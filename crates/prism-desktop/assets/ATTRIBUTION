@@ -1,0 +1,28 @@
+Icons in icons/ are carved from the Prism Launcher binary
+(prismlauncher.exe), (c) Prism Launcher contributors, licensed GPL-3.0-only.
+
+Our workspace is already GPL-3.0-only, so the carved GPL assets stay under
+the same license. The carved directory itself lives outside this repo and is
+never moved; only the mapped PNGs listed below were copied here under
+canonical names.
+
+Verified visual mapping (carved filename -> meaning -> canonical name):
+- 128x128_5178_169.png = chicken head -> chicken_legacy.png
+- 50x50_1246_137.png = enderman head -> enderman_legacy.png
+- 128x128_18345_174.png = enderpearl orb -> enderpearl_legacy.png
+- 48x48_4526_119.png = grass block -> default.png and grass.png
+  (byte-identical copies; Prism's default icon IS the grass block)
+- 32x32_405_107.png = dirt -> dirt.png
+- 32x32_757_103.png = steve head -> steve.png
+- 32x32_1361_109.png = creeper -> creeper.png
+- 32x32_228_108.png = TNT -> tnt.png
+- 32x32_2270_93.png = yellow gear -> gear.png (Settings toolbar)
+- 48x48_1732_132.png = blue play -> play.png
+- 48x48_1509_122.png = red X -> kill.png (Kill/Delete)
+- 48x48_1491_136.png = yellow minus -> minus.png
+- 48x48_1769_123.png = green check -> check.png
+- 48x48_3527_118.png = blue ? -> help.png (Help)
+- 48x48_3331_131.png = blue i -> about.png (About)
+- 48x48_1247_115.png = folder -> folder.png (Folders/Folder actions)
+- 48x48_3379_127.png = upload arrow -> update.png (Update)
+- 48x48_3402_113.png = green refresh -> refresh.png (Refresh)

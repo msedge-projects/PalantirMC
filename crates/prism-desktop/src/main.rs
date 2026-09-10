@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 //! Prism desktop window (iced 0.12).
 //!
 //! The full Prism Launcher-style interface lives in [`app::PrismApp`]
@@ -23,6 +24,7 @@
 
 mod accounts;
 mod app;
+mod icons;
 mod launch;
 mod mods;
 

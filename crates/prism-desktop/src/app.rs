@@ -14,9 +14,11 @@
 //!
 //! Layout mirrors real Prism Launcher 10.x: a compact top toolbar (Add
 //! Instance, Folders, Settings, Help, Update + account chip), collapsible
-//! group sections with a wrapped grid of geometric instance tiles in the
-//! main area, a right sidebar with the big tile and the vertical action
-//! list, and a status bar. No image assets: colored tiles + unicode glyphs.
+//! group sections with a wrapped grid of instance icon tiles in the main
+//! area, a right sidebar with the big icon tile and the vertical action
+//! list, and a status bar. Icons are the real carved Prism art, embedded via
+//! `include_bytes!` (see `crate::icons`): grid tiles and the sidebar paint
+//! `iced::widget::Image` pixels, never letter tiles, with zero runtime IO.
 //!
 //! Background launching: [`PrismApp::update`] only records an [`ActiveRun`];
 //! [`PrismApp::subscription`] exposes an
@@ -33,8 +35,9 @@ use std::time::Duration;
 
 use iced::widget::{
     button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
-    scrollable, text, text_input, Button,
+    scrollable, text, text_input, Button, Image,
 };
+use iced::widget::image::Handle;
 use iced::{Background, Border, Color, Element, Font, Length, Subscription, Theme};
 use prism_core::{
     instance::{groups::Groups, Instance},
@@ -45,6 +48,7 @@ use prism_core::{
 use prism_gui::{InstanceEntry, InstanceListModel, SettingsModel};
 
 use crate::accounts::AccountsStore;
+use crate::icons::{instance_handle, ui_handle};
 use crate::launch::{
     self, open_in_file_manager, prepare_launch, run_launch_worker, AccountRef, ActiveRunData, ChildSlot,
     LaunchParams,
@@ -62,7 +66,7 @@ pub const CONSOLE_VIEW_LINES: usize = 500;
 /// scrollable, so it must be bounded for `snap_to` autoscroll to work).
 pub const CONSOLE_PANE_HEIGHT: f32 = 280.0;
 
-/// Instance tile geometry: colored box side and total tile width.
+/// Instance tile geometry: icon side and total tile width.
 pub const TILE_BOX: f32 = 56.0;
 /// Total tile width (box + padding + button chrome).
 pub const TILE_WIDTH: f32 = 96.0;
@@ -347,15 +351,6 @@ pub fn tile_color(id: &str) -> Color {
 /// Selected-tile background, Prism's instance-selection green (`#7CB342`).
 pub fn selected_tile_color() -> Color {
     Color::from_rgb(0x7Cu8 as f32 / 255.0, 0xB3u8 as f32 / 255.0, 0x42u8 as f32 / 255.0)
-}
-
-/// First letter for an instance tile: the first alphanumeric character,
-/// uppercased; `"?"` when there is none.
-pub fn tile_letter(name: &str) -> String {
-    match name.chars().find(|c| c.is_alphanumeric()) {
-        Some(first) => first.to_uppercase().collect(),
-        None => "?".to_string(),
-    }
 }
 
 /// Tile name label, truncated to two lines' worth of characters (char-safe,
@@ -1429,16 +1424,20 @@ impl PrismApp {
         .into()
     }
 
-    /// Prism-order top toolbar with the account chip right-aligned.
+    /// Prism-order top toolbar with the account chip right-aligned. Every
+    /// button pairs a 16px embedded icon (see `crate::icons::ui_icon`) with
+    /// its text label; the account chip uses the steve head as the player
+    /// avatar. Zero runtime IO: all art is `include_bytes!`'d.
     fn view_toolbar(&self) -> Element<'_, Message> {
+        let chip = self.account_chip_label();
         row![
-            toolbar_button("＋ Add Instance", Message::AddInstancePressed),
-            toolbar_button("Folders", Message::FoldersPressed),
-            toolbar_button("Settings", Message::SettingsPressed),
-            toolbar_button("Help", Message::AboutPressed),
-            toolbar_button("Update", Message::UpdatePressed),
+            toolbar_icon_button(ui_handle("check"), "＋ Add Instance", Message::AddInstancePressed),
+            toolbar_icon_button(ui_handle("folder"), "Folders", Message::FoldersPressed),
+            toolbar_icon_button(ui_handle("gear"), "Settings", Message::SettingsPressed),
+            toolbar_icon_button(ui_handle("help"), "Help", Message::AboutPressed),
+            toolbar_icon_button(ui_handle("update"), "Update", Message::UpdatePressed),
             horizontal_space(),
-            toolbar_button(&self.account_chip_label(), Message::AccountsPressed),
+            toolbar_icon_button(instance_handle("steve"), &chip, Message::AccountsPressed),
         ]
         .spacing(4)
         .into()
@@ -1451,7 +1450,16 @@ impl PrismApp {
                 text_input("Search instances...", &self.search)
                     .on_input(Message::SearchChanged)
                     .width(Length::Fill),
-                button(text("Refresh").size(13)).on_press(Message::Refresh),
+                button(
+                    row![
+                        Image::new(ui_handle("refresh"))
+                            .width(Length::Fixed(16.0))
+                            .height(Length::Fixed(16.0)),
+                        text("Refresh").size(13),
+                    ]
+                    .spacing(4),
+                )
+                .on_press(Message::Refresh),
             ]
             .spacing(6),
         ]
@@ -1826,21 +1834,29 @@ impl PrismApp {
     }
 }
 
-/// One instance tile: a colored rounded box with the first letter plus the
-/// name label below. Single click selects (the sidebar Launch acts on it).
-/// Fully owned (`'static`), so grids built from locals can be returned.
+/// One instance tile: the real carved icon (`iconKey` resolved via
+/// [`crate::icons::instance_icon`], 56px) on a rounded box plus the name
+/// label below. The selected tile keeps Prism's green (`#7CB342`)
+/// background behind the icon; unselected tiles keep their deterministic
+/// pastel ([`tile_color`]). Single click selects (the sidebar Launch acts on
+/// it). Fully owned (`'static`), so grids built from locals can be returned.
+/// Unknown `iconKey`s show the default grass block — never a letter tile.
 fn instance_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Message> {
     let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
-    let tile = container(text(tile_letter(&entry.name)).size(22).style(Color::BLACK))
-        .width(Length::Fixed(TILE_BOX))
-        .height(Length::Fixed(TILE_BOX))
-        .center_x()
-        .center_y()
-        .style(move |_: &Theme| container::Appearance {
-            background: Some(Background::Color(background)),
-            border: Border { radius: 10.0.into(), ..Default::default() },
-            ..Default::default()
-        });
+    let tile = container(
+        Image::new(instance_handle(&entry.icon))
+            .width(Length::Fixed(TILE_BOX))
+            .height(Length::Fixed(TILE_BOX)),
+    )
+    .width(Length::Fixed(TILE_BOX))
+    .height(Length::Fixed(TILE_BOX))
+    .center_x()
+    .center_y()
+    .style(move |_: &Theme| container::Appearance {
+        background: Some(Background::Color(background)),
+        border: Border { radius: 10.0.into(), ..Default::default() },
+        ..Default::default()
+    });
     let id = entry.id.clone();
     button(
         column![
@@ -1856,35 +1872,45 @@ fn instance_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Mess
     .into()
 }
 
-/// Large sidebar tile for the selected instance.
-fn big_tile(entry: &InstanceEntry, selected: bool) -> Element<'_, Message> {
+/// Large sidebar tile for the selected instance: the 96px carved icon on
+/// the same selected/unselected background as the grid tiles.
+fn big_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Message> {
     let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
-    container(text(tile_letter(&entry.name)).size(40).style(Color::BLACK))
-        .width(Length::Fixed(BIG_TILE))
-        .height(Length::Fixed(BIG_TILE))
-        .center_x()
-        .center_y()
-        .style(move |_: &Theme| container::Appearance {
-            background: Some(Background::Color(background)),
-            border: Border { radius: 14.0.into(), ..Default::default() },
-            ..Default::default()
-        })
-        .into()
+    container(
+        Image::new(instance_handle(&entry.icon))
+            .width(Length::Fixed(BIG_TILE))
+            .height(Length::Fixed(BIG_TILE)),
+    )
+    .width(Length::Fixed(BIG_TILE))
+    .height(Length::Fixed(BIG_TILE))
+    .center_x()
+    .center_y()
+    .style(move |_: &Theme| container::Appearance {
+        background: Some(Background::Color(background)),
+        border: Border { radius: 14.0.into(), ..Default::default() },
+        ..Default::default()
+    })
+    .into()
 }
 
-/// Sidebar placeholder when nothing is selected.
+/// Sidebar tile when nothing is selected: the default grass block on a
+/// neutral grey box (the grass fallback, never a letter tile).
 fn big_tile_placeholder() -> Element<'static, Message> {
-    container(text("?").size(40).style(Color::BLACK))
-        .width(Length::Fixed(BIG_TILE))
-        .height(Length::Fixed(BIG_TILE))
-        .center_x()
-        .center_y()
-        .style(|_: &Theme| container::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.45, 0.45, 0.48))),
-            border: Border { radius: 14.0.into(), ..Default::default() },
-            ..Default::default()
-        })
-        .into()
+    container(
+        Image::new(instance_handle(""))
+            .width(Length::Fixed(BIG_TILE))
+            .height(Length::Fixed(BIG_TILE)),
+    )
+    .width(Length::Fixed(BIG_TILE))
+    .height(Length::Fixed(BIG_TILE))
+    .center_x()
+    .center_y()
+    .style(|_: &Theme| container::Appearance {
+        background: Some(Background::Color(Color::from_rgb(0.45, 0.45, 0.48))),
+        border: Border { radius: 14.0.into(), ..Default::default() },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// Full-width sidebar action button; without `enabled` it renders disabled
@@ -1900,6 +1926,19 @@ fn sidebar_button(label: &str, enabled: bool, message: Message) -> Button<'stati
 
 fn toolbar_button(label: &str, message: Message) -> Button<'static, Message> {
     button(text(label).size(13)).on_press(message)
+}
+
+/// Top-toolbar button: a 16px embedded icon plus the text label. The
+/// handle is prebuilt and cached (see `crate::icons`), so this does no IO.
+fn toolbar_icon_button(icon: Handle, label: &str, message: Message) -> Button<'static, Message> {
+    button(
+        row![
+            Image::new(icon).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
+            text(label).size(13),
+        ]
+        .spacing(4),
+    )
+    .on_press(message)
 }
 
 /// Background instance loader: scan + parse off the GUI thread, then hand
@@ -2150,15 +2189,6 @@ mod tests {
         let selected = selected_tile_color();
         let to_byte = |v: f32| (v * 255.0).round() as u32;
         assert_eq!((to_byte(selected.r), to_byte(selected.g), to_byte(selected.b)), (0x7C, 0xB3, 0x42));
-    }
-
-    #[test]
-    fn tile_letters_pick_first_alphanumeric() {
-        assert_eq!(tile_letter("alpha"), "A");
-        assert_eq!(tile_letter("1.21.1"), "1");
-        assert_eq!(tile_letter("  spaced"), "S");
-        assert_eq!(tile_letter(""), "?");
-        assert_eq!(tile_letter("---"), "?");
     }
 
     #[test]
