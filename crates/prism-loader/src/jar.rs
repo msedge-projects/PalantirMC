@@ -111,6 +111,35 @@ pub fn scan_jar_file(path: impl AsRef<Path>) -> Result<JarInfo> {
     scan_jar(bytes.as_slice())
 }
 
+/// Scan a JAR file at `path` via a read-only memory map, without extracting.
+///
+/// The file is mapped read-only and the existing byte-slice scanner runs
+/// directly over the mapping, so no heap copy of the file is made and the OS
+/// pages contents in on demand — useful for large JARs. Falls back to a
+/// plain [`scan_jar_file`] read when the map cannot be created (empty files
+/// cannot be memory-mapped, so a zero-length file takes the fallback
+/// explicitly, as do any other mapping failures).
+pub fn scan_jar_mmap(path: impl AsRef<Path>) -> Result<JarInfo> {
+    let path = path.as_ref();
+    let file = std::fs::File::open(path).map_err(|e| Error::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let len = file.metadata().map_err(|e| Error::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    if len.len() == 0 {
+        return scan_jar_file(path);
+    }
+    // SAFETY: the mapping is read-only and the file is only read through it
+    // while it is alive; a failed map falls back to a plain read below.
+    match unsafe { memmap2::Mmap::map(&file) } {
+        Ok(mmap) => scan_jar(&mmap[..]),
+        Err(_) => scan_jar_file(path),
+    }
+}
+
 /// Parse `Main-Class` from manifest text, unfolding continuation lines.
 fn parse_manifest_main_class(text: &str) -> Option<String> {
     let mut logical: Vec<String> = Vec::new();
@@ -287,5 +316,33 @@ mod tests {
     fn corrupt_bytes_are_an_error() {
         let err = scan_jar(b"not a zip".as_slice()).unwrap_err();
         assert!(matches!(err, Error::Zip(_)));
+    }
+
+    #[test]
+    fn mmap_scan_matches_in_memory_scan() {
+        let manifest = b"Manifest-Version: 1.0\nMain-Class: net.fabricmc.installer.Main\n";
+        let fabric = br#"{"schemaVersion": 1, "id": "mymod", "version": "1.0.0"}"#;
+        let bytes = build_jar(&[
+            ("META-INF/MANIFEST.MF", manifest),
+            ("fabric.mod.json", fabric),
+            ("com/example/A.class", &[0xCA, 0xFE, 0xBA, 0xBE]),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.jar");
+        std::fs::write(&path, &bytes).unwrap();
+        let expected = scan_jar(bytes.as_slice()).unwrap();
+        let actual = scan_jar_mmap(&path).unwrap();
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn mmap_scan_empty_file_falls_back_to_plain_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.jar");
+        std::fs::write(&path, b"").unwrap();
+        let mmap_err = scan_jar_mmap(&path).unwrap_err();
+        let read_err = scan_jar_file(&path).unwrap_err();
+        assert!(matches!(mmap_err, Error::Zip(_)));
+        assert!(matches!(read_err, Error::Zip(_)));
     }
 }

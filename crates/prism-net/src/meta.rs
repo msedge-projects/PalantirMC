@@ -32,7 +32,11 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Abstract URL-to-bytes mapping so metadata fetches are unit-testable
 /// offline.
-pub trait Fetcher {
+///
+/// `Sync` is a supertrait so a single fetcher can be shared across the
+/// scoped worker threads used by [`crate::download::download_many`];
+/// [`BlockingHttpFetcher`] and [`MapFetcher`] are both `Sync`.
+pub trait Fetcher: Sync {
     /// Fetch the full response body for `url`.
     ///
     /// Implementations must apply their own timeout and must return

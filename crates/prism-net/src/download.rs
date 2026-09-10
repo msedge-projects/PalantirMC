@@ -86,6 +86,59 @@ pub fn download_file(url: &str, dest: &Path, timeout: Duration) -> Result<u64, c
     download_bytes(&fetcher, url, dest)
 }
 
+/// Download many `(url, dest)` jobs in parallel, returning one
+/// `(url, result)` pair per job in the input order.
+///
+/// `jobs` are split into `threads` contiguous chunks (`threads` is clamped to
+/// a minimum of 1 and a maximum of `jobs.len()`; `threads == 0` therefore
+/// behaves like 1), and each chunk is downloaded sequentially on its own
+/// scoped worker thread via [`download_bytes`]. The scoped threads only
+/// borrow `fetcher` and `jobs`, so no `'static` bounds or cloning are needed.
+/// Each job is independent: a failing URL yields an `Err` for that entry only
+/// and does not affect the other downloads.
+pub fn download_many(
+    fetcher: &(dyn Fetcher + Sync),
+    jobs: &[(String, PathBuf)],
+    threads: usize,
+) -> Vec<(String, Result<u64, crate::Error>)> {
+    if jobs.is_empty() {
+        return Vec::new();
+    }
+    let worker_count = threads.max(1).min(jobs.len());
+    let chunk_size = jobs.len().div_ceil(worker_count);
+    let chunks: Vec<&[(String, PathBuf)]> =
+        jobs.chunks(chunk_size).collect();
+    std::thread::scope(|s| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .map(|chunk| {
+                s.spawn(move || {
+                    let mut out = Vec::with_capacity(chunk.len());
+                    for (url, dest) in chunk.iter() {
+                        out.push((url.clone(), download_bytes(fetcher, url, dest)));
+                    }
+                    out
+                })
+            })
+            .collect();
+        let mut results = Vec::with_capacity(jobs.len());
+        for (chunk, handle) in chunks.iter().zip(handles) {
+            match handle.join() {
+                Ok(mut out) => results.append(&mut out),
+                Err(_) => {
+                    for (url, dest) in chunk.iter() {
+                        results.push((
+                            url.clone(),
+                            Err(crate::Error::format(dest, "download worker panicked")),
+                        ));
+                    }
+                }
+            }
+        }
+        results
+    })
+}
+
 /// Return the sibling temporary path `<dest>.part` for atomic downloads.
 fn part_path(dest: &Path) -> PathBuf {
     let mut os: OsString = dest.as_os_str().to_owned();
@@ -248,5 +301,71 @@ mod tests {
             _ => panic!("expected Http"),
         }
         assert!(!dest.exists());
+    }
+
+    #[test]
+    fn download_many_downloads_all_files_with_multiple_threads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = MapFetcher::new();
+        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+        for i in 0..8usize {
+            let url = format!("https://x/file{i}.bin");
+            f.insert(url.clone(), format!("payload-{i}").into_bytes());
+            jobs.push((url, tmp.path().join(format!("file{i}.bin"))));
+        }
+        let results = download_many(&f, &jobs, 4);
+        assert_eq!(results.len(), jobs.len());
+        for (i, ((url, result), (expected_url, dest))) in
+            results.iter().zip(jobs.iter()).enumerate()
+        {
+            assert_eq!(url, expected_url);
+            let expected_body = format!("payload-{i}").into_bytes();
+            assert_eq!(*result.as_ref().unwrap(), expected_body.len() as u64);
+            assert_eq!(std::fs::read(dest).unwrap(), expected_body);
+        }
+    }
+
+    #[test]
+    fn download_many_zero_threads_behaves_like_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = MapFetcher::new();
+        f.insert("https://x/a.bin", b"aaa".to_vec());
+        f.insert("https://x/b.bin", b"bb".to_vec());
+        let jobs = vec![
+            ("https://x/a.bin".to_string(), tmp.path().join("a.bin")),
+            ("https://x/b.bin".to_string(), tmp.path().join("b.bin")),
+        ];
+        let results = download_many(&f, &jobs, 0);
+        assert_eq!(results.len(), 2);
+        assert_eq!(*results[0].1.as_ref().unwrap(), 3);
+        assert_eq!(*results[1].1.as_ref().unwrap(), 2);
+        assert_eq!(std::fs::read(&jobs[0].1).unwrap(), b"aaa");
+        assert_eq!(std::fs::read(&jobs[1].1).unwrap(), b"bb");
+    }
+
+    #[test]
+    fn download_many_failure_does_not_poison_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = MapFetcher::new();
+        f.insert("https://x/good.bin", b"good".to_vec());
+        let jobs = vec![
+            ("https://x/good.bin".to_string(), tmp.path().join("good.bin")),
+            ("https://x/missing.bin".to_string(), tmp.path().join("missing.bin")),
+        ];
+        let results = download_many(&f, &jobs, 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "https://x/good.bin");
+        assert!(results[0].1.is_ok());
+        assert_eq!(results[1].0, "https://x/missing.bin");
+        assert!(matches!(results[1].1, Err(crate::Error::Http { .. })));
+        assert_eq!(std::fs::read(&jobs[0].1).unwrap(), b"good");
+        assert!(!jobs[1].1.exists());
+    }
+
+    #[test]
+    fn download_many_empty_jobs_returns_empty() {
+        let f = MapFetcher::new();
+        let results = download_many(&f, &[], 4);
+        assert!(results.is_empty());
     }
 }

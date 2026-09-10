@@ -12,6 +12,8 @@
 //!   write-through cache, network on miss) and print severity/problems.
 //! * `download <url> <dest> [--sha256 HEX]` — fetch a URL to a file via
 //!   `prism-net`, optionally verifying its SHA-256.
+//! * `download-many <dest-dir> <url>... [--threads N]` — fetch several URLs
+//!   into a directory in parallel via `prism-net` and print per-file bytes.
 //! * `import-pack <zip> <instances-dir> <name>` — auto-detect a Modrinth
 //!   (`.mrpack`) or CurseForge modpack zip via `prism-loader` and scaffold
 //!   an instance from it (fully offline: remote files are not downloaded).
@@ -31,7 +33,7 @@ use prism_core::{
     version::RuntimeContext,
 };
 use prism_loader::{detect_format, import_curseforge, import_mrpack, PackFormat};
-use prism_net::{download_file, verify_sha256, OnlineMetaStore, DEFAULT_META_BASE_URL};
+use prism_net::{download_file, download_many, verify_sha256, BlockingHttpFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -55,12 +57,19 @@ fn main() -> Result<()> {
             flag_value(&args, "--cache"),
         ),
         Some("download") => download(&arg(&args, 1)?, &arg(&args, 2)?, flag_value(&args, "--sha256")),
+        Some("download-many") => {
+            let threads = match flag_value(&args, "--threads") {
+                Some(v) => v.parse::<usize>().with_context(|| format!("invalid --threads '{v}'"))?,
+                None => 4,
+            };
+            download_many_cmd(&arg(&args, 1)?, &args[2..], threads)
+        }
         Some("import-pack") => import_pack(&arg(&args, 1)?, &arg(&args, 2)?, arg(&args, 3)?.as_str()),
         Some(other) => {
-            bail!("unknown subcommand '{other}' (expected dump-instance|create|launch-script|verify|resolve-online|download|import-pack)")
+            bail!("unknown subcommand '{other}' (expected dump-instance|create|launch-script|verify|resolve-online|download|download-many|import-pack)")
         }
         None => {
-            bail!("usage: prism-cli <dump-instance|create|launch-script|verify|resolve-online|download|import-pack> ...");
+            bail!("usage: prism-cli <dump-instance|create|launch-script|verify|resolve-online|download|download-many|import-pack> ...");
         }
     }
 }
@@ -272,6 +281,57 @@ fn download(url: &str, dest: &str, sha256: Option<String>) -> Result<()> {
         println!("sha256: OK");
     }
     println!("downloaded {url} -> {dest} ({bytes} bytes)");
+    Ok(())
+}
+
+// ---- download-many --------------------------------------------------------
+
+/// Derive a file name from the last `/`-separated segment of `url`,
+/// ignoring any query string or fragment.
+fn file_name_for_url(url: &str) -> Result<String> {
+    let no_query = url.split('?').next().unwrap_or(url);
+    let path_part = no_query.split('#').next().unwrap_or(no_query);
+    let name = path_part.rsplit('/').next().unwrap_or("");
+    if name.is_empty() {
+        bail!("cannot derive a file name from url '{url}'");
+    }
+    Ok(name.to_string())
+}
+
+fn download_many_cmd(dest_dir: &str, raw: &[String], threads: usize) -> Result<()> {
+    let dest_dir = PathBuf::from(dest_dir);
+    let mut urls: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == "--threads" {
+            i += 2;
+            continue;
+        }
+        urls.push(raw[i].clone());
+        i += 1;
+    }
+    if urls.is_empty() {
+        bail!("usage: prism-cli download-many <dest-dir> <url>... [--threads N]");
+    }
+    let mut jobs: Vec<(String, PathBuf)> = Vec::with_capacity(urls.len());
+    for url in &urls {
+        jobs.push((url.clone(), dest_dir.join(file_name_for_url(url)?)));
+    }
+    let fetcher = BlockingHttpFetcher::new(DOWNLOAD_TIMEOUT);
+    let results = download_many(&fetcher, &jobs, threads);
+    let mut failed = 0usize;
+    for ((_, dest), (url, result)) in jobs.iter().zip(results.iter()) {
+        match result {
+            Ok(bytes) => println!("downloaded {url} -> {} ({bytes} bytes)", dest.display()),
+            Err(e) => {
+                failed += 1;
+                eprintln!("failed {url}: {e:#}");
+            }
+        }
+    }
+    if failed > 0 {
+        bail!("download-many: {failed} of {} downloads failed", results.len());
+    }
     Ok(())
 }
 

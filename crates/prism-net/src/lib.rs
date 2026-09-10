@@ -28,7 +28,7 @@ pub mod meta;
 pub mod modrinth;
 
 pub use auth::{MicrosoftOAuth, OfflineSession};
-pub use download::{download_bytes, download_file, sha256_hex, verify_sha256};
+pub use download::{download_bytes, download_file, download_many, sha256_hex, verify_sha256};
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
     ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse, ModrinthVersionFile,
