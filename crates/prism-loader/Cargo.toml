@@ -1,0 +1,10 @@
+[package]
+name = "prism-loader"
+description = "Forge/Fabric/NeoForge/Quilt detection and install (phase 3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-core = { path = "../prism-core" }

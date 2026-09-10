@@ -1,0 +1,10 @@
+[package]
+name = "prism-gui"
+description = "Prism-compatible GUI (phase 4; iced vs egui decided then)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-core = { path = "../prism-core" }
