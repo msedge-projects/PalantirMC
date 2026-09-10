@@ -5,6 +5,7 @@ members = [
     "crates/prism-net",
     "crates/prism-loader",
     "crates/prism-gui",
+    "crates/prism-cli",
 ]
 
 [workspace.package]
