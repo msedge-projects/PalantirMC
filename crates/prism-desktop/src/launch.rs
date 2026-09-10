@@ -239,7 +239,8 @@ pub fn prepare_launch(
     account: &AccountRef,
 ) -> (Vec<String>, LaunchReadiness) {
     let mut log: Vec<String> = Vec::new();
-    let instance = match Instance::open(&paths.instances_dir().join(instance_id)) {
+    // Resolved dir: honors the `InstanceDir` override in prismlauncher.cfg.
+    let instance = match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
         Ok(instance) => instance,
         Err(e) => {
             log.push(format!("cannot open instance '{instance_id}': {e}"));

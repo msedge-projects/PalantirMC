@@ -1,21 +1,25 @@
 //! Prism desktop window (iced 0.12).
 //!
 //! The full Prism Launcher-style interface lives in [`app::PrismApp`]
-//! (toolbar, sidebar, pages, status bar, add-instance panel, offline launch
-//! flow); this file only holds the two thin runtime shells over it:
+//! (toolbar, instance grid, sidebar, pages, status bar, add-instance panel,
+//! offline launch flow); this file only holds the two thin runtime shells
+//! over it:
 //!
 //! * [`State`] implements [`iced::Sandbox`] — the original API of this
 //!   crate, kept compiling and working. `Sandbox` cannot stream background
 //!   output (its blanket `Application` impl hardcodes
 //!   `Subscription::none()`), so a Launch here runs an honest synchronous
-//!   dry run instead of spawning.
+//!   dry run instead of spawning, and instances load synchronously.
 //! * [`App`] implements [`iced::Application`] from the same iced 0.12 crate
-//!   (no upgrade) and additionally wires
-//!   `iced::subscription::channel` — keyed by the launch run id — to the
-//!   worker thread in `launch.rs`, which `try_send`s console batches back.
+//!   (no upgrade) and additionally wires subscriptions: the
+//!   `iced::subscription::channel` keyed by the launch run id streams the
+//!   worker thread in `launch.rs`, and a second channel fills the instance
+//!   grid from a background thread so the window paints instantly.
 //!
-//! `main` runs [`App`] so launching actually streams. `cargo build` and
-//! `cargo test` stay headless; the binary is never executed by tests.
+//! Renderer choice (see `main`): the tiny-skia software renderer is
+//! preferred via `ICED_BACKEND`, with `antialiasing: false` for the fastest
+//! first paint. `cargo build` and `cargo test` stay headless; the binary is
+//! never executed by tests.
 
 mod accounts;
 mod app;
@@ -25,9 +29,28 @@ mod mods;
 use app::{console_scroll_id, Message, PrismApp};
 use iced::widget::scrollable::RelativeOffset;
 use iced::{Application, Command, Element, Sandbox, Settings, Subscription, Theme};
+use prism_core::paths::PrismPaths;
 
 fn main() -> iced::Result {
-    App::run(Settings::default())
+    // Prefer the tiny-skia software renderer. iced 0.12 ships both backends
+    // (`iced_renderer::Renderer::{TinySkia, Wgpu}`) and its compositor tries
+    // wgpu first, falling back to tiny-skia only on failure. On this Windows
+    // box the wgpu path stalls startup (adapter enumeration plus first-use
+    // shader compilation before the first frame can present), which is the
+    // visible "stutter": the window appears late even though our own IO is
+    // tiny. tiny-skia rasterizes on the CPU and presents the first frame
+    // immediately; for a mostly-static launcher grid the per-frame cost is
+    // negligible. This only sets the default: `ICED_BACKEND=wgpu` (or
+    // `tiny-skia`) in the environment still wins, so machines with good GPU
+    // drivers can opt back into hardware rendering without recompiling.
+    if std::env::var_os("ICED_BACKEND").is_none() {
+        std::env::set_var("ICED_BACKEND", "tiny-skia");
+    }
+    // `antialiasing` defaults to false in iced 0.12; set it explicitly so the
+    // fastest-first-paint choice is visible (no MSAA pipeline setup).
+    let mut settings = Settings::default();
+    settings.antialiasing = false;
+    App::run(settings)
 }
 
 /// Original `Sandbox` shell: fully interactive for everything synchronous.
@@ -65,7 +88,9 @@ impl Sandbox for State {
     }
 }
 
-/// Full shell with background launch streaming via `Subscription`.
+/// Full shell with background instance loading + launch streaming via
+/// `Subscription`. Starts from an instant placeholder ([`PrismApp::pending`])
+/// so the window paints before any disk IO finishes.
 pub struct App {
     app: PrismApp,
 }
@@ -77,7 +102,7 @@ impl Application for App {
     type Theme = Theme;
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        (App { app: PrismApp::new() }, Command::none())
+        (App { app: PrismApp::pending(PrismPaths::detect()) }, Command::none())
     }
 
     fn title(&self) -> String {
@@ -123,7 +148,14 @@ mod tests {
 
     #[test]
     fn sandbox_launch_without_selection_is_honest() {
-        let mut state = <State as Sandbox>::new();
+        // Hermetic on purpose: the real data root may pre-select
+        // `SelectedInstance`, which would give this shell a selection. The
+        // point here is only that launching with *no* selection records no
+        // run and spawns nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = PrismPaths::at(dir.path());
+        std::fs::create_dir_all(paths.configured_instances_dir()).unwrap();
+        let mut state = State { app: PrismApp::with_paths(paths) };
         <State as Sandbox>::update(&mut state, Message::LaunchPressed);
         // Nothing to stream and nothing spawned: the status says so.
         assert!(state.app.take_active_run().is_none());

@@ -80,9 +80,65 @@ impl PrismPaths {
         PrismPaths { root: platform_data_root(System::current()) }
     }
 
-    /// Instance folders root (`instances/`).
+    /// Instance folders root.
+    ///
+    /// Honors the `InstanceDir` override from `<root>/prismlauncher.cfg`
+    /// (see [`PrismPaths::configured_instances_dir`]): real Prism setups
+    /// often point this at a custom location outside the data root, so every
+    /// consumer (discovery, groups, launch, GUI) must go through this method
+    /// rather than assuming `<root>/instances`.
     pub fn instances_dir(&self) -> PathBuf {
-        self.root.join("instances")
+        self.configured_instances_dir()
+    }
+
+    /// Instance folders root with the `InstanceDir` override from
+    /// `<root>/prismlauncher.cfg` applied.
+    ///
+    /// The value is read with [`crate::ini::load_ini_file`] (which handles
+    /// both the verbatim `Key=Value` form and keys under `[General]`). A
+    /// missing/unparseable file or an empty value falls back to
+    /// `<root>/instances`. Relative values are returned as-is (Prism only
+    /// ever writes absolute paths here).
+    pub fn configured_instances_dir(&self) -> PathBuf {
+        let fallback = self.root.join("instances");
+        let map = match crate::ini::load_ini_file(&self.global_config()) {
+            Ok(map) => map,
+            Err(_) => return fallback,
+        };
+        match map.get("InstanceDir") {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    fallback
+                } else {
+                    PathBuf::from(trimmed)
+                }
+            }
+            None => fallback,
+        }
+    }
+
+    /// Currently-selected instance id (`SelectedInstance` from
+    /// `<root>/prismlauncher.cfg`), if present and non-blank.
+    ///
+    /// Callers must still check the id against the discovered instances (a
+    /// stale value is ignored). A missing/unparseable file yields `None`.
+    pub fn selected_instance_id(&self) -> Option<String> {
+        let map = match crate::ini::load_ini_file(&self.global_config()) {
+            Ok(map) => map,
+            Err(_) => return None,
+        };
+        match map.get("SelectedInstance") {
+            Some(raw) => {
+                let id = raw.trim();
+                if id.is_empty() {
+                    None
+                } else {
+                    Some(id.to_string())
+                }
+            }
+            None => None,
+        }
     }
 
     /// Global settings file.
@@ -234,5 +290,71 @@ mod tests {
             None => home_dir().unwrap_or_default().join(".local/share/PrismLauncher"),
         };
         assert_eq!(platform_data_root(System::Linux), expected);
+    }
+
+    #[test]
+    fn configured_instances_dir_defaults_without_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert_eq!(p.configured_instances_dir(), tmp.path().join("instances"));
+        assert_eq!(p.instances_dir(), tmp.path().join("instances"));
+        assert!(p.selected_instance_id().is_none());
+    }
+
+    #[test]
+    fn configured_instances_dir_honors_general_section() {
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().join("custom-instances");
+        // Real Prism files use forward slashes (`E:/Games/...`); backslashes
+        // would be mangled by the Qt escape decoding, in Prism too.
+        let forward = custom.display().to_string().replace('\\', "/");
+        let cfg = format!("[General]\nConfigVersion=1.3\nInstanceDir={forward}\n");
+        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), cfg).unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert_eq!(p.configured_instances_dir(), PathBuf::from(&forward));
+        assert_eq!(p.instances_dir(), PathBuf::from(&forward));
+    }
+
+    #[test]
+    fn configured_instances_dir_honors_verbatim_top_level_key() {
+        // Legacy/top-level form with no section header and no ConfigVersion.
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().join("alt-instances");
+        let forward = custom.display().to_string().replace('\\', "/");
+        let cfg = format!("InstanceDir={forward}\n");
+        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), cfg).unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert_eq!(p.configured_instances_dir(), PathBuf::from(&forward));
+    }
+
+    #[test]
+    fn configured_instances_dir_ignores_empty_and_garbage() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fallback = tmp.path().join("instances");
+        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), "InstanceDir=\nConfigVersion=1.3\n").unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert_eq!(p.configured_instances_dir(), fallback);
+
+        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), "garbage without equals\n").unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert_eq!(p.configured_instances_dir(), fallback);
+        assert!(p.selected_instance_id().is_none());
+    }
+
+    #[test]
+    fn selected_instance_id_round_trips_and_trims() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = PrismPaths::at(tmp.path());
+        assert!(p.selected_instance_id().is_none());
+
+        std::fs::write(
+            tmp.path().join(GLOBAL_CONFIG_FILE),
+            "[General]\nConfigVersion=1.3\nSelectedInstance=  1.21.1  \n",
+        )
+        .unwrap();
+        assert_eq!(p.selected_instance_id().as_deref(), Some("1.21.1"));
+
+        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), "SelectedInstance=\n").unwrap();
+        assert!(p.selected_instance_id().is_none());
     }
 }

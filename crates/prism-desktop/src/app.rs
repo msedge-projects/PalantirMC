@@ -3,25 +3,41 @@
 //! [`PrismApp`] owns every piece of GUI state plus the synchronous update
 //! logic and the `iced` view tree. Two thin shells reuse it (see `main.rs`):
 //!
-//! * `State` implements `iced::Sandbox` (the original API, kept working).
+//! * `State` implements `iced::Sandbox` (the original API, kept working and
+//!   fully synchronous: instances load during construction).
 //! * `App` implements `iced::Application` (same iced 0.12 crate) so the
 //!   launch log can stream through [`Subscription`] — something the
 //!   `Sandbox` blanket impl cannot do (it hardcodes
-//!   `Subscription::none()`).
+//!   `Subscription::none()`). `App` starts from an instant placeholder
+//!   ([`PrismApp::pending`]) and fills the instance grid from a background
+//!   thread, so the window appears immediately even on slow disks.
+//!
+//! Layout mirrors real Prism Launcher 10.x: a compact top toolbar (Add
+//! Instance, Folders, Settings, Help, Update + account chip), collapsible
+//! group sections with a wrapped grid of geometric instance tiles in the
+//! main area, a right sidebar with the big tile and the vertical action
+//! list, and a status bar. No image assets: colored tiles + unicode glyphs.
 //!
 //! Background launching: [`PrismApp::update`] only records an [`ActiveRun`];
 //! [`PrismApp::subscription`] exposes an
 //! `iced::subscription::channel` keyed by that run id whose task spawns the
 //! worker thread from `crate::launch` (the thread owns the futures sender
-//! and `try_send`s `Vec<String>` batches through it).
+//! and `try_send`s `Vec<String>` batches through it). Instance loading uses
+//! a second channel (fixed id [`LOAD_SUBSCRIPTION_ID`]) with the same
+//! spawn-thread + `try_send` pattern.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Button};
-use iced::{Element, Font, Length, Subscription};
+use iced::widget::{
+    button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
+    scrollable, text, text_input, Button,
+};
+use iced::{Background, Border, Color, Element, Font, Length, Subscription, Theme};
 use prism_core::{
-    instance::Instance,
+    instance::{groups::Groups, Instance},
     pack::PackProfile,
     paths::PrismPaths,
     settings::{defaults, Settings},
@@ -41,6 +57,29 @@ pub const CONSOLE_LINE_CAP: usize = 20_000;
 /// How many of the newest console lines the view renders (perf bound; the
 /// buffer itself keeps [`CONSOLE_LINE_CAP`]).
 pub const CONSOLE_VIEW_LINES: usize = 500;
+
+/// Fixed height of the embedded console pane (it lives inside the main
+/// scrollable, so it must be bounded for `snap_to` autoscroll to work).
+pub const CONSOLE_PANE_HEIGHT: f32 = 280.0;
+
+/// Instance tile geometry: colored box side and total tile width.
+pub const TILE_BOX: f32 = 56.0;
+/// Total tile width (box + padding + button chrome).
+pub const TILE_WIDTH: f32 = 96.0;
+/// Tiles per grid row (the "wrapped row" grid is emulated by chunking:
+/// iced 0.12 has no flow layout, so rows of [`TILES_PER_ROW`] tiles wrap the
+/// same way on any window wide enough for the main area).
+pub const TILES_PER_ROW: usize = 4;
+/// Big sidebar tile side.
+pub const BIG_TILE: f32 = 96.0;
+/// Right sidebar width.
+pub const SIDEBAR_WIDTH: f32 = 210.0;
+
+/// Label used for the ungrouped section and the pick-list entry.
+pub const UNGROUPED_LABEL: &str = "Ungrouped";
+
+/// Subscription id for the one-shot background instance load.
+pub const LOAD_SUBSCRIPTION_ID: &str = "prism-desktop-instance-load";
 
 /// Main-area pages (Console is the default landing page).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,6 +118,15 @@ impl Page {
             Page::Settings => "Settings",
             Page::Accounts => "Accounts",
             Page::About => "About",
+        }
+    }
+
+    /// Tab label in the main area (`About` is reached through the `Help`
+    /// toolbar button, like in real Prism).
+    pub fn tab_label(&self) -> &'static str {
+        match self {
+            Page::About => "Help",
+            other => other.title(),
         }
     }
 
@@ -153,6 +201,23 @@ pub enum Message {
         /// Final outcome line.
         note: String,
     },
+    /// Background instance load finished.
+    InstancesLoaded(LoadedData),
+    /// Collapse/expand a group section (`""` = ungrouped).
+    GroupToggled(String),
+    /// Move the selected instance to a group (`Ungrouped` clears it).
+    ChangeGroupSelected(String),
+    /// Duplicate the selected instance folder under a unique name.
+    CopyPressed,
+    /// Export the selected instance (honestly unimplemented: zip export
+    /// would need a new archiving dependency for a one-click feature).
+    ExportPressed,
+    /// Write a `.url` shortcut for the selected instance on the Desktop.
+    ShortcutPressed,
+    /// Check for updates (honest: updates ship via the installer).
+    UpdatePressed,
+    /// Reveal the instances folder in the file manager.
+    FoldersPressed,
     /// Enable/disable a mod file.
     ModToggled(String, bool),
     /// Reveal the selected instance's mods folder.
@@ -193,6 +258,24 @@ pub enum Message {
     MicrosoftPressed,
 }
 
+/// Result of the background instance scan, delivered as
+/// [`Message::InstancesLoaded`]. Everything the grid needs, computed off the
+/// GUI thread: the entry list, the group index (incl. collapsed flags), the
+/// resolved instances dir and the pre-selected instance, if any.
+#[derive(Debug, Clone)]
+pub struct LoadedData {
+    /// Discovered instances in display order.
+    pub list: InstanceListModel,
+    /// Group membership + collapsed flags.
+    pub groups: Groups,
+    /// Pre-selected instance id (from `SelectedInstance`, when it matches).
+    pub selected: Option<String>,
+    /// Resolved instances dir (`InstanceDir` override applied).
+    pub instances_dir: PathBuf,
+    /// One-line outcome for the status bar.
+    pub status: String,
+}
+
 /// One grouped sidebar section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSection {
@@ -227,6 +310,155 @@ pub fn grouped_instances(model: &InstanceListModel, query: &str) -> Vec<GroupSec
         out.push(GroupSection { name: None, entries: ungrouped });
     }
     out
+}
+
+/// Deterministic pastel palette for instance tiles (RGB triples).
+pub const TILE_PALETTE: [(u8, u8, u8); 12] = [
+    (0xF4, 0xB8, 0xC1),
+    (0xF9, 0xD5, 0xA7),
+    (0xF7, 0xE8, 0xA0),
+    (0xB5, 0xE3, 0xB5),
+    (0xA8, 0xD8, 0xF0),
+    (0xC3, 0xB2, 0xE8),
+    (0xE8, 0xB4, 0xD8),
+    (0xB8, 0xE0, 0xD2),
+    (0xF5, 0xC9, 0x9B),
+    (0xC9, 0xD6, 0xF2),
+    (0xD8, 0xE6, 0xA0),
+    (0xEF, 0xC3, 0xA0),
+];
+
+/// Tile background for an instance id: FNV-1a hash into [`TILE_PALETTE`].
+/// Pure and deterministic (same id, same color, every run).
+pub fn tile_color(id: &str) -> Color {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in id.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let (red, green, blue) = TILE_PALETTE[(hash as usize) % TILE_PALETTE.len()];
+    Color::from_rgb(
+        f32::from(red) / 255.0,
+        f32::from(green) / 255.0,
+        f32::from(blue) / 255.0,
+    )
+}
+
+/// Selected-tile background, Prism's instance-selection green (`#7CB342`).
+pub fn selected_tile_color() -> Color {
+    Color::from_rgb(0x7Cu8 as f32 / 255.0, 0xB3u8 as f32 / 255.0, 0x42u8 as f32 / 255.0)
+}
+
+/// First letter for an instance tile: the first alphanumeric character,
+/// uppercased; `"?"` when there is none.
+pub fn tile_letter(name: &str) -> String {
+    match name.chars().find(|c| c.is_alphanumeric()) {
+        Some(first) => first.to_uppercase().collect(),
+        None => "?".to_string(),
+    }
+}
+
+/// Tile name label, truncated to two lines' worth of characters (char-safe,
+/// never splits a code point).
+pub fn short_name(name: &str) -> String {
+    const LIMIT: usize = 30;
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() <= LIMIT {
+        name.to_string()
+    } else {
+        let kept: String = chars[..LIMIT].iter().collect();
+        format!("{kept}…")
+    }
+}
+
+/// Recursively copy a directory tree (files only; symlinks and special
+/// files are skipped, Prism never writes them inside an instance).
+pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("reading '{}': {e}", src.display()))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("creating '{}': {e}", dst.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("listing '{}': {e}", src.display()))?;
+        let kind = entry
+            .file_type()
+            .map_err(|e| format!("stating '{}': {e}", entry.path().display()))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if kind.is_file() {
+            std::fs::copy(&from, &to)
+                .map_err(|e| format!("copying '{}': {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Contents of a Windows `.url` shortcut pointing at `target`.
+///
+/// A `.url` file is plain INI: Explorer opens `file:///` URLs in the file
+/// manager, so the shortcut reveals the instance folder. Backslashes are
+/// normalized to forward slashes (URLs never contain `\`).
+pub fn url_shortcut_text(target: &Path) -> String {
+    let normalized = target.display().to_string().replace('\\', "/");
+    let trimmed = normalized.trim_start_matches('/').to_string();
+    format!("[InternetShortcut]\nURL=file:///{trimmed}\n")
+}
+
+/// Write a `.url` shortcut named `<file_stem>.url` into `dir`.
+pub fn write_url_shortcut(dir: &Path, file_stem: &str, target: &Path) -> Result<PathBuf, String> {
+    if file_stem.contains('/') || file_stem.contains('\\') {
+        return Err(format!("refusing path-like shortcut name '{file_stem}'"));
+    }
+    let stem = prism_core::util::sanitize_dir_name(file_stem);
+    let path = dir.join(format!("{stem}.url"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("creating '{}': {e}", parent.display()))?;
+    }
+    std::fs::write(&path, url_shortcut_text(target))
+        .map_err(|e| format!("writing '{}': {e}", path.display()))?;
+    Ok(path)
+}
+
+/// The user's Desktop folder (`%USERPROFILE%\Desktop` on Windows,
+/// `$HOME/Desktop` elsewhere). Returns `None` when no home is known.
+pub fn desktop_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())?;
+    Some(home.join("Desktop"))
+}
+
+/// Pre-selection for startup: `SelectedInstance` from `prismlauncher.cfg`
+/// when it matches a discovered id (stale values are ignored).
+pub fn resolve_selected_id(paths: &PrismPaths, list: &InstanceListModel) -> Option<String> {
+    let want = paths.selected_instance_id()?;
+    if want.trim().is_empty() {
+        return None;
+    }
+    if list.entries().iter().any(|entry| entry.id == want) {
+        Some(want)
+    } else {
+        None
+    }
+}
+
+/// Scan + parse every instance off the GUI thread (see [`LoadedData`]).
+/// Failures degrade to an empty list plus a status message, never a crash.
+pub fn load_instances_blocking(data_root: &Path) -> LoadedData {
+    let paths = PrismPaths::at(data_root);
+    let instances_dir = paths.configured_instances_dir();
+    let groups = Groups::load(&paths);
+    let list = InstanceListModel::load(&paths).unwrap_or_default();
+    let selected = resolve_selected_id(&paths, &list);
+    let status = if list.is_empty() {
+        format!("No instances found in {}.", instances_dir.display())
+    } else {
+        format!("loaded {} instance(s) from {}", list.len(), instances_dir.display())
+    };
+    LoadedData { list, groups, selected, instances_dir, status }
 }
 
 /// Editable snapshot of the per-instance settings form (all text so empty
@@ -299,7 +531,12 @@ pub fn console_scroll_id() -> scrollable::Id {
 /// The full application state (runtime-agnostic).
 pub struct PrismApp {
     paths: PrismPaths,
+    /// Resolved instances dir, cached at (re)load so `view()` does no IO.
+    instances_dir: PathBuf,
     list: InstanceListModel,
+    groups: Groups,
+    /// True while the background load is in flight (placeholder shown).
+    loading: bool,
     search: String,
     selected: Option<String>,
     page: Page,
@@ -325,11 +562,16 @@ pub struct PrismApp {
 
 impl PrismApp {
     /// Build against an explicit data root (used by `new` and tests).
+    /// Synchronous: loads instances, groups and the `SelectedInstance`
+    /// pre-selection before returning.
     pub(crate) fn with_paths(paths: PrismPaths) -> Self {
         let (accounts, accounts_warn) = AccountsStore::load_with_report(&paths.accounts_file());
         let mut app = PrismApp {
+            instances_dir: paths.configured_instances_dir(),
             paths,
             list: InstanceListModel::default(),
+            groups: Groups::default(),
+            loading: false,
             search: String::new(),
             selected: None,
             page: Page::default(),
@@ -353,6 +595,12 @@ impl PrismApp {
             components: Vec::new(),
         };
         app.reload_instances();
+        if app.selected.is_none() {
+            app.selected = resolve_selected_id(&app.paths, &app.list);
+            if app.selected.is_some() {
+                app.refresh_selection_caches();
+            }
+        }
         if let Some(warn) = accounts_warn {
             app.status = warn.clone();
             app.push_console(vec![warn]);
@@ -361,6 +609,41 @@ impl PrismApp {
             "Prism Launcher (Rust) console — launch output appears here.".to_string(),
         ]);
         app
+    }
+
+    /// Instant placeholder for the `Application` shell: no disk IO beyond
+    /// resolving the data root, so the window can paint immediately. The
+    /// background loader (see [`PrismApp::subscription`]) fills the grid.
+    pub(crate) fn pending(paths: PrismPaths) -> Self {
+        let (accounts, _) = AccountsStore::load_with_report(&paths.accounts_file());
+        PrismApp {
+            instances_dir: paths.configured_instances_dir(),
+            paths,
+            list: InstanceListModel::default(),
+            groups: Groups::default(),
+            loading: true,
+            search: String::new(),
+            selected: None,
+            page: Page::default(),
+            console: VecDeque::from(["Loading instances…".to_string()]),
+            autoscroll: true,
+            status: "Loading instances…".to_string(),
+            show_add: false,
+            add_name: String::new(),
+            add_version: "1.21.1".to_string(),
+            delete_armed: false,
+            form: SettingsForm::default(),
+            accounts,
+            account_input: String::new(),
+            run_seq: 0,
+            active_run: None,
+            child: Arc::new(Mutex::new(None)),
+            mods: Vec::new(),
+            resource_packs: Vec::new(),
+            shader_packs: Vec::new(),
+            worlds: Vec::new(),
+            components: Vec::new(),
+        }
     }
 
     /// Detect the data root like Prism does.
@@ -387,6 +670,36 @@ impl PrismApp {
             },
             None => "none".to_string(),
         }
+    }
+
+    /// Account chip label for the toolbar (`👤 <name>` or the empty state).
+    pub fn account_chip_label(&self) -> String {
+        match self.accounts.selected_account() {
+            Some(account) => format!("👤 {}", account.username),
+            None => "👤 No account".to_string(),
+        }
+    }
+
+    /// Current group of the selection (`Ungrouped` when there is none).
+    pub fn selected_group_label(&self) -> String {
+        match self.selected.as_deref() {
+            Some(id) => match self.list.entries().iter().find(|e| e.id == id) {
+                Some(entry) => entry.group.clone().unwrap_or_else(|| UNGROUPED_LABEL.to_string()),
+                None => UNGROUPED_LABEL.to_string(),
+            },
+            None => UNGROUPED_LABEL.to_string(),
+        }
+    }
+
+    /// Group options for the Change Group pick-list (`Ungrouped` first).
+    pub fn group_options(&self) -> Vec<String> {
+        let mut options = vec![UNGROUPED_LABEL.to_string()];
+        for name in self.groups.names() {
+            if name != UNGROUPED_LABEL {
+                options.push(name.to_string());
+            }
+        }
+        options
     }
 
     /// Append lines, enforcing [`CONSOLE_LINE_CAP`].
@@ -430,32 +743,61 @@ impl PrismApp {
         self.push_console(all);
     }
 
-    /// Subscription for the active launch run (keyed by run id), or none.
+    /// Subscriptions for the background instance load (while [`PrismApp::loading`])
+    /// and the active launch run (keyed by run id), or none.
     pub fn subscription(&self) -> Subscription<Message> {
-        match self.active_run.clone() {
-            Some(run) => {
-                let slot = self.child.clone();
-                iced::subscription::channel(run.run_id, 100, move |sender| async move {
-                    let params = LaunchParams {
-                        data_root: run.data_root.clone(),
-                        instance_id: run.instance_id.clone(),
-                        account: run.account.clone(),
-                        run_id: run.run_id,
-                    };
+        let mut subs: Vec<Subscription<Message>> = Vec::new();
+        if self.loading {
+            let root = self.paths.root.clone();
+            subs.push(iced::subscription::channel(
+                LOAD_SUBSCRIPTION_ID,
+                16,
+                move |sender| async move {
                     let _ = std::thread::spawn(move || {
-                        run_launch_worker(params, slot, sender);
+                        run_instance_loader(root, sender);
                     });
                     loop {
                         futures::future::pending::<()>().await;
                     }
-                })
-            }
-            None => Subscription::none(),
+                },
+            ));
         }
+        if let Some(run) = self.active_run.clone() {
+            let slot = self.child.clone();
+            subs.push(iced::subscription::channel(run.run_id, 100, move |sender| async move {
+                let params = LaunchParams {
+                    data_root: run.data_root.clone(),
+                    instance_id: run.instance_id.clone(),
+                    account: run.account.clone(),
+                    run_id: run.run_id,
+                };
+                let _ = std::thread::spawn(move || {
+                    run_launch_worker(params, slot, sender);
+                });
+                loop {
+                    futures::future::pending::<()>().await;
+                }
+            }));
+        }
+        Subscription::batch(subs)
     }
 
-    /// Reload the instance list, pruning a vanished selection.
+    /// Apply the background load result (selection caches follow).
+    fn apply_loaded(&mut self, data: LoadedData) {
+        self.loading = false;
+        self.list = data.list;
+        self.groups = data.groups;
+        self.instances_dir = data.instances_dir;
+        self.selected = data.selected;
+        self.status = data.status;
+        self.refresh_selection_caches();
+    }
+
+    /// Reload the instance list, pruning a vanished selection. Also refreshes
+    /// the cached resolved instances dir and the group index.
     fn reload_instances(&mut self) {
+        self.instances_dir = self.paths.configured_instances_dir();
+        self.groups = Groups::load(&self.paths);
         match InstanceListModel::load(&self.paths) {
             Ok(list) => {
                 let count = list.len();
@@ -468,7 +810,7 @@ impl PrismApp {
                     self.selected = None;
                 }
                 if count == 0 {
-                    self.status = "No instances found.".to_string();
+                    self.status = format!("No instances found in {}.", self.instances_dir.display());
                 } else {
                     self.status = format!("refreshed ({count} instance(s))");
                 }
@@ -496,7 +838,7 @@ impl PrismApp {
                 return;
             }
         };
-        let instance = match Instance::open(&self.paths.instances_dir().join(&id)) {
+        let instance = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance,
             Err(_) => {
                 self.form = SettingsForm::default();
@@ -528,7 +870,7 @@ impl PrismApp {
                 return;
             }
         };
-        match Instance::open(&self.paths.instances_dir().join(&id)) {
+        match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => self.form = load_form(instance.settings()),
             Err(_) => self.form = SettingsForm::default(),
         }
@@ -608,7 +950,7 @@ impl PrismApp {
             self.status = "minecraft version is empty".to_string();
             return;
         }
-        match Instance::create(&self.paths.instances_dir(), &name, &version) {
+        match Instance::create(&self.instances_dir, &name, &version) {
             Ok(instance) => {
                 let id = instance.id();
                 self.show_add = false;
@@ -638,7 +980,7 @@ impl PrismApp {
             return;
         }
         self.delete_armed = false;
-        match Instance::delete(&self.paths.instances_dir(), &id) {
+        match Instance::delete(&self.instances_dir, &id) {
             Ok(()) => {
                 self.selected = None;
                 self.reload_instances();
@@ -649,15 +991,154 @@ impl PrismApp {
         }
     }
 
+    /// Handle `CopyPressed`: duplicate the folder under a unique name.
+    fn copy_selected(&mut self) {
+        self.delete_armed = false;
+        let id = match self.selected.clone() {
+            Some(id) => id,
+            None => {
+                self.status = "select an instance first".to_string();
+                return;
+            }
+        };
+        let src = self.instances_dir.join(&id);
+        let new_id = match prism_core::util::unique_dir_name(&self.instances_dir, &format!("{id} Copy")) {
+            Ok(name) => name,
+            Err(e) => {
+                self.status = format!("copying '{id}' failed: {e}");
+                return;
+            }
+        };
+        let dst = self.instances_dir.join(&new_id);
+        if let Err(e) = copy_dir_recursive(&src, &dst) {
+            self.status = format!("copying '{id}' failed: {e}");
+            return;
+        }
+        if let Ok(mut copied) = Instance::open(&dst) {
+            let renamed = format!("{} Copy", copied.name());
+            copied.set_name(&renamed);
+            if copied.save().is_err() {
+                self.status = format!("copied '{id}' to '{new_id}' but renaming the copy failed");
+                self.reload_instances();
+                self.selected = Some(new_id);
+                self.refresh_selection_caches();
+                return;
+            }
+        }
+        self.reload_instances();
+        self.selected = Some(new_id.clone());
+        self.refresh_selection_caches();
+        self.status = format!("copied '{id}' to '{new_id}'");
+    }
+
+    /// Handle `ExportPressed`: honest stub (see the `Message` docs).
+    fn export_selected(&mut self) {
+        let id = match self.selected.clone() {
+            Some(id) => id,
+            None => {
+                self.status = "select an instance first".to_string();
+                return;
+            }
+        };
+        let path = self.instances_dir.join(&id);
+        self.status = format!(
+            "Export is not implemented yet — copy the instance folder manually: {}",
+            path.display()
+        );
+        self.push_console(vec![self.status.clone()]);
+    }
+
+    /// Handle `ShortcutPressed`: write a `.url` shortcut on the Desktop.
+    fn create_shortcut(&mut self) {
+        let id = match self.selected.clone() {
+            Some(id) => id,
+            None => {
+                self.status = "select an instance first".to_string();
+                return;
+            }
+        };
+        let target = self.instances_dir.join(&id);
+        let stem = self.selected_name();
+        match desktop_dir() {
+            Some(desktop) => match write_url_shortcut(&desktop, &stem, &target) {
+                Ok(path) => {
+                    self.status = format!(
+                        "wrote shortcut {} (a .url file; on Windows it opens the instance folder)",
+                        path.display()
+                    );
+                }
+                Err(e) => self.status = format!("creating shortcut failed: {e}"),
+            },
+            None => {
+                self.status = "cannot locate your Desktop folder — shortcut not created".to_string();
+            }
+        }
+    }
+
+    /// Handle `UpdatePressed`: honest stub (updates ship via the installer).
+    fn check_updates(&mut self) {
+        self.status =
+            "Updates are delivered via the installer — this build does not update itself.".to_string();
+        self.push_console(vec![self.status.clone()]);
+    }
+
     /// Handle `OpenFolderPressed`.
     fn open_selected_folder(&mut self) {
         let path = match self.selected.clone() {
-            Some(id) => self.paths.instances_dir().join(id),
+            Some(id) => self.instances_dir.join(id),
             None => self.paths.root.clone(),
         };
         match open_in_file_manager(&path) {
             Ok(()) => self.status = format!("opened {}", path.display()),
             Err(e) => self.status = e,
+        }
+    }
+
+    /// Handle `FoldersPressed`: reveal the resolved instances folder.
+    fn open_folders(&mut self) {
+        let dir = self.instances_dir.clone();
+        match open_in_file_manager(&dir) {
+            Ok(()) => self.status = format!("opened {}", dir.display()),
+            Err(e) => self.status = e,
+        }
+    }
+
+    /// Handle `GroupToggled`: collapse/expand a section (persisted, like
+    /// Prism's `hidden` flag in `instgroups.json`).
+    fn toggle_group(&mut self, key: &str) {
+        let collapsed = self.groups.is_collapsed(key);
+        self.groups.set_collapsed(key, !collapsed);
+        if let Err(e) = self.groups.save(&self.paths) {
+            self.status = format!("saving groups failed: {e}");
+        }
+    }
+
+    /// Handle `ChangeGroupSelected`: move the selection between groups.
+    fn change_group(&mut self, label: &str) {
+        let id = match self.selected.clone() {
+            Some(id) => id,
+            None => {
+                self.status = "select an instance first".to_string();
+                return;
+            }
+        };
+        if label == UNGROUPED_LABEL {
+            self.groups.set_group(&id, None);
+        } else if label.trim().is_empty() {
+            self.status = "ignoring blank group name".to_string();
+            return;
+        } else {
+            self.groups.set_group(&id, Some(label));
+        }
+        if let Err(e) = self.groups.save(&self.paths) {
+            self.status = format!("saving groups failed: {e}");
+            return;
+        }
+        self.reload_instances();
+        if label == UNGROUPED_LABEL {
+            self.status = format!("moved '{id}' to Ungrouped");
+        } else {
+            self.status = format!("moved '{id}' to group '{label}'");
         }
     }
 
@@ -671,7 +1152,7 @@ impl PrismApp {
                 return;
             }
         };
-        let dir = match Instance::open(&self.paths.instances_dir().join(&id)) {
+        let dir = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance.mods_dir(),
             Err(e) => {
                 self.status = format!("cannot open '{id}': {e}");
@@ -697,7 +1178,7 @@ impl PrismApp {
                 return;
             }
         };
-        let dir = match Instance::open(&self.paths.instances_dir().join(&id)) {
+        let dir = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance.mods_dir(),
             Err(e) => {
                 self.status = format!("cannot open '{id}': {e}");
@@ -727,7 +1208,7 @@ impl PrismApp {
                 return;
             }
         };
-        let mut instance = match Instance::open(&self.paths.instances_dir().join(&id)) {
+        let mut instance = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance,
             Err(e) => {
                 self.status = format!("cannot open '{id}': {e}");
@@ -812,7 +1293,7 @@ impl PrismApp {
     /// Gate-aware effective memory line for the Settings page.
     fn effective_memory_line(&self) -> Option<String> {
         let id = self.selected.as_ref()?;
-        let instance = Instance::open(&self.paths.instances_dir().join(id)).ok()?;
+        let instance = Instance::open(&self.instances_dir.join(id)).ok()?;
         let global = match Settings::load(&self.paths.global_config()) {
             Ok(settings) => settings,
             Err(_) => Settings::empty(self.paths.global_config()),
@@ -896,6 +1377,14 @@ impl PrismApp {
                     self.push_console(vec![note]);
                 }
             }
+            Message::InstancesLoaded(data) => self.apply_loaded(data),
+            Message::GroupToggled(key) => self.toggle_group(&key),
+            Message::ChangeGroupSelected(label) => self.change_group(&label),
+            Message::CopyPressed => self.copy_selected(),
+            Message::ExportPressed => self.export_selected(),
+            Message::ShortcutPressed => self.create_shortcut(),
+            Message::UpdatePressed => self.check_updates(),
+            Message::FoldersPressed => self.open_folders(),
             Message::ModToggled(file, enabled) => self.toggle_mod(&file, enabled),
             Message::OpenModsFolderPressed => self.open_mods_folder(),
             Message::SetName(value) => self.form.name = value,
@@ -923,12 +1412,13 @@ impl PrismApp {
         }
     }
 
-    /// View tree shared by both shells.
+    /// View tree shared by both shells. Pure reads over cached state: no IO
+    /// happens here, so per-frame work stays minimal.
     pub fn view(&self) -> Element<'_, Message> {
         container(
             column![
                 self.view_toolbar(),
-                row![self.view_sidebar(), self.view_main()].spacing(12).height(Length::Fill),
+                row![self.view_main(), self.view_sidebar()].spacing(12).height(Length::Fill),
                 self.view_status(),
             ]
             .spacing(8),
@@ -939,70 +1429,146 @@ impl PrismApp {
         .into()
     }
 
+    /// Prism-order top toolbar with the account chip right-aligned.
     fn view_toolbar(&self) -> Element<'_, Message> {
-        let delete_label = if self.delete_armed { "Confirm delete?" } else { "Delete" };
         row![
-            toolbar_button("Launch", Message::LaunchPressed),
-            toolbar_button("Kill", Message::KillPressed),
-            toolbar_button("Add Instance", Message::AddInstancePressed),
-            toolbar_button("Edit", Message::EditPressed),
-            toolbar_button("Open Folder", Message::OpenFolderPressed),
-            toolbar_button(delete_label, Message::DeletePressed),
-            toolbar_button("Refresh", Message::Refresh),
+            toolbar_button("＋ Add Instance", Message::AddInstancePressed),
+            toolbar_button("Folders", Message::FoldersPressed),
             toolbar_button("Settings", Message::SettingsPressed),
-            toolbar_button("Accounts", Message::AccountsPressed),
-            toolbar_button("About", Message::AboutPressed),
+            toolbar_button("Help", Message::AboutPressed),
+            toolbar_button("Update", Message::UpdatePressed),
+            horizontal_space(),
+            toolbar_button(&self.account_chip_label(), Message::AccountsPressed),
         ]
         .spacing(4)
         .into()
     }
 
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        let mut list =
-            column![text_input("Search...", &self.search).on_input(Message::SearchChanged)].spacing(6);
-        let mut body = column![].spacing(4);
-        let sections = grouped_instances(&self.list, &self.search);
-        if sections.is_empty() {
-            body = body.push(text("No instances").size(13));
-        }
-        for section in &sections {
-            if sections.len() > 1 || section.name.is_some() {
-                let header = match section.name.as_deref() {
-                    Some(group) => format!("[{group}]"),
-                    None => "[Ungrouped]".to_string(),
-                };
-                body = body.push(text(header).size(13));
-            }
-            for entry in &section.entries {
-                let is_selected = self.selected.as_deref() == Some(entry.id.as_str());
-                let label = if is_selected {
-                    format!("> {}", entry.name)
-                } else {
-                    entry.name.clone()
-                };
-                let id = entry.id.clone();
-                body = body.push(
-                    button(text(label).size(13))
-                        .on_press(Message::SelectInstance(id))
-                        .width(Length::Fill),
-                );
-            }
-        }
-        list = list.push(scrollable(body).height(Length::Fill));
-        container(list).width(Length::Fixed(220.0)).height(Length::Fill).padding(6).into()
-    }
-
+    /// Left/main area: search, collapsible group grid, page tabs, page.
     fn view_main(&self) -> Element<'_, Message> {
-        let mut main = column![].spacing(8);
+        let mut main = column![
+            row![
+                text_input("Search instances...", &self.search)
+                    .on_input(Message::SearchChanged)
+                    .width(Length::Fill),
+                button(text("Refresh").size(13)).on_press(Message::Refresh),
+            ]
+            .spacing(6),
+        ]
+        .spacing(8);
         if self.show_add {
             main = main.push(self.view_add_panel());
         }
-        main = main.push(self.view_page());
-        container(scrollable(main).height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(6)
-            .into()
+        let mut body = column![].spacing(10);
+        if self.loading {
+            body = body.push(text("Loading instances…").size(14));
+        } else {
+            let sections = grouped_instances(&self.list, &self.search);
+            if sections.is_empty() {
+                if self.list.is_empty() {
+                    body = body.push(
+                        text(format!("No instances found in {}.", self.instances_dir.display())).size(13),
+                    );
+                } else {
+                    body = body.push(text("No instances match the search.").size(13));
+                }
+            }
+            for section in &sections {
+                body = body.push(self.view_section(section));
+            }
+        }
+        body = body.push(horizontal_rule(1u16));
+        body = body.push(self.view_tabs());
+        body = body.push(self.view_page());
+        main = main.push(scrollable(body).height(Length::Fill));
+        container(main).width(Length::Fill).height(Length::Fill).padding(6).into()
+    }
+
+    /// One collapsible group section with its wrapped tile grid.
+    fn view_section(&self, section: &GroupSection) -> Element<'_, Message> {
+        let (key, display) = match section.name.as_deref() {
+            Some(group) => (group.to_string(), group.to_string()),
+            None => (String::new(), UNGROUPED_LABEL.to_string()),
+        };
+        let arrow = if self.groups.is_collapsed(&key) { "▸" } else { "▾" };
+        let mut content = column![
+            button(
+                row![
+                    text(format!("{arrow} {display} ({})", section.entries.len())).size(14),
+                    horizontal_space(),
+                ]
+            )
+            .on_press(Message::GroupToggled(key))
+            .width(Length::Fill),
+        ]
+        .spacing(6);
+        if !self.groups.is_collapsed(
+            section.name.as_deref().unwrap_or(""),
+        ) {
+            for chunk in section.entries.chunks(TILES_PER_ROW) {
+                let mut grid_row = row![].spacing(8);
+                for entry in chunk {
+                    let is_selected = self.selected.as_deref() == Some(entry.id.as_str());
+                    grid_row = grid_row.push(instance_tile(entry, is_selected));
+                }
+                content = content.push(grid_row);
+            }
+        }
+        content.into()
+    }
+
+    /// Page tabs (the About page is labeled Help, like Prism's Help menu).
+    fn view_tabs(&self) -> Element<'_, Message> {
+        let mut tabs = row![].spacing(4);
+        for page in Page::all() {
+            tabs = tabs.push(toolbar_button(page.tab_label(), Message::PageSelected(page)));
+        }
+        tabs.into()
+    }
+
+    /// Right sidebar: big tile, name, divider, vertical action list.
+    fn view_sidebar(&self) -> Element<'_, Message> {
+        let mut side = column![].spacing(8);
+        let selected_entry = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.list.entries().iter().find(|entry| entry.id == id));
+        match selected_entry {
+            Some(entry) => {
+                side = side.push(big_tile(entry, true));
+                side = side.push(text(entry.name.clone()).size(15));
+            }
+            None => {
+                side = side.push(big_tile_placeholder());
+                side = side.push(text("No instance selected").size(13));
+            }
+        }
+        side = side.push(horizontal_rule(1u16));
+        let has_selection = self.selected.is_some();
+        let running = self.active_run.is_some();
+        side = side.push(sidebar_button("▶ Launch", has_selection, Message::LaunchPressed));
+        side = side.push(sidebar_button("✖ Kill", running, Message::KillPressed));
+        side = side.push(sidebar_button("Edit", has_selection, Message::EditPressed));
+        if has_selection {
+            side = side.push(
+                row![
+                    text("Group:").size(13),
+                    pick_list(
+                        self.group_options(),
+                        Some(self.selected_group_label()),
+                        Message::ChangeGroupSelected,
+                    ),
+                ]
+                .spacing(6),
+            );
+        }
+        side = side.push(sidebar_button("Folder", has_selection, Message::OpenFolderPressed));
+        side = side.push(sidebar_button("Export", has_selection, Message::ExportPressed));
+        side = side.push(sidebar_button("Copy", has_selection, Message::CopyPressed));
+        let delete_label = if self.delete_armed { "Confirm delete?" } else { "Delete" };
+        side = side.push(sidebar_button(delete_label, has_selection, Message::DeletePressed));
+        side = side.push(sidebar_button("Create Shortcut", has_selection, Message::ShortcutPressed));
+        container(side).width(Length::Fixed(SIDEBAR_WIDTH)).height(Length::Fill).padding(8).into()
     }
 
     fn view_add_panel(&self) -> Element<'_, Message> {
@@ -1059,7 +1625,11 @@ impl PrismApp {
             }
             index += 1;
         }
-        main = main.push(scrollable(lines).id(console_scroll_id()).height(Length::Fill));
+        main = main.push(
+            scrollable(lines)
+                .id(console_scroll_id())
+                .height(Length::Fixed(CONSOLE_PANE_HEIGHT)),
+        );
         main.into()
     }
 
@@ -1181,8 +1751,8 @@ impl PrismApp {
         }
         main = main.push(text(
             "Gates follow SettingsModel semantics: an instance value only takes effect while its \
-             Override gate is on; otherwise the global prismlauncher.cfg value wins. Join-server \
-             settings are instance-only in Prism (no global gate).",
+              Override gate is on; otherwise the global prismlauncher.cfg value wins. Join-server \
+              settings are instance-only in Prism (no global gate).",
         ).size(12));
         main.into()
     }
@@ -1225,14 +1795,19 @@ impl PrismApp {
         main.into()
     }
 
+    /// Help page (the old About content lives here, reached via Help).
     fn view_about(&self) -> Element<'_, Message> {
         column![
+            text("Help").size(16),
+            text("Single-click a tile to select it, then use the sidebar actions (Launch opens the Console page).").size(13),
+            text("Group headers collapse/expand; the Change Group list moves the selected instance.").size(13),
             text(format!("prism-desktop {}", env!("CARGO_PKG_VERSION"))).size(16),
             text(format!("data root: {}", self.paths.root.display())).size(13),
-            text(format!("instances: {}", self.paths.instances_dir().display())).size(13),
+            text(format!("instances: {}", self.instances_dir.display())).size(13),
             text(format!("meta cache: {}", self.paths.meta_dir().display())).size(13),
             text(format!("global config: {}", self.paths.global_config().display())).size(13),
             text(format!("accounts: {}", self.paths.accounts_file().display())).size(13),
+            text("Notes: Export is a stub (copy the folder manually); Create Shortcut writes a .url file on the Desktop; software rendering is preferred (see main.rs).").size(12),
         ]
         .spacing(6)
         .into()
@@ -1251,8 +1826,109 @@ impl PrismApp {
     }
 }
 
-fn toolbar_button(label: &str, message: Message) -> Button<'_, Message> {
+/// One instance tile: a colored rounded box with the first letter plus the
+/// name label below. Single click selects (the sidebar Launch acts on it).
+/// Fully owned (`'static`), so grids built from locals can be returned.
+fn instance_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Message> {
+    let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
+    let tile = container(text(tile_letter(&entry.name)).size(22).style(Color::BLACK))
+        .width(Length::Fixed(TILE_BOX))
+        .height(Length::Fixed(TILE_BOX))
+        .center_x()
+        .center_y()
+        .style(move |_: &Theme| container::Appearance {
+            background: Some(Background::Color(background)),
+            border: Border { radius: 10.0.into(), ..Default::default() },
+            ..Default::default()
+        });
+    let id = entry.id.clone();
+    button(
+        column![
+            tile,
+            container(text(short_name(&entry.name)).size(11))
+                .width(Length::Fixed(TILE_WIDTH - 8.0))
+                .center_x(),
+        ]
+        .spacing(4),
+    )
+    .on_press(Message::SelectInstance(id))
+    .width(Length::Fixed(TILE_WIDTH))
+    .into()
+}
+
+/// Large sidebar tile for the selected instance.
+fn big_tile(entry: &InstanceEntry, selected: bool) -> Element<'_, Message> {
+    let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
+    container(text(tile_letter(&entry.name)).size(40).style(Color::BLACK))
+        .width(Length::Fixed(BIG_TILE))
+        .height(Length::Fixed(BIG_TILE))
+        .center_x()
+        .center_y()
+        .style(move |_: &Theme| container::Appearance {
+            background: Some(Background::Color(background)),
+            border: Border { radius: 14.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Sidebar placeholder when nothing is selected.
+fn big_tile_placeholder() -> Element<'static, Message> {
+    container(text("?").size(40).style(Color::BLACK))
+        .width(Length::Fixed(BIG_TILE))
+        .height(Length::Fixed(BIG_TILE))
+        .center_x()
+        .center_y()
+        .style(|_: &Theme| container::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.45, 0.45, 0.48))),
+            border: Border { radius: 14.0.into(), ..Default::default() },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Full-width sidebar action button; without `enabled` it renders disabled
+/// (no `on_press`), which is how Kill stays off while nothing runs.
+fn sidebar_button(label: &str, enabled: bool, message: Message) -> Button<'static, Message> {
+    let styled = button(text(label).size(13)).width(Length::Fill);
+    if enabled {
+        styled.on_press(message)
+    } else {
+        styled
+    }
+}
+
+fn toolbar_button(label: &str, message: Message) -> Button<'static, Message> {
     button(text(label).size(13)).on_press(message)
+}
+
+/// Background instance loader: scan + parse off the GUI thread, then hand
+/// the result back over the subscription sender. A full channel just waits
+/// briefly; a gone GUI ends the thread.
+fn run_instance_loader(data_root: PathBuf, mut sender: futures::channel::mpsc::Sender<Message>) {
+    let mut pending: Option<LoadedData> = Some(load_instances_blocking(&data_root));
+    loop {
+        let data = match pending.take() {
+            Some(data) => data,
+            None => return,
+        };
+        match sender.try_send(Message::InstancesLoaded(data)) {
+            Ok(()) => return,
+            Err(e) => {
+                if e.is_full() {
+                    match e.into_inner() {
+                        Message::InstancesLoaded(data) => {
+                            pending = Some(data);
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        _ => return,
+                    }
+                } else {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1269,6 +1945,10 @@ mod tests {
         (dir, paths)
     }
 
+    fn write_cfg(paths: &PrismPaths, text: &str) {
+        std::fs::write(paths.global_config(), text).unwrap();
+    }
+
     #[test]
     fn pages_cover_toolbar_order_and_default_console() {
         assert_eq!(Page::all().len(), 9);
@@ -1279,6 +1959,7 @@ mod tests {
         assert!(titles.contains(&"Settings"));
         assert!(titles.contains(&"Accounts"));
         assert!(titles.contains(&"About"));
+        assert_eq!(Page::About.tab_label(), "Help");
     }
 
     #[test]
@@ -1411,6 +2092,25 @@ mod tests {
     }
 
     #[test]
+    fn update_check_is_honest() {
+        let (_dir, paths) = test_paths("update");
+        let mut app = PrismApp::with_paths(paths);
+        app.update(Message::UpdatePressed);
+        assert!(app.status.contains("installer"));
+    }
+
+    #[test]
+    fn export_stub_names_the_folder() {
+        let (_dir, paths) = test_paths("export");
+        let instance = Instance::create(&paths.instances_dir(), "Pack", "1.21.1").unwrap();
+        let mut app = PrismApp::with_paths(paths.clone());
+        app.update(Message::SelectInstance(instance.id()));
+        app.update(Message::ExportPressed);
+        assert!(app.status.contains("not implemented yet"));
+        assert!(app.status.contains("Pack"));
+    }
+
+    #[test]
     fn settings_save_round_trips_through_instance_cfg() {
         let (_dir, paths) = test_paths("save");
         let instance = Instance::create(&paths.instances_dir(), "Cfg", "1.21.1").unwrap();
@@ -1434,5 +2134,185 @@ mod tests {
         assert_eq!(back.settings().get_str("JavaPath", ""), "/opt/java");
         assert!(back.settings().get_bool("JoinServerOnLaunch", false));
         assert_eq!(back.settings().get_str("JoinServerOnLaunchAddress", ""), "mc.example.com:25570");
+    }
+
+    #[test]
+    fn tile_colors_are_deterministic_and_selected_is_prism_green() {
+        let first = tile_color("1.21.1");
+        assert_eq!(first, tile_color("1.21.1"));
+        // Every palette entry is reachable-ish and in range.
+        for id in ["a", "b", "c", "1.21.10", "Some Pack"] {
+            let color = tile_color(id);
+            for channel in [color.r, color.g, color.b] {
+                assert!((0.0..=1.0).contains(&channel));
+            }
+        }
+        let selected = selected_tile_color();
+        let to_byte = |v: f32| (v * 255.0).round() as u32;
+        assert_eq!((to_byte(selected.r), to_byte(selected.g), to_byte(selected.b)), (0x7C, 0xB3, 0x42));
+    }
+
+    #[test]
+    fn tile_letters_pick_first_alphanumeric() {
+        assert_eq!(tile_letter("alpha"), "A");
+        assert_eq!(tile_letter("1.21.1"), "1");
+        assert_eq!(tile_letter("  spaced"), "S");
+        assert_eq!(tile_letter(""), "?");
+        assert_eq!(tile_letter("---"), "?");
+    }
+
+    #[test]
+    fn short_names_truncate_without_splitting_chars() {
+        assert_eq!(short_name("Tiny"), "Tiny");
+        let exact = "x".repeat(30);
+        assert_eq!(short_name(&exact), exact);
+        let long = format!("{}tail", "🧱".repeat(30));
+        let shortened = short_name(&long);
+        assert!(shortened.ends_with('…'));
+        assert_eq!(shortened.chars().count(), 31);
+        assert!(shortened.is_char_boundary(shortened.len()));
+    }
+
+    #[test]
+    fn group_headers_toggle_collapsed_state() {
+        let (_dir, paths) = test_paths("collapse");
+        let instance = Instance::create(&paths.instances_dir(), "Solo", "1.21.1").unwrap();
+        let mut app = PrismApp::with_paths(paths.clone());
+        // Ungrouped starts expanded.
+        assert!(!app.groups.is_collapsed(""));
+        app.update(Message::GroupToggled(String::new()));
+        assert!(app.groups.is_collapsed(""));
+        // Persisted like Prism's `hidden` flag.
+        let back = Groups::load(&paths);
+        assert!(back.is_collapsed(""));
+        app.update(Message::GroupToggled(String::new()));
+        assert!(!app.groups.is_collapsed(""));
+        let _ = instance;
+    }
+
+    #[test]
+    fn change_group_moves_instance_and_persists() {
+        let (_dir, paths) = test_paths("changegroup");
+        let instance = Instance::create(&paths.instances_dir(), "Movable", "1.21.1").unwrap();
+        let mut app = PrismApp::with_paths(paths.clone());
+        app.update(Message::SelectInstance(instance.id()));
+        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
+        assert!(app.group_options().contains(&UNGROUPED_LABEL.to_string()));
+
+        app.update(Message::ChangeGroupSelected("Packs".to_string()));
+        assert!(app.status.contains("Packs"), "status: {}", app.status);
+        assert_eq!(app.selected_group_label(), "Packs");
+        let back = Groups::load(&paths);
+        assert_eq!(back.group_of(&instance.id()), Some("Packs"));
+
+        app.update(Message::ChangeGroupSelected(UNGROUPED_LABEL.to_string()));
+        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
+        let back = Groups::load(&paths);
+        assert!(back.group_of(&instance.id()).is_none());
+    }
+
+    #[test]
+    fn copy_duplicates_the_folder_with_unique_name() {
+        let (_dir, paths) = test_paths("copy");
+        let instance = Instance::create(&paths.instances_dir(), "Original", "1.21.1").unwrap();
+        std::fs::write(paths.instances_dir().join(instance.id()).join("marker.txt"), b"keep").unwrap();
+        let mut app = PrismApp::with_paths(paths.clone());
+        app.update(Message::SelectInstance(instance.id()));
+        app.update(Message::CopyPressed);
+        assert!(app.status.contains("copied"), "status: {}", app.status);
+        assert_eq!(app.list.len(), 2);
+        let new_id = app.selected.clone().unwrap();
+        assert_ne!(new_id, instance.id());
+        assert!(paths.instances_dir().join(&new_id).join("marker.txt").is_file());
+        assert!(paths.instances_dir().join(&new_id).join("instance.cfg").is_file());
+    }
+
+    #[test]
+    fn copy_dir_recursive_copies_trees_and_skips_nothing_real() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("a.txt"), b"a").unwrap();
+        std::fs::write(src.join("sub").join("b.txt"), b"b").unwrap();
+        let dst = dir.path().join("dst");
+        copy_dir_recursive(&src, &dst).unwrap();
+        assert_eq!(std::fs::read(dst.join("a.txt")).unwrap(), b"a");
+        assert_eq!(std::fs::read(dst.join("sub").join("b.txt")).unwrap(), b"b");
+        assert!(copy_dir_recursive(&dir.path().join("missing"), &dst).is_err());
+    }
+
+    #[test]
+    fn url_shortcuts_are_plain_ini_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = PathBuf::from("C:/Games/PrismLauncher/instances/1.21.1");
+        let text = url_shortcut_text(&target);
+        assert!(text.starts_with("[InternetShortcut]\nURL=file:///"));
+        assert!(text.contains("C:/Games/PrismLauncher/instances/1.21.1"));
+        let written = write_url_shortcut(dir.path(), "My Pack", &target).unwrap();
+        assert_eq!(written.extension().and_then(|e| e.to_str()), Some("url"));
+        let back = std::fs::read_to_string(&written).unwrap();
+        assert_eq!(back, text);
+        assert!(write_url_shortcut(dir.path(), "a/b", &target).is_err());
+    }
+
+    #[test]
+    fn startup_uses_configured_dir_and_preselects_selected_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = PrismPaths::at(dir.path());
+        let custom = dir.path().join("custom-instances");
+        std::fs::create_dir_all(&custom).unwrap();
+        let forward = custom.display().to_string().replace('\\', "/");
+        write_cfg(
+            &paths,
+            &format!("[General]\nConfigVersion=1.3\nInstanceDir={forward}\nSelectedInstance=Best\n"),
+        );
+        let created = Instance::create(&custom, "Best", "1.21.1").unwrap();
+        assert_eq!(created.id(), "Best");
+
+        let app = PrismApp::with_paths(paths.clone());
+        assert_eq!(app.instances_dir, custom);
+        assert_eq!(app.list.len(), 1);
+        assert_eq!(app.selected.as_deref(), Some("Best"));
+
+        // The same resolution drives the background loader payload.
+        let loaded = load_instances_blocking(dir.path());
+        assert_eq!(loaded.instances_dir, custom);
+        assert_eq!(loaded.selected.as_deref(), Some("Best"));
+        assert_eq!(loaded.list.len(), 1);
+    }
+
+    #[test]
+    fn stale_selected_instance_is_ignored() {
+        let (_dir, paths) = test_paths("stale-sel");
+        Instance::create(&paths.instances_dir(), "Real", "1.21.1").unwrap();
+        write_cfg(&paths, "[General]\nConfigVersion=1.3\nSelectedInstance=Gone\n");
+        let app = PrismApp::with_paths(paths);
+        assert!(app.selected.is_none());
+        let loaded = load_instances_blocking(&app.paths.root);
+        assert!(loaded.selected.is_none());
+    }
+
+    #[test]
+    fn instances_loaded_message_fills_the_placeholder() {
+        let (_dir, paths) = test_paths("async");
+        Instance::create(&paths.instances_dir(), "Late", "1.21.1").unwrap();
+        let mut app = PrismApp::pending(paths.clone());
+        assert!(app.loading);
+        assert_eq!(app.list.len(), 0);
+        let data = load_instances_blocking(&paths.root);
+        app.update(Message::InstancesLoaded(data));
+        assert!(!app.loading);
+        assert_eq!(app.list.len(), 1);
+        assert!(!app.status.is_empty());
+    }
+
+    #[test]
+    fn account_chip_reflects_selection() {
+        let (_dir, paths) = test_paths("chip");
+        let mut app = PrismApp::with_paths(paths);
+        assert_eq!(app.account_chip_label(), "👤 No account");
+        app.update(Message::AccountNameChanged("Steve".to_string()));
+        app.update(Message::AccountAdd);
+        assert_eq!(app.account_chip_label(), "👤 Steve");
     }
 }
