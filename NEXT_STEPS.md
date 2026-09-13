@@ -415,6 +415,34 @@ comment and it cost two rounds to establish:
 > hardware Direct3D 12 adapter, which is why `gpu.rs` treats a hardware adapter
 > on the legacy OpenGL backend as *not* qualifying.
 
+## 10. Verifying a downloaded build
+
+`tools/launch_check.py` does the part of verification CI cannot: it launches the
+downloaded exe off-screen without activating it, proves the UI thread is
+pumping (`SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG)`), and samples CPU and
+working set across a series of windows rather than one.
+
+Run interleaved against both CI artifacts of `6dbc01a`, four launches:
+
+| | gnu | msvc |
+|---|---|---|
+| window appears | 0.1-0.8 s | 0.1-0.5 s |
+| idle windows | 15.6 and 62.5 ms stray | 0.0 ms, all windows, twice |
+| working set | 29.6-40.4 MB | 29.3-35.0 MB |
+| UI thread | responsive, 0 ms | responsive, 0 ms |
+
+That corroborates §8: no measurable idle CPU, ~30 MB resident, the figure worth
+about 1 MB less than the earlier local build. Both hashes matched the sidecars
+CI wrote, and both pass `check_exe.py`.
+
+One caveat this raises. A single msvc run showed 296.9 ms over 12 s -- 2.5% of
+one core, work in seven of eight consecutive windows -- and looked exactly like
+a target difference. It did not reproduce in two later runs of the same build,
+and the gnu build produced smaller strays of its own. So it was a transient,
+and the series is what makes that visible: a one-window sample would have
+recorded 2.5% with no way to know. If it recurs over a longer run it wants a
+thread-level sample (ETW or a sampling profiler), not more window arithmetic.
+
 ## 9. Scrolling: the measurement, and the fix that is not written yet
 
 Picked up again after the CI work because this is what was in flight. The
