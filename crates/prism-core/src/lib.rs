@@ -25,6 +25,11 @@
 //! fallible operations return [`Error`] with path context.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
+// The policy above is "no `unwrap`/`expect` outside tests", so the tests have
+// to be exempt or the crate cannot compile under clippy at all. `prism-loader`
+// already carries this line; the crates without it were failing 153 and 16
+// lints respectively the first time CI ran clippy.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![warn(missing_docs)]
 
 pub mod assets;

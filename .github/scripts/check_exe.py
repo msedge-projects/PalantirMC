@@ -20,10 +20,12 @@ from __future__ import annotations
 import struct
 import sys
 
-# Families that mean the download only runs where a compiler happens to be
-# installed. `libgcc_s_*`/`libstdc++-6` come from a GNU target, `*winpthread*`
-# from an unstatic-linked mingw too, and the vcruntime is the MSVC equivalent
-# of the same mistake.
+# Families that mean the download only runs where a compiler or a
+# redistributable happens to be installed. `libgcc_s_*`/`libstdc++-6` come from
+# a GNU target, `*winpthread*` from an unstatic-linked mingw, and
+# `vcruntime140`/`msvcp140` are the MSVC equivalent of the same mistake.
+# Both directions have been observed here: the MSVC build was the one importing
+# VCRUNTIME140.dll, while the GNU build imported nothing outside Windows.
 # The `api-ms-win-crt-*` set is Microsoft's own UCRT and is delivered with the
 # OS, so it is deliberately *not* listed here.
 NON_WINDOWS = (
@@ -113,8 +115,8 @@ def main(argv: list[str]) -> int:
             for name in portability:
                 print(f"  {name}")
             print(
-                "hint: a GNU target is linking its runtime dynamically. Either ship the "
-                "MSVC build or add `-C target-feature=+crt-static` to RUSTFLAGS."
+                "hint: link the C runtime statically -- `-C target-feature=+crt-static` "
+                "in RUSTFLAGS -- or the download needs a redistributable installed first."
             )
         else:
             print(f"ok: {path} needs nothing beyond Windows' own DLLs")

@@ -78,11 +78,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-lint-
 
-      # Only the deny-by-default lints are enforced, so a non-zero exit here
-      # means a compile error or a `clippy::correctness` finding -- a real
-      # defect, never a style opinion. Raising this to `-D warnings` is worth
-      # doing once the existing warnings have been triaged; doing it today
-      # would fail every PR for lints nobody has looked at yet.
+      # A non-zero exit here means a compile error, a `clippy::correctness`
+      # finding, or one of the crates' own `#![deny(...)]` attributes -- real
+      # defects, never style opinions. Everyone's warn-by-default lints stay
+      # warnings, so this cannot red a PR over a preference; raising it to
+      # `-D warnings` is worth doing once the existing warnings have been
+      # triaged, which is what the advisory step below reports on.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
 
@@ -101,9 +102,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-pc-windows-msvc
-          - x86_64-pc-windows-gnu
+        include:
+          # Without the static CRT the MSVC build imports VCRUNTIME140.dll,
+          # which is not part of a clean Windows install -- it arrives with
+          # Visual Studio, Office or a game, and its absence is a launcher that
+          # will not start. The GNU build in this same matrix needs nothing
+          # beyond the OS, so the two targets were not equally portable until
+          # this flag was added. The DLL gate below is what caught it.
+          - target: x86_64-pc-windows-msvc
+            rustflags: "-C target-feature=+crt-static"
+          - target: x86_64-pc-windows-gnu
+            rustflags: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -136,6 +145,8 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-release-
 
       - name: Build release
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked -p prism-desktop --target ${{ matrix.target }}
 
       - name: Stage artifact and hash it

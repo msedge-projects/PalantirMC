@@ -62,9 +62,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-pc-windows-msvc
-          - x86_64-pc-windows-gnu
+        include:
+          # The static CRT is what makes both downloads runnable on a machine
+          # with no Visual C++ redistributable installed; see the same matrix
+          # in `ci.yml` for the measurement that showed it was needed.
+          - target: x86_64-pc-windows-msvc
+            rustflags: "-C target-feature=+crt-static"
+          - target: x86_64-pc-windows-gnu
+            rustflags: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +101,8 @@ jobs:
         run: cargo test --workspace --all-targets --locked
 
       - name: Build release
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked -p prism-desktop --target ${{ matrix.target }}
 
       - name: Stage the exe

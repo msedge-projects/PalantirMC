@@ -15,6 +15,9 @@
 //! the shell drives these models directly, so the seam was removed rather than
 //! kept as a second, unreachable path.
 
+// Permitted in tests only: the crate's own rule is about the models, and the
+// tests assert by unwrapping. See `prism-core/src/lib.rs` for the long version.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![warn(missing_docs)]
 
