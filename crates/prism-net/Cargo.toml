@@ -13,6 +13,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 sha2 = "0.10"
+# `auth` builds the entitlements request id itself: the endpoint takes a UUID
+# and answers an empty item list without one. Already in the workspace lock file.
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -20,7 +20,7 @@ pub mod modpack;
 
 pub use archive::{
     extract_tar_gz, extract_tar_gz_bytes, extract_tar_gz_file, extract_zip, extract_zip_bytes,
-    extract_zip_file,
+    extract_zip_file, extract_zip_file_flat,
 };
 pub use install::{plan_loader_install, write_patch};
 pub use jar::{scan_jar, scan_jar_file, JarInfo};

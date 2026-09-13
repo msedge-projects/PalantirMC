@@ -17,8 +17,11 @@
 //! * **Browse** searches Modrinth and installs the newest matching file into
 //!   the selected instance's `mods/` folder ([`crate::browse`]).
 //! * **Import** scans other launchers on disk and copies what it finds.
-//! * **Accounts** are offline accounts persisted to `accounts.json`; Microsoft
-//!   sign-in is the one honest gap and the UI says so.
+//! * **Accounts** are offline or Microsoft, persisted to `accounts.json`.
+//!   Microsoft sign-in runs the real device-code flow in a subscription
+//!   ([`microsoft_sign_in`]) and its refresh token is renewed before a launch,
+//!   so being signed in is a state the launcher keeps rather than one it
+//!   announces.
 //!
 //! Background work follows one pattern: a flag in this struct makes
 //! [`PrismApp::subscription`] expose a channel subscription whose id includes a
@@ -43,6 +46,7 @@ use prism_core::instance::Instance;
 use prism_core::paths::PrismPaths;
 use prism_core::settings::{defaults, Settings};
 
+use crate::accounts::AccountEntry;
 use crate::brand;
 use crate::browse::{self, ContentType, Hit, ImportedPack};
 use crate::catalog::{self, LoaderKind, VersionCatalog};
@@ -220,6 +224,8 @@ pub const IMPORT_ID: &str = "palantirmc-import";
 pub const SHOTS_ID: &str = "palantirmc-screenshots";
 /// Subscription id of the page's scroll frames.
 pub const FRAME_ID: &str = "palantirmc-frame";
+/// Subscription id of the Microsoft device-code sign-in flow.
+pub const MICROSOFT_ID: &str = "palantirmc-microsoft";
 
 /// Screenshot tiles per row in the grid.
 const SHOTS_PER_ROW: usize = 3;
@@ -409,6 +415,9 @@ pub enum Modal {
     Settings,
     /// Delete confirmation (carries the instance id).
     ConfirmDelete(String),
+    /// Microsoft device-code sign-in (the code and its progress live in
+    /// [`PrismApp::microsoft`]).
+    Microsoft,
 }
 
 impl Modal {
@@ -547,6 +556,42 @@ pub struct ImportState {
     pub candidates: Vec<instances::ImportCandidate>,
     /// Failure, if any.
     pub error: Option<String>,
+}
+
+/// State of the Microsoft device-code sign-in dialog.
+///
+/// The flow runs in a subscription rather than a one-shot task: polling
+/// continues for as long as the user takes to type the code, and the result is a
+/// code, a progress line and an outcome. Those are three separate messages, so
+/// the state they land in lives here.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MicrosoftState {
+    /// A flow is running (this is what the subscription watches).
+    pub pending: bool,
+    /// Short code the user types into the browser.
+    pub user_code: Option<String>,
+    /// Where they type it.
+    pub verification_uri: Option<String>,
+    /// Latest progress line.
+    pub status: String,
+    /// Terminal failure, if the flow did not sign in.
+    pub error: Option<String>,
+}
+
+impl MicrosoftState {
+    /// Begin a flow, clearing anything the last one left behind.
+    pub fn start(&mut self) {
+        *self = MicrosoftState {
+            pending: true,
+            status: "Asking Microsoft for a code…".to_string(),
+            ..MicrosoftState::default()
+        };
+    }
+
+    /// Whether a code has arrived and is waiting to be typed.
+    pub fn has_code(&self) -> bool {
+        self.user_code.is_some()
+    }
 }
 
 /// Result of a background job, delivered as [`Message::TaskDone`].
@@ -762,8 +807,38 @@ pub enum Message {
     AccountSelect(String),
     /// Remove an account.
     AccountRemove(String),
-    /// Microsoft sign-in (not implemented).
+    /// Start the Microsoft device-code sign-in.
     MicrosoftPressed,
+    /// The device-code flow produced the code the user has to type.
+    MicrosoftCode {
+        /// Short code shown to the user.
+        user_code: String,
+        /// URL they enter it at.
+        verification_uri: String,
+    },
+    /// A progress line from the device-code flow.
+    MicrosoftStatus(String),
+    /// The device-code flow finished (signed in, or with the reason it did not).
+    MicrosoftDone(Box<Result<AccountEntry, String>>),
+    /// Copy the shown code to the clipboard.
+    MicrosoftCopyCode,
+    /// Open the verification URL in the browser.
+    MicrosoftOpenUrl,
+    /// Stop waiting for the device-code flow.
+    MicrosoftCancel,
+    /// Tokens a launch renewal produced, to be stored.
+    AccountTokens {
+        /// Profile uuid the tokens belong to.
+        uuid: String,
+        /// Profile name.
+        name: String,
+        /// Fresh game access token.
+        access_token: String,
+        /// Fresh Microsoft refresh token.
+        refresh_token: Option<String>,
+        /// Unix milliseconds at which the access token expires.
+        expires_at_ms: i64,
+    },
 
     // ---- logs ----
     /// Clear the log buffer.
@@ -955,6 +1030,8 @@ pub struct PrismApp {
     import: ImportState,
     accounts: crate::accounts::AccountsStore,
     account_input: String,
+    /// State of the Microsoft device-code sign-in dialog.
+    microsoft: MicrosoftState,
     form: SettingsForm,
     mods: Vec<ModEntry>,
     worlds: Vec<String>,
@@ -1003,6 +1080,7 @@ impl PrismApp {
             import: ImportState::default(),
             accounts,
             account_input: String::new(),
+            microsoft: MicrosoftState::default(),
             form: SettingsForm::default(),
             mods: Vec::new(),
             worlds: Vec::new(),
@@ -1050,6 +1128,7 @@ impl PrismApp {
             import: ImportState::default(),
             accounts,
             account_input: String::new(),
+            microsoft: MicrosoftState::default(),
             form: SettingsForm::default(),
             mods: Vec::new(),
             worlds: Vec::new(),
@@ -1147,7 +1226,7 @@ impl PrismApp {
     /// Sub-label of the account card.
     pub fn account_detail(&self) -> String {
         match self.accounts.selected_account() {
-            Some(account) => format!("Offline account · {}", account.uuid),
+            Some(account) => account.detail(),
             None => "Sign in to play on servers".to_string(),
         }
     }
@@ -1201,13 +1280,40 @@ impl PrismApp {
     }
 
     /// Synchronous dry run for runtimes without subscriptions.
+    ///
+    /// This shell cannot stream, so it runs the same preparation with an offline
+    /// metadata store and an empty fetcher: everything *cached and installed* is
+    /// checked for real, and anything that would have to be downloaded is
+    /// reported as exactly that instead of being waited for. The live path
+    /// (which fetches) is the `Application` shell's worker.
     pub(crate) fn sandbox_drain_launch(&mut self) {
         let run = match self.take_active_run() {
             Some(run) => run,
             None => return,
         };
         let paths = PrismPaths::at(&run.data_root);
-        let (lines, readiness) = launch::prepare_launch(&paths, &run.instance_id, &run.account);
+        let mut all: Vec<String> = Vec::new();
+        let readiness = {
+            let mut log = |line: String| all.push(line);
+            let auth = prism_net::MicrosoftAuth::with_prism_client_id();
+            match launch::prepare_auth(&run.account, &auth, &mut log) {
+                Ok(prepared) => {
+                    let (mut store, fetcher) = launch::offline_backend(&paths);
+                    launch::prepare_launch(
+                        &paths,
+                        &run.instance_id,
+                        &prepared.session,
+                        &mut store,
+                        &fetcher,
+                        &mut log,
+                    )
+                }
+                Err(error) => {
+                    log(format!("sign-in failed: {error} — not launching"));
+                    launch::LaunchReadiness::Blocked
+                }
+            }
+        };
         let tail = match readiness {
             launch::LaunchReadiness::Ready(_) => {
                 "dry run: launch looks runnable (live streaming needs the Application entrypoint)"
@@ -1216,7 +1322,6 @@ impl PrismApp {
             launch::LaunchReadiness::Blocked => "dry run: launch blocked (see the log)".to_string(),
         };
         self.set_status(tail.clone());
-        let mut all = lines;
         all.push(tail);
         self.push_console(all);
     }
@@ -1302,16 +1407,13 @@ impl PrismApp {
     // ---- launching -------------------------------------------------------
 
     /// Account identity for the next launch (selection or anonymous).
+    ///
+    /// The whole entry travels, not just the name: a Microsoft account launches
+    /// with its tokens, and renewing them is the worker's first step.
     fn launch_account(&self) -> AccountRef {
         match self.accounts.selected_account() {
-            Some(account) => AccountRef {
-                username: account.username.clone(),
-                uuid: account.uuid.clone(),
-            },
-            None => AccountRef {
-                username: "Player".to_string(),
-                uuid: uuid::Uuid::new_v4().simple().to_string(),
-            },
+            Some(account) => AccountRef::from_entry(account),
+            None => AccountRef::anonymous(),
         }
     }
 
@@ -1402,6 +1504,15 @@ impl PrismApp {
                 self.set_error(format!("Copy saved but renaming failed: {error}"));
             }
         }
+        // A copy belongs where the original did: leaving it ungrouped would
+        // make duplicating an organised instance look like it had been filed
+        // away by itself.
+        if let Some(group) = self.groups.group_of(id).map(str::to_string) {
+            self.groups.set_group(&new_id, Some(&group));
+            if let Err(error) = self.groups.save(&self.paths) {
+                self.set_error(format!("copied, but saving groups failed: {error}"));
+            }
+        }
         self.reload_instances();
         self.selected = Some(new_id.clone());
         self.refresh_selection_caches();
@@ -1409,14 +1520,27 @@ impl PrismApp {
     }
 
     fn delete_instance(&mut self, id: &str) {
+        // The group index is a separate file, so deleting the folder alone
+        // leaves a ghost entry behind that reappears the moment an instance is
+        // ever created under the same id again.
+        let group = self.groups.group_of(id).map(str::to_string);
         match Instance::delete(&self.instances_dir, id) {
             Ok(()) => {
+                let mut note = format!("Deleted '{id}'.");
+                if group.is_some() {
+                    self.groups.set_group(id, None);
+                    if let Err(error) = self.groups.save(&self.paths) {
+                        note.push_str(&format!(
+                            " Its entry in instgroups.json could not be removed: {error}"
+                        ));
+                    }
+                }
                 if self.selected.as_deref() == Some(id) {
                     self.selected = None;
                 }
                 self.modal = Modal::None;
                 self.reload_instances();
-                self.set_status(format!("Deleted '{id}'."));
+                self.set_status(note);
             }
             Err(error) => self.set_error(format!("Deleting '{id}' failed: {error}")),
         }
@@ -1523,15 +1647,40 @@ impl PrismApp {
         settings.set_i64("MinecraftWinHeight", height);
         settings.set_bool("JoinServerOnLaunch", self.form.join_server);
         settings.set_str("JoinServerOnLaunchAddress", self.form.server_address.trim());
-        match instance.save() {
-            Ok(()) => {
-                self.reload_instances();
-                self.selected = Some(id.clone());
-                self.refresh_selection_caches();
-                self.set_status(format!("Saved settings for '{id}'."));
-            }
-            Err(error) => self.set_error(format!("saving settings failed: {error}")),
+        if let Err(error) = instance.save() {
+            return self.set_error(format!("saving settings failed: {error}"));
         }
+        // Prism renames the instance *folder* when its display name changes, and
+        // the group index has to follow: leaving the folder behind means two
+        // names for one instance, and leaving the group behind means the renamed
+        // instance silently falls out of its group. Both are done here so a
+        // rename is one atomic-looking action from the user's side.
+        let wanted = prism_core::util::sanitize_dir_name(&self.form.name);
+        let mut final_id = id.clone();
+        if !self.form.name.trim().is_empty() && wanted != id {
+            match instance.rename(&self.form.name) {
+                Ok(()) => {
+                    let new_id = instance.id();
+                    let group = self.groups.group_of(&id).map(str::to_string);
+                    self.groups.set_group(&id, None);
+                    if let Some(group) = group {
+                        self.groups.set_group(&new_id, Some(&group));
+                    }
+                    if let Err(error) = self.groups.save(&self.paths) {
+                        self.set_error(format!("renamed, but saving groups failed: {error}"));
+                    }
+                    final_id = new_id;
+                }
+                Err(error) => {
+                    // The settings are saved; only the folder rename failed.
+                    self.set_error(format!("settings saved, but renaming failed: {error}"));
+                }
+            }
+        }
+        self.reload_instances();
+        self.selected = Some(final_id.clone());
+        self.refresh_selection_caches();
+        self.set_status(format!("Saved settings for '{final_id}'."));
     }
 
     // ---- accounts --------------------------------------------------------
@@ -2179,6 +2328,12 @@ impl PrismApp {
                 Command::none()
             }
             Message::CloseModal => {
+                // Closing the sign-in dialog stops the flow with it: `pending`
+                // is what keeps the subscription alive, and dropping it is what
+                // tells the polling thread to stop.
+                if self.microsoft.pending {
+                    self.microsoft = MicrosoftState::default();
+                }
                 self.modal = Modal::None;
                 Command::none()
             }
@@ -2342,9 +2497,101 @@ impl PrismApp {
                 Command::none()
             }
             Message::MicrosoftPressed => {
-                self.set_error(
-                    "Microsoft sign-in is not implemented yet — offline accounts only.",
-                );
+                self.microsoft.start();
+                self.modal = Modal::Microsoft;
+                self.set_status("Signing in to Microsoft…");
+                Command::none()
+            }
+            Message::MicrosoftCode { user_code, verification_uri } => {
+                self.microsoft.user_code = Some(user_code);
+                self.microsoft.verification_uri = Some(verification_uri);
+                self.microsoft.status =
+                    "Waiting for you to finish signing in…".to_string();
+                Command::none()
+            }
+            Message::MicrosoftStatus(line) => {
+                self.microsoft.status = line;
+                Command::none()
+            }
+            Message::MicrosoftDone(result) => {
+                self.microsoft.pending = false;
+                match *result {
+                    Ok(entry) => {
+                        let label = entry.username.clone();
+                        match self.accounts.upsert_microsoft(entry).and_then(|()| self.accounts.save())
+                        {
+                            Ok(()) => {
+                                self.microsoft = MicrosoftState::default();
+                                self.modal = Modal::None;
+                                self.set_status(format!("Signed in as {label}."));
+                                self.push_console(vec![format!(
+                                    "Microsoft sign-in succeeded for '{label}'"
+                                )]);
+                            }
+                            Err(error) => self.microsoft.error = Some(error),
+                        }
+                    }
+                    Err(error) => {
+                        // The dialog stays open so the reason is readable next
+                        // to the code that produced it.
+                        self.microsoft.status.clear();
+                        self.microsoft.error = Some(error.clone());
+                        self.set_error(error);
+                    }
+                }
+                Command::none()
+            }
+            Message::MicrosoftCopyCode => match self.microsoft.user_code.clone() {
+                Some(code) => {
+                    self.set_status(format!("Copied code {code}."));
+                    iced::clipboard::write(code)
+                }
+                None => Command::none(),
+            },
+            Message::MicrosoftOpenUrl => match self.microsoft.verification_uri.clone() {
+                Some(url) => {
+                    match launch::open_url(&url) {
+                        Ok(()) => self.set_status(format!("Opened {url} in your browser.")),
+                        Err(error) => self.set_error(error),
+                    }
+                    Command::none()
+                }
+                None => Command::none(),
+            },
+            Message::MicrosoftCancel => {
+                self.microsoft.pending = false;
+                self.microsoft.user_code = None;
+                self.set_status("Microsoft sign-in cancelled.");
+                Command::none()
+            }
+            Message::AccountTokens {
+                uuid,
+                name,
+                access_token,
+                refresh_token,
+                expires_at_ms,
+            } => {
+                // A launch signed in again; keep the store in step so the next
+                // launch reuses the token it just paid for.
+                match self.accounts.update_tokens(
+                    &uuid,
+                    &access_token,
+                    refresh_token.as_deref(),
+                    expires_at_ms,
+                ) {
+                    Ok(()) => {
+                        if let Err(error) = self.accounts.save() {
+                            self.set_error(format!("saving the renewed session failed: {error}"));
+                        } else {
+                            self.push_console(vec![format!(
+                                "renewed the Microsoft session for '{name}'"
+                            )]);
+                        }
+                    }
+                    Err(error) => self.push_console(vec![format!(
+                        "renewed session for '{name}' could not be stored: {error}"
+                    )]),
+                }
                 Command::none()
             }
             Message::ConsoleClear => {
@@ -2525,6 +2772,13 @@ impl PrismApp {
             // no frames at all — the reason this is a subscription rather than a
             // timer the app owns.
             subs.push(frame_ticks());
+        }
+        if self.microsoft.pending {
+            // The sign-in flow lives and dies with the dialog: it is asked for
+            // only while the dialog is open, and dropping the subscription is
+            // what tells the worker thread to stop polling.
+            let client_id = prefs::load(&self.paths).microsoft_client_id();
+            subs.push(microsoft_sign_in(client_id));
         }
         subs.push(Self::window_state());
         if let Some(run) = self.active_run.clone() {
@@ -3456,11 +3710,14 @@ impl PrismApp {
 
     /// Accounts page.
     fn view_accounts(&self) -> Element<'_, Message> {
+        let signed_in = self.accounts.selected_account().is_some();
         let mut body = column![
             text("Accounts").size(24).font(theme::semibold()),
-            text("Offline accounts play single-player and offline servers. They are stored in accounts.json next to your instances.")
+            text("A Microsoft account is what lets you join online servers; offline accounts play single-player and offline servers. Both are stored in accounts.json next to your instances.")
                 .size(12),
             horizontal_rule(1u16),
+            self.microsoft_card(),
+            text("Offline accounts").size(15).font(theme::bold()),
             row![
                 text_input("Username", &self.account_input)
                     .on_input(Message::AccountNameChanged)
@@ -3478,13 +3735,33 @@ impl PrismApp {
         .spacing(12);
         for account in self.accounts.list() {
             let selected = self.accounts.selected_uuid() == Some(account.uuid.as_str());
+            let stale = account.is_microsoft()
+                && account.needs_refresh(prism_core::util::now_millis());
             body = body.push(
                 container(
                     row![
                         icon_tile("steve", 36.0, false),
                         column![
-                            text(account.username.clone()).size(15).font(theme::bold()),
-                            text(format!("Offline · {}", account.uuid)).size(11),
+                            row![
+                                text(account.username.clone()).size(15).font(theme::bold()),
+                                chip(
+                                    account.kind.label().to_string(),
+                                    if account.kind.is_online() {
+                                        theme::chip
+                                    } else {
+                                        theme::chip_neutral
+                                    },
+                                ),
+                            ]
+                            .spacing(8)
+                            .align_items(iced::Alignment::Center),
+                            text(account.detail()).size(11),
+                            if stale {
+                                text("Session expired — it renews on the next launch, or sign in again.")
+                                    .size(11)
+                            } else {
+                                text("").size(11)
+                            },
                         ]
                         .spacing(2)
                         .width(Length::Fill),
@@ -3493,8 +3770,12 @@ impl PrismApp {
                         } else {
                             chip(String::new(), theme::chip_neutral)
                         },
-                        button(text("Use").size(12))
-                            .on_press(Message::AccountSelect(account.uuid.clone()))
+                        button(text(if stale { "Sign in again" } else { "Use" }).size(12))
+                            .on_press(if stale {
+                                Message::MicrosoftPressed
+                            } else {
+                                Message::AccountSelect(account.uuid.clone())
+                            })
                             .style(theme::secondary())
                             .padding([6, 12]),
                         button(text("Remove").size(12))
@@ -3511,26 +3792,121 @@ impl PrismApp {
             );
         }
         if self.accounts.list().is_empty() {
-            body = body.push(centered_note("No accounts yet — add one above to play with your own name."));
+            body = body.push(centered_note(
+                if signed_in {
+                    "No accounts yet."
+                } else {
+                    "No accounts yet — sign in with Microsoft above, or add an offline name."
+                },
+            ));
         }
-        body = body.push(
-            container(
-                column![
-                    text("Microsoft sign-in").size(14).font(theme::bold()),
-                    text("Not implemented yet: it needs an OAuth client and a browser round-trip. Until then only offline accounts are available, and the launcher says so instead of pretending.")
-                        .size(12),
-                    button(text("Sign in with Microsoft").size(12))
-                        .on_press(Message::MicrosoftPressed)
-                        .style(theme::secondary())
-                        .padding([7, 14]),
-                ]
-                .spacing(8),
-            )
+        page_scroller(body)
+    }
+
+    /// The Microsoft card at the top of the Accounts page: what the sign-in is,
+    /// what it is doing right now, and the two ways in.
+    fn microsoft_card(&self) -> Element<'_, Message> {
+        let account = self
+            .accounts
+            .list()
+            .iter()
+            .find(|account| account.is_microsoft())
+            .cloned();
+        let mut content = column![
+            text("Microsoft account").size(15).font(theme::bold()),
+            text("Signing in uses the Microsoft device-code flow: this launcher shows a code, you type it at microsoft.com/link on any device, and the launcher polls until you are done. The tokens it receives are stored next to your instances and renewed automatically before a launch.")
+                .size(12),
+        ]
+        .spacing(8);
+        if let Some(account) = &account {
+            let stale = account.needs_refresh(prism_core::util::now_millis());
+            content = content.push(text(match account.entitled {
+                Some(true) => format!("Signed in as {} — this account owns Minecraft.", account.username),
+                Some(false) => format!("Signed in as {}, but no game entitlement was found.", account.username),
+                None => format!("Signed in as {}.", account.username),
+            })
+            .size(12));
+        }
+        if let Some(error) = &self.microsoft.error {
+            content = content.push(text(format!("Sign-in failed: {error}")).size(12));
+        } else if self.microsoft.pending {
+            content = content.push(text(self.microsoft.status.clone()).size(12));
+        }
+        content = content.push(
+            row![
+                button(text(if account.is_some() { "Sign in again" } else { "Sign in with Microsoft" }).size(12))
+                    .on_press(Message::MicrosoftPressed)
+                    .style(theme::primary())
+                    .padding([7, 16]),
+                text("An offline account is enough for single-player; servers need a Microsoft account.")
+                    .size(11),
+            ]
+            .spacing(12)
+            .align_items(iced::Alignment::Center),
+        );
+        container(content)
             .style(theme::card)
             .padding(14)
-            .width(Length::Fill),
-        );
-        page_scroller(body)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// The device-code dialog: the code, where to type it, and what is happening.
+    fn view_microsoft_dialog(&self) -> Element<'_, Message> {
+        let code = self
+            .microsoft
+            .user_code
+            .clone()
+            .unwrap_or_else(|| "··········".to_string());
+        let url = self
+            .microsoft
+            .verification_uri
+            .clone()
+            .unwrap_or_else(|| "https://microsoft.com/link".to_string());
+        let mut body = column![
+            text("Sign in with Microsoft").size(16).font(theme::bold()),
+            text("Open the page below and enter this code.")
+                .size(12),
+            container(text(code.clone()).size(28).font(theme::bold()))
+                .style(theme::card)
+                .padding([14, 20])
+                .width(Length::Fill)
+                .center_x(),
+            text(url.clone()).size(12),
+            row![
+                button(text("Copy code").size(12))
+                    .on_press(Message::MicrosoftCopyCode)
+                    .style(theme::secondary())
+                    .padding([7, 14]),
+                button(text("Open browser").size(12))
+                    .on_press(Message::MicrosoftOpenUrl)
+                    .style(theme::primary())
+                    .padding([7, 14]),
+            ]
+            .spacing(10),
+        ]
+        .spacing(12);
+        if let Some(error) = &self.microsoft.error {
+            body = body.push(text(format!("Sign-in failed: {error}")).size(12));
+        } else if self.microsoft.pending {
+            body = body.push(text(self.microsoft.status.clone()).size(12));
+        }
+        body = body.push(text("The code expires in about fifteen minutes. This dialog stops polling the moment it closes.")
+            .size(11));
+        let footer: Element<'_, Message> = row![
+            horizontal_space(),
+            button(text("Cancel").size(12))
+                .on_press(Message::MicrosoftCancel)
+                .style(theme::secondary())
+                .padding([7, 16]),
+            button(text("Close").size(12))
+                .on_press(Message::CloseModal)
+                .style(theme::secondary())
+                .padding([7, 16]),
+        ]
+        .spacing(10)
+        .into();
+        modal_shell("Microsoft sign-in", body.into(), footer, 520.0)
     }
 
     /// About / help page.
@@ -3581,8 +3957,9 @@ impl PrismApp {
         }
         body = body.push(horizontal_rule(1u16));
         body = body.push(text("Honest status").size(15).font(theme::bold()));
-        body = body.push(text("• Launching resolves the pack, probes Java and streams the game's output; assets and libraries are not downloaded yet, so a fresh instance reports what is missing instead of failing silently.").size(12));
-        body = body.push(text("• Microsoft sign-in is not implemented (offline accounts only).").size(12));
+        body = body.push(text("• Launching fetches the version metadata, libraries, the client jar, the asset index and its objects, extracts the natives, probes Java and streams the game's output. A file that cannot be downloaded blocks the launch and says which one it was.").size(12));
+        body = body.push(text("• Microsoft sign-in uses the device-code flow; the refresh token is stored in accounts.json and the session is renewed automatically before a launch.").size(12));
+        body = body.push(text("• Offline account UUIDs are derived from the name the way Java does, so the same name is the same player in every launcher.").size(12));
         body = body.push(text("• Modpack import copies the pack's overrides offline; the remote files it lists are not fetched.").size(12));
         body = body.push(text("• Instance icons are the Prism Launcher art (GPL-3.0-only), embedded at build time.").size(12));
         page_scroller(body)
@@ -3646,6 +4023,7 @@ impl PrismApp {
             Modal::Create => self.view_create_dialog(),
             Modal::Import => self.view_import_dialog(),
             Modal::Settings => self.view_settings_dialog(),
+            Modal::Microsoft => self.view_microsoft_dialog(),
             Modal::ConfirmDelete(id) => view_confirm_delete(id),
         };
         // One container, centred on both axes. (A wrapper around the dialog
@@ -4749,38 +5127,45 @@ fn centered_note(message: impl Into<String>) -> Element<'static, Message> {
 
 /// The delete confirmation dialog.
 fn view_confirm_delete(id: &str) -> Element<'static, Message> {
+    let body: Element<'static, Message> = column![
+        text(format!("Delete '{id}'?")).size(15).font(theme::bold()),
+        text("This removes the instance folder from disk. It cannot be undone.").size(12),
+    ]
+    .spacing(8)
+    .into();
+    let footer: Element<'static, Message> = row![
+        horizontal_space(),
+        button(text("Cancel").size(13))
+            .on_press(Message::CloseModal)
+            .style(theme::secondary())
+            .padding([9, 16]),
+        button(text("Delete").size(13))
+            .on_press(Message::ConfirmDelete)
+            .style(theme::destructive())
+            .padding([9, 18]),
+    ]
+    .spacing(8)
+    .into();
+    modal_shell("Delete instance", body, footer, 440.0)
+}
+
+/// A dialog box: header, body, footer, modal styling and a fixed width.
+fn modal_shell<'a>(
+    title: &str,
+    body: Element<'a, Message>,
+    footer: Element<'a, Message>,
+    width: f32,
+) -> Element<'a, Message> {
     container(
         column![
-            modal_header("Delete instance"),
-            container(
-                column![
-                    text(format!("Delete '{id}'?")).size(15).font(theme::bold()),
-                    text("This removes the instance folder from disk. It cannot be undone.")
-                        .size(12),
-                ]
-                .spacing(8),
-            )
-            .padding([8, 22]),
-            container(
-                row![
-                    horizontal_space(),
-                    button(text("Cancel").size(13))
-                        .on_press(Message::CloseModal)
-                        .style(theme::secondary())
-                        .padding([9, 16]),
-                    button(text("Delete").size(13))
-                        .on_press(Message::ConfirmDelete)
-                        .style(theme::destructive())
-                        .padding([9, 18]),
-                ]
-                .spacing(8),
-            )
-            .padding([14, 22]),
+            modal_header(title),
+            container(body).padding([8, 22]),
+            container(footer).padding([14, 22]),
         ]
         .spacing(0),
     )
     .style(theme::modal)
-    .width(Length::Fixed(440.0))
+    .width(Length::Fixed(width))
     .into()
 }
 
@@ -5052,6 +5437,138 @@ where
             futures::future::pending::<()>().await;
         }
     })
+}
+
+/// The Microsoft device-code sign-in flow, as a subscription.
+///
+/// Its life is the dialog's. The app asks for this only while
+/// [`MicrosoftState::pending`], and when the dialog closes iced drops the
+/// subscription — which drops the receiver — so the next send fails and the
+/// polling thread ends there. That is the whole cancellation story: no flag to
+/// poll, no thread to join, and no chance of two flows running at once (the
+/// subscription id is fixed).
+///
+/// The thread does three things in order: ask for a code, poll until the user
+/// finishes (honouring the RFC 8628 `authorization_pending` / `slow_down`
+/// rules), then walk the Xbox → XSTS → Minecraft chain for the actual session.
+/// Every message it sends can fail, and a failure means the dialog is gone.
+fn microsoft_sign_in(client_id: String) -> Subscription<Message> {
+    iced::subscription::channel(MICROSOFT_ID, 8, move |mut sender| async move {
+        let _ = std::thread::spawn(move || {
+            let auth = prism_net::MicrosoftAuth::new(
+                prism_net::MicrosoftOAuth::with_default_scope(client_id),
+            );
+            run_microsoft_sign_in(&auth, &mut sender);
+        });
+        loop {
+            futures::future::pending::<()>().await;
+        }
+    })
+}
+
+/// The body of [`microsoft_sign_in`], split out so it reads as a sequence.
+fn run_microsoft_sign_in(
+    auth: &prism_net::MicrosoftAuth,
+    sender: &mut futures::channel::mpsc::Sender<Message>,
+) {
+    use prism_net::PollOutcome;
+
+    let code = match auth.request_device_code() {
+        Ok(code) => code,
+        Err(error) => {
+            let _ = send_signed_in(sender, Err(error.to_string()));
+            return;
+        }
+    };
+    if !send_message(
+        sender,
+        Message::MicrosoftCode {
+            user_code: code.user_code.clone(),
+            verification_uri: code.verification_uri.clone(),
+        },
+    ) {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(code.expires_in);
+    let mut interval = code.interval;
+    loop {
+        if Instant::now() >= deadline {
+            let _ = send_signed_in(
+                sender,
+                Err("The code expired before the sign-in finished — try again.".to_string()),
+            );
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(interval));
+        match auth.poll(&code.device_code, interval) {
+            Ok(PollOutcome::Retry { interval: next }) => interval = next,
+            Ok(PollOutcome::Authorized(msa)) => {
+                if !send_message(sender, Message::MicrosoftStatus("Signing in to Minecraft…".into()))
+                {
+                    return;
+                }
+                let outcome = auth.finish(&msa).map(|session| {
+                    let expires_at_ms = prism_core::util::now_millis()
+                        + session.expires_in.max(0) * 1000;
+                    AccountEntry::microsoft(
+                        &session.name,
+                        &session.uuid,
+                        &session.access_token,
+                        &msa.refresh_token,
+                        expires_at_ms,
+                        Some(session.entitled),
+                    )
+                });
+                let _ = send_signed_in(sender, outcome.map_err(|error| error.to_string()));
+                return;
+            }
+            Ok(PollOutcome::Failed(reason)) => {
+                let _ = send_signed_in(sender, Err(reason));
+                return;
+            }
+            Err(error) if error.retryable() => {
+                // A dropped connection is not a failed sign-in: back off and
+                // keep asking, exactly as Prism does.
+                interval = (interval * 2).min(MAX_POLL_INTERVAL_SECS);
+            }
+            Err(error) => {
+                let _ = send_signed_in(sender, Err(error.to_string()));
+                return;
+            }
+        }
+    }
+}
+
+/// Longest a sign-in poll waits between attempts after repeated failures.
+const MAX_POLL_INTERVAL_SECS: u64 = 30;
+
+/// Send one message to the GUI, waiting while the channel is full.
+///
+/// `false` means the dialog is gone; every caller treats that as "stop".
+fn send_message(sender: &mut futures::channel::mpsc::Sender<Message>, message: Message) -> bool {
+    let mut pending = Some(message);
+    loop {
+        let message = match pending.take() {
+            Some(message) => message,
+            None => return true,
+        };
+        match sender.try_send(message) {
+            Ok(()) => return true,
+            Err(error) if error.is_full() => {
+                pending = Some(error.into_inner());
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+/// Deliver the sign-in outcome.
+fn send_signed_in(
+    sender: &mut futures::channel::mpsc::Sender<Message>,
+    result: Result<AccountEntry, String>,
+) -> bool {
+    send_message(sender, Message::MicrosoftDone(Box::new(result)))
 }
 
 /// Frame ticks for the page's scroll tween, while one is running.
@@ -5936,9 +6453,14 @@ mod tests {
         let _ = app.update(Message::AccountRemove(uuid));
         assert_eq!(app.account_label(), "No account");
 
-        // Microsoft sign-in stays honest.
+        // Microsoft sign-in opens the device-code dialog and starts the flow.
         let _ = app.update(Message::MicrosoftPressed);
-        assert!(app.status().contains("not implemented"));
+        assert_eq!(app.modal(), &Modal::Microsoft);
+        assert!(app.microsoft.pending, "the flow is running while the dialog is open");
+        // Closing the dialog stops it.
+        let _ = app.update(Message::CloseModal);
+        assert!(!app.microsoft.pending);
+        assert_eq!(app.modal(), &Modal::None);
         // The accounts file is real.
         assert!(paths.accounts_file().is_file());
     }

@@ -6,8 +6,10 @@
 //! their launcher. So the settings that belong to *this* product go in their own
 //! file next to it, written atomically and left alone if it is unparseable.
 //!
-//! Only what the shell actually offers is stored. Today that is the color theme;
-//! a preference nobody can set is a schema waiting to be wrong.
+//! Only what the shell actually offers is stored: the color theme, plus an
+//! optional override for the Microsoft OAuth client id (see
+//! [`Prefs::microsoft_client_id`]) — a preference nobody can set is a schema
+//! waiting to be wrong.
 
 use std::path::PathBuf;
 
@@ -29,6 +31,16 @@ pub struct Prefs {
     /// newer build — or hand-edited — degrades to the default theme instead of
     /// failing the whole parse and losing the rest of the file.
     pub color_theme: String,
+    /// Azure application id to sign in with, when the user has their own.
+    ///
+    /// Empty — and therefore not written — by default, which is what keeps the
+    /// file down to the settings the shell can actually change. The shipped
+    /// default is Prism Launcher's public client id (see
+    /// [`prism_net::DEFAULT_MICROSOFT_CLIENT_ID`]), and
+    /// `PALANTIRMC_MSA_CLIENT_ID` overrides it for a one-off run without editing
+    /// any file.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub microsoft_client_id: String,
 }
 
 impl Prefs {
@@ -39,7 +51,27 @@ impl Prefs {
 
     /// The file for a given choice.
     pub fn with_theme(theme: ColorTheme) -> Prefs {
-        Prefs { color_theme: theme.id().to_string() }
+        Prefs { color_theme: theme.id().to_string(), ..Prefs::default() }
+    }
+
+    /// The OAuth client id the sign-in flow should use.
+    ///
+    /// Order: the environment (`PALANTIRMC_MSA_CLIENT_ID`), then the file, then
+    /// Prism's public client id. The environment variable exists so a user can
+    /// point their own Azure application at one run without editing a file, and
+    /// it wins so that "run it once with this id" always means what it says.
+    pub fn microsoft_client_id(&self) -> String {
+        let from_env = std::env::var("PALANTIRMC_MSA_CLIENT_ID").unwrap_or_default();
+        let from_env = from_env.trim();
+        if !from_env.is_empty() {
+            return from_env.to_string();
+        }
+        let configured = self.microsoft_client_id.trim();
+        if configured.is_empty() {
+            prism_net::DEFAULT_MICROSOFT_CLIENT_ID.to_string()
+        } else {
+            configured.to_string()
+        }
     }
 }
 
@@ -73,8 +105,13 @@ pub fn save(paths: &PrismPaths, prefs: &Prefs) -> Result<(), String> {
 }
 
 /// Remember one theme choice, reporting whether it reached the disk.
+///
+/// The other preferences are carried over rather than reset: changing the theme
+/// is not a reason to forget a configured client id.
 pub fn save_theme(paths: &PrismPaths, theme: ColorTheme) -> Result<(), String> {
-    save(paths, &Prefs::with_theme(theme))
+    let mut prefs = load(paths);
+    prefs.color_theme = theme.id().to_string();
+    save(paths, &prefs)
 }
 
 #[cfg(test)]
@@ -128,6 +165,39 @@ mod tests {
         // keeps the choice it can honour.
         std::fs::write(path(&paths), b"{\"color_theme\":\"neon\"}").unwrap();
         assert_eq!(load(&paths).theme(), ColorTheme::Dark);
+    }
+
+    #[test]
+    fn the_client_id_falls_back_to_prisms_public_app() {
+        let prefs = Prefs::default();
+        assert_eq!(prefs.microsoft_client_id(), prism_net::DEFAULT_MICROSOFT_CLIENT_ID);
+        let configured = Prefs { microsoft_client_id: "my-app-id".into(), ..Prefs::default() };
+        assert_eq!(configured.microsoft_client_id(), "my-app-id");
+        // Whitespace is not a client id.
+        let blank = Prefs { microsoft_client_id: "   ".into(), ..Prefs::default() };
+        assert_eq!(blank.microsoft_client_id(), prism_net::DEFAULT_MICROSOFT_CLIENT_ID);
+    }
+
+    #[test]
+    fn an_empty_client_id_is_not_written_to_the_file() {
+        let (_dir, paths) = root();
+        save_theme(&paths, ColorTheme::Dark).unwrap();
+        let text = std::fs::read_to_string(path(&paths)).unwrap();
+        assert!(!text.contains("microsoft_client_id"), "got: {text}");
+    }
+
+    #[test]
+    fn changing_the_theme_keeps_a_configured_client_id() {
+        let (_dir, paths) = root();
+        save(
+            &paths,
+            &Prefs { color_theme: "dark".into(), microsoft_client_id: "mine".into() },
+        )
+        .unwrap();
+        save_theme(&paths, ColorTheme::Oled).unwrap();
+        let back = load(&paths);
+        assert_eq!(back.theme(), ColorTheme::Oled);
+        assert_eq!(back.microsoft_client_id, "mine");
     }
 
     #[test]

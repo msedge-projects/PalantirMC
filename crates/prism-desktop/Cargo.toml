@@ -33,11 +33,15 @@ futures = "0.3"
 # workspace: browsing the Modrinth API needs headers (a User-Agent), which the
 # metadata fetcher cannot set.
 reqwest = { version = "0.11", features = ["blocking"] }
-# Modrinth publishes a `sha1` per file; verifying it needs exactly this digest.
+# Offline account UUIDs are `java.util.UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
+# which is MD5-based; matching it is what makes the same name the same player in
+# Prism, the vanilla launcher, and here.
+md-5 = "0.10"
+# Mojang publishes a `sha1` per library and asset; Modrinth publishes one per
+# file. Verifying either needs exactly this digest.
 sha1 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 # Screenshots are shown as generated thumbnails rather than originals: a
 # 1080p screenshot is 8 MB of pixels, and a page of them would commit more
 # memory than the machines this launcher targets have. Already in the lock file
@@ -51,6 +55,10 @@ wgpu = "0.19"
 
 [dev-dependencies]
 tempfile = "3"
+# The install tests build a small native jar and assert on what the extractor
+# writes, which needs a zip *writer*. Same version `prism-loader` already pulls
+# in, so this adds nothing to the build.
+zip = "0.6"
 
 # The shell needs two Win32 calls iced 0.12 does not expose: the monitor work
 # area (so the window opens at a size the screen can actually hold) and the OS

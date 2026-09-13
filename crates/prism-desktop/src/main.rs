@@ -31,6 +31,7 @@ mod catalog;
 mod glyphs;
 mod gpu;
 mod icons;
+mod install;
 mod instances;
 mod launch;
 mod mods;

@@ -10,8 +10,10 @@
 //!   layout.
 //! * [`download`] provides the blocking library/asset download pipeline
 //!   (atomic `.part` + rename) and `sha256` verification.
-//! * [`auth`] carries the offline + Microsoft OAuth session types (no network
-//!   here; the interactive flows land on top of these builders).
+//! * [`auth`] carries the offline session type and drives the real Microsoft
+//!   device-code login (device code → Xbox Live → XSTS → game token →
+//!   entitlements → profile), with every HTTP call behind a trait so the chain
+//!   is testable offline.
 //! * [`modrinth`] provides the minimal Modrinth API v2 client types and URL
 //!   builders.
 //!
@@ -27,7 +29,11 @@ pub mod download;
 pub mod meta;
 pub mod modrinth;
 
-pub use auth::{MicrosoftOAuth, OfflineSession};
+pub use auth::{
+    msa_auth_session, xsts_message, AuthError, BlockingHttpTransport, DeviceCodeResponse,
+    HttpTransport, HttpResponse, MapTransport, MinecraftSession, MicrosoftAuth, MicrosoftOAuth,
+    MsaToken, OfflineSession, PollOutcome, DEFAULT_MICROSOFT_CLIENT_ID,
+};
 pub use download::{download_bytes, download_file, download_many, sha256_hex, verify_sha256};
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{

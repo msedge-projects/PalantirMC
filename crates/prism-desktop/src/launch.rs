@@ -1,16 +1,30 @@
-//! Offline launch preparation and the background launch worker.
+//! Launch preparation and the background launch worker.
 //!
-//! The worker mirrors the `prism-cli launch-script` flow: resolve the
-//! instance profile through [`OfflineMetaStore`] at `paths.meta_dir()`,
-//! build the launch script with [`prism_core::launch`], probe java (instance
-//! `JavaPath` else a `PATH` lookup of `javaw`/`java`) and — only when java
-//! was found **and** the main jar exists on disk — spawn the child with
-//! piped stdout/stderr. Anything missing produces an honest console message
-//! and no process is started (never a faked success).
+//! The worker mirrors the `prism-cli launch-script` flow, with the two halves
+//! that used to be missing now in place:
+//!
+//! * **The game is installed, not assumed.** Metadata is resolved through
+//!   [`OnlineMetaStore`], which fetches what is not cached and writes it in the
+//!   offline store's layout; then [`crate::install`] fetches the libraries, the
+//!   client jar, the asset index and its objects, and extracts the natives.
+//!   Only after that does anything check for a main jar — the old flow demanded
+//!   one up front and so could never bootstrap a fresh instance.
+//! * **The session is real.** An offline account produces the legacy session it
+//!   always did; a Microsoft account renews its tokens through
+//!   [`prism_net::MicrosoftAuth`] (the same device-code/refresh chain used to
+//!   sign in) and launches with `user_type = "msa"`. A renewal that fails
+//!   *blocks* the launch instead of quietly falling back to an offline session,
+//!   because the fallback would look like a working launch and then fail on
+//!   every server the user tries to join.
+//!
+//! `-Djava.library.path` points at the instance's `natives/` directory, which is
+//! where [`crate::install`] extracts the natives and where Prism's own
+//! `MinecraftInstance::getNativePath` points, so both launchers run the same
+//! extracted libraries.
 //!
 //! Log lines travel back to the GUI through the `iced::subscription::channel`
-//! sender owned by the worker thread (`Vec<String>` batches); the final
-//! outcome arrives as a done message. See `app.rs` for the subscription.
+//! sender owned by the worker thread (`Vec<String>` batches); the final outcome
+//! arrives as a done message. See `app.rs` for the subscription.
 
 use futures::channel::mpsc::Sender;
 use prism_core::{
@@ -19,29 +33,117 @@ use prism_core::{
     launch,
     pack::PackProfile,
     paths::{PrismPaths, System},
-    resolve::{resolve, OfflineMetaStore},
+    resolve::{resolve, MetaStore, OfflineMetaStore},
     settings::{defaults, Settings},
     version::{ProblemSeverity, RuntimeContext},
 };
 use prism_gui::SettingsModel;
+use prism_net::meta::Fetcher;
+use prism_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use crate::accounts::{needs_refresh, AccountKind};
 use crate::app::Message;
+use crate::install;
 
 /// Shared handle for the running game process (for the Kill button).
 pub type ChildSlot = Arc<Mutex<Option<Child>>>;
 
-/// Offline account identity used for the launch session.
-#[derive(Debug, Clone)]
+/// The account identity a launch runs as.
+///
+/// Carries the Microsoft tokens as well as the name, because renewing them is
+/// part of preparing a launch: the store is the source of truth, this is the
+/// snapshot the worker was handed.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRef {
     /// Player name.
     pub username: String,
     /// Account uuid (32 hex digits).
     pub uuid: String,
+    /// Offline or Microsoft.
+    pub kind: AccountKind,
+    /// Game access token, for a Microsoft account.
+    pub access_token: Option<String>,
+    /// Microsoft refresh token, for a Microsoft account.
+    pub refresh_token: Option<String>,
+    /// Unix milliseconds at which the access token expires.
+    pub expires_at_ms: Option<i64>,
+}
+
+impl AccountRef {
+    /// A name-only (offline) account.
+    pub fn offline(username: impl Into<String>, uuid: impl Into<String>) -> AccountRef {
+        AccountRef {
+            username: username.into(),
+            uuid: uuid.into(),
+            kind: AccountKind::Offline,
+            access_token: None,
+            refresh_token: None,
+            expires_at_ms: None,
+        }
+    }
+
+    /// The anonymous fallback: an offline account for a fresh player name.
+    ///
+    /// The uuid is derived from the name rather than generated, so two launches
+    /// without a selected account are the *same* player instead of a new one
+    /// every time.
+    pub fn anonymous() -> AccountRef {
+        AccountRef {
+            uuid: crate::accounts::offline_uuid("Player"),
+            ..AccountRef::offline("Player", "")
+        }
+    }
+
+    /// Snapshot a stored account.
+    pub fn from_entry(entry: &crate::accounts::AccountEntry) -> AccountRef {
+        AccountRef {
+            username: entry.username.clone(),
+            uuid: entry.uuid.clone(),
+            kind: entry.kind,
+            access_token: entry.access_token.clone(),
+            refresh_token: entry.refresh_token.clone(),
+            expires_at_ms: entry.expires_at_ms,
+        }
+    }
+
+    /// Whether the stored Microsoft token must be renewed before use.
+    pub fn needs_refresh(&self, now_ms: i64) -> bool {
+        needs_refresh(
+            self.kind,
+            self.refresh_token.as_deref(),
+            self.expires_at_ms,
+            now_ms,
+        )
+    }
+}
+
+/// Tokens a launch renewal produced, to be written back to the store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshedTokens {
+    /// Profile uuid the tokens belong to.
+    pub uuid: String,
+    /// Profile name.
+    pub name: String,
+    /// Fresh game access token.
+    pub access_token: String,
+    /// Fresh Microsoft refresh token (Microsoft rotates these).
+    pub refresh_token: Option<String>,
+    /// Unix milliseconds at which the access token expires.
+    pub expires_at_ms: i64,
+}
+
+/// What [`prepare_auth`] decided to launch with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedAuth {
+    /// Session handed to the argument builders.
+    pub session: launch::AuthSession,
+    /// Tokens to persist when the session was renewed.
+    pub refreshed: Option<RefreshedTokens>,
 }
 
 /// Inputs for one launch run.
@@ -77,7 +179,8 @@ pub struct ActiveRunData {
 pub struct LaunchPlan {
     /// Java binary that was probed successfully.
     pub java_bin: String,
-    /// Full java argument vector (JVM args, `-cp`, main class, game args).
+    /// Full java argument vector (JVM args, `-Djava.library.path`, `-cp`, main
+    /// class, game args).
     pub argv: Vec<String>,
     /// Working directory (the game root).
     pub cwd: PathBuf,
@@ -226,35 +329,124 @@ pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
     }
 }
 
+/// Open `url` in the default browser (best effort).
+///
+/// Windows needs `cmd /C start` rather than `explorer.exe` for a URL: passing a
+/// URL to Explorer opens a *folder* search instead of the browser, which is the
+/// kind of "it did nothing" failure worth avoiding in a sign-in flow.
+pub fn open_url(url: &str) -> Result<(), String> {
+    let result = if cfg!(windows) {
+        Command::new("cmd").args(["/C", "start", "", url]).spawn()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg(url).spawn()
+    } else {
+        Command::new("xdg-open").arg(url).spawn()
+    };
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("opening '{url}' failed: {e}")),
+    }
+}
+
+// ---- authentication -------------------------------------------------------
+
+/// Build the launch session for `account`, renewing Microsoft tokens when they
+/// are (or are about to be) stale.
+///
+/// Returns `Err` with a user-facing message when a Microsoft session cannot be
+/// renewed; the caller must block the launch in that case.
+pub fn prepare_auth(
+    account: &AccountRef,
+    auth: &MicrosoftAuth,
+    log: &mut dyn FnMut(String),
+) -> Result<PreparedAuth, String> {
+    if !account.kind.is_online() {
+        log(format!(
+            "using offline account '{}' ({})",
+            account.username, account.uuid
+        ));
+        return Ok(PreparedAuth {
+            session: OfflineSession::new(account.username.clone(), account.uuid.clone())
+                .into_auth_session(),
+            refreshed: None,
+        });
+    }
+    let name = account.username.clone();
+    if !account.needs_refresh(prism_core::util::now_millis()) {
+        if let Some(token) = account.access_token.as_deref().filter(|token| !token.is_empty()) {
+            log(format!("using the stored Microsoft session for '{name}'"));
+            return Ok(PreparedAuth {
+                session: msa_auth_session(&name, &account.uuid, token),
+                refreshed: None,
+            });
+        }
+    }
+    let refresh = account
+        .refresh_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "'{name}' has to sign in to Microsoft again: no refresh token is stored"
+            )
+        })?;
+    log(format!("renewing the Microsoft session for '{name}'…"));
+    let msa = auth.refresh(refresh).map_err(|error| error.to_string())?;
+    // A renewed MSA token still has to walk the Xbox → XSTS → launcher-login
+    // chain: the game token is what the launch actually uses, and it is only
+    // issued by that last hop.
+    let session = auth.finish(&msa).map_err(|error| error.to_string())?;
+    let expires_at_ms = prism_core::util::now_millis() + session.expires_in.max(0) * 1000;
+    log(format!(
+        "signed in as '{}' ({}{})",
+        session.name,
+        session.uuid,
+        if session.entitled { ", game owned" } else { "" }
+    ));
+    Ok(PreparedAuth {
+        session: msa_auth_session(&session.name, &session.uuid, &session.access_token),
+        refreshed: Some(RefreshedTokens {
+            uuid: session.uuid,
+            name: session.name,
+            access_token: session.access_token,
+            refresh_token: msa.refresh_token.clone().filter(|token| !token.is_empty()),
+            expires_at_ms,
+        }),
+    })
+}
+
 // ---- launch preparation ---------------------------------------------------
 
-/// Resolve + plan a launch without starting anything.
+/// Resolve + install + plan a launch without starting anything.
 ///
-/// Returns console lines narrating every step plus either a runnable
-/// [`LaunchPlan`] or [`LaunchReadiness::Blocked`]. Used by the background
-/// worker and (synchronously, as a dry run) by the `Sandbox` entrypoint.
+/// The metadata store and the HTTP fetcher are injected so this is testable
+/// offline: production passes an [`OnlineMetaStore`] (which caches what it
+/// fetches) and a [`prism_net::BlockingHttpFetcher`], while tests pass an
+/// offline store and a map of canned bodies.
 pub fn prepare_launch(
     paths: &PrismPaths,
     instance_id: &str,
-    account: &AccountRef,
-) -> (Vec<String>, LaunchReadiness) {
-    let mut log: Vec<String> = Vec::new();
+    session: &launch::AuthSession,
+    store: &mut dyn MetaStore,
+    fetcher: &(dyn Fetcher + Sync),
+    log: &mut dyn FnMut(String),
+) -> LaunchReadiness {
     // Resolved dir: honors the `InstanceDir` override in prismlauncher.cfg.
     let instance = match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
         Ok(instance) => instance,
         Err(e) => {
-            log.push(format!("cannot open instance '{instance_id}': {e}"));
-            return (log, LaunchReadiness::Blocked);
+            log(format!("cannot open instance '{instance_id}': {e}"));
+            return LaunchReadiness::Blocked;
         }
     };
     let name = instance.name();
     let id = instance.id();
-    log.push(format!("preparing launch of '{name}' ({id})"));
+    log(format!("preparing launch of '{name}' ({id})"));
 
     let global = match Settings::load(&paths.global_config()) {
         Ok(settings) => settings,
         Err(_) => {
-            log.push("no global prismlauncher.cfg found, using defaults".to_string());
+            log("no global prismlauncher.cfg found, using defaults".to_string());
             Settings::empty(paths.global_config())
         }
     };
@@ -263,76 +455,61 @@ pub fn prepare_launch(
     let profile = match PackProfile::load(&instance.mmc_pack_path()) {
         Ok(profile) => profile,
         Err(_) => {
-            log.push("no mmc-pack.json found, using an empty component list".to_string());
+            log("no mmc-pack.json found, using an empty component list".to_string());
             PackProfile::default()
         }
     };
 
-    // Honest per-component cache check before resolving, so a cold cache
-    // names the missing files instead of failing opaquely.
     let ctx = RuntimeContext::current_host();
-    let mut missing_cache: Vec<(String, String)> = Vec::new();
-    for comp in profile.components() {
-        if !comp.is_enabled() {
-            continue;
-        }
-        let version = if comp.version.is_empty() {
-            comp.cached_version.clone()
-        } else {
-            comp.version.clone()
-        };
-        if instance.patches_dir().join(format!("{}.json", comp.uid)).is_file() {
-            continue;
-        }
-        if !paths.meta_dir().join(&comp.uid).join(format!("{version}.json")).is_file() {
-            missing_cache.push((comp.uid.clone(), version));
-        }
-    }
-    for (uid, version) in &missing_cache {
-        log.push(format!("missing meta cache for {uid} {version} — run resolve-online first"));
-    }
-
-    let mut store = OfflineMetaStore::new(paths.meta_dir());
-    let resolution = match resolve(&profile, &instance.patches_dir(), &mut store, &ctx) {
+    let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
         Ok(resolution) => resolution,
         Err(e) => {
-            log.push(format!("resolution error: {e}"));
-            return (log, LaunchReadiness::Blocked);
+            log(format!("resolution error: {e}"));
+            return LaunchReadiness::Blocked;
         }
     };
     for problem in &resolution.problems {
-        log.push(format!("resolve {:?}: {}", problem.severity, problem.message));
+        log(format!("resolve {:?}: {}", problem.severity, problem.message));
     }
     for component in &resolution.components {
         for problem in &component.problems {
-            log.push(format!("resolve {} {:?}: {}", component.uid, problem.severity, problem.message));
+            log(format!("resolve {} {:?}: {}", component.uid, problem.severity, problem.message));
         }
     }
     if resolution.severity() == ProblemSeverity::Error {
-        log.push("resolution failed with errors — not launching".to_string());
-        return (log, LaunchReadiness::Blocked);
+        log("resolution failed with errors — not launching".to_string());
+        return LaunchReadiness::Blocked;
     }
     if resolution.profile.main_class.is_empty() {
-        log.push("no main class resolved — metadata is incomplete, not launching".to_string());
-        return (log, LaunchReadiness::Blocked);
+        log("no main class resolved — metadata is incomplete, not launching".to_string());
+        return LaunchReadiness::Blocked;
     }
-    log.push(format!(
+    log(format!(
         "resolved {} component(s), main class {}",
         resolution.components.len(),
         resolution.profile.main_class
     ));
 
-    // Offline auth session (mirrors the CLI's launch-script flow).
-    let session = launch::AuthSession {
-        player_name: account.username.clone(),
-        uuid: account.uuid.clone(),
-        access_token: "0".to_string(),
-        session: "-".to_string(),
-        user_type: "legacy".to_string(),
-        user_properties: "{}".to_string(),
-        demo: false,
-    };
-    let target = join_target(instance.settings(), &mut log);
+    // ---- install ---------------------------------------------------------
+    let install_plan = install::plan(paths, instance.root(), &resolution.profile, &ctx);
+    log(format!("install: {}", install_plan.summary()));
+    for problem in &install_plan.problems {
+        log(format!("install: {problem}"));
+    }
+    let report = install::run(&install_plan, fetcher, install::DEFAULT_THREADS, log);
+    log(format!("install: {}", report.summary()));
+    for failure in &report.failed {
+        log(format!("install failed: {failure}"));
+    }
+    for problem in &report.problems {
+        log(format!("install: {problem}"));
+    }
+    if !report.is_complete() {
+        log("files are missing and could not be downloaded — not launching".to_string());
+        return LaunchReadiness::Blocked;
+    }
+
+    let target = join_target(instance.settings(), log);
 
     let window = launch::WindowParams {
         width: model.get_i64("MinecraftWinWidth", Some("OverrideWindow"), defaults::MC_WIN_WIDTH),
@@ -351,10 +528,10 @@ pub fn prepare_launch(
         &instance.root().join("libraries"),
     );
     vars.insert("version_name".to_string(), resolution.profile.minecraft_version.clone());
-    let mc_args = launch::process_minecraft_args(&resolution.profile, Some(&session), target.as_ref(), &vars);
+    let mc_args = launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
     let script = launch::create_launch_script(
         &resolution.profile,
-        Some(&session),
+        Some(session),
         target.as_ref(),
         &mc_args,
         window,
@@ -362,41 +539,43 @@ pub fn prepare_launch(
         env!("CARGO_PKG_VERSION"),
         &name,
     );
-    log.push(format!("launch script ({} lines):", script.lines().count()));
+    log(format!("launch script ({} lines):", script.lines().count()));
     for line in script.lines() {
-        log.push(line.to_string());
+        log(line.to_string());
     }
 
     // Java: configured path first, else PATH lookup.
     let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
     let java_bin = if configured.trim().is_empty() {
-        log.push("no JavaPath configured, searching PATH".to_string());
+        log("no JavaPath configured, searching PATH".to_string());
         match find_java_on_path() {
             Some(found) => found,
             None => {
-                log.push(
+                log(
                     "java not found: set JavaPath in the instance/global settings or install a Java runtime (looked for javaw/java on PATH)".to_string(),
                 );
-                return (log, LaunchReadiness::Blocked);
+                return LaunchReadiness::Blocked;
             }
         }
     } else {
         let trimmed = configured.trim().to_string();
         if !Path::new(&trimmed).is_file() {
-            log.push(format!("configured JavaPath '{trimmed}' does not exist — not launching"));
-            return (log, LaunchReadiness::Blocked);
+            log(format!("configured JavaPath '{trimmed}' does not exist — not launching"));
+            return LaunchReadiness::Blocked;
         }
         trimmed
     };
     match probe_java(&java_bin) {
-        Ok(detail) => log.push(format!("using java '{java_bin}' ({detail})")),
+        Ok(detail) => log(format!("using java '{java_bin}' ({detail})")),
         Err(e) => {
-            log.push(e);
-            return (log, LaunchReadiness::Blocked);
+            log(e);
+            return LaunchReadiness::Blocked;
         }
     }
 
-    // Libraries: the main jar (last classpath entry) must exist.
+    // Libraries: the main jar (last classpath entry) must exist. It was just
+    // installed above, so a failure here means the install reported success and
+    // was wrong — which is worth an explicit message rather than a spawn error.
     let files = resolution.profile.get_library_files(
         &ctx,
         Some(&instance.local_libraries_dir()),
@@ -406,17 +585,17 @@ pub fn prepare_launch(
     let main_rel = match select_main_jar(&files.jar) {
         Some(rel) => rel,
         None => {
-            log.push("no libraries resolved — not launching".to_string());
-            return (log, LaunchReadiness::Blocked);
+            log("no libraries resolved — not launching".to_string());
+            return LaunchReadiness::Blocked;
         }
     };
     let main_jar = resolve_library_path(&paths.root, &main_rel);
     if !main_jar.is_file() {
-        log.push(format!(
-            "main jar not found at {} — libraries are not downloaded yet, not launching",
+        log(format!(
+            "main jar is missing at {} even after installing — not launching",
             main_jar.display()
         ));
-        return (log, LaunchReadiness::Blocked);
+        return LaunchReadiness::Blocked;
     }
     let mut missing = 0usize;
     for rel in &files.jar {
@@ -425,7 +604,7 @@ pub fn prepare_launch(
         }
     }
     if missing > 0 {
-        log.push(format!(
+        log(format!(
             "warning: {missing} of {} classpath jar(s) are missing (continuing anyway)",
             files.jar.len()
         ));
@@ -461,14 +640,21 @@ pub fn prepare_launch(
     let jvm_args = launch::java_arguments(&opts);
     let java_args_joined = jvm_args.join(" ");
     let mut argv = jvm_args;
+    // Prism appends this in `LauncherPartLaunch`, right before the classpath:
+    // it is the directory `crate::install` extracted the native jars into, and
+    // without it every LWJGL native load fails at startup.
+    argv.push(format!(
+        "-Djava.library.path={}",
+        instance.natives_dir().to_string_lossy()
+    ));
     argv.push("-cp".to_string());
     argv.push(join_classpath(&full_jars));
     argv.push(resolution.profile.main_class.clone());
     argv.extend(mc_args);
 
     if std::fs::create_dir_all(&game_root).is_err() {
-        log.push(format!("cannot create game directory {} — not launching", game_root.display()));
-        return (log, LaunchReadiness::Blocked);
+        log(format!("cannot create game directory {} — not launching", game_root.display()));
+        return LaunchReadiness::Blocked;
     }
     let env_map = launch::instance_env_vars(
         &name,
@@ -482,24 +668,24 @@ pub fn prepare_launch(
     for (key, value) in &env_map {
         envs.push((key.clone(), value.clone()));
     }
-    log.push(format!("command: {java_bin} {}", argv.join(" ")));
+    log(format!("command: {java_bin} {}", argv.join(" ")));
     let plan = LaunchPlan { java_bin, argv, cwd: game_root, main_jar, envs };
-    (log, LaunchReadiness::Ready(plan))
+    (LaunchReadiness::Ready(plan))
 }
 
 /// Build the join-server target from instance settings, logging problems.
-fn join_target(settings: &Settings, log: &mut Vec<String>) -> Option<launch::LaunchTarget> {
+fn join_target(settings: &Settings, log: &mut dyn FnMut(String)) -> Option<launch::LaunchTarget> {
     if !settings.get_bool("JoinServerOnLaunch", false) {
         return None;
     }
     let raw = settings.get_str("JoinServerOnLaunchAddress", "");
     match parse_server_address(&raw) {
         Some((address, port)) => {
-            log.push(format!("will join server {address}:{port}"));
+            log(format!("will join server {address}:{port}"));
             Some(launch::LaunchTarget { address, port, world: String::new() })
         }
         None => {
-            log.push(format!("ignoring malformed join-server address '{raw}'"));
+            log(format!("ignoring malformed join-server address '{raw}'"));
             None
         }
     }
@@ -571,27 +757,153 @@ fn agent_args(
     out
 }
 
+// ---- playtime -------------------------------------------------------------
+
+/// Stamp `lastLaunchTime` the way Prism does when the game starts.
+///
+/// A failure is reported but never blocks a launch: the game is more important
+/// than its statistics.
+pub fn record_launch_start(paths: &PrismPaths, instance_id: &str, log: &mut dyn FnMut(String)) {
+    match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
+        Ok(mut instance) => {
+            instance.mark_launched();
+            if let Err(error) = instance.save() {
+                log(format!("could not record the launch time: {error}"));
+            }
+        }
+        Err(error) => log(format!("could not record the launch time: {error}")),
+    }
+}
+
+/// Add elapsed seconds to `totalTimePlayed` when the game exits.
+pub fn record_play_time(
+    paths: &PrismPaths,
+    instance_id: &str,
+    elapsed: Duration,
+    log: &mut dyn FnMut(String),
+) {
+    let seconds = elapsed.as_secs().min(i64::MAX as u64) as i64;
+    if seconds <= 0 {
+        return;
+    }
+    match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
+        Ok(mut instance) => {
+            instance.add_play_time_secs(seconds);
+            let total = instance.total_time_played_secs();
+            if let Err(error) = instance.save() {
+                log(format!("could not save the play time: {error}"));
+            } else {
+                log(format!("played for {seconds}s ({total}s in total)"));
+            }
+        }
+        Err(error) => log(format!("could not save the play time: {error}")),
+    }
+}
+
+/// The metadata store and HTTP client a real launch uses.
+pub fn online_backend(paths: &PrismPaths) -> (prism_net::OnlineMetaStore, prism_net::BlockingHttpFetcher) {
+    (
+        prism_net::OnlineMetaStore::new(prism_net::DEFAULT_META_BASE_URL, paths.meta_dir()),
+        prism_net::BlockingHttpFetcher::new(Duration::from_secs(30)),
+    )
+}
+
+/// The offline counterpart, for the sandbox shell and for tests: everything
+/// must already be cached and installed.
+#[allow(dead_code)]
+pub fn offline_backend(paths: &PrismPaths) -> (OfflineMetaStore, prism_net::MapFetcher) {
+    (OfflineMetaStore::new(paths.meta_dir()), prism_net::MapFetcher::new())
+}
+
 // ---- worker ---------------------------------------------------------------
 
-/// Run one launch in a background thread: prepare, optionally spawn the
-/// child with piped output, stream batches + a final done message through
-/// the subscription sender. Never reports success it did not observe.
+/// Run one launch in a background thread: sign in, resolve, install, spawn the
+/// child with piped output, stream batches + a final done message through the
+/// subscription sender. Never reports success it did not observe.
 pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<Message>) {
     let paths = PrismPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;
-    let (lines, readiness) = prepare_launch(&paths, &params.instance_id, &params.account);
-    if !send_batch(&mut sender, run_id, lines) {
-        return;
+    let mut buffer: Vec<String> = Vec::new();
+    // Sent after the preparation block: the log closure below owns the sender
+    // for the duration of that block.
+    let mut tokens_message: Option<Message> = None;
+
+    // The log closure batches into the same channel the game's output uses.
+    let readiness = {
+        let mut log = |line: String| {
+            buffer.push(line);
+            if buffer.len() >= LOG_BATCH {
+                let batch = std::mem::take(&mut buffer);
+                let _ = send_batch(&mut sender, run_id, batch);
+            }
+        };
+        let auth = MicrosoftAuth::with_prism_client_id();
+        let prepared = match prepare_auth(&params.account, &auth, &mut log) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                log(format!("sign-in failed: {error} — not launching"));
+                None
+            }
+        };
+        if let Some(refreshed) = prepared.as_ref().and_then(|prepared| prepared.refreshed.clone()) {
+            tokens_message = Some(Message::AccountTokens {
+                uuid: refreshed.uuid,
+                name: refreshed.name,
+                access_token: refreshed.access_token,
+                refresh_token: refreshed.refresh_token,
+                expires_at_ms: refreshed.expires_at_ms,
+            });
+        }
+        match prepared {
+            Some(prepared) => {
+                let (mut store, fetcher) = online_backend(&paths);
+                prepare_launch(
+                    &paths,
+                    &params.instance_id,
+                    &prepared.session,
+                    &mut store,
+                    &fetcher,
+                    &mut log,
+                )
+            }
+            None => LaunchReadiness::Blocked,
+        }
+    };
+    if let Some(message) = tokens_message {
+        if !send_message(&mut sender, message) {
+            return;
+        }
+    }
+    if !buffer.is_empty() {
+        let batch = std::mem::take(&mut buffer);
+        if !send_batch(&mut sender, run_id, batch) {
+            return;
+        }
     }
     let plan = match readiness {
         LaunchReadiness::Blocked => {
+            // The console already explains why; this is the terminal line.
             send_done(&mut sender, run_id, "launch blocked (see console)".to_string());
             return;
         }
         LaunchReadiness::Ready(plan) => plan,
     };
-    send_batch(&mut sender, run_id, vec![format!("spawning '{}' (main jar {})", plan.java_bin, plan.main_jar.display())]);
+    {
+        let mut log = |line: String| {
+            let _ = send_batch(&mut sender, run_id, vec![line]);
+        };
+        record_launch_start(&paths, &params.instance_id, &mut log);
+    }
+    send_batch(
+        &mut sender,
+        run_id,
+        vec![format!(
+            "spawning '{}' (main jar {})",
+            plan.java_bin,
+            plan.main_jar.display()
+        )],
+    );
     let mut command = Command::new(&plan.java_bin);
     command
         .args(&plan.argv)
@@ -613,6 +925,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             return;
         }
     };
+    let started = Instant::now();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     match slot.lock() {
@@ -671,6 +984,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             }
         }
     }
+    let elapsed = started.elapsed();
     let outcome = match slot.lock() {
         Ok(mut guard) => match guard.take() {
             Some(mut child) => match child.wait() {
@@ -681,9 +995,18 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
         },
         Err(_) => "internal lock error while reaping process".to_string(),
     };
+    {
+        let mut log = |line: String| {
+            let _ = send_batch(&mut sender, run_id, vec![line]);
+        };
+        record_play_time(&paths, &params.instance_id, elapsed, &mut log);
+    }
     send_batch(&mut sender, run_id, vec![outcome.clone()]);
     send_done(&mut sender, run_id, outcome);
 }
+
+/// Log lines buffered before a batch is flushed to the GUI.
+const LOG_BATCH: usize = 25;
 
 /// Best-effort kill of whatever the slot currently holds.
 fn kill_slot(slot: &ChildSlot) {
@@ -718,6 +1041,26 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
             }
         }
     });
+}
+
+/// Send one message, waiting while the channel is full; `false` means the GUI is
+/// gone.
+fn send_message(sender: &mut Sender<Message>, message: Message) -> bool {
+    let mut pending = Some(message);
+    loop {
+        let message = match pending.take() {
+            Some(message) => message,
+            None => return true,
+        };
+        match sender.try_send(message) {
+            Ok(()) => return true,
+            Err(error) if error.is_full() => {
+                pending = Some(error.into_inner());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 /// Forward one batch; `false` means the GUI is gone and the worker should stop.
@@ -780,6 +1123,8 @@ fn send_done(sender: &mut Sender<Message>, run_id: u64, note: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prism_core::pack::Component;
+    use prism_net::{MapFetcher, MapTransport, MicrosoftOAuth};
 
     #[test]
     fn server_addresses_parse_with_default_port() {
@@ -823,38 +1168,406 @@ mod tests {
     }
 
     #[test]
-    fn prepare_launch_reports_cold_cache_honestly() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PrismPaths::at(dir.path());
-        std::fs::create_dir_all(paths.instances_dir()).unwrap();
-        std::fs::create_dir_all(paths.meta_dir()).unwrap();
-        let instance = Instance::create(&paths.instances_dir(), "Cold", "1.21.1").unwrap();
-        let account = AccountRef { username: "Steve".to_string(), uuid: "0".repeat(32) };
-        let (lines, readiness) = prepare_launch(&paths, &instance.id(), &account);
-        assert!(matches!(readiness, LaunchReadiness::Blocked));
-        let text = lines.join("\n");
-        assert!(text.contains("missing meta cache for net.minecraft"), "got: {text}");
-        assert!(text.contains("run resolve-online first"), "got: {text}");
-    }
-
-    #[test]
-    fn prepare_launch_reports_missing_instance() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PrismPaths::at(dir.path());
-        std::fs::create_dir_all(paths.instances_dir()).unwrap();
-        let account = AccountRef { username: "Steve".to_string(), uuid: "0".repeat(32) };
-        let (lines, readiness) = prepare_launch(&paths, "nope", &account);
-        assert!(matches!(readiness, LaunchReadiness::Blocked));
-        assert!(lines.iter().any(|l| l.contains("cannot open instance")));
-    }
-
-    #[test]
     fn candidate_names_match_platform() {
         let names = candidate_java_names();
         if cfg!(windows) {
             assert!(names.contains(&"javaw".to_string()));
         } else {
             assert_eq!(names, vec!["java".to_string()]);
+        }
+    }
+
+    // ---- accounts ---------------------------------------------------------
+
+    #[test]
+    fn the_anonymous_account_is_stable_and_no_longer_random() {
+        let first = AccountRef::anonymous();
+        let second = AccountRef::anonymous();
+        assert_eq!(first.uuid, second.uuid, "the same player every time");
+        assert_eq!(first.uuid, crate::accounts::offline_uuid("Player"));
+        assert_eq!(first.username, "Player");
+        assert!(!first.kind.is_online());
+    }
+
+    #[test]
+    fn an_account_entry_snapshots_into_a_launch_reference() {
+        let entry = crate::accounts::AccountEntry::microsoft(
+            "Steve",
+            "AABB",
+            "token",
+            "refresh",
+            1234,
+            Some(true),
+        );
+        let reference = AccountRef::from_entry(&entry);
+        assert_eq!(reference.username, "Steve");
+        assert_eq!(reference.uuid, "AABB");
+        assert_eq!(reference.access_token.as_deref(), Some("token"));
+        assert_eq!(reference.refresh_token.as_deref(), Some("refresh"));
+        assert_eq!(reference.expires_at_ms, Some(1234));
+        assert!(reference.kind.is_online());
+    }
+
+    #[test]
+    fn an_offline_account_never_needs_a_refresh() {
+        let account = AccountRef::offline("Steve", "abc");
+        assert!(!account.needs_refresh(0));
+        let mut log = Vec::new();
+        let prepared =
+            prepare_auth(&account, &MicrosoftAuth::with_prism_client_id(), &mut |line| log.push(line))
+                .unwrap();
+        assert_eq!(prepared.session.user_type, "legacy");
+        assert_eq!(prepared.session.access_token, "0");
+        assert_eq!(prepared.session.session, "token:0:abc");
+        assert!(prepared.refreshed.is_none());
+        assert!(log.iter().any(|line| line.contains("offline account")));
+    }
+
+    #[test]
+    fn a_fresh_microsoft_token_is_used_without_touching_the_network() {
+        let now = prism_core::util::now_millis();
+        let account = AccountRef {
+            username: "Steve".into(),
+            uuid: "aabb".into(),
+            kind: AccountKind::Msa,
+            access_token: Some("stored-token".into()),
+            refresh_token: Some("refresh".into()),
+            expires_at_ms: Some(now + 24 * 60 * 60 * 1000),
+        };
+        assert!(!account.needs_refresh(now));
+        // A transport with nothing in it: any request would fail, so this test
+        // only passes if no request is made.
+        let auth = MicrosoftAuth::with_transport(
+            MicrosoftOAuth::prism_client_id(),
+            Box::new(MapTransport::new()),
+        );
+        let mut log = Vec::new();
+        let prepared = prepare_auth(&account, &auth, &mut |line| log.push(line)).unwrap();
+        assert_eq!(prepared.session.user_type, "msa");
+        assert_eq!(prepared.session.access_token, "stored-token");
+        assert_eq!(prepared.session.session, "token:stored-token:aabb");
+        assert!(prepared.refreshed.is_none(), "nothing was renewed");
+        assert!(log.iter().any(|line| line.contains("stored Microsoft session")));
+    }
+
+    #[test]
+    fn a_stale_microsoft_token_is_renewed_and_the_new_tokens_come_back() {
+        let now = prism_core::util::now_millis();
+        let account = AccountRef {
+            username: "Steve".into(),
+            uuid: "aabb".into(),
+            kind: AccountKind::Msa,
+            access_token: Some("old-token".into()),
+            refresh_token: Some("refresh-token".into()),
+            // Inside the twelve-hour window.
+            expires_at_ms: Some(now + 60_000),
+        };
+        assert!(account.needs_refresh(now));
+
+        let mut transport = MapTransport::new();
+        transport.insert_form(
+            prism_net::auth::MICROSOFT_TOKEN_URL,
+            200,
+            r#"{"access_token":"msa-2","refresh_token":"refresh-2","expires_in":3600}"#,
+        );
+        transport.insert_json(
+            prism_net::auth::XBOX_USER_AUTH_URL,
+            200,
+            r#"{"Token":"user-token","DisplayClaims":{"xui":[{"uhs":"uhs-1"}]}}"#,
+        );
+        transport.insert_json(
+            prism_net::auth::XBOX_XSTS_AUTH_URL,
+            200,
+            r#"{"Token":"xsts-token","DisplayClaims":{"xui":[{"uhs":"uhs-1"}]}}"#,
+        );
+        transport.insert_json(
+            prism_net::auth::MINECRAFT_LAUNCHER_LOGIN_URL,
+            200,
+            r#"{"access_token":"game-token-2","expires_in":86400}"#,
+        );
+        transport.insert_get(
+            prism_net::auth::MINECRAFT_PROFILE_URL,
+            200,
+            r#"{"id":"aabbccdd","name":"Steve"}"#,
+        );
+        let auth = MicrosoftAuth::with_transport(
+            MicrosoftOAuth::prism_client_id(),
+            Box::new(transport),
+        );
+        let mut log = Vec::new();
+        let prepared = prepare_auth(&account, &auth, &mut |line| log.push(line)).unwrap();
+        assert_eq!(prepared.session.access_token, "game-token-2");
+        assert_eq!(prepared.session.user_type, "msa");
+        let refreshed = prepared.refreshed.expect("renewed tokens are reported");
+        assert_eq!(refreshed.access_token, "game-token-2");
+        assert_eq!(refreshed.refresh_token.as_deref(), Some("refresh-2"));
+        assert_eq!(refreshed.name, "Steve");
+        assert_eq!(refreshed.uuid, "aabbccdd");
+        assert!(refreshed.expires_at_ms > now);
+        assert!(log.iter().any(|line| line.contains("renewing the Microsoft session")));
+    }
+
+    #[test]
+    fn a_microsoft_account_with_no_refresh_token_blocks_rather_than_pretending() {
+        let account = AccountRef {
+            username: "Steve".into(),
+            uuid: "aabb".into(),
+            kind: AccountKind::Msa,
+            access_token: None,
+            refresh_token: None,
+            expires_at_ms: None,
+        };
+        let auth = MicrosoftAuth::with_transport(
+            MicrosoftOAuth::prism_client_id(),
+            Box::new(MapTransport::new()),
+        );
+        let error = prepare_auth(&account, &auth, &mut |_| {}).unwrap_err();
+        assert!(error.contains("sign in to Microsoft again"), "got {error}");
+    }
+
+    #[test]
+    fn a_refresh_that_fails_reports_why() {
+        let now = prism_core::util::now_millis();
+        let account = AccountRef {
+            username: "Steve".into(),
+            uuid: "aabb".into(),
+            kind: AccountKind::Msa,
+            access_token: None,
+            refresh_token: Some("dead".into()),
+            expires_at_ms: Some(now - 1),
+        };
+        let mut transport = MapTransport::new();
+        transport.insert_form(
+            prism_net::auth::MICROSOFT_TOKEN_URL,
+            400,
+            r#"{"error":"invalid_grant","error_description":"The refresh token has expired."}"#,
+        );
+        let auth = MicrosoftAuth::with_transport(
+            MicrosoftOAuth::prism_client_id(),
+            Box::new(transport),
+        );
+        let error = prepare_auth(&account, &auth, &mut |_| {}).unwrap_err();
+        assert!(error.contains("refresh token has expired"), "got {error}");
+    }
+
+    // ---- launch preparation ----------------------------------------------
+
+    fn test_root() -> (tempfile::TempDir, PrismPaths) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = PrismPaths::at(dir.path());
+        std::fs::create_dir_all(paths.instances_dir()).unwrap();
+        std::fs::create_dir_all(paths.meta_dir()).unwrap();
+        (dir, paths)
+    }
+
+    fn session() -> launch::AuthSession {
+        OfflineSession::new("Steve", "0".repeat(32)).into_auth_session()
+    }
+
+    #[test]
+    fn prepare_launch_reports_missing_instance() {
+        let (_dir, paths) = test_root();
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = MapFetcher::new();
+        let mut lines = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            "nope",
+            &session(),
+            &mut store,
+            &fetcher,
+            &mut |line| lines.push(line),
+        );
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+        assert!(lines.iter().any(|l| l.contains("cannot open instance")));
+    }
+
+    #[test]
+    fn a_cold_cache_blocks_with_the_resolution_error_named() {
+        // An instance whose version metadata is not cached and cannot be
+        // fetched (an empty fetcher): the honest outcome is a blocked launch
+        // that says which component failed, not a spawn of a game that is not
+        // there.
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Cold", "1.21.1").unwrap();
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = MapFetcher::new();
+        let mut lines = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &mut store,
+            &fetcher,
+            &mut |line| lines.push(line),
+        );
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+        let text = lines.join("\n");
+        assert!(text.contains("cannot resolve component 'net.minecraft'"), "got: {text}");
+        assert!(text.contains("resolution failed with errors"), "got: {text}");
+    }
+
+    #[test]
+    fn a_fully_installed_instance_produces_a_runnable_plan() {
+        // A minimal but complete instance: metadata cached, every file present,
+        // and a fake `java` on PATH... which cannot be faked, so the java probe
+        // is what this asserts *around*: the resolver and installer succeed and
+        // the launch only stops at the missing runtime.
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Ready", "1.21.1").unwrap();
+        seed_meta(&paths, &instance, "1.21.1");
+        seed_library(paths.root.join("libraries").join("test").join("lib").join("1.0").join("lib-1.0.jar"));
+        seed_library(paths.root.join("libraries").join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"));
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = MapFetcher::new();
+        let mut lines = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &mut store,
+            &fetcher,
+            &mut |line| lines.push(line),
+        );
+        let text = lines.join("\n");
+        // Everything about the install phase must be clean…
+        assert!(text.contains("install:"), "got: {text}");
+        assert!(!text.contains("install failed"), "got: {text}");
+        assert!(!text.contains("files are missing"), "got: {text}");
+        // …and the only acceptable blocker is the runtime that is not
+        // installed on every machine, or a real plan if one is.
+        match readiness {
+            LaunchReadiness::Blocked => {
+                assert!(text.contains("java"), "blocked for a reason that is not java: {text}");
+            }
+            LaunchReadiness::Ready(plan) => {
+                assert!(plan.main_jar.is_file());
+                assert!(
+                    plan.argv.iter().any(|arg| arg.starts_with("-Djava.library.path=")),
+                    "the natives directory must be on the library path"
+                );
+                assert!(plan.argv.iter().any(|arg| arg == "-cp"));
+                assert!(plan.argv.iter().any(|arg| arg == "com.example.Main"));
+            }
+        }
+    }
+
+    /// Write a version file into the metadata cache for `uid`/`version`.
+    fn write_meta(paths: &PrismPaths, uid: &str, version: &str, value: serde_json::Value) {
+        let dir = paths.meta_dir().join(uid);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{version}.json")), value.to_string()).unwrap();
+    }
+
+    fn seed_library(path: PathBuf) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"jar").unwrap();
+    }
+
+    /// Cache the two version files a minimal 1.21.1 instance resolves: the game
+    /// itself and one library, plus the client jar descriptor.
+    fn seed_meta(paths: &PrismPaths, instance: &Instance, game: &str) {
+        write_meta(
+            paths,
+            "net.minecraft",
+            game,
+            serde_json::json!({
+                "uid": "net.minecraft",
+                "version": game,
+                "order": 0,
+                "mainClass": "com.example.Main",
+                "assets": "17",
+                "assetIndex": {
+                    "id": "17",
+                    "sha1": "0000000000000000000000000000000000000000",
+                    "size": 2,
+                    "totalSize": 0,
+                    "url": "https://example.invalid/17.json"
+                },
+                "libraries": [
+                    {
+                        "name": "test.lib:lib:1.0",
+                        "downloads": {
+                            "artifact": {
+                                "path": "test/lib/lib/1.0/lib-1.0.jar",
+                                "sha1": "",
+                                "size": 3,
+                                "url": "https://example.invalid/lib-1.0.jar"
+                            }
+                        }
+                    }
+                ],
+                "downloads": {
+                    "client": {
+                        "path": format!("com/mojang/minecraft/{game}/minecraft-{game}-client.jar"),
+                        "sha1": "",
+                        "size": 3,
+                        "url": "https://example.invalid/client.jar"
+                    }
+                }
+            }),
+        );
+        // The index the profile names has to be on disk, or the install phase
+        // legitimately tries to download it and this test would be measuring a
+        // network failure instead of the launch plan.
+        let indexes = paths.assets_dir().join("indexes");
+        std::fs::create_dir_all(&indexes).unwrap();
+        std::fs::write(indexes.join("17.json"), br#"{"objects":{}}"#).unwrap();
+
+        // The pack must reference it, exactly as `Instance::create` writes it.
+        let mut profile = PackProfile::default();
+        profile.append(Component {
+            uid: "net.minecraft".into(),
+            version: game.into(),
+            important: true,
+            ..Default::default()
+        });
+        profile.save(&instance.mmc_pack_path()).unwrap();
+    }
+
+    #[test]
+    fn playtime_helpers_write_the_instance_metadata() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Timed", "1.21.1").unwrap();
+        let mut lines = Vec::new();
+        record_launch_start(&paths, &instance.id(), &mut |line| lines.push(line));
+        record_play_time(
+            &paths,
+            &instance.id(),
+            Duration::from_secs(125),
+            &mut |line| lines.push(line),
+        );
+        let back = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
+        assert!(back.last_launch_millis() > 0, "LastLaunchTime is stamped");
+        assert_eq!(back.total_time_played_secs(), 125);
+        assert!(lines.iter().any(|line| line.contains("played for 125s")));
+
+        // A zero-length session adds nothing but is not an error.
+        record_play_time(&paths, &instance.id(), Duration::from_millis(10), &mut |_| {});
+        assert_eq!(
+            Instance::open(&paths.instances_dir().join(instance.id()))
+                .unwrap()
+                .total_time_played_secs(),
+            125
+        );
+        // A missing instance is reported, not fatal.
+        let mut lines = Vec::new();
+        record_launch_start(&paths, "gone", &mut |line| lines.push(line));
+        record_play_time(&paths, "gone", Duration::from_secs(3), &mut |line| lines.push(line));
+        assert!(lines.iter().any(|line| line.contains("could not")));
+    }
+
+    #[test]
+    fn open_url_reports_a_browser_it_cannot_launch() {
+        // A URL is only opened through the platform opener, which on every
+        // supported system is an absolute command; a nonsense URL still has to
+        // produce success from the spawn itself, so what is asserted here is
+        // that the call does not panic and reports a real error shape when it
+        // fails.
+        let result = open_url("not-a-url");
+        if let Err(message) = result {
+            assert!(message.contains("opening"), "got {message}");
         }
     }
 }

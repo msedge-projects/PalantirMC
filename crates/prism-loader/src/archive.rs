@@ -292,6 +292,71 @@ pub fn extract_zip_file(path: impl AsRef<Path>, dest: impl AsRef<Path>) -> Resul
     extract_zip_bytes(bytes.as_slice(), dest)
 }
 
+/// Extract a *native* jar flat into `dest`, the way Prism's `ExtractNatives`
+/// step does.
+///
+/// Native jars are not unpacked as a tree: the shared libraries sit at the top
+/// level of the archive and Java finds them through `-Djava.library.path`, so
+/// writing them into `natives/META-INF/...`-style subdirectories would put them
+/// somewhere the JVM never looks. Every file entry therefore lands directly in
+/// `dest` under its own file name, and only that name is trusted — a crafted
+/// entry cannot escape (`..`, absolute paths, and nested paths all collapse to
+/// their final component; an entry with no usable name is skipped rather than
+/// guessed at).
+///
+/// `rename_jnilib` applies Prism's macOS quirk: Java 8 and newer look for
+/// `.dylib`, while older archives ship `.jnilib`, so the suffix is rewritten on
+/// the way out when the caller asks for it.
+///
+/// Returns how many files were written.
+pub fn extract_zip_file_flat(
+    path: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    rename_jnilib: bool,
+) -> Result<usize> {
+    let path = path.as_ref();
+    let dest = dest.as_ref();
+    let bytes = read_file_bytes(path)?;
+    std::fs::create_dir_all(dest).map_err(|e| io_err(dest, e))?;
+    let cursor = std::io::Cursor::new(bytes.as_slice());
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| Error::Zip(e.to_string()))?;
+    let len = archive.len();
+    let mut written = 0usize;
+    let mut index: usize = 0;
+    while index < len {
+        let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
+        index += 1;
+        if file.is_dir() {
+            continue;
+        }
+        // `enclosed_name` already refuses `..` and absolute paths; taking the
+        // file name on top of that is what makes the result flat.
+        let Some(enclosed) = file.enclosed_name() else {
+            return Err(Error::UnsafePath(file.name().to_owned()));
+        };
+        let Some(name) = enclosed.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let name = if rename_jnilib && name.ends_with(".jnilib") {
+            format!("{}.dylib", name.trim_end_matches(".jnilib"))
+        } else {
+            name.to_string()
+        };
+        let out_path = dest.join(&name);
+        let mut out = std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
+        std::io::copy(&mut file, &mut out).map_err(|e| io_err(&out_path, e))?;
+        #[cfg(unix)]
+        {
+            if let Some(mode) = file.unix_mode() {
+                let perms = std::fs::Permissions::from_mode(mode);
+                std::fs::set_permissions(&out_path, perms).map_err(|e| io_err(&out_path, e))?;
+            }
+        }
+        written += 1;
+    }
+    Ok(written)
+}
+
 /// Extract a tar.gz container (file path or in-memory bytes) into `dest`.
 ///
 /// Rejects absolute paths and `..` escapes with [`Error::UnsafePath`] and
@@ -510,6 +575,56 @@ mod tests {
         let out2 = dir.path().join("out2");
         extract_tar_gz_file(&tar_path, &out2).unwrap();
         assert_eq!(std::fs::read(out2.join("y.txt")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn native_jars_extract_flat_with_the_jnilib_rename() {
+        let bytes = build_zip(&[
+            ("META-INF/MANIFEST.MF", b"manifest"),
+            ("liblwjgl.so", b"so"),
+            ("libopenal.jnilib", b"dylib"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("natives.jar");
+        std::fs::write(&zip_path, &bytes).unwrap();
+        let natives = dir.path().join("natives");
+
+        let written = extract_zip_file_flat(&zip_path, &natives, true).unwrap();
+        assert_eq!(written, 3);
+        assert_eq!(std::fs::read(natives.join("liblwjgl.so")).unwrap(), b"so");
+        // Flat: the JVM is pointed at this directory, so a nested copy would be
+        // a library it never finds.
+        assert!(
+            !natives.join("META-INF").join("MANIFEST.MF").exists(),
+            "native entries must not keep their directories"
+        );
+        assert_eq!(std::fs::read(natives.join("MANIFEST.MF")).unwrap(), b"manifest");
+        // …and the macOS suffix quirk is applied only when asked for.
+        assert!(natives.join("libopenal.dylib").is_file());
+        assert!(!natives.join("libopenal.jnilib").exists());
+
+        let plain = dir.path().join("plain");
+        extract_zip_file_flat(&zip_path, &plain, false).unwrap();
+        assert!(plain.join("libopenal.jnilib").is_file());
+    }
+
+    #[test]
+    fn native_extraction_still_refuses_to_escape() {
+        let bytes = build_zip(&[("../evil.dll", b"bad")]);
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("natives.jar");
+        std::fs::write(&zip_path, &bytes).unwrap();
+        let natives = dir.path().join("natives");
+        let err = extract_zip_file_flat(&zip_path, &natives, false).unwrap_err();
+        assert!(matches!(err, Error::UnsafePath(_)), "got {err:?}");
+        assert!(!dir.path().join("evil.dll").exists());
+    }
+
+    #[test]
+    fn native_extraction_reports_a_missing_jar() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = extract_zip_file_flat(dir.path().join("nope.jar"), dir.path(), false).unwrap_err();
+        assert!(matches!(err, Error::Io { .. }), "got {err:?}");
     }
 
     #[test]
