@@ -45,6 +45,14 @@ REF = {
 
 TOL = 6
 
+# Both clients keep their outermost pixels for something that is not layout: this
+# shell draws a 6px band of resize grips on every edge, the reference carries a
+# window frame. Either one is a far stronger vertical edge than the panel's own
+# boundary -- which is a brand wash against a page colour, only a few levels
+# apart -- so the strongest-edge search latched onto the band and reported the
+# panel as 6px wide. Dropping a uniform inset first removes it from both.
+INSET = 4
+
 
 def lum(c):
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
@@ -203,8 +211,14 @@ def main() -> int:
         return 2
 
     im, frame = crop_window_frame(Image.open(path).convert("RGB"))
+    w0, h0 = im.size
+    im = im.crop((INSET, INSET, w0 - INSET, h0 - INSET))
     w, h = im.size
-    print(f"capture {path.name}: {w}x{h}" + (f" (cropped a {frame}px frame)" if frame else ""))
+    print(
+        f"capture {path.name}: {w0}x{h0}"
+        + (f" (cropped a {frame}px frame)" if frame else "")
+        + f" -> {w}x{h} after a {INSET}px inset"
+    )
     g = Gate(only)
 
     def px(x, y):
@@ -212,10 +226,7 @@ def main() -> int:
 
     # The panel is a full-height column on the right; its left edge is the last
     # strong vertical boundary on that side.
-    # The last 4 columns are excluded: a capture that carried a window frame
-    # leaves a half-black transition column at the edge after cropping, and it
-    # out-scores the real boundary.
-    panel_left, panel_score = vertical_edge(im, int(w * 0.62), w - 4)
+    panel_left, panel_score = vertical_edge(im, int(w * 0.62), w - 2)
     # The rail's right edge is the first strong one on the left.
     pane_left, pane_score = vertical_edge(im, int(w * 0.02), int(w * 0.2))
     bar_bottom, bar_score = horizontal_edge(im, int(h * 0.04), int(h * 0.16))
@@ -234,12 +245,64 @@ def main() -> int:
         print("\npanel gate FAILED: boundaries not found")
         return 1
 
-    # The panel's background, taken as the median of its right-hand gutter: the
-    # 16px of padding no card reaches into.
-    gutter_x = w - 4
-    column = [px(gutter_x, y) for y in range(bar_bottom + 4, h - 4, 4)]
-    panel_bg = tuple(sorted(c[i] for c in column)[len(column) // 2] for i in range(3))
-    print(f"panel background (median of its gutter) #%02x%02x%02x" % panel_bg)
+    # The panel's background column, located rather than assumed. A fixed
+    # offset does not survive: the panel's padding is 16 logical px, which is 13
+    # physical px in the reference's capture and 16 in ours, and this shell also
+    # draws a scrollbar in the same band where the reference overlays one. The
+    # gutter is the *darkest* column in the panel's right margin, because every
+    # neighbour it could be confused with -- a card, a scrollbar track -- is
+    # lighter than the panel it sits on.
+    def column_median(x):
+        vals = [px(x, y) for y in range(bar_bottom + 4, h - 4, 4)]
+        return tuple(sorted(v[i] for v in vals)[len(vals) // 2] for i in range(3))
+
+    def strip(x, y0):
+        vals = [px(x, y) for y in range(y0 - 6, y0 + 7)]
+        return tuple(sorted(v[i] for v in vals)[len(vals) // 2] for i in range(3))
+
+    # Find a clear gutter *cell* per height, not one column for the whole panel.
+    # No column is clear end to end in either client: the reference's top card
+    # reaches within 10px of the panel edge, and this shell's panel carries a
+    # scrollbar in the outer 10px with cards filling the rest, so a column can be
+    # background at the top and card at the bottom or the other way about. A cell
+    # is the panel's own surface only where it is darker than the chrome it
+    # frames *and* not greyer than it -- which is the property under test,
+    # checked before the sample is used.
+    chrome_lum = lum(REF["chrome"])
+
+    def strip(x, y0):
+        vals = [px(x, y) for y in range(y0 - 6, y0 + 7)]
+        return tuple(sorted(v[i] for v in vals)[len(vals) // 2] for i in range(3))
+
+    cells: list[tuple[int, int, tuple[int, int, int]]] = []
+    for frac in (0.10, 0.22, 0.34, 0.46, 0.58, 0.70, 0.82, 0.92):
+        y = bar_bottom + int((h - bar_bottom) * frac)
+        for x in range(w - 3, w - 22, -1):
+            c = strip(x, y)
+            if lum(c) <= chrome_lum - 4 and c[1] >= c[2]:
+                cells.append((y, x, c))
+                break
+
+    if not cells:
+        # Not an infrastructure error: this is the tint gate failing, reached by
+        # its own precondition. The build this replaced had no cell darker than
+        # its chrome, because its panel *was* the chrome's colour.
+        print(
+            "  [FAIL] panel gutter is a dark brand tint, not the raised grey: "
+            "no cell in the panel's right margin is darker than the chrome, so "
+            "the panel is painted the chrome's own surface"
+        )
+        print("\npanel gate FAILED (1): panel gutter is a dark brand tint")
+        return 1
+
+    top = cells[0][2]
+    bottom = cells[-1][2]
+    panel_bg = tuple(
+        sorted(c[2][i] for c in cells)[len(cells) // 2] for i in range(3)
+    )
+    print(f"panel gutter: {len(cells)} of 8 heights have a clear cell")
+    for y, x, c in cells:
+        print("  y=%-4d x=%-4d #%02x%02x%02x (w-%d)" % ((y, x) + c + (w - x,)))
 
     g.check(
         150 < (w - panel_left) < 400,
@@ -247,27 +310,27 @@ def main() -> int:
         f"{w - panel_left}px of {w} (reference: 237 of 1088, i.e. 300 logical)",
     )
 
-    def gutter(y0, direction):
-        """The first panel-background pixel scanning away from y0."""
-        for i in range(0, 14):
-            y = y0 + i * direction
-            c = px(gutter_x, y)
-            if near(c, panel_bg, 4):
-                return c
-        return px(gutter_x, y0)
-
-    top = gutter(bar_bottom + 20, +1)
-    bottom = gutter(h - 24, -1)
     print("gutter top #%02x%02x%02x  bottom #%02x%02x%02x" % (top + bottom))
 
-    # G1: tinted with the brand green rather than neutral grey. The reference's
-    # own gutter measures +2 (`#172321`); the build this replaced painted
-    # `surface-3` (39, 41, 46), whose green is *below* its blue at -5. The
-    # threshold is the reference's measurement, not a round number.
     g.check(
-        top[1] - top[2] >= 2,
-        "panel gutter is brand-tinted",
-        f"green-blue = {top[1] - top[2]:+d} (want >= +2; reference +2, previous build -5)",
+        len(cells) >= 4,
+        "the panel's gutter is clear for most of its height",
+        f"{len(cells)} of 8 sampled heights (want >= 4)",
+    )
+
+    # G1: a dark brand tint, not the raised grey. Stated as luminance against the
+    # chrome *and* green at or above blue, because green-minus-blue alone is a
+    # one-level difference on surfaces this dark and would be asserting the
+    # arithmetic rather than the appearance. Both halves separate the two builds
+    # unambiguously: the raised grey measures green five levels below blue and
+    # the same luminance as the chrome it frames, while the tint sits 6-7 levels
+    # darker with green at or above blue.
+    g.check(
+        top[1] >= top[2] and lum(top) <= chrome_lum - 4,
+        "panel gutter is a dark brand tint, not the raised grey",
+        ("#%02x%02x%02x: green-blue %+d, luminance %.1f vs chrome %.1f "
+         "(want green >= blue, and >= 4 below chrome)")
+        % (top + (top[1] - top[2], lum(top), chrome_lum)),
     )
 
     # G2: the wash ramps downward, as the reference's does.

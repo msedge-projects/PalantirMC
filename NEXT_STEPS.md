@@ -558,3 +558,65 @@ Two of those three were caught before the packaging jobs started, because
 `package` depends on `test` -- so a compile or test failure costs about 4 billed
 minutes, not the 28 a full run costs. The expensive failure is the one that only
 appears in a release build.
+
+## 11. What the reference client's own pixels measured
+
+Read off a `PrintWindow` capture of the installed Modrinth App, not from
+screenshots of it and not from its stylesheet -- the stylesheet was used to find
+*which* token to look for, and the capture is what fixed the value. Those numbers
+are now baked into `tools/panel_gate.py` as its reference, and `GATES.md` records
+what each one asserts.
+
+Its capture is 1088x612 for a 1364x881 window, so it is DPI-virtualised at ~0.79;
+our own captures come back at ~1.0 and ~0.81 depending on how the window is
+launched. That is why the checker locates every boundary structurally instead of
+hardcoding coordinates -- a fixed offset that is inside a panel's padding at one
+scale lands on the card's border at another, which is a mistake this cost two
+revisions to stop making.
+
+| What | Reference | Where it comes from |
+|---|---|---|
+| panel background, top | `#182524` | `.app-sidebar`'s `--brand-gradient-bg` |
+| panel background, bottom | `#131a1a` | the same, measured as a straight ramp |
+| a card in the panel | `#2a3633` | `--brand-gradient-button` |
+| a row inside a card | `#3a4341` | `ditto`, one step lighter |
+| section divider | `#303e38` | `--brand-gradient-border` |
+| page pane | `#16181c` | `--color-bg` |
+| chrome (rail, bar, panel) | `#27292e` | `--color-bg-raised` |
+| pane's top-left corner | 20px cut | `.app-contents`'s `--radius-xl` |
+
+The panel's wash is a two-stop vertical ramp and nothing else: sampled down its
+empty gutter it runs `#172321` at the top to `#141b1b` at the bottom, and the
+midpoint predicts the measured middle within one level. It is not flat and it is
+not a colour -- which is exactly what a single `background` value cannot express,
+and why the panel had read as a lighter grey strip beside the page rather than as
+the page tinted.
+
+## 12. Still not matching the reference, and not claimed by any gate
+
+Recorded so the difference between "verified" and "finished" stays visible. None
+of these is asserted by `GATES.md`, and the first two are visible in the capture.
+
+1. **The panel's scrollbar.** Ours is drawn in the outer ~10px of the panel where
+   the reference's `v-overlay-scrollbars` fades one over the content, so our
+   panel's right edge carries a light strip theirs does not. Visible in
+   `.scratch/pal-final.png` at the right edge.
+2. **The panel's sections are separate cards, not divided sections.** The
+   reference places its sections on the panel's own surface and separates them
+   with a 1px `--brand-gradient-border` rule; we keep each in a bordered card of
+   its own, which reads as more boxes than the reference has.
+3. **The panel's left hairline.** `.app-sidebar` has `border-l-[1px]`, which we do
+   not draw. iced paints a container's border on all four edges, so this needs its
+   own 1px column the way the rail's hairline already is one.
+4. **The checklist does not open and close.** The reference wraps it in an
+   Accordion: `grid-template-rows: 0fr -> 1fr` over 0.3s ease-in-out, with the
+   chevron rotating 180 over `transition-transform duration-300`. We always show
+   the rows. Animating a height in iced means animating a `Length`, which is a
+   tween plus a subscription -- the machinery `scroll.rs` already has for the
+   glide, but not yet wired to this.
+5. **The status bar** is ours alone; the reference has none. Left in place because
+   it carries the instance count and readiness the reference puts nowhere.
+6. **Hover and press feel.** Omorphia's buttons are `hover:brightness(1.25)` in
+   dark and `active:scale(0.95)`; ours interpolate between palette colours
+   instead. Same intent, not the same arithmetic, and not measurable from a
+   still capture either way.
