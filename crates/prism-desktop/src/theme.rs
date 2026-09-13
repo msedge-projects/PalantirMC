@@ -126,9 +126,17 @@ impl Palette {
 
     /// The light look.
     ///
-    /// Not an inversion: the accent is darkened until it reads on white (the
-    /// dark theme's green is only 1.9:1 against a white card, which is not
-    /// text), and the chrome sits *below* the cards rather than above them.
+    /// Not an inversion: the accent is darkened until it reads on white -- the
+    /// dark theme's green is 1.9:1 against a white card, which is not text --
+    /// and the chrome sits *below* the cards rather than above them.
+    ///
+    /// The accent is the reference's green-700 rather than the green-600 that
+    /// light mode calls `--color-brand`, and the measurement is the reason:
+    /// on this theme's own card (#F8F8F8) green-600 is 2.71:1, under the 3:1
+    /// floor for a UI component, and white on it is 2.88:1 where the shell puts
+    /// a button label. green-700 is 3.83:1 on the card and 4.06:1 under white.
+    /// Taking the next rung of the same ladder keeps this a transcription while
+    /// still clearing the floor the rest of the palette is held to.
     pub const fn light() -> Palette {
         Palette {
             bg: rgb(0xEB, 0xEB, 0xEB),              // surface-1
@@ -141,9 +149,9 @@ impl Palette {
             text: rgb(0x1A, 0x20, 0x2C),            // --color-text-primary
             text_muted: rgb(0x2C, 0x2E, 0x31),      // --color-text-default
             text_dim: rgb(0x48, 0x4D, 0x54),        // --color-text-tertiary
-            accent: rgb(0x00, 0xAF, 0x5C),          // green-600, light --color-brand
-            accent_hover: rgb(0x09, 0xDE, 0x78),    // green-500: light hovers by brightness(0.9)
-            accent_dim: rgb(0x04, 0x91, 0x4F),      // green-700
+            accent: rgb(0x04, 0x91, 0x4F),          // green-700, the readable rung (see above)
+            accent_hover: rgb(0x00, 0xAF, 0x5C),    // green-600, light --color-brand: hover is brighter
+            accent_dim: rgb(0x03, 0x74, 0x3F),      // green-700 at brightness(0.8), the pressed rule
             on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
             danger: rgb(0xCB, 0x22, 0x45),          // red-600, light --color-red
             danger_hover: rgb(0xED, 0x46, 0x61),    // red-500
