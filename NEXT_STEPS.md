@@ -110,11 +110,11 @@ tree has exercised it end to end. Everything here is a five-second visual check:
   which is intentional but is the one path where `gpu::active_backend()`'s
   report can disagree with what iced actually built.
 
-## 5. Delivery: the workflows are written, the remote is the gap
+## 5. Delivery: wired up and green
 
-The repository still has **no git remote**, so nothing in `.github/` has run
-once. Everything below is written and statically checked; the moment a remote
-exists and a commit lands, it executes.
+The repository is now `MSedgeMC/PalantirMC` (private), and CI runs on every
+push to `master`. All four jobs pass. The Release workflow is registered but has
+never run, because that needs a `v*` tag -- see §5.1 for what that would test.
 
 | File | What it does |
 |---|---|
@@ -134,31 +134,67 @@ same exe with `d3dcompiler_47.dll` renamed in place to `libgcc_s_dw2-1.dll`,
 same byte length, which is the exact failure mode) exits 1 with the hint
 attached. So the gate can fail, which is the only reason it is worth having.
 
-### What the first CI run will shake out
+### What the first CI runs actually found (14:08–14:41)
 
-These are environment assumptions that only a clean runner can falsify:
+All four jobs are green as of `3dee1fc`. Getting there took three runs, and the
+failures were real rather than configuration:
 
-- **Hermetic tests.** 89 `tempdir` uses across the tree, but `instances.rs`,
-  `java.rs` and `paths.rs` read `APPDATA`/`HOME`/`PATH` for real, and this
-  machine has a Prism install at `E:/Games/PrismLauncher` that CI will not.
-  A test that quietly depended on it would pass here and fail there.
-- **`x86_64-pc-windows-gnu` on a runner.** Locally the GNU target is the host
-  target; on CI it needs `choco install mingw`, which is a different mingw than
-  the one rustup installed here. If that job is the only one that misbehaves,
-  the MSVC job is still the shipping build.
-- **rustfmt.** The tree has never been formatted, which is why that step is
-  `continue-on-error`. Expect a large diff on first run.
-- **The lock file.** `--locked` on a runner with an empty registry is the real
-  test of the hand-trimmed `Cargo.lock`; it passed here only against a warm
-  cache of already-downloaded crates.
+| Run | Result |
+|---|---|
+| `eeca48d` | Test ✅ · Lint ❌ 169 `unwrap`/`expect` errors · gnu ✅ · msvc ❌ `VCRUNTIME140.dll` |
+| `7b29170` | Test ✅ · Lint ❌ 16 in `prism-gui` · gnu ✅ · msvc ✅ |
+| `3dee1fc` | **all four ✅** |
 
-To close the gap: create the repo, `git remote add`, commit, push. Untracked
-work that a build needs: `.github/`, `crates/prism-desktop/assets/brand/`, and
-the newer desktop modules (`brand.rs`, `browse.rs`, `catalog.rs`, `glyphs.rs`,
-`gpu.rs`, `instances.rs`, `native.rs`, `prefs.rs`, `screenshots.rs`, `scroll.rs`,
-`theme.rs`). The deleted toolbar PNGs (`about`, `check`, `folder`, `help`,
-`kill`, `minus`, `play`, `refresh`, `update`) and the rewritten `ATTRIBUTION`
-belong to the same change: that chrome is drawn as vector glyphs now.
+**The lint job found a genuine bug, twice.** `prism-core` and `prism-gui` deny
+`unwrap_used`/`expect_used` crate-wide while their own doc comment states the
+rule as "no `unwrap`/`expect` *outside tests*", and `prism-loader` already
+carries the `cfg_attr(test, allow(...))` line that makes the two agree. Neither
+crate had ever been run through clippy (the component is not installed for the
+local toolchain), so 153 and 16 errors respectively had been sitting there. The
+first fix gave the `allow` *before* the `deny` in `prism-gui`; inner attributes
+apply in sequence, so the deny still won -- the second run is what showed the
+order mattered.
+
+**The DLL gate found a portability difference between the two targets.** The
+MSVC exe imported `VCRUNTIME140.dll`, which arrives with Visual Studio, Office
+or a game rather than with Windows, so it was the *less* portable of the two
+builds while looking like the more standard one. Both targets now build with
+`-C target-feature=+crt-static` for MSVC only, and both pass the gate. Verified
+on CI, not just locally: the GNU exe needs 27 DLLs and every one ships with the
+OS.
+
+**What did not break** is worth recording, because it was the risk: the test
+suite passes on a clean Windows runner from an empty registry with `--locked`,
+so the hand-trimmed `Cargo.lock` is genuinely consistent and no test was
+silently leaning on this machine's Prism install at `E:/Games/PrismLauncher`.
+The GNU job's first-ever mingw install via `choco` also worked.
+
+The lint job's second step (`cargo fmt --check`) is still advisory and will
+report a large diff whenever it is first run for real.
+
+### Registration quirk worth knowing
+
+`release.yml` did **not** register on the first push -- no run, no listing, and
+`GET /actions/workflows/release.yml` returned 404. The file was not at fault:
+the identical bytes with only the `name:` changed registered fine in a throwaway
+repo, and a later push to this one registered it without any change. So a
+workflow that never appears in the Actions tab may simply have failed to
+register, and the fix is to push again rather than to edit the file.
+
+### 5.1 Two things still owed
+
+**The release path has never run.** Its `guard` job's PowerShell was verified
+locally against this `Cargo.toml` (`v0.1.0` passes and extracts `0.1.0`;
+`v0.2.0` throws; `0.1.0` throws), but `publish` has only been read, not
+executed -- the file renaming, the regenerated `.sha256` sidecars and
+`gh release create --verify-tag` are all untested. A single `v0.1.0` tag
+exercises all three at once, and also publishes, so it wants to be deliberate.
+
+**A diagnostic repo is still standing.** `MSedgeMC/actions-probe` was created
+while isolating the `release.yml` registration failure and could not be deleted
+-- the `gh` token has no `delete_repo` scope. It is private and empty of
+anything but the probe files; delete it from the repository settings, or after
+`gh auth refresh -h github.com -s delete_repo`.
 
 ## 6. Cleanup performed in this pass
 
@@ -378,3 +414,37 @@ comment and it cost two rounds to establish:
 > The machine measured is an Intel HD Graphics 4400 whose driver exposes no
 > hardware Direct3D 12 adapter, which is why `gpu.rs` treats a hardware adapter
 > on the legacy OpenGL backend as *not* qualifying.
+
+## 9. Scrolling: the measurement, and the fix that is not written yet
+
+Picked up again after the CI work because this is what was in flight. The
+number that matters was measured cursor-free on 13 Sep, by forcing the same
+work a scrolled frame forces (relayout + full raster + full blit):
+
+> **One full-window frame costs ~68.75 ms of CPU.** That is a 14.5 fps ceiling,
+> and the scroll tween publishes a message every 16 ms. It cannot keep up, so
+> every extra frame is queued, not drawn sooner -- which is exactly the
+> "laggy and not smooth, and burning CPU faking it" report.
+
+Cost is per-pixel, roughly 60-110 ns/px, scaling with what gets repainted; a
+scrolled frame repaints the whole content column. Facts that rule things out:
+
+- The renderer is `tiny-skia` (software), decided in `gpu.rs`, and that is the
+  *deliberate* choice on this machine: the only hardware adapter is a 2013
+  Intel HD 4400 on the legacy OpenGL path, measured at ~3x the CPU and ~38x the
+  committed memory of rasterising on the CPU.
+- There is exactly one blur in the UI (`hero_tile`'s 28 px glow), so blur is not
+  the cost. iced recomputes a per-pixel SDF and builds a new pixmap for it every
+  frame, so it is worth watching if the tile ever gets drawn off the Home page.
+- `iced_tiny_skia` returns early when damage is empty, but softbuffer presents
+  the whole buffer -- there is no partial present. Any changed frame pays the
+  full 3.5 MB blit.
+- Every `scroll_to` command rebuilds the **entire** interface (a second
+  `view()` + layout per frame), confirmed in `iced_winit`'s `AboutToWait` arm.
+
+The design chosen, not yet written into `scroll.rs`: make the tween a function
+of **elapsed time** rather than a fixed per-frame easing factor, and pace its
+tick to what the machine can actually draw, so the frame count adapts itself
+and the timer can never publish faster than frames complete. Step 4 of the
+acceptance run in §8 is the one that falsifies it: park the pointer and watch
+CPU while one notch glides.
