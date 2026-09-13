@@ -3430,7 +3430,6 @@ impl PrismApp {
     }
 
     /// Mods of the selected instance, with enable/disable toggles.
-
     fn view_mods(&self) -> Element<'_, Message> {
         let (enabled, total) = self.mods.iter().fold((0, 0), |(enabled, total), entry| {
             (enabled + usize::from(entry.enabled), total + 1)
@@ -3819,13 +3818,21 @@ impl PrismApp {
         ]
         .spacing(8);
         if let Some(account) = &account {
-            let stale = account.needs_refresh(prism_core::util::now_millis());
             content = content.push(text(match account.entitled {
                 Some(true) => format!("Signed in as {} — this account owns Minecraft.", account.username),
                 Some(false) => format!("Signed in as {}, but no game entitlement was found.", account.username),
                 None => format!("Signed in as {}.", account.username),
             })
             .size(12));
+            // Said here rather than only next to the account row: the card is
+            // where a user looks when a launch is about to renew a token, and
+            // "expired" is a state that resolves itself or needs one click.
+            if account.needs_refresh(prism_core::util::now_millis()) {
+                content = content.push(
+                    text("The stored session has expired; the next launch renews it automatically.")
+                        .size(11),
+                );
+            }
         }
         if let Some(error) = &self.microsoft.error {
             content = content.push(text(format!("Sign-in failed: {error}")).size(12));

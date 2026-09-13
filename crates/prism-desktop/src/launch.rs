@@ -409,7 +409,7 @@ pub fn prepare_auth(
             uuid: session.uuid,
             name: session.name,
             access_token: session.access_token,
-            refresh_token: msa.refresh_token.clone().filter(|token| !token.is_empty()),
+            refresh_token: (!msa.refresh_token.is_empty()).then(|| msa.refresh_token.clone()),
             expires_at_ms,
         }),
     })
@@ -670,7 +670,7 @@ pub fn prepare_launch(
     }
     log(format!("command: {java_bin} {}", argv.join(" ")));
     let plan = LaunchPlan { java_bin, argv, cwd: game_root, main_jar, envs };
-    (LaunchReadiness::Ready(plan))
+    LaunchReadiness::Ready(plan)
 }
 
 /// Build the join-server target from instance settings, logging problems.
@@ -840,7 +840,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
         };
         let auth = MicrosoftAuth::with_prism_client_id();
         let prepared = match prepare_auth(&params.account, &auth, &mut log) {
-            Ok(prepared) => prepared,
+            Ok(prepared) => Some(prepared),
             Err(error) => {
                 log(format!("sign-in failed: {error} — not launching"));
                 None

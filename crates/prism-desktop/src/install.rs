@@ -547,19 +547,14 @@ fn run_assets(
             let _ = url;
         }
     }
-    reconstruct(assets, &index, report, log);
+    reconstruct(assets, &index, log);
 }
 
 /// Materialise the logical-name layout legacy indexes expect.
 ///
 /// Only reachable for `legacy` (into the instance's `resources/`) and `pre-1.6`
 /// (into `assets/virtual/<id>/`); a modern index returns immediately.
-fn reconstruct(
-    assets: &AssetPlan,
-    index: &AssetIndex,
-    report: &mut InstallReport,
-    log: &mut dyn FnMut(String),
-) {
+fn reconstruct(assets: &AssetPlan, index: &AssetIndex, log: &mut dyn FnMut(String)) {
     if assets.reconstruct.is_empty() {
         return;
     }
