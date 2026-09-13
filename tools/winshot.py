@@ -57,6 +57,11 @@ PW_RENDERFULLCONTENT = 0x00000002
 SW_RESTORE = 9
 SW_SHOW = 5
 
+# Below this a "window" is a helper, an IME host or a tooltip rather than the
+# app's own frame.
+MIN_WINDOW_WIDTH = 400
+MIN_WINDOW_HEIGHT = 300
+
 ENUMPROC = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 
 
@@ -195,7 +200,14 @@ def grab(hwnd, method="auto"):
     activate(hwnd)
     time.sleep(0.7)
     left, top, right, bottom = window_rect(hwnd)
-    image = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    try:
+        image = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    except OSError:
+        # A grab can lose the race with the window being raised; one retry after
+        # a longer pause is cheaper than a whole re-run.
+        time.sleep(1.5)
+        left, top, right, bottom = window_rect(hwnd)
+        image = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
     return image.convert("RGB"), "screen"
 
 
@@ -244,10 +256,18 @@ def main():
         # moment that happens.
         proc = subprocess.Popen([os.path.abspath(args.launch)], cwd=cwd)
         hwnd = None
+        # Wait for the *real* window, not the first thing the process puts on
+        # screen. A launcher opens small helper windows -- an IME host, a hidden
+        # 6x6 -- before its own, and `find_window` only prefers the largest among
+        # whatever exists at that instant, so breaking on "something visible"
+        # latches onto the helper and captures it.
         for _ in range(160):
-            hwnd = find_window(pid=proc.pid)
-            if hwnd:
-                break
+            candidate = find_window(pid=proc.pid)
+            if candidate:
+                left, top, right, bottom = window_rect(candidate)
+                if right - left >= MIN_WINDOW_WIDTH and bottom - top >= MIN_WINDOW_HEIGHT:
+                    hwnd = candidate
+                    break
             time.sleep(0.25)
     else:
         name = args.process or (args.title and (args.title + ".exe"))
@@ -261,6 +281,13 @@ def main():
         return 2
 
     time.sleep(args.settle)
+
+    # Resolve again once the app has settled: the largest visible window of the
+    # process is the one worth shooting, and by now there is no chance of
+    # picking up a helper that appeared first.
+    settled = find_window(pid=proc.pid) if proc is not None else find_window(title=args.title)
+    if settled is not None:
+        hwnd = settled
 
     for click in args.click:
         x, y = (float(v) for v in click.split(","))

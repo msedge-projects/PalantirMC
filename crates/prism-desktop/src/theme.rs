@@ -28,10 +28,11 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+use iced::gradient::Linear;
 use iced::overlay::menu;
 use iced::theme::Palette as IcedPalette;
 use iced::widget::{button, checkbox, container, pick_list, scrollable, text_input};
-use iced::{Border, Color, Font, Theme};
+use iced::{Background, Border, Color, Font, Gradient, Radians, Theme};
 
 /// Build a color from sRGB bytes (const-friendly, readable hex in the source).
 pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -89,6 +90,16 @@ pub struct Palette {
     pub backdrop: Color,
     /// The dialog surface, a shade off the cards.
     pub modal: Color,
+    /// Top of the right panel's brand wash.
+    pub sidebar_top: Color,
+    /// Bottom of the right panel's brand wash.
+    pub sidebar_bottom: Color,
+    /// A card inside the right panel.
+    pub sidebar_surface: Color,
+    /// An interactive row inside one of those cards.
+    pub sidebar_row: Color,
+    /// The panel's section divider and its left edge.
+    pub sidebar_border: Color,
 }
 
 impl Palette {
@@ -121,6 +132,23 @@ impl Palette {
             hero: rgb(0x13, 0x1F, 0x17),            // --brand-gradient-strong-bg, light end
             backdrop: alpha(rgb(0x16, 0x18, 0x1C), 0.64), // --splash-overlay
             modal: rgb(0x27, 0x29, 0x2E),           // surface-3: a modal is a card that floats
+            // The right panel is not a flat raised strip in the reference --
+            // `.app-sidebar` paints `--brand-gradient-bg`, which resolves to a
+            // brand wash over the page colour. Measured down its own empty
+            // gutter it ramps `#182524` at the top to `#131a1a` at the bottom,
+            // dead straight (the midpoint predicts within one level), so a
+            // two-stop ramp is the whole of it. Without this the panel read as
+            // a lighter strip beside the page instead of as the page tinted.
+            sidebar_top: rgb(0x18, 0x25, 0x24),
+            sidebar_bottom: rgb(0x13, 0x1A, 0x1A),
+            // Inside the panel, `--surface-4` and `--surface-5` are overridden
+            // to `--brand-gradient-button` and `--brand-gradient-border`, so
+            // cards and rows there are brand-tinted rather than neutral grey.
+            // Both measured flat: a card is `#2a3633`, a row inside it `#3a4341`
+            // (a step *lighter*, which is why rows keep their own token).
+            sidebar_surface: rgb(0x2A, 0x36, 0x33),
+            sidebar_row: rgb(0x3A, 0x43, 0x41),
+            sidebar_border: rgb(0x30, 0x3E, 0x38), // the section's 1px divider
         }
     }
 
@@ -158,6 +186,17 @@ impl Palette {
             hero: rgb(0xE6, 0xF4, 0xEC),            // brand gradient over a light surface
             backdrop: alpha(rgb(0xEB, 0xEB, 0xEB), 0.7),
             modal: rgb(0xF8, 0xF8, 0xF8),           // surface-3
+            // The dark panel's wash, re-expressed over this theme's page: green
+            // at ~6% fading to ~2%, which is what the dark stops measure as.
+            // Light `--color-brand` is green-600, so the tint follows it before
+            // being lightened toward the page.
+            sidebar_top: rgb(0xDD, 0xE7, 0xE2),
+            sidebar_bottom: rgb(0xE6, 0xEA, 0xE8),
+            // A light card is already near-white, so the tint moves the other
+            // way: the panel's cards step *down* from `surface` rather than up.
+            sidebar_surface: rgb(0xF2, 0xF8, 0xF5),
+            sidebar_row: rgb(0xE8, 0xF0, 0xEB),
+            sidebar_border: rgb(0xC9, 0xDB, 0xD2),
         }
     }
 
@@ -190,6 +229,14 @@ impl Palette {
             hero: rgb(0x13, 0x1F, 0x17),
             backdrop: alpha(rgb(0x00, 0x00, 0x00), 0.7),
             modal: rgb(0x10, 0x10, 0x13),           // surface-3
+            // The dark panel's wash and surfaces, each moved by the same step
+            // that separates this theme's `surface-3` from the dark one, so the
+            // panel keeps its relationship to the cards rather than going grey.
+            sidebar_top: rgb(0x01, 0x0C, 0x09),
+            sidebar_bottom: rgb(0x00, 0x01, 0x00),
+            sidebar_surface: rgb(0x13, 0x1D, 0x18),
+            sidebar_row: rgb(0x23, 0x2A, 0x26),
+            sidebar_border: rgb(0x19, 0x25, 0x1D),
         }
     }
 }
@@ -350,6 +397,11 @@ palette_accessors! {
     on_accent(on_accent): "Text on top of the accent.",
     danger(danger): "Destructive actions.",
     danger_hover(danger_hover): "Destructive, hovered.",
+    sidebar_top(sidebar_top): "Top of the right panel's brand wash.",
+    sidebar_bottom(sidebar_bottom): "Bottom of the right panel's brand wash.",
+    sidebar_surface(sidebar_surface): "A card inside the right panel.",
+    sidebar_row(sidebar_row): "An interactive row inside one of those cards.",
+    sidebar_border(sidebar_border): "The panel's section divider and its left edge.",
     // `hero`, `backdrop` and `modal` are deliberately absent: their only
     // consumers are the three container styles a few lines below, which read
     // them through `palette()`, and two functions of the same name would
@@ -372,6 +424,12 @@ pub const R_CHIP: f32 = 8.0;
 pub const R_RAIL: f32 = 24.0;
 /// Modal corner radius: `--radius-lg`, as cards.
 pub const R_MODAL: f32 = 16.0;
+/// Corner radius on the page pane's top-left, and only there.
+///
+/// The reference's `.app-contents` sets `border-top-left-radius:
+/// var(--radius-xl)`, so the page is a panel whose one rounded corner notches
+/// into the chrome. It is `--radius-xl` (20), one rung above a card.
+pub const R_PANE: f32 = 20.0;
 
 /// The family name the five bundled Inter faces register under.
 ///
@@ -451,6 +509,67 @@ pub fn app_bg(_: &Theme) -> container::Appearance {
 /// around one.
 pub fn rail(_: &Theme) -> container::Appearance {
     container::Appearance { background: Some(surface().into()), ..Default::default() }
+}
+
+/// The page pane, inside the chrome.
+///
+/// This is the reference's `.app-contents`: the page is a *panel* the chrome
+/// wraps, not a strip beside it, and its top-left corner is `--radius-xl` so
+/// the rail and the bar meet in a notch. The radius needs the background to be
+/// painted here rather than left to the window, because a container's radius
+/// only cuts what that container draws -- behind it the chrome would show
+/// through the corner instead of the corner being cut out of the pane.
+pub fn pane(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(bg().into()),
+        border: Border {
+            radius: [R_PANE, 0.0, 0.0, 0.0].into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The right panel: the reference's `.app-sidebar`, painted with
+/// `--brand-gradient-bg`.
+///
+/// A gradient rather than a colour because that is what the token is, and the
+/// tiny-skia backend rasterises one in the same pass as a solid fill (`fill_quad`
+/// builds a `Shader`, so a linear ramp costs a gradient object per frame, not
+/// per pixel). The angle is `PI`, which in iced is a gradient running straight
+/// down: `to_distance` subtracts a quarter turn, so `PI` puts stop 0 at the top.
+pub fn sidebar(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(Background::Gradient(Gradient::Linear(
+            Linear::new(Radians(std::f32::consts::PI))
+                .add_stop(0.0, sidebar_top())
+                .add_stop(1.0, sidebar_bottom()),
+        ))),
+        ..Default::default()
+    }
+}
+
+/// A card inside the right panel: brand-tinted, not the neutral raised grey.
+pub fn sidebar_card(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(sidebar_surface().into()),
+        border: Border { radius: R_CARD.into(), width: 1.0, color: sidebar_border() },
+        ..Default::default()
+    }
+}
+
+/// One row inside such a card (`bg-button-bg` + `border-button-border` in the
+/// reference), used for the "Getting started" steps.
+///
+/// Where the reference draws a 40px row, the height is set by the caller -- this
+/// style is the fill, the hairline border and the 12px corner.
+pub fn sidebar_step(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(sidebar_row().into()),
+        border: Border { radius: R_BUTTON.into(), width: 1.0, color: sidebar_border() },
+        text_color: Some(text()),
+        ..Default::default()
+    }
 }
 
 /// A hairline between the raised chrome and the page.
@@ -547,6 +666,32 @@ pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
     move |_: &Theme| container::Appearance {
         background: Some(color.into()),
         border: Border { radius: 4.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+/// A filled circle of an arbitrary color.
+///
+/// Distinct from [`pill`] on purpose: a pill is a 4px-radius chip whose size is
+/// set by its label, a circle is a fixed dot. The reference's completed-step
+/// marker is the latter -- an 18px `rounded-full` disc -- and a pill-shaped one
+/// would read as a rounded square at that size.
+pub fn circle(color: Color) -> impl Fn(&Theme) -> container::Appearance {
+    move |_: &Theme| container::Appearance {
+        background: Some(color.into()),
+        // A radius past half the box is clamped, so this is a circle at any size
+        // without the caller having to know the box.
+        border: Border { radius: 999.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+/// The empty ring of a checklist step that is not done yet: the reference's
+/// `RadioButtonIcon`, which is a 1.5px outline rather than a filled dot.
+pub fn step_ring(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: None,
+        border: Border { radius: 999.0.into(), width: 1.5, color: text_dim() },
         ..Default::default()
     }
 }

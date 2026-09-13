@@ -2844,11 +2844,23 @@ impl PrismApp {
         if self.modal().is_open() {
             return self.view_modal();
         }
-        container(self.view_page())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(18)
-            .into()
+        // Two containers, not one, and the outer one is the reason the corner
+        // reads at all: iced cuts a radius out of the background the container
+        // itself painted, so a panel rounded over a bare window would show the
+        // window -- which is the same colour as the panel -- and the notch would
+        // vanish. Painting the chrome underneath first is what makes the cut
+        // reveal chrome, exactly as `.app-contents` does over the rail.
+        container(
+            container(self.view_page())
+                .style(theme::pane())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(18),
+        )
+        .style(theme::rail)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     fn view_page(&self) -> Element<'_, Message> {
@@ -4032,7 +4044,9 @@ impl PrismApp {
 
     /// Right sidebar: getting started, account, selection, run state, about.
     fn view_sidebar(&self) -> Element<'_, Message> {
-        let mut side = column![].spacing(12).padding(14);
+        // `p-4` between the panel's edge and its first card, and between
+        // sections, is what the reference uses for every section of this column.
+        let mut side = column![].spacing(12).padding(16);
         side = side.push(self.card_getting_started());
         side = side.push(self.card_account());
         if let Some(card) = self.selected_card() {
@@ -4043,7 +4057,7 @@ impl PrismApp {
         }
         side = side.push(self.card_version());
         container(scrollable(side).style(iced::theme::Scrollable::custom(theme::Thin)).height(Length::Fill))
-            .style(theme::rail)
+            .style(theme::sidebar)
             .width(Length::Fixed(SIDEBAR_CONTAINER_WIDTH))
             .height(Length::Fill)
             .into()
@@ -4055,28 +4069,51 @@ impl PrismApp {
             ("Create an instance", !self.cards.is_empty()),
             ("Press Play", self.cards.iter().any(|card| card.playtime_secs > 0)),
         ];
+        // The reference's step row is `h-10 px-4 gap-2 rounded-xl`, i.e. exactly
+        // 40px tall with 16px of side padding, and its marker is the one place
+        // the two states differ completely: an 18px filled brand disc holding a
+        // 12px check once done, and a 20px hollow ring while not. The label
+        // dims to secondary and strikes through when complete rather than the
+        // row disappearing, so the panel does not change height underneath the
+        // pointer the moment a step is finished.
         let mut rows = column![].spacing(8);
         for (label, done) in steps {
             let marker: Element<'_, Message> = if done {
-                container(glyph("check", 12.0, theme::accent()))
-                    .style(theme::chip_neutral)
-                    .padding([3, 6])
+                container(glyph("check", 11.0, theme::on_accent()))
+                    .style(theme::circle(theme::accent()))
+                    .width(Length::Fixed(18.0))
+                    .height(Length::Fixed(18.0))
+                    .center_x()
+                    .center_y()
                     .into()
             } else {
-                container(
-                    container(text(""))
-                        .style(theme::pill(theme::text_dim()))
-                        .width(Length::Fixed(6.0))
-                        .height(Length::Fixed(6.0)),
-                )
-                .style(theme::chip_neutral)
-                .padding([6, 9])
-                .into()
+                container(text(""))
+                    .style(theme::step_ring())
+                    .width(Length::Fixed(20.0))
+                    .height(Length::Fixed(20.0))
+                    .into()
             };
             rows = rows.push(
-                row![marker, text(label).size(13).width(Length::Fill)]
+                container(
+                    row![
+                        marker,
+                        text(label)
+                            .size(16)
+                            .font(theme::medium())
+                            .width(Length::Fill)
+                            .style(iced::theme::Text::Color(if done {
+                                theme::text_muted()
+                            } else {
+                                theme::text()
+                            })),
+                    ]
                     .spacing(8)
                     .align_items(iced::Alignment::Center),
+                )
+                .style(theme::sidebar_step)
+                .padding([0, 16])
+                .height(Length::Fixed(40.0))
+                .width(Length::Fill),
             );
         }
         container(
@@ -4085,7 +4122,7 @@ impl PrismApp {
                     Image::new(brand::logo_handle())
                         .width(Length::Fixed(20.0))
                         .height(Length::Fixed(20.0)),
-                    text("Getting started").size(15).font(theme::bold()),
+                    text("Getting started").size(16).font(theme::semibold()),
                 ]
                 .spacing(8)
                 .align_items(iced::Alignment::Center),
@@ -4098,7 +4135,7 @@ impl PrismApp {
             ]
             .spacing(12),
         )
-        .style(theme::card)
+        .style(theme::sidebar_card)
         .padding(14)
         .width(Length::Fill)
         .into()
@@ -4108,7 +4145,7 @@ impl PrismApp {
         let signed_in = self.accounts.selected_account().is_some();
         container(
             column![
-                text("Playing as").size(15).font(theme::bold()),
+                text("Playing as").size(16).font(theme::semibold()),
                 row![
                     icon_tile("steve", 40.0, signed_in),
                     column![
@@ -4136,7 +4173,7 @@ impl PrismApp {
             ]
             .spacing(10),
         )
-        .style(theme::card)
+        .style(theme::sidebar_card)
         .padding(14)
         .width(Length::Fill)
         .into()
@@ -4152,7 +4189,7 @@ impl PrismApp {
             row![
                 icon_tile(&card.icon, CARD_ICON, true),
                 column![
-                    text(card.name.clone()).size(15).font(theme::bold()),
+                    text(card.name.clone()).size(16).font(theme::semibold()),
                     text(card.subtitle()).size(11),
                 ]
                 .spacing(3)
@@ -4236,14 +4273,18 @@ impl PrismApp {
                 .padding([6, 10])
                 .width(Length::Fill),
         );
-        container(body).style(theme::card).padding(14).width(Length::Fill).into()
+        container(body)
+            .style(theme::sidebar_card)
+            .padding(14)
+            .width(Length::Fill)
+            .into()
     }
 
     fn card_running(&self, id: &str) -> Element<'_, Message> {
         container(
             column![                    row![
                     container(text("")).style(theme::pill(theme::accent())).width(Length::Fixed(8.0)).height(Length::Fixed(8.0)),
-                    text("Running").size(15).font(theme::bold()),
+                    text("Running").size(16).font(theme::semibold()),
                 ]
                 .spacing(8)
                 .align_items(iced::Alignment::Center),
@@ -4257,7 +4298,7 @@ impl PrismApp {
             ]
             .spacing(8),
         )
-        .style(theme::card)
+        .style(theme::sidebar_card)
         .padding(14)
         .width(Length::Fill)
         .into()
@@ -4266,7 +4307,9 @@ impl PrismApp {
     fn card_version(&self) -> Element<'_, Message> {
         container(
             column![
-                text(format!("{} v{}", brand::APP_NAME, brand::version())).size(13).font(theme::bold()),
+                text(format!("{} v{}", brand::APP_NAME, brand::version()))
+                    .size(16)
+                    .font(theme::semibold()),
                 text(format!("Data root: {}", self.paths.root.display())).size(10),
                 row![
                     button(text("About").size(12))
@@ -4284,7 +4327,7 @@ impl PrismApp {
             ]
             .spacing(8),
         )
-        .style(theme::card)
+        .style(theme::sidebar_card)
         .padding(14)
         .width(Length::Fill)
         .into()
