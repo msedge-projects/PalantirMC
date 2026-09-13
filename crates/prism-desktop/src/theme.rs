@@ -367,6 +367,9 @@ pub const R_CARD: f32 = 16.0;
 pub const R_BUTTON: f32 = 12.0;
 /// Chip/pill corner radius: `--radius-sm`.
 pub const R_CHIP: f32 = 8.0;
+/// Corner radius that makes a 48px rail button a circle. The reference's rail
+/// entries are `rounded-full`, and at 48px square that is 24.
+pub const R_RAIL: f32 = 24.0;
 /// Modal corner radius: `--radius-lg`, as cards.
 pub const R_MODAL: f32 = 16.0;
 
@@ -438,9 +441,27 @@ pub fn app_bg(_: &Theme) -> container::Appearance {
     container::Appearance { background: Some(bg().into()), ..Default::default() }
 }
 
-/// Left icon rail / right sidebar.
+/// Left icon rail, title bar and right panel: the raised chrome.
+///
+/// All three are `bg-bg-raised` in the reference, which in its palette is
+/// `surface-3` -- the same surface a card is -- and the page sits *inside* that
+/// chrome rather than beside it. Read off its own window: `#27292e` across the
+/// rail, the bar and the panel, against `#16181c` for the content. Ours was
+/// `surface-2`, which read as a slightly lighter page rather than as a frame
+/// around one.
 pub fn rail(_: &Theme) -> container::Appearance {
-    container::Appearance { background: Some(bg_rail().into()), ..Default::default() }
+    container::Appearance { background: Some(surface().into()), ..Default::default() }
+}
+
+/// A hairline between the raised chrome and the page.
+///
+/// A 1px fill rather than `horizontal_rule`, because the rule widget takes its
+/// colour from the theme's own rule style while these two lines have a measured
+/// value: `#42444a`, the reference's `surface-5`, on the bar's bottom edge and
+/// on the rail's right edge. iced paints a container's border on all four edges,
+/// so a line that exists on exactly one edge has to be its own widget.
+pub fn separator(_: &Theme) -> container::Appearance {
+    container::Appearance { background: Some(border_strong().into()), ..Default::default() }
 }
 
 /// Raised card with a hairline border.
@@ -744,15 +765,20 @@ impl Btn {
                 ..Default::default()
             },
             Role::Rail { active } => button::Appearance {
+                // The reference's active entry is `--color-brand-highlight` --
+                // the accent at 25% -- on a fully round button, and its hover is
+                // `--color-button-bg`, which is `surface-4`. Ours was a 12px
+                // rounded square at 16% over a 7% white wash, which read as a
+                // different component rather than as the same one lit up.
                 background: if active {
-                    Some(alpha(accent(), 0.16).into())
+                    Some(alpha(accent(), 0.25).into())
                 } else if hovered {
-                    Some(alpha(text(), 0.07).into())
+                    Some(surface_hover().into())
                 } else {
                     None
                 },
                 text_color: if active { accent() } else if hovered { text() } else { text_dim() },
-                border: Border { radius: 12.0.into(), ..Default::default() },
+                border: Border { radius: R_RAIL.into(), ..Default::default() },
                 ..Default::default()
             },
             Role::Chip { active } => button::Appearance {

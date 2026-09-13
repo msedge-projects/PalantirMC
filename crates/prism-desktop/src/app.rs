@@ -65,14 +65,43 @@ pub const CONSOLE_LINE_CAP: usize = 20_000;
 /// How many of the newest console lines the view renders.
 pub const CONSOLE_VIEW_LINES: usize = 500;
 
-/// Icon-rail width.
-pub const RAIL_WIDTH: f32 = 68.0;
+/// Icon-rail width, as the eye measures it.
+///
+/// 64 is the reference's `--left-bar-width` (`4rem`), which is 8px of padding
+/// above and below a 48px button and 5px beside it. Ours was 68 with 10px all
+/// round, so the rail was 4px too wide *and* its icons sat further from the
+/// edge than the reference's do.
+///
+/// This is the drawn strip, not the container: the window is undecorated, so
+/// the shell draws its own resize bands and the west one is painted in the
+/// rail's colour. The container is [`RAIL_CONTAINER_WIDTH`] and the band makes
+/// up the difference, which is why the strip measures 64 rather than 58.
+pub const RAIL_WIDTH: f32 = 64.0;
 
-/// Right sidebar width.
-pub const SIDEBAR_WIDTH: f32 = 304.0;
+/// The width the rail's own container is laid out at.
+pub const RAIL_CONTAINER_WIDTH: f32 = RAIL_WIDTH - native::RESIZE_BAND;
+
+/// Side of a rail entry.
+///
+/// The reference's rail buttons are `w-12 h-12` -- 48px square -- with a 24px
+/// icon centred in them (`text-2xl`).
+pub const RAIL_BUTTON: f32 = 48.0;
+
+/// Right panel width, measured the same way as [`RAIL_WIDTH`].
+///
+/// 300 is the reference's `--right-bar-width`. Ours was 304, which nobody would
+/// have seen; it changed only because the number is now a transcription of the
+/// reference rather than a value that merely looked about right.
+pub const SIDEBAR_WIDTH: f32 = 300.0;
+
+/// The width the right panel's own container is laid out at.
+pub const SIDEBAR_CONTAINER_WIDTH: f32 = SIDEBAR_WIDTH - native::RESIZE_BAND;
 
 /// Title-bar height.
-pub const TITLE_BAR_HEIGHT: f32 = 46.0;
+///
+/// 48 is the reference's `--top-bar-height` (`3rem`), measured off its window,
+/// which is also where the 1px rule under the bar was measured.
+pub const TITLE_BAR_HEIGHT: f32 = 48.0;
 
 /// Padding above and below the title bar's contents.
 pub const TITLE_BAR_PAD: f32 = 6.0;
@@ -2595,14 +2624,24 @@ impl PrismApp {
 
         let body = row![
             self.view_rail(),
+            // The reference's 1px hairline between the rail and the page.
+            rail_hairline(),
             self.view_content(),
             self.view_sidebar(),
         ]
         .height(Length::Fill);
 
-        let shell = column![self.view_title_bar(), body, self.view_status_bar()]
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let shell = column![
+            self.view_title_bar(),
+            // ...and the one under the bar. Both are the separators between the
+            // raised chrome and the content, drawn rather than set as borders
+            // because iced paints a container's border on every edge.
+            hairline(),
+            body,
+            self.view_status_bar(),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         // An undecorated window has no frame of its own, so the shell draws one
         // itself: a band of resize grips on every edge and corner, painted in
@@ -2680,7 +2719,7 @@ impl PrismApp {
         let maximize_hovered = native::maximize_button_hovered();
         let maximized = self.window_is_maximized();
 
-        row![
+        let bar = row![
             dragging_area,
             search,
             grabbable(
@@ -2721,8 +2760,17 @@ impl PrismApp {
         .spacing(TITLE_BAR_SPACING)
         .padding(title_bar_padding())
         .align_items(iced::Alignment::Center)
-        .height(Length::Fixed(TITLE_BAR_HEIGHT))
-        .into()
+        .height(Length::Fixed(TITLE_BAR_HEIGHT));
+
+        // The bar is the raised surface in the reference, not the page's own
+        // colour: the bar, the rail and the right panel are one chrome and the
+        // content sits inside it. Without this the bar was page-coloured, so the
+        // chrome read as three unrelated strips with the page showing through.
+        container(bar)
+            .style(theme::rail)
+            .width(Length::Fill)
+            .height(Length::Fixed(TITLE_BAR_HEIGHT))
+            .into()
     }
 
     /// "No instances running" / "Running <name>" chip.
@@ -2749,7 +2797,12 @@ impl PrismApp {
 
     /// Icon rail: pages, then the create button, settings and the account.
     fn view_rail(&self) -> Element<'_, Message> {
-        let mut rail = column![].spacing(6).padding([10, 10]).align_items(iced::Alignment::Center);
+        // The reference's rail is `p-[0.5rem] pt-0 gap-[0.25rem]`: 4px between
+        // entries and nothing above the first one, so the stack meets the bar and
+        // reads as attached to it. The horizontal padding is what is left of the
+        // 48px button inside the 58px container.
+        let mut rail =
+            column![].spacing(4).padding([0, 5]).align_items(iced::Alignment::Center);
         for page in Page::rail() {
             rail = rail.push(rail_icon(
                 page.icon(),
@@ -2781,7 +2834,7 @@ impl PrismApp {
         ));
         container(rail)
             .style(theme::rail)
-            .width(Length::Fixed(RAIL_WIDTH))
+            .width(Length::Fixed(RAIL_CONTAINER_WIDTH))
             .height(Length::Fill)
             .into()
     }
@@ -2821,7 +2874,7 @@ impl PrismApp {
     fn view_screenshots(&self) -> Element<'_, Message> {
         let header = column![
             row![
-                text("Screenshots").size(22).font(theme::bold()),
+                text("Screenshots").size(24).font(theme::semibold()),
                 if self.shots.tiles.is_empty() {
                     text("").size(12)
                 } else {
@@ -2911,7 +2964,7 @@ impl PrismApp {
             .collect();
         let mut grid = column![
             row![
-                text("Instances").size(22).font(theme::bold()),
+                text("Instances").size(24).font(theme::semibold()),
                 text(format!("{}", self.cards.len())).size(13),
                 horizontal_space(),
                 button(row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)].spacing(6))
@@ -3016,7 +3069,7 @@ impl PrismApp {
         };
         let mut body = column![
             row![
-                text(format!("Browse {}", self.browse.content_type.label())).size(22).font(theme::bold()),
+                text(format!("Browse {}", self.browse.content_type.label())).size(24).font(theme::semibold()),
                 horizontal_space(),
                 text(format!("Installing into: {target}")).size(12),
             ]
@@ -3117,7 +3170,7 @@ impl PrismApp {
         });
         let mut body = column![
             row![
-                text("Mods").size(22).font(theme::bold()),
+                text("Mods").size(24).font(theme::semibold()),
                 chip(format!("{enabled}/{total} enabled"), theme::chip),
                 horizontal_space(),
                 button(text("Find more mods").size(12))
@@ -3170,7 +3223,7 @@ impl PrismApp {
     fn view_worlds(&self) -> Element<'_, Message> {
         let mut body = column![
             row![
-                text("Worlds").size(22).font(theme::bold()),
+                text("Worlds").size(24).font(theme::semibold()),
                 chip(format!("{}", self.worlds.len()), theme::chip_neutral),
                 horizontal_space(),
                 button(text("Open saves folder").size(12))
@@ -3217,7 +3270,7 @@ impl PrismApp {
         // (`scroll::LOG_RENDER_CAP`), which is what makes the wheel cheap here.
         column![
             row![
-                text("Logs").size(22).font(theme::bold()),
+                text("Logs").size(24).font(theme::semibold()),
                 chip(format!("{total} line(s)"), theme::chip_neutral),
                 horizontal_space(),
                 checkbox("Autoscroll", self.autoscroll)
@@ -3261,7 +3314,7 @@ impl PrismApp {
         let card = self.selected_card().cloned();
         let mut body = column![
             row![
-                text("Instance settings").size(22).font(theme::bold()),
+                text("Instance settings").size(24).font(theme::semibold()),
                 if let Some(card) = &card {
                     chip(card.subtitle(), theme::chip)
                 } else {
@@ -3391,7 +3444,7 @@ impl PrismApp {
     /// Accounts page.
     fn view_accounts(&self) -> Element<'_, Message> {
         let mut body = column![
-            text("Accounts").size(22).font(theme::bold()),
+            text("Accounts").size(24).font(theme::semibold()),
             text("Offline accounts play single-player and offline servers. They are stored in accounts.json next to your instances.")
                 .size(12),
             horizontal_rule(1u16),
@@ -3991,7 +4044,7 @@ impl PrismApp {
         side = side.push(self.card_version());
         container(scrollable(side).style(iced::theme::Scrollable::custom(theme::Thin)).height(Length::Fill))
             .style(theme::rail)
-            .width(Length::Fixed(SIDEBAR_WIDTH))
+            .width(Length::Fixed(SIDEBAR_CONTAINER_WIDTH))
             .height(Length::Fill)
             .into()
     }
@@ -4352,12 +4405,12 @@ impl PrismApp {
 /// reference UI's answer to that: a single icon per destination, named on hover.
 fn rail_icon(icon: &str, label: &str, active: bool, message: Message) -> Element<'static, Message> {
     let color = if active { theme::accent() } else { theme::text_muted() };
-    let tile = button(container(glyph(icon, 22.0, color)).center_x().center_y())
+    let tile = button(container(glyph(icon, 24.0, color)).center_x().center_y())
         .on_press(message)
         .style(theme::rail_button(active))
-        .padding([10, 10])
-        .width(Length::Fixed(48.0))
-        .height(Length::Fixed(46.0));
+        .padding([0, 0])
+        .width(Length::Fixed(RAIL_BUTTON))
+        .height(Length::Fixed(RAIL_BUTTON));
     tooltip(
         tile,
         container(text(label.to_string()).size(12))
@@ -4410,6 +4463,30 @@ fn icon_tile(key: &str, side: f32, accent: bool) -> Element<'static, Message> {
 }
 
 /// A whole instance card: clickable body + inline play button.
+/// A 1px hairline between the raised chrome and the page.
+///
+/// A container rather than `horizontal_rule`, because that widget takes its
+/// colour from the theme's own rule style while this line has a measured value:
+/// `#42444a`, the reference's `surface-5`, along the bar's bottom edge and the
+/// rail's right edge. A container's border is drawn on every edge, so a line
+/// that exists on exactly one edge has to be its own widget.
+fn hairline() -> Element<'static, Message> {
+    container(text(""))
+        .style(theme::separator)
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .into()
+}
+
+/// The vertical twin of [`hairline`], for the rail's right edge.
+fn rail_hairline() -> Element<'static, Message> {
+    container(text(""))
+        .style(theme::separator)
+        .width(Length::Fixed(1.0))
+        .height(Length::Fill)
+        .into()
+}
+
 fn instance_card(card: &InstanceCard, selected: bool) -> Element<'static, Message> {
     let body_card = card.clone();
     let name = card.name.clone();
@@ -4425,8 +4502,8 @@ fn instance_card(card: &InstanceCard, selected: bool) -> Element<'static, Messag
     };
 
     let info = column![
-        text(name).size(15).font(theme::bold()),
-        text(subtitle).size(11),
+        text(name).size(16).font(theme::semibold()),
+        text(subtitle).size(14),
         row![
             chip(playtime, theme::chip_neutral),
             chip(format!("{} mods", body_card.mods_total), theme::chip_neutral),
