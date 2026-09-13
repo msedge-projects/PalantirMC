@@ -527,3 +527,34 @@ at.
 2. **The Modrinth 1:1 pass.** Tokens are in (palette in `theme.rs`, Inter via
    `Settings::fonts`), but the comparison has been against the extracted
    Omorphia stylesheet, not against the running app side by side.
+
+### The first green run of that work (12dd0ef)
+
+`Test workspace`, `Lint`, `Build exe (msvc)` and `Build exe (gnu)` all passed.
+Both artifacts were downloaded, staged into `dist/`, and their sha256 checked
+against the sidecars the runner itself wrote -- both MATCH, so the binaries are
+byte-for-byte what CI produced. `tools/launch_check.py`, off-screen and
+unactivated: up in 0.15 s, 28.8 MB working set, UI thread responsive, and no
+idle CPU on the gnu build (the msvc build showed 15.6 ms in two of four windows,
+the same bursty transient recorded in §10, not a target difference).
+
+Getting there took three pushes, and CI found three real things, none of which a
+local build would have:
+
+1. `&include_bytes!(..)[..]` fails in a `static` on a newer toolchain -- slicing
+   needs `std::ops::Index` in const, which is not stable. Local rustc accepted
+   it; the runner's did not.
+2. My own test asserted the frame-cost rule I had *intended* rather than the one
+   I wrote: a single slow frame raised the measured cost, so one page fault
+   could have turned the glide off for the session. The rule is now asymmetric on
+   purpose -- one fast frame resumes animating, two slow ones in a row stop it --
+   because believing a fast machine is slow is the expensive mistake.
+3. The light palette's accent did not clear the contrast floor the palette's own
+   doc promises: 2.71:1 as text on `#F8F8F8`, and 2.88:1 for white on it. The
+   reference ladder has the rung for this (green-700, 3.83:1 and 4.06:1), so the
+   accent moved down one and light's `--color-brand` became the hover.
+
+Two of those three were caught before the packaging jobs started, because
+`package` depends on `test` -- so a compile or test failure costs about 4 billed
+minutes, not the 28 a full run costs. The expensive failure is the one that only
+appears in a release build.
