@@ -1,20 +1,30 @@
-# Keeps the two supply chains that can break a Windows launcher current: the
-# crates (a wgpu or iced bump is what changes what the exe needs from the OS,
-# which is exactly what `.github/scripts/check_exe.py` guards) and the actions
-# themselves.
+# One grouped PR per ecosystem, and majors deliberately not offered.
+#
+# Why the shape changed: every open pull request gets CI re-run whenever
+# `master` moves, so eight open Dependabot PRs meant every ordinary push
+# started nine pipelines instead of one. On a private repo paying 2x for
+# Windows runners that is the single largest cost in the project, and it was
+# being paid for information nobody had acted on.
+#
+# Majors are suppressed because they are the ones that need code changes
+# (`thiserror` 1 -> 2, `image` 0.24 -> 0.25, `windows-sys` 0.52 -> 0.61,
+# `sha2` 0.10 -> 0.11 all touch call sites), so they arrive as a permanent
+# open PR rather than a mergeable one. They are still visible on demand --
+# drop the `ignore` block and Dependabot will offer them again.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     groups:
-      # One PR for the patch-level churn instead of twenty, and the majors stay
-      # separate because those are the ones that need reading.
-      cargo-patch:
-        applies-to: version-updates
-        update-types: ["patch"]
+      cargo:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"
 
@@ -22,10 +32,13 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
     groups:
       actions:
-        applies-to: version-updates
+        patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "ci"

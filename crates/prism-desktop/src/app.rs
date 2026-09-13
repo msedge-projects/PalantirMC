@@ -1965,8 +1965,10 @@ impl PrismApp {
             Message::PageSelected(page) => {
                 self.page = page;
                 // Every page starts at its own top: a tween left over from the
-                // page you came from would scroll the new one by itself.
-                self.page_scroll = scroll::ScrollAnim::default();
+                // page you came from would scroll the new one by itself. What
+                // `restart` deliberately keeps is the measured frame cost --
+                // that belongs to the machine, not the page.
+                self.page_scroll.restart();
                 if page == Page::Screenshots {
                     self.start_screenshot_scan();
                 }
@@ -1980,14 +1982,14 @@ impl PrismApp {
                 Command::none()
             }
             Message::PageWheel(wheel) => {
-                self.page_scroll.wheel(wheel);
+                self.page_scroll.wheel(wheel, Instant::now());
                 Command::none()
             }
             Message::PageScrollTick => {
                 // One frame: ease toward the target and hand the offset to iced.
                 // `tick` lands exactly on the target, so the last frame leaves
                 // nothing to animate and the subscription stands down.
-                self.page_scroll.tick();
+                self.page_scroll.tick(Instant::now());
                 scrollable::scroll_to(
                     page_scroll_id(),
                     scrollable::AbsoluteOffset {
@@ -5368,11 +5370,18 @@ mod tests {
 
         // Frames now carry it there, and it lands exactly on the target rather
         // than near it — which is what lets the frame subscription stop.
+        //
+        // The clock is the test's rather than the wall's, so what is counted
+        // here is the policy's frame budget and not how fast this machine
+        // happens to be: a tween whose length depended on the test box would be
+        // a tween that behaves differently on the reviewer's.
         let mut frames = 0;
+        let mut now = Instant::now();
         while app.scroll_state().animating() {
-            let _ = app.update(Message::PageScrollTick);
+            app.page_scroll.tick(now);
+            now += scroll::FRAME;
             frames += 1;
-            assert!(frames < 60, "the tween must finish in well under a second");
+            assert!(frames < 40, "the tween must finish in well under a second");
         }
         assert_eq!(app.scroll_state().offset, scroll::WHEEL_PIXELS_PER_NOTCH);
         assert!(frames >= 5, "a single frame would be the jump we are replacing");

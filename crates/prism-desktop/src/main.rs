@@ -105,6 +105,24 @@ fn install_hit_test() {
     let _ = native::install_hit_test();
 }
 
+/// The five Inter weights the shell draws with, carried in the binary.
+///
+/// Supplied through `Settings::fonts` rather than `iced::font::load`, and the
+/// difference is not cosmetic: settings are in place before the first frame, so
+/// the very first paint is already Inter, whereas a load command means a frame
+/// or two of fallback text plus five messages -- and here a message rebuilds the
+/// entire interface, so that would be five extra rebuilds during startup.
+///
+/// Subset by `tools/make_fonts.py` from Inter 3.19, the release Modrinth's own
+/// stylesheet pins. All five together are ~292 KB.
+static FONTS: [&[u8]; 5] = [
+    &include_bytes!("../assets/fonts/Inter-400.otf")[..],
+    &include_bytes!("../assets/fonts/Inter-500.otf")[..],
+    &include_bytes!("../assets/fonts/Inter-600.otf")[..],
+    &include_bytes!("../assets/fonts/Inter-700.otf")[..],
+    &include_bytes!("../assets/fonts/Inter-800.otf")[..],
+];
+
 fn main() -> iced::Result {
     // Decide the renderer from what this machine can actually provide, before
     // iced builds its compositor. See `gpu` for why this is a probe.
@@ -122,6 +140,14 @@ fn main() -> iced::Result {
     let mut settings = Settings::default();
     settings.window = window_settings();
     settings.antialiasing = false;
+    settings.fonts = FONTS
+        .iter()
+        .map(|bytes| std::borrow::Cow::Borrowed(*bytes))
+        .collect();
+    // Modrinth sets its entire interface at weight 500 (`--font-weight-text`),
+    // so the shell's default is the medium face rather than the regular one.
+    // Headings then ask for `theme::heading()` and everything else inherits.
+    settings.default_font = theme::medium();
     App::run(settings)
 }
 

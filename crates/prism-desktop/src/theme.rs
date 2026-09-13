@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use iced::overlay::menu;
 use iced::theme::Palette as IcedPalette;
 use iced::widget::{button, checkbox, container, pick_list, scrollable, text_input};
-use iced::{Border, Color, Font, Shadow, Theme, Vector};
+use iced::{Border, Color, Font, Theme};
 
 /// Build a color from sRGB bytes (const-friendly, readable hex in the source).
 pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -92,28 +92,35 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// The dark look: the reference client's own palette, and the default.
+    /// The dark look: Omorphia's dark theme, verbatim, and the default.
+    ///
+    /// Every value below is a token from
+    /// `modrinth/code`'s `packages/assets/styles/variables.scss` -- the sheet
+    /// the Modrinth App itself is painted from -- so this is a transcription
+    /// rather than an approximation of it. Each line names the token it came
+    /// from, because the mapping is not one-to-one (the palette has one
+    /// `border` where the design system has three).
     pub const fn dark() -> Palette {
         Palette {
-            bg: rgb(0x16, 0x18, 0x1C),
-            bg_rail: rgb(0x1B, 0x1E, 0x23),
-            surface: rgb(0x26, 0x29, 0x2F),
-            surface_hover: rgb(0x30, 0x34, 0x3B),
-            surface_input: rgb(0x1F, 0x22, 0x27),
-            border: rgb(0x33, 0x38, 0x40),
-            border_strong: rgb(0x46, 0x4C, 0x56),
-            text: rgb(0xED, 0xEF, 0xF2),
-            text_muted: rgb(0x9C, 0xA4, 0xAE),
-            text_dim: rgb(0x74, 0x7C, 0x87),
-            accent: rgb(0x1B, 0xD9, 0x6A),
-            accent_hover: rgb(0x35, 0xE8, 0x83),
-            accent_dim: rgb(0x12, 0xA8, 0x51),
-            on_accent: rgb(0x08, 0x12, 0x0B),
-            danger: rgb(0xF0, 0x50, 0x3C),
-            danger_hover: rgb(0xF7, 0x6B, 0x59),
-            hero: rgb(0x0F, 0x11, 0x14),
-            backdrop: rgb(0x0C, 0x0E, 0x11),
-            modal: rgb(0x20, 0x23, 0x28),
+            bg: rgb(0x16, 0x18, 0x1C),              // surface-1
+            bg_rail: rgb(0x1D, 0x1F, 0x23),         // surface-2
+            surface: rgb(0x27, 0x29, 0x2E),         // surface-3, what a card is
+            surface_hover: rgb(0x34, 0x36, 0x3C),   // surface-4, and the hover of one
+            surface_input: rgb(0x34, 0x36, 0x3C),   // --color-button-bg
+            border: alpha(rgb(0xC1, 0xBE, 0xD1), 0.12), // --color-button-border
+            border_strong: rgb(0x42, 0x44, 0x4A),   // surface-5
+            text: rgb(0xFF, 0xFF, 0xFF),            // --color-text-primary
+            text_muted: rgb(0xB0, 0xBA, 0xC5),      // --color-text-default
+            text_dim: rgb(0x96, 0xA2, 0xB0),        // --color-text-tertiary
+            accent: rgb(0x1B, 0xD9, 0x6A),          // green-500, --color-brand
+            accent_hover: rgb(0x42, 0xE6, 0x86),    // green-400: dark hovers by brightness(1.25)
+            accent_dim: rgb(0x0F, 0xAA, 0x4F),      // green-600: pressed is brightness(0.8)
+            on_accent: rgb(0x00, 0x00, 0x00),       // --color-accent-contrast is black in dark
+            danger: rgb(0xFF, 0x49, 0x6E),          // red-500
+            danger_hover: rgb(0xFF, 0x69, 0x84),    // red-400
+            hero: rgb(0x13, 0x1F, 0x17),            // --brand-gradient-strong-bg, light end
+            backdrop: alpha(rgb(0x16, 0x18, 0x1C), 0.64), // --splash-overlay
+            modal: rgb(0x27, 0x29, 0x2E),           // surface-3: a modal is a card that floats
         }
     }
 
@@ -124,25 +131,25 @@ impl Palette {
     /// text), and the chrome sits *below* the cards rather than above them.
     pub const fn light() -> Palette {
         Palette {
-            bg: rgb(0xEF, 0xF1, 0xF3),
-            bg_rail: rgb(0xE4, 0xE7, 0xEA),
-            surface: rgb(0xFF, 0xFF, 0xFF),
-            surface_hover: rgb(0xF1, 0xF3, 0xF5),
-            surface_input: rgb(0xFF, 0xFF, 0xFF),
-            border: rgb(0xDC, 0xDF, 0xE3),
-            border_strong: rgb(0xC1, 0xC6, 0xCC),
-            text: rgb(0x1B, 0x1F, 0x24),
-            text_muted: rgb(0x55, 0x5D, 0x67),
-            text_dim: rgb(0x83, 0x8B, 0x95),
-            accent: rgb(0x0B, 0xA8, 0x4E),
-            accent_hover: rgb(0x0C, 0xBE, 0x58),
-            accent_dim: rgb(0x08, 0x8E, 0x42),
-            on_accent: rgb(0xFF, 0xFF, 0xFF),
-            danger: rgb(0xD1, 0x38, 0x27),
-            danger_hover: rgb(0xE0, 0x4A, 0x38),
-            hero: rgb(0xF6, 0xF7, 0xF8),
-            backdrop: rgb(0xDE, 0xE1, 0xE4),
-            modal: rgb(0xFF, 0xFF, 0xFF),
+            bg: rgb(0xEB, 0xEB, 0xEB),              // surface-1
+            bg_rail: rgb(0xED, 0xED, 0xED),         // surface-1-5
+            surface: rgb(0xF8, 0xF8, 0xF8),         // surface-3
+            surface_hover: rgb(0xDD, 0xDD, 0xDD),   // surface-5
+            surface_input: rgb(0xFF, 0xFF, 0xFF),   // surface-4
+            border: alpha(rgb(0xA1, 0xA1, 0xA1), 0.35), // --color-button-border
+            border_strong: rgb(0xDD, 0xDD, 0xDD),   // surface-5
+            text: rgb(0x1A, 0x20, 0x2C),            // --color-text-primary
+            text_muted: rgb(0x2C, 0x2E, 0x31),      // --color-text-default
+            text_dim: rgb(0x48, 0x4D, 0x54),        // --color-text-tertiary
+            accent: rgb(0x00, 0xAF, 0x5C),          // green-600, light --color-brand
+            accent_hover: rgb(0x09, 0xDE, 0x78),    // green-500: light hovers by brightness(0.9)
+            accent_dim: rgb(0x04, 0x91, 0x4F),      // green-700
+            on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
+            danger: rgb(0xCB, 0x22, 0x45),          // red-600, light --color-red
+            danger_hover: rgb(0xED, 0x46, 0x61),    // red-500
+            hero: rgb(0xE6, 0xF4, 0xEC),            // brand gradient over a light surface
+            backdrop: alpha(rgb(0xEB, 0xEB, 0xEB), 0.7),
+            modal: rgb(0xF8, 0xF8, 0xF8),           // surface-3
         }
     }
 
@@ -153,25 +160,28 @@ impl Palette {
     /// text-on-accent is black because the accent never moves.
     pub const fn oled() -> Palette {
         Palette {
-            bg: rgb(0x00, 0x00, 0x00),
-            bg_rail: rgb(0x00, 0x00, 0x00),
-            surface: rgb(0x0B, 0x0C, 0x0D),
-            surface_hover: rgb(0x18, 0x1A, 0x1D),
-            surface_input: rgb(0x0D, 0x0E, 0x10),
-            border: rgb(0x22, 0x24, 0x27),
-            border_strong: rgb(0x35, 0x38, 0x3D),
-            text: rgb(0xF5, 0xF6, 0xF7),
-            text_muted: rgb(0x9C, 0xA4, 0xAE),
-            text_dim: rgb(0x6B, 0x72, 0x7A),
+            // Omorphia's `.oled-mode` overrides only the seven surfaces; every
+            // other token is inherited from dark, which is why only those
+            // differ here.
+            bg: rgb(0x00, 0x00, 0x00),              // surface-1
+            bg_rail: rgb(0x05, 0x05, 0x06),         // surface-1-5
+            surface: rgb(0x10, 0x10, 0x13),         // surface-3
+            surface_hover: rgb(0x1B, 0x1B, 0x20),   // surface-4
+            surface_input: rgb(0x1B, 0x1B, 0x20),   // surface-4
+            border: alpha(rgb(0xC1, 0xBE, 0xD1), 0.12),
+            border_strong: rgb(0x25, 0x26, 0x2B),   // surface-5
+            text: rgb(0xFF, 0xFF, 0xFF),
+            text_muted: rgb(0xB0, 0xBA, 0xC5),
+            text_dim: rgb(0x96, 0xA2, 0xB0),
             accent: rgb(0x1B, 0xD9, 0x6A),
-            accent_hover: rgb(0x35, 0xE8, 0x83),
-            accent_dim: rgb(0x12, 0xA8, 0x51),
+            accent_hover: rgb(0x42, 0xE6, 0x86),
+            accent_dim: rgb(0x0F, 0xAA, 0x4F),
             on_accent: rgb(0x00, 0x00, 0x00),
-            danger: rgb(0xF0, 0x50, 0x3C),
-            danger_hover: rgb(0xF7, 0x6B, 0x59),
-            hero: rgb(0x00, 0x00, 0x00),
-            backdrop: rgb(0x00, 0x00, 0x00),
-            modal: rgb(0x0E, 0x0F, 0x11),
+            danger: rgb(0xFF, 0x49, 0x6E),
+            danger_hover: rgb(0xFF, 0x69, 0x84),
+            hero: rgb(0x13, 0x1F, 0x17),
+            backdrop: alpha(rgb(0x00, 0x00, 0x00), 0.7),
+            modal: rgb(0x10, 0x10, 0x13),           // surface-3
         }
     }
 }
@@ -338,18 +348,58 @@ palette_accessors! {
     // collide with those styles.
 }
 
-/// Card corner radius.
-pub const R_CARD: f32 = 12.0;
-/// Button corner radius.
-pub const R_BUTTON: f32 = 10.0;
-/// Chip/pill corner radius.
-pub const R_CHIP: f32 = 7.0;
-/// Modal corner radius.
+// Corner radii, from Omorphia's scale (`--radius-xs` 4, `sm` 8, `md` 12,
+// `lg` 16, `xl` 20). Each constant names the component it styles, and the
+// component is what decided the value: `.base-card` is `--radius-lg`, `.btn`
+// is `--radius-md`, a tooltip is `--radius-sm`.
+
+/// Card corner radius: Omorphia's `--radius-lg`, what `.base-card` uses.
+pub const R_CARD: f32 = 16.0;
+/// Button corner radius: `--radius-md`, what `.btn` uses.
+pub const R_BUTTON: f32 = 12.0;
+/// Chip/pill corner radius: `--radius-sm`.
+pub const R_CHIP: f32 = 8.0;
+/// Modal corner radius: `--radius-lg`, as cards.
 pub const R_MODAL: f32 = 16.0;
 
-/// Bold variant of the default font, for names and headings.
-pub fn bold() -> Font {
-    Font { weight: iced::font::Weight::Bold, ..Font::DEFAULT }
+/// The family name the five bundled Inter faces register under.
+///
+/// fontdb reads the *typographic* family (name ID 16) before the plain family
+/// (ID 1), which is what makes this work: Inter's intermediate weights are
+/// named "Inter Medium" and friends in ID 1, and only ID 16 says "Inter".
+/// Without that, weight selection would find two faces out of five.
+pub const FAMILY: &str = "Inter";
+
+/// One of the five shipped weights, by iced's name for it.
+const fn inter(weight: iced::font::Weight) -> Font {
+    Font { family: iced::font::Family::Name(FAMILY), weight, ..Font::DEFAULT }
+}
+
+/// Regular (400).
+pub const fn regular() -> Font {
+    inter(iced::font::Weight::Normal)
+}
+
+/// Medium (500) -- the weight Modrinth sets its whole interface in
+/// (`--font-weight-text: 500`), and the default this shell boots with.
+pub const fn medium() -> Font {
+    inter(iced::font::Weight::Medium)
+}
+
+/// Semibold (600).
+pub const fn semibold() -> Font {
+    inter(iced::font::Weight::Semibold)
+}
+
+/// Bold (700), for emphasis on a label that is already medium.
+pub const fn bold() -> Font {
+    inter(iced::font::Weight::Bold)
+}
+
+/// Extrabold (800): `--font-weight-heading` and `--font-weight-title`, so this
+/// is what a page title is drawn in.
+pub const fn heading() -> Font {
+    inter(iced::font::Weight::ExtraBold)
 }
 
 /// The application theme: `Theme::custom` derives the whole extended palette
@@ -404,11 +454,20 @@ pub fn inset(_: &Theme) -> container::Appearance {
 }
 
 /// The big rounded square behind the welcome logo.
+///
+/// Flat, like the tooltip and the dialog, and for a reason that was measured
+/// rather than assumed: iced's tiny-skia backend renders a `Shadow` by
+/// computing a signed-distance field for every pixel of the shadow's bounds and
+/// building a fresh premultiplied pixmap from it, with no cache anywhere in the
+/// path. A blurred glow on this tile is therefore re-blurred on every frame the
+/// page paints -- every frame of a scroll included -- which at this size is
+/// tens of thousands of `sqrt` calls and two heap allocations per frame, spent
+/// on a halo the logo's own artwork already carries. The accent hairline does
+/// the same job for one fill.
 pub fn hero_tile(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(palette().hero.into()),
         border: Border { radius: 22.0.into(), width: 1.0, color: alpha(accent(), 0.25) },
-        shadow: Shadow { color: alpha(accent(), 0.18), offset: Vector::new(0.0, 0.0), blur_radius: 28.0 },
         ..Default::default()
     }
 }

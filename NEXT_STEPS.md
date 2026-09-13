@@ -476,3 +476,54 @@ tick to what the machine can actually draw, so the frame count adapts itself
 and the timer can never publish faster than frames complete. Step 4 of the
 acceptance run in §8 is the one that falsifies it: park the pointer and watch
 CPU while one notch glides.
+
+### Correction: that 68.75 ms is a *resize* frame, not a scroll frame
+
+The number above came from resizing the window and timing the app's CPU, because
+posted wheel messages are inert at the iced level and real input was not
+permitted at the time. A resize is not a scroll, and the difference is specific:
+ices's text cache is keyed on the text's *bounds*, and a resize changes the
+bounds of nearly every run on the page, so a resize re-shapes the whole page --
+while a scroll translates content whose bounds did not change and should hit the
+cache. So 68.75 ms is an upper bound for a scrolled frame, and the "60-110 ns/px"
+reading inherits the same confound. This is not a retraction of "a frame is
+expensive"; it is a correction of *how* expensive, and real input is what has to
+settle it.
+
+### What was implemented (13 Sep)
+
+`scroll.rs` no longer counts frames. The tween eases against a **deadline**
+(it `DURATION`, 160 ms) and whether to have a tween at all is a function of
+**this machine**:
+
+- `tick` measures the interval between its own calls and folds it into a
+  per-machine frame cost. The fastest recent frame wins, so one hitch cannot
+  demote a fast machine, and recovery upward is capped at a quarter per frame.
+- `glide_duration` returns `DURATION` below `SMOOTH_FRAME` (24 ms, ~40 fps) and
+  `Duration::ZERO` at or above it. Zero means the wheel's own frame moves the
+  offset and **no frame subscription is started at all** -- both cheaper and
+  less laggy than an animation drawn at 14 fps, and the case this machine falls
+  into once it has been measured.
+- `restart()` (used on navigation) keeps the measured cost and discards only the
+  page's position, so the machine is not re-learned once per page.
+
+`hero_tile` lost its 28 px glow shadow. iced's tiny-skia backend renders a
+`Shadow` by computing a per-pixel SDF and building a fresh premultiplied pixmap
+from it, uncached, on every frame the page paints -- tens of thousands of `sqrt`
+calls and two heap allocations per frame, on a tile that sits on two scrollable
+pages. The accent hairline carries the same read for one fill.
+
+Inter is now the shell's typeface: 400/500/600/700/800, subset by
+`tools/make_fonts.py` from the release Modrinth's own stylesheet pins, ~292 KB
+for all five, loaded through `Settings::fonts` so the first frame is already
+Inter. `default_font` is weight 500 because that is what Modrinth sets body text
+at.
+
+### Still unmeasured / open
+
+1. **Real wheel input on a CI build**, now that cursor control is permitted.
+   This is what decides whether the "resize frame" number above applies to
+   scrolls at all.
+2. **The Modrinth 1:1 pass.** Tokens are in (palette in `theme.rs`, Inter via
+   `Settings::fonts`), but the comparison has been against the extracted
+   Omorphia stylesheet, not against the running app side by side.

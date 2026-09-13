@@ -1,10 +1,23 @@
 name: CI
 
+# Deliberately narrow: private repos pay for Actions minutes and Windows bills
+# at 2x Linux, so a full run is ~28 billed minutes and every trigger has to
+# earn its place.
+#
+# Tags are not listed here. `release.yml` already tests the tree before it
+# builds anything, so a tag push testing it a second time was a full pipeline
+# spent on a duplicate answer.
+#
+# Documentation and tooling cannot affect a build, so they do not start one.
+# The trade-off is that a PR touching only .md files gets no status check --
+# fine while nothing requires one, and worth revisiting if branch protection
+# is ever switched on, because that PR would then wait forever.
 on:
   push:
     branches: [master]
-    tags: ["v*"]
+    paths-ignore: ["**.md", "tools/**", ".gitignore", ".gitattributes"]
   pull_request:
+    paths-ignore: ["**.md", "tools/**", ".gitignore", ".gitattributes"]
   workflow_dispatch:
 
 # Nothing here writes to the repository. The release workflow asks for
@@ -94,9 +107,15 @@ jobs:
         continue-on-error: true
         run: cargo fmt --all -- --check
 
+  # Packaging is the expensive half -- two release builds with LTO, ~14 billed
+  # minutes against ~4 for test + lint -- and its result is identical for a
+  # given tree, so a pull request gets the fast questions only and `master`
+  # gets the artefacts. The DLL gate therefore fires after merge rather than
+  # before it; the alternative was paying for it on every push to every branch.
   package:
     name: Build exe (${{ matrix.target }})
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 45
     strategy:
