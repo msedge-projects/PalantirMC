@@ -1112,11 +1112,22 @@ mod tests {
         let oled = Palette::oled();
 
         // The chrome of the light look is bright, the dark one is not, and the
-        // OLED one is actually black so those pixels can switch off.
+        // OLED one is black to the reference's own numbers so those pixels can
+        // switch off: `surface-1` is `#000000` and the rail beside it is
+        // `#050506`, straight from Omorphia's `.oled-mode`. The rail is not
+        // black because it still has to read as a plane beside the page, and
+        // that is exactly what the design system does with it.
         assert!(luminance(light.bg) > 0.8, "light chrome should be bright");
         assert!(luminance(dark.bg) < 0.05, "dark chrome should be near-black");
         assert_eq!((oled.bg.r, oled.bg.g, oled.bg.b), (0.0, 0.0, 0.0));
-        assert_eq!((oled.bg_rail.r, oled.bg_rail.g, oled.bg_rail.b), (0.0, 0.0, 0.0));
+        assert_eq!(
+            (oled.bg_rail.r, oled.bg_rail.g, oled.bg_rail.b),
+            (0x05 as f32 / 255.0, 0x05 as f32 / 255.0, 0x06 as f32 / 255.0)
+        );
+        assert!(
+            luminance(oled.bg_rail) < luminance(dark.bg_rail),
+            "even the OLED rail has to be darker than the ordinary dark one"
+        );
         assert!(
             luminance(oled.surface) < luminance(dark.surface),
             "OLED cards should be darker than the ordinary dark ones"

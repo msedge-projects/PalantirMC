@@ -107,6 +107,16 @@ pub const SMOOTH_FRAME: Duration = Duration::from_millis(24);
 /// pixel from where it belongs and keep asking for frames.
 pub const SETTLED: f32 = 0.5;
 
+/// How many consecutive slow frames it takes to stop animating on a machine.
+///
+/// The two directions of this measurement are not equally costly, so they are
+/// not treated equally. Believing a fast machine is slow turns the glide off
+/// for the rest of the session; believing a slow one is fast costs a few wasted
+/// frames, and the next gesture corrects it. So one fast frame is enough to
+/// resume animating, while a single hitch -- a page fault, another window
+/// painting, a background scan -- is not enough to stop it.
+const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
+
 /// Where a page's scroll position is, and where it is going.
 ///
 /// Plain numbers and a clock rather than a reference to any widget state, so
@@ -125,8 +135,13 @@ pub struct ScrollAnim {
     glide: Option<Glide>,
     /// When the previous frame was handled, for measuring frame cost.
     last_tick: Option<Instant>,
-    /// The fastest recent frame interval, or `None` until one is measured.
+    /// The frame interval this machine was last measured at: a fast one the
+    /// moment it is seen, a slow one only after [`SLOW_FRAMES_TO_DEMOTE`] of
+    /// them in a row. `None` until a glide has run.
     frame_cost: Option<Duration>,
+    /// How many consecutive frames have now been seen at or above
+    /// [`SMOOTH_FRAME`].
+    slow_frames: u8,
 }
 
 /// One glide: where it started, when, and the deadline it must meet.
@@ -257,20 +272,21 @@ impl ScrollAnim {
 
     /// Fold one observed frame interval into the machine's classification.
     ///
-    /// The *fastest* recent frame wins, because that is the honest measure of
-    /// what the machine can draw: a one-off hitch (a page fault, a background
-    /// scan, another window painting) must not demote it for the rest of the
-    /// session. Recovery upward is capped at a quarter per frame, so a machine
-    /// that has genuinely become slower is still reclassified within a few
-    /// frames of the gesture that revealed it.
+    /// Asymmetric on purpose, and the asymmetry is the whole design: see
+    /// [`SLOW_FRAMES_TO_DEMOTE`]. A frame this machine can animate in is its
+    /// answer immediately, and two slow frames in a row are needed to take the
+    /// animation away -- so a hitch neither stops the glide nor, once the
+    /// machine really has become slow, leaves it running for long.
     fn observe_cost(&mut self, interval: Duration) {
-        self.frame_cost = Some(match self.frame_cost {
-            None => interval,
-            Some(previous) => {
-                let micros = previous.as_micros() as u64;
-                interval.min(Duration::from_micros(micros + micros / 4))
-            }
-        });
+        if interval < SMOOTH_FRAME {
+            self.frame_cost = Some(interval);
+            self.slow_frames = 0;
+            return;
+        }
+        self.slow_frames = self.slow_frames.saturating_add(1);
+        if self.slow_frames >= SLOW_FRAMES_TO_DEMOTE {
+            self.frame_cost = Some(interval);
+        }
     }
 
     /// Adopt an offset that came from somewhere else — the scrollbar, a
@@ -307,8 +323,16 @@ impl ScrollAnim {
     /// would mean paying for one glide the machine cannot draw on every
     /// navigation, which is exactly the cost this policy exists to remove.
     pub fn restart(&mut self) {
-        let frame_cost = self.frame_cost;
-        *self = ScrollAnim { frame_cost, ..ScrollAnim::default() };
+        self.offset = 0.0;
+        self.target = 0.0;
+        self.content_height = 0.0;
+        self.view_height = 0.0;
+        self.glide = None;
+        self.last_tick = None;
+        self.slow_frames = 0;
+        // `frame_cost` is deliberately left alone: it describes the machine, so
+        // re-learning it once per page would mean paying for one glide the
+        // machine cannot draw on every navigation.
     }
 }
 
@@ -691,8 +715,12 @@ mod tests {
     #[test]
     fn a_machine_too_slow_to_animate_moves_instead_of_gliding() {
         let mut anim = page(4000.0, 600.0);
-        // One measured frame at 69ms: about 14 frames a second, which is this
-        // machine's software rasteriser.
+        // Two measured frames at 69ms: about 14 frames a second, which is this
+        // machine's software rasteriser. Two rather than one because a single
+        // slow frame is not yet evidence -- see `SLOW_FRAMES_TO_DEMOTE` -- and
+        // the point of this test is the machine that has been classified, not
+        // the frame that classified it.
+        anim.observe_cost(Duration::from_millis(69));
         anim.observe_cost(Duration::from_millis(69));
         anim.wheel(
             Wheel { notches: -1.0, content_height: 4000.0, view_height: 600.0 },
@@ -708,25 +736,33 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_cost_remembers_the_best_frame_not_the_worst() {
+    fn one_hitch_does_not_declare_a_fast_machine_slow() {
         let mut anim = page(4000.0, 600.0);
         anim.observe_cost(Duration::from_millis(16));
         anim.observe_cost(Duration::from_millis(200));
         assert_eq!(
             anim.frame_cost,
             Some(Duration::from_millis(16)),
-            "one hitch must not permanently declare a fast machine slow"
+            "a single bad frame must not take the glide away"
         );
-        // Recovery upward is capped at a quarter per frame, so a machine that
-        // really has become slower is reclassified within a few frames rather
-        // than never.
-        anim.observe_cost(Duration::from_millis(500));
-        assert_eq!(anim.frame_cost, Some(Duration::from_millis(20)));
+        // And the other direction, which is the same measurement read from the
+        // other side: a machine that is slow every frame is classified as slow
+        // within the gesture that revealed it.
+        let mut slow = page(4000.0, 600.0);
+        slow.observe_cost(Duration::from_millis(69));
+        assert_eq!(
+            slow.frame_cost, None,
+            "the first slow frame is still only a suspicion"
+        );
+        slow.observe_cost(Duration::from_millis(69));
+        assert_eq!(slow.frame_cost, Some(Duration::from_millis(69)));
+        assert_eq!(ScrollAnim::glide_duration(slow.frame_cost), Duration::ZERO);
     }
 
     #[test]
     fn a_page_opened_later_remembers_what_the_machine_costs() {
         let mut anim = page(4000.0, 600.0);
+        anim.observe_cost(Duration::from_millis(69));
         anim.observe_cost(Duration::from_millis(69));
         anim.scroll_notches(-4.0);
         anim.restart();
