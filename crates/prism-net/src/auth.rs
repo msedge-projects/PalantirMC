@@ -399,13 +399,31 @@ impl MapTransport {
             .unwrap_or_default()
     }
 
+    /// Find the canned response for `method` + `url`.
+    ///
+    /// An exact key wins. Failing that, a key the request *extends at a query
+    /// boundary* does: Mojang's entitlements endpoint takes a fresh `requestId`
+    /// per call, so a test that had to know the URL exactly could not can a
+    /// response for it at all. Requiring the next character to be `?` is what
+    /// stops a key for `…/profile` from answering `…/profile-something`, and the
+    /// longest match wins so a specific key still beats a broader one.
     fn lookup(&self, method: Method, url: &str) -> crate::Result<HttpResponse> {
         if let Ok(mut seen) = self.seen.lock() {
             seen.push((method, url.to_string()));
         }
+        if let Some(response) = self.map.get(&(method, url.to_string())) {
+            return Ok(response.clone());
+        }
         self.map
-            .get(&(method, url.to_string()))
-            .cloned()
+            .iter()
+            .filter(|((canned_method, canned), _)| {
+                canned_method == &method
+                    && url.len() > canned.len()
+                    && url.starts_with(canned.as_str())
+                    && url.as_bytes()[canned.len()] == b'?'
+            })
+            .max_by_key(|((_, canned), _)| canned.len())
+            .map(|(_, response)| response.clone())
             .ok_or_else(|| crate::Error::http(url, "no canned response for this request"))
     }
 }
@@ -1198,14 +1216,22 @@ mod tests {
         assert_eq!(launch.user_type, "msa");
         assert_eq!(launch.session, "token:game-token:1a2b3c4d5e6f708192a3b4c5d6e7f809");
 
-        // …and the hops are the documented ones, in order.
+        // …and the hops are the documented ones, in order. The comparison is on
+        // the endpoint rather than the whole URL, because the entitlements
+        // request carries a fresh `requestId` on every call.
+        let hops: Vec<String> = transport
+            .requested()
+            .into_iter()
+            .map(|url| url.split('?').next().unwrap_or_default().to_string())
+            .collect();
         assert_eq!(
-            transport.requested(),
+            hops,
             vec![
                 MICROSOFT_TOKEN_URL.to_string(),
                 XBOX_USER_AUTH_URL.to_string(),
                 XBOX_XSTS_AUTH_URL.to_string(),
                 MINECRAFT_LAUNCHER_LOGIN_URL.to_string(),
+                MINECRAFT_ENTITLEMENTS_URL.to_string(),
                 MINECRAFT_PROFILE_URL.to_string(),
             ]
         );
@@ -1213,25 +1239,31 @@ mod tests {
 
     #[test]
     fn entitlements_are_read_when_they_are_there_and_never_fail_the_login() {
-        let transport = full_chain_transport();
-        // The request id is random per call, so a canned map cannot match the
-        // entitlements URL; the two things worth pinning are that a missing
-        // answer leaves the session usable (above) and that a recorded answer is
-        // read as ownership.
-        let auth = flow(&transport);
-        let session = auth.finish(&authorized_msa(&auth)).unwrap();
-        assert!(matches!(
-            auth.entitled(&session.access_token),
-            Ok(false) | Err(AuthError::Transport(_))
-        ));
-
+        // Recorded against the endpoint: the transport matches at the query
+        // boundary, so the per-call `requestId` does not have to be known here.
         let mut owned = full_chain_transport();
         owned.insert_get(
             MINECRAFT_ENTITLEMENTS_URL,
             200,
             r#"{"items":[{"name":"product_minecraft"}]}"#,
         );
-        assert!(flow(&owned).entitled("game-token").unwrap());
+        let auth = flow(&owned);
+        let session = auth.finish(&authorized_msa(&auth)).unwrap();
+        assert!(session.entitled, "an entitlement means ownership");
+
+        // An empty item list is "does not own the game" — a state to describe,
+        // not a failure of the request.
+        let mut bare = full_chain_transport();
+        bare.insert_get(MINECRAFT_ENTITLEMENTS_URL, 200, r#"{"items":[]}"#);
+        let auth = flow(&bare);
+        let session = auth.finish(&authorized_msa(&auth)).unwrap();
+        assert!(!session.entitled);
+
+        // …and so is an endpoint that never answers: the login still produces a
+        // usable session, because ownership is not what it is asking for.
+        let auth = flow(&full_chain_transport());
+        let session = auth.finish(&authorized_msa(&auth)).unwrap();
+        assert!(!session.entitled, "an unanswered check is not ownership");
     }
 
     #[test]
