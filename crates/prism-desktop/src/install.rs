@@ -236,11 +236,26 @@ pub fn plan(
         for rel in &files.native {
             queued.push((rel.clone(), ""));
         }
+        // `${arch}` natives are two *alternatives*, not two files. Prism appends
+        // the 32- or the 64-bit jar according to the Java architecture
+        // (`LaunchProfile::getLibraryFiles`), and it has to: both jars hold the
+        // same file names, so extracting both leaves a 64-bit JVM loading
+        // 32-bit libraries. A Java architecture that is neither gets neither,
+        // which is what Prism does with it too.
+        let arch = match ctx.java_architecture.as_str() {
+            "32" => Some("32"),
+            "64" => Some("64"),
+            _ => None,
+        };
         for rel in &files.native32 {
-            queued.push((rel.clone(), "32"));
+            if arch == Some("32") {
+                queued.push((rel.clone(), "32"));
+            }
         }
         for rel in &files.native64 {
-            queued.push((rel.clone(), "64"));
+            if arch == Some("64") {
+                queued.push((rel.clone(), "64"));
+            }
         }
         for (rel, arch) in queued {
             // Instance-local overrides resolve outside the shared cache; they
@@ -728,13 +743,13 @@ mod tests {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
         let mut profile = LaunchProfile::default();
-        // Shaped like a modern LWJGL native: the classifier matches this host,
-        // so it is the only one planned.
-        let classifier = ctx.classifier();
-        let native_path = format!("org/lwjgl/lwjgl/3.3.1/lwjgl-3.3.1-natives-{classifier}.jar");
+        // Shaped like Mojang's LWJGL native: the `natives` map is keyed by OS
+        // and its value is the classifier, so only this host's jar is planned.
+        let classifier = format!("natives-{}", ctx.system);
+        let native_path = format!("org/lwjgl/lwjgl/3.3.1/lwjgl-3.3.1-{classifier}.jar");
         profile
             .libraries
-            .push(library_from(native_library(&classifier, &native_path, "def", 5)));
+            .push(library_from(native_library(&ctx, &classifier, &native_path, "def", 5)));
         let instance_root = paths.root.join("instances").join("Natives");
         let plan = plan(&paths, &instance_root, &profile, &ctx);
         assert_eq!(plan.jobs.len(), 1, "jobs: {:?}", plan.jobs);
@@ -744,13 +759,97 @@ mod tests {
         assert_eq!(plan.jobs[0].sha1, "def");
     }
 
-    /// A library JSON value for a native jar keyed by `classifier`.
-    ///
-    /// Built with maps rather than `json!` because the key *is* the host's
-    /// classifier, and a computed key cannot be written as a macro literal.
-    fn native_library(classifier: &str, path: &str, sha1: &str, size: usize) -> serde_json::Value {
+    #[test]
+    fn a_placeholder_arch_native_plans_only_the_javas_own_width() {
+        // `natives-windows-${arch}` libraries ship a 32- and a 64-bit jar, and
+        // both contain the same file names. Prism appends exactly one of them,
+        // chosen by the *Java* architecture; planning both would extract 32-bit
+        // libraries over the 64-bit ones and leave the JVM loading them.
+        let (_dir, paths) = test_paths();
+        let mut ctx = RuntimeContext::current_host();
+        let mut profile = LaunchProfile::default();
+        // Both widths are present in the metadata, keyed the way Mojang keys
+        // them, and only the `natives` map value carries `${arch}`.
         let mut natives = serde_json::Map::new();
-        natives.insert(classifier.to_string(), serde_json::Value::String(classifier.to_string()));
+        for key in [ctx.system.clone(), ctx.classifier()] {
+            natives.insert(
+                key,
+                serde_json::Value::String(format!("natives-{}-${{arch}}", ctx.system)),
+            );
+        }
+        let mut classifiers = serde_json::Map::new();
+        for width in ["32", "64"] {
+            let path = format!(
+                "org/lwjgl/lwjgl/lwjgl-platform/2.9.2/lwjgl-platform-2.9.2-natives-{}-{width}.jar",
+                ctx.system
+            );
+            classifiers.insert(
+                format!("natives-{}-{width}", ctx.system),
+                json!({
+                    "path": path,
+                    "sha1": "abc",
+                    "size": 4,
+                    "url": format!("https://libraries.minecraft.net/{path}")
+                }),
+            );
+        }
+        profile.libraries.push(library_from(json!({
+            "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.2",
+            "natives": serde_json::Value::Object(natives),
+            "downloads": { "classifiers": serde_json::Value::Object(classifiers) }
+        })));
+
+        ctx.java_architecture = "64".into();
+        let sixty_four = plan(&paths, &paths.root, &profile, &ctx);
+        assert_eq!(
+            sixty_four.natives.len(),
+            1,
+            "one width, not both: {:?}",
+            sixty_four.natives
+        );
+        assert_eq!(sixty_four.jobs.len(), 1, "jobs: {:?}", sixty_four.jobs);
+        assert!(
+            sixty_four.natives[0].to_string_lossy().ends_with("-64.jar"),
+            "a 64-bit JVM gets the 64-bit jar: {:?}",
+            sixty_four.natives[0]
+        );
+
+        ctx.java_architecture = "32".into();
+        let thirty_two = plan(&paths, &paths.root, &profile, &ctx);
+        assert_eq!(thirty_two.natives.len(), 1, "natives: {:?}", thirty_two.natives);
+        assert!(
+            thirty_two.natives[0].to_string_lossy().ends_with("-32.jar"),
+            "a 32-bit JVM gets the 32-bit jar: {:?}",
+            thirty_two.natives[0]
+        );
+    }
+
+    /// A native library JSON value, shaped the way a version file shapes one.
+    ///
+    /// The `natives` map is keyed by *OS* (`windows`/`linux`/`osx`) and its value
+    /// is the classifier — which is what makes the file name
+    /// `lwjgl-3.3.1-natives-windows.jar` — while `downloads.classifiers` is keyed
+    /// by that same classifier. Keying the map by classifier instead, as this
+    /// fixture first did, describes a shape no real version file has: the planner
+    /// then builds a path from the classifier and finds no matching download.
+    ///
+    /// Built with maps rather than `json!` because the keys are computed from the
+    /// host, and a computed key cannot be written as a macro literal.
+    fn native_library(
+        ctx: &RuntimeContext,
+        classifier: &str,
+        path: &str,
+        sha1: &str,
+        size: usize,
+    ) -> serde_json::Value {
+        let mut natives = serde_json::Map::new();
+        // The OS key is what Mojang writes; the precise `<system>-<arch>` key is
+        // what some pack metadata writes, and it is the only one a non-x86_64
+        // host consults — `compatible_native` falls back to the OS key for the
+        // legacy architectures only. Both keeps this fixture true everywhere.
+        for key in [ctx.system.clone(), ctx.classifier()] {
+            natives.insert(key, serde_json::Value::String(classifier.to_string()));
+        }
         let mut classifiers = serde_json::Map::new();
         classifiers.insert(
             classifier.to_string(),
@@ -785,16 +884,15 @@ mod tests {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
         let instance_root = paths.root.join("instances").join("Run");
-        let native_path = format!(
-            "org/lwjgl/lwjgl/3.3.1/lwjgl-3.3.1-natives-{}.jar",
-            ctx.classifier()
-        );
+        let classifier = format!("natives-{}", ctx.system);
+        let native_path = format!("org/lwjgl/lwjgl/3.3.1/lwjgl-3.3.1-{classifier}.jar");
         let native_bytes = zip_with("lwjgl.dll", b"native");
         let digest = sha1_hex(&native_bytes);
 
         let mut profile = LaunchProfile::default();
         profile.libraries.push(library_from(native_library(
-            &ctx.classifier(),
+            &ctx,
+            &classifier,
             &native_path,
             &digest,
             native_bytes.len(),
@@ -920,7 +1018,7 @@ mod tests {
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.downloaded, 1, "the index");
         assert_eq!(report.objects_downloaded, 2);
-        assert_eq!(report.present, 2);
+        assert_eq!(report.present, 0, "nothing was on disk before this run");
         assert!(paths.assets_dir().join("indexes").join("17.json").is_file());
         assert!(paths.assets_dir().join("objects").join("aa").join("aa11").is_file());
         assert!(lines.iter().any(|line| line.contains("2 asset object(s)")));

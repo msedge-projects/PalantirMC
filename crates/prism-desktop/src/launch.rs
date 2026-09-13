@@ -1201,7 +1201,10 @@ mod tests {
         );
         let reference = AccountRef::from_entry(&entry);
         assert_eq!(reference.username, "Steve");
-        assert_eq!(reference.uuid, "AABB");
+        // Normalized on the way in: Mojang's profile ids are lowercase hex, and
+        // this uuid is passed to the game as `uuid`, so a stored "AABB" must not
+        // reach a server as one.
+        assert_eq!(reference.uuid, "aabb");
         assert_eq!(reference.access_token.as_deref(), Some("token"));
         assert_eq!(reference.refresh_token.as_deref(), Some("refresh"));
         assert_eq!(reference.expires_at_ms, Some(1234));
@@ -1416,7 +1419,16 @@ mod tests {
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Ready", "1.21.1").unwrap();
         seed_meta(&paths, &instance, "1.21.1");
-        seed_library(paths.root.join("libraries").join("test").join("lib").join("1.0").join("lib-1.0.jar"));
+        // `test.lib:lib:1.0` stores as `test/lib/lib/1.0/lib-1.0.jar` — the group
+        // contributes `test/lib` and the artifact name is `lib`, so `lib` appears
+        // twice. Seeding the single-`lib` path left the planner one file short and
+        // this test was measuring that, not the launch plan.
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("test/lib/lib/1.0/lib-1.0.jar"),
+        );
         seed_library(paths.root.join("libraries").join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"));
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
