@@ -2852,7 +2852,7 @@ impl PrismApp {
         // reveal chrome, exactly as `.app-contents` does over the rail.
         container(
             container(self.view_page())
-                .style(theme::pane())
+                .style(theme::pane)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(18),
@@ -3170,8 +3170,9 @@ impl PrismApp {
             .align_items(iced::Alignment::Center),
         )
         .style(theme::card)
-        .padding(12)            .width(Length::Fill)
-            .into()
+        .padding(12)
+        .width(Length::Fill)
+        .into()
     }
 
     /// Mods of the selected instance, with enable/disable toggles.
@@ -4088,7 +4089,7 @@ impl PrismApp {
                     .into()
             } else {
                 container(text(""))
-                    .style(theme::step_ring())
+                    .style(theme::step_ring)
                     .width(Length::Fixed(20.0))
                     .height(Length::Fixed(20.0))
                     .into()
