@@ -115,12 +115,20 @@ fn install_hit_test() {
 ///
 /// Subset by `tools/make_fonts.py` from Inter 3.19, the release Modrinth's own
 /// stylesheet pins. All five together are ~292 KB.
+///
+/// Each entry relies on the declared element type to unsize
+/// `&[u8; N]` into `&[u8]`. Writing that as `&include_bytes!(..)[..]` instead is
+/// the same bytes and is what this was first written as — and it does not
+/// build: slicing in a `static` initialiser needs `std::ops::Index` in const,
+/// which is not stable, so the table failed to compile on CI's toolchain while
+/// the identical code was fine on a slightly older one. The coercion is what
+/// const evaluation actually allows.
 static FONTS: [&[u8]; 5] = [
-    &include_bytes!("../assets/fonts/Inter-400.otf")[..],
-    &include_bytes!("../assets/fonts/Inter-500.otf")[..],
-    &include_bytes!("../assets/fonts/Inter-600.otf")[..],
-    &include_bytes!("../assets/fonts/Inter-700.otf")[..],
-    &include_bytes!("../assets/fonts/Inter-800.otf")[..],
+    include_bytes!("../assets/fonts/Inter-400.otf"),
+    include_bytes!("../assets/fonts/Inter-500.otf"),
+    include_bytes!("../assets/fonts/Inter-600.otf"),
+    include_bytes!("../assets/fonts/Inter-700.otf"),
+    include_bytes!("../assets/fonts/Inter-800.otf"),
 ];
 
 fn main() -> iced::Result {
