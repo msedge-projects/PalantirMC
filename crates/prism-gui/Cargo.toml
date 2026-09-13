@@ -1,15 +1,15 @@
 [package]
 name = "prism-gui"
-description = "Prism-compatible GUI (phase 4; iced vs egui decided then)"
+description = "Shared view-model for the desktop shell: instance list and override-gated settings"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+# The models are read by the shell, never serialized, so this crate needs no
+# serde at all: `prism-core` owns the file formats.
 prism-core = { path = "../prism-core" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 thiserror = "1"
 
 [dev-dependencies]

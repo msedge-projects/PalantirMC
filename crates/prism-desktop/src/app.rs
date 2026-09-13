@@ -1,148 +1,331 @@
-//! Shared Prism desktop application core.
+//! PalantirMC application core: state, updates and the whole `iced` view tree.
 //!
-//! [`PrismApp`] owns every piece of GUI state plus the synchronous update
-//! logic and the `iced` view tree. Two thin shells reuse it (see `main.rs`):
+//! The shell mirrors the Modrinth launcher: a custom title bar (the window is
+//! undecorated, so the bar both paints and drags), a 68px icon rail on the
+//! left, the active page in the middle and a contextual sidebar on the right
+//! holding "Getting started", the signed-in account, the selected instance and
+//! the run state.
 //!
-//! * `State` implements `iced::Sandbox` (the original API, kept working and
-//!   fully synchronous: instances load during construction).
-//! * `App` implements `iced::Application` (same iced 0.12 crate) so the
-//!   launch log can stream through [`Subscription`] — something the
-//!   `Sandbox` blanket impl cannot do (it hardcodes
-//!   `Subscription::none()`). `App` starts from an instant placeholder
-//!   ([`PrismApp::pending`]) and fills the instance grid from a background
-//!   thread, so the window appears immediately even on slow disks.
+//! Nothing here is a mock-up. Every control has a real effect:
 //!
-//! Layout mirrors real Prism Launcher 10.x: a compact top toolbar (Add
-//! Instance, Folders, Settings, Help, Update + account chip), collapsible
-//! group sections with a wrapped grid of instance icon tiles in the main
-//! area, a right sidebar with the big icon tile and the vertical action
-//! list, and a status bar. Icons are the real carved Prism art, embedded via
-//! `include_bytes!` (see `crate::icons`): grid tiles and the sidebar paint
-//! `iced::widget::Image` pixels, never letter tiles, with zero runtime IO.
+//! * **Create instance** is a two-step dialog ([`CreateStep`]) whose loader
+//!   chips, game-version list and loader builds come from the live metadata
+//!   catalog ([`crate::catalog`]); submitting writes a real instance,
+//!   installing the chosen loader through `prism-loader`.
+//! * **Play / Kill** reuse [`crate::launch`] and stream the child's output
+//!   through an `iced` subscription into the Logs page.
+//! * **Browse** searches Modrinth and installs the newest matching file into
+//!   the selected instance's `mods/` folder ([`crate::browse`]).
+//! * **Import** scans other launchers on disk and copies what it finds.
+//! * **Accounts** are offline accounts persisted to `accounts.json`; Microsoft
+//!   sign-in is the one honest gap and the UI says so.
 //!
-//! Background launching: [`PrismApp::update`] only records an [`ActiveRun`];
-//! [`PrismApp::subscription`] exposes an
-//! `iced::subscription::channel` keyed by that run id whose task spawns the
-//! worker thread from `crate::launch` (the thread owns the futures sender
-//! and `try_send`s `Vec<String>` batches through it). Instance loading uses
-//! a second channel (fixed id [`LOAD_SUBSCRIPTION_ID`]) with the same
-//! spawn-thread + `try_send` pattern.
+//! Background work follows one pattern: a flag in this struct makes
+//! [`PrismApp::subscription`] expose a channel subscription whose id includes a
+//! sequence number; the worker thread sends exactly one
+//! [`Message::TaskDone`] and the update applies it (stale sequences are
+//! dropped). The GUI thread therefore never touches the network or a slow
+//! disk.
 
-use std::collections::{BTreeMap, VecDeque};
-use std::path::{Path, PathBuf};
+use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iced::widget::{
     button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
-    scrollable, text, text_input, Button, Image,
+    scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
 };
 use iced::widget::image::Handle;
-use iced::{Background, Border, Color, Element, Font, Length, Subscription, Theme};
-use prism_core::{
-    instance::{groups::Groups, Instance},
-    pack::PackProfile,
-    paths::PrismPaths,
-    settings::{defaults, Settings},
-};
-use prism_gui::{InstanceEntry, InstanceListModel, SettingsModel};
+use iced::{window, Border, Color, Command, Element, Length, Padding, Point, Subscription, Theme};
+use prism_core::instance::groups::Groups;
+use prism_core::instance::Instance;
+use prism_core::paths::PrismPaths;
+use prism_core::settings::{defaults, Settings};
 
-use crate::accounts::AccountsStore;
-use crate::icons::{instance_handle, ui_handle};
+use crate::brand;
+use crate::browse::{self, ContentType, Hit, ImportedPack};
+use crate::catalog::{self, LoaderKind, VersionCatalog};
+use crate::glyphs::glyph;
+use crate::icons::instance_handle;
+use crate::instances::{self, InstanceCard, LoadedInstances, NewInstance};
 use crate::launch::{
-    self, open_in_file_manager, prepare_launch, run_launch_worker, AccountRef, ActiveRunData, ChildSlot,
-    LaunchParams,
+    self, open_in_file_manager, ActiveRunData, AccountRef, ChildSlot, LaunchParams,
 };
 use crate::mods::{list_content_names, list_mods, set_mod_enabled, ModEntry};
+use crate::native::{self, ResizeEdge};
+use crate::prefs;
+use crate::screenshots;
+use crate::scroll;
+use crate::theme::{self, ColorTheme};
 
 /// Maximum console lines kept in memory.
 pub const CONSOLE_LINE_CAP: usize = 20_000;
 
-/// How many of the newest console lines the view renders (perf bound; the
-/// buffer itself keeps [`CONSOLE_LINE_CAP`]).
+/// How many of the newest console lines the view renders.
 pub const CONSOLE_VIEW_LINES: usize = 500;
 
-/// Fixed height of the embedded console pane (it lives inside the main
-/// scrollable, so it must be bounded for `snap_to` autoscroll to work).
-pub const CONSOLE_PANE_HEIGHT: f32 = 280.0;
+/// Icon-rail width.
+pub const RAIL_WIDTH: f32 = 68.0;
 
-/// Instance tile geometry: icon side and total tile width.
-pub const TILE_BOX: f32 = 56.0;
-/// Total tile width (box + padding + button chrome).
-pub const TILE_WIDTH: f32 = 96.0;
-/// Tiles per grid row (the "wrapped row" grid is emulated by chunking:
-/// iced 0.12 has no flow layout, so rows of [`TILES_PER_ROW`] tiles wrap the
-/// same way on any window wide enough for the main area).
-pub const TILES_PER_ROW: usize = 4;
-/// Big sidebar tile side.
-pub const BIG_TILE: f32 = 96.0;
 /// Right sidebar width.
-pub const SIDEBAR_WIDTH: f32 = 210.0;
+pub const SIDEBAR_WIDTH: f32 = 304.0;
 
-/// Label used for the ungrouped section and the pick-list entry.
-pub const UNGROUPED_LABEL: &str = "Ungrouped";
+/// Title-bar height.
+pub const TITLE_BAR_HEIGHT: f32 = 46.0;
 
-/// Subscription id for the one-shot background instance load.
-pub const LOAD_SUBSCRIPTION_ID: &str = "prism-desktop-instance-load";
+/// Padding above and below the title bar's contents.
+pub const TITLE_BAR_PAD: f32 = 6.0;
 
-/// Main-area pages (Console is the default landing page).
+/// The height the title bar's controls and grab patches occupy, between the
+/// padding.
+pub const TITLE_BAR_CONTENT_HEIGHT: f32 = TITLE_BAR_HEIGHT - 2.0 * TITLE_BAR_PAD;
+
+/// Padding around the title bar's contents.
+///
+/// The grabbable patches size themselves from this rather than guessing, so
+/// the strip you can drag covers the bar from its top edge to its bottom edge.
+/// A patch that stopped short would leave a lip along the top and bottom of the
+/// bar that looks draggable and swallows the press.
+fn title_bar_padding() -> Padding {
+    Padding {
+        top: TITLE_BAR_PAD,
+        right: 10.0,
+        bottom: TITLE_BAR_PAD,
+        left: 10.0,
+    }
+}
+
+/// Side of a caption control's glyph.
+///
+/// Shared with [`caption_target`] rather than written twice: the non-client
+/// region Windows is told about has to be the button the user can see, and two
+/// numbers that merely happen to agree do not stay equal through a redesign.
+const CAPTION_GLYPH: f32 = 14.0;
+
+/// A caption control's padding — vertical first, then horizontal.
+const CAPTION_PAD: [f32; 2] = [5.0, 9.0];
+
+/// A caption control's width: its glyph plus its horizontal padding.
+const CAPTION_BUTTON_WIDTH: f32 = CAPTION_GLYPH + 2.0 * CAPTION_PAD[1];
+
+/// A caption control's height: its glyph plus its vertical padding.
+const CAPTION_BUTTON_HEIGHT: f32 = CAPTION_GLYPH + 2.0 * CAPTION_PAD[0];
+
+/// Gap between the title bar's controls.
+const TITLE_BAR_SPACING: f32 = 6.0;
+
+/// Where the title bar's maximize control sits, for the window's hit test.
+///
+/// The button is answered as *non-client* — that is what makes Windows 11
+/// offer Snap Layouts when the pointer rests on it — which means Windows, not
+/// iced, sees the click. So Windows has to be told where the button is, before
+/// the pointer gets anywhere near it.
+///
+/// Every quantity is derived from the constants the bar lays itself out with,
+/// so the region cannot drift away from the button it belongs to. Read it as
+/// the path the layout takes from the client's top-right corner: in over the
+/// frame band, over the bar's padding, and past the close control and one gap.
+///
+/// The frame band counts on *both* axes, and forgetting it on the horizontal
+/// one is not a rounding error: the shell is inset by the band on each side, so
+/// a region measured from the client's edge lands six pixels to the right of
+/// the button it is meant to cover — close enough to look right in a diagram,
+/// and wrong.
+fn caption_target() -> native::CaptionTarget {
+    // The bar sits below the frame band, and the buttons centre themselves in
+    // the bar's content height.
+    let button_top = native::RESIZE_BAND
+        + TITLE_BAR_PAD
+        + (TITLE_BAR_CONTENT_HEIGHT - CAPTION_BUTTON_HEIGHT) / 2.0;
+    native::CaptionTarget {
+        // The side frame band, then the bar's padding, then the close control —
+        // the row's last item — and one gap back to the maximize control.
+        right_inset: native::RESIZE_BAND
+            + title_bar_padding().right
+            + CAPTION_BUTTON_WIDTH
+            + TITLE_BAR_SPACING,
+        width: CAPTION_BUTTON_WIDTH,
+        top: button_top,
+        bottom: button_top + CAPTION_BUTTON_HEIGHT,
+    }
+}
+
+/// How long two presses on the title bar may be apart and still count as a
+/// double-click. Matches Windows' own 500ms default closely enough that the
+/// gesture feels the same as it does on a decorated window.
+pub const DOUBLE_CLICK: Duration = Duration::from_millis(500);
+
+/// How far the pointer must travel after a press on the title bar before the
+/// window starts following it, in logical pixels.
+///
+/// The same job as Windows' own `SM_CXDRAG`/`SM_CYDRAG` (4px by default), and
+/// not a cosmetic detail: the drag is started by handing the mouse to Windows'
+/// modal move loop, and a move loop swallows the second press of a
+/// double-click. Starting it on the press therefore made double-click to
+/// maximize and restore unreliable. Waiting for real movement keeps an
+/// ordinary click — which is a press, a pixel or two of jitter, and a release —
+/// from ever entering that loop.
+pub const BAR_DRAG_THRESHOLD: f32 = 4.0;
+
+/// Instance cards per grid row (iced 0.12 has no flow layout, so rows are
+/// chunked; two wide cards read best next to the sidebar).
+pub const CARDS_PER_ROW: usize = 2;
+
+/// Instance icon side inside a card.
+pub const CARD_ICON: f32 = 52.0;
+
+/// Subscription id of the one-shot instance scan.
+pub const LOAD_ID: &str = "palantirmc-instances";
+/// Subscription id of the one-shot metadata catalog load.
+pub const CATALOG_ID: &str = "palantirmc-catalog";
+/// Subscription id of a Browse page search.
+pub const BROWSE_ID: &str = "palantirmc-browse";
+/// Subscription id of a Create-dialog search.
+pub const CREATE_SEARCH_ID: &str = "palantirmc-create-search";
+/// Subscription id of a Modrinth download.
+pub const INSTALL_ID: &str = "palantirmc-install";
+/// Subscription id of a launcher scan.
+pub const IMPORT_ID: &str = "palantirmc-import";
+/// Subscription id of the screenshot scan and thumbnail pass.
+pub const SHOTS_ID: &str = "palantirmc-screenshots";
+/// Subscription id of the page's scroll frames.
+pub const FRAME_ID: &str = "palantirmc-frame";
+
+/// Screenshot tiles per row in the grid.
+const SHOTS_PER_ROW: usize = 3;
+
+/// Width of one screenshot tile, in pixels.
+const SHOT_TILE_WIDTH: f32 = 268.0;
+
+/// Height of a tile's picture box. Screenshots are captured at the game's
+/// aspect ratio, and 16:9 is what a modern instance produces; anything else is
+/// letterboxed inside the box rather than stretched.
+const SHOT_TILE_HEIGHT: f32 = SHOT_TILE_WIDTH * 9.0 / 16.0;
+
+/// Height of a Create-dialog body, per step (the dialog sits in a scrollable
+/// so long version lists and search results cannot push the footer offscreen).
+const CREATE_BODY_CHOOSE: f32 = 396.0;
+const CREATE_BODY_CONFIGURE: f32 = 440.0;
+
+/// Dialog width and the ceiling on its total height.
+///
+/// The body scrolls, so the dialog never needs to be taller than this; keeping
+/// it comfortably under the window's 640px minimum (title bar and status bar
+/// included) is what lets it stay centred instead of being clipped at the top.
+const DIALOG_WIDTH: f32 = 600.0;
+const DIALOG_MAX_HEIGHT: f32 = 560.0;
+
+/// The Settings dialog is two columns — a section list and a pane — so it is
+/// wider than the single-column dialogs, and its pane scrolls instead of growing
+/// the dialog. Both numbers are chosen to fit the 980x640 minimum window with
+/// the title bar above and the status bar below.
+const SETTINGS_DIALOG_WIDTH: f32 = 860.0;
+const SETTINGS_NAV_WIDTH: f32 = 236.0;
+const SETTINGS_PANE_HEIGHT: f32 = 404.0;
+
+/// Width of one color-theme card, so the four cards make a 2x2 grid that fills
+/// the pane exactly.
+const THEME_CARD_WIDTH: f32 = 272.0;
+
+/// Label of the ungrouped group.
+pub const UNGROUPED_LABEL: &str = instances::UNGROUPED_LABEL;
+
+/// Main-area pages, in rail order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
-    /// Scrollable launch/game log.
+    /// Instance grid / welcome hero.
     #[default]
-    Console,
-    /// `<game_root>/mods` management.
+    Home,
+    /// Modrinth search + install.
+    Browse,
+    /// Per-instance mod management.
     Mods,
-    /// `resourcepacks/` listing.
-    ResourcePacks,
-    /// `shaderpacks/` listing.
-    ShaderPacks,
-    /// `saves/` listing.
+    /// Per-instance worlds.
     Worlds,
-    /// `mmc-pack.json` components.
-    Version,
-    /// Per-instance settings editor.
+    /// Screenshots taken in game, newest first.
+    Screenshots,
+    /// Launch log.
+    Logs,
+    /// Per-instance settings.
     Settings,
-    /// Offline account management.
+    /// Accounts.
     Accounts,
-    /// Version + paths.
+    /// Version, paths, shortcuts, credits.
     About,
 }
 
 impl Page {
-    /// Human-readable title.
-    pub fn title(&self) -> &'static str {
+    /// Human-readable title (also used as the page heading).
+    pub fn title(self) -> &'static str {
         match self {
-            Page::Console => "Console",
+            Page::Home => "Home",
+            Page::Browse => "Browse",
             Page::Mods => "Mods",
-            Page::ResourcePacks => "Resource Packs",
-            Page::ShaderPacks => "Shader Packs",
             Page::Worlds => "Worlds",
-            Page::Version => "Version",
+            Page::Screenshots => "Screenshots",
+            Page::Logs => "Logs",
             Page::Settings => "Settings",
             Page::Accounts => "Accounts",
             Page::About => "About",
         }
     }
 
-    /// Tab label in the main area (`About` is reached through the `Help`
-    /// toolbar button, like in real Prism).
-    pub fn tab_label(&self) -> &'static str {
+    /// What the rail entry says when the pointer rests on it.
+    ///
+    /// Separate from [`Page::title`] on purpose: the page heading stays a noun
+    /// (`Browse`) while the hover label can describe the destination the way the
+    /// reference does (`Discover content`).
+    pub fn tooltip(self) -> &'static str {
         match self {
-            Page::About => "Help",
-            other => other.title(),
+            Page::Home => "Home",
+            Page::Browse => "Discover content",
+            Page::Mods => "Mods",
+            Page::Worlds => "Worlds",
+            Page::Screenshots => "Screenshots",
+            Page::Logs => "Logs",
+            Page::Settings => "Settings",
+            Page::Accounts => "Accounts",
+            Page::About => "About",
         }
     }
 
-    /// All pages in toolbar/sidebar order.
+    /// Rail glyph name (`crate::glyphs` keys).
+    pub fn icon(self) -> &'static str {
+        match self {
+            Page::Home => "play",
+            Page::Browse => "compass",
+            Page::Mods => "cube",
+            Page::Worlds => "globe",
+            Page::Screenshots => "image",
+            Page::Logs => "terminal",
+            Page::Settings => "gear",
+            Page::Accounts => "person",
+            Page::About => "info",
+        }
+    }
+
+    /// Pages that get a rail entry, in order.
+    pub fn rail() -> [Page; 6] {
+        [
+            Page::Home,
+            Page::Browse,
+            Page::Mods,
+            Page::Worlds,
+            Page::Screenshots,
+            Page::Logs,
+        ]
+    }
+
+    /// Every page.
     pub fn all() -> [Page; 9] {
         [
-            Page::Console,
+            Page::Home,
+            Page::Browse,
             Page::Mods,
-            Page::ResourcePacks,
-            Page::ShaderPacks,
             Page::Worlds,
-            Page::Version,
+            Page::Screenshots,
+            Page::Logs,
             Page::Settings,
             Page::Accounts,
             Page::About,
@@ -150,341 +333,492 @@ impl Page {
     }
 }
 
+/// Which loader build the dialog should use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildChoice {
+    /// The build the loader marks recommended (else the newest).
+    #[default]
+    Stable,
+    /// The newest published build.
+    Latest,
+    /// Pick from a dropdown.
+    Other,
+}
+
+impl BuildChoice {
+    /// Label on the chip.
+    pub fn label(self) -> &'static str {
+        match self {
+            BuildChoice::Stable => "Stable",
+            BuildChoice::Latest => "Latest",
+            BuildChoice::Other => "Other",
+        }
+    }
+}
+
+/// Which half of the Create dialog is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreateStep {
+    /// "Already know what you want to play?" + the four instance types.
+    #[default]
+    Choose,
+    /// Icon, name, loader, versions.
+    Configure,
+}
+
+/// The modal dialog, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Modal {
+    /// No dialog.
+    #[default]
+    None,
+    /// Create instance.
+    Create,
+    /// Import from another launcher.
+    Import,
+    /// The launcher's own settings (Appearance and what it can change).
+    Settings,
+    /// Delete confirmation (carries the instance id).
+    ConfirmDelete(String),
+}
+
+impl Modal {
+    /// Whether a dialog is open (the content area is replaced while it is).
+    pub fn is_open(&self) -> bool {
+        !matches!(self, Modal::None)
+    }
+}
+
+/// The Create dialog's form state.
+#[derive(Debug, Clone)]
+pub struct CreateForm {
+    /// Which step is showing.
+    pub step: CreateStep,
+    /// Step-1 search text.
+    pub query: String,
+    /// Search in flight.
+    pub searching: bool,
+    /// Search results.
+    pub results: Vec<Hit>,
+    /// Search failure, if any.
+    pub search_error: Option<String>,
+    /// Search sequence (stale results are dropped).
+    pub seq: u64,
+    /// Instance name.
+    pub name: String,
+    /// Whether the user typed a name (stops the auto-generated one).
+    pub name_edited: bool,
+    /// Chosen loader.
+    pub loader: LoaderKind,
+    /// Chosen game version.
+    pub game: String,
+    /// Offer snapshots in the game-version pick list.
+    pub show_snapshots: bool,
+    /// Stable / Latest / Other.
+    pub build_choice: BuildChoice,
+    /// The concrete loader build.
+    pub build: String,
+    /// `iconKey` for a built-in icon.
+    pub icon_key: String,
+    /// A dropped/uploaded PNG to install as a custom icon.
+    pub icon_source: Option<PathBuf>,
+    /// The built-in icon picker is expanded.
+    pub customize_open: bool,
+    /// Waiting for a dropped PNG.
+    pub awaiting_upload: bool,
+    /// Project to install into the new instance right after creating it.
+    pub install_after: Option<(String, String)>,
+    /// Validation/submit failure to show inside the dialog.
+    pub error: Option<String>,
+}
+
+impl Default for CreateForm {
+    fn default() -> Self {
+        CreateForm {
+            step: CreateStep::Choose,
+            query: String::new(),
+            searching: false,
+            results: Vec::new(),
+            search_error: None,
+            seq: 0,
+            name: String::new(),
+            name_edited: false,
+            loader: LoaderKind::default(),
+            game: String::new(),
+            show_snapshots: false,
+            build_choice: BuildChoice::default(),
+            build: String::new(),
+            icon_key: String::new(),
+            icon_source: None,
+            customize_open: false,
+            awaiting_upload: false,
+            install_after: None,
+            error: None,
+        }
+    }
+}
+
+impl CreateForm {
+    /// The name to use, falling back to "<Loader> <game>".
+    pub fn effective_name(&self) -> String {
+        let typed = self.name.trim();
+        if !typed.is_empty() {
+            return typed.to_string();
+        }
+        if self.loader == LoaderKind::Vanilla {
+            self.game.trim().to_string()
+        } else {
+            format!("{} {}", self.loader.label(), self.game.trim())
+        }
+    }
+}
+
+/// Metadata-catalog load state.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogState {
+    /// Load in flight.
+    pub loading: bool,
+    /// A load has finished (successfully or not).
+    pub loaded_once: bool,
+    /// The catalog itself.
+    pub catalog: VersionCatalog,
+    /// Failure summary (empty catalogs report here too).
+    pub error: Option<String>,
+}
+
+/// Browse page state.
+#[derive(Debug, Clone, Default)]
+pub struct BrowseState {
+    /// Search box contents.
+    pub query: String,
+    /// Search in flight.
+    pub loading: bool,
+    /// Modrinth project type currently being browsed.
+    pub content_type: ContentType,
+    /// Request sequence.
+    pub seq: u64,
+    /// Results.
+    pub hits: Vec<Hit>,
+    /// Failure, if any.
+    pub error: Option<String>,
+    /// Project currently being installed (+ its title).
+    pub installing: Option<(String, String)>,
+    /// Outcome of the last install.
+    pub last_result: Option<String>,
+}
+
+/// Import dialog state.
+#[derive(Debug, Clone, Default)]
+pub struct ImportState {
+    /// Scan in flight.
+    pub loading: bool,
+    /// A scan has run.
+    pub scanned: bool,
+    /// Discovered instances.
+    pub candidates: Vec<instances::ImportCandidate>,
+    /// Failure, if any.
+    pub error: Option<String>,
+}
+
+/// Result of a background job, delivered as [`Message::TaskDone`].
+#[derive(Debug, Clone)]
+pub enum Task {
+    /// Instance scan finished.
+    Instances(Box<LoadedInstances>),
+    /// Metadata catalog finished.
+    Catalog(Box<VersionCatalog>),
+    /// Browse search finished (sequence, result).
+    BrowseSearch {
+        /// Request sequence.
+        seq: u64,
+        /// Hits or a failure message.
+        result: Result<Vec<Hit>, String>,
+    },
+    /// Create-dialog search finished.
+    CreateSearch {
+        /// Request sequence.
+        seq: u64,
+        /// Hits or a failure message.
+        result: Result<Vec<Hit>, String>,
+    },
+    /// Mod download finished.
+    Installed {
+        /// Request sequence.
+        seq: u64,
+        /// Project title.
+        title: String,
+        /// Outcome line or failure.
+        result: Result<String, String>,
+    },
+    /// Launcher scan finished.
+    ImportScan(Vec<instances::ImportCandidate>),
+    /// Screenshot scan and thumbnail pass finished.
+    ShotsLoaded(Vec<ShotTile>),
+}
+
+/// Which patch of the title bar a pointer event landed on.
+///
+/// The patches are separate widgets with separate local coordinate frames, so
+/// a drag has to remember which one it started in: a move reported for a
+/// different patch is measured against the wrong origin and would look like a
+/// jump.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarArea {
+    /// Logo, product name and version.
+    Brand,
+    /// The empty stretch between the search box and the run chip.
+    Middle,
+    /// The "running instance" chip.
+    RunChip,
+}
+
 /// Every interaction the GUI can produce.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// Select an instance by folder id.
-    SelectInstance(String),
-    /// Sidebar search text.
-    SearchChanged(String),
-    /// Reload instances + selection caches.
-    Refresh,
-    /// Switch the main-area page.
+    /// Switch pages.
     PageSelected(Page),
-    /// Start launching the selected instance.
-    LaunchPressed,
-    /// Terminate the running child, if any.
+    /// Re-scan instances.
+    Refresh,
+    /// Look for screenshots again.
+    RefreshScreenshots,
+    /// A wheel event over the page's content, with the geometry it happened in.
+    ///
+    /// Published by `scroll::guard`, which takes the wheel away from iced's
+    /// scrollable so the offset can be eased toward a target instead of jumped.
+    PageWheel(scroll::Wheel),
+    /// One frame of the page's scroll tween.
+    PageScrollTick,
+    /// The page's viewport moved by something other than the wheel: a dragged
+    /// scrollbar, a touch, a key.
+    ///
+    /// Carries the numbers rather than iced's `Viewport`, so the rule for
+    /// adopting a foreign scroll can be tested without a window.
+    PageScrolled {
+        /// The offset the content is now drawn at.
+        offset: f32,
+        /// Full height of the content.
+        content_height: f32,
+        /// Height of the visible part.
+        view_height: f32,
+    },
+    /// Global search box.
+    SearchChanged(String),
+    /// Select an instance by id.
+    SelectInstance(String),
+    /// Select and launch an instance.
+    PlayInstance(String),
+    /// Kill the running child.
     KillPressed,
-    /// Show the inline Add Instance panel.
-    AddInstancePressed,
-    /// Add-panel name input.
-    AddInstanceNameChanged(String),
-    /// Add-panel Minecraft version input.
-    AddInstanceVersionChanged(String),
-    /// Create the instance from the add panel.
-    AddInstanceCreate,
-    /// Hide the add panel.
-    AddInstanceCancel,
-    /// Open the instance editor (Settings page).
-    EditPressed,
-    /// Reveal the selected instance (or data root) in the file manager.
-    OpenFolderPressed,
-    /// Delete the selected instance (two clicks to confirm).
-    DeletePressed,
-    /// Go to the Settings page.
-    SettingsPressed,
-    /// Go to the Accounts page.
-    AccountsPressed,
-    /// Go to the About page.
-    AboutPressed,
-    /// Clear the console buffer.
-    ConsoleClear,
-    /// Toggle console autoscroll.
-    ConsoleAutoscrollToggled(bool),
-    /// One streamed batch from the launch worker.
-    LaunchLog {
-        /// Run this batch belongs to (stale runs are ignored).
-        run_id: u64,
-        /// Log lines.
-        lines: Vec<String>,
-    },
-    /// The launch worker finished.
-    LaunchDone {
-        /// Run that finished.
-        run_id: u64,
-        /// Final outcome line.
-        note: String,
-    },
-    /// Background instance load finished.
-    InstancesLoaded(LoadedData),
-    /// Collapse/expand a group section (`""` = ungrouped).
-    GroupToggled(String),
-    /// Move the selected instance to a group (`Ungrouped` clears it).
-    ChangeGroupSelected(String),
-    /// Duplicate the selected instance folder under a unique name.
-    CopyPressed,
-    /// Export the selected instance (honestly unimplemented: zip export
-    /// would need a new archiving dependency for a one-click feature).
-    ExportPressed,
-    /// Write a `.url` shortcut for the selected instance on the Desktop.
-    ShortcutPressed,
-    /// Check for updates (honest: updates ship via the installer).
-    UpdatePressed,
-    /// Reveal the instances folder in the file manager.
-    FoldersPressed,
+    /// Reveal an instance folder.
+    OpenFolder(String),
+    /// Duplicate an instance folder.
+    DuplicateInstance(String),
+    /// Ask to delete an instance (opens the confirmation dialog).
+    AskDelete(String),
+    /// Confirm the pending delete.
+    ConfirmDelete,
+    /// Open the instance settings page for an instance.
+    EditInstance(String),
+    /// Move the selection to a group (`Ungrouped` clears it).
+    GroupSelected(String),
+    /// Reveal the instances folder.
+    OpenInstancesFolder,
+
+    // ---- window controls (undecorated window) ----
+    /// Minimize.
+    WindowMinimize,
+    /// Toggle maximize.
+    WindowMaximize,
+    /// Close.
+    WindowClose,
+    /// Grab an edge of the window frame and start a native resize loop.
+    ResizeStart(ResizeEdge),
+    /// A non-interactive patch of the title bar was pressed. This arms a drag
+    /// and detects a double-click, but deliberately does not move the window
+    /// yet — see [`Message::BarCursorMoved`].
+    BarPressed(BarArea),
+    /// The pointer moved over a grabbable patch of the title bar.
+    ///
+    /// A drag begins here rather than on the press, once the pointer has moved
+    /// [`BAR_DRAG_THRESHOLD`]. Starting it on the press would hand the mouse to
+    /// Windows' modal move loop before the button came back up, and that loop
+    /// eats the second press of a double-click.
+    BarCursorMoved(BarArea, Point),
+    /// The left button came back up over a grabbable patch: stand the drag down.
+    BarReleased(BarArea),
+    /// Right-click on the title bar: show the native window menu.
+    BarRightClick,
+    /// The window reported whether it is maximized (drives the caption glyph).
+    MaximizedChanged(bool),
+    /// The window's own state changed — the maximize control's hover, or
+    /// whether the window is maximized. See [`PrismApp::window_state`].
+    WindowStateChanged,
+
+    // ---- dialogs ----
+    /// Open the Create dialog.
+    OpenCreate,
+    /// Open the Import dialog (and scan).
+    OpenImport,
+    /// Open the launcher's own settings dialog.
+    OpenSettings,
+    /// Pick a color theme (applies immediately and is remembered).
+    SetColorTheme(ColorTheme),
+    /// Close whatever dialog is open.
+    CloseModal,
+    /// Create step 1 → step 2 (custom setup).
+    CreateCustomSetup,
+    /// Create dialog search text.
+    CreateSearchChanged(String),
+    /// Jump straight to the search results.
+    CreateFocusSearch,
+    /// A search hit was chosen (project ref, title).
+    CreateProjectPicked(String, String),
+    /// Back to step 1.
+    CreateBack,
+    /// Name text.
+    CreateNameChanged(String),
+    /// Loader chip.
+    CreateLoaderPicked(LoaderKind),
+    /// Game version picked.
+    CreateGamePicked(String),
+    /// Snapshots toggle.
+    CreateSnapshotsToggled(bool),
+    /// Stable/Latest/Other chip.
+    CreateBuildChoicePicked(BuildChoice),
+    /// A specific build from the "Other" dropdown.
+    CreateBuildPicked(String),
+    /// Pick a random built-in icon.
+    CreateIconRandomize,
+    /// Toggle the built-in icon picker.
+    CreateIconCustomize,
+    /// Choose a built-in icon.
+    CreateIconPicked(String),
+    /// Wait for a dropped PNG to use as the icon.
+    CreateIconUpload,
+    /// Wait for a dropped `.mrpack`/`.zip` to build the instance from.
+    CreateAwaitPack,
+    /// Submit the dialog.
+    CreateSubmit,
+    /// Import one candidate (index into the scan list).
+    ImportPicked(usize),
+    /// Re-fetch the version metadata (dialog retry, Ctrl+R companion).
+    ReloadCatalog,
+
+    // ---- content ----
     /// Enable/disable a mod file.
     ModToggled(String, bool),
-    /// Reveal the selected instance's mods folder.
-    OpenModsFolderPressed,
-    /// Settings form inputs.
-    SetName(String),
-    /// Settings form inputs.
-    SetMinMem(String),
-    /// Settings form inputs.
-    SetMaxMem(String),
-    /// Settings form inputs.
-    SetOverrideMemory(bool),
-    /// Settings form inputs.
-    SetJavaPath(String),
-    /// Settings form inputs.
-    SetOverrideJava(bool),
-    /// Settings form inputs.
-    SetWinWidth(String),
-    /// Settings form inputs.
-    SetWinHeight(String),
-    /// Settings form inputs.
-    SetOverrideWindow(bool),
-    /// Settings form inputs.
-    SetJoinServer(bool),
-    /// Settings form inputs.
-    SetServerAddress(String),
-    /// Persist the settings form to `instance.cfg`.
-    SettingsSave,
-    /// Accounts page username input.
+    /// Reveal the instance's mods folder.
+    OpenModsFolder,
+    /// Reveal the instance's saves folder.
+    OpenWorldsFolder,
+    /// Go to Browse and search the given text.
+    SearchModrinth(String),
+
+    // ---- browse ----
+    /// Browse search box.
+    BrowseQueryChanged(String),
+    /// Switch between Modrinth mods/resource packs/data packs/shaders/modpacks.
+    BrowseTypePicked(ContentType),
+    /// Run the browse search.
+    BrowseSubmitted,
+    /// Install a project into the selected instance (project ref, title).
+    BrowseInstall(String, String),
+
+    // ---- accounts ----
+    /// New offline account name.
     AccountNameChanged(String),
-    /// Add the typed offline account.
+    /// Add the typed account.
     AccountAdd,
-    /// Select an account by uuid.
+    /// Select an account.
     AccountSelect(String),
-    /// Remove an account by uuid.
+    /// Remove an account.
     AccountRemove(String),
-    /// Microsoft login button (honestly unimplemented).
+    /// Microsoft sign-in (not implemented).
     MicrosoftPressed,
+
+    // ---- logs ----
+    /// Clear the log buffer.
+    ConsoleClear,
+    /// Toggle log autoscroll.
+    ConsoleAutoscrollToggled(bool),
+
+    // ---- launch streaming ----
+    /// One streamed batch.
+    LaunchLog {
+        /// Run id.
+        run_id: u64,
+        /// Lines.
+        lines: Vec<String>,
+    },
+    /// The run finished.
+    LaunchDone {
+        /// Run id.
+        run_id: u64,
+        /// Final line.
+        note: String,
+    },
+
+    // ---- settings form ----
+    /// Display name field.
+    SetName(String),
+    /// `MinMemAlloc` field.
+    SetMinMem(String),
+    /// `MaxMemAlloc` field.
+    SetMaxMem(String),
+    /// `OverrideMemory` gate.
+    SetOverrideMemory(bool),
+    /// `JavaPath` field.
+    SetJavaPath(String),
+    /// `OverrideJavaLocation` gate.
+    SetOverrideJava(bool),
+    /// `MinecraftWinWidth` field.
+    SetWinWidth(String),
+    /// `MinecraftWinHeight` field.
+    SetWinHeight(String),
+    /// `OverrideWindow` gate.
+    SetOverrideWindow(bool),
+    /// `JoinServerOnLaunch` gate.
+    SetJoinServer(bool),
+    /// `JoinServerOnLaunchAddress` field.
+    SetServerAddress(String),
+    /// Persist the form.
+    SettingsSave,
+
+    // ---- background results ----
+    /// A worker finished.
+    TaskDone(Box<Task>),
+    /// A file was dropped on the window.
+    FileDropped(PathBuf),
 }
 
-/// Result of the background instance scan, delivered as
-/// [`Message::InstancesLoaded`]. Everything the grid needs, computed off the
-/// GUI thread: the entry list, the group index (incl. collapsed flags), the
-/// resolved instances dir and the pre-selected instance, if any.
-#[derive(Debug, Clone)]
-pub struct LoadedData {
-    /// Discovered instances in display order.
-    pub list: InstanceListModel,
-    /// Group membership + collapsed flags.
-    pub groups: Groups,
-    /// Pre-selected instance id (from `SelectedInstance`, when it matches).
-    pub selected: Option<String>,
-    /// Resolved instances dir (`InstanceDir` override applied).
-    pub instances_dir: PathBuf,
-    /// One-line outcome for the status bar.
-    pub status: String,
-}
-
-/// One grouped sidebar section.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GroupSection {
-    /// Group name (`None` = ungrouped).
-    pub name: Option<String>,
-    /// Entries in display order.
-    pub entries: Vec<InstanceEntry>,
-}
-
-/// Group the entries of `model` (filtered by `query` like
-/// [`InstanceListModel::filter`]) into named sections first (alphabetical)
-/// and the ungrouped tail last.
-pub fn grouped_instances(model: &InstanceListModel, query: &str) -> Vec<GroupSection> {
-    let mut groups: BTreeMap<Option<String>, Vec<InstanceEntry>> = BTreeMap::new();
-    for entry in model.filter(query) {
-        groups.entry(entry.group.clone()).or_default().push(entry.clone());
-    }
-    let mut named: Vec<(String, Vec<InstanceEntry>)> = Vec::new();
-    let mut ungrouped: Vec<InstanceEntry> = Vec::new();
-    for (key, list) in groups {
-        match key {
-            Some(group) => named.push((group, list)),
-            None => ungrouped = list,
-        }
-    }
-    named.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then_with(|| a.0.cmp(&b.0)));
-    let mut out: Vec<GroupSection> = Vec::new();
-    for (group, list) in named {
-        out.push(GroupSection { name: Some(group), entries: list });
-    }
-    if !ungrouped.is_empty() {
-        out.push(GroupSection { name: None, entries: ungrouped });
-    }
-    out
-}
-
-/// Deterministic pastel palette for instance tiles (RGB triples).
-pub const TILE_PALETTE: [(u8, u8, u8); 12] = [
-    (0xF4, 0xB8, 0xC1),
-    (0xF9, 0xD5, 0xA7),
-    (0xF7, 0xE8, 0xA0),
-    (0xB5, 0xE3, 0xB5),
-    (0xA8, 0xD8, 0xF0),
-    (0xC3, 0xB2, 0xE8),
-    (0xE8, 0xB4, 0xD8),
-    (0xB8, 0xE0, 0xD2),
-    (0xF5, 0xC9, 0x9B),
-    (0xC9, 0xD6, 0xF2),
-    (0xD8, 0xE6, 0xA0),
-    (0xEF, 0xC3, 0xA0),
-];
-
-/// Tile background for an instance id: FNV-1a hash into [`TILE_PALETTE`].
-/// Pure and deterministic (same id, same color, every run).
-pub fn tile_color(id: &str) -> Color {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in id.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    let (red, green, blue) = TILE_PALETTE[(hash as usize) % TILE_PALETTE.len()];
-    Color::from_rgb(
-        f32::from(red) / 255.0,
-        f32::from(green) / 255.0,
-        f32::from(blue) / 255.0,
-    )
-}
-
-/// Selected-tile background, Prism's instance-selection green (`#7CB342`).
-pub fn selected_tile_color() -> Color {
-    Color::from_rgb(0x7Cu8 as f32 / 255.0, 0xB3u8 as f32 / 255.0, 0x42u8 as f32 / 255.0)
-}
-
-/// Tile name label, truncated to two lines' worth of characters (char-safe,
-/// never splits a code point).
-pub fn short_name(name: &str) -> String {
-    const LIMIT: usize = 30;
-    let chars: Vec<char> = name.chars().collect();
-    if chars.len() <= LIMIT {
-        name.to_string()
-    } else {
-        let kept: String = chars[..LIMIT].iter().collect();
-        format!("{kept}…")
-    }
-}
-
-/// Recursively copy a directory tree (files only; symlinks and special
-/// files are skipped, Prism never writes them inside an instance).
-pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    let entries =
-        std::fs::read_dir(src).map_err(|e| format!("reading '{}': {e}", src.display()))?;
-    std::fs::create_dir_all(dst).map_err(|e| format!("creating '{}': {e}", dst.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("listing '{}': {e}", src.display()))?;
-        let kind = entry
-            .file_type()
-            .map_err(|e| format!("stating '{}': {e}", entry.path().display()))?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if kind.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else if kind.is_file() {
-            std::fs::copy(&from, &to)
-                .map_err(|e| format!("copying '{}': {e}", from.display()))?;
-        }
-    }
-    Ok(())
-}
-
-/// Contents of a Windows `.url` shortcut pointing at `target`.
-///
-/// A `.url` file is plain INI: Explorer opens `file:///` URLs in the file
-/// manager, so the shortcut reveals the instance folder. Backslashes are
-/// normalized to forward slashes (URLs never contain `\`).
-pub fn url_shortcut_text(target: &Path) -> String {
-    let normalized = target.display().to_string().replace('\\', "/");
-    let trimmed = normalized.trim_start_matches('/').to_string();
-    format!("[InternetShortcut]\nURL=file:///{trimmed}\n")
-}
-
-/// Write a `.url` shortcut named `<file_stem>.url` into `dir`.
-pub fn write_url_shortcut(dir: &Path, file_stem: &str, target: &Path) -> Result<PathBuf, String> {
-    if file_stem.contains('/') || file_stem.contains('\\') {
-        return Err(format!("refusing path-like shortcut name '{file_stem}'"));
-    }
-    let stem = prism_core::util::sanitize_dir_name(file_stem);
-    let path = dir.join(format!("{stem}.url"));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("creating '{}': {e}", parent.display()))?;
-    }
-    std::fs::write(&path, url_shortcut_text(target))
-        .map_err(|e| format!("writing '{}': {e}", path.display()))?;
-    Ok(path)
-}
-
-/// The user's Desktop folder (`%USERPROFILE%\Desktop` on Windows,
-/// `$HOME/Desktop` elsewhere). Returns `None` when no home is known.
-pub fn desktop_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())?;
-    Some(home.join("Desktop"))
-}
-
-/// Pre-selection for startup: `SelectedInstance` from `prismlauncher.cfg`
-/// when it matches a discovered id (stale values are ignored).
-pub fn resolve_selected_id(paths: &PrismPaths, list: &InstanceListModel) -> Option<String> {
-    let want = paths.selected_instance_id()?;
-    if want.trim().is_empty() {
-        return None;
-    }
-    if list.entries().iter().any(|entry| entry.id == want) {
-        Some(want)
-    } else {
-        None
-    }
-}
-
-/// Scan + parse every instance off the GUI thread (see [`LoadedData`]).
-/// Failures degrade to an empty list plus a status message, never a crash.
-pub fn load_instances_blocking(data_root: &Path) -> LoadedData {
-    let paths = PrismPaths::at(data_root);
-    let instances_dir = paths.configured_instances_dir();
-    let groups = Groups::load(&paths);
-    let list = InstanceListModel::load(&paths).unwrap_or_default();
-    let selected = resolve_selected_id(&paths, &list);
-    let status = if list.is_empty() {
-        format!("No instances found in {}.", instances_dir.display())
-    } else {
-        format!("loaded {} instance(s) from {}", list.len(), instances_dir.display())
-    };
-    LoadedData { list, groups, selected, instances_dir, status }
-}
-
-/// Editable snapshot of the per-instance settings form (all text so empty
-/// inputs are representable; parsed on save with fallbacks).
+/// Editable snapshot of the per-instance settings form.
 #[derive(Debug, Clone, Default)]
 pub struct SettingsForm {
     /// Display name.
     pub name: String,
-    /// `MinMemAlloc` text.
+    /// `MinMemAlloc`.
     pub min_mem: String,
-    /// `MaxMemAlloc` text.
+    /// `MaxMemAlloc`.
     pub max_mem: String,
-    /// `OverrideMemory` gate.
+    /// `OverrideMemory`.
     pub override_memory: bool,
-    /// `JavaPath` text.
+    /// `JavaPath`.
     pub java_path: String,
-    /// `OverrideJavaLocation` gate.
+    /// `OverrideJavaLocation`.
     pub override_java: bool,
-    /// `MinecraftWinWidth` text.
+    /// `MinecraftWinWidth`.
     pub win_width: String,
-    /// `MinecraftWinHeight` text.
+    /// `MinecraftWinHeight`.
     pub win_height: String,
-    /// `OverrideWindow` gate.
+    /// `OverrideWindow`.
     pub override_window: bool,
-    /// `JoinServerOnLaunch` (instance-only, no global gate in Prism).
+    /// `JoinServerOnLaunch`.
     pub join_server: bool,
-    /// `JoinServerOnLaunchAddress` text.
+    /// `JoinServerOnLaunchAddress`.
     pub server_address: String,
 }
 
-/// Read the form from instance settings.
+/// Read the settings form from an instance's settings.
 pub fn load_form(settings: &Settings) -> SettingsForm {
     SettingsForm {
         name: settings.get_str("name", defaults::INSTANCE_NAME),
@@ -501,143 +835,203 @@ pub fn load_form(settings: &Settings) -> SettingsForm {
     }
 }
 
-/// Parse a memory/size field, keeping `fallback` for blank/invalid input.
+/// Parse a numeric field, keeping `fallback` for blank/invalid input.
 pub fn parse_mem(text: &str, fallback: i64) -> i64 {
-    match text.trim().parse::<i64>() {
-        Ok(value) => value,
-        Err(_) => fallback,
-    }
+    text.trim().parse::<i64>().unwrap_or(fallback)
 }
 
-/// How many of `total` buffered lines the view renders.
+/// How many buffered log lines the view renders.
 pub fn console_shown_lines(total: usize) -> usize {
-    if total > CONSOLE_VIEW_LINES {
-        CONSOLE_VIEW_LINES
-    } else {
-        total
-    }
+    scroll::visible_log_lines(total).min(CONSOLE_VIEW_LINES)
 }
 
-/// Identifier of the console scrollable (for autoscroll snap commands).
+
+/// Identifier of the log scrollable (for autoscroll snaps).
 pub fn console_scroll_id() -> scrollable::Id {
-    scrollable::Id::new("prism-console")
+    scrollable::Id::new("palantirmc-console")
 }
 
-/// The full application state (runtime-agnostic).
+/// Identifier of the page scrollable.
+///
+/// One id for every page, because only one page is mounted at a time: the
+/// tween drives "the page", and no two pages can be on screen to confuse it.
+/// The log page is the exception — see `view_logs`.
+pub fn page_scroll_id() -> scrollable::Id {
+    scrollable::Id::new("palantirmc-page")
+}
+
+/// Built-in instance icons offered by "Randomize" and "Customize".
+pub const ICON_CHOICES: [&str; 10] = [
+    "grass", "dirt", "creeper", "steve", "tnt", "gear", "chicken_legacy", "enderman_legacy",
+    "enderpearl_legacy", "default",
+];
+
+/// One screenshot, decoded and shrunk so the renderer uploads it once.
+///
+/// Holds pixels rather than a path: the whole point of the thumbnail pass is
+/// that the original file — 8 MB of pixels for a 1080p capture — is never handed
+/// to the renderer at all.
+#[derive(Debug, Clone)]
+pub struct ShotTile {
+    /// Which file it came from, and which instance owns it.
+    pub entry: screenshots::Entry,
+    /// Thumbnail pixels, already at thumbnail size.
+    pub handle: Handle,
+    /// Thumbnail width in pixels.
+    pub width: u32,
+    /// Thumbnail height in pixels.
+    pub height: u32,
+}
+
+impl ShotTile {
+    /// Caption under the tile: the file name and the instance it came from.
+    pub fn caption(&self) -> String {
+        format!("{} · {}", self.entry.name, self.entry.instance)
+    }
+}    /// Screenshots page state.
+    #[derive(Default)]
+    pub struct ShotState {
+    /// Whether the background scan is running.
+    pub loading: bool,
+    /// Loaded tiles, newest first.
+    pub tiles: Vec<ShotTile>,
+    /// Set once a scan has finished, so the page can tell "none yet" from
+    /// "still looking".
+    pub scanned: bool,
+}
+
+/// The application state (runtime-agnostic; both shells in `main.rs` use it).
 pub struct PrismApp {
     paths: PrismPaths,
-    /// Resolved instances dir, cached at (re)load so `view()` does no IO.
     instances_dir: PathBuf,
-    list: InstanceListModel,
+    cards: Vec<InstanceCard>,
     groups: Groups,
-    /// True while the background load is in flight (placeholder shown).
     loading: bool,
     search: String,
     selected: Option<String>,
     page: Page,
+    /// Where the current page is scrolled, and where the wheel is taking it.
+    ///
+    /// The shell owns this rather than iced's scrollable, so a notch can be
+    /// eased into place instead of applied as an instant 60-pixel jump.
+    page_scroll: scroll::ScrollAnim,
     console: VecDeque<String>,
     autoscroll: bool,
     status: String,
-    show_add: bool,
-    add_name: String,
-    add_version: String,
-    delete_armed: bool,
-    form: SettingsForm,
-    accounts: AccountsStore,
+    status_is_error: bool,
+    modal: Modal,
+    create: CreateForm,
+    catalog: CatalogState,
+    browse: BrowseState,
+    import: ImportState,
+    accounts: crate::accounts::AccountsStore,
     account_input: String,
+    form: SettingsForm,
+    mods: Vec<ModEntry>,
+    worlds: Vec<String>,
+    shots: ShotState,
     run_seq: u64,
+    install_seq: u64,
     active_run: Option<ActiveRunData>,
     child: ChildSlot,
-    mods: Vec<ModEntry>,
-    resource_packs: Vec<String>,
-    shader_packs: Vec<String>,
-    worlds: Vec<String>,
-    components: Vec<(String, String)>,
+    /// Whether the window is maximized, so the caption button can offer
+    /// Maximize or Restore. Kept in sync by [`Message::MaximizedChanged`] and
+    /// by our own toggles.
+    maximized: bool,
+    /// When the title bar was last pressed, for detecting a double-click.
+    last_bar_press: Option<Instant>,
+    /// The title-bar patch the current press landed on, while that press is
+    /// still waiting to become a window drag.
+    bar_armed: Option<BarArea>,
+    /// Where the pointer was when the armed patch first saw it move, so the
+    /// drag waits for real movement instead of a click's jitter.
+    bar_origin: Option<Point>,
 }
 
 impl PrismApp {
-    /// Build against an explicit data root (used by `new` and tests).
-    /// Synchronous: loads instances, groups and the `SelectedInstance`
-    /// pre-selection before returning.
+    /// Build against an explicit data root, loading instances synchronously.
     pub(crate) fn with_paths(paths: PrismPaths) -> Self {
-        let (accounts, accounts_warn) = AccountsStore::load_with_report(&paths.accounts_file());
+        let (accounts, accounts_warn) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
         let mut app = PrismApp {
             instances_dir: paths.configured_instances_dir(),
             paths,
-            list: InstanceListModel::default(),
+            cards: Vec::new(),
             groups: Groups::default(),
             loading: false,
             search: String::new(),
             selected: None,
             page: Page::default(),
+            shots: ShotState::default(),
+            page_scroll: scroll::ScrollAnim::default(),
             console: VecDeque::new(),
             autoscroll: true,
             status: String::new(),
-            show_add: false,
-            add_name: String::new(),
-            add_version: "1.21.1".to_string(),
-            delete_armed: false,
-            form: SettingsForm::default(),
+            status_is_error: false,
+            modal: Modal::None,
+            create: CreateForm::default(),
+            catalog: CatalogState::default(),
+            browse: BrowseState::default(),
+            import: ImportState::default(),
             accounts,
             account_input: String::new(),
+            form: SettingsForm::default(),
+            mods: Vec::new(),
+            worlds: Vec::new(),
             run_seq: 0,
+            install_seq: 0,
             active_run: None,
             child: Arc::new(Mutex::new(None)),
-            mods: Vec::new(),
-            resource_packs: Vec::new(),
-            shader_packs: Vec::new(),
-            worlds: Vec::new(),
-            components: Vec::new(),
+            maximized: false,
+            last_bar_press: None,
+            bar_armed: None,
+            bar_origin: None,
         };
-        app.reload_instances();
-        if app.selected.is_none() {
-            app.selected = resolve_selected_id(&app.paths, &app.list);
-            if app.selected.is_some() {
-                app.refresh_selection_caches();
-            }
-        }
         if let Some(warn) = accounts_warn {
-            app.status = warn.clone();
+            app.set_error(warn.clone());
             app.push_console(vec![warn]);
         }
-        app.push_console(vec![
-            "Prism Launcher (Rust) console — launch output appears here.".to_string(),
-        ]);
+        app.reload_instances();
+        app.push_console(vec![format!("{} console — launch output appears here.", brand::APP_NAME)]);
         app
     }
 
     /// Instant placeholder for the `Application` shell: no disk IO beyond
-    /// resolving the data root, so the window can paint immediately. The
-    /// background loader (see [`PrismApp::subscription`]) fills the grid.
+    /// resolving the data root, so the window paints immediately.
     pub(crate) fn pending(paths: PrismPaths) -> Self {
-        let (accounts, _) = AccountsStore::load_with_report(&paths.accounts_file());
+        let (accounts, _) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
         PrismApp {
             instances_dir: paths.configured_instances_dir(),
             paths,
-            list: InstanceListModel::default(),
+            cards: Vec::new(),
             groups: Groups::default(),
             loading: true,
             search: String::new(),
             selected: None,
             page: Page::default(),
-            console: VecDeque::from(["Loading instances…".to_string()]),
+            shots: ShotState::default(),
+            page_scroll: scroll::ScrollAnim::default(),
+            console: VecDeque::from([format!("Starting {}…", brand::APP_NAME)]),
             autoscroll: true,
             status: "Loading instances…".to_string(),
-            show_add: false,
-            add_name: String::new(),
-            add_version: "1.21.1".to_string(),
-            delete_armed: false,
-            form: SettingsForm::default(),
+            status_is_error: false,
+            modal: Modal::None,
+            create: CreateForm::default(),
+            catalog: CatalogState::default(),
+            browse: BrowseState::default(),
+            import: ImportState::default(),
             accounts,
             account_input: String::new(),
+            form: SettingsForm::default(),
+            mods: Vec::new(),
+            worlds: Vec::new(),
             run_seq: 0,
+            install_seq: 0,
             active_run: None,
             child: Arc::new(Mutex::new(None)),
-            mods: Vec::new(),
-            resource_packs: Vec::new(),
-            shader_packs: Vec::new(),
-            worlds: Vec::new(),
-            components: Vec::new(),
+            maximized: false,
+            last_bar_press: None,
+            bar_armed: None,
+            bar_origin: None,
         }
     }
 
@@ -648,45 +1042,88 @@ impl PrismApp {
 
     /// Window title.
     pub fn title(&self) -> String {
-        "Prism Launcher (Rust)".to_string()
+        let selected = self.selected_name();
+        if self.selected.is_none() {
+            brand::window_title()
+        } else {
+            format!("{} — {}", brand::window_title(), selected)
+        }
     }
+
+    // ---- small accessors used by the views and in tests --------------------
 
     /// Whether console autoscroll is on.
     pub fn autoscroll_enabled(&self) -> bool {
         self.autoscroll
     }
 
-    /// Display name of the selection (folder id fallback).
+    /// The page's scroll position.
+    ///
+    /// Test-only: the view reads it directly out of `self`, and nothing outside
+    /// this module has a reason to ask.
+    #[cfg(test)]
+    fn scroll_state(&self) -> scroll::ScrollAnim {
+        self.page_scroll
+    }
+
+    /// The selected instance's card.
+    pub fn selected_card(&self) -> Option<&InstanceCard> {
+        let id = self.selected.as_deref()?;
+        self.cards.iter().find(|card| card.id == id)
+    }
+
+    /// The open dialog.
+    pub fn modal(&self) -> &Modal {
+        &self.modal
+    }
+
+    /// Which renderer this process is drawing with.
+    ///
+    /// Reported rather than described, and read from the same probe that chose it
+    /// (see [`crate::gpu`]), so it is evidence about *this* machine rather than a
+    /// claim about GPUs in general. Two rounds of this shell's renderer bug were
+    /// diagnosed wrongly by inferring the adapter from a module list; this is
+    /// what makes the real answer visible to whoever hits the next one.
+    pub fn graphics_summary(&self) -> String {
+        crate::gpu::active_backend().to_string()
+    }
+
+    /// Which graphics adapter the probe found, and whether it was used.
+    pub fn adapter_summary(&self) -> String {
+        match crate::gpu::detected() {
+            Some(report) => report.summary(),
+            None => "not probed".to_string(),
+        }
+    }
+
+    /// Display name of the selection (id fallback, `none` when empty).
     pub fn selected_name(&self) -> String {
-        match self.selected.as_deref() {
-            Some(id) => match self.list.entries().iter().find(|e| e.id == id) {
-                Some(entry) => entry.name.clone(),
-                None => id.to_string(),
+        match self.selected_card() {
+            Some(card) => card.name.clone(),
+            None => match self.selected.as_deref() {
+                Some(id) => id.to_string(),
+                None => "none".to_string(),
             },
-            None => "none".to_string(),
         }
     }
 
-    /// Account chip label for the toolbar (`👤 <name>` or the empty state).
-    pub fn account_chip_label(&self) -> String {
+    /// Label of the account chip / "Playing as" card.
+    pub fn account_label(&self) -> String {
         match self.accounts.selected_account() {
-            Some(account) => format!("👤 {}", account.username),
-            None => "👤 No account".to_string(),
+            Some(account) => account.username.clone(),
+            None => "No account".to_string(),
         }
     }
 
-    /// Current group of the selection (`Ungrouped` when there is none).
-    pub fn selected_group_label(&self) -> String {
-        match self.selected.as_deref() {
-            Some(id) => match self.list.entries().iter().find(|e| e.id == id) {
-                Some(entry) => entry.group.clone().unwrap_or_else(|| UNGROUPED_LABEL.to_string()),
-                None => UNGROUPED_LABEL.to_string(),
-            },
-            None => UNGROUPED_LABEL.to_string(),
+    /// Sub-label of the account card.
+    pub fn account_detail(&self) -> String {
+        match self.accounts.selected_account() {
+            Some(account) => format!("Offline account · {}", account.uuid),
+            None => "Sign in to play on servers".to_string(),
         }
     }
 
-    /// Group options for the Change Group pick-list (`Ungrouped` first).
+    /// Group options for the pick list (`Ungrouped` first).
     pub fn group_options(&self) -> Vec<String> {
         let mut options = vec![UNGROUPED_LABEL.to_string()];
         for name in self.groups.names() {
@@ -697,13 +1134,19 @@ impl PrismApp {
         options
     }
 
+    /// Current group label of the selection.
+    pub fn selected_group_label(&self) -> String {
+        self.selected_card()
+            .and_then(|card| card.group.clone())
+            .unwrap_or_else(|| UNGROUPED_LABEL.to_string())
+    }
+
+    // ---- status/console plumbing ------------------------------------------
+
     /// Append lines, enforcing [`CONSOLE_LINE_CAP`].
     pub fn push_console(&mut self, lines: Vec<String>) {
         for line in lines {
-            let clean = match line.strip_suffix('\r') {
-                Some(stripped) => stripped.to_string(),
-                None => line,
-            };
+            let clean = line.strip_suffix('\r').unwrap_or(&line).to_string();
             self.console.push_back(clean);
         }
         while self.console.len() > CONSOLE_LINE_CAP {
@@ -711,165 +1154,123 @@ impl PrismApp {
         }
     }
 
-    /// Take the active run (used by the `Sandbox` shell for its honest
-    /// synchronous dry run; the `Application` shell never calls this).
+    fn set_status(&mut self, message: impl Into<String>) {
+        self.status = message.into();
+        self.status_is_error = false;
+    }
+
+    fn set_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.status = message.clone();
+        self.status_is_error = true;
+        self.push_console(vec![message]);
+    }
+
+    /// Take the active run (the `Sandbox` shell drains it synchronously).
     pub(crate) fn take_active_run(&mut self) -> Option<ActiveRunData> {
         self.active_run.take()
     }
 
-    /// Synchronous dry run for runtimes without subscriptions: resolve and
-    /// report, never spawn.
+    /// Synchronous dry run for runtimes without subscriptions.
     pub(crate) fn sandbox_drain_launch(&mut self) {
         let run = match self.take_active_run() {
             Some(run) => run,
             None => return,
         };
         let paths = PrismPaths::at(&run.data_root);
-        let (lines, readiness) = prepare_launch(&paths, &run.instance_id, &run.account);
+        let (lines, readiness) = launch::prepare_launch(&paths, &run.instance_id, &run.account);
         let tail = match readiness {
             launch::LaunchReadiness::Ready(_) => {
-                "dry run: launch looks runnable (live streaming needs the Application entrypoint)".to_string()
+                "dry run: launch looks runnable (live streaming needs the Application entrypoint)"
+                    .to_string()
             }
-            launch::LaunchReadiness::Blocked => "dry run: launch blocked (see console)".to_string(),
+            launch::LaunchReadiness::Blocked => "dry run: launch blocked (see the log)".to_string(),
         };
-        self.status = tail.clone();
+        self.set_status(tail.clone());
         let mut all = lines;
         all.push(tail);
         self.push_console(all);
     }
 
-    /// Subscriptions for the background instance load (while [`PrismApp::loading`])
-    /// and the active launch run (keyed by run id), or none.
-    pub fn subscription(&self) -> Subscription<Message> {
-        let mut subs: Vec<Subscription<Message>> = Vec::new();
-        if self.loading {
-            let root = self.paths.root.clone();
-            subs.push(iced::subscription::channel(
-                LOAD_SUBSCRIPTION_ID,
-                16,
-                move |sender| async move {
-                    let _ = std::thread::spawn(move || {
-                        run_instance_loader(root, sender);
-                    });
-                    loop {
-                        futures::future::pending::<()>().await;
-                    }
-                },
-            ));
-        }
-        if let Some(run) = self.active_run.clone() {
-            let slot = self.child.clone();
-            subs.push(iced::subscription::channel(run.run_id, 100, move |sender| async move {
-                let params = LaunchParams {
-                    data_root: run.data_root.clone(),
-                    instance_id: run.instance_id.clone(),
-                    account: run.account.clone(),
-                    run_id: run.run_id,
-                };
-                let _ = std::thread::spawn(move || {
-                    run_launch_worker(params, slot, sender);
-                });
-                loop {
-                    futures::future::pending::<()>().await;
-                }
-            }));
-        }
-        Subscription::batch(subs)
+    // ---- loading ----------------------------------------------------------
+
+    /// Rescan instances on this thread (startup + user-triggered refresh).
+    fn reload_instances(&mut self) {
+        let loaded = instances::load(&self.paths);
+        self.apply_loaded(loaded);
     }
 
-    /// Apply the background load result (selection caches follow).
-    fn apply_loaded(&mut self, data: LoadedData) {
+    /// The `(instance name, folder)` pairs the screenshot scan should look in.
+    ///
+    /// One entry per instance in the launcher, not just the selected one: the
+    /// reference page is a single library view, and a screenshot is something
+    /// you want to find again rather than something you file under the pack you
+    /// happened to be playing.
+    fn screenshot_dirs(&self) -> Vec<(String, PathBuf)> {
+        self.cards
+            .iter()
+            .map(|card| (card.name.clone(), self.instances_dir.join(&card.id)))
+            .collect()
+    }
+
+    /// Ask for a screenshot scan.
+    ///
+    /// Existing tiles stay on screen while the pass runs, so re-opening the page
+    /// does not flash empty and then fill in.
+    fn start_screenshot_scan(&mut self) {
+        if self.shots.loading {
+            return;
+        }
+        self.shots.loading = true;
+    }
+
+    fn apply_loaded(&mut self, loaded: LoadedInstances) {
         self.loading = false;
-        self.list = data.list;
-        self.groups = data.groups;
-        self.instances_dir = data.instances_dir;
-        self.selected = data.selected;
-        self.status = data.status;
+        self.cards = loaded.cards;
+        self.groups = loaded.groups;
+        self.instances_dir = loaded.instances_dir;
+        let keep = self
+            .selected
+            .as_deref()
+            .map(|id| self.cards.iter().any(|card| card.id == id))
+            .unwrap_or(false);
+        if !keep {
+            self.selected = loaded.selected;
+        }
+        self.set_status(loaded.status);
         self.refresh_selection_caches();
     }
 
-    /// Reload the instance list, pruning a vanished selection. Also refreshes
-    /// the cached resolved instances dir and the group index.
-    fn reload_instances(&mut self) {
-        self.instances_dir = self.paths.configured_instances_dir();
-        self.groups = Groups::load(&self.paths);
-        match InstanceListModel::load(&self.paths) {
-            Ok(list) => {
-                let count = list.len();
-                self.list = list;
-                let keep = match self.selected.as_deref() {
-                    Some(id) => self.list.entries().iter().any(|e| e.id == id),
-                    None => false,
-                };
-                if !keep {
-                    self.selected = None;
-                }
-                if count == 0 {
-                    self.status = format!("No instances found in {}.", self.instances_dir.display());
-                } else {
-                    self.status = format!("refreshed ({count} instance(s))");
-                }
-            }
-            Err(e) => {
-                self.list = InstanceListModel::default();
-                self.selected = None;
-                self.status = format!("listing instances failed: {e}");
-            }
-        }
-    }
-
-    /// Reload everything derived from the selection (mods, content lists,
-    /// version components, settings form).
+    /// Reload everything derived from the selection.
     fn refresh_selection_caches(&mut self) {
         self.mods.clear();
-        self.resource_packs.clear();
-        self.shader_packs.clear();
         self.worlds.clear();
-        self.components.clear();
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.form = SettingsForm::default();
-                return;
-            }
+        let Some(card) = self.selected_card().cloned() else {
+            self.form = SettingsForm::default();
+            return;
         };
-        let instance = match Instance::open(&self.instances_dir.join(&id)) {
-            Ok(instance) => instance,
-            Err(_) => {
-                self.form = SettingsForm::default();
-                return;
-            }
+        let Ok(instance) = Instance::open(&self.instances_dir.join(&card.id)) else {
+            self.form = SettingsForm::default();
+            return;
         };
-        let game_root = instance.game_root();
         self.mods = list_mods(&instance.mods_dir());
-        self.resource_packs = list_content_names(&game_root.join("resourcepacks"));
-        self.shader_packs = list_content_names(&game_root.join("shaderpacks"));
-        self.worlds = list_content_names(&game_root.join("saves"));
-        self.components = match PackProfile::load(&instance.mmc_pack_path()) {
-            Ok(profile) => profile
-                .components()
-                .iter()
-                .map(|c| (c.uid.clone(), c.version.clone()))
-                .collect(),
-            Err(_) => Vec::new(),
-        };
+        self.worlds = list_content_names(&instance.game_root().join("saves"));
         self.form = load_form(instance.settings());
     }
 
-    /// Reload just the settings form for the selection.
+    /// Reload just the settings form.
     fn reload_form(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.form = SettingsForm::default();
-                return;
-            }
+        let Some(id) = self.selected.clone() else {
+            self.form = SettingsForm::default();
+            return;
         };
         match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => self.form = load_form(instance.settings()),
             Err(_) => self.form = SettingsForm::default(),
         }
     }
+
+    // ---- launching -------------------------------------------------------
 
     /// Account identity for the next launch (selection or anonymous).
     fn launch_account(&self) -> AccountRef {
@@ -885,19 +1286,20 @@ impl PrismApp {
         }
     }
 
-    /// Handle `LaunchPressed`: record the run (the subscription spawns the
-    /// worker) or refuse with an honest reason.
-    fn start_launch(&mut self) {
-        self.delete_armed = false;
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
+    /// Record a run; the subscription spawns the worker.
+    fn start_launch(&mut self, id: Option<String>) {
+        // An empty id is "nothing selected" — treating it as a real instance
+        // would launch `""` and wipe the current selection on the way in.
+        if let Some(id) = id.filter(|id| !id.trim().is_empty()) {
+            self.selected = Some(id);
+            self.refresh_selection_caches();
+        }
+        let Some(id) = self.selected.clone() else {
+            self.set_error("Pick an instance first — press N to create one.");
+            return;
         };
         if self.active_run.is_some() {
-            self.status = "a launch is already running (Kill it first)".to_string();
+            self.set_error("A launch is already running — kill it first.");
             return;
         }
         if let Ok(mut guard) = self.child.lock() {
@@ -914,301 +1316,164 @@ impl PrismApp {
             data_root: self.paths.root.clone(),
             account,
         });
-        self.page = Page::Console;
-        self.status = format!("starting '{id}'...");
+        self.page = Page::Logs;
+        self.set_status(format!("Starting '{id}'…"));
         self.push_console(vec![format!("launch requested for '{id}'")]);
     }
 
-    /// Handle `KillPressed`.
     fn kill_running(&mut self) {
-        match self.child.lock() {
+        // The outcome is decided while the child slot is locked and applied
+        // afterwards: holding the lock across a `self` mutation would not
+        // borrow-check.
+        let outcome = match self.child.lock() {
             Ok(mut guard) => match guard.as_mut() {
                 Some(child) => match child.kill() {
-                    Ok(()) => self.status = "kill requested".to_string(),
-                    Err(e) => self.status = format!("kill failed: {e}"),
+                    Ok(()) => Ok("Kill requested.".to_string()),
+                    Err(error) => Err(format!("kill failed: {error}")),
                 },
-                None => self.status = "no running process".to_string(),
+                None => Ok("Nothing is running.".to_string()),
             },
-            Err(_) => self.status = "internal lock error".to_string(),
-        }
-    }
-
-    /// Handle `AddInstanceCreate`.
-    fn create_instance(&mut self) {
-        let name = self.add_name.trim().to_string();
-        let version = self.add_version.trim().to_string();
-        if name.is_empty() {
-            self.status = "instance name is empty".to_string();
-            return;
-        }
-        if version.is_empty() {
-            self.status = "minecraft version is empty".to_string();
-            return;
-        }
-        match Instance::create(&self.instances_dir, &name, &version) {
-            Ok(instance) => {
-                let id = instance.id();
-                self.show_add = false;
-                self.add_name.clear();
-                self.add_version.clear();
-                self.reload_instances();
-                self.selected = Some(id.clone());
-                self.refresh_selection_caches();
-                self.status = format!("created instance '{id}'");
-            }
-            Err(e) => self.status = format!("creating instance failed: {e}"),
-        }
-    }
-
-    /// Handle `DeletePressed` (first click arms, second click deletes).
-    fn delete_selected(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
+            Err(_) => Err("internal lock error".to_string()),
         };
-        if !self.delete_armed {
-            self.delete_armed = true;
-            self.status = format!("click Delete again to confirm deleting '{id}'");
-            return;
-        }
-        self.delete_armed = false;
-        match Instance::delete(&self.instances_dir, &id) {
-            Ok(()) => {
-                self.selected = None;
-                self.reload_instances();
-                self.refresh_selection_caches();
-                self.status = format!("deleted instance '{id}'");
-            }
-            Err(e) => self.status = format!("deleting '{id}' failed: {e}"),
+        match outcome {
+            Ok(message) => self.set_status(message),
+            Err(error) => self.set_error(error),
         }
     }
 
-    /// Handle `CopyPressed`: duplicate the folder under a unique name.
-    fn copy_selected(&mut self) {
-        self.delete_armed = false;
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
+    // ---- instance actions ------------------------------------------------
+
+    fn open_folder(&mut self, id: &str) {
+        let path = if id.is_empty() {
+            self.instances_dir.clone()
+        } else {
+            self.instances_dir.join(id)
         };
-        let src = self.instances_dir.join(&id);
-        let new_id = match prism_core::util::unique_dir_name(&self.instances_dir, &format!("{id} Copy")) {
+        match open_in_file_manager(&path) {
+            Ok(()) => self.set_status(format!("Opened {}", path.display())),
+            Err(error) => self.set_error(error),
+        }
+    }
+
+    fn duplicate_instance(&mut self, id: &str) {
+        let src = self.instances_dir.join(id);
+        let new_id = match prism_core::util::unique_dir_name(&self.instances_dir, &format!("{id} Copy"))
+        {
             Ok(name) => name,
-            Err(e) => {
-                self.status = format!("copying '{id}' failed: {e}");
-                return;
-            }
+            Err(error) => return self.set_error(format!("Duplicating '{id}' failed: {error}")),
         };
         let dst = self.instances_dir.join(&new_id);
-        if let Err(e) = copy_dir_recursive(&src, &dst) {
-            self.status = format!("copying '{id}' failed: {e}");
-            return;
+        if let Err(error) = instances::copy_dir_recursive(&src, &dst) {
+            return self.set_error(format!("Duplicating '{id}' failed: {error}"));
         }
-        if let Ok(mut copied) = Instance::open(&dst) {
-            let renamed = format!("{} Copy", copied.name());
-            copied.set_name(&renamed);
-            if copied.save().is_err() {
-                self.status = format!("copied '{id}' to '{new_id}' but renaming the copy failed");
-                self.reload_instances();
-                self.selected = Some(new_id);
-                self.refresh_selection_caches();
-                return;
+        if let Ok(mut copy) = Instance::open(&dst) {
+            let renamed = format!("{} Copy", copy.name());
+            copy.set_name(&renamed);
+            if let Err(error) = copy.save() {
+                self.set_error(format!("Copy saved but renaming failed: {error}"));
             }
         }
         self.reload_instances();
         self.selected = Some(new_id.clone());
         self.refresh_selection_caches();
-        self.status = format!("copied '{id}' to '{new_id}'");
+        self.set_status(format!("Duplicated '{id}' as '{new_id}'."));
     }
 
-    /// Handle `ExportPressed`: honest stub (see the `Message` docs).
-    fn export_selected(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
-        };
-        let path = self.instances_dir.join(&id);
-        self.status = format!(
-            "Export is not implemented yet — copy the instance folder manually: {}",
-            path.display()
-        );
-        self.push_console(vec![self.status.clone()]);
-    }
-
-    /// Handle `ShortcutPressed`: write a `.url` shortcut on the Desktop.
-    fn create_shortcut(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
-        };
-        let target = self.instances_dir.join(&id);
-        let stem = self.selected_name();
-        match desktop_dir() {
-            Some(desktop) => match write_url_shortcut(&desktop, &stem, &target) {
-                Ok(path) => {
-                    self.status = format!(
-                        "wrote shortcut {} (a .url file; on Windows it opens the instance folder)",
-                        path.display()
-                    );
+    fn delete_instance(&mut self, id: &str) {
+        match Instance::delete(&self.instances_dir, id) {
+            Ok(()) => {
+                if self.selected.as_deref() == Some(id) {
+                    self.selected = None;
                 }
-                Err(e) => self.status = format!("creating shortcut failed: {e}"),
-            },
-            None => {
-                self.status = "cannot locate your Desktop folder — shortcut not created".to_string();
+                self.modal = Modal::None;
+                self.reload_instances();
+                self.set_status(format!("Deleted '{id}'."));
             }
+            Err(error) => self.set_error(format!("Deleting '{id}' failed: {error}")),
         }
     }
 
-    /// Handle `UpdatePressed`: honest stub (updates ship via the installer).
-    fn check_updates(&mut self) {
-        self.status =
-            "Updates are delivered via the installer — this build does not update itself.".to_string();
-        self.push_console(vec![self.status.clone()]);
-    }
-
-    /// Handle `OpenFolderPressed`.
-    fn open_selected_folder(&mut self) {
-        let path = match self.selected.clone() {
-            Some(id) => self.instances_dir.join(id),
-            None => self.paths.root.clone(),
-        };
-        match open_in_file_manager(&path) {
-            Ok(()) => self.status = format!("opened {}", path.display()),
-            Err(e) => self.status = e,
-        }
-    }
-
-    /// Handle `FoldersPressed`: reveal the resolved instances folder.
-    fn open_folders(&mut self) {
-        let dir = self.instances_dir.clone();
-        match open_in_file_manager(&dir) {
-            Ok(()) => self.status = format!("opened {}", dir.display()),
-            Err(e) => self.status = e,
-        }
-    }
-
-    /// Handle `GroupToggled`: collapse/expand a section (persisted, like
-    /// Prism's `hidden` flag in `instgroups.json`).
-    fn toggle_group(&mut self, key: &str) {
-        let collapsed = self.groups.is_collapsed(key);
-        self.groups.set_collapsed(key, !collapsed);
-        if let Err(e) = self.groups.save(&self.paths) {
-            self.status = format!("saving groups failed: {e}");
-        }
-    }
-
-    /// Handle `ChangeGroupSelected`: move the selection between groups.
     fn change_group(&mut self, label: &str) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
+        let Some(id) = self.selected.clone() else {
+            return self.set_error("Pick an instance first.");
         };
         if label == UNGROUPED_LABEL {
             self.groups.set_group(&id, None);
         } else if label.trim().is_empty() {
-            self.status = "ignoring blank group name".to_string();
-            return;
+            return self.set_error("ignoring a blank group name");
         } else {
             self.groups.set_group(&id, Some(label));
         }
-        if let Err(e) = self.groups.save(&self.paths) {
-            self.status = format!("saving groups failed: {e}");
-            return;
+        if let Err(error) = self.groups.save(&self.paths) {
+            return self.set_error(format!("saving groups failed: {error}"));
         }
         self.reload_instances();
-        if label == UNGROUPED_LABEL {
-            self.status = format!("moved '{id}' to Ungrouped");
-        } else {
-            self.status = format!("moved '{id}' to group '{label}'");
-        }
+        self.set_status(format!("Moved '{id}' to '{label}'."));
     }
 
-    /// Handle `OpenModsFolderPressed` (creating the folder like Prism does
-    /// on launch so there is always something to reveal).
-    fn open_mods_folder(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
-        };
-        let dir = match Instance::open(&self.instances_dir.join(&id)) {
-            Ok(instance) => instance.mods_dir(),
-            Err(e) => {
-                self.status = format!("cannot open '{id}': {e}");
-                return;
-            }
-        };
-        if std::fs::create_dir_all(&dir).is_err() {
-            self.status = format!("cannot create {}", dir.display());
-            return;
-        }
-        match open_in_file_manager(&dir) {
-            Ok(()) => self.status = format!("opened {}", dir.display()),
-            Err(e) => self.status = e,
-        }
-    }
-
-    /// Handle `ModToggled`.
     fn toggle_mod(&mut self, file: &str, enabled: bool) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
-            }
+        let Some(id) = self.selected.clone() else {
+            return self.set_error("Pick an instance first.");
         };
         let dir = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance.mods_dir(),
-            Err(e) => {
-                self.status = format!("cannot open '{id}': {e}");
-                return;
-            }
+            Err(error) => return self.set_error(format!("cannot open '{id}': {error}")),
         };
         match set_mod_enabled(&dir, file, enabled) {
             Ok(()) => {
                 self.mods = list_mods(&dir);
-                if enabled {
-                    self.status = format!("enabled mod '{file}'");
-                } else {
-                    self.status = format!("disabled mod '{file}'");
-                }
+                let state = if enabled { "Enabled" } else { "Disabled" };
+                self.set_status(format!("{state} '{file}'."));
             }
-            Err(e) => self.status = e,
+            Err(error) => self.set_error(error),
         }
     }
 
-    /// Handle `SettingsSave`: parse the form (falling back per field) and
-    /// persist `instance.cfg` through the `Settings` setters.
-    fn save_settings(&mut self) {
-        let id = match self.selected.clone() {
-            Some(id) => id,
-            None => {
-                self.status = "select an instance first".to_string();
-                return;
+    fn open_mods_folder(&mut self) {
+        let Some(id) = self.selected.clone() else {
+            return self.set_error("Pick an instance first.");
+        };
+        match Instance::open(&self.instances_dir.join(&id)) {
+            Ok(instance) => {
+                let dir = instance.mods_dir();
+                if let Err(error) = prism_core::util::ensure_dir(&dir) {
+                    return self.set_error(format!("cannot create {}: {error}", dir.display()));
+                }
+                match open_in_file_manager(&dir) {
+                    Ok(()) => self.set_status(format!("Opened {}", dir.display())),
+                    Err(error) => self.set_error(error),
+                }
             }
+            Err(error) => self.set_error(format!("cannot open '{id}': {error}")),
+        }
+    }
+
+    fn open_worlds_folder(&mut self) {
+        let Some(id) = self.selected.clone() else {
+            return self.set_error("Pick an instance first.");
+        };
+        match Instance::open(&self.instances_dir.join(&id)) {
+            Ok(instance) => {
+                let dir = instance.game_root().join("saves");
+                if let Err(error) = prism_core::util::ensure_dir(&dir) {
+                    return self.set_error(format!("cannot create {}: {error}", dir.display()));
+                }
+                match open_in_file_manager(&dir) {
+                    Ok(()) => self.set_status(format!("Opened {}", dir.display())),
+                    Err(error) => self.set_error(error),
+                }
+            }
+            Err(error) => self.set_error(format!("cannot open '{id}': {error}")),
+        }
+    }
+
+    fn save_settings(&mut self) {
+        let Some(id) = self.selected.clone() else {
+            return self.set_error("Pick an instance first.");
         };
         let mut instance = match Instance::open(&self.instances_dir.join(&id)) {
             Ok(instance) => instance,
-            Err(e) => {
-                self.status = format!("cannot open '{id}': {e}");
-                return;
-            }
+            Err(error) => return self.set_error(format!("cannot open '{id}': {error}")),
         };
         if !self.form.name.trim().is_empty() {
             let name = self.form.name.trim().to_string();
@@ -1222,14 +1487,8 @@ impl PrismApp {
         settings.set_i64("MaxMemAlloc", max_mem);
         settings.set_str("JavaPath", self.form.java_path.trim());
         settings.set_bool("OverrideJavaLocation", self.form.override_java);
-        let width = parse_mem(
-            &self.form.win_width,
-            settings.get_i64("MinecraftWinWidth", defaults::MC_WIN_WIDTH),
-        );
-        let height = parse_mem(
-            &self.form.win_height,
-            settings.get_i64("MinecraftWinHeight", defaults::MC_WIN_HEIGHT),
-        );
+        let width = parse_mem(&self.form.win_width, settings.get_i64("MinecraftWinWidth", defaults::MC_WIN_WIDTH));
+        let height = parse_mem(&self.form.win_height, settings.get_i64("MinecraftWinHeight", defaults::MC_WIN_HEIGHT));
         settings.set_bool("OverrideWindow", self.form.override_window);
         settings.set_i64("MinecraftWinWidth", width);
         settings.set_i64("MinecraftWinHeight", height);
@@ -1238,824 +1497,4474 @@ impl PrismApp {
         match instance.save() {
             Ok(()) => {
                 self.reload_instances();
+                self.selected = Some(id.clone());
                 self.refresh_selection_caches();
-                self.status = format!("saved settings for '{id}'");
+                self.set_status(format!("Saved settings for '{id}'."));
             }
-            Err(e) => {
-                self.status = format!("saving settings failed: {e}");
-            }
+            Err(error) => self.set_error(format!("saving settings failed: {error}")),
         }
     }
 
-    /// Handle `AccountAdd`.
+    // ---- accounts --------------------------------------------------------
+
     fn add_account(&mut self) {
         let name = self.account_input.trim().to_string();
-        match self.accounts.add(&name) {
-            Ok(()) => match self.accounts.save() {
-                Ok(()) => {
-                    self.account_input.clear();
-                    self.status = format!("added account '{name}'");
-                }
-                Err(e) => self.status = e,
-            },
-            Err(e) => self.status = e,
+        match self.accounts.add(&name).and_then(|()| self.accounts.save()) {
+            Ok(()) => {
+                self.account_input.clear();
+                self.set_status(format!("Added offline account '{name}'."));
+            }
+            Err(error) => self.set_error(error),
         }
     }
 
-    /// Handle `AccountSelect`.
     fn select_account(&mut self, uuid: &str) {
-        match self.accounts.select(uuid) {
-            Ok(()) => match self.accounts.save() {
-                Ok(()) => self.status = "account selected".to_string(),
-                Err(e) => self.status = e,
-            },
-            Err(e) => self.status = e,
+        match self.accounts.select(uuid).and_then(|()| self.accounts.save()) {
+            Ok(()) => self.set_status(format!("Now playing as {}.", self.account_label())),
+            Err(error) => self.set_error(error),
         }
     }
 
-    /// Handle `AccountRemove`.
     fn remove_account(&mut self, uuid: &str) {
         if self.accounts.remove(uuid) {
             match self.accounts.save() {
-                Ok(()) => self.status = "account removed".to_string(),
-                Err(e) => self.status = e,
+                Ok(()) => self.set_status("Account removed."),
+                Err(error) => self.set_error(error),
             }
         } else {
-            self.status = "account not found".to_string();
+            self.set_error("account not found");
         }
     }
 
-    /// Gate-aware effective memory line for the Settings page.
-    fn effective_memory_line(&self) -> Option<String> {
-        let id = self.selected.as_ref()?;
-        let instance = Instance::open(&self.instances_dir.join(id)).ok()?;
-        let global = match Settings::load(&self.paths.global_config()) {
-            Ok(settings) => settings,
-            Err(_) => Settings::empty(self.paths.global_config()),
-        };
-        let model = SettingsModel::with_instance(global, instance.settings().clone());
-        let (low, high) = model.effective_memory();
-        Some(format!("Effective memory (OverrideMemory gate): {low} / {high} MiB"))
+    // ---- launcher settings ------------------------------------------------
+
+    /// Apply a color theme and remember it.
+    ///
+    /// The theme is process-wide ([`theme::set_color_theme`]) because the widget
+    /// styles read it while painting, and the write to the preferences file is
+    /// what makes the choice survive a restart. A write that fails is reported
+    /// but does not undo the choice: the window should still look the way it was
+    /// just asked to.
+    fn set_color_theme(&mut self, theme: ColorTheme) {
+        theme::set_color_theme(theme);
+        match prefs::save_theme(&self.paths, theme) {
+            Ok(()) => self.set_status(format!("Color theme: {}", theme.label())),
+            Err(error) => self.set_error(format!(
+                "Color theme: {} (could not be saved: {error})",
+                theme.label()
+            )),
+        }
     }
 
-    /// Synchronous update shared by both shells.
-    pub fn update(&mut self, message: Message) {
-        match message {
-            Message::SelectInstance(id) => {
-                self.delete_armed = false;
-                self.selected = Some(id);
-                self.refresh_selection_caches();
-                self.status = format!("selected {}", self.selected_name());
+    // ---- create dialog ---------------------------------------------------
+
+    /// Open the dialog and make sure the catalog is on its way.
+    fn open_create(&mut self) {
+        self.create = CreateForm::default();
+        self.modal = Modal::Create;
+        self.ensure_catalog();
+    }
+
+    fn ensure_catalog(&mut self) {
+        if !self.catalog.loading && !self.catalog.loaded_once {
+            self.reload_catalog();
+        }
+    }
+
+    /// Fetch the version metadata again; the subscription spawns the worker.
+    fn reload_catalog(&mut self) {
+        if self.catalog.loading {
+            return;
+        }
+        self.catalog.loading = true;
+        self.catalog.error = None;
+        self.set_status("Loading Minecraft versions…");
+    }
+
+    /// Apply catalog-dependent defaults once versions are known.
+    ///
+    /// With an empty catalog the version stays unset on purpose: inventing a
+    /// version the metadata service never confirmed would create an instance
+    /// that cannot be installed. The dialog says so and offers a retry instead.
+    fn prime_create_defaults(&mut self) {
+        if self.create.game.trim().is_empty() {
+            if let Some(default) = self.catalog.catalog.default_game_version() {
+                self.create.game = default;
             }
-            Message::SearchChanged(query) => self.search = query,
-            Message::Refresh => {
-                self.delete_armed = false;
+        }
+        self.recompute_build();
+    }
+
+    /// Recompute the concrete loader build from loader/game/build-choice.
+    fn recompute_build(&mut self) {
+        if self.create.loader == LoaderKind::Vanilla {
+            self.create.build.clear();
+            return;
+        }
+        let game = self.create.game.clone();
+        let loader = self.create.loader;
+        let builds = self.catalog.catalog.loader_builds(loader, &game);
+        let builds_total = builds.len();
+        let available = builds.iter().any(|entry| entry.version == self.create.build);
+        let choice = self.create.build_choice;
+        let picked = match choice {
+            BuildChoice::Stable => self.catalog.catalog.stable_build(loader, &game),
+            BuildChoice::Latest => self.catalog.catalog.latest_build(loader, &game),
+            BuildChoice::Other => {
+                if available {
+                    Some(self.create.build.clone())
+                } else {
+                    builds.first().map(|entry| entry.version.clone())
+                }
+            }
+        };
+        self.create.build = picked.unwrap_or_default();
+        if matches!(choice, BuildChoice::Other) && self.create.build.is_empty() {
+            self.create.build = self
+                .catalog
+                .catalog
+                .other_builds(loader, &game)
+                .first()
+                .cloned()
+                .unwrap_or_default();
+        }
+        if builds_total == 0 && self.catalog.loaded_once {
+            self.create.error = Some(format!(
+                "{} has no builds for {} yet — pick another game version or loader.",
+                loader.label(),
+                if game.is_empty() { "that version" } else { &game }
+            ));
+        } else if self.create.error.as_deref().map(|e| e.contains("has no builds")).unwrap_or(false) {
+            self.create.error = None;
+        }
+    }
+
+    /// Step-1 → step-2 with the current choices turned into an instance.
+    fn create_custom_setup(&mut self) {
+        self.create.step = CreateStep::Configure;
+        self.prime_create_defaults();
+    }
+
+    fn submit_create(&mut self) {
+        let name = self.create.effective_name();
+        let game = self.create.game.clone();
+        let spec = NewInstance {
+            loader: self.create.loader,
+            loader_build: if self.create.loader.loads_mods() {
+                Some(self.create.build.clone())
+            } else {
+                None
+            },
+            icon_key: if self.create.icon_source.is_none() && !self.create.icon_key.is_empty() {
+                Some(self.create.icon_key.clone())
+            } else {
+                None
+            },
+            icon_source: self.create.icon_source.clone(),
+            ..NewInstance::vanilla(&name, &game)
+        };
+        if spec.name.trim().is_empty() {
+            self.create.error = Some("Give the instance a name.".to_string());
+            return;
+        }
+        if spec.game.trim().is_empty() {
+            self.create.error = Some("Pick a game version.".to_string());
+            return;
+        }
+        match instances::create(&self.paths, &spec) {
+            Ok(created) => {
+                let mut warnings = created.warnings.clone();
+                if let Some((project, title)) = self.create.install_after.clone() {
+                    self.start_install(project, title, Some(created.id.clone()));
+                }
+                self.modal = Modal::None;
+                self.create = CreateForm::default();
+                self.search.clear();
                 self.reload_instances();
+                self.selected = Some(created.id.clone());
                 self.refresh_selection_caches();
+                self.page = Page::Home;
+                let mut line = format!("Created '{}'.", created.id);
+                if !warnings.is_empty() {
+                    line.push_str(&format!(" ({})", warnings.join("; ")));
+                }
+                self.set_status(line);
+                self.push_console(std::mem::take(&mut warnings));
             }
+            Err(error) => self.create.error = Some(error),
+        }
+    }
+
+    fn pick_random_icon(&mut self) {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as usize)
+            .unwrap_or(0);
+        self.create.icon_key = ICON_CHOICES[seed % ICON_CHOICES.len()].to_string();
+        self.create.icon_source = None;
+        self.create.awaiting_upload = false;
+        self.set_status(format!("Icon set to '{}'.", self.create.icon_key));
+    }
+
+    // ---- browse ----------------------------------------------------------
+
+    fn start_browse_search(&mut self) {
+        let query = self.browse.query.trim().to_string();
+        if query.is_empty() {
+            self.browse.hits.clear();
+            self.browse.loading = false;
+            return;
+        }
+        self.browse.seq += 1;
+        self.browse.loading = true;
+        self.browse.error = None;
+        self.set_status(format!(
+            "Searching Modrinth {} for '{query}'…",
+            self.browse.content_type.label()
+        ));
+    }
+
+    fn start_create_search(&mut self) {
+        let query = self.create.query.trim().to_string();
+        if query.is_empty() {
+            self.create.results.clear();
+            self.create.searching = false;
+            return;
+        }
+        self.create.seq += 1;
+        self.create.searching = true;
+        self.create.search_error = None;
+    }
+
+    /// Resolve + download the right file for the selection (or a new instance).
+    fn start_install(&mut self, project: String, title: String, for_instance: Option<String>) {
+        let target = for_instance.or_else(|| self.selected.clone());
+        let Some(id) = target else {
+            self.set_error("Pick an instance to install into first.");
+            return;
+        };
+        let card = self.cards.iter().find(|card| card.id == id).cloned();
+        let (game, loader) = match card {
+            Some(card) => (card.mc_version.clone(), card.loader),
+            None => {
+                // Freshly created instance: read it back from disk.
+                match Instance::open(&self.instances_dir.join(&id)) {
+                    Ok(instance) => {
+                        let card = instances::summarize(&self.instances_dir, &entry_for(&instance));
+                        (card.mc_version, card.loader)
+                    }
+                    Err(error) => {
+                        self.set_error(format!("cannot inspect '{id}': {error}"));
+                        return;
+                    }
+                }
+            }
+        };
+        if self.browse.content_type.needs_loader() && !loader.loads_mods() {
+            self.set_error(format!(
+                "'{}' is vanilla — install a loader (Fabric/NeoForge/Forge/Quilt) before adding mods.",
+                id
+            ));
+            return;
+        }
+        if game.trim().is_empty() {
+            self.set_error(format!("'{id}' has no Minecraft version recorded; open its settings first."));
+            return;
+        }
+        self.install_seq += 1;
+        self.browse.installing = Some((project.clone(), title.clone()));
+        self.browse.last_result = None;
+        self.set_status(format!("Installing '{title}' into '{id}'…"));
+    }
+
+    // ---- import ----------------------------------------------------------
+
+    fn start_import_scan(&mut self) {
+        self.import.loading = true;
+        self.import.scanned = false;
+        self.import.error = None;
+        self.import.candidates.clear();
+    }
+
+    fn import_candidate(&mut self, index: usize) {
+        let Some(candidate) = self.import.candidates.get(index).cloned() else {
+            return;
+        };
+        match instances::import_instance(&self.paths, &candidate.source) {
+            Ok(id) => {
+                self.import.candidates.remove(index);
+                self.modal = Modal::None;
+                self.reload_instances();
+                self.selected = Some(id.clone());
+                self.refresh_selection_caches();
+                self.set_status(format!("Imported '{}' from {}.", id, candidate.origin));
+            }
+            Err(error) => self.import.error = Some(error),
+        }
+    }
+
+    /// Handle a dropped file: an icon for the open dialog, a pack to import, or
+    /// a custom icon for the selected instance.
+    fn handle_drop(&mut self, path: PathBuf) {
+        let extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        match (self.modal.clone(), extension.as_str()) {
+            (Modal::Create, "png") => {
+                self.create.icon_source = Some(path.clone());
+                self.create.awaiting_upload = false;
+                self.set_status(format!("Using '{}' as the instance icon.", path.display()));
+            }
+            (Modal::Create, "mrpack" | "zip") => match browse::import_pack(&self.paths, &path) {
+                Ok(ImportedPack { id, format }) => {
+                    self.modal = Modal::None;
+                    self.reload_instances();
+                    self.selected = Some(id.clone());
+                    self.refresh_selection_caches();
+                    self.set_status(format!(
+                        "Imported '{id}' from a {format}; remote pack files still need downloading."
+                    ));
+                }
+                Err(error) => self.create.error = Some(error),
+            },
+            (_, "mrpack" | "zip") => match browse::import_pack(&self.paths, &path) {
+                Ok(ImportedPack { id, format }) => {
+                    self.reload_instances();
+                    self.selected = Some(id.clone());
+                    self.refresh_selection_caches();
+                    self.set_status(format!("Imported '{id}' from a {format}."));
+                }
+                Err(error) => self.set_error(error),
+            },
+            (_, "png") => {
+                let Some(id) = self.selected.clone() else {
+                    return self.set_error("Pick an instance first, then drop a PNG to use it as its icon.");
+                };
+                match instances::set_instance_icon(&self.paths, &id, &path) {
+                    Ok(key) => {
+                        self.reload_instances();
+                        self.selected = Some(id.clone());
+                        self.refresh_selection_caches();
+                        self.set_status(format!("Icon '{}' applied to '{id}'.", key));
+                    }
+                    Err(error) => self.set_error(error),
+                }
+            }
+            (_, other) => self.set_error(format!(
+                "Dropped '.{other}' files are not used — drop a PNG (icon) or a .mrpack/.zip (pack)."
+            )),
+        }
+    }
+
+    // ---- background results ---------------------------------------------
+
+    fn apply_task(&mut self, task: Task) {
+        match task {
+            Task::Instances(loaded) => self.apply_loaded(*loaded),
+            Task::Catalog(catalog) => {
+                self.catalog.loading = false;
+                self.catalog.loaded_once = true;
+                let warnings = catalog.warnings.clone();
+                let empty = catalog.is_empty();
+                self.catalog.error = if empty {
+                    Some(
+                        "No version metadata could be loaded — check your connection, then retry."
+                            .to_string(),
+                    )
+                } else if !warnings.is_empty() {
+                    Some(format!("Some version lists were unavailable: {}", warnings.join("; ")))
+                } else if catalog.offline {
+                    Some("Using cached version metadata (offline).".to_string())
+                } else {
+                    None
+                };
+                let count = catalog.game_version_count();
+                let offline = catalog.offline;
+                self.catalog.catalog = *catalog;
+                if self.modal == Modal::Create {
+                    self.prime_create_defaults();
+                }
+                if empty {
+                    self.set_error("Loading Minecraft versions failed.");
+                } else if offline {
+                    self.set_status(format!("Loaded {count} Minecraft versions from cache."));
+                } else {
+                    self.set_status(format!("Loaded {count} Minecraft versions."));
+                }
+            }
+            Task::BrowseSearch { seq, result } => {
+                if seq != self.browse.seq {
+                    return;
+                }
+                self.browse.loading = false;
+                match result {
+                    Ok(hits) => {
+                        let count = hits.len();
+                        self.browse.hits = hits;
+                        self.set_status(format!("{count} result(s) from Modrinth."));
+                    }
+                    Err(error) => {
+                        self.browse.hits.clear();
+                        self.browse.error = Some(error.clone());
+                        self.set_error(error);
+                    }
+                }
+            }
+            Task::CreateSearch { seq, result } => {
+                if seq != self.create.seq {
+                    return;
+                }
+                self.create.searching = false;
+                match result {
+                    Ok(hits) => self.create.results = hits,
+                    Err(error) => {
+                        self.create.results.clear();
+                        self.create.search_error = Some(error);
+                    }
+                }
+            }
+            Task::Installed { seq, title, result } => {
+                if seq != self.install_seq {
+                    return;
+                }
+                self.browse.installing = None;
+                match result {
+                    Ok(line) => {
+                        self.browse.last_result = Some(line.clone());
+                        self.set_status(line.clone());
+                        self.push_console(vec![line]);
+                        self.refresh_selection_caches();
+                    }
+                    Err(error) => {
+                        self.browse.last_result = Some(format!("Failed: {error}"));
+                        self.set_error(format!("Installing '{title}' failed: {error}"));
+                    }
+                }
+            }
+            Task::ShotsLoaded(tiles) => {
+                self.shots.loading = false;
+                self.shots.scanned = true;
+                self.shots.tiles = tiles;
+            }
+            Task::ImportScan(candidates) => {
+                self.import.loading = false;
+                self.import.scanned = true;
+                if candidates.is_empty() {
+                    self.import.error =
+                        Some("No other launcher instances found on this machine.".to_string());
+                }
+                self.import.candidates = candidates;
+            }
+        }
+    }
+
+    /// Synchronous update. Returns the commands the runtime should run.
+    pub fn update(&mut self, message: Message) -> Command<Message> {
+        match message {
             Message::PageSelected(page) => {
-                self.delete_armed = false;
                 self.page = page;
+                // Every page starts at its own top: a tween left over from the
+                // page you came from would scroll the new one by itself.
+                self.page_scroll = scroll::ScrollAnim::default();
+                if page == Page::Screenshots {
+                    self.start_screenshot_scan();
+                }
                 if page == Page::Settings {
                     self.reload_form();
                 }
+                if page == Page::Browse && self.browse.hits.is_empty() && !self.browse.query.is_empty()
+                {
+                    self.start_browse_search();
+                }
+                Command::none()
             }
-            Message::LaunchPressed => self.start_launch(),
-            Message::KillPressed => self.kill_running(),
-            Message::AddInstancePressed => self.show_add = true,
-            Message::AddInstanceNameChanged(value) => self.add_name = value,
-            Message::AddInstanceVersionChanged(value) => self.add_version = value,
-            Message::AddInstanceCreate => self.create_instance(),
-            Message::AddInstanceCancel => {
-                self.show_add = false;
-                self.add_name.clear();
-                self.add_version.clear();
+            Message::PageWheel(wheel) => {
+                self.page_scroll.wheel(wheel);
+                Command::none()
             }
-            Message::EditPressed => {
+            Message::PageScrollTick => {
+                // One frame: ease toward the target and hand the offset to iced.
+                // `tick` lands exactly on the target, so the last frame leaves
+                // nothing to animate and the subscription stands down.
+                self.page_scroll.tick();
+                scrollable::scroll_to(
+                    page_scroll_id(),
+                    scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: self.page_scroll.offset,
+                    },
+                )
+            }
+            Message::PageScrolled { offset, content_height, view_height } => {
+                // A scroll nobody eased. Adopting it — rather than re-applying
+                // the tween's own offset — is what keeps the scrollbar drag
+                // usable; re-measuring here keeps the clamp honest when a
+                // search result list grows or shrinks.
+                self.page_scroll.observe(content_height, view_height);
+                self.page_scroll.resync(offset);
+                Command::none()
+            }
+            Message::Refresh => {
+                self.reload_instances();
+                Command::none()
+            }
+            Message::RefreshScreenshots => {
+                self.start_screenshot_scan();
+                Command::none()
+            }
+            Message::ReloadCatalog => {
+                self.reload_catalog();
+                Command::none()
+            }
+            Message::SearchChanged(query) => {
+                self.search = query;
+                Command::none()
+            }
+            Message::SelectInstance(id) => {
+                self.selected = Some(id);
+                self.refresh_selection_caches();
+                Command::none()
+            }
+            Message::PlayInstance(id) => {
+                self.start_launch(Some(id));
+                Command::none()
+            }
+            Message::KillPressed => {
+                self.kill_running();
+                Command::none()
+            }
+            Message::OpenFolder(id) => {
+                self.open_folder(&id);
+                Command::none()
+            }
+            Message::DuplicateInstance(id) => {
+                self.duplicate_instance(&id);
+                Command::none()
+            }
+            Message::AskDelete(id) => {
+                self.modal = Modal::ConfirmDelete(id);
+                Command::none()
+            }
+            Message::ConfirmDelete => {
+                if let Modal::ConfirmDelete(id) = self.modal.clone() {
+                    self.delete_instance(&id);
+                }
+                Command::none()
+            }
+            Message::EditInstance(id) => {
+                self.selected = Some(id);
+                self.refresh_selection_caches();
                 self.page = Page::Settings;
                 self.reload_form();
-                self.status = "editing instance settings".to_string();
+                Command::none()
             }
-            Message::OpenFolderPressed => self.open_selected_folder(),
-            Message::DeletePressed => self.delete_selected(),
-            Message::SettingsPressed => {
-                self.page = Page::Settings;
-                self.reload_form();
+            Message::GroupSelected(label) => {
+                self.change_group(&label);
+                Command::none()
             }
-            Message::AccountsPressed => self.page = Page::Accounts,
-            Message::AboutPressed => self.page = Page::About,
+            Message::OpenInstancesFolder => {
+                self.open_folder("");
+                Command::none()
+            }
+            Message::WindowMinimize => window::minimize(window::Id::MAIN, true),
+            Message::WindowMaximize => self.toggle_maximized(),
+            Message::WindowClose => window::close(window::Id::MAIN),
+            Message::ResizeStart(edge) => {
+                native::start_resize(edge);
+                Command::none()
+            }
+            Message::BarPressed(area) => {
+                // A second press inside the system double-click window means
+                // "maximize", not "start dragging again".
+                let now = Instant::now();
+                let doubled = self
+                    .last_bar_press
+                    .map(|then| now.duration_since(then) < DOUBLE_CLICK)
+                    .unwrap_or(false);
+                self.last_bar_press = if doubled { None } else { Some(now) };
+                if doubled {
+                    // The double-click wins outright, and nothing is left armed,
+                    // so the pointer drifting during the second press cannot
+                    // turn it into a drag instead.
+                    self.disarm_bar();
+                    self.toggle_maximized()
+                } else {
+                    self.bar_armed = Some(area);
+                    self.bar_origin = None;
+                    Command::none()
+                }
+            }
+            Message::BarCursorMoved(area, position) => {
+                if self.bar_armed != Some(area) {
+                    // Either no press is waiting, or the pointer is over a
+                    // different patch whose coordinates do not compare.
+                    Command::none()
+                } else {
+                    let origin = *self.bar_origin.get_or_insert(position);
+                    if origin.distance(position) >= BAR_DRAG_THRESHOLD {
+                        self.disarm_bar();
+                        window::drag(window::Id::MAIN)
+                    } else {
+                        Command::none()
+                    }
+                }
+            }
+            Message::BarReleased(area) => {
+                if self.bar_armed == Some(area) {
+                    self.disarm_bar();
+                }
+                Command::none()
+            }
+            Message::BarRightClick => window::show_system_menu(window::Id::MAIN),
+            Message::MaximizedChanged(maximized) => {
+                self.maximized = maximized;
+                Command::none()
+            }
+            Message::WindowStateChanged => {
+                // The tracked flag is refreshed, but the caption reads the
+                // window itself (see `window_is_maximized`), so this arm's real
+                // job is to be a message at all: it is what makes iced rebuild
+                // the view, and the rebuild is what shows the hover and the
+                // maximize/restore glyph.
+                self.maximized = native::window_maximized().unwrap_or(self.maximized);
+                Command::none()
+            }
+            Message::OpenCreate => {
+                self.open_create();
+                Command::none()
+            }
+            Message::OpenImport => {
+                self.modal = Modal::Import;
+                self.start_import_scan();
+                Command::none()
+            }
+            Message::OpenSettings => {
+                self.modal = Modal::Settings;
+                Command::none()
+            }
+            Message::SetColorTheme(theme) => {
+                self.set_color_theme(theme);
+                Command::none()
+            }
+            Message::CloseModal => {
+                self.modal = Modal::None;
+                Command::none()
+            }
+            Message::CreateCustomSetup => {
+                self.create_custom_setup();
+                Command::none()
+            }
+            Message::CreateSearchChanged(query) => {
+                self.create.query = query;
+                self.start_create_search();
+                Command::none()
+            }
+            Message::CreateFocusSearch => {
+                if self.create.query.trim().is_empty() {
+                    self.create.error = Some("Type what you are looking for first.".to_string());
+                }
+                Command::none()
+            }
+            Message::CreateProjectPicked(project, title) => {
+                self.create.install_after = Some((project, title.clone()));
+                if self.create.name.trim().is_empty() || !self.create.name_edited {
+                    self.create.name = title.clone();
+                }
+                self.create.step = CreateStep::Configure;
+                self.prime_create_defaults();
+                self.set_status(format!("'{title}' will be installed right after the instance is created."));
+                Command::none()
+            }
+            Message::CreateBack => {
+                self.create.step = CreateStep::Choose;
+                self.create.error = None;
+                Command::none()
+            }
+            Message::CreateNameChanged(name) => {
+                self.create.name = name;
+                self.create.name_edited = true;
+                Command::none()
+            }
+            Message::CreateLoaderPicked(loader) => {
+                self.create.loader = loader;
+                self.create.build_choice = BuildChoice::Stable;
+                self.create.error = None;
+                self.recompute_build();
+                Command::none()
+            }
+            Message::CreateGamePicked(game) => {
+                self.create.game = game;
+                self.recompute_build();
+                Command::none()
+            }
+            Message::CreateSnapshotsToggled(on) => {
+                self.create.show_snapshots = on;
+                Command::none()
+            }
+            Message::CreateBuildChoicePicked(choice) => {
+                self.create.build_choice = choice;
+                self.recompute_build();
+                Command::none()
+            }
+            Message::CreateBuildPicked(build) => {
+                self.create.build = build;
+                Command::none()
+            }
+            Message::CreateIconRandomize => {
+                self.pick_random_icon();
+                Command::none()
+            }
+            Message::CreateIconCustomize => {
+                self.create.customize_open = !self.create.customize_open;
+                self.create.awaiting_upload = false;
+                Command::none()
+            }
+            Message::CreateIconPicked(key) => {
+                self.create.icon_key = key.clone();
+                self.create.icon_source = None;
+                self.create.customize_open = false;
+                self.set_status(format!("Icon set to '{key}'."));
+                Command::none()
+            }
+            Message::CreateIconUpload => {
+                self.create.awaiting_upload = true;
+                self.create.icon_source = None;
+                self.set_status("Drop a PNG anywhere on the window to use it as the icon.");
+                Command::none()
+            }
+            Message::CreateAwaitPack => {
+                // Nothing to toggle: the drop handler already routes a
+                // `.mrpack`/`.zip` dropped on the open Create dialog into
+                // `browse::import_pack`. All that was missing was telling the
+                // user that, instead of opening the *icon* picker.
+                self.create.awaiting_upload = false;
+                self.set_status(
+                    "Drop a .mrpack or CurseForge .zip anywhere on this window to create the instance from it.",
+                );
+                Command::none()
+            }
+            Message::CreateSubmit => {
+                self.submit_create();
+                Command::none()
+            }
+            Message::ImportPicked(index) => {
+                self.import_candidate(index);
+                Command::none()
+            }
+            Message::ModToggled(file, enabled) => {
+                self.toggle_mod(&file, enabled);
+                Command::none()
+            }
+            Message::OpenModsFolder => {
+                self.open_mods_folder();
+                Command::none()
+            }
+            Message::OpenWorldsFolder => {
+                self.open_worlds_folder();
+                Command::none()
+            }
+            Message::SearchModrinth(query) => {
+                self.page = Page::Browse;
+                self.browse.query = query;
+                self.start_browse_search();
+                Command::none()
+            }
+            Message::BrowseQueryChanged(query) => {
+                self.browse.query = query;
+                self.browse.seq += 1;
+                self.browse.loading = !self.browse.query.trim().is_empty();
+                self.browse.error = None;
+                Command::none()
+            }
+            Message::BrowseTypePicked(content_type) => {
+                self.browse.content_type = content_type;
+                self.browse.hits.clear();
+                self.browse.error = None;
+                if !self.browse.query.trim().is_empty() {
+                    self.start_browse_search();
+                }
+                Command::none()
+            }
+            Message::BrowseSubmitted => {
+                self.start_browse_search();
+                Command::none()
+            }
+            Message::BrowseInstall(project, title) => {
+                self.start_install(project, title, None);
+                Command::none()
+            }
+            Message::AccountNameChanged(value) => {
+                self.account_input = value;
+                Command::none()
+            }
+            Message::AccountAdd => {
+                self.add_account();
+                Command::none()
+            }
+            Message::AccountSelect(uuid) => {
+                self.select_account(&uuid);
+                Command::none()
+            }
+            Message::AccountRemove(uuid) => {
+                self.remove_account(&uuid);
+                Command::none()
+            }
+            Message::MicrosoftPressed => {
+                self.set_error(
+                    "Microsoft sign-in is not implemented yet — offline accounts only.",
+                );
+                Command::none()
+            }
             Message::ConsoleClear => {
                 self.console.clear();
-                self.status = "console cleared".to_string();
+                self.set_status("Log cleared.");
+                Command::none()
             }
-            Message::ConsoleAutoscrollToggled(on) => self.autoscroll = on,
+            Message::ConsoleAutoscrollToggled(on) => {
+                self.autoscroll = on;
+                Command::none()
+            }
             Message::LaunchLog { run_id, lines } => {
-                let current = match self.active_run.as_ref() {
-                    Some(run) => run.run_id,
-                    None => 0,
-                };
+                let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
                     if let Some(last) = lines.last() {
-                        self.status = last.clone();
+                        self.set_status(last.clone());
                     }
                     self.push_console(lines);
                 }
+                Command::none()
             }
             Message::LaunchDone { run_id, note } => {
-                let current = match self.active_run.as_ref() {
-                    Some(run) => run.run_id,
-                    None => 0,
-                };
+                let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
                     self.active_run = None;
-                    self.status = note.clone();
+                    self.set_status(note.clone());
                     self.push_console(vec![note]);
                 }
+                Command::none()
             }
-            Message::InstancesLoaded(data) => self.apply_loaded(data),
-            Message::GroupToggled(key) => self.toggle_group(&key),
-            Message::ChangeGroupSelected(label) => self.change_group(&label),
-            Message::CopyPressed => self.copy_selected(),
-            Message::ExportPressed => self.export_selected(),
-            Message::ShortcutPressed => self.create_shortcut(),
-            Message::UpdatePressed => self.check_updates(),
-            Message::FoldersPressed => self.open_folders(),
-            Message::ModToggled(file, enabled) => self.toggle_mod(&file, enabled),
-            Message::OpenModsFolderPressed => self.open_mods_folder(),
-            Message::SetName(value) => self.form.name = value,
-            Message::SetMinMem(value) => self.form.min_mem = value,
-            Message::SetMaxMem(value) => self.form.max_mem = value,
-            Message::SetOverrideMemory(on) => self.form.override_memory = on,
-            Message::SetJavaPath(value) => self.form.java_path = value,
-            Message::SetOverrideJava(on) => self.form.override_java = on,
-            Message::SetWinWidth(value) => self.form.win_width = value,
-            Message::SetWinHeight(value) => self.form.win_height = value,
-            Message::SetOverrideWindow(on) => self.form.override_window = on,
-            Message::SetJoinServer(on) => self.form.join_server = on,
-            Message::SetServerAddress(value) => self.form.server_address = value,
-            Message::SettingsSave => self.save_settings(),
-            Message::AccountNameChanged(value) => self.account_input = value,
-            Message::AccountAdd => self.add_account(),
-            Message::AccountSelect(uuid) => self.select_account(&uuid),
-            Message::AccountRemove(uuid) => self.remove_account(&uuid),
-            Message::MicrosoftPressed => {
-                self.status = "Microsoft login is not implemented yet".to_string();
-                self.push_console(vec![
-                    "Microsoft login is not implemented yet — offline accounts only.".to_string(),
-                ]);
+            Message::SetName(value) => {
+                self.form.name = value;
+                Command::none()
+            }
+            Message::SetMinMem(value) => {
+                self.form.min_mem = value;
+                Command::none()
+            }
+            Message::SetMaxMem(value) => {
+                self.form.max_mem = value;
+                Command::none()
+            }
+            Message::SetOverrideMemory(on) => {
+                self.form.override_memory = on;
+                Command::none()
+            }
+            Message::SetJavaPath(value) => {
+                self.form.java_path = value;
+                Command::none()
+            }
+            Message::SetOverrideJava(on) => {
+                self.form.override_java = on;
+                Command::none()
+            }
+            Message::SetWinWidth(value) => {
+                self.form.win_width = value;
+                Command::none()
+            }
+            Message::SetWinHeight(value) => {
+                self.form.win_height = value;
+                Command::none()
+            }
+            Message::SetOverrideWindow(on) => {
+                self.form.override_window = on;
+                Command::none()
+            }
+            Message::SetJoinServer(on) => {
+                self.form.join_server = on;
+                Command::none()
+            }
+            Message::SetServerAddress(value) => {
+                self.form.server_address = value;
+                Command::none()
+            }
+            Message::SettingsSave => {
+                self.save_settings();
+                Command::none()
+            }
+            Message::TaskDone(task) => {
+                self.apply_task(*task);
+                Command::none()
+            }
+            Message::FileDropped(path) => {
+                self.handle_drop(path);
+                Command::none()
             }
         }
     }
 
-    /// View tree shared by both shells. Pure reads over cached state: no IO
-    /// happens here, so per-frame work stays minimal.
+    // ---- subscriptions ---------------------------------------------------
+
+    /// Background subscriptions: instance scan, metadata, searches, downloads,
+    /// imports and the launch stream.
+    pub fn subscription(&self) -> Subscription<Message> {
+        let mut subs: Vec<Subscription<Message>> = Vec::new();
+        if self.loading {
+            let root = self.paths.root.clone();
+            subs.push(one_shot(LOAD_ID, 8, move |mut sender| {
+                let loaded = instances::load(&PrismPaths::at(root));
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::Instances(Box::new(loaded)))));
+            }));
+        }
+        if self.catalog.loading {
+            let meta = self.paths.meta_dir();
+            subs.push(one_shot(CATALOG_ID, 8, move |mut sender| {
+                let fetched = catalog::fetch(&meta);
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::Catalog(Box::new(fetched)))));
+            }));
+        }
+        if self.browse.loading {
+            let (seq, query, content_type) = (
+                self.browse.seq,
+                self.browse.query.trim().to_string(),
+                self.browse.content_type,
+            );
+            subs.push(one_shot((BROWSE_ID, seq, content_type), 8, move |mut sender| {
+                let result = browse::client().and_then(|client| browse::search_typed(&client, &query, content_type));
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::BrowseSearch { seq, result })));
+            }));
+        }
+        if self.create.searching {
+            let (seq, query) = (self.create.seq, self.create.query.trim().to_string());
+            subs.push(one_shot((CREATE_SEARCH_ID, seq), 8, move |mut sender| {
+                let result = browse::client().and_then(|client| browse::search_typed(&client, &query, ContentType::Mods));
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::CreateSearch { seq, result })));
+            }));
+        }
+        if let Some((project, title)) = self.browse.installing.clone() {
+            let seq = self.install_seq;
+            let paths = self.paths.clone();
+            let cards = self.cards.clone();
+            let selected = self.selected.clone();
+            let content_type = self.browse.content_type;
+            subs.push(one_shot((INSTALL_ID, seq, content_type), 8, move |mut sender| {
+                let result = install_into(
+                    &paths,
+                    &cards,
+                    selected.as_deref(),
+                    &project,
+                    &title,
+                    content_type,
+                );
+                let _ = sender
+                    .try_send(Message::TaskDone(Box::new(Task::Installed { seq, title, result })));
+            }));
+        }
+        if self.import.loading {
+            let paths = self.paths.clone();
+            subs.push(one_shot(IMPORT_ID, 8, move |mut sender| {
+                let found = instances::find_importable(&paths);
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::ImportScan(found))));
+            }));
+        }
+        if self.shots.loading {
+            // A buffer of 4: exactly one message is ever sent, and a failed
+            // send has to be non-blocking rather than wedging the worker.
+            let dirs = self.screenshot_dirs();
+            // Sized from the tile the grid actually draws and the display it is
+            // being drawn on, rather than a fixed budget every machine paid.
+            // Read here, on the UI thread, because it is a Win32 query.
+            let side = screenshots::thumbnail_side(SHOT_TILE_WIDTH, native::system_scale_factor());
+            subs.push(one_shot(SHOTS_ID, 4, move |mut sender| {
+                let found = screenshots::scan(&dirs);
+                let tiles = screenshots::thumbnails(&found, side)
+                    .into_iter()
+                    .map(|(entry, thumb)| ShotTile {
+                        entry,
+                        handle: Handle::from_pixels(thumb.width, thumb.height, thumb.pixels),
+                        width: thumb.width,
+                        height: thumb.height,
+                    })
+                    .collect();
+                let _ = sender.try_send(Message::TaskDone(Box::new(Task::ShotsLoaded(tiles))));
+            }));
+        }
+        if self.page_scroll.animating() {
+            // Only while something is moving. A page that has settled asks for
+            // no frames at all — the reason this is a subscription rather than a
+            // timer the app owns.
+            subs.push(frame_ticks());
+        }
+        subs.push(Self::window_state());
+        if let Some(run) = self.active_run.clone() {
+            let slot = self.child.clone();
+            subs.push(iced::subscription::channel(run.run_id, 128, move |sender| async move {
+                let params = LaunchParams {
+                    data_root: run.data_root.clone(),
+                    instance_id: run.instance_id.clone(),
+                    account: run.account.clone(),
+                    run_id: run.run_id,
+                };
+                let _ = std::thread::spawn(move || {
+                    launch::run_launch_worker(params, slot, sender);
+                });
+                loop {
+                    futures::future::pending::<()>().await;
+                }
+            }));
+        }
+        Subscription::batch(subs)
+    }
+
+    /// Keyboard shortcuts subscription (`N`, `Esc`, `Ctrl+R`).
+    pub fn keyboard(&self) -> Subscription<Message> {
+        iced::keyboard::on_key_press(shortcut)
+    }
+
+    // ---- views -----------------------------------------------------------
+
+    /// Whole window: title bar, rail, content (or dialog), sidebar, status.
+    /// Maximize or restore, keeping [`PrismApp::maximized`] in step so the
+    /// caption button can swap between the Maximize and Restore glyphs.
+    fn toggle_maximized(&mut self) -> Command<Message> {
+        self.maximized = !self.maximized;
+        window::toggle_maximize(window::Id::MAIN)
+    }
+
+    /// Whether the window is maximized, preferring what the window itself says.
+    ///
+    /// The caption's maximize control is a non-client region now, so Windows
+    /// runs that click and the app never receives a message for it. Maximizing
+    /// also arrives by ways the app cannot see at all — Aero Snap, `Win`+`Up`,
+    /// the taskbar — and a bar that shows Maximize on a maximized window is
+    /// worse than one cheap query per frame. The tracked flag answers only when
+    /// there is no window to ask, which is the case in tests and on the first
+    /// frames before the shim has found one.
+    fn window_is_maximized(&self) -> bool {
+        native::window_maximized().unwrap_or(self.maximized)
+    }
+
+    /// Watch the window's own state: the maximize control's hover, and whether
+    /// the window is maximized.
+    ///
+    /// Neither can be a widget of ours. The maximize control is answered as
+    /// non-client — that is what puts Windows 11's Snap Layouts on it — so no
+    /// widget ever sees that pointer; and a window maximizes by paths with no
+    /// button in them at all: Aero Snap, the taskbar, `Win`+`Up`, and the
+    /// native control itself.
+    ///
+    /// iced rebuilds a view only when a message arrives, so both need a message
+    /// to reach the app, and both change from outside it. Polling for them
+    /// would redraw an idle launcher forever; instead the window procedure —
+    /// which is told about the pointer by Windows and about maximizing by the
+    /// window itself — reports each change down the pipe this subscription
+    /// holds open. The cost is zero until something actually changes.
+    ///
+    /// Kept as the *only* `iced::subscription::run` in the shell on purpose.
+    /// iced identifies a `run` recipe by hashing the message type and the id —
+    /// and `run` uses `()` for the id — so every `run` subscription in a program
+    /// hashes the same, and a second one would be treated as this one rather
+    /// than started alongside it. A stream that needs its own identity goes
+    /// through `run_with_id`.
+    pub fn window_state() -> Subscription<Message> {
+        iced::subscription::run(|| {
+            let (sender, receiver) = futures::channel::mpsc::unbounded();
+            native::watch_window_state(sender);
+            // Every report down the pipe is the same message: the state itself
+            // is read from the window when the view is built, so there is
+            // nothing to carry across but the fact that something changed.
+            futures::StreamExt::map(receiver, |()| Message::WindowStateChanged)
+        })
+    }
+
+    /// Forget a title-bar press that has not (yet) become a window drag.
+    fn disarm_bar(&mut self) {
+        self.bar_armed = None;
+        self.bar_origin = None;
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
-        container(
-            column![
-                self.view_toolbar(),
-                row![self.view_main(), self.view_sidebar()].spacing(12).height(Length::Fill),
-                self.view_status(),
+        // Keep the window's hit test pointed at the maximize control. The
+        // target is derived from constants rather than from the window's size,
+        // so this cannot go stale, and re-publishing it is a store behind a
+        // lock — cheap enough to repeat on every frame rather than to keep in
+        // step by hand.
+        native::set_caption_target(caption_target());
+
+        let body = row![
+            self.view_rail(),
+            self.view_content(),
+            self.view_sidebar(),
+        ]
+        .height(Length::Fill);
+
+        let shell = column![self.view_title_bar(), body, self.view_status_bar()]
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        // An undecorated window has no frame of its own, so the shell draws one
+        // itself: a band of resize grips on every edge and corner, painted in
+        // the colour of whatever region borders them so the frame is invisible.
+        //
+        // These are now the *fallback*. Once the window's hit test answers the
+        // edges (see `crate::native`), Windows owns them and a press here never
+        // reaches iced at all; the bands are what keeps the window resizable if
+        // that shim could not be installed — and they keep the drawn layout
+        // exactly as verified, since the region Windows owns is the same strip.
+        column![
+            row![
+                grip(ResizeEdge::NorthWest, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
+                grip(ResizeEdge::North, Length::Fill, theme::app_bg),
+                grip(ResizeEdge::NorthEast, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
             ]
-            .spacing(8),
-        )
-        .padding(10)
+            .height(Length::Fixed(native::RESIZE_BAND)),
+            row![
+                // The side bands match the rail and sidebar, which are the same
+                // colour as each other, so the seam is invisible.
+                grip(ResizeEdge::West, Length::Fixed(native::RESIZE_BAND), theme::rail),
+                container(shell).width(Length::Fill).height(Length::Fill),
+                grip(ResizeEdge::East, Length::Fixed(native::RESIZE_BAND), theme::rail),
+            ]
+            .height(Length::Fill),
+            row![
+                grip(ResizeEdge::SouthWest, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
+                grip(ResizeEdge::South, Length::Fill, theme::app_bg),
+                grip(ResizeEdge::SouthEast, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
+            ]
+            .height(Length::Fixed(native::RESIZE_BAND)),
+        ]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
     }
 
-    /// Prism-order top toolbar with the account chip right-aligned. Every
-    /// button pairs a 16px embedded icon (see `crate::icons::ui_icon`) with
-    /// its text label; the account chip uses the steve head as the player
-    /// avatar. Zero runtime IO: all art is `include_bytes!`'d.
-    fn view_toolbar(&self) -> Element<'_, Message> {
-        let chip = self.account_chip_label();
-        row![
-            toolbar_icon_button(ui_handle("check"), "＋ Add Instance", Message::AddInstancePressed),
-            toolbar_icon_button(ui_handle("folder"), "Folders", Message::FoldersPressed),
-            toolbar_icon_button(ui_handle("gear"), "Settings", Message::SettingsPressed),
-            toolbar_icon_button(ui_handle("help"), "Help", Message::AboutPressed),
-            toolbar_icon_button(ui_handle("update"), "Update", Message::UpdatePressed),
-            horizontal_space(),
-            toolbar_icon_button(instance_handle("steve"), &chip, Message::AccountsPressed),
-        ]
-        .spacing(4)
-        .into()
-    }
-
-    /// Left/main area: search, collapsible group grid, page tabs, page.
-    fn view_main(&self) -> Element<'_, Message> {
-        let mut main = column![
+    /// Undecorated title bar: logo, product name, global search, run chip and
+    /// the window controls. The empty area starts an OS window drag.
+    fn view_title_bar(&self) -> Element<'_, Message> {
+        // Everything in the bar that is not a control is a place to grab the
+        // window: the brand cluster, the empty middle, and the run chip. Wrapping
+        // each in a mouse area is what turns a title bar you had to aim at into
+        // one you can drag from anywhere, and a right-click on any of them opens
+        // the native window menu.
+        let dragging_area = grabbable(
+            BarArea::Brand,
+            Length::Fixed(190.0),
+            self.bar_armed == Some(BarArea::Brand),
             row![
-                text_input("Search instances...", &self.search)
-                    .on_input(Message::SearchChanged)
-                    .width(Length::Fill),
-                button(
-                    row![
-                        Image::new(ui_handle("refresh"))
-                            .width(Length::Fixed(16.0))
-                            .height(Length::Fixed(16.0)),
-                        text("Refresh").size(13),
-                    ]
-                    .spacing(4),
-                )
-                .on_press(Message::Refresh),
+                Image::new(brand::logo_handle())
+                    .width(Length::Fixed(22.0))
+                    .height(Length::Fixed(22.0)),
+                text(brand::APP_NAME).size(15).font(theme::bold()),
+                text(format!("v{}", brand::version())).size(11),
             ]
-            .spacing(6),
-        ]
-        .spacing(8);
-        if self.show_add {
-            main = main.push(self.view_add_panel());
-        }
-        let mut body = column![].spacing(10);
-        if self.loading {
-            body = body.push(text("Loading instances…").size(14));
-        } else {
-            let sections = grouped_instances(&self.list, &self.search);
-            if sections.is_empty() {
-                if self.list.is_empty() {
-                    body = body.push(
-                        text(format!("No instances found in {}.", self.instances_dir.display())).size(13),
-                    );
-                } else {
-                    body = body.push(text("No instances match the search.").size(13));
-                }
-            }
-            for section in &sections {
-                body = body.push(self.view_section(section));
-            }
-        }
-        body = body.push(horizontal_rule(1u16));
-        body = body.push(self.view_tabs());
-        body = body.push(self.view_page());
-        main = main.push(scrollable(body).height(Length::Fill));
-        container(main).width(Length::Fill).height(Length::Fill).padding(6).into()
-    }
+            .spacing(8)
+            .align_items(iced::Alignment::Center),
+        );
 
-    /// One collapsible group section with its wrapped tile grid.
-    fn view_section(&self, section: &GroupSection) -> Element<'_, Message> {
-        let (key, display) = match section.name.as_deref() {
-            Some(group) => (group.to_string(), group.to_string()),
-            None => (String::new(), UNGROUPED_LABEL.to_string()),
-        };
-        let arrow = if self.groups.is_collapsed(&key) { "▸" } else { "▾" };
-        let mut content = column![
-            button(
-                row![
-                    text(format!("{arrow} {display} ({})", section.entries.len())).size(14),
-                    horizontal_space(),
-                ]
-            )
-            .on_press(Message::GroupToggled(key))
-            .width(Length::Fill),
-        ]
-        .spacing(6);
-        if !self.groups.is_collapsed(
-            section.name.as_deref().unwrap_or(""),
-        ) {
-            for chunk in section.entries.chunks(TILES_PER_ROW) {
-                let mut grid_row = row![].spacing(8);
-                for entry in chunk {
-                    let is_selected = self.selected.as_deref() == Some(entry.id.as_str());
-                    grid_row = grid_row.push(instance_tile(entry, is_selected));
-                }
-                content = content.push(grid_row);
-            }
-        }
-        content.into()
-    }
-
-    /// Page tabs (the About page is labeled Help, like Prism's Help menu).
-    fn view_tabs(&self) -> Element<'_, Message> {
-        let mut tabs = row![].spacing(4);
-        for page in Page::all() {
-            tabs = tabs.push(toolbar_button(page.tab_label(), Message::PageSelected(page)));
-        }
-        tabs.into()
-    }
-
-    /// Right sidebar: big tile, name, divider, vertical action list.
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        let mut side = column![].spacing(8);
-        let selected_entry = self
-            .selected
-            .as_deref()
-            .and_then(|id| self.list.entries().iter().find(|entry| entry.id == id));
-        match selected_entry {
-            Some(entry) => {
-                side = side.push(big_tile(entry, true));
-                side = side.push(text(entry.name.clone()).size(15));
-            }
-            None => {
-                side = side.push(big_tile_placeholder());
-                side = side.push(text("No instance selected").size(13));
-            }
-        }
-        side = side.push(horizontal_rule(1u16));
-        let has_selection = self.selected.is_some();
-        let running = self.active_run.is_some();
-        side = side.push(sidebar_button("▶ Launch", has_selection, Message::LaunchPressed));
-        side = side.push(sidebar_button("✖ Kill", running, Message::KillPressed));
-        side = side.push(sidebar_button("Edit", has_selection, Message::EditPressed));
-        if has_selection {
-            side = side.push(
-                row![
-                    text("Group:").size(13),
-                    pick_list(
-                        self.group_options(),
-                        Some(self.selected_group_label()),
-                        Message::ChangeGroupSelected,
-                    ),
-                ]
-                .spacing(6),
-            );
-        }
-        side = side.push(sidebar_button("Folder", has_selection, Message::OpenFolderPressed));
-        side = side.push(sidebar_button("Export", has_selection, Message::ExportPressed));
-        side = side.push(sidebar_button("Copy", has_selection, Message::CopyPressed));
-        let delete_label = if self.delete_armed { "Confirm delete?" } else { "Delete" };
-        side = side.push(sidebar_button(delete_label, has_selection, Message::DeletePressed));
-        side = side.push(sidebar_button("Create Shortcut", has_selection, Message::ShortcutPressed));
-        container(side).width(Length::Fixed(SIDEBAR_WIDTH)).height(Length::Fill).padding(8).into()
-    }
-
-    fn view_add_panel(&self) -> Element<'_, Message> {
-        container(
-            column![
-                text("Add instance").size(16),
-                text_input("Name", &self.add_name).on_input(Message::AddInstanceNameChanged),
-                text_input("Minecraft version (e.g. 1.21.1)", &self.add_version)
-                    .on_input(Message::AddInstanceVersionChanged),
-                row![
-                    button(text("Create").size(13)).on_press(Message::AddInstanceCreate),
-                    button(text("Cancel").size(13)).on_press(Message::AddInstanceCancel),
-                ]
-                .spacing(6),
-            ]
-            .spacing(6),
+        let search = container(
+            text_input("Search your instances…", &self.search)
+                .on_input(Message::SearchChanged)
+                .style(theme::Field)
+                .padding([8, 10])
+                .width(Length::Fill),
         )
-        .padding(8)
+        .width(Length::Fixed(300.0));
+
+        // The maximize control is answered as non-client — that is exactly what
+        // makes Windows 11 put Snap Layouts on it — so iced never sees the
+        // pointer arrive and cannot work out a hover of its own. The window's
+        // hit test reports the hover instead, and the button paints the look it
+        // would have painted from iced's, unchanged.
+        let maximize_hovered = native::maximize_button_hovered();
+        let maximized = self.window_is_maximized();
+
+        row![
+            dragging_area,
+            search,
+            grabbable(
+                BarArea::Middle,
+                Length::Fill,
+                self.bar_armed == Some(BarArea::Middle),
+                horizontal_space(),
+            ),
+            grabbable(
+                BarArea::RunChip,
+                Length::Shrink,
+                self.bar_armed == Some(BarArea::RunChip),
+                self.view_run_chip(),
+            ),
+            button(glyph("refresh", 14.0, theme::text_dim()))
+                .on_press(Message::Refresh)
+                .style(theme::ghost())
+                .padding([5, 9]),
+            button(glyph("minimize", CAPTION_GLYPH, theme::text_dim()))
+                .on_press(Message::WindowMinimize)
+                .style(theme::window_button())
+                .padding(CAPTION_PAD),
+            button(glyph(
+                if maximized { "restore" } else { "maximize" },
+                CAPTION_GLYPH,
+                if maximize_hovered { theme::text() } else { theme::text_dim() },
+            ))
+            .on_press(Message::WindowMaximize)
+            .style(theme::caption_button(maximize_hovered))
+            .padding(CAPTION_PAD),
+            // The close glyph stays legible on the red hover fill, where the
+            // dimmer idle tint would sink into the background.
+            button(glyph("close", CAPTION_GLYPH, theme::text_muted()))
+                .on_press(Message::WindowClose)
+                .style(theme::close_button())
+                .padding(CAPTION_PAD),
+        ]
+        .spacing(TITLE_BAR_SPACING)
+        .padding(title_bar_padding())
+        .align_items(iced::Alignment::Center)
+        .height(Length::Fixed(TITLE_BAR_HEIGHT))
         .into()
+    }
+
+    /// "No instances running" / "Running <name>" chip.
+    fn view_run_chip(&self) -> Element<'_, Message> {
+        let (color, label) = match self.active_run.as_ref() {
+            Some(run) => (theme::accent(), format!("Running {}", run.instance_id)),
+            None => (theme::text_dim(), "No instances running".to_string()),
+        };
+        container(
+            row![
+                container(text(""))
+                    .style(theme::pill(color))
+                    .width(Length::Fixed(8.0))
+                    .height(Length::Fixed(8.0)),
+                text(label).size(12),
+            ]
+            .spacing(6)
+            .align_items(iced::Alignment::Center),
+        )
+        .style(theme::token_pill)
+        .padding([5, 10])
+        .into()
+    }
+
+    /// Icon rail: pages, then the create button, settings and the account.
+    fn view_rail(&self) -> Element<'_, Message> {
+        let mut rail = column![].spacing(6).padding([10, 10]).align_items(iced::Alignment::Center);
+        for page in Page::rail() {
+            rail = rail.push(rail_icon(
+                page.icon(),
+                page.tooltip(),
+                self.page == page,
+                Message::PageSelected(page),
+            ));
+        }
+        rail = rail.push(horizontal_rule(1u16));
+        rail = rail.push(rail_icon("folder", "Instances folder", false, Message::OpenInstancesFolder));
+        rail = rail.push(iced::widget::Space::with_height(Length::Fill));
+        rail = rail.push(rail_icon("plus", "Create instance (N)", false, Message::OpenCreate));
+        // The gear opens the *launcher's* settings, the way the reference
+        // client's does. Per-instance settings stay where they belong: on the
+        // instance's own card, through "Edit".
+        rail = rail.push(rail_icon(
+            "gear",
+            "Settings",
+            self.modal == Modal::Settings,
+            Message::OpenSettings,
+        ));
+        // The account entry is a drawn glyph too: the player head belongs on
+        // the account card, where there is room to read it as an avatar.
+        rail = rail.push(rail_icon(
+            "person",
+            &format!("Playing as {}", self.account_label()),
+            self.page == Page::Accounts,
+            Message::PageSelected(Page::Accounts),
+        ));
+        container(rail)
+            .style(theme::rail)
+            .width(Length::Fixed(RAIL_WIDTH))
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// Content area: the active page, or the dialog that replaced it.
+    fn view_content(&self) -> Element<'_, Message> {
+        if self.modal().is_open() {
+            return self.view_modal();
+        }
+        container(self.view_page())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(18)
+            .into()
     }
 
     fn view_page(&self) -> Element<'_, Message> {
         match self.page {
-            Page::Console => self.view_console(),
+            Page::Home => self.view_home(),
+            Page::Browse => self.view_browse(),
             Page::Mods => self.view_mods(),
-            Page::ResourcePacks => self.view_name_list("Resource packs", &self.resource_packs, "resourcepacks/"),
-            Page::ShaderPacks => self.view_name_list("Shader packs", &self.shader_packs, "shaderpacks/"),
-            Page::Worlds => self.view_name_list("Worlds", &self.worlds, "saves/"),
-            Page::Version => self.view_version(),
+            Page::Worlds => self.view_worlds(),
+            Page::Screenshots => self.view_screenshots(),
+            Page::Logs => self.view_logs(),
             Page::Settings => self.view_settings(),
             Page::Accounts => self.view_accounts(),
             Page::About => self.view_about(),
         }
     }
 
-    fn view_console(&self) -> Element<'_, Message> {
-        let total = self.console.len();
-        let shown = console_shown_lines(total);
-        let skip = total - shown;
-        let mut main = column![
+    /// Screenshots: the reference's empty state, or the newest grid.
+    ///
+    /// The empty state is the whole reason this page exists on a fresh install,
+    /// so it says what will appear here rather than showing an empty box — and
+    /// it distinguishes "still looking" from "none yet", which otherwise look
+    /// identical for the second it takes to scan.
+    fn view_screenshots(&self) -> Element<'_, Message> {
+        let header = column![
             row![
-                button(text("Clear").size(13)).on_press(Message::ConsoleClear),
-                checkbox("Autoscroll", self.autoscroll).on_toggle(Message::ConsoleAutoscrollToggled),
-                text(format!("{total} line(s), showing last {shown}")).size(12),
+                text("Screenshots").size(22).font(theme::bold()),
+                if self.shots.tiles.is_empty() {
+                    text("").size(12)
+                } else {
+                    text(format!("{}", self.shots.tiles.len())).size(13)
+                },
+                horizontal_space(),
+                button(
+                    row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)]
+                        .spacing(6),
+                )
+                .on_press(Message::RefreshScreenshots)
+                .style(theme::secondary())
+                .padding([6, 12]),
             ]
-            .spacing(8),
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
         ]
-        .spacing(6);
-        let mut lines = column![].spacing(0);
-        let mut index = 0usize;
-        for line in self.console.iter() {
-            if index >= skip {
-                lines = lines.push(text(line.clone()).size(12).font(Font::MONOSPACE));
-            }
-            index += 1;
+        .spacing(14);
+
+        if self.shots.tiles.is_empty() {
+            let (title, detail) = if self.shots.loading {
+                (
+                    "Looking for screenshots…",
+                    "Reading the screenshots folders of your instances.",
+                )
+            } else {
+                (
+                    "No screenshots yet",
+                    "Screenshots you take in-game will appear here.",
+                )
+            };
+            let empty = column![
+                glyph("image", 70.0, theme::text_dim()),
+                text(title).size(17).font(theme::bold()),
+                text(detail).size(12).style(iced::theme::Text::Color(theme::text_muted())),
+            ]
+            .spacing(12)
+            .align_items(iced::Alignment::Center);
+
+            return column![
+                header,
+                container(empty)
+                    .style(theme::inset)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x()
+                    .center_y(),
+            ]
+            .spacing(14)
+            .into();
         }
-        main = main.push(
-            scrollable(lines)
-                .id(console_scroll_id())
-                .height(Length::Fixed(CONSOLE_PANE_HEIGHT)),
-        );
-        main.into()
+
+        let mut grid = column![].spacing(12);
+        for chunk in self.shots.tiles.chunks(SHOTS_PER_ROW) {
+            let mut line = row![].spacing(12);
+            for tile in chunk {
+                line = line.push(shot_tile(tile));
+            }
+            if chunk.len() < SHOTS_PER_ROW {
+                line = line.push(iced::widget::Space::with_width(Length::Fill));
+            }
+            grid = grid.push(line);
+        }
+
+        column![header, page_scroller(grid)].spacing(14).into()
     }
 
-    fn view_mods(&self) -> Element<'_, Message> {
-        let mut main = column![
+    /// Home: the welcome hero while there are no instances, else the grid.
+    fn view_home(&self) -> Element<'_, Message> {
+        if self.loading {
+            return centered_note("Loading your instances…");
+        }
+        if self.cards.is_empty() {
+            return self.view_hero();
+        }
+        let needle = self.search.to_lowercase();
+        let visible: Vec<&InstanceCard> = self
+            .cards
+            .iter()
+            .filter(|card| {
+                needle.is_empty()
+                    || card.name.to_lowercase().contains(&needle)
+                    || card.id.to_lowercase().contains(&needle)
+                    || card.subtitle().to_lowercase().contains(&needle)
+            })
+            .collect();
+        let mut grid = column![
             row![
-                button(text("Open Mods Folder").size(13)).on_press(Message::OpenModsFolderPressed),
-                text(format!("{} mod(s)", self.mods.len())).size(13),
+                text("Instances").size(22).font(theme::bold()),
+                text(format!("{}", self.cards.len())).size(13),
+                horizontal_space(),
+                button(row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)].spacing(6))
+                    .on_press(Message::Refresh)
+                    .style(theme::secondary())
+                    .padding([6, 12]),
+                button(text("+ New instance").size(12))
+                    .on_press(Message::OpenCreate)
+                    .style(theme::primary())
+                    .padding([6, 12]),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
+        ]
+        .spacing(14);
+        if visible.is_empty() {
+            grid = grid.push(centered_note(format!("Nothing matches '{}'.", self.search)));
+        }
+        for chunk in visible.chunks(CARDS_PER_ROW) {
+            let mut line = row![].spacing(12);
+            for card in chunk {
+                line = line.push(instance_card(
+                    card,
+                    self.selected.as_deref() == Some(card.id.as_str()),
+                ));
+            }
+            if chunk.len() < CARDS_PER_ROW {
+                line = line.push(iced::widget::Space::with_width(Length::Fill));
+                if chunk.len() == 1 {
+                    line = line.push(iced::widget::Space::with_width(Length::Fill));
+                }
+            }
+            grid = grid.push(line);
+        }
+        page_scroller(grid)
+    }
+
+    /// Welcome hero (no instances yet).
+    fn view_hero(&self) -> Element<'_, Message> {
+        let hero = column![
+            container(
+                Image::new(brand::logo_handle())
+                    .width(Length::Fixed(112.0))
+                    .height(Length::Fixed(112.0)),
+            )
+            .style(theme::hero_tile)
+            .padding(14),
+            text(format!("Welcome to {}", brand::APP_NAME)).size(30).font(theme::bold()),
+            text("Ready to start playing?").size(15),
+            container(
+                button(
+                    row![
+                        text("+").size(16),
+                        text("Create an instance").size(14),
+                    ]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center),
+                )
+                .on_press(Message::OpenCreate)
+                .style(theme::primary())
+                .padding([11, 22]),
+            )
+            .padding([6, 0]),
+            text("Press N to quickly create an instance").size(12),
+            container(horizontal_rule(1u16)).padding([14, 0]).width(Length::Fixed(280.0)),
+            text("Escaping another launcher?").size(13),
+            button(
+                row![
+                    glyph("folder", 14.0, theme::text_muted()),
+                    text("Import from Prism Launcher").size(13),
+                ]
+                .spacing(8)
+                .align_items(iced::Alignment::Center),
+            )
+            .on_press(Message::OpenImport)
+            .style(theme::secondary())
+            .padding([9, 16]),
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center);
+
+        container(container(hero).center_x().style(theme::card).padding(28))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into()
+    }
+
+    /// Browse: Modrinth search + one-click install.
+    fn view_browse(&self) -> Element<'_, Message> {
+        let target = match self.selected_card() {
+            Some(card) if self.browse.content_type.needs_loader() && card.has_loader() => {
+                format!("{} ({})", card.name, card.subtitle())
+            }
+            Some(card) if self.browse.content_type.needs_loader() => {
+                format!("{} — vanilla, install a loader first", card.name)
+            }
+            Some(card) => format!("{} ({})", card.name, card.subtitle()),
+            None => "no instance selected".to_string(),
+        };
+        let mut body = column![
+            row![
+                text(format!("Browse {}", self.browse.content_type.label())).size(22).font(theme::bold()),
+                horizontal_space(),
+                text(format!("Installing into: {target}")).size(12),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            row![
+                browse_type_tabs(self.browse.content_type),
+            ],
+            row![
+                text_input("Search Modrinth (e.g. sodium, jei, xaero)", &self.browse.query)
+                    .on_input(Message::BrowseQueryChanged)
+                    .on_submit(Message::BrowseSubmitted)
+                    .style(theme::Field)
+                    .padding([10, 12])
+                    .width(Length::Fill),
+                button(text("Search").size(13))
+                    .on_press(Message::BrowseSubmitted)
+                    .style(theme::primary())
+                    .padding([10, 18]),
             ]
             .spacing(8),
         ]
-        .spacing(6);
+        .spacing(14);
+
+        if self.browse.loading {
+            body = body.push(centered_note("Asking Modrinth…"));
+        }
+        if let Some(error) = &self.browse.error {
+            body = body.push(text(format!("Search failed: {error}")).size(13).style(iced::theme::Text::Color(theme::danger())));
+        }
+        if let Some(line) = &self.browse.last_result {
+            body = body.push(text(line.clone()).size(12));
+        }
+        if !self.browse.loading && self.browse.hits.is_empty() && self.browse.error.is_none() {
+            body = body.push(centered_note(
+                "Search Modrinth for content that matches the selected instance's game version.",
+            ));
+        }
+        for hit in &self.browse.hits {
+            body = body.push(self.browse_row(hit));
+        }
+        page_scroller(body)
+    }
+
+    fn browse_row(&self, hit: &Hit) -> Element<'static, Message> {
+        let installable = self.selected_card().is_some()
+            && (!self.browse.content_type.needs_loader()
+                || self.selected_card().map(InstanceCard::has_loader).unwrap_or(false));
+        let installing = self
+            .browse
+            .installing
+            .as_ref()
+            .map(|(project, _)| project == hit.project_ref())
+            .unwrap_or(false);
+        let project = hit.project_ref().to_string();
+        let title = hit.title.clone();
+        let mut install_label = "Install".to_string();
+        if installing {
+            install_label = "Installing…".to_string();
+        }
+        let install: Button<'static, Message> = if installable && !installing {
+            button(text(install_label).size(12))
+                .on_press(Message::BrowseInstall(project.clone(), title.clone()))
+                .style(theme::primary())
+                .padding([8, 16])
+        } else {
+            button(text(install_label).size(12)).style(theme::secondary()).padding([8, 16])
+        };
+        container(
+            row![
+                column![
+                    row![
+                        text(hit.title.clone()).size(15).font(theme::bold()),
+                        chip(hit.project_type.clone(), theme::chip_neutral),
+                    ]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center),
+                    text(hit.byline()).size(11),
+                    text(hit.description.clone()).size(12),
+                ]
+                .spacing(4)
+                .width(Length::Fill),
+                install,
+            ]
+            .spacing(12)
+            .align_items(iced::Alignment::Center),
+        )
+        .style(theme::card)
+        .padding(12)            .width(Length::Fill)
+            .into()
+    }
+
+    /// Mods of the selected instance, with enable/disable toggles.
+
+    fn view_mods(&self) -> Element<'_, Message> {
+        let (enabled, total) = self.mods.iter().fold((0, 0), |(enabled, total), entry| {
+            (enabled + usize::from(entry.enabled), total + 1)
+        });
+        let mut body = column![
+            row![
+                text("Mods").size(22).font(theme::bold()),
+                chip(format!("{enabled}/{total} enabled"), theme::chip),
+                horizontal_space(),
+                button(text("Find more mods").size(12))
+                    .on_press(Message::PageSelected(Page::Browse))
+                    .style(theme::secondary())
+                    .padding([6, 12]),
+                button(text("Open folder").size(12))
+                    .on_press(Message::OpenModsFolder)
+                    .style(theme::secondary())
+                    .padding([6, 12]),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
+        ]
+        .spacing(12);
         if self.selected.is_none() {
-            main = main.push(text("Select an instance to manage mods.").size(13));
+            body = body.push(centered_note("Pick an instance to manage its mods."));
+        } else if self.mods.is_empty() {
+            body = body.push(centered_note(
+                "No mods yet — use Browse to install one, or drop a .jar into the mods folder.",
+            ));
         }
         for entry in &self.mods {
             let file = entry.file_name.clone();
-            main = main.push(
-                row![
-                    text(entry.display_name.clone()).size(13).font(Font::MONOSPACE).width(Length::Fill),
-                    checkbox("Enabled", entry.enabled)
-                        .on_toggle(move |on| Message::ModToggled(file.clone(), on)),
-                ]
-                .spacing(8),
+            body = body.push(
+                container(
+                    row![
+                        container(text(if entry.enabled { "✓" } else { "•" }).size(13))
+                            .style(if entry.enabled { theme::chip } else { theme::chip_neutral })
+                            .padding([3, 9]),
+                        text(entry.file_name.clone()).size(12).width(Length::Fill),
+                        checkbox("", entry.enabled)
+                            .on_toggle(move |on| Message::ModToggled(file.clone(), on))
+                            .style(theme::Tick)
+                            .size(18),
+                    ]
+                    .spacing(10)
+                    .align_items(iced::Alignment::Center),
+                )
+                .style(theme::card)
+                .padding(10)
+                .width(Length::Fill),
             );
         }
-        main.into()
+        page_scroller(body)
     }
 
-    fn view_name_list(&self, title: &str, names: &[String], folder: &str) -> Element<'_, Message> {
-        let mut main = column![
-            text(format!("{title} ({folder})")).size(16),
-            text(format!("{} item(s)", names.len())).size(12),
-        ]
-        .spacing(6);
-        if self.selected.is_none() {
-            main = main.push(text("Select an instance to browse.").size(13));
-        }
-        for name in names {
-            main = main.push(text(name.clone()).size(13).font(Font::MONOSPACE));
-        }
-        main.into()
-    }
-
-    fn view_version(&self) -> Element<'_, Message> {
-        let mut main = column![
-            text("Version (mmc-pack components)").size(16),
-            text(format!("{} component(s)", self.components.len())).size(12),
-        ]
-        .spacing(6);
-        if self.selected.is_none() {
-            main = main.push(text("Select an instance to inspect.").size(13));
-        }
-        for (uid, version) in &self.components {
-            main = main.push(text(format!("{uid}  {version}")).size(13).font(Font::MONOSPACE));
-        }
-        main.into()
-    }
-
-    fn view_settings(&self) -> Element<'_, Message> {
-        let mut main = column![text("Instance settings").size(16)].spacing(6);
-        if self.selected.is_none() {
-            main = main.push(text("Select an instance to edit settings.").size(13));
-            return main.into();
-        }
-        main = main.push(text("Display name").size(12));
-        main = main.push(text_input("Name", &self.form.name).on_input(Message::SetName));
-        main = main.push(
-            checkbox("Override memory (use instance Min/MaxMemAlloc)", self.form.override_memory)
-                .on_toggle(Message::SetOverrideMemory),
-        );
-        main = main.push(
+    /// Worlds of the selected instance.
+    fn view_worlds(&self) -> Element<'_, Message> {
+        let mut body = column![
             row![
-                text("Min MiB").size(13),
-                text_input("128", &self.form.min_mem)
-                    .on_input(Message::SetMinMem)
-                    .width(Length::Fixed(110.0)),
-                text("Max MiB").size(13),
-                text_input("4096", &self.form.max_mem)
-                    .on_input(Message::SetMaxMem)
-                    .width(Length::Fixed(110.0)),
+                text("Worlds").size(22).font(theme::bold()),
+                chip(format!("{}", self.worlds.len()), theme::chip_neutral),
+                horizontal_space(),
+                button(text("Open saves folder").size(12))
+                    .on_press(Message::OpenWorldsFolder)
+                    .style(theme::secondary())
+                    .padding([6, 12]),
             ]
-            .spacing(6),
-        );
-        main = main.push(
-            checkbox("Override Java location (use instance JavaPath)", self.form.override_java)
-                .on_toggle(Message::SetOverrideJava),
-        );
-        main = main.push(
-            text_input("Java path (empty = PATH lookup)", &self.form.java_path)
-                .on_input(Message::SetJavaPath),
-        );
-        main = main.push(
-            checkbox("Override window size", self.form.override_window).on_toggle(Message::SetOverrideWindow),
-        );
-        main = main.push(
-            row![
-                text("Width").size(13),
-                text_input("854", &self.form.win_width)
-                    .on_input(Message::SetWinWidth)
-                    .width(Length::Fixed(110.0)),
-                text("Height").size(13),
-                text_input("480", &self.form.win_height)
-                    .on_input(Message::SetWinHeight)
-                    .width(Length::Fixed(110.0)),
-            ]
-            .spacing(6),
-        );
-        main = main.push(
-            checkbox("Join server on launch", self.form.join_server).on_toggle(Message::SetJoinServer),
-        );
-        main = main.push(
-            text_input("Server address (host[:port])", &self.form.server_address)
-                .on_input(Message::SetServerAddress),
-        );
-        main = main.push(button(text("Save").size(13)).on_press(Message::SettingsSave));
-        if let Some(line) = self.effective_memory_line() {
-            main = main.push(text(line).size(12));
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
+        ]
+        .spacing(12);
+        if self.selected.is_none() {
+            body = body.push(centered_note("Pick an instance to see its worlds."));
+        } else if self.worlds.is_empty() {
+            body = body.push(centered_note("No worlds in this instance yet."));
         }
-        main = main.push(text(
-            "Gates follow SettingsModel semantics: an instance value only takes effect while its \
-              Override gate is on; otherwise the global prismlauncher.cfg value wins. Join-server \
-              settings are instance-only in Prism (no global gate).",
-        ).size(12));
-        main.into()
-    }
-
-    fn view_accounts(&self) -> Element<'_, Message> {
-        let mut main = column![text("Accounts (offline)").size(16)].spacing(6);
-        main = main.push(
-            row![
-                text_input("username", &self.account_input)
-                    .on_input(Message::AccountNameChanged)
+        for world in &self.worlds {
+            body = body.push(
+                container(text(world.clone()).size(13))
+                    .style(theme::card)
+                    .padding(10)
                     .width(Length::Fill),
-                button(text("Add").size(13)).on_press(Message::AccountAdd),
-            ]
-            .spacing(6),
-        );
-        for account in self.accounts.list() {
-            let select_id = account.uuid.clone();
-            let remove_id = account.uuid.clone();
-            let marker = if self.accounts.selected_uuid() == Some(account.uuid.as_str()) {
-                "*"
-            } else {
-                " "
-            };
-            main = main.push(
-                row![
-                    text(format!("{marker} {} ({})", account.username, account.uuid))
-                        .size(13)
-                        .font(Font::MONOSPACE)
-                        .width(Length::Fill),
-                    button(text("Select").size(12)).on_press(Message::AccountSelect(select_id)),
-                    button(text("Remove").size(12)).on_press(Message::AccountRemove(remove_id)),
-                ]
-                .spacing(6),
             );
         }
-        main = main.push(button(text("Microsoft login").size(13)).on_press(Message::MicrosoftPressed));
-        main = main.push(
-            text("Microsoft login is not implemented yet — offline accounts only.").size(12),
-        );
-        main.into()
+        page_scroller(body)
     }
 
-    /// Help page (the old About content lives here, reached via Help).
-    fn view_about(&self) -> Element<'_, Message> {
-        column![
-            text("Help").size(16),
-            text("Single-click a tile to select it, then use the sidebar actions (Launch opens the Console page).").size(13),
-            text("Group headers collapse/expand; the Change Group list moves the selected instance.").size(13),
-            text(format!("prism-desktop {}", env!("CARGO_PKG_VERSION"))).size(16),
-            text(format!("data root: {}", self.paths.root.display())).size(13),
-            text(format!("instances: {}", self.instances_dir.display())).size(13),
-            text(format!("meta cache: {}", self.paths.meta_dir().display())).size(13),
-            text(format!("global config: {}", self.paths.global_config().display())).size(13),
-            text(format!("accounts: {}", self.paths.accounts_file().display())).size(13),
-            text("Notes: Export is a stub (copy the folder manually); Create Shortcut writes a .url file on the Desktop; software rendering is preferred (see main.rs).").size(12),
-        ]
-        .spacing(6)
-        .into()
-    }
-
-    fn view_status(&self) -> Element<'_, Message> {
-        let selected = match self.selected.as_deref() {
-            Some(id) => id.to_string(),
-            None => "none".to_string(),
-        };
-        container(
-            text(format!("selected: {selected} | instances: {} | {}", self.list.len(), self.status)).size(12),
-        )
-        .padding(4)
-        .into()
-    }
-}
-
-/// One instance tile: the real carved icon (`iconKey` resolved via
-/// [`crate::icons::instance_icon`], 56px) on a rounded box plus the name
-/// label below. The selected tile keeps Prism's green (`#7CB342`)
-/// background behind the icon; unselected tiles keep their deterministic
-/// pastel ([`tile_color`]). Single click selects (the sidebar Launch acts on
-/// it). Fully owned (`'static`), so grids built from locals can be returned.
-/// Unknown `iconKey`s show the default grass block — never a letter tile.
-fn instance_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Message> {
-    let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
-    let tile = container(
-        Image::new(instance_handle(&entry.icon))
-            .width(Length::Fixed(TILE_BOX))
-            .height(Length::Fixed(TILE_BOX)),
-    )
-    .width(Length::Fixed(TILE_BOX))
-    .height(Length::Fixed(TILE_BOX))
-    .center_x()
-    .center_y()
-    .style(move |_: &Theme| container::Appearance {
-        background: Some(Background::Color(background)),
-        border: Border { radius: 10.0.into(), ..Default::default() },
-        ..Default::default()
-    });
-    let id = entry.id.clone();
-    button(
-        column![
-            tile,
-            container(text(short_name(&entry.name)).size(11))
-                .width(Length::Fixed(TILE_WIDTH - 8.0))
-                .center_x(),
-        ]
-        .spacing(4),
-    )
-    .on_press(Message::SelectInstance(id))
-    .width(Length::Fixed(TILE_WIDTH))
-    .into()
-}
-
-/// Large sidebar tile for the selected instance: the 96px carved icon on
-/// the same selected/unselected background as the grid tiles.
-fn big_tile(entry: &InstanceEntry, selected: bool) -> Element<'static, Message> {
-    let background = if selected { selected_tile_color() } else { tile_color(&entry.id) };
-    container(
-        Image::new(instance_handle(&entry.icon))
-            .width(Length::Fixed(BIG_TILE))
-            .height(Length::Fixed(BIG_TILE)),
-    )
-    .width(Length::Fixed(BIG_TILE))
-    .height(Length::Fixed(BIG_TILE))
-    .center_x()
-    .center_y()
-    .style(move |_: &Theme| container::Appearance {
-        background: Some(Background::Color(background)),
-        border: Border { radius: 14.0.into(), ..Default::default() },
-        ..Default::default()
-    })
-    .into()
-}
-
-/// Sidebar tile when nothing is selected: the default grass block on a
-/// neutral grey box (the grass fallback, never a letter tile).
-fn big_tile_placeholder() -> Element<'static, Message> {
-    container(
-        Image::new(instance_handle(""))
-            .width(Length::Fixed(BIG_TILE))
-            .height(Length::Fixed(BIG_TILE)),
-    )
-    .width(Length::Fixed(BIG_TILE))
-    .height(Length::Fixed(BIG_TILE))
-    .center_x()
-    .center_y()
-    .style(|_: &Theme| container::Appearance {
-        background: Some(Background::Color(Color::from_rgb(0.45, 0.45, 0.48))),
-        border: Border { radius: 14.0.into(), ..Default::default() },
-        ..Default::default()
-    })
-    .into()
-}
-
-/// Full-width sidebar action button; without `enabled` it renders disabled
-/// (no `on_press`), which is how Kill stays off while nothing runs.
-fn sidebar_button(label: &str, enabled: bool, message: Message) -> Button<'static, Message> {
-    let styled = button(text(label).size(13)).width(Length::Fill);
-    if enabled {
-        styled.on_press(message)
-    } else {
-        styled
-    }
-}
-
-fn toolbar_button(label: &str, message: Message) -> Button<'static, Message> {
-    button(text(label).size(13)).on_press(message)
-}
-
-/// Top-toolbar button: a 16px embedded icon plus the text label. The
-/// handle is prebuilt and cached (see `crate::icons`), so this does no IO.
-fn toolbar_icon_button(icon: Handle, label: &str, message: Message) -> Button<'static, Message> {
-    button(
-        row![
-            Image::new(icon).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
-            text(label).size(13),
-        ]
-        .spacing(4),
-    )
-    .on_press(message)
-}
-
-/// Background instance loader: scan + parse off the GUI thread, then hand
-/// the result back over the subscription sender. A full channel just waits
-/// briefly; a gone GUI ends the thread.
-fn run_instance_loader(data_root: PathBuf, mut sender: futures::channel::mpsc::Sender<Message>) {
-    let mut pending: Option<LoadedData> = Some(load_instances_blocking(&data_root));
-    loop {
-        let data = match pending.take() {
-            Some(data) => data,
-            None => return,
-        };
-        match sender.try_send(Message::InstancesLoaded(data)) {
-            Ok(()) => return,
-            Err(e) => {
-                if e.is_full() {
-                    match e.into_inner() {
-                        Message::InstancesLoaded(data) => {
-                            pending = Some(data);
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        _ => return,
-                    }
-                } else {
-                    return;
-                }
+    /// Logs: the streamed launch output.
+    fn view_logs(&self) -> Element<'_, Message> {
+        let total = self.console.len();
+        let shown = console_shown_lines(total);
+        let skip = total - shown;
+        let mut lines = column![].spacing(0);
+        for (index, line) in self.console.iter().enumerate() {
+            if index >= skip {
+                lines = lines.push(text(line.clone()).size(12).font(iced::Font::MONOSPACE));
             }
         }
+        // The one scrolling area that keeps iced's own wheel handling: this
+        // offset is not the reader's to command — autoscroll snaps it to the
+        // end on every line of output — so a tween would spend its frames
+        // fighting that snap for the same pixels. The render is capped instead
+        // (`scroll::LOG_RENDER_CAP`), which is what makes the wheel cheap here.
+        column![
+            row![
+                text("Logs").size(22).font(theme::bold()),
+                chip(format!("{total} line(s)"), theme::chip_neutral),
+                horizontal_space(),
+                checkbox("Autoscroll", self.autoscroll)
+                    .on_toggle(Message::ConsoleAutoscrollToggled)
+                    .style(theme::Tick),
+                button(text("Clear").size(12))
+                    .on_press(Message::ConsoleClear)
+                    .style(theme::secondary())
+                    .padding([6, 12]),
+                if self.active_run.is_some() {
+                    button(text("Kill").size(12))
+                        .on_press(Message::KillPressed)
+                        .style(theme::destructive())
+                        .padding([6, 12])
+                } else {
+                    button(text("Kill").size(12)).style(theme::secondary()).padding([6, 12])
+                },
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            container(
+                scrollable(lines)
+                    .id(console_scroll_id())
+                    .style(iced::theme::Scrollable::custom(theme::Thin))
+                    .height(Length::Fill),
+            )
+            .style(theme::inset)
+            .padding(10)
+            .width(Length::Fill)
+            .height(Length::Fill),
+        ]
+        .spacing(12)
+        .into()
+    }
+
+    /// Per-instance settings form.
+    fn view_settings(&self) -> Element<'_, Message> {
+        if self.selected.is_none() {
+            return centered_note("Pick an instance to edit its settings.");
+        }
+        let card = self.selected_card().cloned();
+        let mut body = column![
+            row![
+                text("Instance settings").size(22).font(theme::bold()),
+                if let Some(card) = &card {
+                    chip(card.subtitle(), theme::chip)
+                } else {
+                    chip("".to_string(), theme::chip_neutral)
+                },
+                horizontal_space(),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
+        ]
+        .spacing(12);
+
+        body = body.push(section("Display name"));
+        body = body.push(
+            text_input("Name", &self.form.name)
+                .on_input(Message::SetName)
+                .style(theme::Field)
+                .padding([8, 10])
+                .width(Length::Fill),
+        );
+
+        body = body.push(section("Memory"));
+        body = body.push(
+            checkbox(
+                "Override memory (use this instance's Min/MaxMemAlloc)",
+                self.form.override_memory,
+            )
+            .style(theme::Tick)
+            .on_toggle(Message::SetOverrideMemory),
+        );
+        body = body.push(
+            row![
+                text_input("Min MiB", &self.form.min_mem)
+                    .on_input(Message::SetMinMem)
+                    .style(theme::Field)
+                    .padding([8, 10])
+                    .width(Length::Fixed(180.0)),
+                text_input("Max MiB", &self.form.max_mem)
+                    .on_input(Message::SetMaxMem)
+                    .style(theme::Field)
+                    .padding([8, 10])
+                    .width(Length::Fixed(180.0)),
+            ]
+            .spacing(10),
+        );
+
+        body = body.push(section("Java"));
+        body = body.push(
+            checkbox("Override Java location (use this instance's JavaPath)", self.form.override_java)
+                .style(theme::Tick)
+                .on_toggle(Message::SetOverrideJava),
+        );
+        body = body.push(
+            text_input("Java path (empty = look on PATH)", &self.form.java_path)
+                .on_input(Message::SetJavaPath)
+                .style(theme::Field)
+                .padding([8, 10])
+                .width(Length::Fill),
+        );
+
+        body = body.push(section("Window"));
+        body = body.push(
+            checkbox("Override window size", self.form.override_window)
+                .style(theme::Tick)
+                .on_toggle(Message::SetOverrideWindow),
+        );
+        body = body.push(
+            row![
+                text_input("Width", &self.form.win_width)
+                    .on_input(Message::SetWinWidth)
+                    .style(theme::Field)
+                    .padding([8, 10])
+                    .width(Length::Fixed(180.0)),
+                text_input("Height", &self.form.win_height)
+                    .on_input(Message::SetWinHeight)
+                    .style(theme::Field)
+                    .padding([8, 10])
+                    .width(Length::Fixed(180.0)),
+            ]
+            .spacing(10),
+        );
+
+        body = body.push(section("On launch"));
+        body = body.push(
+            checkbox("Join a server automatically", self.form.join_server)
+                .style(theme::Tick)
+                .on_toggle(Message::SetJoinServer),
+        );
+        body = body.push(
+            text_input("host[:port]", &self.form.server_address)
+                .on_input(Message::SetServerAddress)
+                .style(theme::Field)
+                .padding([8, 10])
+                .width(Length::Fill),
+        );
+
+        body = body.push(
+            row![
+                button(text("Save").size(13))
+                    .on_press(Message::SettingsSave)
+                    .style(theme::primary())
+                    .padding([9, 20]),
+                button(text("Open folder").size(13))
+                    .on_press(Message::OpenFolder(self.selected.clone().unwrap_or_default()))
+                    .style(theme::secondary())
+                    .padding([9, 16]),
+                button(text("Duplicate").size(13))
+                    .on_press(Message::DuplicateInstance(self.selected.clone().unwrap_or_default()))
+                    .style(theme::secondary())
+                    .padding([9, 16]),
+                button(text("Delete…").size(13))
+                    .on_press(Message::AskDelete(self.selected.clone().unwrap_or_default()))
+                    .style(theme::destructive())
+                    .padding([9, 16]),
+            ]
+            .spacing(10),
+        );
+        body = body.push(text(
+            "Values apply only while their override gate is on; otherwise the global launcher settings win (Prism semantics).",
+        )
+        .size(11));
+
+        page_scroller(body)
+    }
+
+    /// Accounts page.
+    fn view_accounts(&self) -> Element<'_, Message> {
+        let mut body = column![
+            text("Accounts").size(22).font(theme::bold()),
+            text("Offline accounts play single-player and offline servers. They are stored in accounts.json next to your instances.")
+                .size(12),
+            horizontal_rule(1u16),
+            row![
+                text_input("Username", &self.account_input)
+                    .on_input(Message::AccountNameChanged)
+                    .on_submit(Message::AccountAdd)
+                    .style(theme::Field)
+                    .padding([8, 10])
+                    .width(Length::Fill),
+                button(text("Add account").size(13))
+                    .on_press(Message::AccountAdd)
+                    .style(theme::primary())
+                    .padding([8, 18]),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12);
+        for account in self.accounts.list() {
+            let selected = self.accounts.selected_uuid() == Some(account.uuid.as_str());
+            body = body.push(
+                container(
+                    row![
+                        icon_tile("steve", 36.0, false),
+                        column![
+                            text(account.username.clone()).size(15).font(theme::bold()),
+                            text(format!("Offline · {}", account.uuid)).size(11),
+                        ]
+                        .spacing(2)
+                        .width(Length::Fill),
+                        if selected {
+                            chip("Playing as".to_string(), theme::chip)
+                        } else {
+                            chip(String::new(), theme::chip_neutral)
+                        },
+                        button(text("Use").size(12))
+                            .on_press(Message::AccountSelect(account.uuid.clone()))
+                            .style(theme::secondary())
+                            .padding([6, 12]),
+                        button(text("Remove").size(12))
+                            .on_press(Message::AccountRemove(account.uuid.clone()))
+                            .style(theme::destructive())
+                            .padding([6, 12]),
+                    ]
+                    .spacing(10)
+                    .align_items(iced::Alignment::Center),
+                )
+                .style(theme::card)
+                .padding(12)
+                .width(Length::Fill),
+            );
+        }
+        if self.accounts.list().is_empty() {
+            body = body.push(centered_note("No accounts yet — add one above to play with your own name."));
+        }
+        body = body.push(
+            container(
+                column![
+                    text("Microsoft sign-in").size(14).font(theme::bold()),
+                    text("Not implemented yet: it needs an OAuth client and a browser round-trip. Until then only offline accounts are available, and the launcher says so instead of pretending.")
+                        .size(12),
+                    button(text("Sign in with Microsoft").size(12))
+                        .on_press(Message::MicrosoftPressed)
+                        .style(theme::secondary())
+                        .padding([7, 14]),
+                ]
+                .spacing(8),
+            )
+            .style(theme::card)
+            .padding(14)
+            .width(Length::Fill),
+        );
+        page_scroller(body)
+    }
+
+    /// About / help page.
+    fn view_about(&self) -> Element<'_, Message> {
+        let rows: Vec<(String, String)> = vec![
+            ("Version".into(), brand::full_name()),
+            ("Graphics".into(), self.graphics_summary()),
+            ("Adapter".into(), self.adapter_summary()),
+            ("Data root".into(), self.paths.root.display().to_string()),
+            ("Instances".into(), self.instances_dir.display().to_string()),
+            ("Metadata cache".into(), self.paths.meta_dir().display().to_string()),
+            ("Accounts".into(), self.paths.accounts_file().display().to_string()),
+            ("Global config".into(), self.paths.global_config().display().to_string()),
+        ];
+        let mut body = column![
+            row![
+                container(
+                    Image::new(brand::logo_handle())
+                        .width(Length::Fixed(64.0))
+                        .height(Length::Fixed(64.0)),
+                )
+                .style(theme::hero_tile)
+                .padding(8),
+                column![
+                    text(brand::APP_NAME).size(24).font(theme::bold()),
+                    text("A Prism-compatible Minecraft launcher with a Modrinth-style shell.").size(12),
+                ]
+                .spacing(4),
+            ]
+            .spacing(14)
+            .align_items(iced::Alignment::Center),
+            horizontal_rule(1u16),
+            text("Shortcuts").size(15).font(theme::bold()),
+            text("N — create an instance     ·     Esc — close a dialog     ·     Ctrl+R — rescan instances").size(12),
+            text("Drag & drop — drop a PNG for a custom instance icon, or a .mrpack/.zip to import a pack").size(12),
+            horizontal_rule(1u16),
+            text("Paths").size(15).font(theme::bold()),
+        ]
+        .spacing(10);
+        for (label, value) in rows {
+            body = body.push(
+                row![
+                    text(label).size(12).width(Length::Fixed(120.0)),
+                    text(value).size(12).font(iced::Font::MONOSPACE),
+                ]
+                .spacing(10),
+            );
+        }
+        body = body.push(horizontal_rule(1u16));
+        body = body.push(text("Honest status").size(15).font(theme::bold()));
+        body = body.push(text("• Launching resolves the pack, probes Java and streams the game's output; assets and libraries are not downloaded yet, so a fresh instance reports what is missing instead of failing silently.").size(12));
+        body = body.push(text("• Microsoft sign-in is not implemented (offline accounts only).").size(12));
+        body = body.push(text("• Modpack import copies the pack's overrides offline; the remote files it lists are not fetched.").size(12));
+        body = body.push(text("• Instance icons are the Prism Launcher art (GPL-3.0-only), embedded at build time.").size(12));
+        page_scroller(body)
+    }
+
+    /// The launcher's own settings: a section list beside the active pane.
+    ///
+    /// Laid out like the reference client's dialog — DISPLAY / ACCOUNT /
+    /// INSTANCES down the left, the pane on the right, the product version and
+    /// the OS along the bottom. Only Appearance is editable, and the rest of the
+    /// list is drawn as plain labels: a row that looks like a button but leads to
+    /// an empty pane is a bug in a button's clothes.
+    fn view_settings_dialog(&self) -> Element<'_, Message> {
+        let nav = column![
+            nav_section("DISPLAY"),
+            nav_row("sliders", "Appearance", true),
+            nav_row("info", "Features", false),
+            nav_row("compass", "Behavior", false),
+            nav_row("globe", "Language", false),
+            nav_section("ACCOUNT"),
+            nav_row("person", "Profile", false),
+            nav_row("person", "Social", false),
+            nav_row("info", "Privacy", false),
+            nav_section("INSTANCES"),
+            nav_row("refresh", "Synced settings", false),
+            nav_row("cube", "Java installations", false),
+            iced::widget::Space::with_height(Length::Fill),
+            text("Prism's own settings stay in prismlauncher.cfg.")
+                .size(10)
+                .style(iced::theme::Text::Color(theme::text_dim())),
+        ]
+        .spacing(3)
+        .padding(Padding::from([8, 10]));
+
+        let pane = scrollable(appearance_pane())
+            .style(iced::theme::Scrollable::custom(theme::Thin))
+            .height(Length::Fixed(SETTINGS_PANE_HEIGHT));
+
+        let body = row![
+            container(nav).width(Length::Fixed(SETTINGS_NAV_WIDTH)),
+            vertical_rule(1u16),
+            container(pane).padding([0, 18]).width(Length::Fill),
+        ]
+        .height(Length::Fixed(SETTINGS_PANE_HEIGHT + 16.0));
+
+        container(column![
+            modal_header("Settings"),
+            body,
+            container(settings_footer()).padding([12, 22]),
+        ])
+        .style(theme::modal)
+        .width(Length::Fixed(SETTINGS_DIALOG_WIDTH))
+        .max_height(DIALOG_MAX_HEIGHT)
+        .into()
+    }
+
+    /// The dialog that replaced the content area.
+    fn view_modal(&self) -> Element<'_, Message> {
+        let dialog: Element<'_, Message> = match &self.modal {
+            Modal::None => return self.view_page(),
+            Modal::Create => self.view_create_dialog(),
+            Modal::Import => self.view_import_dialog(),
+            Modal::Settings => self.view_settings_dialog(),
+            Modal::ConfirmDelete(id) => view_confirm_delete(id),
+        };
+        // One container, centred on both axes. (A wrapper around the dialog
+        // cannot centre it: a shrink-wrapped container has nothing to centre
+        // *within*, so the dialog used to land in the pane's top-left corner.)
+        container(dialog)
+            .style(theme::backdrop)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into()
+    }
+
+    /// Create instance, step 1 (choose a path) or step 2 (configure).
+    fn view_create_dialog(&self) -> Element<'_, Message> {
+        let header = modal_header("Create instance");
+        let (body, footer) = match self.create.step {
+            CreateStep::Choose => {
+                let mut body = column![
+                    text("Already know what you want to play?").size(14).font(theme::bold()),
+                    text_input("Search mods, modpacks, and more…", &self.create.query)
+                        .on_input(Message::CreateSearchChanged)
+                        .on_submit(Message::CreateFocusSearch)
+                        .style(theme::Field)
+                        .padding([10, 12]),
+                ]
+                .spacing(10);
+                if self.create.searching {
+                    body = body.push(text("Searching Modrinth…").size(12));
+                }
+                if let Some(error) = &self.create.search_error {
+                    body = body.push(text(format!("Search failed: {error}")).size(12));
+                }
+                for hit in &self.create.results {
+                let project = hit.project_ref().to_string();
+                    let title = hit.title.clone();
+                    body = body.push(
+                        button(
+                            row![
+                                column![
+                                    text(hit.title.clone()).size(13).font(theme::bold()),
+                                    text(hit.description.clone()).size(11),
+                                ]
+                                .spacing(2)
+                                .width(Length::Fill),
+                                chip(hit.downloads_label(), theme::chip_neutral),
+                            ]
+                            .spacing(10)
+                            .align_items(iced::Alignment::Center),
+                        )
+                        .on_press(Message::CreateProjectPicked(project, title))
+                        .style(theme::secondary())
+                        .padding(10)
+                        .width(Length::Fill),
+                    );
+                }
+                body = body.push(divider_label("or"));
+                body = body.push(text("Choose instance type").size(14).font(theme::bold()));
+                body = body.push(option_row(
+                    "cube",
+                    "Custom setup",
+                    "Start from scratch by picking a loader and game version.",
+                    Message::CreateCustomSetup,
+                ));
+                body = body.push(option_row(
+                    "search",
+                    "Start from a mod or modpack",
+                    "Search Modrinth above and we will install it right after creating.",
+                    Message::CreateFocusSearch,
+                ));
+                body = body.push(option_row(
+                    "upload",
+                    "Upload a modpack",
+                    "Drop a .mrpack or CurseForge .zip anywhere on this window.",
+                    Message::CreateAwaitPack,
+                ));
+                body = body.push(option_row(
+                    "download",
+                    "Import instance",
+                    "Copy an instance from Prism Launcher on this machine.",
+                    Message::OpenImport,
+                ));
+                let footer = row![
+                    horizontal_space(),
+                    button(text("Cancel").size(13))
+                        .on_press(Message::CloseModal)
+                        .style(theme::ghost())
+                        .padding([9, 16]),
+                ]
+                .spacing(8);
+                (body, footer)
+            }
+            CreateStep::Configure => {
+                let catalog = &self.catalog.catalog;
+                let builds = catalog.loader_builds(self.create.loader, &self.create.game);
+                let other = catalog.other_builds(self.create.loader, &self.create.game);
+                let games = catalog.game_versions(self.create.show_snapshots);
+                let no_games = games.is_empty();
+
+                let mut body = column![
+                    row![
+                        self.view_icon_preview(),
+                        column![
+                            button(text("Upload").size(12))
+                                .on_press(Message::CreateIconUpload)
+                                .style(theme::secondary())
+                                .padding([7, 14])
+                                .width(Length::Fill),
+                            button(text("Randomize").size(12))
+                                .on_press(Message::CreateIconRandomize)
+                                .style(theme::secondary())
+                                .padding([7, 14])
+                                .width(Length::Fill),
+                            button(text("Customize").size(12))
+                                .on_press(Message::CreateIconCustomize)
+                                .style(if self.create.customize_open { theme::primary() } else { theme::secondary() })
+                                .padding([7, 14])
+                                .width(Length::Fill),
+                        ]
+                        .spacing(6)
+                        .width(Length::Fill),
+                    ]
+                    .spacing(12)
+                    .align_items(iced::Alignment::Start),
+                ]
+                .spacing(10);
+
+                if self.create.awaiting_upload {
+                    body = body.push(text("Drop a PNG anywhere on the window…").size(12));
+                }
+                if let Some(source) = &self.create.icon_source {
+                    body = body.push(text(format!("Icon: {}", source.display())).size(11));
+                }
+                if self.create.customize_open {
+                    let mut icons = row![].spacing(8);
+                    for key in ICON_CHOICES {
+                        let active = self.create.icon_key == key;
+                        icons = icons.push(
+                            button(icon_tile(key, 34.0, active))
+                                .on_press(Message::CreateIconPicked(key.to_string()))
+                                .style(theme::ghost())
+                                .padding(2),
+                        );
+                    }
+                    body = body.push(icons);
+                }
+
+                body = body.push(section("Name"));
+                body = body.push(text_input("My instance", &self.create.name)
+                    .on_input(Message::CreateNameChanged)
+                    .style(theme::Field)
+                    .padding([9, 11]));
+
+                body = body.push(section("Loader"));
+                let mut chips = row![].spacing(6);
+                for loader in LoaderKind::all() {
+                    chips = chips.push(
+                        button(text(loader.label()).size(12))
+                            .on_press(Message::CreateLoaderPicked(loader))
+                            .style(theme::chip_button(self.create.loader == loader))
+                            .padding([7, 13]),
+                    );
+                }
+                body = body.push(chips);
+
+                body = body.push(section("Game version"));
+                let game_selected = if self.create.game.is_empty() {
+                    None
+                } else {
+                    Some(self.create.game.clone())
+                };
+                body = body.push(
+                    row![
+                        pick_list(games, game_selected, Message::CreateGamePicked)
+                            .style(theme::Dropdown)
+                            .padding([8, 10])
+                            .width(Length::Fill),
+                        checkbox("Snapshots", self.create.show_snapshots)
+                            .on_toggle(Message::CreateSnapshotsToggled)
+                            .style(theme::Tick),
+                    ]
+                    .spacing(10)
+                    .align_items(iced::Alignment::Center),
+                );
+
+                if no_games {
+                    // No list means no version to pick, and no version means
+                    // nothing to create: say why, and offer the way out.
+                    let mut hint = row![text(if self.catalog.loading {
+                        "Loading Minecraft versions…"
+                    } else {
+                        "No Minecraft versions yet — retry once you are back online."
+                    })
+                    .size(11)]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center);
+                    if !self.catalog.loading {
+                        hint = hint.push(
+                            button(text("Retry").size(12))
+                                .on_press(Message::ReloadCatalog)
+                                .style(theme::secondary())
+                                .padding([6, 12]),
+                        );
+                    }
+                    body = body.push(hint);
+                }
+
+                if self.create.loader.loads_mods() {
+                    body = body.push(section("Loader version"));
+                    let mut choices = row![].spacing(6);
+                    for choice in [BuildChoice::Stable, BuildChoice::Latest, BuildChoice::Other] {
+                        choices = choices.push(
+                            button(text(choice.label()).size(12))
+                                .on_press(Message::CreateBuildChoicePicked(choice))
+                                .style(theme::chip_button(self.create.build_choice == choice))
+                                .padding([7, 13]),
+                        );
+                    }
+                    body = body.push(choices);
+                    if self.create.build_choice == BuildChoice::Other {
+                        let selected = if self.create.build.is_empty() {
+                            None
+                        } else {
+                            Some(self.create.build.clone())
+                        };
+                        body = body.push(
+                            pick_list(other, selected, Message::CreateBuildPicked)
+                                .style(theme::Dropdown)
+                                .padding([8, 10])
+                                .width(Length::Fill),
+                        );
+                    }
+                    let summary = if self.catalog.loading {
+                        "Loading builds…".to_string()
+                    } else if builds.is_empty() {
+                        "No builds for this game version.".to_string()
+                    } else {
+                        format!(
+                            "{} {} · {} build(s) available for {}",
+                            self.create.loader.label(),
+                            if self.create.build.is_empty() { "?" } else { &self.create.build },
+                            builds.len(),
+                            self.create.game
+                        )
+                    };
+                    body = body.push(text(summary).size(11));
+                } else {
+                    body = body.push(text("Vanilla: no mod loader will be installed.").size(11));
+                }
+
+                if let Some(error) = &self.create.error {
+                    body = body.push(text(error.clone()).size(12).style(iced::theme::Text::Color(theme::danger())));
+                }
+                if let Some(project) = &self.create.install_after {
+                    body = body.push(text(format!("Then install: {}", project.1)).size(11));
+                }
+                if let Some(warning) = &self.catalog.error {
+                    body = body.push(text(warning.clone()).size(11));
+                }
+
+                let can_submit = !self.create.effective_name().trim().is_empty()
+                    && !self.create.game.trim().is_empty()
+                    && (!self.create.loader.loads_mods()
+                        || (!self.create.build.is_empty() && !builds.is_empty()));
+                let create_button: Button<'_, Message> = if can_submit {
+                    button(text("+ Create instance").size(13))
+                        .on_press(Message::CreateSubmit)
+                        .style(theme::primary())
+                        .padding([9, 18])
+                } else {
+                    button(text("+ Create instance").size(13))
+                        .style(theme::primary())
+                        .padding([9, 18])
+                };
+                let footer = row![
+                    button(text("← Back").size(13))
+                        .on_press(Message::CreateBack)
+                        .style(theme::secondary())
+                        .padding([9, 16]),
+                    horizontal_space(),
+                    create_button,
+                ]
+                .spacing(8);
+                (body, footer)
+            }
+        };
+
+        let height = match self.create.step {
+            CreateStep::Choose => CREATE_BODY_CHOOSE,
+            CreateStep::Configure => CREATE_BODY_CONFIGURE,
+        };
+        container(column![
+            header,
+            container(
+                scrollable(body)
+                    .style(iced::theme::Scrollable::custom(theme::Thin))
+                    .height(Length::Fixed(height)),
+            )
+            .padding([4, 22]),
+            container(footer).padding([14, 22]),
+        ])
+        .style(theme::modal)
+        .width(Length::Fixed(DIALOG_WIDTH))
+        .max_height(DIALOG_MAX_HEIGHT)
+        .into()
+    }
+
+    /// The icon the new instance would get: a dropped PNG, a chosen built-in
+    /// icon, or the default grass block.
+    fn view_icon_preview(&self) -> Element<'_, Message> {
+        match &self.create.icon_source {
+            Some(path) => container(
+                Image::new(Handle::from_path(path.clone()))
+                    .width(Length::Fixed(58.0))
+                    .height(Length::Fixed(58.0)),
+            )
+            .style(theme::icon_tile(theme::surface_input()))
+            .width(Length::Fixed(72.0))
+            .height(Length::Fixed(72.0))
+            .center_x()
+            .center_y()
+            .into(),
+            None => {
+                let key = if self.create.icon_key.is_empty() {
+                    "grass"
+                } else {
+                    self.create.icon_key.as_str()
+                };
+                icon_tile(key, 72.0, true)
+            }
+        }
+    }
+
+    /// Import dialog.
+    fn view_import_dialog(&self) -> Element<'_, Message> {
+        let mut body = column![
+            text("Copy an instance from another launcher. Prism Launcher's on-disk format is the one this launcher reads, so imports are exact copies.")
+                .size(12),
+            horizontal_rule(1u16),
+        ]
+        .spacing(10);
+        if self.import.loading {
+            body = body.push(centered_note("Looking for other launchers…"));
+        }
+        if let Some(error) = &self.import.error {
+            body = body.push(text(error.clone()).size(12));
+        }
+        for (index, candidate) in self.import.candidates.iter().enumerate() {
+            body = body.push(
+                container(
+                    row![
+                        column![
+                            text(candidate.name.clone()).size(14).font(theme::bold()),
+                            text(candidate.source.display().to_string()).size(11),
+                        ]
+                        .spacing(2)
+                        .width(Length::Fill),
+                        chip(candidate.origin.to_string(), theme::chip_neutral),
+                        button(text("Import").size(12))
+                            .on_press(Message::ImportPicked(index))
+                            .style(theme::primary())
+                            .padding([7, 14]),
+                    ]
+                    .spacing(10)
+                    .align_items(iced::Alignment::Center),
+                )
+                .style(theme::card)
+                .padding(12)
+                .width(Length::Fill),
+            );
+        }
+        container(column![
+            modal_header("Import instance"),
+            container(
+                scrollable(body)
+                    .style(iced::theme::Scrollable::custom(theme::Thin))
+                    .height(Length::Fixed(CREATE_BODY_CHOOSE)),
+            )
+            .padding([4, 22]),
+            container(
+                row![
+                    horizontal_space(),
+                    button(text("Close").size(13))
+                        .on_press(Message::CloseModal)
+                        .style(theme::secondary())
+                        .padding([9, 16]),
+                ]
+                .spacing(8),
+            )
+            .padding([14, 22]),
+        ])
+        .style(theme::modal)
+        .width(Length::Fixed(620.0))
+        .into()
+    }
+
+    /// Right sidebar: getting started, account, selection, run state, about.
+    fn view_sidebar(&self) -> Element<'_, Message> {
+        let mut side = column![].spacing(12).padding(14);
+        side = side.push(self.card_getting_started());
+        side = side.push(self.card_account());
+        if let Some(card) = self.selected_card() {
+            side = side.push(self.card_instance(card));
+        }
+        if let Some(run) = &self.active_run {
+            side = side.push(self.card_running(&run.instance_id));
+        }
+        side = side.push(self.card_version());
+        container(scrollable(side).style(iced::theme::Scrollable::custom(theme::Thin)).height(Length::Fill))
+            .style(theme::rail)
+            .width(Length::Fixed(SIDEBAR_WIDTH))
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn card_getting_started(&self) -> Element<'_, Message> {
+        let steps = [
+            ("Add an account", self.accounts.selected_account().is_some()),
+            ("Create an instance", !self.cards.is_empty()),
+            ("Press Play", self.cards.iter().any(|card| card.playtime_secs > 0)),
+        ];
+        let mut rows = column![].spacing(8);
+        for (label, done) in steps {
+            let marker: Element<'_, Message> = if done {
+                container(glyph("check", 12.0, theme::accent()))
+                    .style(theme::chip_neutral)
+                    .padding([3, 6])
+                    .into()
+            } else {
+                container(
+                    container(text(""))
+                        .style(theme::pill(theme::text_dim()))
+                        .width(Length::Fixed(6.0))
+                        .height(Length::Fixed(6.0)),
+                )
+                .style(theme::chip_neutral)
+                .padding([6, 9])
+                .into()
+            };
+            rows = rows.push(
+                row![marker, text(label).size(13).width(Length::Fill)]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center),
+            );
+        }
+        container(
+            column![
+                row![
+                    Image::new(brand::logo_handle())
+                        .width(Length::Fixed(20.0))
+                        .height(Length::Fixed(20.0)),
+                    text("Getting started").size(15).font(theme::bold()),
+                ]
+                .spacing(8)
+                .align_items(iced::Alignment::Center),
+                rows,
+                button(text("+ Create an instance").size(12))
+                    .on_press(Message::OpenCreate)
+                    .style(theme::primary())
+                    .padding([8, 14])
+                    .width(Length::Fill),
+            ]
+            .spacing(12),
+        )
+        .style(theme::card)
+        .padding(14)
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn card_account(&self) -> Element<'_, Message> {
+        let signed_in = self.accounts.selected_account().is_some();
+        container(
+            column![
+                text("Playing as").size(15).font(theme::bold()),
+                row![
+                    icon_tile("steve", 40.0, signed_in),
+                    column![
+                        text(self.account_label()).size(14).font(theme::bold()),
+                        text(self.account_detail()).size(11),
+                    ]
+                    .spacing(2)
+                    .width(Length::Fill),
+                ]
+                .spacing(10)
+                .align_items(iced::Alignment::Center),
+                if signed_in {
+                    button(text("Manage accounts").size(12))
+                        .on_press(Message::PageSelected(Page::Accounts))
+                        .style(theme::secondary())
+                        .padding([7, 12])
+                        .width(Length::Fill)
+                } else {
+                    button(text("Add an account").size(12))
+                        .on_press(Message::PageSelected(Page::Accounts))
+                        .style(theme::primary())
+                        .padding([7, 12])
+                        .width(Length::Fill)
+                },
+            ]
+            .spacing(10),
+        )
+        .style(theme::card)
+        .padding(14)
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn card_instance(&self, card: &InstanceCard) -> Element<'_, Message> {
+        let running = self
+            .active_run
+            .as_ref()
+            .map(|run| run.instance_id == card.id)
+            .unwrap_or(false);
+        let mut body = column![
+            row![
+                icon_tile(&card.icon, CARD_ICON, true),
+                column![
+                    text(card.name.clone()).size(15).font(theme::bold()),
+                    text(card.subtitle()).size(11),
+                ]
+                .spacing(3)
+                .width(Length::Fill),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+            row![
+                chip(format!("{} mods", card.mods_total), theme::chip_neutral),
+                chip(card.playtime_label(), theme::chip_neutral),
+                chip(format!("{} MiB", card.max_mem_mb), theme::chip_neutral),
+            ]
+            .spacing(6),
+        ]
+        .spacing(10);
+        if let Some(problem) = &card.problem {
+            body = body.push(text(problem.clone()).size(11).style(iced::theme::Text::Color(theme::danger())));
+        }
+        let play: Element<'_, Message> = if running {
+            button(text("Kill").size(13))
+                .on_press(Message::KillPressed)
+                .style(theme::destructive())
+                .padding([9, 16])
+                .width(Length::Fill)
+                .into()
+        } else {
+            button(
+                row![
+                    glyph("play", 14.0, theme::on_accent()),
+                    text("Play").size(13),
+                ]
+                .spacing(8)
+                .align_items(iced::Alignment::Center),
+            )
+            .on_press(Message::PlayInstance(card.id.clone()))
+            .style(theme::primary())
+            .padding([9, 16])
+            .width(Length::Fill)
+            .into()
+        };
+        body = body.push(play);
+        body = body.push(
+            row![
+                button(text("Edit").size(12))
+                    .on_press(Message::EditInstance(card.id.clone()))
+                    .style(theme::secondary())
+                    .padding([6, 10])
+                    .width(Length::Fill),
+                button(text("Folder").size(12))
+                    .on_press(Message::OpenFolder(card.id.clone()))
+                    .style(theme::secondary())
+                    .padding([6, 10])
+                    .width(Length::Fill),
+                button(text("Copy").size(12))
+                    .on_press(Message::DuplicateInstance(card.id.clone()))
+                    .style(theme::secondary())
+                    .padding([6, 10])
+                    .width(Length::Fill),
+            ]
+            .spacing(6),
+        );
+        body = body.push(
+            row![
+                text("Group").size(11),
+                pick_list(
+                    self.group_options(),
+                    Some(self.selected_group_label()),
+                    Message::GroupSelected,
+                )
+                .style(theme::Dropdown)
+                .padding([4, 8])
+                .width(Length::Fill),
+            ]
+            .spacing(8)
+            .align_items(iced::Alignment::Center),
+        );
+        body = body.push(
+            button(text("Delete…").size(12))
+                .on_press(Message::AskDelete(card.id.clone()))
+                .style(theme::destructive())
+                .padding([6, 10])
+                .width(Length::Fill),
+        );
+        container(body).style(theme::card).padding(14).width(Length::Fill).into()
+    }
+
+    fn card_running(&self, id: &str) -> Element<'_, Message> {
+        container(
+            column![                    row![
+                    container(text("")).style(theme::pill(theme::accent())).width(Length::Fixed(8.0)).height(Length::Fixed(8.0)),
+                    text("Running").size(15).font(theme::bold()),
+                ]
+                .spacing(8)
+                .align_items(iced::Alignment::Center),
+                text(id.to_string()).size(13),
+                text("Open the Logs page to watch the output.").size(11),
+                button(text("Kill process").size(12))
+                    .on_press(Message::KillPressed)
+                    .style(theme::destructive())
+                    .padding([7, 12])
+                    .width(Length::Fill),
+            ]
+            .spacing(8),
+        )
+        .style(theme::card)
+        .padding(14)
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn card_version(&self) -> Element<'_, Message> {
+        container(
+            column![
+                text(format!("{} v{}", brand::APP_NAME, brand::version())).size(13).font(theme::bold()),
+                text(format!("Data root: {}", self.paths.root.display())).size(10),
+                row![
+                    button(text("About").size(12))
+                        .on_press(Message::PageSelected(Page::About))
+                        .style(theme::secondary())
+                        .padding([6, 12])
+                        .width(Length::Fill),
+                    button(text("Instances folder").size(12))
+                        .on_press(Message::OpenInstancesFolder)
+                        .style(theme::secondary())
+                        .padding([6, 12])
+                        .width(Length::Fill),
+                ]
+                .spacing(6),
+            ]
+            .spacing(8),
+        )
+        .style(theme::card)
+        .padding(14)
+        .width(Length::Fill)
+        .into()
+    }
+
+    /// Slim status strip at the bottom.
+    fn view_status_bar(&self) -> Element<'_, Message> {
+        let color = if self.status_is_error { theme::danger() } else { theme::text_muted() };
+        container(
+            row![
+                text(format!("{} instance(s)", self.cards.len())).size(11),
+                text("·").size(11),
+                text(self.status.clone()).size(11).style(iced::theme::Text::Color(color)),
+                horizontal_space(),
+                text(format!(
+                    "selected: {}",
+                    self.selected.as_deref().unwrap_or("none")
+                ))
+                .size(11),
+            ]
+            .spacing(8)
+            .align_items(iced::Alignment::Center),
+        )
+        .style(theme::toast)
+        .padding([5, 12])
+        .width(Length::Fill)
+        .into()
+    }
+}
+
+/// Observation accessors: the tests drive the whole shell through them, and
+/// they are the hooks a future remote-debug surface would use. They are gated
+/// on `cfg(test)` so the shipped binary carries no unreachable API surface.
+#[cfg(test)]
+impl PrismApp {
+    /// Current status line.
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+
+    /// Whether the status line reports a failure.
+    pub fn status_is_error(&self) -> bool {
+        self.status_is_error
+    }
+
+    /// Currently selected instance id.
+    pub fn selected(&self) -> Option<&str> {
+        self.selected.as_deref()
+    }
+
+    /// Whether a launch is streaming.
+    pub fn is_running(&self) -> bool {
+        self.active_run.is_some()
+    }
+
+    /// The page currently shown.
+    pub fn page(&self) -> Page {
+        self.page
+    }
+
+    /// The create dialog's form.
+    pub fn create_form(&self) -> &CreateForm {
+        &self.create
+    }
+
+    /// The metadata-catalog state.
+    pub fn catalog_state(&self) -> &CatalogState {
+        &self.catalog
+    }
+
+    /// The browse state.
+    pub fn browse_state(&self) -> &BrowseState {
+        &self.browse
+    }
+
+    /// The import state.
+    pub fn import_state(&self) -> &ImportState {
+        &self.import
+    }
+
+    /// Number of instances.
+    pub fn instance_count(&self) -> usize {
+        self.cards.len()
+    }
+
+    /// The instance cards.
+    pub fn cards(&self) -> &[InstanceCard] {
+        &self.cards
+    }
+
+    /// The log buffer.
+    pub fn console(&self) -> &VecDeque<String> {
+        &self.console
+    }
+
+    /// Accounts handle.
+    pub fn accounts(&self) -> &crate::accounts::AccountsStore {
+        &self.accounts
+    }
+
+    /// Mods of the selection.
+    pub fn mods(&self) -> &[ModEntry] {
+        &self.mods
+    }
+}
+
+// ---- free widget helpers ------------------------------------------------
+
+/// A rail entry: a drawn glyph that takes the rail's ink colour.
+///
+/// The colour is why the icons are vectors — a bitmap cannot be recoloured, so
+/// an embedded icon looked identical whether its page was the active one or
+/// not.
+/// One icon-rail entry, with the label it shows on hover.
+///
+/// The label used to be dropped on the floor (`_label`), so six rail buttons
+/// looked identical whether you were pointing at one or not. The tooltip is the
+/// reference UI's answer to that: a single icon per destination, named on hover.
+fn rail_icon(icon: &str, label: &str, active: bool, message: Message) -> Element<'static, Message> {
+    let color = if active { theme::accent() } else { theme::text_muted() };
+    let tile = button(container(glyph(icon, 22.0, color)).center_x().center_y())
+        .on_press(message)
+        .style(theme::rail_button(active))
+        .padding([10, 10])
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(46.0));
+    tooltip(
+        tile,
+        container(text(label.to_string()).size(12))
+            .style(theme::Tooltip)
+            .padding([6, 10]),
+        tooltip::Position::Right,
+    )
+    .gap(6)
+    .padding(0)
+    .into()
+}
+
+/// One screenshot tile: the picture, then what it is.
+fn shot_tile(tile: &ShotTile) -> Element<'static, Message> {
+    let picture = Image::new(tile.handle.clone())
+        .width(Length::Fixed(SHOT_TILE_WIDTH))
+        .height(Length::Fixed(SHOT_TILE_HEIGHT));
+    container(
+        column![
+            // The dark square behind the picture stands in for the letterboxing
+            // bars on a screenshot that is not the expected aspect ratio.
+            container(picture)
+                .style(theme::icon_tile(theme::bg()))
+                .padding(2),
+            text(tile.caption())
+                .size(11)
+                .style(iced::theme::Text::Color(theme::text_muted())),
+        ]
+        .spacing(7),
+    )
+    .style(theme::card)
+    .padding(8)
+    .into()
+}
+
+/// A rounded icon tile (embedded instance art).
+fn icon_tile(key: &str, side: f32, accent: bool) -> Element<'static, Message> {
+    let background = if accent { theme::alpha(theme::accent(), 0.18) } else { theme::surface_input() };
+    container(
+        Image::new(instance_handle(key))
+            .width(Length::Fixed(side - 14.0))
+            .height(Length::Fixed(side - 14.0)),
+    )
+    .style(theme::icon_tile(background))
+    .width(Length::Fixed(side))
+    .height(Length::Fixed(side))
+    .center_x()
+    .center_y()
+    .into()
+}
+
+/// A whole instance card: clickable body + inline play button.
+fn instance_card(card: &InstanceCard, selected: bool) -> Element<'static, Message> {
+    let body_card = card.clone();
+    let name = card.name.clone();
+    let subtitle = card.subtitle();
+    let playtime = card.playtime_label();
+    let id = card.id.clone();
+    let play_id = card.id.clone();
+    let group_chip = card.group.clone();
+    let loader_chip = if card.has_loader() {
+        Some(format!("{} {}", card.loader.label(), card.loader_version))
+    } else {
+        None
+    };
+
+    let info = column![
+        text(name).size(15).font(theme::bold()),
+        text(subtitle).size(11),
+        row![
+            chip(playtime, theme::chip_neutral),
+            chip(format!("{} mods", body_card.mods_total), theme::chip_neutral),
+            match loader_chip {
+                Some(label) => chip(label, theme::chip),
+                None => chip("Vanilla".to_string(), theme::chip_neutral),
+            },
+            match group_chip {
+                Some(group) => chip(group, theme::chip_neutral),
+                None => chip("".to_string(), theme::chip_neutral),
+            },
+        ]
+        .spacing(6),
+    ]
+    .spacing(5)
+    .width(Length::Fill);
+
+    let body = button(row![icon_tile(&body_card.icon, CARD_ICON, selected), info].spacing(12).align_items(iced::Alignment::Center))
+        .on_press(Message::SelectInstance(id))
+        .style(theme::card_area(selected))
+        .padding(10)
+        .width(Length::Fill);
+
+    let play = button(glyph("play", 16.0, theme::on_accent()))
+        .on_press(Message::PlayInstance(play_id))
+        .style(theme::primary())
+        .padding(12);
+
+    container(row![body, play].spacing(8).align_items(iced::Alignment::Center))
+        .style(if selected { theme::card_selected } else { theme::card })
+        .padding(8)
+        .width(Length::Fill)
+        .into()
+}
+
+/// A labelled small pill; `label` may be empty (renders nothing).
+fn chip(label: String, style: fn(&Theme) -> container::Appearance) -> Element<'static, Message> {
+    let content: Element<'static, Message> = if label.is_empty() {
+        Element::from(text("").size(11))
+    } else {
+        Element::from(text(label).size(11))
+    };
+    container(content).style(style).padding([3, 8]).into()
+}
+
+/// A section label inside a form.
+fn section(label: &str) -> Element<'static, Message> {
+    column![text(label.to_string()).size(13).font(theme::bold())].spacing(2).into()
+}
+
+/// The "or" separator used in the create dialog.
+fn divider_label(label: &str) -> Element<'static, Message> {
+    row![
+        container(horizontal_rule(1u16)).width(Length::Fill),
+        text(label.to_string()).size(11),
+        container(horizontal_rule(1u16)).width(Length::Fill),
+    ]
+    .spacing(10)
+    .align_items(iced::Alignment::Center)
+    .into()
+}
+
+/// One of the four Create-dialog type rows.
+fn option_row(icon: &str, title: &str, description: &str, message: Message) -> Element<'static, Message> {
+    container(
+        button(
+            row![
+                container(glyph(icon, 18.0, theme::text_muted()))
+                    .style(theme::chip_neutral)
+                    .padding([8, 10]),
+                column![
+                    text(title.to_string()).size(14).font(theme::bold()),
+                    text(description.to_string()).size(11),
+                ]
+                .spacing(2)
+                .width(Length::Fill),
+                text("→").size(14),
+            ]
+            .spacing(12)
+            .align_items(iced::Alignment::Center),
+        )
+        .on_press(message)
+        .style(theme::ghost())
+        .padding(10)
+        .width(Length::Fill),
+    )
+    .style(theme::option_row)
+    .padding(4)
+    .width(Length::Fill)
+    .into()
+}
+
+/// Make a non-interactive patch of chrome grabbable: press and drag moves the
+/// window, right-click opens the native window menu.
+///
+/// iced has no notion of a "drag region", so every inert part of the title bar
+/// has to opt in. Missing one leaves a dead patch the user cannot drag by,
+/// which is what made moving the window feel broken.
+/// The patch is given an explicit width and an explicit height spanning the
+/// bar between its padding.
+///
+/// That is not cosmetic. A child that sizes to its content — a
+/// `horizontal_space()`, say — has no height of its own inside a row whose
+/// items are centred, and the mouse area built around it then inherits a rect
+/// with zero height. A zero-height rect can never be *hovered*, and iced gates
+/// every press on that test, so the widest stretch of the title bar ends up a
+/// dead strip that ignores the pointer entirely.
+///
+/// `armed` is the drag cost control, and it matters more than it looks. In
+/// iced 0.12 a *published message* is what makes the shell rebuild: `iced_winit`'s
+/// event loop (`application.rs`, the `AboutToWait` arm) rebuilds only when event
+/// dispatch produced a message or reported the interface `Outdated`, and each
+/// message then runs the app's `update` and `view` — twice over for a command
+/// that carries a widget operation. A pointer move that publishes nothing costs
+/// a repaint of the widget tree the shell already holds, which `iced_tiny_skia`
+/// then skips entirely when the primitives compare equal to last frame's. So an
+/// always-attached `on_move` turned the title bar into the most expensive strip
+/// in the window: sliding the pointer along it republished the whole view once
+/// per move event — around a hundred times a second on Windows — for a handler
+/// that could not do anything until a press had armed a drag. Attaching it only
+/// between the press and the release keeps the drag behaviour identical and
+/// stops the move storm.
+fn grabbable<'a>(
+    area: BarArea,
+    width: Length,
+    armed: bool,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mouse_area = iced::widget::MouseArea::new(
+        container(content)
+            .width(width)
+            .height(Length::Fixed(TITLE_BAR_CONTENT_HEIGHT))
+            .center_y(),
+    )
+    .on_press(Message::BarPressed(area))
+    .on_release(Message::BarReleased(area))
+    .on_right_press(Message::BarRightClick);
+
+    let mouse_area = if armed {
+        mouse_area.on_move(move |position| Message::BarCursorMoved(area, position))
+    } else {
+        mouse_area
+    };
+
+    mouse_area.into()
+}
+
+/// One edge or corner of the window frame: an invisible band that hands the
+/// pointer to Windows to run a native resize loop.
+///
+/// `side` is the size across the band (the band's thickness for a corner, or
+/// its extent for an edge); the other axis always fills. `paint` matches the
+/// colour of the region the band borders so the frame never shows.
+fn grip(
+    edge: ResizeEdge,
+    side: Length,
+    paint: fn(&Theme) -> iced::widget::container::Appearance,
+) -> Element<'static, Message> {
+    let vertical = matches!(edge, ResizeEdge::West | ResizeEdge::East);
+    let (width, height) = if vertical {
+        (side, Length::Fill)
+    } else {
+        (Length::Fill, side)
+    };
+
+    iced::widget::MouseArea::new(
+        container(text(""))
+            .style(paint)
+            .width(width)
+            .height(height),
+    )
+    .on_press(Message::ResizeStart(edge))
+    .on_right_press(Message::BarRightClick)
+    .interaction(edge.interaction())
+    .into()
+}
+
+/// Centered informational note.
+fn browse_type_tabs(active: ContentType) -> Element<'static, Message> {
+    let mut tabs = row![].spacing(6);
+    for content_type in ContentType::all() {
+        tabs = tabs.push(
+            button(text(content_type.label()).size(12))
+                .on_press(Message::BrowseTypePicked(content_type))
+                .style(theme::chip_button(content_type == active))
+                .padding([6, 10]),
+        );
+    }
+    tabs.into()
+}
+
+fn centered_note(message: impl Into<String>) -> Element<'static, Message> {
+    container(text(message.into()).size(13))
+        .width(Length::Fill)
+        .padding(24)
+        .center_x()
+        .into()
+}
+
+/// The delete confirmation dialog.
+fn view_confirm_delete(id: &str) -> Element<'static, Message> {
+    container(
+        column![
+            modal_header("Delete instance"),
+            container(
+                column![
+                    text(format!("Delete '{id}'?")).size(15).font(theme::bold()),
+                    text("This removes the instance folder from disk. It cannot be undone.")
+                        .size(12),
+                ]
+                .spacing(8),
+            )
+            .padding([8, 22]),
+            container(
+                row![
+                    horizontal_space(),
+                    button(text("Cancel").size(13))
+                        .on_press(Message::CloseModal)
+                        .style(theme::secondary())
+                        .padding([9, 16]),
+                    button(text("Delete").size(13))
+                        .on_press(Message::ConfirmDelete)
+                        .style(theme::destructive())
+                        .padding([9, 18]),
+                ]
+                .spacing(8),
+            )
+            .padding([14, 22]),
+        ]
+        .spacing(0),
+    )
+    .style(theme::modal)
+    .width(Length::Fixed(440.0))
+    .into()
+}
+
+/// Dialog header: title plus a close button.
+fn modal_header(title: &str) -> Element<'static, Message> {
+    container(
+        row![
+            text(title.to_string()).size(20).font(theme::bold()),
+            horizontal_space(),
+            button(glyph("close", 13.0, theme::text_muted()))
+                .on_press(Message::CloseModal)
+                .style(theme::ghost())
+                .padding([5, 9]),
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center),
+    )
+    .padding([18, 22])
+    .width(Length::Fill)
+    .into()
+}
+
+/// A page's scrolling area: eased wheel scrolling, and iced's own scrollbar.
+///
+/// The guard is *inside* the scrollable, which is the whole trick: iced gives
+/// the event to the content first and stands down when the content claims it, so
+/// the shell gets to own the offset while the scrollbar, dragging it, touch and
+/// keyboard scrolling all stay iced's.
+///
+/// The log page deliberately does not use this — see `view_logs`.
+fn page_scroller<'a>(content: impl Into<Element<'a, Message>> + 'a) -> Element<'a, Message> {
+    scrollable(scroll::guard(content, Message::PageWheel))
+        .id(page_scroll_id())
+        .on_scroll(|viewport: scrollable::Viewport| Message::PageScrolled {
+            offset: viewport.absolute_offset().y,
+            content_height: viewport.content_bounds().height,
+            view_height: viewport.bounds().height,
+        })
+        .style(iced::theme::Scrollable::custom(theme::Thin))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// A group heading in the Settings dialog's section list.
+fn nav_section(label: &str) -> Element<'static, Message> {
+    container(
+        text(label.to_string())
+            .size(10)
+            .style(iced::theme::Text::Color(theme::text_dim())),
+    )
+    .padding(Padding { top: 12.0, right: 12.0, bottom: 4.0, left: 12.0 })
+    .into()
+}
+
+/// One row of the Settings dialog's section list.
+///
+/// `active` is the pane the dialog is showing. The inactive rows are labels,
+/// not buttons: there is one pane behind this list, and eight rows that did
+/// nothing when clicked would be eight lies.
+fn nav_row(icon: &str, label: &str, active: bool) -> Element<'static, Message> {
+    let color = if active { theme::accent() } else { theme::text_dim() };
+    container(
+        row![
+            glyph(icon, 15.0, color),
+            text(label.to_string())
+                .size(13)
+                .style(iced::theme::Text::Color(color)),
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center),
+    )
+    .style(if active { theme::nav_active } else { theme::nav_idle })
+    .padding([8, 12])
+    .width(Length::Fill)
+    .into()
+}
+
+/// The version and platform line along the bottom of the Settings dialog.
+///
+/// The reference client prints its own version and the Windows build here;
+/// both are things a user is asked for when something goes wrong, so they are
+/// read from the product and the OS rather than typed into the source.
+fn settings_footer() -> Element<'static, Message> {
+    let platform = native::windows_version().unwrap_or_else(|| std::env::consts::OS.to_string());
+    let dim = iced::theme::Text::Color(theme::text_dim());
+    row![
+        glyph("info", 16.0, theme::text_dim()),
+        column![
+            text(format!("{} {}", brand::APP_NAME, brand::version())).size(11).style(dim),
+            text(platform).size(11).style(dim),
+        ]
+        .spacing(1),
+    ]
+    .spacing(10)
+    .align_items(iced::Alignment::Center)
+    .into()
+}
+
+/// The Appearance pane: the color-theme grid, then the switch that cannot work
+/// yet.
+fn appearance_pane() -> Element<'static, Message> {
+    let current = theme::color_theme();
+    let mut cards = column![].spacing(12);
+    for couple in ColorTheme::ALL.chunks(2) {
+        let mut line = row![].spacing(12);
+        for choice in couple {
+            line = line.push(theme_choice(*choice, *choice == current));
+        }
+        cards = cards.push(line);
+    }
+
+    let dim = iced::theme::Text::Color(theme::text_muted());
+    let dimmer = iced::theme::Text::Color(theme::text_dim());
+    column![
+        text("Color theme").size(16).font(theme::bold()),
+        text(format!(
+            "Select your preferred color theme across {}.",
+            brand::APP_NAME
+        ))
+        .size(12)
+        .style(dim),
+        cards,
+        horizontal_rule(1u16),
+        row![
+            column![
+                text("Sync theme across devices").size(13).font(theme::bold()),
+                text(
+                    "Use this theme everywhere you're signed in. Turn this off to keep \
+                     a separate theme on this device."
+                )
+                .size(11)
+                .style(dim),
+                text(
+                    "Not available yet: syncing needs a Modrinth account, and this \
+                     launcher signs in to Microsoft only."
+                )
+                .size(11)
+                .style(dimmer),
+            ]
+            .spacing(3)
+            .width(Length::Fill),
+            // No `on_toggle`, so iced draws the switch disabled — which is the
+            // truth, rather than a control that silently forgets.
+            checkbox("", false).style(theme::Tick),
+        ]
+        .spacing(14)
+        .align_items(iced::Alignment::Start),
+    ]
+    .spacing(14)
+    .padding(Padding { top: 2.0, right: 2.0, bottom: 8.0, left: 2.0 })
+    .into()
+}
+
+/// One color-theme card: a miniature of the theme, then its name and a radio.
+///
+/// The miniature is painted *from that theme's palette*, not from a picture of
+/// it, so a card cannot promise something the theme does not deliver — the
+/// Light card is white because choosing Light really does paint white, and the
+/// OLED card is black because it really is black.
+fn theme_choice(choice: ColorTheme, selected: bool) -> Element<'static, Message> {
+    let palette = choice.palette();
+    let preview = container(
+        row![
+            container(text(""))
+                .width(Length::Fixed(30.0))
+                .height(Length::Fixed(30.0))
+                .style(swatch(palette.bg_rail, 8.0)),
+            column![
+                bar(96.0, 9.0, theme::alpha(palette.text, 0.85)),
+                bar(62.0, 7.0, theme::alpha(palette.text, 0.45)),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12)
+        .align_items(iced::Alignment::Center),
+    )
+    .style(move |_: &Theme| container::Appearance {
+        background: Some(palette.bg.into()),
+        border: Border { radius: 8.0.into(), width: 1.0, color: palette.border },
+        ..Default::default()
+    })
+    .padding(14)
+    .width(Length::Fill)
+    .height(Length::Fixed(84.0));
+
+    let radio = container(text(""))
+        .width(Length::Fixed(15.0))
+        .height(Length::Fixed(15.0))
+        .style(move |_: &Theme| container::Appearance {
+            background: selected.then(|| theme::accent().into()),
+            border: Border {
+                radius: 999.0.into(),
+                width: 2.0,
+                color: if selected { theme::accent() } else { theme::text_dim() },
+            },
+            ..Default::default()
+        });
+
+    let label = row![
+        radio,
+        text(choice.label()).size(12).style(iced::theme::Text::Color(
+            if selected { theme::accent() } else { theme::text() }
+        )),
+    ]
+    .spacing(8)
+    .align_items(iced::Alignment::Center);
+
+    button(column![preview, label].spacing(10).width(Length::Fill))
+        .on_press(Message::SetColorTheme(choice))
+        .style(theme::theme_card(selected))
+        .padding(10)
+        .width(Length::Fixed(THEME_CARD_WIDTH))
+        .into()
+}
+
+/// A rounded color plate, for the miniature's sidebar block.
+fn swatch(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Appearance {
+    move |_: &Theme| container::Appearance {
+        background: Some(color.into()),
+        border: Border { radius: radius.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+/// One line of fake text in a theme miniature.
+fn bar(width: f32, height: f32, color: Color) -> Element<'static, Message> {
+    container(text(""))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .style(swatch(color, height / 2.0))
+        .into()
+}
+
+/// Keyboard shortcut mapping.
+fn shortcut(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    use iced::keyboard::key::Named;
+    use iced::keyboard::Key;
+    match key.as_ref() {
+        Key::Character(character) => {
+            let text = character;
+            if modifiers.control() && text.eq_ignore_ascii_case("r") {
+                return Some(Message::Refresh);
+            }
+            if !modifiers.control() && text.eq_ignore_ascii_case("n") {
+                return Some(Message::OpenCreate);
+            }
+            None
+        }
+        Key::Named(Named::Escape) => Some(Message::CloseModal),
+        Key::Named(Named::Enter) => None,
+        _ => None,
+    }
+}
+
+/// One-shot background job as a subscription.
+///
+/// The worker thread runs `job`, which is expected to send exactly one
+/// [`Message::TaskDone`]; the future then parks forever (the runtime drops the
+/// subscription as soon as the caller stops asking for it).
+fn one_shot<H, F>(id: H, capacity: usize, job: F) -> Subscription<Message>
+where
+    H: std::hash::Hash + 'static,
+    F: FnOnce(futures::channel::mpsc::Sender<Message>) + Send + 'static,
+{
+    iced::subscription::channel(id, capacity, move |sender| async move {
+        let _ = std::thread::spawn(move || job(sender));
+        loop {
+            futures::future::pending::<()>().await;
+        }
+    })
+}
+
+/// Frame ticks for the page's scroll tween, while one is running.
+///
+/// A thread and a channel rather than `iced::time::every`, which needs a
+/// futures-runtime feature this build does not enable — and enabling it would
+/// put an async runtime in the process to deliver a 16-millisecond sleep this
+/// shell can do with `std::thread`. Every other background job here is driven
+/// the same way (see `one_shot`).
+///
+/// The subscription's life is the animation's: it is only asked for while
+/// something is moving, and when the app stops asking iced drops the receiver,
+/// the next send reports the channel is gone, and the thread ends with it.
+fn frame_ticks() -> Subscription<Message> {
+    iced::subscription::channel(FRAME_ID, 4, |mut sender| async move {
+        let _ = std::thread::spawn(move || loop {
+            std::thread::sleep(scroll::FRAME);
+            match sender.try_send(Message::PageScrollTick) {
+                Ok(()) => {}
+                // Full means the UI is a frame or two behind. Frames are
+                // droppable, so the animation simply skips ahead.
+                Err(error) if error.is_full() => {}
+                // Closed: nothing is animating any more.
+                Err(_) => break,
+            }
+        });
+        loop {
+            futures::future::pending::<()>().await;
+        }
+    })
+}
+
+/// The instance-list entry for an open instance (used when a freshly created
+/// instance is not in the cached card list yet).
+pub fn entry_for(instance: &Instance) -> prism_gui::InstanceEntry {
+    prism_gui::InstanceEntry {
+        id: instance.id(),
+        name: instance.name(),
+        icon: instance.icon_key(),
+        group: None,
+        playtime_secs: instance.total_time_played_secs(),
+    }
+}
+
+/// Resolve and download a project's best file for the target instance.
+fn install_into(
+    paths: &PrismPaths,
+    cards: &[InstanceCard],
+    selected: Option<&str>,
+    project: &str,
+    title: &str,
+    content_type: ContentType,
+) -> Result<String, String> {
+    let id = selected.ok_or_else(|| "no instance selected".to_string())?;
+    let (game, loader) = match cards.iter().find(|card| card.id == id) {
+        Some(card) => (card.mc_version.clone(), card.loader),
+        None => {
+            let instance = Instance::open(&paths.configured_instances_dir().join(id))
+                .map_err(|error| format!("cannot open '{id}': {error}"))?;
+            let card = instances::summarize(&paths.configured_instances_dir(), &entry_for(&instance));
+            (card.mc_version, card.loader)
+        }
+    };
+    if content_type.needs_loader() && !loader.loads_mods() {
+        return Err(format!(
+            "'{id}' is vanilla — install a loader before adding mods"
+        ));
+    }
+    let client = browse::client()?;
+    let versions = browse::project_versions(&client, project)?;
+    let version = browse::pick_version(&versions, &game, loader).ok_or_else(|| {
+        format!("no {title} release matches {} {}", loader.label(), game)
+    })?;
+    let target_dir = paths
+        .configured_instances_dir()
+        .join(id)
+        .join(content_type.target_folder());
+    let installed = browse::install_version(&client, &target_dir, version)?;
+    let note = if installed.verified {
+        "sha1 verified"
+    } else {
+        "size checked"
+    };
+    Ok(format!(
+        "Installed {} ({}) into '{id}' — {note}",
+        installed.filename,
+        installed_bytes(installed.bytes)
+    ))
+}
+
+/// Human byte size for status lines.
+fn installed_bytes(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.0} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use prism_core::instance::groups::Groups;
+    use prism_core::settings::Settings;
 
-    fn test_paths(tag: &str) -> (tempfile::TempDir, PrismPaths) {
+    #[test]
+    fn the_title_bar_needs_two_quick_presses_to_maximize() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        assert!(!app.maximized);
+
+        // First press arms a drag and leaves the size alone.
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(!app.maximized, "one press is a drag, not a maximize");
+
+        // A second press inside the double-click window maximizes.
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(app.maximized);
+
+        // A third starts a fresh gesture rather than flipping straight back, so
+        // a triple-click cannot land the window in the state it started in.
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(app.maximized, "the third press begins a new drag");
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(!app.maximized, "the fourth is the second half of a new double-click");
+    }
+
+    #[test]
+    fn two_slow_presses_are_two_drags() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        // Backdate the remembered press so the next one falls outside the
+        // double-click window, the way a slow double-click does.
+        app.last_bar_press = Some(Instant::now() - DOUBLE_CLICK - Duration::from_millis(1));
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(
+            !app.maximized,
+            "a slow second press drags again instead of maximizing"
+        );
+    }
+
+    #[test]
+    fn a_press_arms_a_drag_without_starting_one() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert_eq!(app.bar_armed, Some(BarArea::Middle));
+        assert_eq!(app.bar_origin, None, "no origin until the pointer moves");
+    }
+
+    #[test]
+    fn a_click_that_jitters_under_the_threshold_stays_a_click() {
+        // The whole reason the threshold exists: a press that wobbles a pixel
+        // or two and comes back up must never enter Windows' move loop, because
+        // that loop eats the second press of a double-click.
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        let _ = app.update(Message::BarCursorMoved(BarArea::Middle, Point::new(100.0, 10.0)));
+        let _ = app.update(Message::BarCursorMoved(
+            BarArea::Middle,
+            Point::new(100.0 + BAR_DRAG_THRESHOLD - 0.5, 10.0),
+        ));
+        assert_eq!(
+            app.bar_armed,
+            Some(BarArea::Middle),
+            "jitter must not be mistaken for a drag"
+        );
+
+        let _ = app.update(Message::BarReleased(BarArea::Middle));
+        assert_eq!(app.bar_armed, None, "the release stands the arm down");
+    }
+
+    #[test]
+    fn moving_past_the_threshold_spends_the_arm() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        let _ = app.update(Message::BarCursorMoved(BarArea::Middle, Point::new(100.0, 10.0)));
+        let _ = app.update(Message::BarCursorMoved(
+            BarArea::Middle,
+            Point::new(100.0 + BAR_DRAG_THRESHOLD, 10.0),
+        ));
+        assert_eq!(app.bar_armed, None, "a real drag must stand the arm down");
+        assert_eq!(app.bar_origin, None);
+    }
+
+    #[test]
+    fn a_move_reported_for_another_patch_cannot_start_the_drag() {
+        // The patches are separate widgets with separate local origins, so a
+        // position from one says nothing about how far the pointer has actually
+        // travelled since a press in another.
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Brand));
+        let _ = app.update(Message::BarCursorMoved(BarArea::Middle, Point::new(900.0, 900.0)));
+        assert_eq!(
+            app.bar_armed,
+            Some(BarArea::Brand),
+            "a move outside the pressed patch must not start a drag"
+        );
+    }
+
+    #[test]
+    fn the_second_press_of_a_double_click_arms_nothing() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        let _ = app.update(Message::BarPressed(BarArea::Middle));
+        assert!(app.maximized);
+        assert_eq!(app.bar_armed, None, "maximizing must not leave a drag armed");
+        assert_eq!(app.bar_origin, None);
+    }
+
+    #[test]
+    fn the_caption_button_follows_the_real_window_state() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        // The window reports its own state at startup, which is what lets the
+        // caption button offer Restore on a window that opened maximized.
+        let _ = app.update(Message::MaximizedChanged(true));
+        assert!(app.maximized);
+        let _ = app.update(Message::WindowMaximize);
+        assert!(!app.maximized, "clicking the caption toggles back to windowed");
+    }
+
+    #[test]
+    fn every_resize_edge_is_handled_without_a_window() {
+        // All eight grips exist and their messages are processed headlessly. On
+        // Windows each call hands off to the OS; elsewhere it is a no-op. What
+        // must never happen is a panic from a missing edge.
+        assert_eq!(crate::native::ResizeEdge::ALL.len(), 8);
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        for edge in crate::native::ResizeEdge::ALL {
+            let _ = app.update(Message::ResizeStart(edge));
+        }
+        // And the bar's right-click reaches the native menu request.
+        let _ = app.update(Message::BarRightClick);
+    }
+
+    #[test]
+    fn the_published_maximize_region_is_the_button_the_bar_draws() {
+        // The shim turns exactly this rectangle into non-client area, so a
+        // number that disagrees with the layout is either a maximize button
+        // that cannot be clicked or a dead hole in the middle of the bar.
+        let target = caption_target();
+        assert_eq!(target.width, CAPTION_GLYPH + 2.0 * CAPTION_PAD[1]);
+        assert_eq!(target.bottom - target.top, CAPTION_GLYPH + 2.0 * CAPTION_PAD[0]);
+        // Spelled out as well, so a change to the constants has to be meant.
+        assert_eq!(target.width, 32.0, "the caption button's width");
+        assert_eq!(target.bottom - target.top, 24.0, "the caption button's height");
+
+        // It is the second control in from the right: the frame band, the bar's
+        // padding, the close control, and one gap.
+        assert_eq!(
+            target.right_inset,
+            native::RESIZE_BAND
+                + title_bar_padding().right
+                + CAPTION_BUTTON_WIDTH
+                + TITLE_BAR_SPACING
+        );
+        assert_eq!(target.right_inset, 54.0, "six rows of frame plus 48 of bar");
+    }
+
+    #[test]
+    fn the_maximize_region_sits_inside_the_bars_content_band() {
+        // Below the frame band and inside the bar's padding on both sides, so
+        // the region covers the button and nothing else in the bar.
+        let target = caption_target();
+        let content_top = native::RESIZE_BAND + TITLE_BAR_PAD;
+        let content_bottom = native::RESIZE_BAND + TITLE_BAR_HEIGHT - TITLE_BAR_PAD;
+        assert!(target.top >= content_top, "top {} is above the content band", target.top);
+        assert!(target.bottom <= content_bottom, "bottom {} overflows the bar", target.bottom);
+        // Centred in it, which is where the bar puts a control of this height.
+        assert!((target.top - content_top - (content_bottom - target.bottom)).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_frame_band_never_wins_over_the_maximize_button() {
+        // `native::hit_code` answers the frame edges first, so a button that
+        // reached into the band would be swallowed by the frame instead of
+        // being answered as a button — and Windows would resize the window
+        // instead of offering Snap Layouts.
+        let target = caption_target();
+        assert!(target.top >= native::RESIZE_BAND, "the button starts inside the frame");
+        assert!(
+            target.right_inset >= native::RESIZE_BAND,
+            "the button ends inside the frame"
+        );
+    }
+
+    #[test]
+    fn the_shim_answers_the_maximize_button_and_leaves_its_neighbours_alone() {
+        // The one test that runs the two modules together: what the title bar
+        // publishes has to come back out of the window's hit test as the button
+        // Windows is looking for.
+        let target = caption_target();
+        let (width, height) = (1257.0, 707.0);
+        let mid_y = (target.top + target.bottom) / 2.0;
+        let (left, right) = target.x_span(width);
+        let mid_x = (left + right) / 2.0;
+        assert_eq!(
+            native::hit_code(mid_x, mid_y, width, height, Some(target), false),
+            Some(native::HTMAXBUTTON)
+        );
+
+        // The close control is one gap further in, and stays the bar's own: it
+        // keeps the red hover and the click iced draws for it.
+        let close_centre = width
+            - native::RESIZE_BAND
+            - title_bar_padding().right
+            - CAPTION_BUTTON_WIDTH / 2.0;
+        assert_eq!(
+            native::hit_code(close_centre, mid_y, width, height, Some(target), false),
+            Some(native::HTCLIENT),
+            "the close control must stay the bar's to handle"
+        );
+        // As does the bar around the button.
+        assert_eq!(
+            native::hit_code(left - 20.0, mid_y, width, height, Some(target), false),
+            Some(native::HTCLIENT)
+        );
+    }
+
+    #[test]
+    fn the_maximize_region_tracks_the_window_edge_as_it_resizes() {
+        // The region is measured from the client's right edge, so it follows the
+        // control as the window is resized instead of having to be recomputed.
+        let target = caption_target();
+        for width in [980.0, 1257.0, 1920.0, 2560.0] {
+            let (left, right) = target.x_span(width);
+            assert_eq!(width - right, target.right_inset, "at {width} wide");
+            assert_eq!(right - left, target.width, "at {width} wide");
+            assert!(left > 0.0, "the region fell off the left of a {width}px window");
+        }
+    }
+
+    #[test]
+    fn a_window_state_report_does_not_invent_a_caption_state() {
+        // The arm refreshes the tracked flag from the window itself. With no
+        // window to ask — a test process, or the frames before the shim has
+        // found one — the last known state has to stand rather than being
+        // invented, or a maximized window's caption would flip on a report.
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::MaximizedChanged(true));
+        let _ = app.update(Message::WindowStateChanged);
+        assert!(app.maximized, "nothing was there to contradict it");
+        assert!(app.window_is_maximized());
+    }
+
+    #[test]
+    fn the_caption_falls_back_to_the_tracked_state_without_a_window() {
+        // Nothing to ask in a test process, which is also the state of the first
+        // frames before the shim has found the window: the glyph then follows
+        // what the app was last told.
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        assert!(!app.window_is_maximized());
+        let _ = app.update(Message::MaximizedChanged(true));
+        assert!(
+            app.window_is_maximized(),
+            "the tracked state answers when there is no window to ask"
+        );
+    }
+
+    /// Hold the theme lock, surviving a panic in another test.
+    fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::theme::THEME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn the_gear_opens_the_launcher_settings_dialog() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        // Opening it is a dialog, not a page: the reference client's gear does
+        // the same, and per-instance settings live on the instance's card.
+        let _ = app.update(Message::OpenSettings);
+        assert_eq!(app.modal(), &Modal::Settings);
+        assert!(app.modal().is_open());
+        {
+            // The view is built and dropped inside its own scope: it borrows
+            // the app, and the next message needs it back.
+            let dialog: Element<'_, Message> = app.view();
+            let _ = dialog;
+        }
+        let _ = app.update(Message::CloseModal);
+        assert_eq!(app.modal(), &Modal::None);
+    }
+
+    #[test]
+    fn choosing_a_color_theme_applies_it_and_records_it() {
+        let _guard = theme_lock();
+        let original = theme::color_theme();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let _ = app.update(Message::OpenSettings);
+
+        for theme in [ColorTheme::Oled, ColorTheme::Light, ColorTheme::System] {
+            let _ = app.update(Message::SetColorTheme(theme));
+            assert_eq!(theme::color_theme(), theme, "the chosen theme is not in force");
+            assert_eq!(prefs::load(&paths).theme(), theme, "the choice was not remembered");
+            assert!(
+                app.status().contains(theme.label()),
+                "the status line should name the theme: {}",
+                app.status()
+            );
+        }
+
+        // The dialog stays open across the choice, so a second one is one click
+        // away rather than a reopen.
+        assert_eq!(app.modal(), &Modal::Settings);
+        // Leave the process as it was found: the palette is global.
+        let _ = app.update(Message::SetColorTheme(original));
+    }
+
+    #[test]
+    fn a_wheel_notch_eases_the_page_instead_of_jumping() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::PageWheel(scroll::Wheel {
+            notches: -1.0,
+            content_height: 3000.0,
+            view_height: 700.0,
+        }));
+
+        // The target moved by exactly one notch; the offset has not moved at
+        // all, which is the difference between a jump and a glide.
+        assert_eq!(app.scroll_state().target, scroll::WHEEL_PIXELS_PER_NOTCH);
+        assert_eq!(app.scroll_state().offset, 0.0);
+        assert!(app.scroll_state().animating());
+
+        // Frames now carry it there, and it lands exactly on the target rather
+        // than near it — which is what lets the frame subscription stop.
+        let mut frames = 0;
+        while app.scroll_state().animating() {
+            let _ = app.update(Message::PageScrollTick);
+            frames += 1;
+            assert!(frames < 60, "the tween must finish in well under a second");
+        }
+        assert_eq!(app.scroll_state().offset, scroll::WHEEL_PIXELS_PER_NOTCH);
+        assert!(frames >= 5, "a single frame would be the jump we are replacing");
+    }
+
+    #[test]
+    fn a_foreign_scroll_is_adopted_rather_than_fought() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::PageWheel(scroll::Wheel {
+            notches: -1.0,
+            content_height: 3000.0,
+            view_height: 700.0,
+        }));
+        let _ = app.update(Message::PageScrollTick);
+
+        // The user grabbed the scrollbar and dragged it somewhere else.
+        let _ = app.update(Message::PageScrolled {
+            offset: 1400.0,
+            content_height: 3000.0,
+            view_height: 700.0,
+        });
+        assert_eq!(app.scroll_state().offset, 1400.0);
+        assert_eq!(app.scroll_state().target, 1400.0, "the tween must not drag it back");
+        assert!(!app.scroll_state().animating(), "nothing left to animate");
+    }
+
+    #[test]
+    fn switching_pages_forgets_the_previous_scroll() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::PageWheel(scroll::Wheel {
+            notches: -4.0,
+            content_height: 3000.0,
+            view_height: 700.0,
+        }));
+        assert!(app.scroll_state().animating());
+        let _ = app.update(Message::PageSelected(Page::Browse));
+        assert_eq!(app.scroll_state(), scroll::ScrollAnim::default());
+    }
+
+    #[test]
+    fn every_theme_can_be_previewed_in_the_appearance_pane() {
+        let _guard = theme_lock();
+        let original = theme::color_theme();
+        // Building the pane is the test: each card paints its own palette, so
+        // a theme whose colors were never resolved would fail to construct.
+        for theme in ColorTheme::ALL {
+            theme::set_color_theme(theme);
+            let pane: Element<'_, Message> = appearance_pane();
+            let _ = pane;
+        }
+        theme::set_color_theme(original);
+    }
+
+    fn test_paths() -> (tempfile::TempDir, PrismPaths) {
         let dir = tempfile::tempdir().unwrap();
-        let _ = tag;
         let paths = PrismPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
         (dir, paths)
     }
 
-    fn write_cfg(paths: &PrismPaths, text: &str) {
-        std::fs::write(paths.global_config(), text).unwrap();
+    fn catalog_with(game: &[&str], fabric: &[(&str, bool, &str)]) -> VersionCatalog {
+        use prism_core::resolve::VersionEntry;
+        let mut catalog = VersionCatalog::default();
+        catalog.game = game
+            .iter()
+            .map(|version| VersionEntry {
+                uid: catalog::MINECRAFT_UID.to_string(),
+                version: version.to_string(),
+                type_: "release".to_string(),
+                recommended: *version == "26.2",
+                release_time: format!("2026-0{}-01T00:00:00+00:00", version.len()),
+                ..Default::default()
+            })
+            .collect();
+        catalog.loaders.insert(
+            LoaderKind::Fabric,
+            fabric
+                .iter()
+                .map(|(version, recommended, time)| VersionEntry {
+                    uid: "net.fabricmc.fabric-loader".to_string(),
+                    version: version.to_string(),
+                    type_: "release".to_string(),
+                    recommended: *recommended,
+                    release_time: (*time).to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+        );
+        catalog
     }
 
     #[test]
-    fn pages_cover_toolbar_order_and_default_console() {
+    fn pages_cover_the_rail_and_titles() {
+        // Nine pages: the six on the rail, plus the two reached from an
+        // instance or a dialog (Settings, Accounts) and About.
         assert_eq!(Page::all().len(), 9);
-        assert_eq!(Page::default(), Page::Console);
-        let titles: Vec<&str> = Page::all().iter().map(|p| p.title()).collect();
-        assert!(titles.contains(&"Console"));
-        assert!(titles.contains(&"Mods"));
-        assert!(titles.contains(&"Settings"));
-        assert!(titles.contains(&"Accounts"));
-        assert!(titles.contains(&"About"));
-        assert_eq!(Page::About.tab_label(), "Help");
+        assert_eq!(Page::default(), Page::Home);
+        assert_eq!(Page::rail().len(), 6);
+        assert!(Page::rail().contains(&Page::Screenshots));
+        // Each page draws its own symbol: a repeated or unknown key would make
+        // two rail entries indistinguishable.
+        let mut glyphs = Vec::new();
+        for page in Page::all() {
+            assert!(!page.title().is_empty());
+            let glyph = crate::glyphs::Glyph::from_name(page.icon());
+            assert!(!glyphs.contains(&glyph), "page '{}' repeats a glyph", page.title());
+            glyphs.push(glyph);
+        }
+        assert_eq!(Page::Accounts.icon(), "person");
+        assert_eq!(Page::Mods.icon(), "cube");
+        assert_eq!(Page::Worlds.icon(), "globe");
     }
 
     #[test]
-    fn navigation_updates_page() {
-        let (_dir, paths) = test_paths("nav");
-        let mut app = PrismApp::with_paths(paths);
-        assert_eq!(app.page, Page::Console);
-        app.update(Message::PageSelected(Page::Mods));
-        assert_eq!(app.page, Page::Mods);
-        app.update(Message::SettingsPressed);
-        assert_eq!(app.page, Page::Settings);
-        app.update(Message::AccountsPressed);
-        assert_eq!(app.page, Page::Accounts);
-        app.update(Message::AboutPressed);
-        assert_eq!(app.page, Page::About);
-        app.update(Message::EditPressed);
-        assert_eq!(app.page, Page::Settings);
+    fn modal_reports_open_state() {
+        assert!(!Modal::None.is_open());
+        assert!(Modal::Create.is_open());
+        assert!(Modal::Import.is_open());
+        assert!(Modal::ConfirmDelete("x".into()).is_open());
     }
 
     #[test]
-    fn console_caps_at_twenty_thousand_lines() {
-        let (_dir, paths) = test_paths("console");
+    fn navigation_switches_pages_without_a_dialog() {
+        let (_dir, paths) = test_paths();
         let mut app = PrismApp::with_paths(paths);
-        app.console.clear();
-        let lines: Vec<String> = (0..(CONSOLE_LINE_CAP + 5)).map(|i| format!("line {i}")).collect();
-        app.push_console(lines);
-        assert_eq!(app.console.len(), CONSOLE_LINE_CAP);
-        assert_eq!(app.console.front().map(String::as_str), Some("line 5"));
-        assert_eq!(console_shown_lines(10), 10);
-        assert_eq!(console_shown_lines(1_000_000), CONSOLE_VIEW_LINES);
-        app.update(Message::ConsoleClear);
-        assert!(app.console.is_empty());
+        let _ = app.update(Message::PageSelected(Page::Browse));
+        assert_eq!(app.page(), Page::Browse);
+        let _ = app.update(Message::OpenCreate);
+        assert_eq!(app.modal(), &Modal::Create);
+        assert!(app.catalog_state().loading, "opening the dialog starts the catalog");
+        let _ = app.update(Message::CloseModal);
+        assert_eq!(app.modal(), &Modal::None);
+    }
+
+    #[test]
+    fn create_button_lifecycle_opens_a_real_instance() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        app.catalog.loading = false;
+        app.catalog.loaded_once = true;
+        app.catalog.catalog = catalog_with(
+            &["26.2", "1.21.1"],
+            &[("0.19.5", true, "2026-08-28T11:01:04+00:00"), ("0.18.0", false, "2026-01-01T00:00:00+00:00")],
+        );
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateCustomSetup);
+        assert_eq!(app.create_form().step, CreateStep::Configure);
+        assert_eq!(app.create_form().game, "26.2", "recommended release is the default");
+        assert_eq!(app.create_form().loader, LoaderKind::Vanilla);
+
+        let _ = app.update(Message::CreateLoaderPicked(LoaderKind::Fabric));
+        assert_eq!(app.create_form().build, "0.19.5", "Stable build comes from the catalog");
+        let _ = app.update(Message::CreateBuildChoicePicked(BuildChoice::Latest));
+        assert_eq!(app.create_form().build, "0.19.5");
+        let _ = app.update(Message::CreateBuildChoicePicked(BuildChoice::Other));
+        let _ = app.update(Message::CreateBuildPicked("0.18.0".to_string()));
+        let _ = app.update(Message::CreateNameChanged("My Fabric Pack".to_string()));
+        let _ = app.update(Message::CreateSubmit);
+        assert_eq!(app.modal(), &Modal::None, "submit closes the dialog");
+        assert_eq!(app.instance_count(), 1);
+        assert_eq!(app.selected(), Some("My Fabric Pack"));
+
+        let instance = Instance::open(&paths.instances_dir().join("My Fabric Pack")).unwrap();
+        let profile = prism_core::pack::PackProfile::load(&instance.mmc_pack_path()).unwrap();
+        assert_eq!(profile.get("net.fabricmc.fabric-loader").unwrap().version, "0.18.0");
+        let card = app.selected_card().unwrap();
+        assert_eq!(card.loader, LoaderKind::Fabric);
+        assert_eq!(card.mc_version, "26.2");
+    }
+
+    #[test]
+    fn create_requires_a_name_and_a_game_version() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        app.catalog.loaded_once = true;
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateCustomSetup);
+        // No catalog at all: nothing can be submitted.
+        let _ = app.update(Message::CreateSubmit);
+        assert!(app.create_form().error.is_some());
+        assert_eq!(app.instance_count(), 0);
+    }
+
+    #[test]
+    fn loader_without_builds_reports_it_instead_of_guessing() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        app.catalog.loaded_once = true;
+        app.catalog.catalog = catalog_with(&["26.2"], &[]);
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateCustomSetup);
+        let _ = app.update(Message::CreateLoaderPicked(LoaderKind::Fabric));
+        assert!(app.create_form().build.is_empty());
+        assert!(app
+            .create_form()
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no builds"));
+    }
+
+    #[test]
+    fn picking_a_project_prefills_the_configure_step() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        app.catalog.loaded_once = true;
+        app.catalog.catalog = catalog_with(&["26.2"], &[("0.19.5", true, "2026-08-28T11:01:04+00:00")]);
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateProjectPicked(
+            "AANobbMI".to_string(),
+            "Sodium".to_string(),
+        ));
+        assert_eq!(app.create_form().step, CreateStep::Configure);
+        assert_eq!(app.create_form().name, "Sodium");
+        assert_eq!(
+            app.create_form().install_after.as_ref().map(|(p, _)| p.as_str()),
+            Some("AANobbMI")
+        );
+    }
+
+    #[test]
+    fn create_search_results_are_dropped_when_stale() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateSearchChanged("sodium".to_string()));
+        let seq = app.create_form().seq;
+        let hit = Hit {
+            project_id: "P".into(),
+            slug: "sodium".into(),
+            title: "Sodium".into(),
+            description: String::new(),
+            author: String::new(),
+            downloads: 1,
+            icon_url: String::new(),
+            project_type: "mod".into(),
+        };
+        let _ = app.update(Message::TaskDone(Box::new(Task::CreateSearch {
+            seq: seq + 5,
+            result: Ok(vec![hit.clone()]),
+        })));
+        assert!(app.create_form().results.is_empty(), "stale results are ignored");
+        let _ = app.update(Message::TaskDone(Box::new(Task::CreateSearch {
+            seq,
+            result: Ok(vec![hit]),
+        })));
+        assert_eq!(app.create_form().results.len(), 1);
+        assert!(!app.create_form().searching);
+    }
+
+    #[test]
+    fn catalog_results_drive_the_browse_and_create_state() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::OpenCreate);
+        let catalog = catalog_with(&["26.2"], &[("0.19.5", true, "2026-08-28T11:01:04+00:00")]);
+        let _ = app.update(Message::TaskDone(Box::new(Task::Catalog(Box::new(catalog.clone())))));
+        assert!(!app.catalog_state().loading);
+        assert!(app.catalog_state().loaded_once);
+        assert!(app.catalog_state().error.is_none());
+        assert_eq!(app.create_form().game, "26.2");
+
+        // An empty catalog is reported honestly.
+        let _ = app.update(Message::TaskDone(Box::new(Task::Catalog(Box::new(VersionCatalog::default())))));
+        assert!(app.catalog_state().error.is_some());
+        assert!(app.status_is_error());
+    }
+
+    #[test]
+    fn browse_search_and_install_are_sequenced() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::BrowseQueryChanged("sodium".to_string()));
+        assert!(app.browse_state().loading);
+        let seq = app.browse_state().seq;
+        let hit = Hit {
+            project_id: "P".into(),
+            slug: "sodium".into(),
+            title: "Sodium".into(),
+            description: "Fast".into(),
+            author: "jellysquid3".into(),
+            downloads: 10,
+            icon_url: String::new(),
+            project_type: "mod".into(),
+        };
+        let _ = app.update(Message::TaskDone(Box::new(Task::BrowseSearch {
+            seq,
+            result: Ok(vec![hit]),
+        })));
+        assert_eq!(app.browse_state().hits.len(), 1);
+        assert!(!app.browse_state().loading);
+
+        // Installing without an instance is refused with a reason.
+        let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        assert!(app.status().contains("Pick an instance"), "status: {}", app.status());
+        assert!(app.browse_state().installing.is_none());
+    }
+
+    #[test]
+    fn installing_into_a_vanilla_instance_is_refused_before_any_network() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Plain", "26.2")).unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        assert!(app.status().contains("vanilla"), "status: {}", app.status());
+        assert!(app.browse_state().installing.is_none());
+    }
+
+    #[test]
+    fn install_results_land_in_the_status_and_browse_state() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(
+            &paths,
+            &NewInstance {
+                loader: LoaderKind::Fabric,
+                loader_build: Some("0.19.5".to_string()),
+                ..NewInstance::vanilla("Modded", "26.2")
+            },
+        )
+        .unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        assert!(app.browse_state().installing.is_some());
+        let seq = app.install_seq;
+        let _ = app.update(Message::TaskDone(Box::new(Task::Installed {
+            seq,
+            title: "Sodium".to_string(),
+            result: Ok("Installed sodium.jar into 'Modded' — sha1 verified".to_string()),
+        })));
+        assert!(app.browse_state().installing.is_none());
+        assert!(app.status().contains("sha1 verified"));
+        // Stale installs are ignored.
+        let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        let _ = app.update(Message::TaskDone(Box::new(Task::Installed {
+            seq: seq + 9,
+            title: "Sodium".to_string(),
+            result: Err("stale".to_string()),
+        })));
+        assert!(app.browse_state().installing.is_some(), "stale install result must be dropped");
+    }
+
+    #[test]
+    fn dropping_files_routes_icons_and_packs() {
+        let (dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        // With the Create dialog open, a PNG becomes the instance icon.
+        let png = dir.path().join("avatar.png");
+        std::fs::write(&png, [&[0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A][..], b"data"].concat())
+            .unwrap();
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::FileDropped(png.clone()));
+        assert_eq!(app.create_form().icon_source.as_deref(), Some(png.as_path()));
+        // Any other extension is refused with a reason.
+        let weird = dir.path().join("notes.txt");
+        std::fs::write(&weird, b"x").unwrap();
+        let _ = app.update(Message::FileDropped(weird));
+        assert!(app.status().contains("not used"), "status: {}", app.status());
+    }
+
+    #[test]
+    fn random_icons_come_from_the_built_in_set() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateIconRandomize);
+        assert!(ICON_CHOICES.contains(&app.create_form().icon_key.as_str()));
+        let _ = app.update(Message::CreateIconPicked("creeper".to_string()));
+        assert_eq!(app.create_form().icon_key, "creeper");
+        let _ = app.update(Message::CreateIconCustomize);
+        assert!(app.create_form().customize_open);
+    }
+
+    #[test]
+    fn deleting_asks_first_and_then_removes_the_folder() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Doomed", "26.2")).unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        let _ = app.update(Message::AskDelete(created.id.clone()));
+        assert_eq!(app.modal(), &Modal::ConfirmDelete(created.id.clone()));
+        assert!(paths.instances_dir().join(&created.id).is_dir());
+        let _ = app.update(Message::CloseModal);
+        assert_eq!(app.modal(), &Modal::None);
+        let _ = app.update(Message::AskDelete(created.id.clone()));
+        let _ = app.update(Message::ConfirmDelete);
+        assert!(!paths.instances_dir().join(&created.id).exists());
+        assert_eq!(app.instance_count(), 0);
+        assert!(app.selected().is_none());
+    }
+
+    #[test]
+    fn editing_settings_round_trips_through_instance_cfg() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Cfg", "26.2")).unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::EditInstance(created.id.clone()));
+        assert_eq!(app.page(), Page::Settings);
+        let _ = app.update(Message::SetMinMem("256".to_string()));
+        let _ = app.update(Message::SetMaxMem("bogus".to_string()));
+        let _ = app.update(Message::SetOverrideMemory(true));
+        let _ = app.update(Message::SetJavaPath("/opt/java".to_string()));
+        let _ = app.update(Message::SetServerAddress("mc.example.com:25570".to_string()));
+        let _ = app.update(Message::SetJoinServer(true));
+        let _ = app.update(Message::SettingsSave);
+        let back = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
+        assert_eq!(back.settings().get_i64("MinMemAlloc", 0), 256);
+        assert_eq!(back.settings().get_i64("MaxMemAlloc", 0), 4096, "invalid input keeps the old value");
+        assert_eq!(back.settings().get_str("JavaPath", ""), "/opt/java");
+        assert!(back.settings().get_bool("JoinServerOnLaunch", false));
+        assert!(app.status().contains("Saved"));
+    }
+
+    #[test]
+    fn accounts_add_select_and_remove() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        assert_eq!(app.account_label(), "No account");
+        let _ = app.update(Message::AccountNameChanged("Steve".to_string()));
+        let _ = app.update(Message::AccountAdd);
+        assert_eq!(app.account_label(), "Steve");
+        assert!(app.status().contains("Steve"));
+        let uuid = app.accounts().selected_uuid().unwrap().to_string();
+        let _ = app.update(Message::AccountRemove(uuid));
+        assert_eq!(app.account_label(), "No account");
+
+        // Microsoft sign-in stays honest.
+        let _ = app.update(Message::MicrosoftPressed);
+        assert!(app.status().contains("not implemented"));
+        // The accounts file is real.
+        assert!(paths.accounts_file().is_file());
     }
 
     #[test]
     fn launch_streaming_ignores_stale_runs() {
-        let (_dir, paths) = test_paths("stale");
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Runnable", "26.2")).unwrap();
+        app.reload_instances();
+        app.console.clear();
+        let _ = app.update(Message::LaunchLog { run_id: 7, lines: vec!["x".to_string()] });
+        assert!(app.console().is_empty());
+
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        assert!(app.is_running());
+        assert_eq!(app.page(), Page::Logs);
+        let run_id = app.active_run.as_ref().unwrap().run_id;
+        // `start_launch` already logged the request; only the new lines count.
+        let before = app.console().len();
+        let _ = app.update(Message::LaunchLog {
+            run_id,
+            lines: vec!["hello".to_string()],
+        });
+        assert_eq!(app.console().len(), before + 1);
+        assert_eq!(app.console().back().unwrap(), "hello");
+        let _ = app.update(Message::LaunchDone { run_id: run_id + 1, note: "stale".to_string() });
+        assert!(app.is_running());
+        let _ = app.update(Message::LaunchDone { run_id, note: "done".to_string() });
+        assert!(!app.is_running());
+        assert_eq!(app.status(), "done");
+    }
+
+    #[test]
+    fn launching_without_a_selection_explains_itself() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        // Nothing selected at all: an empty id must not become instance `""`.
+        let _ = app.update(Message::PlayInstance(String::new()));
+        assert!(app.status().contains("Pick an instance"), "status: {}", app.status());
+        assert!(app.status_is_error());
+        assert!(!app.is_running());
+        assert_eq!(app.selected, None);
+    }
+
+    #[test]
+    fn an_empty_instance_id_plays_the_current_selection() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Kept", "26.2")).unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::SelectInstance(created.id.clone()));
+        let _ = app.update(Message::PlayInstance(String::new()));
+        assert!(app.is_running());
+        assert_eq!(app.selected.as_deref(), Some(created.id.as_str()));
+        assert_eq!(app.active_run.as_ref().unwrap().instance_id, created.id);
+    }
+
+    #[test]
+    fn mods_toggle_on_disk_and_refresh_the_cache() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Modded", "26.2")).unwrap();
+        // Prism keeps the game folder (and therefore `mods/`) under `minecraft/`.
+        let mods_dir = paths.instances_dir().join(&created.id).join("minecraft").join("mods");
+        std::fs::create_dir_all(&mods_dir).unwrap();
+        std::fs::write(mods_dir.join("sodium.jar"), b"jar").unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        let _ = app.update(Message::SelectInstance(created.id.clone()));
+        assert_eq!(app.mods().len(), 1);
+        let _ = app.update(Message::ModToggled("sodium.jar".to_string(), false));
+        assert!(!app.mods()[0].enabled);
+        assert!(mods_dir.join("sodium.jar.disabled").is_file());
+        assert!(app.status().contains("Disabled"));
+    }
+
+    #[test]
+    fn grouping_moves_the_selection_and_persists() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Movable", "26.2")).unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
+        let _ = app.update(Message::GroupSelected("Packs".to_string()));
+        assert_eq!(app.selected_group_label(), "Packs");
+        assert!(app.group_options().contains(&"Packs".to_string()));
+        let _ = app.update(Message::GroupSelected(UNGROUPED_LABEL.to_string()));
+        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
+    }
+
+    #[test]
+    fn duplicating_copies_the_tree_and_selects_the_copy() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Original", "26.2")).unwrap();
+        std::fs::write(
+            paths.instances_dir().join(&created.id).join("marker.txt"),
+            b"keep",
+        )
+        .unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::DuplicateInstance(created.id.clone()));
+        assert_eq!(app.instance_count(), 2);
+        let copy = app.selected().unwrap().to_string();
+        assert_ne!(copy, created.id);
+        assert!(paths.instances_dir().join(&copy).join("marker.txt").is_file());
+    }
+
+    #[test]
+    fn import_scan_results_are_reported() {
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::OpenImport);
+        assert_eq!(app.modal(), &Modal::Import);
+        assert!(app.import_state().loading);
+        let _ = app.update(Message::TaskDone(Box::new(Task::ImportScan(Vec::new()))));
+        assert!(!app.import_state().loading);
+        assert!(app.import_state().scanned);
+        assert!(app.import_state().error.is_some(), "an empty scan is explained, not hidden");
+    }
+
+    #[test]
+    fn importing_a_candidate_copies_it_and_closes_the_dialog() {
+        let (dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        let source = dir.path().join("Borrowed");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("instance.cfg"), b"[General]\nname=Borrowed\n").unwrap();
+        let _ = app.update(Message::OpenImport);
+        let _ = app.update(Message::TaskDone(Box::new(Task::ImportScan(vec![
+            instances::ImportCandidate {
+                name: "Borrowed".to_string(),
+                source: source.clone(),
+                origin: "Prism Launcher",
+            },
+        ]))));
+        let _ = app.update(Message::ImportPicked(0));
+        assert_eq!(app.modal(), &Modal::None);
+        assert_eq!(app.selected(), Some("Borrowed"));
+        assert!(paths.instances_dir().join("Borrowed").join("instance.cfg").is_file());
+    }
+
+    #[test]
+    fn console_caps_and_clears() {
+        let (_dir, paths) = test_paths();
         let mut app = PrismApp::with_paths(paths);
         app.console.clear();
-        // No active run: everything ignored.
-        app.update(Message::LaunchLog { run_id: 7, lines: vec!["x".to_string()] });
-        assert!(app.console.is_empty());
-        app.active_run = Some(ActiveRunData {
-            run_id: 3,
-            instance_id: "a".to_string(),
-            data_root: PathBuf::from("/tmp"),
-            account: AccountRef { username: "u".to_string(), uuid: "v".to_string() },
-        });
-        app.update(Message::LaunchLog { run_id: 9, lines: vec!["stale".to_string()] });
-        assert!(app.console.is_empty());
-        app.update(Message::LaunchLog { run_id: 3, lines: vec!["fresh".to_string()] });
-        assert_eq!(app.console.len(), 1);
-        app.update(Message::LaunchDone { run_id: 9, note: "stale done".to_string() });
-        assert!(app.active_run.is_some());
-        app.update(Message::LaunchDone { run_id: 3, note: "done".to_string() });
-        assert!(app.active_run.is_none());
-        assert_eq!(app.status, "done");
+        let lines: Vec<String> = (0..(CONSOLE_LINE_CAP + 5)).map(|i| format!("line {i}")).collect();
+        app.push_console(lines);
+        assert_eq!(app.console().len(), CONSOLE_LINE_CAP);
+        assert_eq!(app.console().front().map(String::as_str), Some("line 5"));
+        assert_eq!(console_shown_lines(1_000_000), CONSOLE_VIEW_LINES);
+        let _ = app.update(Message::ConsoleClear);
+        assert!(app.console().is_empty());
     }
 
     #[test]
@@ -2064,285 +5973,74 @@ mod tests {
         assert_eq!(parse_mem(" 2048 ", 0), 2048);
         assert_eq!(parse_mem("", 4096), 4096);
         assert_eq!(parse_mem("lots", 4096), 4096);
-        assert_eq!(parse_mem("-5", 1), -5);
     }
 
     #[test]
     fn form_loads_prism_keys_with_defaults() {
         let settings = Settings::empty("instance.cfg");
         let form = load_form(&settings);
+        assert_eq!(form.name, defaults::INSTANCE_NAME);
         assert_eq!(form.min_mem, "128");
         assert_eq!(form.max_mem, "4096");
         assert!(!form.override_memory);
         assert_eq!(form.win_width, "854");
         assert_eq!(form.win_height, "480");
-        assert!(!form.join_server);
     }
 
     #[test]
-    fn grouped_instances_orders_groups_then_ungrouped() {
-        let (_dir, paths) = test_paths("groups");
-        let first = Instance::create(&paths.instances_dir(), "Zulu", "1.21.1").unwrap();
-        Instance::create(&paths.instances_dir(), "alpha", "1.21.1").unwrap();
-        Instance::create(&paths.instances_dir(), "Mike", "1.21.1").unwrap();
-        let mut groups = Groups::default();
-        groups.set_group(&first.id(), Some("Packs"));
-        groups.save(&paths).unwrap();
-        let model = InstanceListModel::load(&paths).unwrap();
-        assert_eq!(model.len(), 3);
-
-        let sections = grouped_instances(&model, "");
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].name.as_deref(), Some("Packs"));
-        assert_eq!(sections[0].entries.len(), 1);
-        assert_eq!(sections[1].name, None);
-        assert_eq!(sections[1].entries.len(), 2);
-
-        let filtered = grouped_instances(&model, "alp");
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].entries[0].name, "alpha");
-
-        let none = grouped_instances(&model, "zzz");
-        assert!(none.is_empty());
+    fn create_form_invents_a_name_only_when_needed() {
+        let mut form = CreateForm {
+            loader: LoaderKind::Fabric,
+            game: "26.2".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(form.effective_name(), "Fabric 26.2");
+        form.loader = LoaderKind::Vanilla;
+        assert_eq!(form.effective_name(), "26.2");
+        form.name = "  Typed  ".to_string();
+        assert_eq!(form.effective_name(), "Typed");
     }
 
     #[test]
-    fn delete_requires_two_clicks() {
-        let (_dir, paths) = test_paths("delete");
-        let instance = Instance::create(&paths.instances_dir(), "Doomed", "1.21.1").unwrap();
-        let mut app = PrismApp::with_paths(paths);
-        app.update(Message::SelectInstance(instance.id()));
-        assert!(app.selected.is_some());
-        app.update(Message::DeletePressed);
-        assert!(app.delete_armed);
-        assert!(app.selected.is_some());
-        app.update(Message::DeletePressed);
-        assert!(!app.delete_armed);
-        assert!(app.selected.is_none());
-        assert_eq!(app.list.len(), 0);
-    }
-
-    #[test]
-    fn microsoft_button_is_honest() {
-        let (_dir, paths) = test_paths("ms");
-        let mut app = PrismApp::with_paths(paths);
-        app.update(Message::MicrosoftPressed);
-        assert!(app.status.contains("not implemented yet"));
-    }
-
-    #[test]
-    fn update_check_is_honest() {
-        let (_dir, paths) = test_paths("update");
-        let mut app = PrismApp::with_paths(paths);
-        app.update(Message::UpdatePressed);
-        assert!(app.status.contains("installer"));
-    }
-
-    #[test]
-    fn export_stub_names_the_folder() {
-        let (_dir, paths) = test_paths("export");
-        let instance = Instance::create(&paths.instances_dir(), "Pack", "1.21.1").unwrap();
+    fn refresh_rescans_the_instances_folder() {
+        let (_dir, paths) = test_paths();
         let mut app = PrismApp::with_paths(paths.clone());
-        app.update(Message::SelectInstance(instance.id()));
-        app.update(Message::ExportPressed);
-        assert!(app.status.contains("not implemented yet"));
-        assert!(app.status.contains("Pack"));
+        instances::create(&paths, &NewInstance::vanilla("Later", "26.2")).unwrap();
+        assert_eq!(app.instance_count(), 0);
+        let _ = app.update(Message::Refresh);
+        assert_eq!(app.instance_count(), 1);
+        assert_eq!(app.cards()[0].name, "Later");
+        let _ = app.update(Message::SearchChanged("lat".to_string()));
+        assert!(app.cards()[0].name.contains("Lat"));
     }
 
     #[test]
-    fn settings_save_round_trips_through_instance_cfg() {
-        let (_dir, paths) = test_paths("save");
-        let instance = Instance::create(&paths.instances_dir(), "Cfg", "1.21.1").unwrap();
-        let mut app = PrismApp::with_paths(paths.clone());
-        app.update(Message::SelectInstance(instance.id()));
-        app.update(Message::SetMinMem("256".to_string()));
-        app.update(Message::SetMaxMem("bogus".to_string()));
-        app.update(Message::SetOverrideMemory(true));
-        app.update(Message::SetJavaPath("/opt/java".to_string()));
-        app.update(Message::SetOverrideJava(true));
-        app.update(Message::SetServerAddress("mc.example.com:25570".to_string()));
-        app.update(Message::SetJoinServer(true));
-        app.update(Message::SettingsSave);
-        assert!(app.status.contains("saved"), "status: {}", app.status);
-
-        let back = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
-        assert_eq!(back.settings().get_i64("MinMemAlloc", 0), 256);
-        // Invalid input kept the previous value.
-        assert_eq!(back.settings().get_i64("MaxMemAlloc", 0), 4096);
-        assert!(back.settings().get_bool("OverrideMemory", false));
-        assert_eq!(back.settings().get_str("JavaPath", ""), "/opt/java");
-        assert!(back.settings().get_bool("JoinServerOnLaunch", false));
-        assert_eq!(back.settings().get_str("JoinServerOnLaunchAddress", ""), "mc.example.com:25570");
+    fn shortcut_map_covers_n_and_escape() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+        assert!(matches!(
+            shortcut(Key::Character("n".into()), Modifiers::default()),
+            Some(Message::OpenCreate)
+        ));
+        assert!(matches!(
+            shortcut(Key::Character("N".into()), Modifiers::default()),
+            Some(Message::OpenCreate)
+        ));
+        assert!(matches!(
+            shortcut(Key::Character("r".into()), Modifiers::CTRL),
+            Some(Message::Refresh)
+        ));
+        assert!(matches!(
+            shortcut(Key::Named(Named::Escape), Modifiers::default()),
+            Some(Message::CloseModal)
+        ));
+        assert!(shortcut(Key::Named(Named::Enter), Modifiers::default()).is_none());
+        assert!(shortcut(Key::Character("q".into()), Modifiers::default()).is_none());
     }
 
     #[test]
-    fn tile_colors_are_deterministic_and_selected_is_prism_green() {
-        let first = tile_color("1.21.1");
-        assert_eq!(first, tile_color("1.21.1"));
-        // Every palette entry is reachable-ish and in range.
-        for id in ["a", "b", "c", "1.21.10", "Some Pack"] {
-            let color = tile_color(id);
-            for channel in [color.r, color.g, color.b] {
-                assert!((0.0..=1.0).contains(&channel));
-            }
-        }
-        let selected = selected_tile_color();
-        let to_byte = |v: f32| (v * 255.0).round() as u32;
-        assert_eq!((to_byte(selected.r), to_byte(selected.g), to_byte(selected.b)), (0x7C, 0xB3, 0x42));
-    }
-
-    #[test]
-    fn short_names_truncate_without_splitting_chars() {
-        assert_eq!(short_name("Tiny"), "Tiny");
-        let exact = "x".repeat(30);
-        assert_eq!(short_name(&exact), exact);
-        let long = format!("{}tail", "🧱".repeat(30));
-        let shortened = short_name(&long);
-        assert!(shortened.ends_with('…'));
-        assert_eq!(shortened.chars().count(), 31);
-        assert!(shortened.is_char_boundary(shortened.len()));
-    }
-
-    #[test]
-    fn group_headers_toggle_collapsed_state() {
-        let (_dir, paths) = test_paths("collapse");
-        let instance = Instance::create(&paths.instances_dir(), "Solo", "1.21.1").unwrap();
-        let mut app = PrismApp::with_paths(paths.clone());
-        // Ungrouped starts expanded.
-        assert!(!app.groups.is_collapsed(""));
-        app.update(Message::GroupToggled(String::new()));
-        assert!(app.groups.is_collapsed(""));
-        // Persisted like Prism's `hidden` flag.
-        let back = Groups::load(&paths);
-        assert!(back.is_collapsed(""));
-        app.update(Message::GroupToggled(String::new()));
-        assert!(!app.groups.is_collapsed(""));
-        let _ = instance;
-    }
-
-    #[test]
-    fn change_group_moves_instance_and_persists() {
-        let (_dir, paths) = test_paths("changegroup");
-        let instance = Instance::create(&paths.instances_dir(), "Movable", "1.21.1").unwrap();
-        let mut app = PrismApp::with_paths(paths.clone());
-        app.update(Message::SelectInstance(instance.id()));
-        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
-        assert!(app.group_options().contains(&UNGROUPED_LABEL.to_string()));
-
-        app.update(Message::ChangeGroupSelected("Packs".to_string()));
-        assert!(app.status.contains("Packs"), "status: {}", app.status);
-        assert_eq!(app.selected_group_label(), "Packs");
-        let back = Groups::load(&paths);
-        assert_eq!(back.group_of(&instance.id()), Some("Packs"));
-
-        app.update(Message::ChangeGroupSelected(UNGROUPED_LABEL.to_string()));
-        assert_eq!(app.selected_group_label(), UNGROUPED_LABEL);
-        let back = Groups::load(&paths);
-        assert!(back.group_of(&instance.id()).is_none());
-    }
-
-    #[test]
-    fn copy_duplicates_the_folder_with_unique_name() {
-        let (_dir, paths) = test_paths("copy");
-        let instance = Instance::create(&paths.instances_dir(), "Original", "1.21.1").unwrap();
-        std::fs::write(paths.instances_dir().join(instance.id()).join("marker.txt"), b"keep").unwrap();
-        let mut app = PrismApp::with_paths(paths.clone());
-        app.update(Message::SelectInstance(instance.id()));
-        app.update(Message::CopyPressed);
-        assert!(app.status.contains("copied"), "status: {}", app.status);
-        assert_eq!(app.list.len(), 2);
-        let new_id = app.selected.clone().unwrap();
-        assert_ne!(new_id, instance.id());
-        assert!(paths.instances_dir().join(&new_id).join("marker.txt").is_file());
-        assert!(paths.instances_dir().join(&new_id).join("instance.cfg").is_file());
-    }
-
-    #[test]
-    fn copy_dir_recursive_copies_trees_and_skips_nothing_real() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src");
-        std::fs::create_dir_all(src.join("sub")).unwrap();
-        std::fs::write(src.join("a.txt"), b"a").unwrap();
-        std::fs::write(src.join("sub").join("b.txt"), b"b").unwrap();
-        let dst = dir.path().join("dst");
-        copy_dir_recursive(&src, &dst).unwrap();
-        assert_eq!(std::fs::read(dst.join("a.txt")).unwrap(), b"a");
-        assert_eq!(std::fs::read(dst.join("sub").join("b.txt")).unwrap(), b"b");
-        assert!(copy_dir_recursive(&dir.path().join("missing"), &dst).is_err());
-    }
-
-    #[test]
-    fn url_shortcuts_are_plain_ini_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = PathBuf::from("C:/Games/PrismLauncher/instances/1.21.1");
-        let text = url_shortcut_text(&target);
-        assert!(text.starts_with("[InternetShortcut]\nURL=file:///"));
-        assert!(text.contains("C:/Games/PrismLauncher/instances/1.21.1"));
-        let written = write_url_shortcut(dir.path(), "My Pack", &target).unwrap();
-        assert_eq!(written.extension().and_then(|e| e.to_str()), Some("url"));
-        let back = std::fs::read_to_string(&written).unwrap();
-        assert_eq!(back, text);
-        assert!(write_url_shortcut(dir.path(), "a/b", &target).is_err());
-    }
-
-    #[test]
-    fn startup_uses_configured_dir_and_preselects_selected_instance() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PrismPaths::at(dir.path());
-        let custom = dir.path().join("custom-instances");
-        std::fs::create_dir_all(&custom).unwrap();
-        let forward = custom.display().to_string().replace('\\', "/");
-        write_cfg(
-            &paths,
-            &format!("[General]\nConfigVersion=1.3\nInstanceDir={forward}\nSelectedInstance=Best\n"),
-        );
-        let created = Instance::create(&custom, "Best", "1.21.1").unwrap();
-        assert_eq!(created.id(), "Best");
-
-        let app = PrismApp::with_paths(paths.clone());
-        assert_eq!(app.instances_dir, custom);
-        assert_eq!(app.list.len(), 1);
-        assert_eq!(app.selected.as_deref(), Some("Best"));
-
-        // The same resolution drives the background loader payload.
-        let loaded = load_instances_blocking(dir.path());
-        assert_eq!(loaded.instances_dir, custom);
-        assert_eq!(loaded.selected.as_deref(), Some("Best"));
-        assert_eq!(loaded.list.len(), 1);
-    }
-
-    #[test]
-    fn stale_selected_instance_is_ignored() {
-        let (_dir, paths) = test_paths("stale-sel");
-        Instance::create(&paths.instances_dir(), "Real", "1.21.1").unwrap();
-        write_cfg(&paths, "[General]\nConfigVersion=1.3\nSelectedInstance=Gone\n");
-        let app = PrismApp::with_paths(paths);
-        assert!(app.selected.is_none());
-        let loaded = load_instances_blocking(&app.paths.root);
-        assert!(loaded.selected.is_none());
-    }
-
-    #[test]
-    fn instances_loaded_message_fills_the_placeholder() {
-        let (_dir, paths) = test_paths("async");
-        Instance::create(&paths.instances_dir(), "Late", "1.21.1").unwrap();
-        let mut app = PrismApp::pending(paths.clone());
-        assert!(app.loading);
-        assert_eq!(app.list.len(), 0);
-        let data = load_instances_blocking(&paths.root);
-        app.update(Message::InstancesLoaded(data));
-        assert!(!app.loading);
-        assert_eq!(app.list.len(), 1);
-        assert!(!app.status.is_empty());
-    }
-
-    #[test]
-    fn account_chip_reflects_selection() {
-        let (_dir, paths) = test_paths("chip");
-        let mut app = PrismApp::with_paths(paths);
-        assert_eq!(app.account_chip_label(), "👤 No account");
-        app.update(Message::AccountNameChanged("Steve".to_string()));
-        app.update(Message::AccountAdd);
-        assert_eq!(app.account_chip_label(), "👤 Steve");
+    fn byte_sizes_are_human_readable() {
+        assert_eq!(installed_bytes(512), "512 B");
+        assert_eq!(installed_bytes(2048), "2 KiB");
+        assert_eq!(installed_bytes(3 * 1024 * 1024), "3.0 MiB");
     }
 }

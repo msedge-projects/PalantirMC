@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here writes to the repository. The release workflow asks for
+# `contents: write` on the one job that needs it instead of every job getting
+# write access by default.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artifacts bloat the cache and never speed up a clean runner.
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  test:
+    name: Test workspace
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustc -vV
+          cargo -vV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-test-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-test-
+
+      # `--locked` is deliberate: it fails if a manifest and the lock file
+      # disagree, which is the one packaging mistake that only shows up on a
+      # machine that has never built the project before -- exactly this one.
+      # `--all-targets` compiles examples and benches too, so code that only
+      # breaks outside the test configuration is caught here rather than in a
+      # release build.
+      - name: Run tests
+        run: cargo test --workspace --all-targets --locked
+
+  lint:
+    name: Lint
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install components
+        run: rustup component add clippy rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-lint-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-lint-
+
+      # Only the deny-by-default lints are enforced, so a non-zero exit here
+      # means a compile error or a `clippy::correctness` finding -- a real
+      # defect, never a style opinion. Raising this to `-D warnings` is worth
+      # doing once the existing warnings have been triaged; doing it today
+      # would fail every PR for lints nobody has looked at yet.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+
+      # This tree has never been run through rustfmt, so formatting reports
+      # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
+      # has been committed and reviewed.
+      - name: Formatting (advisory)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+  package:
+    name: Build exe (${{ matrix.target }})
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - x86_64-pc-windows-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      # windows-latest ships MSVC, so only the GNU target needs a linker.
+      - name: Install mingw-w64
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: pwsh
+        run: |
+          choco install mingw --no-progress -y
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\ProgramData\chocolatey\bin"
+
+      - name: Add rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Show toolchain
+        run: |
+          rustc -vV
+          cargo -vV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-release-
+
+      - name: Build release
+        run: cargo build --release --locked -p prism-desktop --target ${{ matrix.target }}
+
+      - name: Stage artifact and hash it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Path "target/${{ matrix.target }}/release/PalantirMC.exe" -Destination dist/PalantirMC.exe
+
+          $exe = Get-Item -Path dist/PalantirMC.exe
+          $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
+
+          # A debug or half-linked binary is far outside this range; catch it here
+          # rather than shipping a broken download.
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
+            throw "Unexpected PalantirMC.exe size: $($exe.Length) bytes"
+          }
+
+          "PalantirMC.exe  $hash" | Out-File -Encoding ascii dist/PalantirMC.exe.sha256
+
+          "### PalantirMC.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| Field | Value |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| Size | $($exe.Length) bytes |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| sha256 | $hash |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      # The download has to run on a machine with no toolchain installed, so the
+      # import table may name only Windows' own DLLs. This is checked on the
+      # artefact that would actually be shipped, not on the build output.
+      - name: Check the exe's DLL dependencies
+        run: python .github/scripts/check_exe.py dist/PalantirMC.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: palantirmc-${{ matrix.target }}
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error

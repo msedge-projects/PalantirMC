@@ -16,10 +16,26 @@ pub const MODRINTH_BASE_URL: &str = "https://api.modrinth.com/v2";
 
 /// Build the project-search URL for `query`.
 ///
-/// The query is percent-encoded (facets omitted by design); a default
-/// `limit=50` is appended to match Prism's browsing page size.
+/// The query is percent-encoded and a default `limit=50` is appended to match
+/// Prism's browsing page size. Use [`search_url_with_project_type`] when the
+/// caller is browsing one of Modrinth's content tabs.
 pub fn search_url(query: &str) -> String {
     format!("{}/search?query={}&limit=50", MODRINTH_BASE_URL, percent_encode(query))
+}
+
+/// Build a Modrinth search URL constrained to one project type.
+///
+/// Modrinth's `facets` query parameter is JSON (`[["project_type:mod"]]`), not
+/// a bespoke query-string flag. Keeping that encoding here prevents each GUI
+/// from hand-rolling subtly different filters and means resource-pack searches
+/// never return mods that the install path cannot handle.
+pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
+    let facets = format!(r#"[["project_type:{project_type}"]]"#);
+    format!(
+        "{}&facets={}",
+        search_url(query),
+        percent_encode(&facets)
+    )
 }
 
 /// Build the version-list URL for a project id or slug.
@@ -224,6 +240,14 @@ mod tests {
     #[test]
     fn search_url_empty_query() {
         assert_eq!(search_url(""), "https://api.modrinth.com/v2/search?query=&limit=50");
+    }
+
+    #[test]
+    fn search_url_can_filter_to_a_modrinth_project_type() {
+        assert_eq!(
+            search_url_with_project_type("faithful", "resourcepack"),
+            "https://api.modrinth.com/v2/search?query=faithful&limit=50&facets=%5B%5B%22project_type%3Aresourcepack%22%5D%5D"
+        );
     }
 
     #[test]

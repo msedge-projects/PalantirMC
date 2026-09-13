@@ -1,0 +1,1241 @@
+//! PalantirMC look & feel.
+//!
+//! One place for the palette, the radii and every widget style, so pages stay
+//! declarative. The reference is the Modrinth launcher: near-black chrome
+//! (`#16181C`), slightly lighter content cards (`#26292F`), a single saturated
+//! green accent (`#1BD96A`) and lots of quiet grey text — with its light and
+//! OLED counterparts available as a real choice ([`ColorTheme`]) rather than a
+//! second stylesheet.
+//!
+//! **The palette is a value, not a constant.** [`palette`] resolves the theme in
+//! force into a [`Palette`], and the `palette_accessors!` block below turns each
+//! of its fields into a function (`text()`, `accent()`, …) so widget styles read
+//! [`palette`] at *paint* time. That is what lets Settings switch the look of
+//! the whole window without a single widget style being duplicated per theme.
+//!
+//! iced 0.12 style plumbing notes (verified against the vendored crate
+//! sources, see `README`-level comments in `app.rs` for the layout story):
+//!
+//! * containers/rules accept plain closures (`impl Fn(&Theme) -> Appearance`),
+//!   which is how the functions below are used (`container(..).style(theme::card)`);
+//! * buttons do **not** — `Theme::Style` is an enum, so [`Btn`] implements
+//!   [`button::StyleSheet`] and converts into it ([`Role`] picks the look);
+//! * text inputs and scrollables need explicit `StyleSheet` impls, which is
+//!   [`Field`] and [`Thin`];
+//! * checkboxes and pick lists are *also* enums, and their `Custom` arms carry
+//!   a boxed/Rc'd `StyleSheet` — [`Tick`] and [`Dropdown`]. A pick list needs
+//!   two stylesheets (field and menu), which is why `Dropdown` implements both.
+
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+
+use iced::overlay::menu;
+use iced::theme::Palette as IcedPalette;
+use iced::widget::{button, checkbox, container, pick_list, scrollable, text_input};
+use iced::{Border, Color, Font, Shadow, Theme, Vector};
+
+/// Build a color from sRGB bytes (const-friendly, readable hex in the source).
+pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
+    Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+}
+
+/// Same color with a different alpha (const-friendly).
+pub const fn alpha(color: Color, a: f32) -> Color {
+    Color { a, ..color }
+}
+
+// ---- Palette -----------------------------------------------------------
+
+/// Every color the shell paints with, resolved for one look.
+///
+/// A struct rather than a pile of constants, because the look is a *choice*:
+/// [`palette`] returns the colors of the theme in force, and every widget style
+/// reads them from there, so nothing has to know which theme that is.
+pub struct Palette {
+    /// Window chrome (deepest surface).
+    pub bg: Color,
+    /// Rails and sidebars.
+    pub bg_rail: Color,
+    /// Cards, modals and other raised surfaces.
+    pub surface: Color,
+    /// Hovered raised surface.
+    pub surface_hover: Color,
+    /// Inset fields (search boxes, modal inner panels).
+    pub surface_input: Color,
+    /// Hairline borders.
+    pub border: Color,
+    /// Border on hover/selection.
+    pub border_strong: Color,
+    /// Primary text.
+    pub text: Color,
+    /// Secondary text.
+    pub text_muted: Color,
+    /// Tertiary text / inactive rail icons.
+    pub text_dim: Color,
+    /// The accent (Modrinth green).
+    pub accent: Color,
+    /// Accent, hovered.
+    pub accent_hover: Color,
+    /// Accent, pressed.
+    pub accent_dim: Color,
+    /// Text on top of the accent.
+    pub on_accent: Color,
+    /// Destructive actions.
+    pub danger: Color,
+    /// Destructive, hovered.
+    pub danger_hover: Color,
+    /// The welcome logo tile's own surface.
+    pub hero: Color,
+    /// The dimmed wash behind a dialog.
+    pub backdrop: Color,
+    /// The dialog surface, a shade off the cards.
+    pub modal: Color,
+}
+
+impl Palette {
+    /// The dark look: the reference client's own palette, and the default.
+    pub const fn dark() -> Palette {
+        Palette {
+            bg: rgb(0x16, 0x18, 0x1C),
+            bg_rail: rgb(0x1B, 0x1E, 0x23),
+            surface: rgb(0x26, 0x29, 0x2F),
+            surface_hover: rgb(0x30, 0x34, 0x3B),
+            surface_input: rgb(0x1F, 0x22, 0x27),
+            border: rgb(0x33, 0x38, 0x40),
+            border_strong: rgb(0x46, 0x4C, 0x56),
+            text: rgb(0xED, 0xEF, 0xF2),
+            text_muted: rgb(0x9C, 0xA4, 0xAE),
+            text_dim: rgb(0x74, 0x7C, 0x87),
+            accent: rgb(0x1B, 0xD9, 0x6A),
+            accent_hover: rgb(0x35, 0xE8, 0x83),
+            accent_dim: rgb(0x12, 0xA8, 0x51),
+            on_accent: rgb(0x08, 0x12, 0x0B),
+            danger: rgb(0xF0, 0x50, 0x3C),
+            danger_hover: rgb(0xF7, 0x6B, 0x59),
+            hero: rgb(0x0F, 0x11, 0x14),
+            backdrop: rgb(0x0C, 0x0E, 0x11),
+            modal: rgb(0x20, 0x23, 0x28),
+        }
+    }
+
+    /// The light look.
+    ///
+    /// Not an inversion: the accent is darkened until it reads on white (the
+    /// dark theme's green is only 1.9:1 against a white card, which is not
+    /// text), and the chrome sits *below* the cards rather than above them.
+    pub const fn light() -> Palette {
+        Palette {
+            bg: rgb(0xEF, 0xF1, 0xF3),
+            bg_rail: rgb(0xE4, 0xE7, 0xEA),
+            surface: rgb(0xFF, 0xFF, 0xFF),
+            surface_hover: rgb(0xF1, 0xF3, 0xF5),
+            surface_input: rgb(0xFF, 0xFF, 0xFF),
+            border: rgb(0xDC, 0xDF, 0xE3),
+            border_strong: rgb(0xC1, 0xC6, 0xCC),
+            text: rgb(0x1B, 0x1F, 0x24),
+            text_muted: rgb(0x55, 0x5D, 0x67),
+            text_dim: rgb(0x83, 0x8B, 0x95),
+            accent: rgb(0x0B, 0xA8, 0x4E),
+            accent_hover: rgb(0x0C, 0xBE, 0x58),
+            accent_dim: rgb(0x08, 0x8E, 0x42),
+            on_accent: rgb(0xFF, 0xFF, 0xFF),
+            danger: rgb(0xD1, 0x38, 0x27),
+            danger_hover: rgb(0xE0, 0x4A, 0x38),
+            hero: rgb(0xF6, 0xF7, 0xF8),
+            backdrop: rgb(0xDE, 0xE1, 0xE4),
+            modal: rgb(0xFF, 0xFF, 0xFF),
+        }
+    }
+
+    /// True black for OLED panels.
+    ///
+    /// Identical to the dark look in hue, but the two deepest surfaces are
+    /// actually `#000000` so an OLED panel can switch those pixels off, and the
+    /// text-on-accent is black because the accent never moves.
+    pub const fn oled() -> Palette {
+        Palette {
+            bg: rgb(0x00, 0x00, 0x00),
+            bg_rail: rgb(0x00, 0x00, 0x00),
+            surface: rgb(0x0B, 0x0C, 0x0D),
+            surface_hover: rgb(0x18, 0x1A, 0x1D),
+            surface_input: rgb(0x0D, 0x0E, 0x10),
+            border: rgb(0x22, 0x24, 0x27),
+            border_strong: rgb(0x35, 0x38, 0x3D),
+            text: rgb(0xF5, 0xF6, 0xF7),
+            text_muted: rgb(0x9C, 0xA4, 0xAE),
+            text_dim: rgb(0x6B, 0x72, 0x7A),
+            accent: rgb(0x1B, 0xD9, 0x6A),
+            accent_hover: rgb(0x35, 0xE8, 0x83),
+            accent_dim: rgb(0x12, 0xA8, 0x51),
+            on_accent: rgb(0x00, 0x00, 0x00),
+            danger: rgb(0xF0, 0x50, 0x3C),
+            danger_hover: rgb(0xF7, 0x6B, 0x59),
+            hero: rgb(0x00, 0x00, 0x00),
+            backdrop: rgb(0x00, 0x00, 0x00),
+            modal: rgb(0x0E, 0x0F, 0x11),
+        }
+    }
+}
+
+// ---- Color theme -------------------------------------------------------
+
+/// A color theme, as offered in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorTheme {
+    /// The dark look, and the default.
+    #[default]
+    Dark,
+    /// The light look.
+    Light,
+    /// Black surfaces, for OLED displays.
+    Oled,
+    /// Follow the operating system's app appearance.
+    System,
+}
+
+impl ColorTheme {
+    /// Every theme, in the order Settings shows them: the two the reference
+    /// client offers first, then OLED, then the OS-following one.
+    pub const ALL: [ColorTheme; 4] =
+        [ColorTheme::Dark, ColorTheme::Light, ColorTheme::Oled, ColorTheme::System];
+
+    /// The label on the card.
+    pub const fn label(self) -> &'static str {
+        match self {
+            ColorTheme::Dark => "Dark",
+            ColorTheme::Light => "Light",
+            ColorTheme::Oled => "OLED",
+            ColorTheme::System => "Sync with system",
+        }
+    }
+
+    /// Stable id, for the settings file. Never localized and never reordered;
+    /// renaming one silently resets the theme of anyone who picked it.
+    pub const fn id(self) -> &'static str {
+        match self {
+            ColorTheme::Dark => "dark",
+            ColorTheme::Light => "light",
+            ColorTheme::Oled => "oled",
+            ColorTheme::System => "system",
+        }
+    }
+
+    /// Parse a stored id. Anything unrecognized is the default rather than an
+    /// error: a hand-edited or future settings file must still open.
+    pub fn from_id(id: &str) -> ColorTheme {
+        Self::ALL
+            .into_iter()
+            .find(|theme| theme.id() == id.trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    }
+
+    /// The concrete look this theme means.
+    ///
+    /// `System` is the only theme that depends on the machine, and it resolves
+    /// to OLED when the OS is dark — an explicit OLED choice is the display's
+    /// business, not the OS's, so "system dark" means the ordinary dark look
+    /// and OLED stays something you ask for.
+    pub const fn resolve(self, system_prefers_light: bool) -> ColorTheme {
+        match self {
+            ColorTheme::System if system_prefers_light => ColorTheme::Light,
+            ColorTheme::System => ColorTheme::Dark,
+            other => other,
+        }
+    }
+
+    /// The colors this theme paints with, following the OS for [`ColorTheme::System`].
+    pub fn palette(self) -> Palette {
+        match self.resolve(os_prefers_light()) {
+            ColorTheme::Light => Palette::light(),
+            ColorTheme::Oled => Palette::oled(),
+            _ => Palette::dark(),
+        }
+    }
+}
+
+/// The theme in force. A process-wide choice, like the reference client's, and
+/// read on every style call — an `AtomicU8` load is cheaper than threading a
+/// theme through several hundred widget builders.
+static COLOR_THEME: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the OS is set to a light appearance, cached at startup.
+static OS_PREFERS_LIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Serializes the tests that change the theme in force.
+///
+/// The palette is process-wide, so a test that switches it has to restore it
+/// before another test paints with it. Shared with the app's own tests, which
+/// reach the same global through `Message::SetColorTheme`.
+#[cfg(test)]
+pub(crate) static THEME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The theme in force.
+pub fn color_theme() -> ColorTheme {
+    match COLOR_THEME.load(Ordering::Relaxed) {
+        1 => ColorTheme::Light,
+        2 => ColorTheme::Oled,
+        3 => ColorTheme::System,
+        _ => ColorTheme::Dark,
+    }
+}
+
+/// Put a theme in force. The next `view()` paints with it.
+pub fn set_color_theme(theme: ColorTheme) {
+    let raw = match theme {
+        ColorTheme::Dark => 0,
+        ColorTheme::Light => 1,
+        ColorTheme::Oled => 2,
+        ColorTheme::System => 3,
+    };
+    COLOR_THEME.store(raw, Ordering::Relaxed);
+}
+
+/// Record the OS appearance, so [`ColorTheme::System`] can resolve to it.
+pub fn set_os_prefers_light(light: bool) {
+    OS_PREFERS_LIGHT.store(light, Ordering::Relaxed);
+}
+
+/// Whether the OS is set to a light appearance.
+pub fn os_prefers_light() -> bool {
+    OS_PREFERS_LIGHT.load(Ordering::Relaxed)
+}
+
+/// The colors for the theme in force.
+pub fn palette() -> Palette {
+    color_theme().palette()
+}
+
+/// One accessor per color.
+///
+/// Generated so the twenty colors cannot drift apart: each is a single field
+/// read of [`palette`], and a new color is one line here rather than a
+/// hand-written function that might read the wrong field.
+macro_rules! palette_accessors {
+    ($($name:ident($field:ident): $doc:literal,)*) => {
+        $(#[doc = $doc] pub fn $name() -> Color { palette().$field })*
+    };
+}
+
+palette_accessors! {
+    bg(bg): "Window chrome (deepest surface).",
+    bg_rail(bg_rail): "Rails and sidebars.",
+    surface(surface): "Cards and other raised surfaces.",
+    surface_hover(surface_hover): "Hovered raised surface.",
+    surface_input(surface_input): "Inset fields (search boxes, modal inner panels).",
+    border(border): "Hairline borders.",
+    border_strong(border_strong): "Border on hover/selection.",
+    text(text): "Primary text.",
+    text_muted(text_muted): "Secondary text.",
+    text_dim(text_dim): "Tertiary text / inactive rail icons.",
+    accent(accent): "The accent.",
+    accent_hover(accent_hover): "Accent, hovered.",
+    accent_dim(accent_dim): "Accent, pressed.",
+    on_accent(on_accent): "Text on top of the accent.",
+    danger(danger): "Destructive actions.",
+    danger_hover(danger_hover): "Destructive, hovered.",
+    // `hero`, `backdrop` and `modal` are deliberately absent: their only
+    // consumers are the three container styles a few lines below, which read
+    // them through `palette()`, and two functions of the same name would
+    // collide with those styles.
+}
+
+/// Card corner radius.
+pub const R_CARD: f32 = 12.0;
+/// Button corner radius.
+pub const R_BUTTON: f32 = 10.0;
+/// Chip/pill corner radius.
+pub const R_CHIP: f32 = 7.0;
+/// Modal corner radius.
+pub const R_MODAL: f32 = 16.0;
+
+/// Bold variant of the default font, for names and headings.
+pub fn bold() -> Font {
+    Font { weight: iced::font::Weight::Bold, ..Font::DEFAULT }
+}
+
+/// The application theme: `Theme::custom` derives the whole extended palette
+/// (inputs, pick lists, scrollbars, checked boxes) from these five colors, so
+/// stock widgets already match the shell without every one of them being
+/// restyled by hand.
+///
+/// Reads the theme in force, so this changes with the choice in Settings:
+/// iced re-reads it whenever it repaints, and the shell repaints after the
+/// message that changes the theme.
+pub fn app_theme() -> Theme {
+    Theme::custom(
+        "PalantirMC".to_string(),
+        IcedPalette {
+            background: bg(),
+            text: text(),
+            primary: accent(),
+            success: accent(),
+            danger: danger(),
+        },
+    )
+}
+
+// ---- Container styles (plain closures) ---------------------------------
+
+/// Root window background.
+pub fn app_bg(_: &Theme) -> container::Appearance {
+    container::Appearance { background: Some(bg().into()), ..Default::default() }
+}
+
+/// Left icon rail / right sidebar.
+pub fn rail(_: &Theme) -> container::Appearance {
+    container::Appearance { background: Some(bg_rail().into()), ..Default::default() }
+}
+
+/// Raised card with a hairline border.
+pub fn card(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(surface().into()),
+        border: Border { radius: R_CARD.into(), width: 1.0, color: border() },
+        ..Default::default()
+    }
+}
+
+/// Inset panel: search boxes and modal inner sections.
+pub fn inset(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(surface_input().into()),
+        border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
+        ..Default::default()
+    }
+}
+
+/// The big rounded square behind the welcome logo.
+pub fn hero_tile(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(palette().hero.into()),
+        border: Border { radius: 22.0.into(), width: 1.0, color: alpha(accent(), 0.25) },
+        shadow: Shadow { color: alpha(accent(), 0.18), offset: Vector::new(0.0, 0.0), blur_radius: 28.0 },
+        ..Default::default()
+    }
+}
+
+/// Dimmed backdrop behind a modal (the main area is replaced, so this reads as
+/// the launcher receding rather than a separate window).
+pub fn backdrop(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(palette().backdrop.into()),
+        ..Default::default()
+    }
+}
+
+/// The modal dialog itself.
+///
+/// Deliberately a flat surface with a hairline border rather than a blurred
+/// shadow. iced's tiny-skia backend renders a `Shadow` as a per-pixel blurred
+/// bitmap, so a dialog-sized shadow costs ~400k SDF evaluations *per frame*,
+/// and on this backend a large opaque one composites over the dialog's own
+/// contents and paints the whole card near-black. The border plus the darker
+/// backdrop already separate the dialog from the launcher behind it.
+/// The selected row in the Settings section list: a tinted pill, so the current
+/// pane is obvious without its label having to shout.
+pub fn nav_active(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(accent(), 0.14).into()),
+        border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(accent(), 0.32) },
+        ..Default::default()
+    }
+}
+
+/// A section row that is listed but not yet editable: no surface at all, so it
+/// reads as a label rather than as a button that does nothing.
+pub fn nav_idle(_: &Theme) -> container::Appearance {
+    container::Appearance::default()
+}
+
+pub fn modal(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(palette().modal.into()),
+        border: Border { radius: R_MODAL.into(), width: 1.0, color: border_strong() },
+        ..Default::default()
+    }
+}
+
+/// A dot/pill surface in an arbitrary color (status chips, run indicators).
+pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
+    move |_: &Theme| container::Appearance {
+        background: Some(color.into()),
+        border: Border { radius: 4.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+/// Small tinted capsule used next to the product name and for status text.
+pub fn token_pill(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(text(), 0.05).into()),
+        border: Border { radius: 999.0.into(), width: 1.0, color: alpha(text(), 0.08) },
+        text_color: Some(text_muted()),
+        ..Default::default()
+    }
+}
+
+/// Card variant for the selected instance tile.
+pub fn card_selected(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(accent(), 0.08).into()),
+        border: Border { radius: R_CARD.into(), width: 1.0, color: alpha(accent(), 0.55) },
+        ..Default::default()
+    }
+}
+
+/// Bottom status strip.
+pub fn toast(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(surface().into()),
+        border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
+        text_color: Some(text_muted()),
+        ..Default::default()
+    }
+}
+
+/// Small filled pill used for loader/version metadata next to a name.
+pub fn chip(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(accent(), 0.14).into()),
+        border: Border { radius: R_CHIP.into(), width: 1.0, color: alpha(accent(), 0.32) },
+        text_color: Some(accent()),
+        ..Default::default()
+    }
+}
+
+/// Neutral variant of [`chip`] (no accent: used for game versions).
+pub fn chip_neutral(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(text(), 0.07).into()),
+        border: Border { radius: R_CHIP.into(), width: 1.0, color: border() },
+        text_color: Some(text_muted()),
+        ..Default::default()
+    }
+}
+
+/// Clickable settings/type row inside the Create Instance dialog.
+pub fn option_row(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(alpha(text(), 0.04).into()),
+        border: Border { radius: R_CARD.into(), width: 1.0, color: alpha(text(), 0.06) },
+        text_color: Some(text()),
+        ..Default::default()
+    }
+}
+
+/// Square behind an instance icon in a card/grid.
+pub fn icon_tile(background: Color) -> impl Fn(&Theme) -> container::Appearance {
+    move |_: &Theme| container::Appearance {
+        background: Some(background.into()),
+        border: Border { radius: 12.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+// ---- Tooltip -----------------------------------------------------------
+
+/// The floating label the icon rail shows on hover.
+///
+/// Deliberately flat and shadowless. This file's note on [`modal`] applies here
+/// twice over: iced's tiny-skia backend renders a `Shadow` as a per-pixel
+/// blurred bitmap, and a tooltip appears *while the pointer is moving*, which is
+/// the worst possible moment to add per-frame blur work. The 1px border carries
+/// the separation instead, which is what the reference does too.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tooltip;
+
+impl container::StyleSheet for Tooltip {
+    type Style = Theme;
+
+    fn appearance(&self, _: &Theme) -> container::Appearance {
+        container::Appearance {
+            background: Some(surface_hover().into()),
+            border: Border { radius: R_CHIP.into(), width: 1.0, color: border_strong() },
+            text_color: Some(text()),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<Tooltip> for iced::theme::Container {
+    fn from(tooltip: Tooltip) -> Self {
+        Self::Custom(Box::new(tooltip))
+    }
+}
+
+// ---- Button styles -----------------------------------------------------
+
+/// Which of the launcher's button looks to paint.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Role {
+    /// Filled accent button ("Create an instance", "Play").
+    Primary,
+    /// Raised grey button (secondary actions).
+    Secondary,
+    /// Borderless button that only tints on hover (rail, links, window controls).
+    Ghost,
+    /// Icon-rail entry; `active` paints the accent pill behind it.
+    Rail { active: bool },
+    /// Selectable pill (loader / loader-version / snapshot switches).
+    Chip { active: bool },
+    /// The clickable body of an instance card.
+    CardArea { selected: bool },
+    /// Destructive tinted button.
+    Danger,
+    /// One color-theme choice in Settings: the whole card is the target, and
+    /// the selected one is ringed in the accent.
+    ThemeCard { selected: bool },
+    /// Title-bar control.
+    Window,
+    /// Title-bar control whose hover is decided *outside* iced.
+    ///
+    /// The window's maximize button is a non-client region — Windows has to
+    /// own it for Snap Layouts to appear — so iced never sees the pointer over
+    /// it and never reports it hovered. The hit test that took the region over
+    /// is the only thing that knows, and it passes the answer in here.
+    WindowExternallyHovered { hovered: bool },
+    /// Title-bar close control (red on hover).
+    WindowClose,
+}
+
+/// A [`button::StyleSheet`] wrapper so call sites can write
+/// `.style(theme::primary())`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Btn(pub Role);
+
+/// Filled accent button.
+pub fn primary() -> Btn {
+    Btn(Role::Primary)
+}
+/// Raised grey button.
+pub fn secondary() -> Btn {
+    Btn(Role::Secondary)
+}
+/// Borderless button.
+pub fn ghost() -> Btn {
+    Btn(Role::Ghost)
+}
+/// Icon-rail entry.
+pub fn rail_button(active: bool) -> Btn {
+    Btn(Role::Rail { active })
+}
+/// Selectable pill.
+pub fn chip_button(active: bool) -> Btn {
+    Btn(Role::Chip { active })
+}
+/// The clickable body of an instance card (the card itself is a container).
+pub fn card_area(selected: bool) -> Btn {
+    Btn(Role::CardArea { selected })
+}
+/// Destructive tinted button.
+///
+/// Named `destructive` rather than `danger` because [`danger`] is already the
+/// red itself — one name for the color, one for the button that uses it.
+pub fn destructive() -> Btn {
+    Btn(Role::Danger)
+}
+/// One color-theme choice in Settings.
+pub fn theme_card(selected: bool) -> Btn {
+    Btn(Role::ThemeCard { selected })
+}
+/// Title-bar control.
+pub fn window_button() -> Btn {
+    Btn(Role::Window)
+}
+/// Title-bar control drawn from a hover state iced did not observe — see
+/// [`Role::WindowExternallyHovered`].
+pub fn caption_button(hovered: bool) -> Btn {
+    Btn(Role::WindowExternallyHovered { hovered })
+}
+/// Title-bar close control.
+pub fn close_button() -> Btn {
+    Btn(Role::WindowClose)
+}
+
+impl Btn {
+    fn appearance(&self, hovered: bool, pressed: bool) -> button::Appearance {
+        let base = match self.0 {
+            Role::Primary => button::Appearance {
+                background: Some(if pressed { accent_dim() } else if hovered { accent_hover() } else { accent() }.into()),
+                text_color: on_accent(),
+                border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::Secondary => button::Appearance {
+                background: Some(if hovered { surface_hover() } else { surface() }.into()),
+                text_color: text(),
+                border: Border {
+                    radius: R_BUTTON.into(),
+                    width: 1.0,
+                    color: if hovered { border_strong() } else { border() },
+                },
+                ..Default::default()
+            },
+            Role::Ghost => button::Appearance {
+                background: if hovered { Some(alpha(text(), 0.08).into()) } else { None },
+                text_color: if hovered { text() } else { text_muted() },
+                border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::Rail { active } => button::Appearance {
+                background: if active {
+                    Some(alpha(accent(), 0.16).into())
+                } else if hovered {
+                    Some(alpha(text(), 0.07).into())
+                } else {
+                    None
+                },
+                text_color: if active { accent() } else if hovered { text() } else { text_dim() },
+                border: Border { radius: 12.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::Chip { active } => button::Appearance {
+                background: if active {
+                    Some(alpha(accent(), 0.16).into())
+                } else if hovered {
+                    Some(alpha(text(), 0.08).into())
+                } else {
+                    None
+                },
+                text_color: if active { accent() } else { text_muted() },
+                border: Border {
+                    radius: R_CHIP.into(),
+                    width: 1.0,
+                    color: if active { accent() } else { border() },
+                },
+                ..Default::default()
+            },
+            Role::CardArea { selected } => button::Appearance {
+                background: if selected {
+                    Some(alpha(accent(), 0.06).into())
+                } else if hovered {
+                    Some(alpha(text(), 0.05).into())
+                } else {
+                    None
+                },
+                text_color: text(),
+                border: Border { radius: R_CARD.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::Danger => button::Appearance {
+                background: Some(alpha(danger(), if hovered { 0.24 } else { 0.14 }).into()),
+                text_color: if hovered { danger_hover() } else { danger() },
+                border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(danger(), 0.45) },
+                ..Default::default()
+            },
+            Role::ThemeCard { selected } => button::Appearance {
+                // The card's own surface, so the label under a light preview sits
+                // on light and the one under a dark preview sits on dark — the
+                // card looks like the theme it offers.
+                background: Some(if hovered { surface_hover() } else { surface() }.into()),
+                text_color: if selected { accent() } else { text() },
+                border: Border {
+                    radius: R_CARD.into(),
+                    width: if selected { 2.0 } else { 1.0 },
+                    color: if selected { accent() } else { border() },
+                },
+                ..Default::default()
+            },
+            Role::Window => button::Appearance {
+                background: if hovered { Some(alpha(text(), 0.10).into()) } else { None },
+                text_color: if hovered { text() } else { text_dim() },
+                border: Border { radius: 6.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+            // Deliberately the same look as `Role::Window`: which of the two
+            // decides the hover is the only difference, and the button must
+            // not change appearance depending on who noticed the pointer.
+            Role::WindowExternallyHovered { hovered } => button::Appearance {
+                background: if hovered { Some(alpha(text(), 0.10).into()) } else { None },
+                text_color: if hovered { text() } else { text_dim() },
+                border: Border { radius: 6.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::WindowClose => button::Appearance {
+                background: if hovered { Some(danger().into()) } else { None },
+                text_color: if hovered { Color::WHITE } else { text_dim() },
+                border: Border { radius: 6.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+        };
+        base
+    }
+}
+
+impl button::StyleSheet for Btn {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme) -> button::Appearance {
+        self.appearance(false, false)
+    }
+
+    fn hovered(&self, _theme: &Theme) -> button::Appearance {
+        self.appearance(true, false)
+    }
+
+    fn pressed(&self, _theme: &Theme) -> button::Appearance {
+        self.appearance(true, true)
+    }
+
+    fn disabled(&self, _theme: &Theme) -> button::Appearance {
+        let mut base = self.appearance(false, false);
+        base.background = base.background.map(|background| match background {
+            iced::Background::Color(color) => alpha(color, 0.35).into(),
+            gradient => gradient,
+        });
+        if base.background.is_none() {
+            // Ghost buttons need *some* surface so the disabled state reads.
+            base.background = Some(alpha(text(), 0.04).into());
+        }
+        base.text_color = alpha(base.text_color, 0.4);
+        base
+    }
+}
+
+impl From<Btn> for iced::theme::Button {
+    fn from(btn: Btn) -> Self {
+        Self::custom(btn)
+    }
+}
+
+// ---- Field (text input) ------------------------------------------------
+
+/// Borderless dark text field matching the search boxes and form inputs.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Field;
+
+impl text_input::StyleSheet for Field {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme) -> text_input::Appearance {
+        text_input::Appearance {
+            background: surface_input().into(),
+            border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
+            icon_color: text_dim(),
+        }
+    }
+
+    fn focused(&self, _theme: &Theme) -> text_input::Appearance {
+        text_input::Appearance {
+            background: surface_input().into(),
+            border: Border { radius: R_BUTTON.into(), width: 1.0, color: accent() },
+            icon_color: accent(),
+        }
+    }
+
+    fn placeholder_color(&self, _theme: &Theme) -> Color {
+        text_dim()
+    }
+
+    fn value_color(&self, _theme: &Theme) -> Color {
+        text()
+    }
+
+    fn disabled_color(&self, _theme: &Theme) -> Color {
+        alpha(text(), 0.35)
+    }
+
+    fn selection_color(&self, _theme: &Theme) -> Color {
+        alpha(accent(), 0.35)
+    }
+
+    fn disabled(&self, _theme: &Theme) -> text_input::Appearance {
+        text_input::Appearance {
+            background: alpha(surface_input(), 0.6).into(),
+            border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(border(), 0.6) },
+            icon_color: alpha(text_dim(), 0.5),
+        }
+    }
+}
+
+impl From<Field> for iced::theme::TextInput {
+    fn from(_: Field) -> Self {
+        Self::Custom(Box::new(Field))
+    }
+}
+
+// ---- Thin (scrollable) -------------------------------------------------
+
+/// Slim scrollbar: small, low-contrast and cheap to composite on both wgpu
+/// and tiny-skia. This paints the bar only — where the page sits, and how it
+/// gets there, belongs to `crate::scroll`, which takes the wheel itself and
+/// eases the offset instead of letting iced apply each notch as an instant
+/// 60-pixel jump.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Thin;
+
+impl Thin {
+    fn appearance(&self, mouse_over: bool) -> scrollable::Appearance {
+        scrollable::Appearance {
+            container: container::Appearance::default(),
+            scrollbar: scrollable::Scrollbar {
+                background: None,
+                border: Border { radius: 6.0.into(), ..Default::default() },
+                scroller: scrollable::Scroller {
+                    color: if mouse_over { alpha(accent(), 0.62) } else { alpha(text(), 0.24) },
+                    border: Border { radius: 6.0.into(), ..Default::default() },
+                },
+            },
+            gap: None,
+        }
+    }
+}
+
+impl scrollable::StyleSheet for Thin {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme) -> scrollable::Appearance {
+        self.appearance(false)
+    }
+
+    fn hovered(&self, _theme: &Theme, is_mouse_over_scrollbar: bool) -> scrollable::Appearance {
+        self.appearance(is_mouse_over_scrollbar)
+    }
+}
+
+// ---- Dropdown (pick list) ----------------------------------------------
+
+/// Dark dropdown for the version, build and group pickers.
+///
+/// The stock `PickList::default()` is the *light* iced theme, so every version
+/// selector in the shell used to open a white panel with near-black text in the
+/// middle of a dark dialog. This pairs a surface-coloured field with a matching
+/// menu so the closed control and its open list agree with the card around
+/// them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Dropdown;
+
+impl Dropdown {
+    fn field(&self, hovered: bool) -> pick_list::Appearance {
+        pick_list::Appearance {
+            text_color: text(),
+            placeholder_color: text_dim(),
+            handle_color: if hovered { text() } else { text_muted() },
+            background: if hovered { surface_hover() } else { surface_input() }.into(),
+            border: Border {
+                radius: R_BUTTON.into(),
+                width: 1.0,
+                color: if hovered { border_strong() } else { border() },
+            },
+        }
+    }
+}
+
+impl pick_list::StyleSheet for Dropdown {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme) -> pick_list::Appearance {
+        self.field(false)
+    }
+
+    fn hovered(&self, _theme: &Theme) -> pick_list::Appearance {
+        self.field(true)
+    }
+}
+
+impl menu::StyleSheet for Dropdown {
+    type Style = Theme;
+
+    fn appearance(&self, _theme: &Theme) -> menu::Appearance {
+        menu::Appearance {
+            text_color: text(),
+            background: surface_hover().into(),
+            border: Border { radius: R_BUTTON.into(), width: 1.0, color: border_strong() },
+            selected_text_color: accent(),
+            selected_background: alpha(accent(), 0.16).into(),
+        }
+    }
+}
+
+impl From<Dropdown> for iced::theme::PickList {
+    fn from(dropdown: Dropdown) -> Self {
+        use std::rc::Rc;
+        Self::Custom(Rc::new(dropdown), Rc::new(dropdown))
+    }
+}
+
+// ---- Tick (checkbox) ---------------------------------------------------
+
+/// Square accent checkbox; the stock one is a light-theme rounded box.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tick;
+
+impl Tick {
+    fn appearance(&self, checked: bool) -> checkbox::Appearance {
+        checkbox::Appearance {
+            background: if checked { accent().into() } else { surface_input().into() },
+            icon_color: on_accent(),
+            border: Border {
+                radius: 4.0.into(),
+                width: 1.0,
+                color: if checked { accent() } else { border_strong() },
+            },
+            text_color: Some(if checked { text() } else { text_muted() }),
+        }
+    }
+}
+
+impl checkbox::StyleSheet for Tick {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme, is_checked: bool) -> checkbox::Appearance {
+        self.appearance(is_checked)
+    }
+
+    fn hovered(&self, _theme: &Theme, is_checked: bool) -> checkbox::Appearance {
+        let mut appearance = self.appearance(is_checked);
+        appearance.text_color = Some(text());
+        if !is_checked {
+            appearance.border.color = text_muted();
+        }
+        appearance
+    }
+}
+
+impl From<Tick> for iced::theme::Checkbox {
+    fn from(tick: Tick) -> Self {
+        Self::Custom(Box::new(tick))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Takes [`THEME_TEST_LOCK`], surviving a panic in another test.
+    fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
+        THEME_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// sRGB relative luminance, for the contrast checks below.
+    fn luminance(color: Color) -> f32 {
+        fn channel(value: f32) -> f32 {
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+
+    /// WCAG contrast ratio between two opaque colors.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (high, low) = {
+            let (a, b) = (luminance(a), luminance(b));
+            if a > b {
+                (a, b)
+            } else {
+                (b, a)
+            }
+        };
+        (high + 0.05) / (low + 0.05)
+    }
+
+    #[test]
+    fn palette_matches_the_reference_theme() {
+        // Asserted against the dark palette directly rather than through the
+        // global, so this cannot race a test that switches themes.
+        let dark = Palette::dark();
+        assert_eq!(
+            (dark.bg.r, dark.bg.g, dark.bg.b),
+            (0x16 as f32 / 255.0, 0x18 as f32 / 255.0, 0x1C as f32 / 255.0)
+        );
+        let accent = rgb(0x1B, 0xD9, 0x6A);
+        assert!((accent.g - 0.851).abs() < 0.002, "accent green channel: {}", accent.g);
+        assert_eq!(alpha(text(), 0.5).a, 0.5);
+        assert_eq!(alpha(text(), 0.5).r, text().r);
+    }
+
+    #[test]
+    fn each_color_theme_paints_its_own_surfaces() {
+        let dark = Palette::dark();
+        let light = Palette::light();
+        let oled = Palette::oled();
+
+        // The chrome of the light look is bright, the dark one is not, and the
+        // OLED one is actually black so those pixels can switch off.
+        assert!(luminance(light.bg) > 0.8, "light chrome should be bright");
+        assert!(luminance(dark.bg) < 0.05, "dark chrome should be near-black");
+        assert_eq!((oled.bg.r, oled.bg.g, oled.bg.b), (0.0, 0.0, 0.0));
+        assert_eq!((oled.bg_rail.r, oled.bg_rail.g, oled.bg_rail.b), (0.0, 0.0, 0.0));
+        assert!(
+            luminance(oled.surface) < luminance(dark.surface),
+            "OLED cards should be darker than the ordinary dark ones"
+        );
+
+        // Text has to follow its own background: dark-on-light, light-on-dark.
+        assert!(luminance(light.text) < luminance(light.bg), "light theme needs dark text");
+        assert!(luminance(dark.text) > luminance(dark.bg), "dark theme needs light text");
+        for palette in [dark, light, oled] {
+            assert!(
+                contrast(palette.text, palette.bg) >= 7.0,
+                "body text should clear AAA on every theme"
+            );
+            assert!(
+                contrast(palette.accent, palette.surface) >= 3.0,
+                "the accent is used for text and must stay readable on a card"
+            );
+        }
+    }
+
+    #[test]
+    fn system_theme_follows_the_operating_system() {
+        // Only `System` consults the OS; an explicit choice is never overridden.
+        assert_eq!(ColorTheme::System.resolve(true), ColorTheme::Light);
+        assert_eq!(ColorTheme::System.resolve(false), ColorTheme::Dark);
+        assert_eq!(ColorTheme::Dark.resolve(true), ColorTheme::Dark);
+        assert_eq!(ColorTheme::Light.resolve(false), ColorTheme::Light);
+        assert_eq!(ColorTheme::Oled.resolve(true), ColorTheme::Oled);
+    }
+
+    #[test]
+    fn theme_ids_round_trip_through_the_settings_file() {
+        for theme in ColorTheme::ALL {
+            assert_eq!(ColorTheme::from_id(theme.id()), theme, "{} did not round-trip", theme.id());
+        }
+        // A hand-edited or future file must open, not fail.
+        assert_eq!(ColorTheme::from_id("OLED"), ColorTheme::Oled);
+        assert_eq!(ColorTheme::from_id("  light "), ColorTheme::Light);
+        assert_eq!(ColorTheme::from_id("neon"), ColorTheme::Dark);
+        assert_eq!(ColorTheme::from_id(""), ColorTheme::Dark);
+        // Every id is distinct, or choosing one would paint another.
+        let mut ids: Vec<&str> = ColorTheme::ALL.iter().map(|theme| theme.id()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), ColorTheme::ALL.len());
+    }
+
+    #[test]
+    fn choosing_a_theme_changes_what_the_styles_paint() {
+        let _guard = theme_lock();
+        let original = color_theme();
+
+        set_color_theme(ColorTheme::Light);
+        assert_eq!(color_theme(), ColorTheme::Light);
+        assert_eq!(bg(), Palette::light().bg);
+        assert_eq!(app_theme().palette().background, Palette::light().bg);
+        assert_eq!(card(&app_theme()).background, Some(Palette::light().surface.into()));
+
+        set_color_theme(ColorTheme::Oled);
+        assert_eq!(bg(), Palette::oled().bg);
+
+        set_color_theme(ColorTheme::System);
+        set_os_prefers_light(true);
+        assert_eq!(bg(), Palette::light().bg, "System should follow a light OS");
+        set_os_prefers_light(false);
+        assert_eq!(bg(), Palette::dark().bg, "System should follow a dark OS");
+
+        // Leave the process as it was found: every other test paints with it.
+        set_os_prefers_light(false);
+        set_color_theme(original);
+    }
+
+    #[test]
+    fn theme_is_custom_and_named() {
+        let theme = app_theme();
+        assert!(format!("{theme:?}").contains("PalantirMC"));
+        let palette = theme.palette();
+        assert_eq!(palette.primary, accent());
+        assert_eq!(palette.background, bg());
+    }
+
+    #[test]
+    fn button_roles_paint_distinct_primary_and_danger() {
+        let theme = app_theme();
+        let resting = button::StyleSheet::active(&primary(), &theme);
+        let destructive = button::StyleSheet::active(&destructive(), &theme);
+        let plain = button::StyleSheet::active(&ghost(), &theme);
+        assert_eq!(resting.text_color, on_accent());
+        assert_ne!(resting.background, destructive.background);
+        assert!(plain.background.is_none());
+        // Hovered primary is brighter than the resting one.
+        let hovered = button::StyleSheet::hovered(&primary(), &theme);
+        match (hovered.background, resting.background) {
+            (Some(iced::Background::Color(h)), Some(iced::Background::Color(r))) => {
+                assert!(h.g > r.g);
+            }
+            other => panic!("expected color backgrounds, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rail_and_chip_roles_track_active_state() {
+        let theme = app_theme();
+        let active = button::StyleSheet::active(&rail_button(true), &theme);
+        let idle = button::StyleSheet::active(&rail_button(false), &theme);
+        assert_eq!(active.text_color, accent());
+        assert_eq!(idle.text_color, text_dim());
+        assert!(idle.background.is_none());
+        assert!(active.background.is_some());
+
+        let chip_on = button::StyleSheet::active(&chip_button(true), &theme);
+        let chip_off = button::StyleSheet::active(&chip_button(false), &theme);
+        assert_ne!(chip_on.border.color, chip_off.border.color);
+    }
+
+    #[test]
+    fn disabled_buttons_are_dimmed() {
+        let theme = app_theme();
+        let disabled = button::StyleSheet::disabled(&primary(), &theme);
+        assert!(disabled.text_color.a < 1.0);
+        let ghost_disabled = button::StyleSheet::disabled(&ghost(), &theme);
+        assert!(ghost_disabled.background.is_some(), "ghost buttons need a disabled surface");
+    }
+
+    #[test]
+    fn card_and_pill_styles_track_selection() {
+        let theme = app_theme();
+        let idle = button::StyleSheet::active(&card_area(false), &theme);
+        let chosen = button::StyleSheet::active(&card_area(true), &theme);
+        assert!(idle.background.is_none());
+        assert!(chosen.background.is_some());
+        assert_ne!(card_selected(&theme).border.color, card(&theme).border.color);
+        assert_eq!(pill(accent())(&theme).background, Some(accent().into()));
+        assert!(token_pill(&theme).background.is_some());
+    }
+
+    #[test]
+    fn field_converts_into_the_input_style() {
+        let style: iced::theme::TextInput = Field.into();
+        assert!(matches!(style, iced::theme::TextInput::Custom(_)));
+    }
+
+    #[test]
+    fn containers_and_fields_are_themed() {
+        let theme = app_theme();
+        assert_eq!(card(&theme).border.radius, R_CARD.into());
+        assert_eq!(inset(&theme).background, Some(surface_input().into()));
+        assert_eq!(chip(&theme).text_color, Some(accent()));
+        assert_eq!(text_input::StyleSheet::placeholder_color(&Field, &theme), text_dim());
+        assert_eq!(text_input::StyleSheet::focused(&Field, &theme).border.color, accent());
+        assert_eq!(text_input::StyleSheet::active(&Field, &theme).border.color, border());
+        let idle = scrollable::StyleSheet::active(&Thin, &theme);
+        let hovering = scrollable::StyleSheet::hovered(&Thin, &theme, true);
+        assert!(hovering.scrollbar.scroller.color.a > idle.scrollbar.scroller.color.a);
+        assert!(backdrop(&theme).background.is_some());
+        // The version and group dropdowns must not fall back to the stock
+        // light theme: closed field dark, open menu dark, accent on the
+        // selected row.
+        let field = pick_list::StyleSheet::active(&Dropdown, &theme);
+        assert_eq!(field.text_color, text());
+        assert_eq!(field.background, surface_input().into());
+        assert_eq!(pick_list::StyleSheet::hovered(&Dropdown, &theme).background, surface_hover().into());
+        let open = menu::StyleSheet::appearance(&Dropdown, &theme);
+        assert_eq!(open.background, surface_hover().into());
+        assert_eq!(open.selected_text_color, accent());
+        assert_eq!(open.text_color, text());
+        // The snapshots toggle and the mod switches share the accent square.
+        let off = checkbox::StyleSheet::active(&Tick, &theme, false);
+        let on = checkbox::StyleSheet::active(&Tick, &theme, true);
+        assert_eq!(on.background, accent().into());
+        assert_ne!(off.background, on.background);
+        assert!(on.text_color.expect("checked boxes need a label colour").r > off.text_color.expect("unchecked boxes need a label colour").r);
+        // The dialog is a flat bordered surface: a blurred shadow of this size
+        // is both expensive and, on tiny-skia, destructive to the card's own
+        // contents (see `modal`).
+        let dialog = modal(&theme);
+        assert_eq!(dialog.shadow.blur_radius, 0.0);
+        assert!(dialog.background.is_some());
+        assert_eq!(dialog.border.width, 1.0);
+    }
+}

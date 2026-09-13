@@ -18,9 +18,9 @@
 //!   (`.mrpack`) or CurseForge modpack zip via `prism-loader` and scaffold
 //!   an instance from it (fully offline: remote files are not downloaded).
 //!
-//! Argument parsing is hand-rolled (no clap), like the original verify
-//! harness this binary was ported from. Errors use `anyhow` at the binary
-//! boundary, per the phase plan.
+//! Argument parsing is hand-rolled (no clap), matching the offline
+//! verification tool this binary grew out of. Errors use `anyhow` at the
+//! binary boundary.
 
 use anyhow::{bail, Context, Result};
 use prism_core::{

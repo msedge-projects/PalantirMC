@@ -1,0 +1,202 @@
+name: Release
+
+# Publishing is tag-driven on purpose: the tag names the version, the guard job
+# checks it agrees with `Cargo.toml`, and the same commit is what CI tested.
+# `workflow_dispatch` exists to re-publish a tag whose upload failed -- it does
+# not invent one, because `gh release create --verify-tag` refuses to create a
+# tag that isn't already in the repository.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and re-publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  guard:
+    name: Check tag against Cargo.toml
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fails in ten seconds rather than after a fifteen-minute build, and it
+      # fails on the thing that is otherwise only noticed by whoever downloads
+      # the file and finds the version inside it is not the version it claims.
+      - name: Compare tag and workspace version
+        shell: pwsh
+        env:
+          REQUESTED: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $tag = $env:REQUESTED
+          if (-not $tag.StartsWith("v")) {
+            throw "Release tags must look like v0.1.0 (got '$tag')"
+          }
+
+          $declared = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' -List).Matches[0].Groups[1].Value
+          if ($tag -ne "v$declared") {
+            throw "Tag '$tag' does not match the workspace version '$declared' in Cargo.toml"
+          }
+
+          "Releasing $tag (workspace version $declared)" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+  build:
+    name: Build exe (${{ matrix.target }})
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - x86_64-pc-windows-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mingw-w64
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: pwsh
+        run: |
+          choco install mingw --no-progress -y
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\ProgramData\chocolatey\bin"
+
+      - name: Add rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-release-
+
+      # Tests run before anything is published: a release built from a commit
+      # that does not pass its own suite is not a release.
+      - name: Run tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build release
+        run: cargo build --release --locked -p prism-desktop --target ${{ matrix.target }}
+
+      - name: Stage the exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/PalantirMC.exe" dist/PalantirMC.exe
+
+          $exe = Get-Item dist/PalantirMC.exe
+          if ($exe.Length -lt 1MB -or $exe.Length -gt 50MB) {
+            throw "Unexpected PalantirMC.exe size: $($exe.Length) bytes"
+          }
+
+      - name: Check the exe's DLL dependencies
+        run: python .github/scripts/check_exe.py dist/PalantirMC.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: palantirmc-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      # The only job in either workflow that writes anything.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download every build
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Both targets are published, named so a downloader can tell which is
+      # which. The MSVC build is the recommended one; the GNU build is what the
+      # project is developed against locally, and publishing both means a
+      # regression in either is visible to users immediately.
+      - name: Collect and rename release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+
+          "### Release files" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| File | Size | sha256 |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          "| --- | --- | --- |" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+          Get-ChildItem -Path artifacts -Recurse -File -Filter *.exe | ForEach-Object {
+            $target = $_.Directory.Name
+            $label = switch -Wildcard ($target) {
+              "*msvc" { "x64-msvc" }
+              "*gnu"  { "x64-gnu" }
+              default { $target }
+            }
+
+            $name = "PalantirMC-$label.exe"
+            Copy-Item $_.FullName "release/$name"
+
+            # Regenerated after renaming: the sidecar has to name the file it
+            # actually sits next to for `sha256sum -c` to work.
+            $hash = (Get-FileHash "release/$name" -Algorithm SHA256).Hash.ToLower()
+            "$name  $hash" | Out-File -Encoding ascii "release/$name.sha256"
+
+            "| $name | $((Get-Item "release/$name").Length) bytes | $hash |" |
+              Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+          }
+
+          # A zip as well as the bare exe: some downloaders hand .exe files to
+          # the browser's safe-browsing flow, and a zip sidesteps that.
+          Get-ChildItem -Path release -Filter *.exe | ForEach-Object {
+            Compress-Archive -Path $_.FullName, "$($_.FullName).sha256" `
+              -DestinationPath ($_.FullName -replace '\.exe$', '.zip') -Force
+          }
+
+          if (Test-Path LICENSE) { Copy-Item LICENSE release/ }
+
+          Get-ChildItem release | Format-Table Name, Length | Out-String | Write-Host
+
+      - name: Create or refresh the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $tag = $env:REQUESTED
+          $files = Get-ChildItem release -File | ForEach-Object { $_.FullName }
+
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists -- replacing its files."
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files `
+              --verify-tag `
+              --title "PalantirMC $tag" `
+              --generate-notes
+          }
+
+          gh release view $tag --json url --jq .url | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY

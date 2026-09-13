@@ -1,0 +1,31 @@
+# Keeps the two supply chains that can break a Windows launcher current: the
+# crates (a wgpu or iced bump is what changes what the exe needs from the OS,
+# which is exactly what `.github/scripts/check_exe.py` guards) and the actions
+# themselves.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the patch-level churn instead of twenty, and the majors stay
+      # separate because those are the ones that need reading.
+      cargo-patch:
+        applies-to: version-updates
+        update-types: ["patch"]
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "ci"

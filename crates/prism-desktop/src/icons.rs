@@ -30,11 +30,10 @@
 //! 4. Anything else (unknown or empty) -> `default` grass bytes. There is
 //!    no letter-tile fallback anymore.
 //!
-//! # Toolbar-icon table ([`ui_icon`])
-//!
-//! Exact match over `play`, `kill`, `minus`, `check`, `help`, `about`,
-//! `folder`, `update`, `refresh`, `gear`; unknown/empty -> `help` (the blue
-//! `?` is the natural generic toolbar glyph).
+//! The launcher's *own* chrome — rail, dialogs, inline buttons — is not here:
+//! those symbols are drawn as tintable vectors in `crate::glyphs`, because a
+//! bitmap cannot take the colour of the button it sits in. What remains below
+//! is instance art, where Prism's recognisable Minecraft icons are the point.
 //!
 //! # Handle caching (why the grid does not re-decode PNGs every frame)
 //!
@@ -49,8 +48,8 @@
 //!   are drawn every frame, so they stay cached. Building a fresh handle
 //!   per `view()` call would therefore already avoid re-decoding.
 //! * Per-frame `from_memory` would still re-hash the PNG bytes on every
-//!   frame just to recompute the id, so [`instance_handle`]/[`ui_handle`]
-//!   go one step further: each canonical icon's `Handle` is built exactly
+//!   frame just to recompute the id, so [`instance_handle`]
+//!   goes one step further: each canonical icon's `Handle` is built exactly
 //!   once behind a `OnceLock` map and then cheaply cloned (`Handle` clone
 //!   is an `Arc` bump; the `Bytes` payload is the `&'static` embedded
 //!   slice, never copied). The grid does no hashing, no decoding and no IO
@@ -74,16 +73,6 @@ const CREEPER_BYTES: &[u8] = include_bytes!("../assets/icons/creeper.png");
 const TNT_BYTES: &[u8] = include_bytes!("../assets/icons/tnt.png");
 const GEAR_BYTES: &[u8] = include_bytes!("../assets/icons/gear.png");
 
-const PLAY_BYTES: &[u8] = include_bytes!("../assets/icons/play.png");
-const KILL_BYTES: &[u8] = include_bytes!("../assets/icons/kill.png");
-const MINUS_BYTES: &[u8] = include_bytes!("../assets/icons/minus.png");
-const CHECK_BYTES: &[u8] = include_bytes!("../assets/icons/check.png");
-const HELP_BYTES: &[u8] = include_bytes!("../assets/icons/help.png");
-const ABOUT_BYTES: &[u8] = include_bytes!("../assets/icons/about.png");
-const FOLDER_BYTES: &[u8] = include_bytes!("../assets/icons/folder.png");
-const UPDATE_BYTES: &[u8] = include_bytes!("../assets/icons/update.png");
-const REFRESH_BYTES: &[u8] = include_bytes!("../assets/icons/refresh.png");
-
 /// Canonical instance-icon names (file stems under `assets/icons/`).
 pub const INSTANCE_CANONICAL: [&str; 10] = [
     "chicken_legacy",
@@ -97,10 +86,6 @@ pub const INSTANCE_CANONICAL: [&str; 10] = [
     "tnt",
     "gear",
 ];
-
-/// Canonical toolbar-icon names (file stems under `assets/icons/`).
-pub const UI_CANONICAL: [&str; 10] =
-    ["play", "kill", "minus", "check", "help", "about", "folder", "update", "refresh", "gear"];
 
 /// Bytes for a canonical instance-icon name (always known-good input).
 fn instance_bytes(canonical: &str) -> &'static [u8] {
@@ -116,23 +101,6 @@ fn instance_bytes(canonical: &str) -> &'static [u8] {
         "gear" => GEAR_BYTES,
         // "default" and anything unexpected: Prism's default grass block.
         _ => DEFAULT_BYTES,
-    }
-}
-
-/// Bytes for a canonical toolbar-icon name (always known-good input).
-fn ui_bytes(canonical: &str) -> &'static [u8] {
-    match canonical {
-        "play" => PLAY_BYTES,
-        "kill" => KILL_BYTES,
-        "minus" => MINUS_BYTES,
-        "check" => CHECK_BYTES,
-        "about" => ABOUT_BYTES,
-        "folder" => FOLDER_BYTES,
-        "update" => UPDATE_BYTES,
-        "refresh" => REFRESH_BYTES,
-        "gear" => GEAR_BYTES,
-        // "help" and anything unexpected: the blue `?`.
-        _ => HELP_BYTES,
     }
 }
 
@@ -189,16 +157,6 @@ pub fn instance_icon(key: &str) -> &'static [u8] {
     instance_bytes(resolve_instance(key))
 }
 
-/// Embedded PNG bytes for a toolbar icon name (unknown/empty yields the
-/// blue `?` help glyph).
-pub fn ui_icon(name: &str) -> &'static [u8] {
-    if UI_CANONICAL.contains(&name) {
-        ui_bytes(name)
-    } else {
-        HELP_BYTES
-    }
-}
-
 /// Build the once-per-process handle cache for the given canonical set.
 fn build_handles(names: &[&'static str], bytes: fn(&str) -> &'static [u8]) -> HashMap<&'static str, Handle> {
     let mut map = HashMap::with_capacity(names.len());
@@ -216,12 +174,6 @@ fn instance_handles() -> &'static HashMap<&'static str, Handle> {
     CACHE.get_or_init(|| build_handles(&INSTANCE_CANONICAL, instance_icon))
 }
 
-/// Cached image handles for the canonical toolbar icons.
-fn ui_handles() -> &'static HashMap<&'static str, Handle> {
-    static CACHE: OnceLock<HashMap<&'static str, Handle>> = OnceLock::new();
-    CACHE.get_or_init(|| build_handles(&UI_CANONICAL, ui_icon))
-}
-
 /// Cached [`Handle`] for an instance `iconKey`: built once per canonical
 /// icon and cloned afterwards, so grid frames do no hashing, decoding or
 /// IO (see the module docs for the renderer-side caching analysis).
@@ -230,15 +182,6 @@ pub fn instance_handle(key: &str) -> Handle {
     match instance_handles().get(canonical) {
         Some(handle) => handle.clone(),
         None => Handle::from_memory(DEFAULT_BYTES),
-    }
-}
-
-/// Cached [`Handle`] for a toolbar icon name (unknown/empty -> help `?`).
-pub fn ui_handle(name: &str) -> Handle {
-    let canonical = if UI_CANONICAL.contains(&name) { name } else { "help" };
-    match ui_handles().get(canonical) {
-        Some(handle) => handle.clone(),
-        None => Handle::from_memory(HELP_BYTES),
     }
 }
 
@@ -338,35 +281,12 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_table_covers_all_names_with_valid_pngs() {
-        for name in UI_CANONICAL {
-            assert_png(ui_bytes(name));
-            assert_png(ui_icon(name));
-        }
-        assert_eq!(ui_icon("play"), PLAY_BYTES);
-        assert_eq!(ui_icon("kill"), KILL_BYTES);
-        assert_eq!(ui_icon("minus"), MINUS_BYTES);
-        assert_eq!(ui_icon("check"), CHECK_BYTES);
-        assert_eq!(ui_icon("help"), HELP_BYTES);
-        assert_eq!(ui_icon("about"), ABOUT_BYTES);
-        assert_eq!(ui_icon("folder"), FOLDER_BYTES);
-        assert_eq!(ui_icon("update"), UPDATE_BYTES);
-        assert_eq!(ui_icon("refresh"), REFRESH_BYTES);
-        assert_eq!(ui_icon("gear"), GEAR_BYTES);
-        // Unknown/empty toolbar names fall back to the blue `?`.
-        assert_eq!(ui_icon(""), HELP_BYTES);
-        assert_eq!(ui_icon("nope"), HELP_BYTES);
-    }
-
-    #[test]
     fn handles_are_stable_and_alias_shared_bytes() {
         // Same key -> same content-hash id, without touching a renderer.
         assert_eq!(instance_handle("chicken_legacy").id(), instance_handle("chicken_legacy").id());
-        assert_eq!(ui_handle("play").id(), ui_handle("play").id());
         // Aliases share the target's bytes, hence its id.
         assert_eq!(instance_handle("grass_legacy").id(), instance_handle("grass").id());
         assert_eq!(instance_handle("diamond").id(), instance_handle("dirt").id());
         assert_eq!(instance_handle("bogus").id(), instance_handle("default").id());
-        assert_eq!(ui_handle("bogus").id(), ui_handle("help").id());
     }
 }

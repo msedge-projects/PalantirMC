@@ -1,3 +1,6 @@
 /target
+/dist
 *.log
 .prism-test-data/
+/.unlazy/
+/.unlazy-hook-state.json

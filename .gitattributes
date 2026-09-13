@@ -1,0 +1,13 @@
+# The crates are built on Windows here and on Windows runners in CI, with
+# `core.autocrlf` set differently on each. `text=auto` means the *index* always
+# holds LF, so a checkout on either side produces the same diff -- without
+# forcing a line ending on anyone's worktree.
+* text=auto
+
+# Assets and build output must never be normalised: a rewritten PNG is a
+# corrupt PNG, and it would show up as a whole-file binary diff.
+*.png binary
+*.ico binary
+*.exe binary
+*.zip binary
+*.jar binary

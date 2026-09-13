@@ -1,18 +1,16 @@
-//! GUI view-model: instance list, override-gated settings and navigation.
+//! GUI view-model: the instance list and override-gated settings.
 //!
-//! This module is rendering-backend agnostic on purpose: it owns the data a
-//! future `iced`/`egui` frontend will paint (see [`crate::GuiBackend`]) and
-//! contains no windowing code, so it stays fully testable offline.
+//! No windowing code lives here, so the whole model stays testable offline;
+//! `prism-desktop`'s shell is the only thing that paints it.
 
 use prism_core::{
     instance::{groups::Groups, Instance},
     paths::PrismPaths,
     settings::{defaults, Settings},
 };
-use serde::{Deserialize, Serialize};
 
 /// One row of the instance list view.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceEntry {
     /// Folder id (`BaseInstance::id`).
     pub id: String,
@@ -278,65 +276,6 @@ impl SettingsModel {
     }
 }
 
-/// Top-level GUI pages (Prism's left sidebar).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub enum Page {
-    /// Instance grid (default landing page).
-    #[default]
-    Instances,
-    /// Per-instance mods view.
-    Mods,
-    /// Settings (global or per-instance).
-    Settings,
-    /// Account management.
-    Accounts,
-}
-
-impl Page {
-    /// Short human-readable title for tabs and window titles.
-    pub fn title(&self) -> &'static str {
-        match self {
-            Page::Instances => "Instances",
-            Page::Mods => "Mods",
-            Page::Settings => "Settings",
-            Page::Accounts => "Accounts",
-        }
-    }
-
-    /// All pages in sidebar order.
-    pub fn all() -> [Page; 4] {
-        [Page::Instances, Page::Mods, Page::Settings, Page::Accounts]
-    }
-}
-
-/// Where the GUI currently is: a page plus optional instance context (used
-/// by instance-scoped pages such as [`Page::Mods`] and [`Page::Settings`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Route {
-    /// Current page.
-    pub page: Page,
-    /// Selected instance id, if the page is instance-scoped.
-    pub instance_id: Option<String>,
-}
-
-impl Default for Route {
-    fn default() -> Self {
-        Route { page: Page::Instances, instance_id: None }
-    }
-}
-
-impl Route {
-    /// Route to a top-level page without instance context.
-    pub fn new(page: Page) -> Self {
-        Route { page, instance_id: None }
-    }
-
-    /// Route to an instance-scoped page.
-    pub fn with_instance(page: Page, id: impl Into<String>) -> Self {
-        Route { page, instance_id: Some(id.into()) }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,16 +398,5 @@ mod tests {
         model.save().unwrap();
         let back = Settings::load(model.global().path()).unwrap();
         assert_eq!(back.get_i64("MaxMemAlloc", 0), 3072);
-    }
-
-    #[test]
-    fn pages_and_routes_cover_sidebar() {
-        assert_eq!(Page::all().len(), 4);
-        assert_eq!(Page::Settings.title(), "Settings");
-        let route = Route::with_instance(Page::Mods, "my-pack");
-        assert_eq!(route.page, Page::Mods);
-        assert_eq!(route.instance_id.as_deref(), Some("my-pack"));
-        assert_eq!(Route::default().page, Page::Instances);
-        assert_eq!(Route::new(Page::Accounts).instance_id, None);
     }
 }
