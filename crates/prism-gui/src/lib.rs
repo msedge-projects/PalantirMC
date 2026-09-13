@@ -17,8 +17,13 @@
 
 // Permitted in tests only: the crate's own rule is about the models, and the
 // tests assert by unwrapping. See `prism-core/src/lib.rs` for the long version.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+//
+// Order matters and is not cosmetic: lint attributes are applied in sequence,
+// so this `allow` has to come *after* the `deny` below or the deny wins in the
+// test build. It was written the other way round first and the lint job caught
+// it -- prism-core, with the correct order, went green in the same run.
 #![deny(clippy::unwrap_used, clippy::expect_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![warn(missing_docs)]
 
 mod model;
