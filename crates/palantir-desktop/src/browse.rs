@@ -13,11 +13,15 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use palantir_loader::{PackFile, PackPlan};
+use palantir_net::download_many_with_progress;
+use palantir_net::meta::{BlockingHttpFetcher, Fetcher};
 use palantir_net::modrinth::{search_url_with_project_type, version_url, ModrinthProjectVersion};
 use serde::Deserialize;
 use sha1::Digest;
 
 use crate::catalog::LoaderKind;
+use crate::install::{self, Progress};
 
 /// User agent identifying this launcher, as Modrinth's API guidelines ask.
 pub const USER_AGENT: &str = concat!("PalantirMC/", env!("CARGO_PKG_VERSION"));
@@ -72,14 +76,20 @@ impl ContentType {
         [Self::Mods, Self::ResourcePacks, Self::DataPacks, Self::Shaders, Self::Modpacks]
     }
 
-    /// Target folder inside an instance.
-    pub const fn target_folder(self) -> &'static str {
+    /// Folder inside an instance this content goes into.
+    ///
+    /// `None` for modpacks, and that is the point of the option: a pack is
+    /// installed as a *new instance*, not into an existing one. The old
+    /// `"mods"` answer for it is what made Browse drop a `.mrpack` into the
+    /// selected instance's mod folder, where the game read it as a broken mod
+    /// and none of the pack was present.
+    pub const fn target_folder(self) -> Option<&'static str> {
         match self {
-            Self::Mods => "mods",
-            Self::ResourcePacks => "resourcepacks",
-            Self::DataPacks => "datapacks",
-            Self::Shaders => "shaderpacks",
-            Self::Modpacks => "mods",
+            Self::Mods => Some("mods"),
+            Self::ResourcePacks => Some("resourcepacks"),
+            Self::DataPacks => Some("datapacks"),
+            Self::Shaders => Some("shaderpacks"),
+            Self::Modpacks => None,
         }
     }
 
@@ -251,6 +261,25 @@ pub fn pick_version<'a>(
     versions.iter().filter(compatible).next()
 }
 
+/// Choose a project's newest downloadable version, whatever it targets.
+///
+/// Used for modpacks, and only for modpacks: a pack carries its own Minecraft
+/// version and loader in its index, so filtering one against the *selected*
+/// instance's version is how you end up refusing to install a 1.20.1 pack
+/// because 1.21 happens to be selected. Prism's list, in preference order:
+/// `release`, then `beta`, then `alpha`, in the API's publish-date order.
+pub fn newest_version(versions: &[ModrinthProjectVersion]) -> Option<&ModrinthProjectVersion> {
+    for kind in ["release", "beta", "alpha"] {
+        if let Some(found) = versions
+            .iter()
+            .find(|candidate| candidate.primary_file().is_some() && candidate.version_type == kind)
+        {
+            return Some(found);
+        }
+    }
+    versions.iter().find(|candidate| candidate.primary_file().is_some())
+}
+
 /// A file that was written into an instance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstalledFile {
@@ -269,6 +298,29 @@ pub fn sha1_hex(bytes: &[u8]) -> String {
     let mut hasher = sha1::Sha1::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+/// `sha1` of a file on disk, lowercase hex.
+///
+/// Streamed rather than read whole: a modpack's files include 40 MB mod jars,
+/// and the digest is the only thing about them this launcher wants in memory.
+/// The 64 KiB window is the same one the downloader writes through.
+pub fn sha1_file(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("reading '{}' failed: {error}", path.display()))?;
+    let mut hasher = sha1::Sha1::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("reading '{}' failed: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Make an API-provided file name safe to write on Windows.
@@ -338,53 +390,417 @@ pub fn install_version(
     Ok(InstalledFile { filename, path, bytes: bytes.len(), verified })
 }
 
-/// One imported modpack.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ImportedPack {
-    /// New instance id.
-    pub id: String,
-    /// Pack format that was detected.
-    pub format: &'static str,
+/// How many files one content install may write, dependencies included.
+///
+/// A bound rather than a policy: Modrinth's graph is user-generated and a cycle
+/// between two projects that both require each other is entirely possible. The
+/// `seen` set already stops a repeat; this stops a chain long enough to look
+/// like a hang. Sixteen covers a mod and its practical dependency set — Fabric
+/// API, a library, a config library, an API — several times over.
+pub const MAX_CONTENT_FILES: usize = 16;
+
+/// Content installed into an instance, dependencies included.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstalledContent {
+    /// Files written, the requested one first.
+    pub files: Vec<InstalledFile>,
+    /// Lines worth telling the user: dependencies that were skipped, and why.
+    pub notes: Vec<String>,
 }
 
-/// Import a dropped `.mrpack` / CurseForge zip as a new instance.
+impl InstalledContent {
+    /// `3 files (2.1 MiB)` for a status line.
+    pub fn summary(&self) -> String {
+        let bytes: usize = self.files.iter().map(|file| file.bytes).sum();
+        let verified = self.files.iter().filter(|file| file.verified).count();
+        let note = if verified == self.files.len() {
+            "sha1 verified"
+        } else if verified == 0 {
+            "size checked"
+        } else {
+            "sha1 verified where published"
+        };
+        format!("{} file(s) ({}, {note})", self.files.len(), human_bytes(bytes as u64))
+    }
+}
+
+/// Install a version and the dependencies it requires.
 ///
-/// Fully offline: the pack's `overrides` land in the instance and the loader is
-/// registered; remote files listed in the index are *not* downloaded, and the
-/// returned status says so.
-pub fn import_pack(
+/// Modrinth publishes a version's `dependencies` ([`ModrinthDependency`]) and
+/// this is the only thing that reads them. A `required` dependency that names a
+/// Modrinth project is resolved with the same rules as the requested file and
+/// installed too, and the walk continues into that dependency's own list. What does *not*
+/// happen is also deliberate: `optional` and `embedded` dependencies are left
+/// alone (installing an optional dependency changes what the user asked for),
+/// a dependency hosted off Modrinth is reported rather than guessed at, and a
+/// dependency that fails to download does not take the requested file down with
+/// it.
+///
+/// `seen` is keyed by project id, so two mods that both require Fabric API
+/// install it once, and a cycle terminates.
+pub fn install_with_dependencies(
+    client: &reqwest::blocking::Client,
+    target_dir: &Path,
+    version: &ModrinthProjectVersion,
+    game: &str,
+    loader: LoaderKind,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledContent, String> {
+    let mut installed = InstalledContent::default();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: Vec<(String, ModrinthProjectVersion)> =
+        vec![(version.project_id.clone(), version.clone())];
+    while let Some((project, version)) = queue.pop() {
+        let key = if project.is_empty() { version.id.clone() } else { project };
+        if !seen.insert(key) {
+            continue;
+        }
+        if installed.files.len() >= MAX_CONTENT_FILES {
+            installed.notes.push(format!(
+                "stopped after {MAX_CONTENT_FILES} files — install the remaining dependencies by name"
+            ));
+            break;
+        }
+        let requested = installed.files.is_empty();
+        progress(Progress::starting(format!("installing {}", version.name)));
+        match install_version(client, target_dir, &version) {
+            Ok(file) => installed.files.push(file),
+            // The file the user clicked is the reason for the install: its
+            // failure is the install's failure. A dependency's is not.
+            Err(error) if requested => return Err(error),
+            Err(error) => {
+                installed.notes.push(format!("{}: {error}", version.name));
+                continue;
+            }
+        }
+        for dependency in version.dependencies.iter().filter(|d| d.is_required()) {
+            let Some(project) = dependency.project() else {
+                installed.notes.push(format!(
+                    "{} also needs {} — it is not on Modrinth, so fetch it from where its author publishes it",
+                    version.name,
+                    dependency.file_name.as_deref().unwrap_or("a file")
+                ));
+                continue;
+            };
+            if seen.contains(project) {
+                continue;
+            }
+            let found = project_versions(client, project).and_then(|versions| {
+                pick_version(&versions, game, loader)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "no build of {project} matches {} {game}",
+                            loader.label()
+                        )
+                    })
+            });
+            match found {
+                Ok(found) => queue.push((project.to_string(), found)),
+                Err(error) => installed.notes.push(format!("{} needs {project}: {error}", version.name)),
+            }
+        }
+    }
+    Ok(installed)
+}
+
+/// What fetching a pack's listed files came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackFetch {
+    /// Files downloaded this time.
+    pub fetched: usize,
+    /// Files that were already on disk and correct enough to leave alone.
+    pub present: usize,
+    /// Bytes written.
+    pub bytes: u64,
+    /// One line per file that could not be installed.
+    pub failed: Vec<String>,
+}
+
+impl PackFetch {
+    /// `18 files (121.4 MiB), 2 already present` for a status line.
+    pub fn summary(&self) -> String {
+        let mut out = format!("{} file(s)", self.fetched);
+        if self.bytes > 0 {
+            out.push_str(&format!(" ({})", human_bytes(self.bytes)));
+        }
+        if self.present > 0 {
+            out.push_str(&format!(", {} already present", self.present));
+        }
+        out
+    }
+}
+
+/// Human byte size (binary units), for a status line.
+pub fn human_bytes(bytes: u64) -> String {
+    let value = bytes as f64;
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.1} GiB", value / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", value / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.0} KiB", value / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Download the files a pack's index lists into the instance it was imported
+/// into.
+///
+/// The pack's own `path` decides where each file lands, under the instance
+/// root; [`PackFile::relative_path`] has already refused anything that would
+/// escape it, and the refusal was reported at planning time rather than
+/// silently rewritten here. Every file is checked against the `sha1` the pack
+/// published, and a mismatch is deleted rather than kept: a corrupted mod jar
+/// is a crash at startup, while a missing one is a line the user can act on.
+///
+/// A file the pack lists with several URLs gets its mirrors tried in order when
+/// the first one fails — that is what the list is for.
+pub fn fetch_pack_files(
+    fetcher: &(dyn Fetcher + Sync),
+    root: &Path,
+    files: &[PackFile],
+    threads: usize,
+    progress: &mut dyn FnMut(Progress),
+) -> PackFetch {
+    let mut fetch = PackFetch::default();
+    let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+    // Parallel to `jobs`: the file each job came from and where it is going, for
+    // the digest and the mirrors after the download.
+    let mut planned: Vec<(&PackFile, PathBuf)> = Vec::new();
+    for file in files {
+        let Some(relative) = file.relative_path() else {
+            fetch
+                .failed
+                .push(format!("{}: refusing to write that path", file.path));
+            continue;
+        };
+        if file.downloads.is_empty() {
+            // `plan_pack` never produces this, but this is a public entry point
+            // and indexing `downloads[0]` is not how a missing URL should be
+            // reported.
+            fetch
+                .failed
+                .push(format!("{}: no download URL", file.path));
+            continue;
+        }
+        let dest = root.join(relative);
+        if file.satisfied_at(&dest) {
+            fetch.present += 1;
+            continue;
+        }
+        jobs.push((file.downloads[0].clone(), dest.clone()));
+        planned.push((file, dest));
+    }
+    if jobs.is_empty() {
+        return fetch;
+    }
+    let total = jobs.len();
+    let results = download_many_with_progress(fetcher, &jobs, threads.max(1), &mut |done, bytes| {
+        progress(Progress::new("pack files", done, total, bytes));
+    });
+    for (index, (_, result)) in results.into_iter().enumerate() {
+        let (file, dest) = &planned[index];
+        let outcome = match result {
+            Ok(bytes) => Ok(bytes),
+            // The first URL failed, so the mirrors get their turn before this
+            // file is written off. Sequential and rare: a pack lists mirrors
+            // for the file the primary host would not serve, not for balance.
+            Err(error) => {
+                let mut last = error.to_string();
+                let mut recovered = None;
+                for mirror in file.downloads.iter().skip(1) {
+                    match fetch_one(fetcher, mirror, dest) {
+                        Ok(bytes) => {
+                            recovered = Some(bytes);
+                            break;
+                        }
+                        Err(error) => last = error.to_string(),
+                    }
+                }
+                recovered.ok_or(last)
+            }
+        };
+        let bytes = match outcome {
+            Ok(bytes) => bytes,
+            Err(reason) => {
+                fetch.failed.push(format!("{}: {reason}", file.path));
+                continue;
+            }
+        };
+        match verify_pack_file(dest, file) {
+            Ok(()) => {
+                fetch.fetched += 1;
+                fetch.bytes += bytes;
+            }
+            Err(reason) => {
+                // Worse than missing: the next launch would trust it.
+                let _ = std::fs::remove_file(dest);
+                fetch.failed.push(format!("{}: {reason}", file.path));
+            }
+        }
+    }
+    fetch
+}
+
+/// Fetch one URL with `fetcher`, writing it into `dest`.
+fn fetch_one(fetcher: &(dyn Fetcher + Sync), url: &str, dest: &Path) -> Result<u64, String> {
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            palantir_core::util::ensure_dir(parent)
+                .map_err(|error| format!("creating {} failed: {error}", parent.display()))?;
+        }
+    }
+    // `.part` then rename, so an interrupted mirror attempt never leaves a
+    // half file where a later check would trust it.
+    let part = dest.with_extension("part");
+    let mut sink = std::fs::File::create(&part)
+        .map_err(|error| format!("writing {} failed: {error}", part.display()))?;
+    let written = fetcher
+        .fetch_to(url, &mut sink)
+        .map_err(|error| error.to_string())?;
+    drop(sink);
+    std::fs::rename(&part, dest)
+        .map_err(|error| format!("finishing {} failed: {error}", dest.display()))?;
+    Ok(written)
+}
+
+/// Check a fetched pack file against the `sha1` the pack published.
+fn verify_pack_file(dest: &Path, file: &PackFile) -> Result<(), String> {
+    let Some(expected) = file.sha1.as_deref().filter(|digest| !digest.is_empty()) else {
+        return Ok(());
+    };
+    let actual = sha1_file(dest)?;
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!("sha1 mismatch: packed {expected}, downloaded {actual}"))
+    }
+}
+
+/// A pack installed as a new instance, files and all.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstalledPack {
+    /// The new instance's id (its folder name).
+    pub id: String,
+    /// What the files came to.
+    pub fetch: PackFetch,
+    /// Entries the pack listed that were not installed, with the reason.
+    pub skipped: Vec<String>,
+}
+
+/// Install a Modrinth modpack as a new instance.
+///
+/// The order is the only one that works: the `.mrpack` is fetched and cached,
+/// its plan is read, the archive is imported (overrides written, loader
+/// registered), and only then are the files the index lists downloaded into the
+/// new instance. Installing a pack by dropping its archive into `mods/` — which
+/// is what this used to do — left the game reading a zip as a broken mod and
+/// none of the pack present.
+///
+/// The archive stays in `<data root>/cache/packs/`: it is the only thing that
+/// knows what the pack contains, so a failed fetch can be retried and a repair
+/// has something to work from.
+pub fn install_pack(
+    client: &reqwest::blocking::Client,
+    paths: &palantir_core::paths::PalantirPaths,
+    version: &ModrinthProjectVersion,
+    name: &str,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledPack, String> {
+    let file = version
+        .primary_file()
+        .ok_or_else(|| format!("{} has no downloadable file", version.name))?;
+    if file.url.is_empty() {
+        return Err(format!("{} publishes no direct download", version.name));
+    }
+    let filename = safe_file_name(&file.filename)?;
+    let cache_dir = paths.root.join("cache").join("packs");
+    palantir_core::util::ensure_dir(&cache_dir)
+        .map_err(|error| format!("creating {} failed: {error}", cache_dir.display()))?;
+    let archive = cache_dir.join(&filename);
+    progress(Progress::starting(format!("downloading {filename}")));
+    let mut response = client
+        .get(&file.url)
+        .send()
+        .map_err(|error| format!("downloading {filename} failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("downloading {filename} failed: HTTP {status}"));
+    }
+    {
+        let mut sink = std::fs::File::create(&archive)
+            .map_err(|error| format!("writing {} failed: {error}", archive.display()))?;
+        std::io::copy(&mut response, &mut sink)
+            .map_err(|error| format!("writing {} failed: {error}", archive.display()))?;
+    }
+    if let Some(expected) = file.sha1().filter(|digest| !digest.is_empty()) {
+        let actual = sha1_file(&archive)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            let _ = std::fs::remove_file(&archive);
+            return Err(format!("sha1 mismatch for {filename}: packed {expected}, downloaded {actual}"));
+        }
+    }
+    // Read once and hand the same bytes to the plan and the import: a pack's
+    // overrides make it tens of megabytes, and neither call needs its own copy.
+    let bytes = std::fs::read(&archive)
+        .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
+    import_and_fetch(client, paths, &bytes, name, progress)
+}
+
+/// Install a pack that is already on disk (a dropped `.mrpack` or `.zip`).
+///
+/// The same tail as [`install_pack`] without the download: the instance name is
+/// the archive's file stem, which is the only name available and the one the
+/// user would have typed.
+pub fn install_pack_archive(
+    client: &reqwest::blocking::Client,
     paths: &palantir_core::paths::PalantirPaths,
     archive: &Path,
-) -> Result<ImportedPack, String> {
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledPack, String> {
     let bytes = std::fs::read(archive)
         .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
-    let instances_dir = paths.configured_instances_dir();
     let name = archive
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Imported pack".to_string());
-    let (format, created) = match palantir_loader::detect_format(&bytes) {
-        palantir_loader::PackFormat::MrPack => (
-            "Modrinth .mrpack",
-            palantir_loader::import_mrpack(&bytes, &instances_dir, &name),
-        ),
-        palantir_loader::PackFormat::CurseForge => (
-            "CurseForge pack",
-            palantir_loader::import_curseforge(&bytes, &instances_dir, &name),
-        ),
-        palantir_loader::PackFormat::Unknown => {
-            return Err(format!(
-                "'{}' is neither a .mrpack nor a CurseForge pack",
-                archive.display()
-            ))
+    import_and_fetch(client, paths, &bytes, name.as_str(), progress)
+}
+
+/// Import pack bytes and fetch everything the index lists.
+fn import_and_fetch(
+    client: &reqwest::blocking::Client,
+    paths: &palantir_core::paths::PalantirPaths,
+    bytes: &[u8],
+    name: &str,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledPack, String> {
+    let plan: PackPlan = palantir_loader::plan_pack(bytes)
+        .map_err(|error| format!("that archive is not a readable pack: {error}"))?;
+    let instances_dir = paths.configured_instances_dir();
+    let root = match palantir_loader::detect_format(bytes) {
+        palantir_loader::PackFormat::MrPack => {
+            palantir_loader::import_mrpack(bytes, &instances_dir, name)
         }
-    };
-    let root = created.map_err(|error| format!("importing the pack failed: {error}"))?;
+        palantir_loader::PackFormat::CurseForge => {
+            palantir_loader::import_curseforge(bytes, &instances_dir, name)
+        }
+        palantir_loader::PackFormat::Unknown => {
+            return Err("that archive is neither a .mrpack nor a CurseForge pack".to_string())
+        }
+    }
+    .map_err(|error| format!("importing the pack failed: {error}"))?;
     let id = root
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| name.clone());
-    Ok(ImportedPack { id, format })
+        .unwrap_or_else(|| name.to_string());
+    // The Browse client is reused for the files so Modrinth gets the same
+    // `User-Agent` it got for the search that led here.
+    let fetcher = BlockingHttpFetcher::with_client(client.clone(), HTTP_TIMEOUT);
+    let fetch = fetch_pack_files(&fetcher, &root, &plan.files, install::DEFAULT_THREADS, progress);
+    Ok(InstalledPack { id, fetch, skipped: plan.skipped })
 }
 
 #[cfg(test)]
@@ -413,7 +829,39 @@ mod tests {
             } else {
                 Vec::new()
             },
+            // No dependencies unless a test asks for them: the field exists so
+            // an installer can follow Modrinth's graph, and an empty list is
+            // what the overwhelming majority of versions publish.
+            dependencies: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_modpack_targets_an_instance_of_its_own() {
+        assert_eq!(ContentType::Mods.target_folder(), Some("mods"));
+        assert_eq!(ContentType::Shaders.target_folder(), Some("shaderpacks"));
+        assert_eq!(
+            ContentType::Modpacks.target_folder(),
+            None,
+            "a pack is an instance, not a folder inside one"
+        );
+        assert!(!ContentType::Modpacks.needs_loader());
+        assert_eq!(ContentType::Modpacks.api_value(), "modpack");
+    }
+
+    #[test]
+    fn the_newest_pack_is_chosen_without_regard_to_the_selection() {
+        let versions = vec![
+            version("beta-new", "beta", &["1.21.4"], &["fabric"], true),
+            version("release-old", "release", &["1.20.1"], &["forge"], true),
+            version("no-file", "release", &["1.20.1"], &["forge"], false),
+        ];
+        // Releases first, whatever game version or loader they carry: the pack
+        // brings its own, and there is no selected instance to match.
+        assert_eq!(newest_version(&versions).unwrap().name, "release-old");
+        assert!(newest_version(&[]).is_none());
+        let only_beta = vec![version("b", "beta", &["1.21"], &[], true)];
+        assert_eq!(newest_version(&only_beta).unwrap().name, "b");
     }
 
     #[test]
@@ -536,14 +984,68 @@ mod tests {
     }
 
     #[test]
-    fn pack_import_rejects_non_pack_files() {
+    fn pack_install_rejects_non_pack_files() {
         let dir = tempfile::tempdir().unwrap();
         let paths = palantir_core::paths::PalantirPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
+        let client = client().unwrap();
         let bogus = dir.path().join("not-a-pack.zip");
         std::fs::write(&bogus, b"definitely not a zip archive").unwrap();
-        let error = import_pack(&paths, &bogus).unwrap_err();
-        assert!(error.contains("neither"), "error: {error}");
-        assert!(import_pack(&paths, &dir.path().join("missing.zip")).is_err());
+        let error = install_pack_archive(&client, &paths, &bogus, &mut |_| {}).unwrap_err();
+        assert!(error.contains("readable pack"), "error: {error}");
+        assert!(install_pack_archive(&client, &paths, &dir.path().join("missing.zip"), &mut |_| {})
+            .is_err());
+    }
+
+    #[test]
+    fn a_pack_file_is_fetched_verified_and_dropped_when_it_does_not_match() {
+        // The fetch is driven through the same `Fetcher` the install phases use,
+        // so the whole path is exercised without a network: one good file, one
+        // whose bytes are not what the pack's `sha1` says, and one already
+        // present.
+        let dir = tempfile::tempdir().unwrap();
+        let good = b"good mod bytes";
+        let files = vec![
+            PackFile {
+                path: "mods/good.jar".to_string(),
+                downloads: vec!["https://cdn.example.invalid/good.jar".to_string()],
+                sha1: Some(sha1_hex(good)),
+                size: good.len() as u64,
+            },
+            PackFile {
+                path: "mods/bad.jar".to_string(),
+                downloads: vec!["https://cdn.example.invalid/bad.jar".to_string()],
+                sha1: Some("0000000000000000000000000000000000000000".to_string()),
+                size: 4,
+            },
+            PackFile {
+                path: "shaderpacks/here.zip".to_string(),
+                downloads: vec!["https://cdn.example.invalid/here.zip".to_string()],
+                sha1: None,
+                size: 0,
+            },
+        ];
+        std::fs::create_dir_all(dir.path().join("shaderpacks")).unwrap();
+        std::fs::write(dir.path().join("shaderpacks").join("here.zip"), b"x").unwrap();
+        let mut fetcher = palantir_net::MapFetcher::new();
+        fetcher.insert("https://cdn.example.invalid/good.jar", good.to_vec());
+        fetcher.insert("https://cdn.example.invalid/bad.jar", b"tampered".to_vec());
+        // Spelled the way `MapFetcher` stores them, so the assertion below is
+        // about the pack's files rather than about the fixture.
+        assert!(!fetcher.is_empty());
+        let mut reports = 0usize;
+        let fetch = fetch_pack_files(&fetcher, dir.path(), &files, 2, &mut |_| reports += 1);
+        assert_eq!(fetch.fetched, 1);
+        assert_eq!(fetch.present, 1, "a file that is already there is left alone");
+        assert_eq!(fetch.bytes, good.len() as u64);
+        assert_eq!(fetch.failed.len(), 1);
+        assert!(fetch.failed[0].contains("mods/bad.jar"), "{:?}", fetch.failed);
+        assert!(fetch.failed[0].contains("sha1 mismatch"));
+        assert!(dir.path().join("mods").join("good.jar").is_file());
+        assert!(
+            !dir.path().join("mods").join("bad.jar").exists(),
+            "a file that fails its digest is removed, not kept for the next launch to trust"
+        );
+        assert!(reports > 0, "the bar hears about the phase");
     }
 }

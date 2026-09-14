@@ -615,7 +615,7 @@ pub fn prepare_launch(
     // live at the root, not inside the instance folder.
     let mut vars = launch::instance_var_map(paths, &instance, &resolution.profile);
     vars.insert("version_name".to_string(), resolution.profile.minecraft_version.clone());
-    let mc_args = launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
+    let mut mc_args = launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
     let script = launch::create_launch_script(
         &resolution.profile,
         Some(session),
@@ -633,6 +633,11 @@ pub fn prepare_launch(
     for line in script.lines() {
         log(line.to_string());
     }
+    // After the script, deliberately: `windowParams` is the script's own way of
+    // saying this, and the game arguments are what the game is actually spawned
+    // with. Writing both would have the compat artifact and the real launch
+    // disagree about where the window size comes from.
+    append_window_args(&mut mc_args, &window, &model, &mut *log);
 
     // Java: the instance's own path when it is usable, then the paths this
     // launcher's settings name, then a runtime this machine already has, and
@@ -1573,6 +1578,96 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     send_done(&mut sender, run_id, outcome);
 }
 
+/// Hand the instance's window size to the game.
+///
+/// `--width`/`--height` are Minecraft's own options — the client's argument
+/// parser defaults to 854x480, which is exactly this launcher's default, and
+/// these two flags are how Prism's sibling launchers set a window too. Nothing
+/// here invented an argument: before this, the size was written into the launch
+/// *script* (a Prism-compat artifact no part of this launcher reads back) and
+/// nowhere else, so an instance set to 1920x1080 opened at 854x480 and the
+/// setting looked broken.
+///
+/// Three deliberate decisions:
+///
+/// * Nothing is appended unless the instance actually overrides its window.
+///   `OverrideWindow` off means "let the game decide", and passing the defaults
+///   anyway would stop Minecraft from honouring the size it remembers.
+/// * A version whose own argument list already contains `--width` is left
+///   alone. Some patched profiles carry the flags themselves, and a second pair
+///   would put the last one on top of the intended one by accident.
+/// * "Maximized" is translated, not faked. Minecraft has no maximize flag (the
+///   legacy launcher's `maximized` line is for the pre-1.6 wrapper), so the
+///   request is passed as the size of the monitor's work area: the same pixels a
+///   maximized window covers, minus the taskbar. That is a window that fills the
+///   screen rather than one the window manager has maximized, and the log says
+///   so rather than leaving the difference to be discovered.
+fn append_window_args(
+    mc_args: &mut Vec<String>,
+    window: &launch::WindowParams,
+    model: &SettingsModel,
+    log: &mut dyn FnMut(String),
+) {
+    let overridden = model.get_bool("OverrideWindow", None, false);
+    let maximized = overridden && window.maximized;
+    // Asked for only when it will be used: the query is a Win32 call, and an
+    // instance that does not override its window must not pay for one.
+    let work_area = if maximized {
+        crate::native::primary_work_area()
+            .map(|area| (area.width as i64, area.height as i64))
+    } else {
+        None
+    };
+    match window_flags(mc_args, window, overridden, work_area) {
+        Some((width, height)) => {
+            log(if maximized {
+                format!(
+                    "launching at {width}x{height} — Minecraft has no maximize argument, so the work area is the closest honest translation"
+                )
+            } else {
+                format!("window size {width}x{height}")
+            });
+            mc_args.push("--width".to_string());
+            mc_args.push(width.to_string());
+            mc_args.push("--height".to_string());
+            mc_args.push(height.to_string());
+        }
+        // The one case worth a word: the user asked for a maximized window and
+        // the launcher cannot read the monitor, so it passed nothing. Saying so
+        // beats a window that quietly opened at the wrong size.
+        None if maximized => log(
+            "this instance asks to launch maximized, but neither the monitor's work area nor a usable window size could be read — letting the game pick".to_string(),
+        ),
+        None => {}
+    }
+}
+
+/// The window size to pass to the game, or `None` to pass none.
+///
+/// Pure so the decision table is testable without a settings model or a
+/// monitor: nothing is appended when the instance does not override its window,
+/// when the profile already passes `--width` itself, or when the numbers are not
+/// both positive. A maximized request uses `work_area` when the primary
+/// monitor's is known, and falls back to the configured size when it is not.
+fn window_flags(
+    mc_args: &[String],
+    window: &launch::WindowParams,
+    overridden: bool,
+    work_area: Option<(i64, i64)>,
+) -> Option<(i64, i64)> {
+    if !overridden || mc_args.iter().any(|arg| arg == "--width") {
+        return None;
+    }
+    let (width, height) = match work_area.filter(|_| window.maximized) {
+        Some(area) => area,
+        None => (window.width, window.height),
+    };
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
 /// Lines the game prints once its own window is up.
 ///
 /// The exact answer to "is it running yet" would be to ask Windows whether the
@@ -2418,6 +2513,36 @@ mod tests {
     /// Both halves matter: a marker that matches too early would end the bar
     /// while the player is still waiting, and one that never matches would leave
     /// it travelling behind a game that is already running.
+    #[test]
+    fn the_instance_s_window_size_reaches_the_game() {
+        let window = launch::WindowParams { width: 1920, height: 1080, maximized: false };
+        // No override: nothing is passed, so the game keeps whatever it
+        // remembers. Passing the defaults would override that silently.
+        assert_eq!(window_flags(&[], &window, false, None), None);
+        assert_eq!(window_flags(&[], &window, true, None), Some((1920, 1080)));
+        // A profile that already passes the flags keeps them.
+        let existing = vec!["--width".to_string(), "800".to_string()];
+        assert_eq!(window_flags(&existing, &window, true, None), None);
+        // A size the game cannot use is not passed at all.
+        let zero = launch::WindowParams { width: 0, height: 0, maximized: false };
+        assert_eq!(window_flags(&[], &zero, true, None), None);
+        let negative = launch::WindowParams { width: 1920, height: -1, maximized: false };
+        assert_eq!(window_flags(&[], &negative, true, None), None);
+        // Maximized is the monitor's work area, and the configured size is the
+        // fallback when the monitor cannot be read.
+        let maximized = launch::WindowParams { width: 854, height: 480, maximized: true };
+        assert_eq!(
+            window_flags(&[], &maximized, true, Some((1920, 1040))),
+            Some((1920, 1040))
+        );
+        assert_eq!(window_flags(&[], &maximized, true, None), Some((854, 480)));
+        // A work area only matters when the request is to maximize.
+        assert_eq!(
+            window_flags(&[], &window, true, Some((1920, 1040))),
+            Some((1920, 1080))
+        );
+    }
+
     #[test]
     fn the_games_window_shows_up_in_its_own_output() {
         let up = [

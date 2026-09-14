@@ -64,6 +64,21 @@ pub const ASSET_OBJECT_BASE_URL: &str = "https://resources.download.minecraft.ne
 /// nothing.
 pub const DEFAULT_THREADS: usize = 16;
 
+/// A native jar to unpack, with the entries its own metadata excludes.
+///
+/// The list travels with the jar rather than being looked up again at extract
+/// time because the library that named the jar is the only thing that knows it:
+/// `extract.exclude` is a property of the component, and flattening every entry
+/// regardless is what put `META-INF/MANIFEST.MF` on the JVM's library path as
+/// `natives/MANIFEST.MF`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeJar {
+    /// The jar in the shared library cache.
+    pub path: PathBuf,
+    /// `extract.exclude` prefixes from the library (`["META-INF/"]`).
+    pub excludes: Vec<String>,
+}
+
 /// One file that has to exist on disk before the game can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadJob {
@@ -122,7 +137,7 @@ pub struct InstallPlan {
     /// Files that are missing (or too small to trust) and must be fetched.
     pub jobs: Vec<DownloadJob>,
     /// Native jars to extract once they exist.
-    pub natives: Vec<PathBuf>,
+    pub natives: Vec<NativeJar>,
     /// Directory the natives are extracted into.
     pub natives_dir: PathBuf,
     /// The asset index, when the profile names one.
@@ -286,7 +301,10 @@ pub fn plan(
                 // Every native bucket is a candidate for extraction; only the
                 // ones this JVM actually loads get extracted, which the
                 // 32/64-bit selection has already decided.
-                plan.natives.push(dest.clone());
+                plan.natives.push(NativeJar {
+                    path: dest.clone(),
+                    excludes: library.extract_excludes.clone(),
+                });
             }
             match file_facts(library, &rel, arch) {
                 Some((url, sha1, size)) => {
@@ -641,18 +659,19 @@ pub fn run(
     if !plan.natives.is_empty() {
         let rename_jnilib = cfg!(target_os = "macos");
         for jar in &plan.natives {
-            if !jar.is_file() {
+            if !jar.path.is_file() {
                 continue;
             }
             match palantir_loader::archive::extract_zip_file_flat(
-                jar,
+                &jar.path,
                 &plan.natives_dir,
                 rename_jnilib,
+                &jar.excludes,
             ) {
                 Ok(count) => report.natives_extracted += count,
                 Err(error) => report
                     .failed
-                    .push(format!("extracting {}: {error}", jar.display())),
+                    .push(format!("extracting {}: {error}", jar.path.display())),
             }
         }
         if report.natives_extracted > 0 {
@@ -751,6 +770,10 @@ fn run_assets(
     };
     let mut jobs: Vec<(String, PathBuf)> = Vec::new();
     let mut labels: Vec<String> = Vec::new();
+    // Parallel to `jobs`: the digest each object has to hash to. An asset object
+    // is addressed *by* its digest, so this costs nothing to know and is the one
+    // check that catches a corrupted or half-written object.
+    let mut digests: Vec<String> = Vec::new();
     for (name, object) in &index.objects {
         if object.hash.len() < 2 {
             continue;
@@ -766,6 +789,7 @@ fn run_assets(
         }
         jobs.push((asset_object_url(&object.hash), dest));
         labels.push(name.clone());
+        digests.push(object.hash.to_ascii_lowercase());
     }
     if !jobs.is_empty() {
         reporter.log(format!("downloading {} asset object(s)…", jobs.len()));
@@ -775,10 +799,27 @@ fn run_assets(
         let results = download_with_progress(fetcher, &jobs, threads, "asset objects", reporter);
         for (index_in_jobs, (url, result)) in results.into_iter().enumerate() {
             match result {
-                Ok(bytes) => {
-                    report.objects_downloaded += 1;
-                    report.bytes += bytes;
-                }
+                Ok(bytes) => match crate::browse::sha1_file(&jobs[index_in_jobs].1) {
+                    Ok(actual) if actual.eq_ignore_ascii_case(&digests[index_in_jobs]) => {
+                        report.objects_downloaded += 1;
+                        report.bytes += bytes;
+                    }
+                    Ok(actual) => {
+                        // The file is named after the digest it should have. A
+                        // mismatch means the bytes are not the object, and it is
+                        // deleted for the same reason a failed library digest
+                        // is: keeping it means every later launch trusts it,
+                        // because the present path checks size and not content.
+                        let _ = std::fs::remove_file(&jobs[index_in_jobs].1);
+                        report.failed.push(format!(
+                            "asset {}: sha1 mismatch: expected {}, got {actual}",
+                            labels[index_in_jobs], digests[index_in_jobs]
+                        ));
+                    }
+                    Err(reason) => report
+                        .failed
+                        .push(format!("asset {}: {reason}", labels[index_in_jobs])),
+                },
                 Err(error) => report
                     .failed
                     .push(format!("asset {}: {error}", labels[index_in_jobs])),
@@ -1042,9 +1083,12 @@ mod tests {
         let plan = plan(&paths, &instance_root, &profile, &ctx);
         assert_eq!(plan.jobs.len(), 1, "jobs: {:?}", plan.jobs);
         assert_eq!(plan.natives.len(), 1);
-        assert_eq!(plan.natives[0], paths.root.join("libraries").join(&native_path));
+        assert_eq!(plan.natives[0].path, paths.root.join("libraries").join(&native_path));
         assert_eq!(plan.natives_dir, instance_root.join("natives"));
         assert_eq!(plan.jobs[0].sha1, "def");
+        // The library's own `extract.exclude` travels with the jar, because
+        // nothing else at extract time knows which entries are not natives.
+        assert_eq!(plan.natives[0].excludes, vec!["META-INF/".to_string()]);
     }
 
     #[test]
@@ -1097,7 +1141,7 @@ mod tests {
         );
         assert_eq!(sixty_four.jobs.len(), 1, "jobs: {:?}", sixty_four.jobs);
         assert!(
-            sixty_four.natives[0].to_string_lossy().ends_with("-64.jar"),
+            sixty_four.natives[0].path.to_string_lossy().ends_with("-64.jar"),
             "a 64-bit JVM gets the 64-bit jar: {:?}",
             sixty_four.natives[0]
         );
@@ -1106,7 +1150,7 @@ mod tests {
         let thirty_two = plan(&paths, &paths.root, &profile, &ctx);
         assert_eq!(thirty_two.natives.len(), 1, "natives: {:?}", thirty_two.natives);
         assert!(
-            thirty_two.natives[0].to_string_lossy().ends_with("-32.jar"),
+            thirty_two.natives[0].path.to_string_lossy().ends_with("-32.jar"),
             "a 32-bit JVM gets the 32-bit jar: {:?}",
             thirty_two.natives[0]
         );
@@ -1151,7 +1195,10 @@ mod tests {
         json!({
             "name": "org.lwjgl:lwjgl:3.3.1",
             "natives": serde_json::Value::Object(natives),
-            "downloads": { "classifiers": serde_json::Value::Object(classifiers) }
+            "downloads": { "classifiers": serde_json::Value::Object(classifiers) },
+            // Mojang's native libraries all carry this, and it is the reason the
+            // extractor takes an exclude list at all.
+            "extract": { "exclude": ["META-INF/"] }
         })
     }
 

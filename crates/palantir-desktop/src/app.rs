@@ -48,7 +48,7 @@ use palantir_core::settings::{defaults, Settings};
 
 use crate::accounts::AccountEntry;
 use crate::brand;
-use crate::browse::{self, ContentType, Hit, ImportedPack};
+use crate::browse::{self, ContentType, Hit};
 use crate::catalog::{self, LoaderKind, VersionCatalog};
 use crate::glyphs::{self, glyph};
 use crate::icons::instance_handle;
@@ -239,6 +239,9 @@ pub const BROWSE_ID: &str = "palantirmc-browse";
 pub const CREATE_SEARCH_ID: &str = "palantirmc-create-search";
 /// Subscription id of a Modrinth download.
 pub const INSTALL_ID: &str = "palantirmc-install";
+
+/// Channel id for the dropped-archive install worker.
+pub const PACK_ID: &str = "palantirmc-pack";
 /// Subscription id of a launcher scan.
 pub const IMPORT_ID: &str = "palantirmc-import";
 /// Subscription id of the screenshot scan and thumbnail pass.
@@ -657,6 +660,13 @@ pub enum Task {
         /// Outcome line or failure.
         result: Result<String, String>,
     },
+    /// A dropped pack finished installing (bytes, id, outcome).
+    PackInstalled {
+        /// Request sequence.
+        seq: u64,
+        /// Outcome line or failure.
+        result: Result<String, String>,
+    },
     /// Launcher scan finished.
     ImportScan(Vec<instances::ImportCandidate>),
     /// Screenshot scan and thumbnail pass finished.
@@ -951,6 +961,20 @@ pub enum Message {
         /// Run id.
         run_id: u64,
     },
+    /// How far a content install has got.
+    ///
+    /// The same kind of fact as [`Message::LaunchProgress`] and deliberately a
+    /// second variant rather than a shared one: a run is identified by the
+    /// launch it belongs to and this by the browse install sequence, and
+    /// conflating the two would let a finished install move a running game's
+    /// bar. A pack can be hundreds of megabytes, which is the whole reason it
+    /// needs a bar rather than a status line.
+    ContentProgress {
+        /// Install sequence this belongs to.
+        seq: u64,
+        /// What the install has finished so far.
+        progress: Progress,
+    },
     /// One frame of the indeterminate bar's travel.
     BarTick,
 
@@ -1141,6 +1165,10 @@ pub struct PalantirApp {
     shots: ShotState,
     run_seq: u64,
     install_seq: u64,
+    /// The dropped archive whose install worker is running, if one is.
+    pack_installing: Option<PathBuf>,
+    /// How far the current content install has got, if one is running.
+    content_progress: Option<Progress>,
     active_run: Option<ActiveRunData>,
     /// How far the running launch's current phase has got, if one is fetching.
     ///
@@ -1246,6 +1274,8 @@ impl PalantirApp {
             worlds: Vec::new(),
             run_seq: 0,
             install_seq: 0,
+            pack_installing: None,
+            content_progress: None,
             active_run: None,
             run_progress: None,
             bar_phase: 0.0,
@@ -1307,6 +1337,8 @@ impl PalantirApp {
             worlds: Vec::new(),
             run_seq: 0,
             install_seq: 0,
+            pack_installing: None,
+            content_progress: None,
             active_run: None,
             run_progress: None,
             bar_phase: 0.0,
@@ -2292,6 +2324,28 @@ impl PalantirApp {
         ));
     }
 
+    /// Install a dropped pack: create the instance, then fetch its files.
+    ///
+    /// Only the path is kept; the worker reads the archive itself. The read, the
+    /// import and every download happen off the UI thread, because a pack's
+    /// files are hundreds of megabytes and the window has to stay alive while
+    /// they arrive.
+    fn start_pack_install(&mut self, archive: PathBuf) {
+        // Bumping the sequence is what makes an install in flight stale: its
+        // files still land on disk, but its report is dropped, because a status
+        // line for work the user has already moved past is the one thing the
+        // strip at the bottom of the window should not be showing.
+        self.install_seq += 1;
+        self.pack_installing = Some(archive.clone());
+        // One install at a time: the browse card's spinner is the same fact.
+        self.browse.installing = None;
+        self.content_progress = None;
+        self.set_status(format!(
+            "Installing '{}'…",
+            archive.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()
+        ));
+    }
+
     fn start_create_search(&mut self) {
         let query = self.create.query.trim().to_string();
         if query.is_empty() {
@@ -2306,43 +2360,71 @@ impl PalantirApp {
 
     /// Resolve + download the right file for the selection (or a new instance).
     fn start_install(&mut self, project: String, title: String, for_instance: Option<String>) {
+        // A modpack is not installed *into* an instance — it becomes one, with
+        // the Minecraft version and the loader its own index declares. Requiring
+        // a selection here is what used to make Browse drop the `.mrpack` into
+        // the selected instance's `mods/`, where the game read a zip as a broken
+        // mod and none of the pack was present.
+        let makes_instance = self.browse.content_type == ContentType::Modpacks;
+        // Read before the selection is consumed below: the status line is built
+        // from it at the end of this function.
+        let target_name = for_instance.clone().or_else(|| self.selected.clone());
         let target = for_instance.or_else(|| self.selected.clone());
-        let Some(id) = target else {
-            self.set_error("Pick an instance to install into first.");
-            return;
-        };
-        let card = self.cards.iter().find(|card| card.id == id).cloned();
-        let (game, loader) = match card {
-            Some(card) => (card.mc_version.clone(), card.loader),
-            None => {
-                // Freshly created instance: read it back from disk.
-                match Instance::open(&self.instances_dir.join(&id)) {
-                    Ok(instance) => {
-                        let card = instances::summarize(&self.instances_dir, &entry_for(&instance));
-                        (card.mc_version, card.loader)
-                    }
-                    Err(error) => {
-                        self.set_error(format!("cannot inspect '{id}': {error}"));
-                        return;
+        if !makes_instance {
+            let Some(id) = target else {
+                self.set_error("Pick an instance to install into first.");
+                return;
+            };
+            let card = self.cards.iter().find(|card| card.id == id).cloned();
+            let (game, loader) = match card {
+                Some(card) => (card.mc_version.clone(), card.loader),
+                None => {
+                    // Freshly created instance: read it back from disk.
+                    match Instance::open(&self.instances_dir.join(&id)) {
+                        Ok(instance) => {
+                            let card =
+                                instances::summarize(&self.instances_dir, &entry_for(&instance));
+                            (card.mc_version, card.loader)
+                        }
+                        Err(error) => {
+                            self.set_error(format!("cannot inspect '{id}': {error}"));
+                            return;
+                        }
                     }
                 }
+            };
+            if self.browse.content_type.needs_loader() && !loader.loads_mods() {
+                self.set_error(format!(
+                    "'{}' is vanilla — install a loader (Fabric/NeoForge/Forge/Quilt) before adding mods.",
+                    id
+                ));
+                return;
             }
-        };
-        if self.browse.content_type.needs_loader() && !loader.loads_mods() {
-            self.set_error(format!(
-                "'{}' is vanilla — install a loader (Fabric/NeoForge/Forge/Quilt) before adding mods.",
-                id
-            ));
-            return;
-        }
-        if game.trim().is_empty() {
-            self.set_error(format!("'{id}' has no Minecraft version recorded; open its settings first."));
-            return;
+            if game.trim().is_empty() {
+                self.set_error(format!(
+                    "'{id}' has no Minecraft version recorded; open its settings first."
+                ));
+                return;
+            }
         }
         self.install_seq += 1;
         self.browse.installing = Some((project.clone(), title.clone()));
         self.browse.last_result = None;
-        self.set_status(format!("Installing '{title}' into '{id}'…"));
+        self.content_progress = None;
+        // The newer install supersedes the older one, whichever door it came
+        // through. Without this the pack worker would still be subscribed, and
+        // the new sequence id would start it again on the archive it already
+        // has. One install at a time, and the most recent request is the one
+        // that runs.
+        self.pack_installing = None;
+        self.set_status(if makes_instance {
+            format!("Installing '{title}' as a new instance…")
+        } else {
+            format!(
+                "Installing '{title}' into '{}'…",
+                target_name.unwrap_or_default()
+            )
+        });
     }
 
     // ---- import ----------------------------------------------------------
@@ -2384,27 +2466,17 @@ impl PalantirApp {
                 self.create.awaiting_upload = false;
                 self.set_status(format!("Using '{}' as the instance icon.", path.display()));
             }
-            (Modal::Create, "mrpack" | "zip") => match browse::import_pack(&self.paths, &path) {
-                Ok(ImportedPack { id, format }) => {
-                    self.modal = Modal::None;
-                    self.reload_instances();
-                    self.selected = Some(id.clone());
-                    self.refresh_selection_caches();
-                    self.set_status(format!(
-                        "Imported '{id}' from a {format}; remote pack files still need downloading."
-                    ));
-                }
-                Err(error) => self.create.error = Some(error),
-            },
-            (_, "mrpack" | "zip") => match browse::import_pack(&self.paths, &path) {
-                Ok(ImportedPack { id, format }) => {
-                    self.reload_instances();
-                    self.selected = Some(id.clone());
-                    self.refresh_selection_caches();
-                    self.set_status(format!("Imported '{id}' from a {format}."));
-                }
-                Err(error) => self.set_error(error),
-            },
+            // A dropped pack is installed, not merely imported: both drop
+            // targets land on the same worker, which creates the instance,
+            // writes the overrides and then fetches the files the index lists.
+            // Importing used to be the whole job, and the status line said the
+            // rest "still needs downloading" with nothing in the launcher that
+            // could do it.
+            (Modal::Create, "mrpack" | "zip") => {
+                self.modal = Modal::None;
+                self.start_pack_install(path);
+            }
+            (_, "mrpack" | "zip") => self.start_pack_install(path),
             (_, "png") => {
                 let Some(id) = self.selected.clone() else {
                     return self.set_error("Pick an instance first, then drop a PNG to use it as its icon.");
@@ -2497,11 +2569,18 @@ impl PalantirApp {
                     return;
                 }
                 self.browse.installing = None;
+                self.content_progress = None;
                 match result {
                     Ok(line) => {
                         self.browse.last_result = Some(line.clone());
                         self.set_status(line.clone());
-                        self.push_console(vec![line]);
+                        self.push_console(vec![line.clone()]);
+                        // A modpack install *created* an instance, so the cards
+                        // and the instance list are stale now in a way the other
+                        // content types cannot make them.
+                        if self.browse.content_type == ContentType::Modpacks {
+                            self.reload_instances();
+                        }
                         self.refresh_selection_caches();
                     }
                     Err(error) => {
@@ -2514,6 +2593,23 @@ impl PalantirApp {
                 self.shots.loading = false;
                 self.shots.scanned = true;
                 self.shots.tiles = tiles;
+            }
+            Task::PackInstalled { seq, result } => {
+                if seq != self.install_seq {
+                    return;
+                }
+                self.pack_installing = None;
+                self.content_progress = None;
+                match result {
+                    Ok(line) => {
+                        self.set_status(line.clone());
+                        self.push_console(vec![line]);
+                        // A pack install always creates an instance, so the list
+                        // on screen is stale by definition.
+                        self.reload_instances();
+                    }
+                    Err(error) => self.set_error(format!("Installing the pack failed: {error}")),
+                }
             }
             Task::ImportScan(candidates) => {
                 self.import.loading = false;
@@ -3006,11 +3102,13 @@ impl PalantirApp {
             Message::CreateAwaitPack => {
                 // Nothing to toggle: the drop handler already routes a
                 // `.mrpack`/`.zip` dropped on the open Create dialog into
-                // `browse::import_pack`. All that was missing was telling the
-                // user that, instead of opening the *icon* picker.
+                // `PalantirApp::start_pack_install`, which creates the instance,
+                // writes the overrides and then fetches the files the pack
+                // lists. All that was missing was telling the user that, instead
+                // of opening the *icon* picker.
                 self.create.awaiting_upload = false;
                 self.set_status(
-                    "Drop a .mrpack or CurseForge .zip anywhere on this window to create the instance from it.",
+                    "Drop a .mrpack or CurseForge .zip anywhere on this window to install it as a new instance.",
                 );
                 Command::none()
             }
@@ -3210,6 +3308,18 @@ impl PalantirApp {
                 }
                 Command::none()
             }
+            Message::ContentProgress { seq, progress } => {
+                if seq == self.install_seq {
+                    // The status line says which file is being installed and the
+                    // bar says the install is still going, which is the whole
+                    // point: a pack's files are minutes of work, and a strip
+                    // that only ever showed the last file name could not tell
+                    // "working" from "stuck".
+                    self.set_status(progress.status_line());
+                    self.content_progress = Some(progress);
+                }
+                Command::none()
+            }
             Message::LaunchStarted { run_id } => {
                 let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
@@ -3349,16 +3459,46 @@ impl PalantirApp {
             let selected = self.selected.clone();
             let content_type = self.browse.content_type;
             subs.push(one_shot((INSTALL_ID, seq, content_type), 8, move |mut sender| {
-                let result = install_into(
-                    &paths,
-                    &cards,
-                    selected.as_deref(),
-                    &project,
-                    &title,
-                    content_type,
-                );
+                // Progress is a level, so a full channel drops a report rather
+                // than blocking the worker that is fetching files. The final
+                // `TaskDone` is the opposite — it is the outcome — so it is the
+                // one message this closure must not lose.
+                let result = {
+                    let mut report = |progress: Progress| {
+                        let _ = sender.try_send(Message::ContentProgress { seq, progress });
+                    };
+                    install_into(
+                        &paths,
+                        &cards,
+                        selected.as_deref(),
+                        &project,
+                        &title,
+                        content_type,
+                        &mut report,
+                    )
+                };
                 let _ = sender
                     .try_send(Message::TaskDone(Box::new(Task::Installed { seq, title, result })));
+            }));
+        }
+        if let Some(archive) = self.pack_installing.clone() {
+            // The same install sequence the browse path uses: both are "install
+            // content", neither can be running at once, and starting either one
+            // is what invalidates the other's progress reports.
+            let seq = self.install_seq;
+            let paths = self.paths.clone();
+            subs.push(one_shot((PACK_ID, seq), 8, move |mut sender| {
+                let result = {
+                    let mut report = |progress: Progress| {
+                        let _ = sender.try_send(Message::ContentProgress { seq, progress });
+                    };
+                    browse::client().and_then(|client| {
+                        browse::install_pack_archive(&client, &paths, &archive, &mut report)
+                            .map(|pack| pack_line(&pack))
+                    })
+                };
+                let _ = sender
+                    .try_send(Message::TaskDone(Box::new(Task::PackInstalled { seq, result })));
             }));
         }
         if self.import.loading {
@@ -3409,7 +3549,10 @@ impl PalantirApp {
             let client_id = prefs::load(&self.home).microsoft_client_id();
             subs.push(microsoft_sign_in(client_id));
         }
-        if self.run_progress.as_ref().is_some_and(Progress::is_indeterminate) {
+        if self
+            .active_progress()
+            .is_some_and(Progress::is_indeterminate)
+        {
             // Only while the bar has no total. A determinate phase moves on its
             // own reports, and a bar that is not travelling must not hold the
             // window awake at twelve frames a second for the length of a game.
@@ -3983,15 +4126,21 @@ impl PalantirApp {
 
     /// Browse: Modrinth search + one-click install.
     fn view_browse(&self) -> Element<'_, Message> {
-        let target = match self.selected_card() {
-            Some(card) if self.browse.content_type.needs_loader() && card.has_loader() => {
-                format!("{} ({})", card.name, card.subtitle())
+        let target = if self.browse.content_type == ContentType::Modpacks {
+            // A pack is its own instance, so the selected one is irrelevant and
+            // saying which is selected would be a lie about what Install does.
+            "a new instance — the pack's own version and loader".to_string()
+        } else {
+            match self.selected_card() {
+                Some(card) if self.browse.content_type.needs_loader() && card.has_loader() => {
+                    format!("{} ({})", card.name, card.subtitle())
+                }
+                Some(card) if self.browse.content_type.needs_loader() => {
+                    format!("{} — vanilla, install a loader first", card.name)
+                }
+                Some(card) => format!("{} ({})", card.name, card.subtitle()),
+                None => "no instance selected".to_string(),
             }
-            Some(card) if self.browse.content_type.needs_loader() => {
-                format!("{} — vanilla, install a loader first", card.name)
-            }
-            Some(card) => format!("{} ({})", card.name, card.subtitle()),
-            None => "no instance selected".to_string(),
         };
         let mut body = column![
             row![
@@ -4041,9 +4190,10 @@ impl PalantirApp {
     }
 
     fn browse_row(&self, hit: &Hit) -> Element<'static, Message> {
-        let installable = self.selected_card().is_some()
-            && (!self.browse.content_type.needs_loader()
-                || self.selected_card().map(InstanceCard::has_loader).unwrap_or(false));
+        let installable = self.browse.content_type == ContentType::Modpacks
+            || (self.selected_card().is_some()
+                && (!self.browse.content_type.needs_loader()
+                    || self.selected_card().map(InstanceCard::has_loader).unwrap_or(false)));
         let installing = self
             .browse
             .installing
@@ -4224,7 +4374,7 @@ impl PalantirApp {
             .align_items(iced::Alignment::Center),
         ]
         .spacing(12);
-        if let Some(progress) = &self.run_progress {
+        if let Some(progress) = self.active_progress() {
             page = page.push(self.view_progress_strip(progress));
         }
         page.push(
@@ -5452,7 +5602,7 @@ impl PalantirApp {
         ]
         .spacing(8)
         .align_items(iced::Alignment::Center);
-        if let Some(progress) = &self.run_progress {
+        if let Some(progress) = self.active_progress() {
             bar = bar.push(self.bar_widget(
                 progress,
                 Length::Fixed(STATUS_BAR_WIDTH),
@@ -5508,6 +5658,18 @@ impl PalantirApp {
             .height(Length::Fixed(height))
             .style(theme::bar)
             .into()
+    }
+
+    /// The bar the window should draw.
+    ///
+    /// Two things can be fetching at once — a launch that is still installing
+    /// and a content install the user started while it ran — so this is a
+    /// precedence rather than a single slot: the launch's phase wins, because the
+    /// launch is what the user is waiting for, and the install's bar takes over
+    /// the moment the launch has nothing left to report. `run_progress` is
+    /// cleared when the game's window comes up, so the handover is automatic.
+    fn active_progress(&self) -> Option<&Progress> {
+        self.run_progress.as_ref().or(self.content_progress.as_ref())
     }
 
     fn view_progress_strip(&self, progress: &Progress) -> Element<'_, Message> {
@@ -5568,6 +5730,11 @@ impl PalantirApp {
     /// What the bar is drawing, if a phase is fetching.
     pub fn run_progress(&self) -> Option<&Progress> {
         self.run_progress.as_ref()
+    }
+
+    /// The archive whose pack install is in flight, if one is.
+    pub fn pending_pack(&self) -> Option<&std::path::Path> {
+        self.pack_installing.as_deref()
     }
 
     /// Where the indeterminate bar's segment sits, for the tests that move it.
@@ -6333,6 +6500,12 @@ pub fn entry_for(instance: &Instance) -> palantir_gui::InstanceEntry {
 }
 
 /// Resolve and download a project's best file for the target instance.
+///
+/// Two shapes, because Modrinth publishes two kinds of thing behind one API. A
+/// mod, pack of assets, shader or data pack goes into an instance's folder and
+/// brings its required dependencies ([`browse::install_with_dependencies`]); a
+/// modpack *is* an instance, so it is downloaded, imported and populated
+/// ([`browse::install_pack`]) with no selection required at all.
 fn install_into(
     paths: &PalantirPaths,
     cards: &[InstanceCard],
@@ -6340,7 +6513,16 @@ fn install_into(
     project: &str,
     title: &str,
     content_type: ContentType,
+    progress: &mut dyn FnMut(Progress),
 ) -> Result<String, String> {
+    let client = browse::client()?;
+    let versions = browse::project_versions(&client, project)?;
+    if content_type == ContentType::Modpacks {
+        let version = browse::newest_version(&versions)
+            .ok_or_else(|| format!("no downloadable {title} pack was published"))?;
+        let pack = browse::install_pack(&client, paths, version, title, progress)?;
+        return Ok(pack_line(&pack));
+    }
     let id = selected.ok_or_else(|| "no instance selected".to_string())?;
     let (game, loader) = match cards.iter().find(|card| card.id == id) {
         Some(card) => (card.mc_version.clone(), card.loader),
@@ -6356,37 +6538,59 @@ fn install_into(
             "'{id}' is vanilla — install a loader before adding mods"
         ));
     }
-    let client = browse::client()?;
-    let versions = browse::project_versions(&client, project)?;
     let version = browse::pick_version(&versions, &game, loader).ok_or_else(|| {
         format!("no {title} release matches {} {}", loader.label(), game)
     })?;
-    let target_dir = paths
-        .configured_instances_dir()
-        .join(id)
-        .join(content_type.target_folder());
-    let installed = browse::install_version(&client, &target_dir, version)?;
-    let note = if installed.verified {
-        "sha1 verified"
-    } else {
-        "size checked"
-    };
-    Ok(format!(
-        "Installed {} ({}) into '{id}' — {note}",
-        installed.filename,
-        installed_bytes(installed.bytes)
-    ))
+    let folder = content_type.target_folder().ok_or_else(|| {
+        format!(
+            "{} content is installed as its own instance",
+            content_type.label()
+        )
+    })?;
+    let target_dir = paths.configured_instances_dir().join(id).join(folder);
+    let installed =
+        browse::install_with_dependencies(&client, &target_dir, version, &game, loader, progress)?;
+    let mut line = format!("Installed {}", installed.summary());
+    if installed.files.len() > 1 {
+        let names: Vec<&str> = installed
+            .files
+            .iter()
+            .skip(1)
+            .map(|file| file.filename.as_str())
+            .collect();
+        line.push_str(&format!(" including the {} it needs", names.join(", ")));
+    }
+    line.push_str(&format!(" into '{id}'"));
+    if !installed.notes.is_empty() {
+        line.push_str(&format!(" — {}", installed.notes.join("; ")));
+    }
+    Ok(line)
 }
 
-/// Human byte size for status lines.
-fn installed_bytes(bytes: usize) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.0} KiB", bytes as f64 / 1024.0)
-    } else {
-        format!("{bytes} B")
+/// The status line for a finished modpack install.
+///
+/// One function because two workers produce it — the Browse card's install and a
+/// dropped archive — and a user who installed the same pack both ways should not
+/// be able to tell which door it came through. What it deliberately does *not*
+/// hide is the third number: entries the pack listed that were not installed,
+/// which is what a CurseForge pack always has ([`palantir_loader::PackPlan`]).
+fn pack_line(pack: &browse::InstalledPack) -> String {
+    let mut line = format!(
+        "Installed '{}' as a new instance — {}",
+        pack.id,
+        pack.fetch.summary()
+    );
+    if !pack.fetch.failed.is_empty() {
+        line.push_str(&format!(", {} file(s) failed", pack.fetch.failed.len()));
     }
+    if !pack.skipped.is_empty() {
+        line.push_str(&format!(
+            "; {} entr{} not installed",
+            pack.skipped.len(),
+            if pack.skipped.len() == 1 { "y was" } else { "ies were" }
+        ));
+    }
+    line
 }
 
 #[cfg(test)]
@@ -7524,6 +7728,89 @@ mod tests {
         std::fs::write(&weird, b"x").unwrap();
         let _ = app.update(Message::FileDropped(weird));
         assert!(app.status().contains("not used"), "status: {}", app.status());
+
+        // A dropped pack becomes a job for the pack worker rather than being
+        // imported inline: importing it here would block the UI thread for the
+        // length of a several-hundred-megabyte download.
+        let pack = dir.path().join("My Pack.mrpack");
+        std::fs::write(&pack, b"not really a zip").unwrap();
+        let _ = app.update(Message::FileDropped(pack.clone()));
+        assert_eq!(app.pending_pack(), Some(pack.as_path()));
+        assert!(app.status().contains("My Pack"), "status: {}", app.status());
+    }
+
+    #[test]
+    fn a_content_install_draws_the_bar_and_hands_it_back() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Modded", "26.2")).unwrap();
+        app.reload_instances();
+        app.selected = Some(created.id.clone());
+        let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        let seq = app.install_seq;
+        let level = Progress::starting("installing Sodium");
+        let _ = app.update(Message::ContentProgress { seq, progress: level.clone() });
+        assert_eq!(app.active_progress(), Some(&level));
+        assert!(app.status().contains("Sodium"), "status: {}", app.status());
+        // A report from a superseded install must not move this one's bar.
+        let _ = app.update(Message::ContentProgress {
+            seq: seq + 7,
+            progress: Progress::new("pack files", 1, 2, 10),
+        });
+        assert_eq!(app.active_progress(), Some(&level), "stale install progress is dropped");
+        // The result takes the bar down, and a finished install leaves nothing
+        // for the tick subscription to keep redrawing.
+        let _ = app.update(Message::TaskDone(Box::new(Task::Installed {
+            seq,
+            title: "Sodium".to_string(),
+            result: Ok("Installed 2 file(s) (1.2 MiB, sha1 verified) into 'Modded'".to_string()),
+        })));
+        assert!(app.active_progress().is_none());
+        assert!(app.status().contains("1.2 MiB"));
+        assert!(app.browse_state().installing.is_none());
+        // …and a launch's phase, when there is one, wins over an install's: the
+        // launch is what the user is waiting on, and the install's bar comes back
+        // the moment the launch has nothing left to report.
+        let _ = app.update(Message::ContentProgress { seq, progress: level.clone() });
+        let launch = Progress::new("files", 1, 4, 1024);
+        app.run_progress = Some(launch.clone());
+        assert_eq!(app.active_progress(), Some(&launch));
+        app.run_progress = None;
+        assert_eq!(app.active_progress(), Some(&level));
+    }
+
+    #[test]
+    fn a_finished_pack_install_reloads_the_instance_list() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let archive = paths.root.join("My Pack.mrpack");
+        std::fs::write(&archive, b"x").unwrap();
+        app.start_pack_install(archive);
+        let seq = app.install_seq;
+        assert_eq!(app.pending_pack(), Some(paths.root.join("My Pack.mrpack").as_path()));
+        let _ = app.update(Message::TaskDone(Box::new(Task::PackInstalled {
+            seq,
+            result: Ok("Installed 'My Pack' as a new instance — 3 file(s) (12.0 MiB)".to_string()),
+        })));
+        assert!(app.pending_pack().is_none());
+        assert!(app.active_progress().is_none());
+        assert!(app.status().contains("My Pack"), "status: {}", app.status());
+        // A stale result is dropped, and dropped means nothing changes: not the
+        // status line, not the install flag.
+        app.start_pack_install(paths.root.join("Other.mrpack"));
+        let fresh = app.install_seq;
+        let _ = app.update(Message::TaskDone(Box::new(Task::PackInstalled {
+            seq,
+            result: Err("stale".to_string()),
+        })));
+        assert!(!app.status_is_error(), "status: {}", app.status());
+        assert_eq!(app.pending_pack(), Some(paths.root.join("Other.mrpack").as_path()));
+        let _ = app.update(Message::TaskDone(Box::new(Task::PackInstalled {
+            seq: fresh,
+            result: Err("that archive is not a readable pack".to_string()),
+        })));
+        assert!(app.status_is_error());
+        assert!(app.pending_pack().is_none());
     }
 
     #[test]
@@ -7954,8 +8241,12 @@ mod tests {
 
     #[test]
     fn byte_sizes_are_human_readable() {
-        assert_eq!(installed_bytes(512), "512 B");
-        assert_eq!(installed_bytes(2048), "2 KiB");
-        assert_eq!(installed_bytes(3 * 1024 * 1024), "3.0 MiB");
+        // One implementation, in `browse`, because a pack's total and a single
+        // file's size are the same kind of number and used to be formatted by
+        // two functions that could disagree.
+        assert_eq!(browse::human_bytes(512), "512 B");
+        assert_eq!(browse::human_bytes(2048), "2 KiB");
+        assert_eq!(browse::human_bytes(3 * 1024 * 1024), "3.0 MiB");
+        assert_eq!(browse::human_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
     }
 }
