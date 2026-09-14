@@ -62,30 +62,37 @@ fn resolve_against_the_live_service(
     .expect("resolving the profile")
 }
 
-/// The Fabric build the service says supports `game`, newest first.
+/// The newest Fabric build and the game it pins itself to.
 ///
 /// Fabric's version list is game-agnostic — no entry pins Minecraft — so the
-/// game a build supports is only in the version *file*, which is the same thing
-/// the launcher has to read before it can offer a build with confidence.
-fn fabric_build_for(store: &mut OnlineMetaStore, game: &str) -> String {
+/// game a build supports is only in the version *file*: exactly the thing the
+/// launcher reads before it can claim a build works. Asking the service for the
+/// pair, instead of naming one, is what keeps this test from needing an edit
+/// every release.
+fn newest_fabric_build(store: &mut OnlineMetaStore) -> (String, String) {
     let list = store
         .version_list(FABRIC_UID)
         .expect("fabric version list is required for this test");
     assert!(!list.is_empty(), "the service listed no Fabric builds at all");
-    for entry in list.iter().rev().take(40).filter(|e| !e.version.is_empty()) {
+    let mut tried = 0usize;
+    for entry in list.iter().rev().filter(|e| !e.version.is_empty()) {
+        if tried >= 20 {
+            break;
+        }
+        tried += 1;
         let file = match store.version_file(FABRIC_UID, &entry.version) {
             Ok(file) => file,
             Err(_) => continue,
         };
-        if file
+        if let Some(pin) = file
             .requires
             .iter()
-            .any(|r| r.uid == "net.minecraft" && r.equals_version == game)
+            .find(|r| r.uid == "net.minecraft" && !r.equals_version.is_empty())
         {
-            return entry.version.clone();
+            return (entry.version.clone(), pin.equals_version.clone());
         }
     }
-    panic!("no Fabric build on the service claims to support {game}");
+    panic!("none of the {tried} newest Fabric builds names a Minecraft version it supports");
 }
 
 /// Instance creation and instance loading, end to end, against the service the
@@ -182,9 +189,13 @@ fn a_created_instance_resolves_against_the_live_service() {
 #[ignore = "live: reaches the metadata service"]
 fn a_fabric_instance_gets_its_loader_and_mappings_from_the_live_service() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let instance = fresh_instance(tmp.path(), "Live Fabric");
     let mut store = live_store(&tmp.path().join("meta"));
-    let build = fabric_build_for(&mut store, GAME);
+    let (build, game) = newest_fabric_build(&mut store);
+
+    let instances = tmp.path().join("instances");
+    std::fs::create_dir_all(&instances).expect("creating the instances dir");
+    let instance =
+        Instance::create(&instances, "Live Fabric", &game).expect("creating the instance");
 
     // What the create dialog does for a chosen loader.
     let path = instance.mmc_pack_path();
@@ -196,7 +207,7 @@ fn a_fabric_instance_gets_its_loader_and_mappings_from_the_live_service() {
     assert_eq!(
         resolution.severity(),
         ProblemSeverity::None,
-        "resolution reported: {:?}",
+        "Fabric {build} on Minecraft {game} reported: {:?}",
         resolution.problems
     );
     assert_eq!(
@@ -226,7 +237,7 @@ fn a_fabric_instance_gets_its_loader_and_mappings_from_the_live_service() {
         .iter()
         .find(|c| c.uid == "net.fabricmc.intermediary")
         .expect("the mappings the loader requires were never resolved");
-    assert_eq!(mappings.version, GAME);
+    assert_eq!(mappings.version, game);
 }
 
 /// A version list is what a build list is built from, and the layout it is read
