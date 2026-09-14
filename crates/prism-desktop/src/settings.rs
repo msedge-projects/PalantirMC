@@ -1913,7 +1913,7 @@ mod tests {
         // finished, must be drawn between the two ends rather than at the end.
         let mut anim = SwitchAnim::default();
         let start = std::time::Instant::now();
-        anim.set(Flag::ShowPlayTime.id(), true, start);
+        anim.set(Flag::ShowPlayTime.id(), false, true, start);
         let running = anim.tick(start + crate::anim::DURATION / 2);
         assert!(running, "the slide should still be running halfway through");
         let progress = anim.progress(Flag::ShowPlayTime.id(), true);

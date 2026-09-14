@@ -2327,7 +2327,10 @@ impl PrismApp {
                 // disagree with what it was showing.
                 let value = !flag.get(&self.prefs);
                 flag.set(&mut self.prefs, value);
-                self.switches.set(flag.id(), value, Instant::now());
+                // Both ends travel: the first click on a switch has no stored
+                // position, and the value it just left is what says where the
+                // knob was drawn.
+                self.switches.set(flag.id(), !value, value, Instant::now());
                 self.switch_pointer.pressed = None;
                 // A switch can take away the screen it was pressed from: with
                 // the Worlds entry hidden, being *on* Worlds would leave a page

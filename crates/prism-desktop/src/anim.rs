@@ -79,14 +79,22 @@ impl SwitchAnim {
         }
     }
 
-    /// Record that the setting behind `id` is now `on`, and start its slide.
+    /// Record that the setting behind `id` has moved from `from` to `to`, and
+    /// start its slide.
     ///
     /// Called from `update`, where the message that changed the setting is
     /// handled — not from the view, which cannot know whether the value it is
-    /// drawing is new. A value that did not actually change starts no slide.
-    pub fn set(&mut self, id: &'static str, on: bool, now: Instant) {
-        let target = if on { 1.0 } else { 0.0 };
-        let knob = self.knobs.entry(id).or_insert_with(|| Knob::settled(target));
+    /// drawing is new. Both ends travel because a switch that has never been
+    /// touched has no entry here, and the only thing that says where it *was*
+    /// is the value it just left. Guessing that from `to` alone would make a
+    /// first click the one click that jumps instead of sliding.
+    pub fn set(&mut self, id: &'static str, from: bool, to: bool, now: Instant) {
+        let target = if to { 1.0 } else { 0.0 };
+        // A value that did not actually change starts no slide.
+        let knob = self
+            .knobs
+            .entry(id)
+            .or_insert_with(|| Knob::settled(if from { 1.0 } else { 0.0 }));
         if knob.to == target {
             return;
         }
@@ -96,13 +104,6 @@ impl SwitchAnim {
         knob.from = knob.progress;
         knob.to = target;
         knob.began = Some(now);
-    }
-
-    /// Set a switch with no slide — for a value that arrived from somewhere
-    /// other than a click, such as the prefs file at startup.
-    pub fn jump(&mut self, id: &'static str, on: bool) {
-        let target = if on { 1.0 } else { 0.0 };
-        self.knobs.insert(id, Knob::settled(target));
     }
 
     /// Whether any knob is still travelling.
@@ -172,9 +173,9 @@ mod tests {
     fn a_click_starts_a_slide_and_arrives_on_the_deadline() {
         let mut anim = SwitchAnim::default();
         let start = Instant::now();
-        anim.set("a", true, start);
+        anim.set("a", false, true, start);
         assert!(anim.animating());
-        assert_eq!(anim.progress("a", true), 0.0, "a slide begins where the knob is");
+        assert_eq!(anim.progress("a", true), 0.0, "a slide begins where the knob was");
 
         // Halfway is strictly between the ends — a jump would be at 1.0 here.
         assert!(anim.tick(start + DURATION / 2));
@@ -193,7 +194,7 @@ mod tests {
         // frames and thirty early ones both finish at the same wall clock time.
         let start = Instant::now();
         let mut slow = SwitchAnim::default();
-        slow.set("a", true, start);
+        slow.set("a", false, true, start);
         for step in 1..=3 {
             slow.tick(start + DURATION.mul_f32(step as f32 / 3.0));
         }
@@ -201,7 +202,7 @@ mod tests {
         assert!(!slow.animating());
 
         let mut fast = SwitchAnim::default();
-        fast.set("a", true, start);
+        fast.set("a", false, true, start);
         for step in 1..=30 {
             fast.tick(start + Duration::from_micros(step * 6_666));
         }
@@ -215,12 +216,12 @@ mod tests {
         // start over: it reverses from the pixel it is on.
         let mut anim = SwitchAnim::default();
         let start = Instant::now();
-        anim.set("a", true, start);
+        anim.set("a", false, true, start);
         anim.tick(start + DURATION / 2);
         let halfway = anim.progress("a", true);
         assert!(halfway > 0.0 && halfway < 1.0);
 
-        anim.set("a", false, start + DURATION / 2);
+        anim.set("a", true, false, start + DURATION / 2);
         assert_eq!(anim.progress("a", true), halfway, "the turn-around keeps the position");
         anim.tick(start + DURATION);
         assert_eq!(anim.progress("a", false), 0.0);
@@ -231,12 +232,12 @@ mod tests {
     fn setting_the_value_it_already_has_starts_nothing() {
         let mut anim = SwitchAnim::default();
         let start = Instant::now();
-        anim.set("a", false, start);
+        anim.set("a", false, false, start);
         assert!(!anim.animating(), "off to off is not a transition");
-        anim.set("a", true, start);
+        anim.set("a", false, true, start);
         assert!(anim.animating());
         anim.tick(start + DURATION);
-        anim.set("a", true, start + DURATION);
+        anim.set("a", true, true, start + DURATION);
         assert!(!anim.animating(), "on to on is not a transition either");
     }
 
@@ -244,23 +245,11 @@ mod tests {
     fn switches_do_not_share_a_position() {
         let mut anim = SwitchAnim::default();
         let start = Instant::now();
-        anim.set("a", true, start);
-        anim.set("b", false, start);
+        anim.set("a", false, true, start);
+        anim.set("b", true, false, start);
         anim.tick(start + DURATION);
         assert_eq!(anim.progress("a", true), 1.0);
         assert_eq!(anim.progress("b", false), 0.0);
-    }
-
-    #[test]
-    fn a_jump_arrives_without_a_slide() {
-        // The startup path: the prefs file says what is on, and a shell that
-        // animated all thirty switches into place on its first frame would be
-        // both wrong and expensive.
-        let mut anim = SwitchAnim::default();
-        anim.jump("a", true);
-        assert_eq!(anim.progress("a", true), 1.0);
-        assert!(!anim.animating());
-        assert!(!anim.tick(Instant::now()), "a jump leaves nothing to animate");
     }
 
     #[test]
