@@ -1344,6 +1344,18 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     // for the duration of that block.
     let mut tokens_message: Option<Message> = None;
 
+    // The launch has a bar of its own, and this is its first half. Everything
+    // before the game's own output is indeterminate work — signing in, resolving
+    // a version, installing what is missing, unpacking natives — and the install
+    // phases report their own finer levels over the top of this one as they run.
+    // What this adds is the part that used to be nothing but console lines: the
+    // launcher saying, before a single number exists, that it has started.
+    send_progress(
+        &mut sender,
+        run_id,
+        install::Progress::starting(format!("preparing '{}'", params.instance_id)),
+    );
+
     // Each line of the preparation block goes out as it happens rather than
     // being held back into batches. Batching is right for the game's own output,
     // which arrives hundreds of lines at a time, but this phase is I/O-bound and
@@ -1412,6 +1424,15 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
         }
         LaunchReadiness::Ready(plan) => plan,
     };
+    // The second half of the launch's bar: everything is installed, and from
+    // here the work is the JVM starting, loading its classes and building the
+    // game's window. Nothing countable happens for the next ten to forty
+    // seconds, which is exactly what an indeterminate bar is for.
+    send_progress(
+        &mut sender,
+        run_id,
+        install::Progress::starting(format!("starting '{}'", params.instance_id)),
+    );
     {
         let mut log = |line: String| {
             let _ = send_batch(&mut sender, run_id, vec![line], &journal);
@@ -1484,9 +1505,19 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     spawn_reader(stderr, true, tx);
     // Worker loop: batch whatever the readers deliver.
     let mut buf: Vec<String> = Vec::new();
+    // Whether the game has told us its window is up, so the launch's bar can
+    // stop pretending there is more to wait for.
+    let mut game_up = false;
     loop {
         match rx.recv_timeout(Duration::from_millis(60)) {
             Ok((is_stderr, line)) => {
+                if !game_up && !is_stderr && startup_line(&line) {
+                    game_up = true;
+                    if !send_message(&mut sender, Message::LaunchStarted { run_id }) {
+                        kill_slot(&slot);
+                        return;
+                    }
+                }
                 if is_stderr {
                     buf.push(format!("[stderr] {line}"));
                 } else {
@@ -1540,6 +1571,32 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     }
     send_batch(&mut sender, run_id, vec![outcome.clone()], &journal);
     send_done(&mut sender, run_id, outcome);
+}
+
+/// Lines the game prints once its own window is up.
+///
+/// The exact answer to "is it running yet" would be to ask Windows whether the
+/// child process owns a visible window. That is FFI in the one code path with
+/// no fixtures, and the game's own log states the same fact in a form a test can
+/// pin down: these are the graphics and sound setup lines, all of which run
+/// *after* the window exists.
+///
+/// The failure mode matters more than the exact set. A version whose wording
+/// changes none of these leaves the bar indeterminate until the process exits,
+/// which is a bar that is honest for too long; clearing it on the loader's
+/// bootstrap lines instead would be a bar that lies early. `startup_line` is
+/// tested against both kinds of line for that reason.
+const STARTUP_MARKERS: [&str; 5] = [
+    "Backend library:",
+    "OpenGL Version:",
+    "OpenGL Renderer:",
+    "Sound engine started",
+    "Created: ",
+];
+
+/// Whether one line of the game's output says its window is up.
+fn startup_line(line: &str) -> bool {
+    STARTUP_MARKERS.iter().any(|marker| line.contains(marker))
 }
 
 /// Best-effort kill of whatever the slot currently holds.
@@ -2354,6 +2411,36 @@ mod tests {
 
     fn session() -> launch::AuthSession {
         OfflineSession::new("Steve", "0".repeat(32)).into_auth_session()
+    }
+
+    /// The launch's bar ends when the game's own output says its window is up.
+    ///
+    /// Both halves matter: a marker that matches too early would end the bar
+    /// while the player is still waiting, and one that never matches would leave
+    /// it travelling behind a game that is already running.
+    #[test]
+    fn the_games_window_shows_up_in_its_own_output() {
+        let up = [
+            "[10:00:00] [Render thread/INFO]: Backend library: LWJGL version 3.4.1+1",
+            "[10:00:00] [Render thread/INFO]: OpenGL Renderer: NVIDIA GeForce GTX 1650/PCIe/SSE2",
+            "[10:00:01] [Render thread/INFO]: Sound engine started",
+            "[10:00:01] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas",
+        ];
+        for line in up {
+            assert!(startup_line(line), "the window is up by: {line}");
+        }
+        // The lines the loader and the JVM print first are not that, however
+        // long the launcher has been waiting for them.
+        let still_starting = [
+            "[10:00:00] [main/INFO]: Loading Minecraft 26.2 with Fabric Loader 0.19.5",
+            "[10:00:00] [main/INFO]: Loading 4 mods:",
+            "[10:00:00] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7",
+            "[stderr] WARNING: A restricted method in java.lang.System has been called",
+            "[10:00:00] [main/INFO]: Setting user: Player",
+        ];
+        for line in still_starting {
+            assert!(!startup_line(line), "this is not the window coming up: {line}");
+        }
     }
 
     #[test]

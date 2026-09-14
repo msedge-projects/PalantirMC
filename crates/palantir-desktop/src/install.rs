@@ -453,12 +453,36 @@ pub struct Progress {
     pub total: usize,
     /// Bytes received so far, as the downloader counted them.
     pub bytes: u64,
+    /// Whether this level has no total to be a fraction of.
+    ///
+    /// A separate flag rather than a reading of `total`, because `total`
+    /// already means something else: a phase with nothing to fetch is *over*,
+    /// and a bar that said "still working" for it would be wrong in the other
+    /// direction.
+    pub starting: bool,
 }
 
 impl Progress {
     /// A report for a phase that has finished `done` of `total` files.
     pub fn new(label: impl Into<String>, done: usize, total: usize, bytes: u64) -> Progress {
-        Progress { label: label.into(), done, total, bytes }
+        Progress { label: label.into(), done, total, bytes, starting: false }
+    }
+
+    /// A report for work whose length is not known yet.
+    ///
+    /// The launch is what needs this: signing in, resolving a version,
+    /// installing a Java runtime and unpacking natives have no countable total
+    /// until they are over, and a bar that invented a percentage for them would
+    /// be the one place this launcher's progress lied. The views answer
+    /// [`Progress::is_indeterminate`] with a segment sliding along the bar
+    /// instead of a fill, which says "working" without saying "this much".
+    pub fn starting(label: impl Into<String>) -> Progress {
+        Progress { label: label.into(), done: 0, total: 0, bytes: 0, starting: true }
+    }
+
+    /// Whether this level is a report of *activity* rather than of progress.
+    pub fn is_indeterminate(&self) -> bool {
+        self.starting
     }
 
     /// How full the bar is, in `0.0..=1.0`.
@@ -486,8 +510,13 @@ impl Progress {
     /// One line of text for the status bar: `asset objects 715/5057 (14%)`.
     ///
     /// Short on purpose: this is the same fact as the bar, for the pages the bar
-    /// is not drawn on and for a window too narrow to hold both.
+    /// is not drawn on and for a window too narrow to hold both. An
+    /// indeterminate level has no numbers to print, so it prints what it is
+    /// doing and nothing else.
     pub fn status_line(&self) -> String {
+        if self.is_indeterminate() {
+            return format!("{}…", self.label);
+        }
         format!("{} {}/{} ({}%)", self.label, self.done, self.total, self.percent())
     }
 }

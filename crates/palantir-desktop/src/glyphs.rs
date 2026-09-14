@@ -29,7 +29,7 @@ use iced::widget::canvas::{
     self, Canvas, Frame, Geometry, LineCap, LineDash, LineJoin, Path, Stroke, Style,
 };
 use iced::{
-    mouse::Cursor, Color, Element, Length, Point, Radians, Rectangle, Renderer, Theme, Vector,
+    mouse::Cursor, Color, Element, Length, Point, Radians, Rectangle, Renderer, Size, Theme, Vector,
 };
 
 use crate::app::Message;
@@ -165,6 +165,74 @@ impl Glyph {
             "gauge",
         ]
     }
+}
+
+/// Share of a [`sliding_bar`]'s track that its segment occupies.
+///
+/// A third reads as something travelling along the bar. A wide segment would
+/// read as a bar filling and emptying, which is the one thing an indeterminate
+/// bar must not look like: it would say "nearly done" over and over.
+const SLIDING_SEGMENT: f32 = 0.34;
+
+/// A bar with a segment sliding along it, for work with no total to show.
+///
+/// The indeterminate twin of the `progress_bar` the launcher draws while it
+/// installs. `phase` is where the segment sits in `0.0..=1.0` — anything outside
+/// wraps — and the caller advances it on a tick while the phase is on screen, so
+/// a bar that is not being watched costs nothing.
+///
+/// `track` and `segment` come from the theme at the call site, the way [`glyph`]
+/// takes its colour, so this stays a drawing and not a palette.
+pub fn sliding_bar(phase: f32, track: Color, segment: Color) -> Element<'static, Message> {
+    Canvas::new(SlidingBar { phase, track, segment })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// The canvas program behind [`sliding_bar`].
+struct SlidingBar {
+    phase: f32,
+    track: Color,
+    segment: Color,
+}
+
+impl<Message> canvas::Program<Message> for SlidingBar {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let height = bounds.height;
+        frame.fill(
+            &Path::rectangle(Point::ORIGIN, Size::new(bounds.width, height)),
+            self.track,
+        );
+        let width = bounds.width * SLIDING_SEGMENT;
+        let x = slide_offset(self.phase, bounds.width - width);
+        frame.fill(
+            &Path::rectangle(Point::new(x, 0.0), Size::new(width, height)),
+            self.segment,
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Where the segment's left edge sits for `phase`, given `travel` pixels of it.
+///
+/// Pure, and the one part of the drawing with a rule worth testing: the phase
+/// wraps rather than clamping, so a segment that reaches the end comes back on
+/// the other side instead of sticking there, and a negative phase (a tick that
+/// arrived out of order) wraps to the right place rather than flying off the
+/// bar.
+fn slide_offset(phase: f32, travel: f32) -> f32 {
+    travel.max(0.0) * phase.rem_euclid(1.0)
 }
 
 /// A size-and-colour bound glyph, ready to drop into a view.
@@ -576,6 +644,22 @@ fn draw(frame: &mut Frame, glyph: Glyph, ink: Ink) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The segment has to sweep the whole track and come back, not stick at an
+    /// end and not fly off it, because this is the only thing the bar is saying.
+    #[test]
+    fn the_sliding_segment_wraps_and_stays_inside_the_track() {
+        assert_eq!(slide_offset(0.0, 100.0), 0.0);
+        assert_eq!(slide_offset(0.5, 100.0), 50.0);
+        assert_eq!(slide_offset(1.0, 100.0), 0.0, "the end wraps to the start");
+        assert_eq!(slide_offset(1.25, 100.0), 25.0);
+        assert_eq!(
+            slide_offset(-0.25, 100.0),
+            75.0,
+            "a tick out of order wraps rather than jumping backwards off the bar"
+        );
+        assert_eq!(slide_offset(0.5, 0.0), 0.0, "a track narrower than a segment");
+    }
 
     #[test]
     fn every_known_name_maps_to_its_glyph() {

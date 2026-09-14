@@ -50,7 +50,7 @@ use crate::accounts::AccountEntry;
 use crate::brand;
 use crate::browse::{self, ContentType, Hit, ImportedPack};
 use crate::catalog::{self, LoaderKind, VersionCatalog};
-use crate::glyphs::glyph;
+use crate::glyphs::{self, glyph};
 use crate::icons::instance_handle;
 use crate::install::Progress;
 use crate::instances::{self, InstanceCard, LoadedInstances, NewInstance};
@@ -245,6 +245,23 @@ pub const IMPORT_ID: &str = "palantirmc-import";
 pub const SHOTS_ID: &str = "palantirmc-screenshots";
 /// Subscription id of the page's scroll frames.
 pub const FRAME_ID: &str = "palantirmc-frame";
+/// Subscription id of the indeterminate bar's ticks.
+pub const BAR_ID: &str = "palantirmc-bar";
+
+/// How long one sweep of the indeterminate bar takes.
+///
+/// Slow enough to read as travel rather than as flicker, fast enough to say the
+/// launcher is still working: a bar that crosses in under a second looks like a
+/// glitch, and one that takes five looks stopped.
+const BAR_PERIOD: Duration = Duration::from_millis(1400);
+
+/// How often the bar's segment moves.
+///
+/// Twelve and a half frames a second is enough for a bar this small, and it is
+/// only asked for while a phase with no total is on screen — so this costs
+/// nothing during the install that has a real percentage, and nothing at all
+/// once the game is up.
+const BAR_TICK: Duration = Duration::from_millis(80);
 /// Subscription id of the Microsoft device-code sign-in flow.
 pub const MICROSOFT_ID: &str = "palantirmc-microsoft";
 
@@ -924,6 +941,18 @@ pub enum Message {
         /// What the phase has finished so far.
         progress: Progress,
     },
+    /// The game is up, so there is nothing left to wait for.
+    ///
+    /// A third kind of fact again: not a line that happened, not a level that
+    /// keeps changing, but the end of the launch's indeterminate bar. Sent when
+    /// the game's own output says its window is up, which is the first moment it
+    /// is true.
+    LaunchStarted {
+        /// Run id.
+        run_id: u64,
+    },
+    /// One frame of the indeterminate bar's travel.
+    BarTick,
 
     // ---- settings form ----
     /// Display name field.
@@ -1119,6 +1148,12 @@ pub struct PalantirApp {
     /// and the status line are both drawn from this, and the console no longer
     /// carries a line per tick to scrape a number out of.
     run_progress: Option<Progress>,
+    /// Where the indeterminate bar's segment sits, in `0.0..=1.0`.
+    ///
+    /// Advanced by [`Message::BarTick`] while — and only while — a phase with
+    /// no total is on screen. Kept here rather than derived from the clock so
+    /// the drawing stays a function of state, which is what makes it testable.
+    bar_phase: f32,
     child: ChildSlot,
     /// Whether the window is maximized, so the caption button can offer
     /// Maximize or Restore. Kept in sync by [`Message::MaximizedChanged`] and
@@ -1213,6 +1248,7 @@ impl PalantirApp {
             install_seq: 0,
             active_run: None,
             run_progress: None,
+            bar_phase: 0.0,
             child: Arc::new(Mutex::new(None)),
             maximized: false,
             last_bar_press: None,
@@ -1273,6 +1309,7 @@ impl PalantirApp {
             install_seq: 0,
             active_run: None,
             run_progress: None,
+            bar_phase: 0.0,
             child: Arc::new(Mutex::new(None)),
             maximized: false,
             last_bar_press: None,
@@ -1640,6 +1677,7 @@ impl PalantirApp {
         // Nothing is fetching yet: sign-in and resolution come first, and a bar
         // left over from the previous run would claim this one had started it.
         self.run_progress = None;
+        self.bar_phase = 0.0;
         self.page = Page::Logs;
         self.set_status(format!("Starting '{id}'…"));
         self.push_console(vec![format!("launch requested for '{id}'")]);
@@ -3172,6 +3210,31 @@ impl PalantirApp {
                 }
                 Command::none()
             }
+            Message::LaunchStarted { run_id } => {
+                let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
+                if current == run_id && current != 0 {
+                    // The bar has said all it can: the window is up, and from
+                    // here the game reports itself. The status line says so
+                    // instead, which is the part of the strip that persists.
+                    self.run_progress = None;
+                    let name = self
+                        .active_run
+                        .as_ref()
+                        .map(|run| run.instance_id.clone())
+                        .unwrap_or_default();
+                    self.set_status(format!("Running '{name}'."));
+                }
+                Command::none()
+            }
+            Message::BarTick => {
+                // Wrapping rather than clamping: the drawing wraps too, so the
+                // segment slides off one end and back on the other. Nothing
+                // else here cares how far along the phase is, because nothing
+                // knows.
+                self.bar_phase = (self.bar_phase + BAR_TICK.as_secs_f32() / BAR_PERIOD.as_secs_f32())
+                    .rem_euclid(1.0);
+                Command::none()
+            }
             Message::LaunchDone { run_id, note } => {
                 let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
@@ -3345,6 +3408,12 @@ impl PalantirApp {
             // what tells the worker thread to stop polling.
             let client_id = prefs::load(&self.home).microsoft_client_id();
             subs.push(microsoft_sign_in(client_id));
+        }
+        if self.run_progress.as_ref().is_some_and(Progress::is_indeterminate) {
+            // Only while the bar has no total. A determinate phase moves on its
+            // own reports, and a bar that is not travelling must not hold the
+            // window awake at twelve frames a second for the length of a game.
+            subs.push(bar_ticks());
         }
         subs.push(Self::window_state());
         if let Some(run) = self.active_run.clone() {
@@ -5384,12 +5453,11 @@ impl PalantirApp {
         .spacing(8)
         .align_items(iced::Alignment::Center);
         if let Some(progress) = &self.run_progress {
-            bar = bar.push(
-                progress_bar(0.0..=1.0, progress.fraction())
-                    .width(Length::Fixed(STATUS_BAR_WIDTH))
-                    .height(Length::Fixed(STATUS_BAR_HEIGHT))
-                    .style(theme::bar),
-            );
+            bar = bar.push(self.bar_widget(
+                progress,
+                Length::Fixed(STATUS_BAR_WIDTH),
+                STATUS_BAR_HEIGHT,
+            ));
         }
         bar = bar.push(horizontal_space());
         bar = bar.push(
@@ -5413,22 +5481,54 @@ impl PalantirApp {
     /// how far along it is, and how many megabytes have arrived. Nothing is
     /// drawn between phases, because between phases there is nothing honest to
     /// show.
+    /// The bar itself, in whichever of its two shapes the level calls for.
+    ///
+    /// A level with a total fills, and one without slides: `progress_bar` can
+    /// only say "this much of that", and a launch has no "that" to be a
+    /// fraction of. Drawing the second inside the first's box is what keeps the
+    /// strip from changing height when the launch takes over from the install.
+    fn bar_widget(
+        &self,
+        progress: &Progress,
+        width: Length,
+        height: f32,
+    ) -> Element<'_, Message> {
+        if progress.is_indeterminate() {
+            return container(glyphs::sliding_bar(
+                self.bar_phase,
+                theme::surface_input(),
+                theme::accent(),
+            ))
+            .width(width)
+            .height(Length::Fixed(height))
+            .into();
+        }
+        progress_bar(0.0..=1.0, progress.fraction())
+            .width(width)
+            .height(Length::Fixed(height))
+            .style(theme::bar)
+            .into()
+    }
+
     fn view_progress_strip(&self, progress: &Progress) -> Element<'_, Message> {
+        // An indeterminate level has no numbers, so the strip shows the label it
+        // is working on and no counts at all — the bar is the whole report.
+        let numbers = if progress.is_indeterminate() {
+            String::new()
+        } else {
+            format!(
+                "{} / {} · {}% · {:.1} MB",
+                progress.done,
+                progress.total,
+                progress.percent(),
+                progress.megabytes()
+            )
+        };
         container(
             row![
                 text(progress.label.as_str()).size(12),
-                progress_bar(0.0..=1.0, progress.fraction())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(LOG_BAR_HEIGHT))
-                    .style(theme::bar),
-                text(format!(
-                    "{} / {} · {}% · {:.1} MB",
-                    progress.done,
-                    progress.total,
-                    progress.percent(),
-                    progress.megabytes()
-                ))
-                .size(12),
+                self.bar_widget(progress, Length::Fill, LOG_BAR_HEIGHT),
+                text(numbers).size(12),
             ]
             .spacing(12)
             .align_items(iced::Alignment::Center),
@@ -5468,6 +5568,11 @@ impl PalantirApp {
     /// What the bar is drawing, if a phase is fetching.
     pub fn run_progress(&self) -> Option<&Progress> {
         self.run_progress.as_ref()
+    }
+
+    /// Where the indeterminate bar's segment sits, for the tests that move it.
+    pub fn bar_phase(&self) -> f32 {
+        self.bar_phase
     }
 
     /// The page currently shown.
@@ -6179,6 +6284,33 @@ fn frame_ticks() -> Subscription<Message> {
                 // droppable, so the animation simply skips ahead.
                 Err(error) if error.is_full() => {}
                 // Closed: nothing is animating any more.
+                Err(_) => break,
+            }
+        });
+        loop {
+            futures::future::pending::<()>().await;
+        }
+    })
+}
+
+/// Ticks for the indeterminate bar's travel, while one is on screen.
+///
+/// The same shape as [`frame_ticks`] and for the same reason — a thread and a
+/// channel rather than `iced::time::every` — with one difference that matters:
+/// this one is slower. Frames chase a finger on a trackpad; this only has to
+/// keep a segment moving, and asking for sixteen milliseconds of redraw to move
+/// it a twentieth of a bar would be burning a game's worth of frames on a
+/// decoration.
+fn bar_ticks() -> Subscription<Message> {
+    iced::subscription::channel(BAR_ID, 4, |mut sender| async move {
+        let _ = std::thread::spawn(move || loop {
+            std::thread::sleep(BAR_TICK);
+            match sender.try_send(Message::BarTick) {
+                Ok(()) => {}
+                // Full: the UI is behind. A tick that is late is indistinguishable
+                // from one that is done, so this one is simply dropped.
+                Err(error) if error.is_full() => {}
+                // Closed: the bar is gone, and so is this thread.
                 Err(_) => break,
             }
         });
@@ -7548,6 +7680,81 @@ mod tests {
         let _ = app.update(Message::LaunchDone { run_id, note: "done".to_string() });
         assert!(app.run_progress().is_none());
         assert_eq!(app.status(), "done");
+    }
+
+    /// The launch has a bar of its own, and it says "working" without saying
+    /// "this much": signing in and starting a JVM have no total to be a
+    /// fraction of, so the level is indeterminate and the bar travels.
+    #[test]
+    fn a_launch_in_progress_gets_a_bar_with_no_numbers_on_it() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Runnable", "26.2")).unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        let run_id = app.active_run.as_ref().unwrap().run_id;
+        let before = app.console().len();
+
+        let level = Progress::starting("preparing 'Runnable'");
+        let _ = app.update(Message::LaunchProgress { run_id, progress: level.clone() });
+        assert_eq!(app.run_progress(), Some(&level));
+        assert!(level.is_indeterminate(), "nothing countable is happening yet");
+        assert_eq!(app.status(), "preparing 'Runnable'…", "no counts to print");
+        assert_eq!(app.console().len(), before, "the bar is not a line");
+
+        // The segment moves, and wraps rather than sticking at the end.
+        let start = app.bar_phase();
+        let _ = app.update(Message::BarTick);
+        assert!(app.bar_phase() > start, "a tick moves the segment");
+        let _ = app.update(Message::BarTick);
+        assert!(app.bar_phase() < 1.0, "the phase stays a fraction of the track");
+
+        // The game's window is up: the waiting is over, and the strip says so
+        // instead of leaving a travelling bar behind a running game.
+        let _ = app.update(Message::LaunchStarted { run_id });
+        assert!(app.run_progress().is_none(), "there is nothing left to wait for");
+        assert_eq!(app.status(), "Running 'Runnable'.");
+        assert!(app.is_running(), "the run itself has not ended");
+        let _ = app.update(Message::LaunchDone { run_id, note: "process exited".to_string() });
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn a_stale_launch_started_leaves_the_bar_alone() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Runnable", "26.2")).unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        let run_id = app.active_run.as_ref().unwrap().run_id;
+        let level = Progress::starting("starting 'Runnable'");
+        let _ = app.update(Message::LaunchProgress { run_id, progress: level.clone() });
+        let _ = app.update(Message::LaunchStarted { run_id: run_id + 1 });
+        assert_eq!(app.run_progress(), Some(&level), "a stale run must not end this one");
+        let _ = app.update(Message::LaunchStarted { run_id: 0 });
+        assert_eq!(app.run_progress(), Some(&level), "no run id is not every run id");
+    }
+
+    /// Starting a run clears the previous one's bar, so a second launch does not
+    /// open on the last phase of the first.
+    #[test]
+    fn a_new_run_starts_the_bar_from_the_beginning() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Runnable", "26.2")).unwrap();
+        app.reload_instances();
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        let run_id = app.active_run.as_ref().unwrap().run_id;
+        let _ = app.update(Message::LaunchProgress {
+            run_id,
+            progress: Progress::starting("preparing 'Runnable'"),
+        });
+        let _ = app.update(Message::BarTick);
+        assert!(app.bar_phase() > 0.0);
+        let _ = app.update(Message::LaunchDone { run_id, note: "done".to_string() });
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        assert!(app.run_progress().is_none(), "the new run has not reported yet");
+        assert_eq!(app.bar_phase(), 0.0, "the segment starts where the bar does");
     }
 
     #[test]
