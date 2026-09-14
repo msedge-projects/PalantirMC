@@ -201,10 +201,12 @@ mod tests {
         assert_eq!(slow.progress("a", true), 1.0);
         assert!(!slow.animating());
 
+        // Thirty steps of a hair over 6.6 ms each, so the last one lands past
+        // the deadline and the slide is over — the count is not what ends it.
         let mut fast = SwitchAnim::default();
         fast.set("a", false, true, start);
         for step in 1..=30 {
-            fast.tick(start + Duration::from_micros(step * 6_666));
+            fast.tick(start + Duration::from_micros(step * 6_800));
         }
         assert_eq!(fast.progress("a", true), 1.0);
         assert!(!fast.animating());
@@ -213,7 +215,10 @@ mod tests {
     #[test]
     fn a_reversed_click_turns_around_from_where_it_is() {
         // Clicking twice in a hurry must not snap the knob to the far end and
-        // start over: it reverses from the pixel it is on.
+        // start over: it reverses from the pixel it is on. The second click
+        // here lands half a slide in, and the return trip then gets a full
+        // slide of its own — so a tick that is halfway through the *first*
+        // deadline cannot be the end of it.
         let mut anim = SwitchAnim::default();
         let start = Instant::now();
         anim.set("a", false, true, start);
@@ -224,6 +229,11 @@ mod tests {
         anim.set("a", true, false, start + DURATION / 2);
         assert_eq!(anim.progress("a", true), halfway, "the turn-around keeps the position");
         anim.tick(start + DURATION);
+        let back = anim.progress("a", false);
+        assert!(back > 0.0 && back < halfway, "got {back} back from {halfway}");
+        assert!(anim.animating(), "the return trip is not over yet");
+
+        anim.tick(start + DURATION / 2 + DURATION);
         assert_eq!(anim.progress("a", false), 0.0);
         assert!(!anim.animating());
     }
