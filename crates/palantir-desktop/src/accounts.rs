@@ -777,9 +777,14 @@ mod tests {
         // `active` is the selection, not `active` plus a separate key.
         assert_eq!(store.selected_uuid(), Some("119bed4a98cd44b399434000dacd244c"));
         assert!(!store.list()[1].is_microsoft());
-        // Its Minecraft token is good for hours yet, so nothing renews.
-        assert!(!account.needs_refresh(1_789_400_000_000));
-        assert!(account.needs_refresh(1_789_405_992_000), "and it renews when it is not");
+        // The expiry came out of the file in seconds and is the renewal rule's
+        // input: outside the twelve-hour window nothing is renewed, inside it is.
+        let expiry = 1_789_405_992_000;
+        assert!(
+            !account.needs_refresh(expiry - REFRESH_WINDOW_MS - 1),
+            "a session with more than twelve hours left is used as it is"
+        );
+        assert!(account.needs_refresh(expiry), "and one that has run out is renewed");
     }
 
     #[test]
