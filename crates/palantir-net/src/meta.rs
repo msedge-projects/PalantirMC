@@ -140,7 +140,7 @@ impl Fetcher for MapFetcher {
 /// Online metadata store with a disk write-through cache.
 ///
 /// Prism parity: mirrors `Meta::Index` + `Meta::VersionList` fetch logic —
-/// version lists live at `{base}/{uid}.json`, version files at
+/// version lists live at `{base}/{uid}/index.json`, version files at
 /// `{base}/{uid}/{version}.json`, and successful fetches are persisted into
 /// the meta-cache layout so later runs (and
 /// [`palantir_core::resolve::OfflineMetaStore`]) can read them offline.

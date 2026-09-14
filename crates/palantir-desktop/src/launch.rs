@@ -49,6 +49,7 @@ use std::time::{Duration, Instant};
 use crate::accounts::{needs_refresh, AccountKind};
 use crate::app::Message;
 use crate::install;
+use crate::java_runtime::{self, JavaPrefs};
 
 /// Shared handle for the running game process (for the Kill button).
 pub type ChildSlot = Arc<Mutex<Option<Child>>>;
@@ -146,6 +147,53 @@ pub struct PreparedAuth {
     pub refreshed: Option<RefreshedTokens>,
 }
 
+/// What this launcher's own settings say a launch should use.
+///
+/// Read at the moment a run is requested and carried with it, because the
+/// worker has no business going back to a preferences file — or to another
+/// launcher's — to find out what it was told to use. The settings live in this
+/// product's own directory, which is not the data root and is not what the
+/// worker was handed.
+///
+/// Both halves are here for the same reason: a Java the version may or may not
+/// be able to run on, and a heap an instance may or may not override. A
+/// preference this launcher shows but never passes on is a pane that lies, and
+/// two launchers disagreeing about a number is the same failure spelled
+/// differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchDefaults {
+    /// The Java the Java tab names.
+    pub java: JavaPrefs,
+    /// Heap floor, in MiB, for an instance that does not override memory.
+    pub min_mem_mib: i64,
+    /// Heap ceiling, in MiB, for an instance that does not override memory.
+    pub max_mem_mib: i64,
+}
+
+impl LaunchDefaults {
+    /// Read the defaults this launcher's settings hold.
+    pub fn from_prefs(prefs: &crate::prefs::Prefs) -> LaunchDefaults {
+        LaunchDefaults {
+            java: JavaPrefs::from_prefs(prefs),
+            min_mem_mib: i64::from(prefs.min_mem_mib()),
+            max_mem_mib: i64::from(prefs.max_mem_mib()),
+        }
+    }
+}
+
+impl Default for LaunchDefaults {
+    /// What a launch uses when no preference has been set: the Java search, and
+    /// the numbers the game's own settings ship with — not zero, which is not a
+    /// heap.
+    fn default() -> LaunchDefaults {
+        LaunchDefaults {
+            java: JavaPrefs::default(),
+            min_mem_mib: palantir_core::settings::defaults::MIN_MEM_ALLOC,
+            max_mem_mib: palantir_core::settings::defaults::MAX_MEM_ALLOC,
+        }
+    }
+}
+
 /// Inputs for one launch run.
 #[derive(Debug, Clone)]
 pub struct LaunchParams {
@@ -157,6 +205,9 @@ pub struct LaunchParams {
     pub account: AccountRef,
     /// Subscription id this run streams under.
     pub run_id: u64,
+    /// The settings this launcher's own UI holds, read when the run was asked
+    /// for.
+    pub defaults: LaunchDefaults,
 }
 
 /// A recorded run: what the subscription streams under and what the worker
@@ -172,6 +223,8 @@ pub struct ActiveRunData {
     pub data_root: PathBuf,
     /// Account to launch with.
     pub account: AccountRef,
+    /// The settings that were read when the run was requested.
+    pub defaults: LaunchDefaults,
 }
 
 /// A fully planned, runnable launch.
@@ -427,6 +480,7 @@ pub fn prepare_launch(
     paths: &PalantirPaths,
     instance_id: &str,
     session: &launch::AuthSession,
+    defaults: &LaunchDefaults,
     store: &mut dyn MetaStore,
     fetcher: &(dyn Fetcher + Sync),
     log: &mut dyn FnMut(String),
@@ -542,28 +596,49 @@ pub fn prepare_launch(
         log(line.to_string());
     }
 
-    // Java: the instance's own path when it is usable, otherwise the best
-    // runtime this machine has. A configured path that is not there any more is
-    // a reason to look further rather than a reason to refuse to start: the
-    // path belongs to a runtime that was uninstalled or moved, and the user did
-    // not ask this launcher to stop working because of it. Prism reads
+    // Java: the instance's own path when it is usable, then the paths this
+    // launcher's settings name, then a runtime this machine already has, and
+    // only then a runtime fetched from the metadata service. A configured path
+    // that is not there any more is a reason to look further rather than a
+    // reason to refuse to start: the path belongs to a runtime that was
+    // uninstalled or moved, and the user did not ask this launcher to stop
+    // working because of it. The same goes for a path that is there but is the
+    // wrong major — the Create dialog writes the settings' default Java into
+    // every new instance, and a Java 21 default on a 1.12.2 instance is an
+    // `UnsupportedClassVersionError` rather than an answer. Prism reads
     // `AutomaticJava` (on unless switched off) and picks a runtime it can find;
     // the same rule here means an instance keeps launching.
+    let majors = &resolution.profile.compatible_java_majors;
     let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
     let configured = configured.trim();
     let java_bin = if configured.is_empty() {
         String::new()
-    } else if Path::new(configured).is_file() {
-        log(format!("using the configured Java: {configured}"));
-        configured.to_string()
-    } else {
+    } else if !Path::new(configured).is_file() {
         log(format!(
             "the configured JavaPath '{configured}' is not there — looking for another Java"
         ));
         String::new()
+    } else {
+        match java_fits_version(configured, majors) {
+            Ok(()) => {
+                log(format!("using the configured Java: {configured}"));
+                configured.to_string()
+            }
+            Err(reason) => {
+                log(format!("{reason} — looking for another Java"));
+                String::new()
+            }
+        }
     };
     let java_bin = if java_bin.is_empty() {
-        match pick_java(paths, &resolution.profile.compatible_java_majors, log) {
+        match pick_java(
+            paths,
+            &defaults.java,
+            &resolution.profile.compatible_java_majors,
+            &resolution.profile.compatible_java_name,
+            fetcher,
+            log,
+        ) {
             Some(found) => found,
             None => {
                 log(
@@ -620,7 +695,12 @@ pub fn prepare_launch(
         ));
     }
 
-    let (min_mem, max_mem) = model.effective_memory();
+    let overrides_memory = instance.settings().get_bool("OverrideMemory", false);
+    let (min_mem, max_mem) = heap_for_launch(&model, instance.settings(), defaults);
+    log(format!(
+        "heap: {min_mem} MiB to {max_mem} MiB ({})",
+        if overrides_memory { "this instance's own numbers" } else { "this launcher's defaults" }
+    ));
     let full_jars: Vec<String> = files
         .jar
         .iter()
@@ -681,6 +761,26 @@ pub fn prepare_launch(
     log(format!("command: {java_bin} {}", argv.join(" ")));
     let plan = LaunchPlan { java_bin, argv, cwd: game_root, main_jar, envs };
     LaunchReadiness::Ready(plan)
+}
+
+/// The heap a launch uses: the instance's own numbers when it overrides memory,
+/// and this launcher's defaults otherwise.
+///
+/// Prism's `prismlauncher.cfg` is deliberately not consulted here. The numbers on
+/// the Synced settings pane are what this launcher shows, so they are what a
+/// launch has to obey — a machine whose numbers began as Prism's read them once
+/// when the preferences loaded ([`crate::prefs::Prefs::min_mem_mib`]), so the
+/// pane and the JVM agree there too.
+fn heap_for_launch(
+    model: &SettingsModel,
+    instance: &Settings,
+    defaults: &LaunchDefaults,
+) -> (i64, i64) {
+    if instance.get_bool("OverrideMemory", false) {
+        model.effective_memory()
+    } else {
+        (defaults.min_mem_mib, defaults.max_mem_mib)
+    }
 }
 
 /// Build the join-server target from instance settings, logging problems.
@@ -860,6 +960,48 @@ pub fn major_from_version_output(text: &str) -> Option<i64> {
     (!quoted.is_empty()).then(|| palantir_core::java::JavaVersion::parse(quoted).major())
 }
 
+/// The major a Java binary is: from its home's `release` file when there is
+/// one, and from running it when there is not.
+///
+/// The `release` file is preferred because the answer decides a launch: a
+/// machine with six JDKs should not pay six processes to say which is which.
+fn java_major_of(bin: &str) -> Option<i64> {
+    let home = Path::new(bin).parent().and_then(Path::parent);
+    home.and_then(home_version).or_else(|| probe_java_major(bin))
+}
+
+/// Why the Java at `bin` may not be used for a version that accepts `majors`.
+///
+/// A runtime the user named outranks automatic selection — that is what naming
+/// it means — but it does not outrank the version's own requirement, because
+/// then naming one Java breaks every instance that needs another. So a Java
+/// that is there but is the wrong major is looked past, and the search carries
+/// on.
+///
+/// Two cases are deliberately *not* refusals: a version that declares no majors
+/// has nothing to disagree with, and a Java whose version could not be read is
+/// left alone rather than second-guessed — it may be a wrapper or a launcher
+/// script that answers perfectly well when it is run.
+fn java_fits_version(bin: &str, majors: &[i64]) -> Result<(), String> {
+    if majors.is_empty() {
+        return Ok(());
+    }
+    let Some(major) = java_major_of(bin) else {
+        return Ok(());
+    };
+    if majors.contains(&major) {
+        return Ok(());
+    }
+    let wants = majors
+        .iter()
+        .map(|major| major.to_string())
+        .collect::<Vec<_>>()
+        .join(" or ");
+    Err(format!(
+        "the configured Java '{bin}' is Java {major}, but this version wants Java {wants}"
+    ))
+}
+
 /// Ask a binary its version. `None` when it cannot be run at all.
 fn probe_java_major(bin: &str) -> Option<i64> {
     let output = Command::new(bin).arg("-version").output().ok()?;
@@ -891,13 +1033,49 @@ pub fn best_java(candidates: &[JavaCandidate], want_majors: &[i64]) -> Option<Ja
 }
 
 /// Choose a Java for this version, saying what was chosen and why.
+///
+/// The order is five answers to one question, from the most specific promise to
+/// the last resort:
+///
+/// 1. the binary the Java tab names for a major this version accepts;
+/// 2. the tab's default binary;
+/// 3. a runtime this machine already has at an accepted major;
+/// 4. the runtime the version names, fetched from the metadata service;
+/// 5. the best runtime there is, with the mismatch said out loud.
+///
+/// Steps 1 and 2 are what makes the Java tab real: a user with a JDK 8 and a
+/// JDK 21 has already answered "which one", and scanning for an answer anyway
+/// would ignore them. Step 4 is the difference between "install a Java first"
+/// and a game that starts on a machine that never had one.
 fn pick_java(
     paths: &PalantirPaths,
+    java: &JavaPrefs,
     want_majors: &[i64],
+    want_name: &str,
+    fetcher: &(dyn Fetcher + Sync),
     log: &mut dyn FnMut(String),
 ) -> Option<String> {
-    // A candidate that never told us its version is asked now, once — but only
-    // here, where the answer decides whether it is used.
+    // 1 and 2: what this launcher's own settings say.
+    for (major, path) in java.for_majors(want_majors) {
+        if Path::new(path).is_file() {
+            log(format!("using Java {major} from the Java settings: {path}"));
+            return Some(path.to_string());
+        }
+        log(format!(
+            "the Java the settings name for major {major} is not there: {path}"
+        ));
+    }
+    if let Some(path) = java.default_binary() {
+        if Path::new(path).is_file() {
+            log(format!("using the default Java from the settings: {path}"));
+            return Some(path.to_string());
+        }
+        log(format!("the default Java in the settings is not there: {path}"));
+    }
+
+    // 3: what the machine has. A candidate that never told us its version is
+    // asked now, once — but only here, where the answer decides whether it is
+    // used.
     let candidates: Vec<JavaCandidate> = java_candidates(paths)
         .into_iter()
         .map(|mut candidate| {
@@ -907,13 +1085,49 @@ fn pick_java(
             candidate
         })
         .collect();
-    let chosen = best_java(&candidates, want_majors)?;
-    match chosen.major {
-        Some(major) if want_majors.contains(&major) => log(format!(
-            "using {} (Java {major}, from {})",
-            chosen.bin,
-            chosen.origin.label()
+    let compatible = candidates.iter().find(|candidate| {
+        candidate
+            .major
+            .map(|major| want_majors.contains(&major))
+            .unwrap_or(false)
+    });
+    if let Some(found) = compatible {
+        log(format!(
+            "using {} (Java {}, from {})",
+            found.bin,
+            found.major.unwrap_or(0),
+            found.origin.label()
+        ));
+        return Some(found.bin.clone());
+    }
+
+    // 4: nothing here fits, so ask the service for the runtime the version
+    // names. A failure is logged rather than fatal — step 5 still has an answer,
+    // and a machine with the wrong Java that explains itself beats no launch at
+    // all.
+    let host = java_runtime::host_runtime_os(&RuntimeContext::current_host());
+    let request = java_runtime::RuntimeRequest {
+        base_url: palantir_net::DEFAULT_META_BASE_URL,
+        majors: want_majors,
+        name: want_name,
+        os: &host,
+    };
+    match java_runtime::ensure_runtime(
+        paths,
+        &request,
+        fetcher,
+        java_runtime::DOWNLOAD_THREADS,
+        log,
+    ) {
+        Ok(bin) => return Some(bin),
+        Err(reason) => log(format!(
+            "no Java for this version could be fetched: {reason}"
         )),
+    }
+
+    // 5: the best there is, with the mismatch named.
+    let chosen = best_java(&candidates, &[])?;
+    match chosen.major {
         Some(major) if !want_majors.is_empty() => log(format!(
             "using {} (Java {major}, from {}), but this version wants Java {} — expect an UnsupportedClassVersionError if it does not start",
             chosen.bin,
@@ -1061,19 +1275,32 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     let paths = PalantirPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;
-    let mut buffer: Vec<String> = Vec::new();
+    // Two things happen to every line before the console sees it: secrets are
+    // masked, and the line is written to the instance. One object, because a line
+    // that reached the screen without passing through both is the bug this
+    // exists to prevent.
+    let journal = LaunchLogFile::open(&paths, &params.instance_id);
+    if !send_batch(
+        &mut sender,
+        run_id,
+        vec![format!("writing this run to {}", journal.path().display())],
+        &journal,
+    ) {
+        return;
+    }
     // Sent after the preparation block: the log closure below owns the sender
     // for the duration of that block.
     let mut tokens_message: Option<Message> = None;
 
-    // The log closure batches into the same channel the game's output uses.
+    // Each line of the preparation block goes out as it happens rather than
+    // being held back into batches. Batching is right for the game's own output,
+    // which arrives hundreds of lines at a time, but this phase is I/O-bound and
+    // now reports progress while it works — and a buffer that only left the
+    // closure every 25 lines is exactly what made a long asset download look
+    // frozen instead of busy.
     let readiness = {
         let mut log = |line: String| {
-            buffer.push(line);
-            if buffer.len() >= LOG_BATCH {
-                let batch = std::mem::take(&mut buffer);
-                let _ = send_batch(&mut sender, run_id, batch);
-            }
+            let _ = send_batch(&mut sender, run_id, vec![line], &journal);
         };
         let auth = MicrosoftAuth::with_public_client_id();
         let prepared = match prepare_auth(&params.account, &auth, &mut log) {
@@ -1099,6 +1326,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
                     &paths,
                     &params.instance_id,
                     &prepared.session,
+                    &params.defaults,
                     &mut store,
                     &fetcher,
                     &mut log,
@@ -1112,12 +1340,6 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             return;
         }
     }
-    if !buffer.is_empty() {
-        let batch = std::mem::take(&mut buffer);
-        if !send_batch(&mut sender, run_id, batch) {
-            return;
-        }
-    }
     let plan = match readiness {
         LaunchReadiness::Blocked => {
             // The console already explains why; this is the terminal line.
@@ -1128,7 +1350,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     };
     {
         let mut log = |line: String| {
-            let _ = send_batch(&mut sender, run_id, vec![line]);
+            let _ = send_batch(&mut sender, run_id, vec![line], &journal);
         };
         record_launch_start(&paths, &params.instance_id, &mut log);
     }
@@ -1140,6 +1362,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             plan.java_bin,
             plan.main_jar.display()
         )],
+        &journal,
     );
     let mut command = Command::new(&plan.java_bin);
     command
@@ -1157,6 +1380,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
                 &mut sender,
                 run_id,
                 vec![format!("failed to start '{}': {e} — not launching", plan.java_bin)],
+                &journal,
             );
             send_done(&mut sender, run_id, "failed to start".to_string());
             return;
@@ -1170,14 +1394,24 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             *guard = Some(child);
         }
         Err(_) => {
-            send_batch(&mut sender, run_id, vec!["internal lock error: cannot track child".to_string()]);
+            send_batch(
+                &mut sender,
+                run_id,
+                vec!["internal lock error: cannot track child".to_string()],
+                &journal,
+            );
             send_done(&mut sender, run_id, "internal lock error".to_string());
             let _ = child.kill();
             let _ = child.wait();
             return;
         }
     }
-    send_batch(&mut sender, run_id, vec!["process started, streaming output…".to_string()]);
+    send_batch(
+        &mut sender,
+        run_id,
+        vec!["process started, streaming output…".to_string()],
+        &journal,
+    );
 
     let (tx, rx) = mpsc::channel::<(bool, String)>();
     spawn_reader(stdout, false, tx.clone());
@@ -1194,7 +1428,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
                 }
                 if buf.len() >= 100 {
                     let batch = std::mem::take(&mut buf);
-                    if !send_batch(&mut sender, run_id, batch) {
+                    if !send_batch(&mut sender, run_id, batch, &journal) {
                         kill_slot(&slot);
                         return;
                     }
@@ -1203,7 +1437,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !buf.is_empty() {
                     let batch = std::mem::take(&mut buf);
-                    if !send_batch(&mut sender, run_id, batch) {
+                    if !send_batch(&mut sender, run_id, batch, &journal) {
                         kill_slot(&slot);
                         return;
                     }
@@ -1212,7 +1446,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 if !buf.is_empty() {
                     let batch = std::mem::take(&mut buf);
-                    if !send_batch(&mut sender, run_id, batch) {
+                    if !send_batch(&mut sender, run_id, batch, &journal) {
                         kill_slot(&slot);
                         return;
                     }
@@ -1234,16 +1468,13 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     };
     {
         let mut log = |line: String| {
-            let _ = send_batch(&mut sender, run_id, vec![line]);
+            let _ = send_batch(&mut sender, run_id, vec![line], &journal);
         };
         record_play_time(&paths, &params.instance_id, elapsed, &mut log);
     }
-    send_batch(&mut sender, run_id, vec![outcome.clone()]);
+    send_batch(&mut sender, run_id, vec![outcome.clone()], &journal);
     send_done(&mut sender, run_id, outcome);
 }
-
-/// Log lines buffered before a batch is flushed to the GUI.
-const LOG_BATCH: usize = 25;
 
 /// Best-effort kill of whatever the slot currently holds.
 fn kill_slot(slot: &ChildSlot) {
@@ -1300,11 +1531,144 @@ fn send_message(sender: &mut Sender<Message>, message: Message) -> bool {
     }
 }
 
+/// What a launch line carries that must not be written down.
+///
+/// A launch command is `java … --accessToken <token> … --clientId <id>`, and
+/// those tokens are not only printed: the game echoes its own command line in
+/// crash reports, and a player pasting a log into a bug report is the normal way
+/// these leak. Masking the value that follows the flag covers all three shapes —
+/// the command, the launch script, and the game's echo of them — because all
+/// three spell the flags the same way.
+const SECRET_FLAGS: [&str; 4] = ["--accessToken", "--clientId", "--xuid", "--session"];
+
+/// What a masked secret is replaced with.
+pub const REDACTED: &str = "<redacted>";
+
+/// Hide the credentials a line can carry, keeping everything else byte for byte.
+///
+/// Both spellings of a flag are handled (`--accessToken value` and
+/// `--accessToken=value`) and the separator is kept, so a redacted line still
+/// reads as the command that ran. A flag with nothing after it is left alone:
+/// naming the flag says nothing secret.
+pub fn redact(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut cursor = 0usize;
+    while cursor < line.len() {
+        let found = SECRET_FLAGS
+            .iter()
+            .filter_map(|flag| line[cursor..].find(flag).map(|at| (cursor + at, flag.len())))
+            .min_by_key(|(at, _)| *at);
+        let Some((start, flag_len)) = found else {
+            out.push_str(&line[cursor..]);
+            break;
+        };
+        let after = &line[start + flag_len..];
+        // A value has to be *separated* from its flag: whitespace or `=`.
+        // Anything else means the flag is part of a longer token and carries
+        // nothing — `--accessToken,` names a flag without a secret, and masking
+        // the punctuation would corrupt the line while protecting nobody.
+        if !matches!(after.chars().next(), Some(c) if c.is_whitespace() || c == '=') {
+            out.push_str(&line[cursor..start + flag_len]);
+            cursor = start + flag_len;
+            continue;
+        }
+        // Everything up to the value is kept verbatim: whitespace, or an `=`
+        // with whitespace after it.
+        let value_at = after
+            .find(|c: char| !c.is_whitespace() && c != '=')
+            .unwrap_or(after.len());
+        let value = &after[value_at..];
+        let value_len = value.find(char::is_whitespace).unwrap_or(value.len());
+        out.push_str(&line[cursor..start + flag_len + value_at]);
+        if value_len > 0 {
+            out.push_str(REDACTED);
+        }
+        cursor = start + flag_len + value_at + value_len;
+    }
+    out
+}
+
+/// The on-disk copy of a run's console.
+///
+/// One file per instance, next to the game's own logs, because "why did this
+/// instance not start" is answered by the lines that scrolled past while it was
+/// failing — and until this existed they were gone the moment the window closed
+/// or the process was killed, which is exactly when somebody is looking for
+/// them.
+///
+/// The previous run is rotated to `.1` rather than appended to: retrying a
+/// launch is the moment the log of the failed attempt matters most, and a single
+/// growing file would have overwritten the evidence with the retry.
+pub struct LaunchLogFile {
+    path: PathBuf,
+}
+
+impl LaunchLogFile {
+    /// Open (creating) the log for `instance_id`, rotating the previous run.
+    ///
+    /// Best effort throughout: a log that cannot be written is a missing
+    /// convenience, never a reason to refuse to launch the game.
+    pub fn open(paths: &PalantirPaths, instance_id: &str) -> LaunchLogFile {
+        let path = paths
+            .configured_instances_dir()
+            .join(instance_id)
+            .join("logs")
+            .join("launcher.log");
+        if path.is_file() {
+            let previous = path.with_extension("log.1");
+            let _ = std::fs::remove_file(&previous);
+            let _ = std::fs::rename(&path, &previous);
+        }
+        let log = LaunchLogFile { path };
+        log.append(&[format!(
+            "{} {} — launching '{instance_id}'",
+            crate::brand::APP_NAME,
+            crate::brand::version()
+        )]);
+        log
+    }
+
+    /// Where the log is, whether or not anything could be written to it yet.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Append lines, creating the directory and file when they are missing.
+    pub fn append(&self, lines: &[String]) {
+        use std::io::Write;
+        let Some(parent) = self.path.parent() else {
+            return;
+        };
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+        let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)
+        else {
+            return;
+        };
+        for line in lines {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+
+}
+
 /// Forward one batch; `false` means the GUI is gone and the worker should stop.
-fn send_batch(sender: &mut Sender<Message>, run_id: u64, lines: Vec<String>) -> bool {
+///
+/// Every line passes through here — the launcher's own account of the launch and
+/// the game's output alike — so this is the one place that has to redact, and the
+/// one place that writes the log to disk.
+fn send_batch(
+    sender: &mut Sender<Message>,
+    run_id: u64,
+    lines: Vec<String>,
+    journal: &LaunchLogFile,
+) -> bool {
     if lines.is_empty() {
         return true;
     }
+    let lines: Vec<String> = lines.into_iter().map(|line| redact(&line)).collect();
+    journal.append(&lines);
     let mut pending: Option<Vec<String>> = Some(lines);
     loop {
         let batch = match pending.take() {
@@ -1390,6 +1754,123 @@ mod tests {
             .unwrap();
         }
         (dir, paths)
+    }
+
+    /// A JDK home with the `release` file a real one carries, holding a binary
+    /// that is a file but not a JVM.
+    ///
+    /// Writing `release` is what lets the java-selection tests be about
+    /// selection instead of about which JDK the machine running them happens to
+    /// have: the version is read from the home, and nothing is executed until a
+    /// test deliberately launches with one of these.
+    fn fake_java_home(dir: &Path, name: &str, version: &str) -> String {
+        let home = dir.join(name);
+        std::fs::create_dir_all(home.join("bin")).unwrap();
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        let bin = home.join("bin").join(exe);
+        std::fs::write(&bin, b"").unwrap();
+        std::fs::write(home.join("release"), format!("JAVA_VERSION=\"{version}\"\n")).unwrap();
+        bin.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_java_the_version_cannot_run_on_is_not_used_just_because_it_was_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let eight = fake_java_home(dir.path(), "jdk8", "1.8.0_402");
+        let twenty_one = fake_java_home(dir.path(), "jdk21", "21.0.6");
+
+        // The major comes from the home's own file, without running anything.
+        assert_eq!(java_major_of(&eight), Some(8));
+        assert_eq!(java_major_of(&twenty_one), Some(21));
+
+        // Naming a Java is a promise about that Java, and it is kept: it is used
+        // for the major it is, and a version that accepts either of two keeps
+        // it. So does a version that declares nothing at all.
+        assert!(java_fits_version(&twenty_one, &[21]).is_ok());
+        assert!(java_fits_version(&eight, &[8, 17]).is_ok());
+        assert!(java_fits_version(&eight, &[]).is_ok());
+
+        // What it does not outrank is the version's own requirement: a Java 21
+        // named for a version that runs on 8 is exactly what an
+        // UnsupportedClassVersionError looks like from here, so it is refused
+        // with both numbers in the reason.
+        let reason = java_fits_version(&twenty_one, &[8]).unwrap_err();
+        assert!(reason.contains("Java 21"), "{reason}");
+        assert!(reason.contains("wants Java 8"), "{reason}");
+        let reason = java_fits_version(&eight, &[17, 21]).unwrap_err();
+        assert!(reason.contains("wants Java 17 or 21"), "{reason}");
+
+        // A binary whose version cannot be read is not refused — it may be a
+        // wrapper, and refusing a Java the user named by hand would be this
+        // launcher overruling them on a question it could not answer.
+        let bare = dir.path().join("wrapper").join(if cfg!(windows) { "java.exe" } else { "java" });
+        std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+        std::fs::write(&bare, b"not a JVM").unwrap();
+        assert_eq!(java_major_of(&bare.to_string_lossy()), None);
+        assert!(java_fits_version(&bare.to_string_lossy(), &[21]).is_ok());
+    }
+
+    /// The Synced settings pane is the answer for the heap, not Prism's file.
+    ///
+    /// A machine where both exist is the case that matters: the pane shows one
+    /// number, so the JVM has to get that number, or the pane is wrong about the
+    /// machine it describes.
+    #[test]
+    fn the_heap_a_launch_uses_is_the_one_the_pane_shows() {
+        let prism = || {
+            let mut settings = Settings::empty("prismlauncher.cfg");
+            settings.set_i64("MinMemAlloc", 128);
+            settings.set_i64("MaxMemAlloc", 2048);
+            settings
+        };
+        let defaults = LaunchDefaults {
+            min_mem_mib: 1024,
+            max_mem_mib: 8192,
+            ..LaunchDefaults::default()
+        };
+
+        // No override: this launcher's numbers, even though the global file
+        // names different ones.
+        let instance = Settings::empty("instance.cfg");
+        let model = SettingsModel::with_instance(prism(), instance.clone());
+        assert_eq!(heap_for_launch(&model, &instance, &defaults), (1024, 8192));
+
+        // Override on: the instance's numbers win, which is what the gate means.
+        let mut instance = Settings::empty("instance.cfg");
+        instance.set_bool("OverrideMemory", true);
+        instance.set_i64("MinMemAlloc", 256);
+        instance.set_i64("MaxMemAlloc", 4096);
+        let model = SettingsModel::with_instance(prism(), instance.clone());
+        assert_eq!(heap_for_launch(&model, &instance, &defaults), (256, 4096));
+
+        // A gate with nothing behind it falls to the global file, which is what
+        // a half-written instance.cfg gets in Prism too.
+        let mut bare = Settings::empty("instance.cfg");
+        bare.set_bool("OverrideMemory", true);
+        let model = SettingsModel::with_instance(prism(), bare.clone());
+        assert_eq!(heap_for_launch(&model, &bare, &defaults), (128, 2048));
+    }
+
+    #[test]
+    fn the_defaults_are_read_from_the_preferences_rather_than_left_at_zero() {
+        let mut prefs = crate::prefs::Prefs::default();
+        prefs.default_min_mem_mib = Some(1024);
+        prefs.default_max_mem_mib = Some(8192);
+        prefs.default_java_path = Some("C:/jdk21/bin/javaw.exe".to_string());
+        let defaults = LaunchDefaults::from_prefs(&prefs);
+        assert_eq!((defaults.min_mem_mib, defaults.max_mem_mib), (1024, 8192));
+        assert_eq!(defaults.java.default_binary(), Some("C:/jdk21/bin/javaw.exe"));
+
+        // Nothing set anywhere: the shipped numbers, because a heap of zero
+        // megabytes is a launch that dies in the JVM rather than a default.
+        let shipping = LaunchDefaults::from_prefs(&crate::prefs::Prefs::default());
+        assert_eq!(
+            (shipping.min_mem_mib, shipping.max_mem_mib),
+            (
+                i64::from(crate::prefs::DEFAULT_MIN_MEM_MIB),
+                i64::from(crate::prefs::DEFAULT_MAX_MEM_MIB)
+            )
+        );
     }
 
     #[test]
@@ -1484,6 +1965,83 @@ mod tests {
         assert_eq!(best_java(&only_unknown, &[21]).unwrap().bin, "unknown");
         // And no candidates is no answer, not a panic.
         assert!(best_java(&[], &[21]).is_none());
+    }
+
+    /// The Java tab is consulted before the machine is, which is the whole
+    /// point of the tab: a user with a JDK 8 and a JDK 21 has already answered
+    /// "which one", and a scan that ran first would answer for them.
+    #[test]
+    fn the_java_the_settings_name_answers_before_the_machine_is_scanned() {
+        let (_dir, paths) = test_root();
+        // Files rather than working runtimes: `pick_java` names a binary and the
+        // probe happens in its caller, so this test does not depend on what
+        // this machine happens to have installed.
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        let named = paths.root.join("jdk21").join("bin").join(exe);
+        let fallback = paths.root.join("jdk").join("bin").join(exe);
+        for path in [&named, &fallback] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        let named = named.to_string_lossy().into_owned();
+        let fallback = fallback.to_string_lossy().into_owned();
+
+        let java = JavaPrefs {
+            default_path: fallback.clone(),
+            by_major: [(21, named.clone())].into_iter().collect(),
+        };
+
+        // The version wants 21, and 21 is what was named for it.
+        let mut lines = Vec::new();
+        let found = pick_java(
+            &paths,
+            &java,
+            &[21],
+            "java-runtime-delta",
+            &MapFetcher::new(),
+            &mut |line| lines.push(line),
+        )
+        .unwrap();
+        assert_eq!(found, named);
+        assert!(lines.iter().any(|line| line.contains("from the Java settings")), "{lines:?}");
+
+        // A version whose majors nothing was named for falls to the default
+        // rather than to the scan.
+        let mut lines = Vec::new();
+        let found = pick_java(
+            &paths,
+            &java,
+            &[17],
+            "java-runtime-gamma",
+            &MapFetcher::new(),
+            &mut |line| lines.push(line),
+        )
+        .unwrap();
+        assert_eq!(found, fallback);
+        assert!(
+            lines.iter().any(|line| line.contains("the default Java from the settings")),
+            "{lines:?}"
+        );
+
+        // A named path that is gone is said out loud and looked past rather
+        // than used: the runtime was uninstalled, and the user did not ask for
+        // the launcher to stop working because of it.
+        let mut stale = java.clone();
+        let gone = paths.root.join("gone").join(exe).to_string_lossy().into_owned();
+        stale.by_major.insert(21, gone.clone());
+        stale.default_path = paths.root.join("gone-too").join(exe).to_string_lossy().into_owned();
+        let mut lines = Vec::new();
+        let found = pick_java(
+            &paths,
+            &stale,
+            &[21],
+            "java-runtime-delta",
+            &MapFetcher::new(),
+            &mut |line| lines.push(line),
+        );
+        let text = lines.join("\n");
+        assert!(text.contains("not there"), "{text}");
+        assert_ne!(found.as_deref(), Some(gone.as_str()), "a path that is gone is not a Java");
     }
 
     #[test]
@@ -1726,6 +2284,7 @@ mod tests {
             &paths,
             "nope",
             &session(),
+            &LaunchDefaults::default(),
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
@@ -1749,6 +2308,7 @@ mod tests {
             &paths,
             &instance.id(),
             &session(),
+            &LaunchDefaults::default(),
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
@@ -1767,7 +2327,7 @@ mod tests {
         // the launch only stops at the missing runtime.
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Ready", "1.21.1").unwrap();
-        seed_meta(&paths, &instance, "1.21.1");
+        seed_meta(&paths, &instance, "1.21.1", &[]);
         // `test.lib:lib:1.0` stores as `test/lib/lib/1.0/lib-1.0.jar` — the group
         // contributes `test/lib` and the artifact name is `lib`, so `lib` appears
         // twice. Seeding the single-`lib` path left the planner one file short and
@@ -1787,6 +2347,7 @@ mod tests {
             &paths,
             &instance.id(),
             &session(),
+            &LaunchDefaults::default(),
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
@@ -1814,6 +2375,69 @@ mod tests {
         }
     }
 
+    /// The Create dialog writes the settings' default Java into a new instance.
+    /// That pin must not strand an instance whose version needs another major:
+    /// the search carries on from the settings, which is what the Java tab is
+    /// for.
+    #[test]
+    fn an_instance_pinned_to_the_wrong_java_keeps_looking() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Old", "1.12.2").unwrap();
+        // 1.12.2 runs on Java 8, and the instance is about to be pinned to 21 —
+        // the shape a machine whose default Java is 21 leaves behind.
+        seed_meta(&paths, &instance, "1.12.2", &[8]);
+        seed_library(paths.root.join("libraries").join("test/lib/lib/1.0/lib-1.0.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("com/mojang/minecraft/1.12.2/minecraft-1.12.2-client.jar"),
+        );
+
+        let jdks = tempfile::tempdir().unwrap();
+        let pinned = fake_java_home(jdks.path(), "jdk21", "21.0.6");
+        let wanted = fake_java_home(jdks.path(), "jdk8", "1.8.0_402");
+        let mut instance = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
+        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance.settings_mut().set_str("JavaPath", &pinned);
+        instance.save().unwrap();
+
+        let defaults = LaunchDefaults {
+            java: JavaPrefs { default_path: wanted.clone(), ..JavaPrefs::default() },
+            ..LaunchDefaults::default()
+        };
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = MapFetcher::new();
+        let mut lines = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &defaults,
+            &mut store,
+            &fetcher,
+            &mut |line| lines.push(line),
+        );
+        let text = lines.join("\n");
+        assert!(
+            text.contains("is Java 21, but this version wants Java 8"),
+            "the wrong-major pin has to be named and looked past: {text}"
+        );
+        assert!(
+            text.contains("using the default Java from the settings"),
+            "the settings' Java is the next answer: {text}"
+        );
+        // Both files are placeholders rather than JVMs, so the launch stops at
+        // the probe — and that is the only thing it stops at: naming a Java the
+        // version cannot run on cost one log line, not a launch.
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+        assert!(
+            text.contains(&format!("java probe failed for '{wanted}'")),
+            "the settings' Java is the one that was tried: {text}"
+        );
+    }
+
     /// Write a version file into the metadata cache for `uid`/`version`.
     fn write_meta(paths: &PalantirPaths, uid: &str, version: &str, value: serde_json::Value) {
         let dir = paths.meta_dir().join(uid);
@@ -1828,7 +2452,11 @@ mod tests {
 
     /// Cache the two version files a minimal 1.21.1 instance resolves: the game
     /// itself and one library, plus the client jar descriptor.
-    fn seed_meta(paths: &PalantirPaths, instance: &Instance, game: &str) {
+    ///
+    /// `majors` is what the version declares it will run on
+    /// (`compatibleJavaMajors`), which is the field a launcher picks a Java
+    /// from; an empty slice means the version does not say.
+    fn seed_meta(paths: &PalantirPaths, instance: &Instance, game: &str, majors: &[i64]) {
         write_meta(
             paths,
             "net.minecraft",
@@ -1838,6 +2466,7 @@ mod tests {
                 "version": game,
                 "order": 0,
                 "mainClass": "com.example.Main",
+                "compatibleJavaMajors": majors,
                 "assets": "17",
                 "assetIndex": {
                     "id": "17",
@@ -1917,6 +2546,98 @@ mod tests {
         record_launch_start(&paths, "gone", &mut |line| lines.push(line));
         record_play_time(&paths, "gone", Duration::from_secs(3), &mut |line| lines.push(line));
         assert!(lines.iter().any(|line| line.contains("could not")));
+    }
+
+    // ---- the run log -------------------------------------------------------
+
+    #[test]
+    fn a_launch_line_loses_its_tokens_but_keeps_its_shape() {
+        // The shapes that actually occur: the command line, the same thing written
+        // into the launch script, and the game echoing its own arguments in a
+        // crash report.
+        assert_eq!(
+            redact(
+                "command: java -cp a.jar net.minecraft.client.main.Main --accessToken \
+                 eyJhbG.abc.def --uuid aabb"
+            ),
+            "command: java -cp a.jar net.minecraft.client.main.Main --accessToken <redacted> \
+             --uuid aabb"
+        );
+        assert_eq!(
+            redact("\"$JAVA\" --accessToken=eyJhbG --version 21"),
+            "\"$JAVA\" --accessToken=<redacted> --version 21"
+        );
+        // Several secrets on one line, with the whitespace left as it was found.
+        assert_eq!(
+            redact("--clientId\t1234   --xuid deadbeef --username Steve"),
+            "--clientId\t<redacted>   --xuid <redacted> --username Steve"
+        );
+        // A flag with nothing after it names a secret without carrying one, and a
+        // line without secrets comes back byte for byte.
+        assert_eq!(
+            redact("expected --accessToken, got nothing"),
+            "expected --accessToken, got nothing"
+        );
+        let plain = "install: 5057 asset object(s) to fetch";
+        assert_eq!(redact(plain), plain);
+    }
+
+    #[test]
+    fn the_run_log_lives_with_the_instance_and_rotates_once() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Logged", "1.21.1").unwrap();
+
+        let first = LaunchLogFile::open(&paths, &instance.id());
+        assert!(first.path().ends_with(Path::new("logs").join("launcher.log")));
+        first.append(&["first run".to_string()]);
+        let text = std::fs::read_to_string(first.path()).unwrap();
+        assert!(text.contains("Logged"), "the header names the instance: {text}");
+        assert!(text.contains("first run"), "{text}");
+
+        // A second launch moves the first aside instead of appending to it:
+        // retrying is exactly when the log of the failed attempt matters.
+        let second = LaunchLogFile::open(&paths, &instance.id());
+        second.append(&["second run".to_string()]);
+        let text = std::fs::read_to_string(second.path()).unwrap();
+        assert!(text.contains("second run"), "{text}");
+        assert!(!text.contains("first run"), "{text}");
+        let previous = std::fs::read_to_string(second.path().with_extension("log.1")).unwrap();
+        assert!(previous.contains("first run"), "{previous}");
+    }
+
+    /// Every line the console shows — the launcher's own account and the game's
+    /// output alike — goes out redacted and lands in the instance's log.
+    #[test]
+    fn nothing_reaches_the_console_without_passing_the_redactor_and_the_log() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Streamed", "1.21.1").unwrap();
+        let journal = LaunchLogFile::open(&paths, &instance.id());
+
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(4);
+        assert!(send_batch(
+            &mut tx,
+            7,
+            vec![
+                "command: java --accessToken eyJhbG --clientId 1234".to_string(),
+                "Starting Minecraft 1.21.1".to_string(),
+            ],
+            &journal,
+        ));
+        let Ok(Message::LaunchLog { run_id, lines }) = rx.try_recv() else {
+            panic!("expected a log batch");
+        };
+        assert_eq!(run_id, 7);
+        assert_eq!(
+            lines,
+            vec![
+                "command: java --accessToken <redacted> --clientId <redacted>",
+                "Starting Minecraft 1.21.1"
+            ]
+        );
+
+        let text = std::fs::read_to_string(journal.path()).unwrap();
+        assert!(!text.contains("eyJhbG"), "the token reached the disk: {text}");
+        assert!(text.contains("--accessToken <redacted>"), "{text}");
     }
 
     #[test]

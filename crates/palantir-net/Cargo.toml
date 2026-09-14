@@ -19,3 +19,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# The live test checks that a runtime entry's published digest is the digest of
+# the manifest its URL serves — the one assumption the whole Java-download path
+# rests on: if it were wrong, every install would be refused as tampered with,
+# and only a live test can notice, because a fixture would have been written
+# with the same assumption. Same version the desktop crate already uses.
+sha1 = "0.10"

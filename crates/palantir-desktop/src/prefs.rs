@@ -42,10 +42,17 @@ pub const PREFS_FILE: &str = palantir_core::paths::PREFS_FILE;
 pub const DEFAULT_CONCURRENT_DOWNLOADS: u32 = 6;
 /// Concurrent disk writes when nothing is configured.
 pub const DEFAULT_CONCURRENT_WRITES: u32 = 6;
-/// Heap floor, in MiB, for an instance that does not override it.
-pub const DEFAULT_MIN_MEM_MIB: u32 = 512;
-/// Heap ceiling, in MiB, for an instance that does not override it.
-pub const DEFAULT_MAX_MEM_MIB: u32 = 4096;
+/// Heap floor, in MiB, for an instance that does not override memory.
+///
+/// The same number the game's own settings default to
+/// ([`palantir_core::settings::defaults::MIN_MEM_ALLOC`]) rather than a second
+/// opinion about it. The settings pane shows this value and a launch obeys it,
+/// and two constants that drifted apart would make the pane wrong about the
+/// machine — which is the state this launcher shipped in until the fields were
+/// wired up.
+pub const DEFAULT_MIN_MEM_MIB: u32 = palantir_core::settings::defaults::MIN_MEM_ALLOC as u32;
+/// Heap ceiling, in MiB, for an instance that does not override memory.
+pub const DEFAULT_MAX_MEM_MIB: u32 = palantir_core::settings::defaults::MAX_MEM_ALLOC as u32;
 /// The only interface language this build ships.
 pub const DEFAULT_LOCALE: &str = "en-US";
 
@@ -165,12 +172,28 @@ pub struct Prefs {
     pub discord_rpc: bool,
 
     // ---- Instances ---------------------------------------------------
-    /// Heap floor a new instance starts with, in MiB.
+    /// Heap floor a launch uses, in MiB, for an instance that does not override
+    /// memory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_min_mem_mib: Option<u32>,
-    /// Heap ceiling a new instance starts with, in MiB.
+    /// Heap ceiling a launch uses, in MiB, for an instance that does not
+    /// override memory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_max_mem_mib: Option<u32>,
+    /// Heap floor taken from the other launcher's `prismlauncher.cfg`, when this
+    /// file has no number of its own.
+    ///
+    /// Deliberately *not* one of the fields above: reading Prism's numbers must
+    /// never write them into this launcher's file, so a machine that has never
+    /// touched the memory pane keeps a preferences file that says nothing about
+    /// memory. It exists because a Prism install's heap is a real setting, and
+    /// adopting an install should not quietly launch it with different numbers.
+    #[serde(skip)]
+    adopted_min_mem_mib: Option<u32>,
+    /// Heap ceiling taken from `prismlauncher.cfg` (see
+    /// [`Prefs::adopted_min_mem_mib`]).
+    #[serde(skip)]
+    adopted_max_mem_mib: Option<u32>,
     /// Java binary a new instance starts with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_java_path: Option<String>,
@@ -239,6 +262,8 @@ impl Default for Prefs {
             discord_rpc: false,
             default_min_mem_mib: None,
             default_max_mem_mib: None,
+            adopted_min_mem_mib: None,
+            adopted_max_mem_mib: None,
             default_java_path: None,
             max_concurrent_downloads: None,
             max_concurrent_writes: None,
@@ -271,14 +296,23 @@ impl Prefs {
         self.max_concurrent_writes.unwrap_or(DEFAULT_CONCURRENT_WRITES)
     }
 
-    /// The heap floor a new instance starts with.
+    /// The heap floor a launch uses: what was set here, else what was adopted
+    /// from the other launcher's config, else the shipped number.
+    ///
+    /// One answer rather than three, because the settings pane shows this value
+    /// and a launch passes it to the JVM: a resolution the pane could not see
+    /// would be a pane that is wrong about the machine.
     pub fn min_mem_mib(&self) -> u32 {
-        self.default_min_mem_mib.unwrap_or(DEFAULT_MIN_MEM_MIB)
+        self.default_min_mem_mib
+            .or(self.adopted_min_mem_mib)
+            .unwrap_or(DEFAULT_MIN_MEM_MIB)
     }
 
-    /// The heap ceiling a new instance starts with.
+    /// The heap ceiling a launch uses (see [`Prefs::min_mem_mib`]).
     pub fn max_mem_mib(&self) -> u32 {
-        self.default_max_mem_mib.unwrap_or(DEFAULT_MAX_MEM_MIB)
+        self.default_max_mem_mib
+            .or(self.adopted_max_mem_mib)
+            .unwrap_or(DEFAULT_MAX_MEM_MIB)
     }
 
     /// The interface language, defaulting to the one this build ships.
@@ -310,6 +344,46 @@ impl Prefs {
             configured.to_string()
         }
     }
+
+    /// Take the heap numbers from the other launcher's config, when this file
+    /// has none of its own.
+    ///
+    /// A machine that already has the other launcher installed has a heap it was
+    /// configured with, and this launcher shows and uses that rather than a
+    /// shipped default no launch would have used: adopting the install that is
+    /// already there is about the data, and memory is part of how that install
+    /// behaves. Prism's file is only ever read, here and everywhere else.
+    ///
+    /// The numbers land in [`Prefs::adopted_min_mem_mib`] and its ceiling rather
+    /// than in the file's own fields, so nothing read here can reach
+    /// `palantirmc-desktop.json` on the next save: a machine that has never
+    /// touched the memory pane keeps a preferences file that says nothing about
+    /// memory, and a number typed into the pane still wins over Prism's.
+    fn adopt_prism_memory(&mut self, home: &PalantirPaths) {
+        if self.default_min_mem_mib.is_some() && self.default_max_mem_mib.is_some() {
+            return;
+        }
+        let Ok(settings) = palantir_core::settings::Settings::load(&home.global_config()) else {
+            return;
+        };
+        // A number in the file that is not a number — or is zero, which is not a
+        // heap — is not a heap to adopt. Prism itself reads nonsense as zero, and
+        // a zero-megabyte heap is a launch that fails in the JVM rather than a
+        // setting anybody chose.
+        let heap = |key: &str| {
+            settings
+                .map()
+                .get(key)
+                .and_then(|raw| raw.trim().parse::<u32>().ok())
+                .filter(|mib| *mib > 0)
+        };
+        if self.default_min_mem_mib.is_none() {
+            self.adopted_min_mem_mib = heap(PRISM_MIN_MEM_KEY);
+        }
+        if self.default_max_mem_mib.is_none() {
+            self.adopted_max_mem_mib = heap(PRISM_MAX_MEM_KEY);
+        }
+    }
 }
 
 /// Where the preferences live: this product's own directory, not the data root.
@@ -324,11 +398,18 @@ pub fn path(home: &PalantirPaths) -> PathBuf {
 /// The corrupt file is left in place — overwriting it would destroy whatever
 /// the user was editing when it broke.
 pub fn load(home: &PalantirPaths) -> Prefs {
-    std::fs::read_to_string(path(home))
+    let mut prefs: Prefs = std::fs::read_to_string(path(home))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    prefs.adopt_prism_memory(home);
+    prefs
 }
+
+/// Prism's key for the heap floor in `prismlauncher.cfg`.
+pub const PRISM_MIN_MEM_KEY: &str = "MinMemAlloc";
+/// Prism's key for the heap ceiling in `prismlauncher.cfg`.
+pub const PRISM_MAX_MEM_KEY: &str = "MaxMemAlloc";
 
 /// Write the preferences, atomically.
 ///
@@ -450,6 +531,62 @@ mod tests {
         assert_ne!(path(&paths), prism);
     }
 
+    /// A machine that already runs the other launcher has a heap it was set up
+    /// with, and this one shows and uses those numbers rather than a shipped
+    /// default no launch would have used.
+    #[test]
+    fn the_heap_the_other_launcher_has_is_adopted_rather_than_copied() {
+        let (_dir, paths) = root();
+        let prism = "[General]\nMinMemAlloc=1024\nMaxMemAlloc=8192\n";
+        std::fs::write(paths.global_config(), prism).unwrap();
+        let prefs = load(&paths);
+        assert_eq!(prefs.min_mem_mib(), 1024);
+        assert_eq!(prefs.max_mem_mib(), 8192);
+
+        // Reading them must not turn them into this launcher's own settings: a
+        // machine that has never touched the memory pane keeps a preferences
+        // file that says nothing about memory. And Prism's file is written by
+        // nobody, here as everywhere else.
+        save(&paths, &prefs).unwrap();
+        let written = std::fs::read_to_string(path(&paths)).unwrap();
+        assert!(!written.contains("mem_mib"), "the adopted numbers were copied: {written}");
+        assert_eq!(std::fs::read_to_string(paths.global_config()).unwrap(), prism);
+    }
+
+    #[test]
+    fn a_number_set_here_beats_the_one_the_other_launcher_has() {
+        let (_dir, paths) = root();
+        std::fs::write(
+            paths.global_config(),
+            "[General]\nMinMemAlloc=1024\nMaxMemAlloc=8192\n",
+        )
+        .unwrap();
+        save(
+            &paths,
+            &Prefs { default_max_mem_mib: Some(2048), ..Prefs::default() },
+        )
+        .unwrap();
+        let prefs = load(&paths);
+        assert_eq!(prefs.max_mem_mib(), 2048, "the number typed here is the one a launch uses");
+        assert_eq!(prefs.min_mem_mib(), 1024, "the one not set here still comes from Prism");
+    }
+
+    #[test]
+    fn a_heap_that_is_not_a_heap_is_not_adopted() {
+        // Zero megabytes is not a heap, and a typo is not a number: adopting
+        // either would turn a readable global config into a launch that dies in
+        // the JVM instead of one that uses the shipped numbers.
+        let (_dir, paths) = root();
+        std::fs::write(
+            paths.global_config(),
+            "[General]\nMinMemAlloc=0\nMaxMemAlloc=  \n",
+        )
+        .unwrap();
+        let prefs = load(&paths);
+        assert_eq!(prefs.min_mem_mib(), DEFAULT_MIN_MEM_MIB);
+        assert_eq!(prefs.max_mem_mib(), DEFAULT_MAX_MEM_MIB);
+    }
+
     #[test]
     fn the_defaults_are_decisions_rather_than_zeroes() {
         // A derived `Default` would answer `false` to all of these, and three of
@@ -549,6 +686,9 @@ mod tests {
             discord_rpc: true,
             default_min_mem_mib: Some(1024),
             default_max_mem_mib: Some(8192),
+            // Nothing was adopted from anywhere: this file is the whole story.
+            adopted_min_mem_mib: None,
+            adopted_max_mem_mib: None,
             default_java_path: Some("C:/jdk21/bin/javaw.exe".into()),
             max_concurrent_downloads: Some(3),
             max_concurrent_writes: Some(2),

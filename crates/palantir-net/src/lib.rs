@@ -16,6 +16,10 @@
 //!   is testable offline.
 //! * [`modrinth`] provides the minimal Modrinth API v2 client types and URL
 //!   builders.
+//! * [`java`] provides the Java runtime metadata the service publishes
+//!   (`net.minecraft.java`): the platform tag a host needs, the runtime entries
+//!   a major offers, and the per-file manifest Mojang's own JRE is described by.
+//!   Parsing only — installing one is filesystem work for the caller.
 //!
 //! Design notes:
 //!
@@ -26,6 +30,7 @@
 
 pub mod auth;
 pub mod download;
+pub mod java;
 pub mod meta;
 pub mod modrinth;
 
@@ -34,7 +39,10 @@ pub use auth::{
     HttpTransport, HttpResponse, MapTransport, MinecraftSession, MicrosoftAuth, MicrosoftOAuth,
     MsaToken, OfflineSession, PollOutcome, DEFAULT_MICROSOFT_CLIENT_ID,
 };
-pub use download::{download_bytes, download_file, download_many, sha256_hex, verify_sha256};
+pub use download::{
+    download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,
+    verify_sha256,
+};
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
     ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse, ModrinthVersionFile,

@@ -33,8 +33,8 @@ use std::path::{Path, PathBuf};
 use palantir_core::assets::{object_relative_path, AssetIndex};
 use palantir_core::paths::PalantirPaths;
 use palantir_core::version::{LaunchProfile, Library, RuntimeContext};
+use palantir_net::download_many_with_progress;
 use palantir_net::meta::Fetcher;
-use palantir_net::download_many;
 
 /// Where Mojang serves asset objects from (hash-addressed, first two hex
 /// characters as the directory).
@@ -424,6 +424,12 @@ fn library_label(library: &Library) -> String {
 /// Two phases rather than one because the asset objects cannot be enumerated
 /// until the index is on disk: phase one is the planned files, phase two reads
 /// the index it just wrote and fetches the hashes it names.
+///
+/// Both phases report progress through `log` while they work (see
+/// [`download_with_progress`]): a phase that fetches thousands of small files
+/// says nothing between starting and finishing otherwise, and a silent screen
+/// is indistinguishable from a hang — which is how a resumable install gets
+/// killed by the person waiting for it.
 pub fn run(
     plan: &InstallPlan,
     fetcher: &(dyn Fetcher + Sync),
@@ -442,7 +448,7 @@ pub fn run(
             .iter()
             .map(|job| (job.url.clone(), job.dest.clone()))
             .collect();
-        let results = download_many(fetcher, &jobs, threads.max(1));
+        let results = download_with_progress(fetcher, &jobs, threads, "files", log);
         for (index, (url, result)) in results.into_iter().enumerate() {
             let job = &plan.jobs[index];
             match result {
@@ -497,6 +503,59 @@ pub fn run(
     report
 }
 
+/// Progress lines a bulk phase prints at most.
+///
+/// One line per ~2% of the phase, so a 5000-file asset index gets a line every
+/// hundred files or so: enough to show movement on a console nobody wants a
+/// line per file on.
+const PROGRESS_REPORTS: usize = 50;
+
+/// The number of finished files between two progress lines.
+///
+/// Rounded up, so the count of lines stays near [`PROGRESS_REPORTS`] rather
+/// than doubling for a phase whose size does not divide evenly.
+fn progress_step(total: usize) -> usize {
+    total.div_ceil(PROGRESS_REPORTS).max(1)
+}
+
+/// One progress line, e.g. `files: 126/5057 (2%, 3.4 MB)`.
+///
+/// `bytes` is what the phase has actually received so far, which is why a phase
+/// whose sources publish no sizes can still show movement.
+fn progress_line(label: &str, done: usize, total: usize, bytes: u64) -> String {
+    let percent = match total {
+        0 => 100,
+        total => done * 100 / total,
+    };
+    let megabytes = bytes as f64 / (1024.0 * 1024.0);
+    format!("{label}: {done}/{total} ({percent}%, {megabytes:.1} MB)")
+}
+
+/// Fetch every job in parallel, logging progress while it works.
+///
+/// The downloads stay parallel inside [`download_many_with_progress`]; the
+/// reporting happens on this thread, once per finished file, so the lines reach
+/// `log` in order and need no locking. The first file and the last are always
+/// reported — the first says the phase is alive, the last that it is over — and
+/// the rest follow [`progress_step`].
+pub(crate) fn download_with_progress(
+    fetcher: &(dyn Fetcher + Sync),
+    jobs: &[(String, PathBuf)],
+    threads: usize,
+    label: &str,
+    log: &mut dyn FnMut(String),
+) -> Vec<(String, Result<u64, palantir_net::Error>)> {
+    let total = jobs.len();
+    let step = progress_step(total);
+    let mut reported = 0usize;
+    download_many_with_progress(fetcher, jobs, threads.max(1), &mut |done, bytes| {
+        if done == 1 || done == total || done - reported >= step {
+            reported = done;
+            log(progress_line(label, done, total, bytes));
+        }
+    })
+}
+
 /// Phase two: read the index and fetch the objects it names.
 fn run_assets(
     assets: &AssetPlan,
@@ -548,7 +607,7 @@ fn run_assets(
     }
     if !jobs.is_empty() {
         log(format!("downloading {} asset object(s)…", jobs.len()));
-        let results = download_many(fetcher, &jobs, threads.max(1));
+        let results = download_with_progress(fetcher, &jobs, threads, "asset objects", log);
         for (index_in_jobs, (url, result)) in results.into_iter().enumerate() {
             match result {
                 Ok(bytes) => {
@@ -1152,5 +1211,138 @@ mod tests {
         assert!(summary.contains("9 already present"), "{summary}");
         assert!(summary.contains("5 native file(s)"), "{summary}");
         assert!(report.is_complete());
+    }
+
+    /// A phase of thousands of small files has to show it is moving without
+    /// printing a line per file: the first file says the phase started before
+    /// any real delay, the last says it finished, and the ones between are
+    /// spaced by [`progress_step`].
+    #[test]
+    fn a_bulk_phase_reports_progress_without_narrating_every_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fetcher = MapFetcher::new();
+        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+        const FILES: usize = 1000;
+        const EACH: usize = 4096;
+        for index in 0..FILES {
+            let url = format!("https://cdn.invalid/object-{index:04}");
+            fetcher.insert(&url, vec![b'x'; EACH]);
+            jobs.push((url, dir.path().join(format!("object-{index:04}"))));
+        }
+
+        let mut lines: Vec<String> = Vec::new();
+        let results =
+            download_with_progress(&fetcher, &jobs, 4, "files", &mut |line| lines.push(line));
+
+        assert_eq!(results.len(), FILES);
+        assert!(
+            results.iter().all(|(_, result)| result.is_ok()),
+            "every file arrived"
+        );
+        assert!(
+            lines[0].starts_with("files: 1/1000 (0%"),
+            "the phase says it is alive on its first file: {lines:?}"
+        );
+        let last = lines.last().unwrap();
+        assert!(
+            last.starts_with("files: 1000/1000 (100%"),
+            "and that it finished, with the bytes it carried: {last}"
+        );
+        assert!(last.contains("3.9 MB"), "1000 × 4096 bytes: {last}");
+        assert!(
+            lines.len() <= PROGRESS_REPORTS + 2,
+            "a line per file would be 1000 lines of console, got {}: {lines:?}",
+            lines.len()
+        );
+    }
+
+    #[test]
+    fn the_progress_cadence_is_a_step_not_a_line_per_file() {
+        assert_eq!(progress_step(0), 1, "an empty phase still finishes in one step");
+        assert_eq!(progress_step(1), 1);
+        assert_eq!(progress_step(PROGRESS_REPORTS), 1);
+        assert_eq!(progress_step(5057), 102, "a line every ~2% of 5057 files");
+        assert_eq!(progress_step(120), 3, "rounded up, so 120 files get ~40 lines");
+        assert_eq!(progress_line("files", 1, 4, 0), "files: 1/4 (25%, 0.0 MB)");
+        assert_eq!(
+            progress_line("asset objects", 4, 4, 2 * 1024 * 1024),
+            "asset objects: 4/4 (100%, 2.0 MB)"
+        );
+    }
+
+    /// The phase that made the launcher look dead is the asset one, so the
+    /// lines have to come out of a real [`run`] and not just the helper.
+    #[test]
+    fn the_asset_phase_reports_progress_while_it_downloads() {
+        let (_dir, paths) = test_paths();
+        let ctx = RuntimeContext::current_host();
+        const OBJECTS: usize = 120;
+        let mut objects = serde_json::Map::new();
+        let mut bodies: Vec<(String, String)> = Vec::new();
+        for index in 0..OBJECTS {
+            let body = format!("object-{index}");
+            let hash = sha1_hex(body.as_bytes());
+            objects.insert(
+                format!("file-{index}.bin"),
+                json!({ "hash": hash, "size": body.len() }),
+            );
+            bodies.push((hash, body));
+        }
+        let index_body = json!({ "objects": objects }).to_string();
+        let mut profile = LaunchProfile::default();
+        profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo {
+            path: None,
+            sha1: sha1_hex(index_body.as_bytes()),
+            size: index_body.len() as i64,
+            url: "https://piston-meta.mojang.com/120.json".into(),
+            total_size: 0,
+            id: "120".into(),
+            known: true,
+        });
+        let mut fetcher = MapFetcher::new();
+        fetcher.insert(
+            "https://piston-meta.mojang.com/120.json",
+            index_body.into_bytes(),
+        );
+        for (hash, body) in bodies {
+            fetcher.insert(
+                &format!("{ASSET_OBJECT_BASE_URL}/{}", object_relative_path(&hash)),
+                body.into_bytes(),
+            );
+        }
+
+        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let mut lines: Vec<String> = Vec::new();
+        let report = run(&plan, &fetcher, 4, &mut |line| lines.push(line));
+
+        assert!(report.is_complete(), "failures: {:?}", report.failed);
+        assert_eq!(report.objects_downloaded, OBJECTS);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("downloading 120 asset object(s)")),
+            "the phase is announced: {lines:?}"
+        );
+        let progress: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.starts_with("asset objects: "))
+            .collect();
+        assert!(
+            progress
+                .first()
+                .is_some_and(|line| line.starts_with("asset objects: 1/120 (0%")),
+            "the first object is reported: {progress:?}"
+        );
+        assert!(
+            progress
+                .last()
+                .is_some_and(|line| line.starts_with("asset objects: 120/120 (100%")),
+            "the last object is reported: {progress:?}"
+        );
+        assert!(
+            progress.len() > 1 && progress.len() < OBJECTS / 2,
+            "a few lines, not one per object: {}",
+            progress.len()
+        );
     }
 }

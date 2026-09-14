@@ -204,6 +204,15 @@ pub struct NewInstance {
     pub icon_source: Option<PathBuf>,
     /// `MaxMemAlloc` to set (enables the `OverrideMemory` gate when `Some`).
     pub max_mem_mb: Option<i64>,
+    /// `JavaPath` to set (enables the `OverrideJavaLocation` gate when `Some`).
+    ///
+    /// This is the Synced settings "Java binary" the Create dialog starts from,
+    /// written down rather than looked up later: the instance settings page then
+    /// shows the Java it runs with, the same way it shows the heap. A launch
+    /// still falls back to that default when the path here is gone or names a
+    /// major the version cannot run on, so pinning one at creation cannot make
+    /// an instance unlaunchable.
+    pub java_path: Option<String>,
 }
 
 impl NewInstance {
@@ -217,6 +226,7 @@ impl NewInstance {
             icon_key: None,
             icon_source: None,
             max_mem_mb: None,
+            java_path: None,
         }
     }
 }
@@ -284,6 +294,15 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
     if let Some(mem) = spec.max_mem_mb {
         instance.settings_mut().set_bool("OverrideMemory", true);
         instance.settings_mut().set_i64("MaxMemAlloc", mem);
+    }
+
+    // The Synced settings default, written the way the instance settings page
+    // writes it: the gate plus the path, because Prism reads `JavaPath` only
+    // behind `OverrideJavaLocation`. A blank path is "nothing was chosen", so
+    // it leaves the instance with no opinion rather than an empty one.
+    if let Some(java) = spec.java_path.as_deref().map(str::trim).filter(|path| !path.is_empty()) {
+        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance.settings_mut().set_str("JavaPath", java);
     }
 
     if let Some(source) = spec.icon_source.as_deref() {
@@ -583,6 +602,39 @@ mod tests {
         assert_eq!(card.loader, LoaderKind::Vanilla);
         assert_eq!(card.subtitle(), "26.2");
         assert!(!card.has_loader());
+    }
+
+    #[test]
+    fn a_created_instance_records_the_java_it_was_given() {
+        let (_dir, paths) = test_paths();
+        let spec = NewInstance {
+            java_path: Some("  C:/jdk21/bin/javaw.exe  ".to_string()),
+            ..NewInstance::vanilla("Pinned", "1.21.1")
+        };
+        let created = create(&paths, &spec).unwrap();
+        let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
+        // Prism reads `JavaPath` only behind `OverrideJavaLocation`, so the gate
+        // is what makes the path mean anything at all — writing one without the
+        // other is how a setting ends up stored and ignored.
+        assert!(instance.settings().get_bool("OverrideJavaLocation", false));
+        assert_eq!(instance.settings().get_str("JavaPath", ""), "C:/jdk21/bin/javaw.exe");
+
+        // Nothing chosen leaves the instance with no opinion rather than an
+        // empty path the settings page would show as a choice.
+        let plain = create(&paths, &NewInstance::vanilla("Unpinned", "1.21.1")).unwrap();
+        let plain = Instance::open(&paths.instances_dir().join(&plain.id)).unwrap();
+        assert!(!plain.settings().get_bool("OverrideJavaLocation", false));
+        assert_eq!(plain.settings().get_str("JavaPath", ""), "");
+
+        // A blank path is "nothing was chosen" too: the create dialog passes the
+        // default straight through, and an empty one is ordinary.
+        let blank = NewInstance {
+            java_path: Some("   ".to_string()),
+            ..NewInstance::vanilla("Blank", "1.21.1")
+        };
+        let blank = create(&paths, &blank).unwrap();
+        let blank = Instance::open(&paths.instances_dir().join(&blank.id)).unwrap();
+        assert!(!blank.settings().get_bool("OverrideJavaLocation", false));
     }
 
     #[test]

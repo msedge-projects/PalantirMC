@@ -54,7 +54,7 @@ use crate::glyphs::glyph;
 use crate::icons::instance_handle;
 use crate::instances::{self, InstanceCard, LoadedInstances, NewInstance};
 use crate::launch::{
-    self, open_in_file_manager, ActiveRunData, AccountRef, ChildSlot, LaunchParams,
+    self, open_in_file_manager, ActiveRunData, AccountRef, ChildSlot, LaunchDefaults, LaunchParams,
 };
 use crate::mods::{list_content_names, list_mods, set_mod_enabled, ModEntry};
 use crate::anim;
@@ -1448,6 +1448,7 @@ impl PalantirApp {
                         &paths,
                         &run.instance_id,
                         &prepared.session,
+                        &run.defaults,
                         &mut store,
                         &fetcher,
                         &mut log,
@@ -1586,11 +1587,16 @@ impl PalantirApp {
         }
         self.run_seq += 1;
         let account = self.launch_account();
+        // The settings the run needs are read here, at the moment it is
+        // requested, and travel with it: the worker has no business going back
+        // to a preferences file to find out what it was told to use.
+        let defaults = LaunchDefaults::from_prefs(&self.prefs);
         self.active_run = Some(ActiveRunData {
             run_id: self.run_seq,
             instance_id: id.clone(),
             data_root: self.paths.root.clone(),
             account,
+            defaults,
         });
         self.page = Page::Logs;
         self.set_status(format!("Starting '{id}'…"));
@@ -2131,6 +2137,12 @@ impl PalantirApp {
             } else {
                 None
             },
+            // What the Synced settings name as the Java for new instances. It is
+            // copied rather than left to the launch to work out, so the instance
+            // settings page shows the Java this instance will run with — and a
+            // launch still falls back to the same default, so an instance whose
+            // Java is not right for its version is not stranded.
+            java_path: self.prefs.default_java_path.clone(),
             icon_key: if self.create.icon_source.is_none() && !self.create.icon_key.is_empty() {
                 Some(self.create.icon_key.clone())
             } else {
@@ -3287,6 +3299,7 @@ impl PalantirApp {
                     instance_id: run.instance_id.clone(),
                     account: run.account.clone(),
                     run_id: run.run_id,
+                    defaults: run.defaults.clone(),
                 };
                 let _ = std::thread::spawn(move || {
                     launch::run_launch_worker(params, slot, sender);
@@ -7032,6 +7045,41 @@ mod tests {
         let card = app.selected_card().unwrap();
         assert_eq!(card.loader, LoaderKind::Fabric);
         assert_eq!(card.mc_version, "26.2");
+    }
+
+    /// The Synced settings "Java binary" is the Java a new instance starts
+    /// with: the Create dialog writes it down, so the instance settings page can
+    /// show the Java this instance runs with instead of saying nothing and
+    /// letting the launch work it out.
+    #[test]
+    fn a_new_instance_starts_with_the_default_java() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        app.catalog.loading = false;
+        app.catalog.loaded_once = true;
+        app.catalog.catalog = catalog_with(&["26.2"], &[]);
+        app.prefs.default_java_path = Some("C:/jdk21/bin/javaw.exe".to_string());
+
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateCustomSetup);
+        let _ = app.update(Message::CreateNameChanged("Defaulted".to_string()));
+        let _ = app.update(Message::CreateSubmit);
+        assert_eq!(app.instance_count(), 1, "create failed: {:?}", app.create_form().error);
+        let instance = Instance::open(&paths.instances_dir().join("Defaulted")).unwrap();
+        assert!(instance.settings().get_bool("OverrideJavaLocation", false));
+        assert_eq!(instance.settings().get_str("JavaPath", ""), "C:/jdk21/bin/javaw.exe");
+
+        // With nothing chosen, the instance is not pinned to a path that would
+        // have to be looked past on every launch.
+        app.prefs.default_java_path = None;
+        let _ = app.update(Message::OpenCreate);
+        let _ = app.update(Message::CreateCustomSetup);
+        let _ = app.update(Message::CreateNameChanged("Loose".to_string()));
+        let _ = app.update(Message::CreateSubmit);
+        assert_eq!(app.instance_count(), 2);
+        let instance = Instance::open(&paths.instances_dir().join("Loose")).unwrap();
+        assert!(!instance.settings().get_bool("OverrideJavaLocation", false));
+        assert_eq!(instance.settings().get_str("JavaPath", ""), "");
     }
 
     #[test]

@@ -7,10 +7,17 @@
 //! [`download_bytes`] is the unit-testable core (it takes any [`Fetcher`],
 //! so tests inject [`MapFetcher`] bytes); [`download_file`] wraps it with a
 //! [`BlockingHttpFetcher`] timeout.
+//!
+//! [`download_many`] spreads many jobs over a small thread pool; it is
+//! [`download_many_with_progress`] with a callback that ignores what it is
+//! told. The progress spelling exists because a bulk phase of thousands of
+//! small files is otherwise silent between starting and finishing, which is
+//! indistinguishable from a hang.
 
 use crate::meta::{BlockingHttpFetcher, Fetcher};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::Duration;
 
 /// Compute the lowercase hex `sha256` digest of `data`.
@@ -89,54 +96,108 @@ pub fn download_file(url: &str, dest: &Path, timeout: Duration) -> Result<u64, c
 /// Download many `(url, dest)` jobs in parallel, returning one
 /// `(url, result)` pair per job in the input order.
 ///
+/// The chunking, thread count and per-job independence of
+/// [`download_many_with_progress`], without the reporting: this is that call
+/// with a progress callback that ignores what it is told.
+pub fn download_many(
+    fetcher: &(dyn Fetcher + Sync),
+    jobs: &[(String, PathBuf)],
+    threads: usize,
+) -> Vec<(String, Result<u64, crate::Error>)> {
+    download_many_with_progress(fetcher, jobs, threads, &mut |_, _| {})
+}
+
+/// Download many `(url, dest)` jobs in parallel, reporting each finished one.
+///
 /// `jobs` are split into `threads` contiguous chunks (`threads` is clamped to
 /// a minimum of 1 and a maximum of `jobs.len()`; `threads == 0` therefore
 /// behaves like 1), and each chunk is downloaded sequentially on its own
 /// scoped worker thread via [`download_bytes`]. The scoped threads only
 /// borrow `fetcher` and `jobs`, so no `'static` bounds or cloning are needed.
 /// Each job is independent: a failing URL yields an `Err` for that entry only
-/// and does not affect the other downloads.
-pub fn download_many(
+/// and does not affect the other downloads — and it still counts as a finished
+/// job below, so a phase's progress reaches its total even when files fail.
+///
+/// `progress` is called **on the calling thread**, once per finished job and
+/// never from a worker, with the number of jobs finished so far and the bytes
+/// those jobs have carried (a failed job carries none). That is what makes it
+/// usable from a caller that has to log where a long phase is: the events are
+/// serialised in completion order, so they need no lock and the callback can
+/// borrow a plain `&mut dyn FnMut` logger. Unless a worker panicked — whose
+/// unfinished chunk is reported as an error instead — the final call has
+/// `jobs.len()` as its count.
+pub fn download_many_with_progress(
     fetcher: &(dyn Fetcher + Sync),
     jobs: &[(String, PathBuf)],
     threads: usize,
+    progress: &mut dyn FnMut(usize, u64),
 ) -> Vec<(String, Result<u64, crate::Error>)> {
     if jobs.is_empty() {
         return Vec::new();
     }
     let worker_count = threads.max(1).min(jobs.len());
     let chunk_size = jobs.len().div_ceil(worker_count);
-    let chunks: Vec<&[(String, PathBuf)]> =
-        jobs.chunks(chunk_size).collect();
+    // Each chunk carries the index of its first job, so a worker can report
+    // where what it just finished belongs without the caller sorting results.
+    let chunks: Vec<(usize, &[(String, PathBuf)])> = jobs
+        .chunks(chunk_size)
+        .enumerate()
+        .map(|(offset, chunk)| (offset * chunk_size, chunk))
+        .collect();
+    let mut results: Vec<Option<Result<u64, crate::Error>>> =
+        (0..jobs.len()).map(|_| None).collect();
     std::thread::scope(|s| {
+        let (finished_tx, finished_rx) = mpsc::channel::<(usize, Result<u64, crate::Error>)>();
         let handles: Vec<_> = chunks
             .iter()
-            .map(|chunk| {
+            .map(|(offset, chunk)| {
+                let offset = *offset;
+                let finished_tx = finished_tx.clone();
                 s.spawn(move || {
-                    let mut out = Vec::with_capacity(chunk.len());
-                    for (url, dest) in chunk.iter() {
-                        out.push((url.clone(), download_bytes(fetcher, url, dest)));
+                    for (index, (url, dest)) in chunk.iter().enumerate() {
+                        let result = download_bytes(fetcher, url, dest);
+                        // A closed receiver means the caller stopped listening;
+                        // there is nowhere left to send anything.
+                        if finished_tx.send((offset + index, result)).is_err() {
+                            return;
+                        }
                     }
-                    out
                 })
             })
             .collect();
-        let mut results = Vec::with_capacity(jobs.len());
-        for (chunk, handle) in chunks.iter().zip(handles) {
-            match handle.join() {
-                Ok(mut out) => results.append(&mut out),
-                Err(_) => {
-                    for (url, dest) in chunk.iter() {
-                        results.push((
-                            url.clone(),
-                            Err(crate::Error::format(dest, "download worker panicked")),
-                        ));
-                    }
-                }
+        // Dropping the original sender is what ends the loop below: it exits
+        // once every worker has dropped its clone and the queue is empty.
+        drop(finished_tx);
+        let mut finished = 0usize;
+        let mut bytes = 0u64;
+        while let Ok((index, result)) = finished_rx.recv() {
+            if let Ok(count) = &result {
+                bytes += count;
             }
+            results[index] = Some(result);
+            finished += 1;
+            progress(finished, bytes);
         }
-        results
-    })
+        // Joined by hand rather than left to the scope, so a worker that
+        // panicked costs its own chunk its files instead of panicking this
+        // call: those entries stay `None` and become an error below.
+        for handle in handles {
+            let _ = handle.join();
+        }
+    });
+    results
+        .into_iter()
+        .enumerate()
+        .map(|(index, result)| {
+            let (url, dest) = &jobs[index];
+            (
+                url.clone(),
+                result.unwrap_or_else(|| {
+                    Err(crate::Error::format(dest, "download worker panicked"))
+                }),
+            )
+        })
+        .collect()
 }
 
 /// Return the sibling temporary path `<dest>.part` for atomic downloads.
@@ -367,5 +428,60 @@ mod tests {
         let f = MapFetcher::new();
         let results = download_many(&f, &[], 4);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn download_many_with_progress_counts_every_finished_job_including_failures() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = MapFetcher::new();
+        f.insert("https://x/a.bin", b"aaa".to_vec()); // 3 bytes
+        f.insert("https://x/c.bin", b"ccccc".to_vec()); // 5 bytes
+        let jobs = vec![
+            ("https://x/a.bin".to_string(), tmp.path().join("a.bin")),
+            // No body for this one: it fails, and still counts as finished.
+            ("https://x/missing.bin".to_string(), tmp.path().join("missing.bin")),
+            ("https://x/c.bin".to_string(), tmp.path().join("c.bin")),
+        ];
+
+        let mut events: Vec<(usize, u64)> = Vec::new();
+        let results = download_many_with_progress(&f, &jobs, 2, &mut |finished, bytes| {
+            events.push((finished, bytes));
+        });
+
+        assert_eq!(events.len(), 3, "one event per job: {events:?}");
+        assert_eq!(
+            events.iter().map(|(finished, _)| *finished).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "the count rises by one per job, in completion order: {events:?}"
+        );
+        assert!(
+            events.windows(2).all(|pair| pair[0].1 <= pair[1].1),
+            "bytes only ever add up: {events:?}"
+        );
+        assert_eq!(events.last().unwrap().1, 8, "3 + 5 bytes, the failure adds none");
+        assert_eq!(results.len(), 3);
+        assert!(results[1].1.is_err(), "the missing file still reports its error");
+    }
+
+    #[test]
+    fn download_many_with_progress_with_no_jobs_reports_nothing() {
+        let f = MapFetcher::new();
+        let mut calls = 0usize;
+        let results = download_many_with_progress(&f, &[], 4, &mut |_, _| calls += 1);
+        assert!(results.is_empty());
+        assert_eq!(calls, 0, "there is no progress to report before there is work");
+    }
+
+    #[test]
+    fn download_many_returns_what_download_many_with_progress_returns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = MapFetcher::new();
+        f.insert("https://x/a.bin", b"aaa".to_vec());
+        let jobs = vec![("https://x/a.bin".to_string(), tmp.path().join("a.bin"))];
+        let plain = download_many(&f, &jobs, 2);
+        let reported = download_many_with_progress(&f, &jobs, 2, &mut |_, _| {});
+        assert_eq!(plain.len(), reported.len());
+        assert!(plain.iter().all(|(_, result)| result.is_ok()));
+        assert!(reported.iter().all(|(_, result)| result.is_ok()));
     }
 }

@@ -34,6 +34,7 @@ mod gpu;
 mod icons;
 mod install;
 mod instances;
+mod java_runtime;
 mod launch;
 mod mods;
 mod native;

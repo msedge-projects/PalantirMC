@@ -1311,19 +1311,23 @@ fn privacy<'a>(view: &View<'a>) -> Element<'a, Message> {
     .into()
 }
 
-/// Instances > Synced settings: what a new instance starts with.
+/// Instances > Synced settings: what an instance starts from.
 fn synced_settings<'a>(view: &View<'a>) -> Element<'a, Message> {
     column![
         section(
-            "Defaults for new instances",
-            Some("What an instance starts with before it overrides anything.".to_string()),
+            "Defaults for instances",
+            Some(
+                "What a new instance starts with, and what a launch uses when the instance \
+                 overrides nothing."
+                    .to_string(),
+            ),
             true
         ),
         Space::with_height(Length::Fixed(16.0)),
         field_row(
             view,
             "Memory floor",
-            "Heap a new instance starts with, in MiB.",
+            "Heap floor a launch uses, in MiB, unless the instance overrides memory.",
             Field::MinMemory,
             false
         ),
@@ -1331,7 +1335,7 @@ fn synced_settings<'a>(view: &View<'a>) -> Element<'a, Message> {
         field_row(
             view,
             "Memory ceiling",
-            "Most heap a new instance may use, in MiB.",
+            "Heap ceiling a launch uses, in MiB, unless the instance overrides memory.",
             Field::MaxMemory,
             false
         ),
@@ -1339,15 +1343,18 @@ fn synced_settings<'a>(view: &View<'a>) -> Element<'a, Message> {
         field_row(
             view,
             "Java binary",
-            "Java to run new instances with. Empty means look on PATH.",
+            "Java a new instance starts with, and what a version that names no Java of its own \
+             runs on. Empty means find one on this machine, and, failing that, download the one \
+             the version asks for.",
             Field::DefaultJavaPath,
             true
         ),
         Space::with_height(Length::Fixed(24.0)),
         note(
-            "These are this launcher's own defaults, kept in palantirmc-desktop.json. Prism's \
-             global configuration in prismlauncher.cfg is never rewritten, so an instance created \
-             here does not change what Prism itself would do.",
+            "These are this launcher's own defaults, kept in palantirmc-desktop.json. On a machine \
+             where Prism already has memory settings they start from Prism's numbers — read once, \
+             never rewritten — so adopting an install does not change its heap until a value is \
+             typed here, and assigning one does not change what Prism itself would do.",
         ),
     ]
     .spacing(0)
@@ -1359,7 +1366,10 @@ fn java<'a>(view: &View<'a>) -> Element<'a, Message> {
     const MAJORS: [&str; 4] = ["25", "21", "17", "8"];
     let mut body = column![section(
         "Java installations",
-        Some("Which Java to run each major version with. Empty means look on PATH.".to_string()),
+        Some(
+            "Which Java to run each major version with. Empty means find one when it is needed."
+                .to_string(),
+        ),
         true
     )]
     .spacing(0);
@@ -1388,10 +1398,15 @@ fn java<'a>(view: &View<'a>) -> Element<'a, Message> {
     body.push(Space::with_height(Length::Fixed(24.0)))
         .push(note(
             "A version left empty is found automatically when an instance that needs it is \
-             launched: first the runtimes under the data root's java folder, then JAVA_HOME, then \
-             the standard install locations, then PATH — preferring one whose version matches \
-             what the instance asks for. A version that is set here is used for that major and no \
-             other.",
+             launched: the Java the instance itself names, then a path set here for one of the \
+             majors the version accepts, then the Java binary on the Synced settings tab — which \
+             is also the Java a new instance starts with — then the runtimes under the data \
+             root's java folder, JAVA_HOME, the standard install locations and PATH, preferring \
+             one whose version matches what the instance asks for. A path that is gone, or that \
+             names a major this version cannot run on, is looked past rather than used. If \
+             nothing on this machine matches, the runtime the version names is downloaded from \
+             the metadata service and unpacked under the data root's java folder. A path set here \
+             is used for that major and no other.",
         ))
         .into()
 }

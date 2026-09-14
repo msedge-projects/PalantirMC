@@ -24,7 +24,9 @@ use palantir_core::instance::Instance;
 use palantir_core::pack::PackProfile;
 use palantir_core::resolve::{resolve, MetaStore};
 use palantir_core::version::{ProblemSeverity, RuntimeContext};
-use palantir_net::{verify_sha256, MicrosoftAuth, OnlineMetaStore, DEFAULT_META_BASE_URL};
+use palantir_net::{
+    verify_sha256, Fetcher, MicrosoftAuth, OnlineMetaStore, DEFAULT_META_BASE_URL,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -354,5 +356,145 @@ fn microsoft_issues_a_device_code_for_the_shipped_client_id() {
         code.interval >= 5,
         "Microsoft asked for {}s between polls; the launcher polls as often as it is told",
         code.interval
+    );
+}
+
+/// The Java the service publishes, walked through the same parser the launcher
+/// runs when a machine has no Java at an accepted major.
+///
+/// A version file says which Java it needs, in two fields of its own
+/// (`compatibleJavaMajors`, `compatibleJavaName`); the launcher then fetches the
+/// runtime the service names, which is three metadata files deep: the
+/// `net.minecraft.java` list, the major's version file, and Mojang's per-file
+/// manifest. Every one of those is a shape that a fixture would happily get
+/// wrong in the same way the code did — the whole point of asking the service.
+///
+/// The last assertion is the one that matters most. Each runtime entry publishes
+/// a digest, and the launcher refuses to install a manifest whose bytes do not
+/// match it. If that digest described something *other* than the manifest — a
+/// tarball, an inner file, the version file — then every install would be
+/// refused as tampered with, and no offline test could tell, because it would
+/// have been written with the same belief.
+#[test]
+#[ignore = "live: reaches the metadata service"]
+fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
+    use palantir_net::java::{
+        host_runtime_os, parse_manifest, parse_runtimes, pick_runtime, runtime_file_url,
+        runtime_list_url, runtime_version, JAVA_RUNTIMES_UID,
+    };
+    use sha1::{Digest, Sha1};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let mut store = live_store(&tmp.path().join("meta"));
+
+    // The list the major is looked up in, and the one URL builder that has to
+    // agree with the store's own layout.
+    let majors = store
+        .version_list(JAVA_RUNTIMES_UID)
+        .unwrap_or_else(|e| panic!("{JAVA_RUNTIMES_UID} list: {e}"));
+    assert_eq!(
+        runtime_list_url(DEFAULT_META_BASE_URL),
+        store.version_list_url(JAVA_RUNTIMES_UID),
+        "the runtime list is built at a different URL than the rest of the metadata"
+    );
+    // 1.12.2 wants Java 8 and 1.21.1 wants Java 21; a service that lists neither
+    // could not answer a single instance this launcher creates.
+    for wanted in ["java8", "java21"] {
+        assert!(
+            majors.iter().any(|entry| entry.version == wanted),
+            "{JAVA_RUNTIMES_UID} no longer lists {wanted}: {:?}",
+            majors.iter().map(|e| e.version.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    // What the game itself asks for.
+    let game = store
+        .version_file("net.minecraft", GAME)
+        .expect("fetching the game version file");
+    assert!(
+        !game.compatible_java_majors.is_empty(),
+        "{GAME} stopped declaring a compatible Java major, which is what a \
+         launcher needs to pick one"
+    );
+    assert!(
+        !game.compatible_java_name.is_empty(),
+        "{GAME} stopped naming a Java runtime, so nothing can be fetched when \
+         the machine has no matching Java"
+    );
+    for major in &game.compatible_java_majors {
+        assert!(
+            majors.iter().any(|entry| entry.version == runtime_version(*major)),
+            "{GAME} wants Java {major}, which {JAVA_RUNTIMES_UID} does not publish"
+        );
+    }
+
+    // The major's version file, for the newest major the game accepts.
+    let major = *game.compatible_java_majors.iter().max().expect("a compatible major");
+    let url = runtime_file_url(DEFAULT_META_BASE_URL, &runtime_version(major));
+    let fetcher = palantir_net::BlockingHttpFetcher::new(Duration::from_secs(60));
+    let bytes = fetcher.fetch(&url).unwrap_or_else(|e| panic!("{url}: {e}"));
+    let entries = parse_runtimes(&bytes, Path::new(&url)).expect("parsing the runtime file");
+    assert!(!entries.is_empty(), "{url} listed no runtimes at all");
+    assert!(
+        entries
+            .iter()
+            .all(|entry| !entry.os.is_empty() && !entry.name.is_empty()),
+        "a runtime entry came back without a platform or a name"
+    );
+    assert!(
+        entries.iter().any(|entry| entry.major == major),
+        "{url} names {major} but carries no entry for it"
+    );
+
+    // The entry this host would install, named by the game itself.
+    let host = host_runtime_os(&RuntimeContext::current_host());
+    let entry = pick_runtime(&entries, &host, &game.compatible_java_name).unwrap_or_else(|| {
+        panic!(
+            "{GAME} names '{}' and wants Java {major}, but {} has no such runtime",
+            game.compatible_java_name,
+            url
+        )
+    });
+    assert!(
+        entry.is_manifest(),
+        "the {host} runtime the game names is a '{}' download now, which the \
+         launcher does not unpack",
+        entry.kind
+    );
+    assert_eq!(entry.sha1.len(), 40, "the runtime entry stopped publishing a sha1");
+    assert!(entry.url.starts_with("https://"), "runtime url: {}", entry.url);
+
+    // And the manifest behind it, which is what the installer reads.
+    let manifest_bytes = fetcher
+        .fetch(&entry.url)
+        .unwrap_or_else(|e| panic!("{}: {e}", entry.url));
+    let digest = Sha1::digest(&manifest_bytes);
+    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    assert_eq!(
+        digest,
+        entry.sha1.to_ascii_lowercase(),
+        "the runtime entry's published digest is not the digest of the manifest it \
+         points at, so no runtime would ever be installed"
+    );
+
+    let files = parse_manifest(&manifest_bytes, Path::new(&entry.url))
+        .expect("parsing the JRE manifest");
+    assert!(
+        files.len() > 50,
+        "a JRE manifest with {} file(s) is not a runtime",
+        files.len()
+    );
+    let exe = if cfg!(windows) { "bin/java.exe" } else { "bin/java" };
+    let binary = files
+        .iter()
+        .find(|file| file.path == exe)
+        .unwrap_or_else(|| panic!("the manifest has no {exe}"));
+    assert!(binary.executable, "{exe} is not marked executable");
+    assert_eq!(binary.sha1.len(), 40, "{exe} has no published digest");
+    assert!(binary.size > 0, "{exe} has no published size");
+    assert!(
+        binary.url.starts_with("https://"),
+        "{exe} is served from {}",
+        binary.url
     );
 }
