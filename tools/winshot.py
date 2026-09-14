@@ -452,9 +452,23 @@ def main():
                     break
             time.sleep(0.25)
     else:
-        name = args.process or (args.title and (args.title + ".exe"))
-        pid = pid_of(name) if name else None
-        hwnd = find_window(pid=pid) if pid else None
+        if not args.process and not args.title:
+            # Attaching needs something to match on. Without it the search below
+            # returns the largest window on the desktop -- somebody else's --
+            # and `--park` would then move *that* window off-screen. Refusing is
+            # the only safe answer.
+            parser.error("attaching needs --process or --title")
+        name = args.process
+        if name and not name.lower().endswith(".exe"):
+            name += ".exe"
+        attach_pid = pid_of(name) if name else None
+        # A process that does not exist is a *failure*, not a licence to fall
+        # back to whatever the desktop has on top: the fallback is what would
+        # park a stranger's window.
+        if attach_pid is None and not args.title:
+            print(f"no running process named {name}", file=sys.stderr)
+            return 2
+        hwnd = find_window(pid=attach_pid) if attach_pid else None
         if hwnd is None:
             hwnd = find_window(title=args.title)
 
@@ -473,8 +487,14 @@ def main():
 
     # Resolve again once the app has settled: the largest visible window of the
     # process is the one worth shooting, and by now there is no chance of
-    # picking up a helper that appeared first.
-    settled = find_window(pid=proc.pid) if proc is not None else find_window(title=args.title)
+    # picking up a helper that appeared first. The selector is the *same* one as
+    # above, so this can only ever move to another window of the process that was
+    # asked for -- never to whatever the desktop happens to have on top.
+    settled = (
+        find_window(pid=proc.pid)
+        if proc is not None
+        else (find_window(pid=attach_pid) if attach_pid else find_window(title=args.title))
+    )
     if settled is not None and settled != hwnd:
         hwnd = settled
         if args.park:

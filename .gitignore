@@ -1,6 +1,9 @@
 /target
 /dist
 *.log
+# Bytecode the Python helpers in tools/ leave behind.
+__pycache__/
+*.pyc
 .palantir-test-data/
 /.unlazy/
 /.unlazy-hook-state.json
