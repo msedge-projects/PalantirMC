@@ -1075,8 +1075,54 @@ and no bar at all between phases. A per-phase bar that names its phase is honest
 byte-weighting the whole install would need sizes that libraries do not publish
 before they are fetched, and would either lie or sit still.
 
-### Still open
+### End to end, measured (20:22)
 
-`dwa` now has to fetch those 458 MB for real, which is the first end-to-end
-exercise of the fixed URL and of the bar at this size. The live test proves one
-object; the run that proves five thousand is a machine with the game missing.
+Then it was done for real: the CI artifact of `892fc6f` (`dist/PalantirMC.exe`,
+`fe49bfa1…`), pointed at a scratch data root with `PALANTIRMC_HOME`, holding a
+copy of `dwa` and nothing else, driven by a session script. What the app's own
+`launcher.log` wrote:
+
+```
+install: 101 file(s) to download (127.7 MB), 0 already present
+downloading 101 file(s)…
+files: done — 101 file(s), 131.4 MB in 28.2 s
+downloading 5057 asset object(s)…
+```
+
+**The URL holds against the live service.** The asset phase opened and moved:
+767 files under the root 9 s after it began, 666 of them objects, about 74
+objects a second. That is the phase that used to spend six minutes collecting
+5057 404s and end at `0.0 MB`.
+
+**The bar tracks it.** Accent pixels in the window's status strip, read out of
+`PrintWindow` captures, against what the phase had done:
+
+| capture | on disk | bar, of its 200 px | phase |
+|---|---|---|---|
+| before Play | 7 files | nothing drawn | nothing fetching — no bar, as designed |
+| t+3 s | 11 files, 1.4 MB | nothing drawn | still planning; no phase has reported |
+| t+8 s | 87 files, 46 MB | 144 px = 72% | files phase, ~73 of 101 done |
+| t+15 s | 105 files, 122 MB | 186 px = 93% | files phase, ~94 of 101 |
+| t+25 s | 105 files, 122 MB | 186 px = 93% | one large library in flight: nothing finished, so nothing advances |
+| t+37 s | 767 files, 159 MB | 24 px = 12% | asset phase, ~600 of 5057 objects |
+
+The 12% is 12% of *5057 objects*, not of the libraries before them — the bar
+resets with the phase and the status line names which phase it is, which is what
+makes a per-phase bar honest and a whole-install one a guess. Nothing is drawn
+before the first phase reports or between phases. The strips these rows were
+measured from are cropped — one row per capture, `dl-0` before and `dl-1`…`dl-5`
+during — into `.scratch/bar-strips.png`.
+
+**What driving it took**, because it cost an hour to find: a session cannot
+click the launcher until the launcher is *raised*. `SetCursorPos` + `mouse_event`
+delivers the press to whatever is topmost at that point, and on this desktop
+that was a full-screen window belonging to another program — so every click went
+there and the launcher answered nothing, which is indistinguishable from a dead
+button. `winshot.activate` (an Alt tap, then `SetForegroundWindow`) before the
+click is the whole fix; the session is `.scratch/drive2.py`. The shell's own
+hit-test is not implicated: `WM_NCHITTEST` answers `HTCLIENT` for a card button.
+
+Still open: the asset phase was not watched to its end here (the session ended
+at 159 MB of 458 MB and closed the window), so the closing line and the last
+90% of the bar remain untested against the real CDN, and the game has still not
+been launched out of a completed install.
