@@ -1461,7 +1461,9 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
             Element::from(
                 button(text("Purge cache").size(13).font(theme::semibold()))
                     .on_press(Message::PurgeCache)
-                    .style(theme::danger())
+                    // `destructive`, not `danger`: the latter is the palette's
+                    // red, and a button's style is the role, not the colour.
+                    .style(theme::destructive())
                     .padding([10, 14]),
             ),
         ),
