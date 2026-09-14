@@ -1001,3 +1001,82 @@ and a filesystem. So the code path that installs a JRE is exercised only by the
 fixture-backed tests in `java_runtime.rs`. A machine with no Java at an accepted
 major is the way to close it, and it is the same shape of gap as §16.5's real
 game launch.
+
+## 19. The asset objects were never being downloaded, and now an install shows it
+
+Two changes, and the second is why the first could be seen at all.
+
+### The 404
+
+The user's second launch of `dwa` reported, from the instance's own
+`logs/launcher.log`:
+
+```
+install: installed 0 file(s) (0.0 MB), 101 already present, 5057 failure(s)
+files are missing and could not be downloaded — not launching
+```
+
+5057 failures, 5057 unique URLs, one per asset object, and **0.0 MB** after
+several minutes. `run_assets` derived the disk path and the URL from one helper,
+`palantir_core::assets::object_relative_path`, which returns the *storage* layout
+(`objects/<xx>/<hash>`) because that is what `assets/` holds on disk and what
+Prism writes there. Mojang's resource CDN has no `objects/` segment: it serves
+`/<xx>/<hash>`. So every request went to `/objects/<xx>/<hash>` and came back
+404 — measured against the live service, 1.38 s for the 404 against 0.031 s for
+the real object on a warm connection.
+
+The index is 5057 objects totalling **458 MB**, median object 9 KB: not a
+bandwidth problem, a path problem. The nine phases around it were fine — the 101
+libraries and the index itself are fetched from URLs the *profile* carries, and
+this was the one phase where the URL is derived rather than read.
+
+**Why no test saw it.** Every fixture built its expected URL through the same
+helper the code built the real one (`install.rs`'s `MapFetcher` keys), so all of
+them agreed on a path the server has never had. That is §16's failure mode again
+in a new place: the fixture supplied the bytes the code expected.
+
+**The fix** is two functions with two names and their own tests:
+`object_relative_path` for the storage layout, `object_cdn_path` for the CDN, and
+`install::asset_object_url` as the one place the base URL and the path meet. The
+tests that hold it are deliberately not self-consistent — `palantir-core` asserts
+the CDN path as the literal Mojang serves, `install.rs` writes the finished URL
+out in full, the fixture keys spell the path out rather than calling either
+helper, and a new `#[ignore]`d live test in `palantir-net/tests/live.rs` fetches
+one real object and checks its SHA-1 against the hash the index named. That last
+one is the only test that could have caught this, which is why it exists.
+
+### The bar
+
+The phase was also silent by design: it printed ~50 progress *lines* per phase,
+which on a six-minute download is a scrollback nobody reads and a moving number
+nobody can see.
+
+So a phase now reports two different kinds of thing through one `install::Reporter`:
+
+* **lines** — few, meaningful, and written to the instance's `launcher.log`:
+  the phase opening (`downloading 5057 asset object(s)…`) and a new closing line
+  with what it moved and how long it took (`asset objects: done — 452.9 MB in
+  91.3 s`).
+* **levels** — an `install::Progress` per ~2% of the phase: label, done, total,
+  bytes. The window draws it as a bar; the log never sees it, because a log that
+grows a line per 2% of a download is a log nobody reads.
+
+The level travels to the window as its own message (`Message::LaunchProgress`)
+sent with `try_send` and **dropped when the channel is full**, unlike log lines,
+which retry. A level is not an event: the next one supersedes it, and a
+downloader waiting on a window that is a frame behind is the wrong trade twice
+over. The bar is drawn twice from the one piece of state — in the status strip,
+which every page has, and above the console on the Logs page, where the numbers
+are spelled out — and the status text tracks the level so the strip cannot sit
+on a phase's opening line for the minutes the phase takes.
+
+What is *not* drawn: a bar for a phase with no work (everything already present),
+and no bar at all between phases. A per-phase bar that names its phase is honest;
+byte-weighting the whole install would need sizes that libraries do not publish
+before they are fetched, and would either lie or sit still.
+
+### Still open
+
+`dwa` now has to fetch those 458 MB for real, which is the first end-to-end
+exercise of the fixed URL and of the bar at this size. The live test proves one
+object; the run that proves five thousand is a machine with the game missing.
