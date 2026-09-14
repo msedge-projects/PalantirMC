@@ -106,9 +106,50 @@ pub fn runtime_dir(paths: &PalantirPaths, name: &str) -> PathBuf {
 }
 
 /// The executable of a managed runtime.
+///
+/// `java.exe` on Windows, which is the console build: this is the file that
+/// says whether the runtime is complete, so it is what
+/// [`install_runtime`] checks for and what the tests write. To *run* the game,
+/// see [`launcher_binary`].
 pub fn java_binary(paths: &PalantirPaths, name: &str) -> PathBuf {
     let exe = if cfg!(windows) { "java.exe" } else { "java" };
     runtime_dir(paths, name).join("bin").join(exe)
+}
+
+/// The executable to actually run, which is the windowless one on Windows.
+///
+/// A JRE ships two launchers for the same JVM: `java.exe`, a console
+/// application, and `javaw.exe`, the same thing with no console. Starting
+/// `java.exe` from a GUI process makes Windows allocate a console window for
+/// it, and that window is what a player sees as a command prompt sitting behind
+/// the game — titled with the `java.exe` path and carrying Java's own icon, so
+/// the thing on the taskbar is the console rather than the game.
+///
+/// Windows' `CreateProcess` hides it when the child is spawned with
+/// `CREATE_NO_WINDOW` ([`crate::launch`] does that too, for the cases this
+/// cannot cover: a `java.exe` the user configured by hand, and the runtime
+/// probes). Both are wanted, because either alone leaves a path that flashes a
+/// console.
+pub fn launcher_binary(paths: &PalantirPaths, name: &str) -> PathBuf {
+    let console = java_binary(paths, name);
+    match windowless_binary(&console) {
+        Some(windowless) if windowless.is_file() => windowless,
+        _ => console,
+    }
+}
+
+/// `javaw.exe` beside a `java.exe`, or `None` when `console` is not one.
+///
+/// Keyed off the file name rather than `cfg!(windows)` so the rule is the same
+/// on every platform and can be tested on any of them; on a platform whose
+/// runtime is a bare `java` this matches nothing and the caller keeps what it
+/// had.
+fn windowless_binary(console: &Path) -> Option<PathBuf> {
+    let name = console.file_name()?.to_str()?;
+    if !name.eq_ignore_ascii_case("java.exe") {
+        return None;
+    }
+    Some(console.with_file_name("javaw.exe"))
 }
 
 /// Whether a file is there and plausibly complete: existence first, then a size
@@ -255,8 +296,9 @@ pub fn ensure_runtime(
     let name = request.name.trim();
     let binary = java_binary(paths, name);
     if binary.is_file() {
-        reporter.log(format!("'{name}' is already unpacked at {}", binary.display()));
-        return Ok(binary.to_string_lossy().into_owned());
+        let runnable = launcher_binary(paths, name);
+        reporter.log(format!("'{name}' is already unpacked at {}", runnable.display()));
+        return Ok(runnable.to_string_lossy().into_owned());
     }
     if request.majors.is_empty() {
         return Err(
@@ -371,11 +413,12 @@ pub fn ensure_runtime(
         }
         match install_runtime(paths, name, &files, fetcher, threads, reporter) {
             Ok(count) => {
+                let runnable = launcher_binary(paths, name);
                 reporter.log(format!(
                     "Java '{name}' is ready ({count} file(s) fetched) at {}",
-                    binary.display()
+                    runnable.display()
                 ));
-                return Ok(binary.to_string_lossy().into_owned());
+                return Ok(runnable.to_string_lossy().into_owned());
             }
             Err(error) => last = format!("{version}: {error}"),
         }
@@ -440,6 +483,52 @@ mod tests {
             paths.root.join("java").join("java-runtime-delta").join("bin").join(
                 if cfg!(windows) { "java.exe" } else { "java" }
             )
+        );
+    }
+
+    #[test]
+    fn the_windowless_launcher_is_the_sibling_named_javaw() {
+        assert_eq!(
+            windowless_binary(Path::new("C:/jdk/bin/java.exe")),
+            Some(PathBuf::from("C:/jdk/bin/javaw.exe")),
+            "the pair a Windows JRE ships"
+        );
+        assert_eq!(
+            windowless_binary(Path::new("/usr/lib/jvm/bin/java")),
+            None,
+            "there is no windowed build to prefer off Windows, so nothing changes"
+        );
+        assert_eq!(
+            windowless_binary(Path::new("C:/jdk/bin/javaw.exe")),
+            None,
+            "only a console launcher has a windowless sibling to find"
+        );
+    }
+
+    /// The point of the pair: never run the console build when the windowless
+    /// one is sitting next to it, because `java.exe` puts a command prompt on
+    /// screen with the game.
+    #[test]
+    fn a_runtime_with_javaw_beside_it_runs_without_a_console() {
+        let (_dir, paths) = temp_paths();
+        let console = java_binary(&paths, "java-runtime-delta");
+        if let Some(parent) = console.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&console, b"console").unwrap();
+        assert_eq!(
+            launcher_binary(&paths, "java-runtime-delta"),
+            console,
+            "with no windowless build there is nothing to prefer"
+        );
+        let Some(windowless) = windowless_binary(&console) else {
+            return;
+        };
+        std::fs::write(&windowless, b"windowless").unwrap();
+        assert_eq!(
+            launcher_binary(&paths, "java-runtime-delta"),
+            windowless,
+            "the JRE ships both, and the game gets the one without a console"
         );
     }
 

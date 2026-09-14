@@ -369,6 +369,30 @@ pub fn has_legacy_lwjgl(profile: &palantir_core::version::LaunchProfile) -> bool
     profile.libraries.iter().any(|lib| lib.name.group() == "org.lwjgl.lwjgl")
 }
 
+/// Spawn `command` with no console window of its own on Windows.
+///
+/// A GUI process that starts a console program — `java.exe`, or the `cmd /C
+/// start` used to open a URL — gets a console allocated for the child, and the
+/// player sees that as a command prompt appearing behind the launcher and then
+/// behind the game, titled with the `java.exe` path and wearing Java's icon.
+/// `CREATE_NO_WINDOW` gives the child no console at all.
+///
+/// This is half of the fix and [`crate::java_runtime::launcher_binary`] is the
+/// other half: that one runs `javaw.exe` (no console to hide), which cannot
+/// cover a `java.exe` a user configured by hand or the version probes below,
+/// and this one covers everything but leaves the child on the console build.
+/// Either alone leaves a path that flashes a console.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// Nothing to hide where the console in question does not exist.
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
+
 /// Open `path` in the platform file manager (best effort).
 pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
     let (tool, verb) = if cfg!(windows) {
@@ -391,7 +415,11 @@ pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
 /// kind of "it did nothing" failure worth avoiding in a sign-in flow.
 pub fn open_url(url: &str) -> Result<(), String> {
     let result = if cfg!(windows) {
-        Command::new("cmd").args(["/C", "start", "", url]).spawn()
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        // `start` still opens the browser without a console of its own.
+        hide_console(&mut command);
+        command.spawn()
     } else if cfg!(target_os = "macos") {
         Command::new("open").arg(url).spawn()
     } else {
@@ -1015,7 +1043,12 @@ fn java_fits_version(bin: &str, majors: &[i64]) -> Result<(), String> {
 
 /// Ask a binary its version. `None` when it cannot be run at all.
 fn probe_java_major(bin: &str) -> Option<i64> {
-    let output = Command::new(bin).arg("-version").output().ok()?;
+    let mut command = Command::new(bin);
+    command.arg("-version");
+    // A probe is a whole `java.exe` start; without this the console it would
+    // allocate blinks on screen every time a launch picks a Java.
+    hide_console(&mut command);
+    let output = command.output().ok()?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     major_from_version_output(&stderr).or_else(|| major_from_version_output(&stdout))
@@ -1170,7 +1203,10 @@ fn pick_java(
 
 /// Probe a java binary with `java -version`; returns the first output line.
 fn probe_java(java_bin: &str) -> Result<String, String> {
-    match Command::new(java_bin).arg("-version").output() {
+    let mut command = Command::new(java_bin);
+    command.arg("-version");
+    hide_console(&mut command);
+    match command.output() {
         Ok(output) => {
             if !output.status.success() {
                 return Err(format!("java probe failed for '{java_bin}' (exit {})", output.status));
@@ -1401,6 +1437,8 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     for (key, value) in &plan.envs {
         command.env(key, value);
     }
+    // The game must not be born with a console behind it.
+    hide_console(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
