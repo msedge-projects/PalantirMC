@@ -103,6 +103,39 @@ impl ModrinthSearchHit {
     }
 }
 
+/// One dependency a version declares.
+///
+/// Modrinth publishes these on every version: a mod that needs Fabric API says
+/// so here, and an installer that ignores the field hands the user a game that
+/// crashes on startup with a stack trace they cannot act on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct ModrinthDependency {
+    /// Version id, when the dependency pins one.
+    #[serde(default)]
+    pub version_id: Option<String>,
+    /// Project id, when the dependency is another Modrinth project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// File name, for a dependency that is not hosted on Modrinth.
+    #[serde(default)]
+    pub file_name: Option<String>,
+    /// `required` / `optional` / `incompatible` / `embedded`.
+    #[serde(default)]
+    pub dependency_type: String,
+}
+
+impl ModrinthDependency {
+    /// Whether this dependency has to be installed for the parent to work.
+    pub fn is_required(&self) -> bool {
+        self.dependency_type == "required"
+    }
+
+    /// The project to install, when the dependency names one.
+    pub fn project(&self) -> Option<&str> {
+        self.project_id.as_deref().filter(|id| !id.is_empty())
+    }
+}
+
 /// One entry of `GET /v2/project/{id}/version` (subset).
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ModrinthProjectVersion {
@@ -133,6 +166,9 @@ pub struct ModrinthProjectVersion {
     /// Downloadable files.
     #[serde(default)]
     pub files: Vec<ModrinthVersionFile>,
+    /// Other projects this version depends on.
+    #[serde(default)]
+    pub dependencies: Vec<ModrinthDependency>,
 }
 
 impl ModrinthProjectVersion {
@@ -351,6 +387,44 @@ mod tests {
     }
 
     #[test]
+    fn a_version_reads_the_dependencies_it_declares() {
+        // The real shape from `GET /v2/project/{id}/version`: a required
+        // dependency names a project, an optional one may name only a file, and
+        // `embedded` means "already inside this file".
+        let json = r#"[{
+            "id": "v1", "project_id": "sodium", "name": "Sodium 0.6",
+            "version_number": "0.6", "version_type": "release", "downloads": 1,
+            "game_versions": ["1.21.1"], "loaders": ["fabric"],
+            "files": [{"url": "https://cdn/x.jar", "filename": "x.jar", "primary": true,
+                       "size": 10, "hashes": {"sha1": "aa"}}],
+            "dependencies": [
+                {"version_id": "fab", "project_id": "fabric-api", "file_name": null,
+                 "dependency_type": "required"},
+                {"project_id": null, "file_name": "libfoo.jar", "dependency_type": "required"},
+                {"project_id": "iris", "dependency_type": "optional"},
+                {"project_id": "sodium", "dependency_type": "embedded"}
+            ]
+        }]"#;
+        let versions: Vec<ModrinthProjectVersion> = serde_json::from_str(json).unwrap();
+        let deps = &versions[0].dependencies;
+        assert_eq!(deps.len(), 4);
+        let required: Vec<&ModrinthDependency> =
+            deps.iter().filter(|d| d.is_required()).collect();
+        assert_eq!(required.len(), 2);
+        assert_eq!(required[0].project(), Some("fabric-api"));
+        // A dependency that is not on Modrinth has no project to install.
+        assert_eq!(required[1].project(), None);
+        assert_eq!(required[1].file_name.as_deref(), Some("libfoo.jar"));
+        // An empty project id is not a project either.
+        let empty = ModrinthDependency {
+            project_id: Some(String::new()),
+            dependency_type: "required".to_string(),
+            ..ModrinthDependency::default()
+        };
+        assert_eq!(empty.project(), None);
+    }
+
+    #[test]
     fn primary_file_returns_none_when_empty() {
         let v = ModrinthProjectVersion {
             id: String::new(),
@@ -362,6 +436,7 @@ mod tests {
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: Vec::new(),
+            dependencies: Vec::new(),
         };
         assert!(v.primary_file().is_none());
     }
@@ -385,6 +460,7 @@ mod tests {
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: vec![mk(false, "a.jar"), mk(false, "b.jar")],
+            dependencies: Vec::new(),
         };
         assert_eq!(v.primary_file().unwrap().filename, "a.jar");
     }

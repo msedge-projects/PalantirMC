@@ -45,8 +45,8 @@ pub use download::{
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
-    ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse, ModrinthVersionFile,
-    search_url, version_url, MODRINTH_BASE_URL,
+    ModrinthDependency, ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse,
+    ModrinthVersionFile, search_url, version_url, MODRINTH_BASE_URL,
 };
 
 use std::path::PathBuf;

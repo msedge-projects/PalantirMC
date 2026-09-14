@@ -94,6 +94,15 @@ impl BlockingHttpFetcher {
         BlockingHttpFetcher { client, timeout }
     }
 
+    /// Build a fetcher around a client the caller already configured.
+    ///
+    /// The bulk downloader wants a [`Fetcher`]; the Browse page wants the
+    /// `User-Agent` Modrinth's API guidelines ask for. This is the join: the
+    /// same client serves both, instead of a second one that sends no header.
+    pub fn with_client(client: reqwest::blocking::Client, timeout: Duration) -> Self {
+        Self::from_client(client, timeout)
+    }
+
     /// Send a `GET`, turning a transport problem or a non-success status into
     /// [`crate::Error::Http`].
     ///
