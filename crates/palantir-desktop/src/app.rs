@@ -6767,7 +6767,7 @@ mod tests {
 
         // Instances of our own already: somebody is already set up, and a
         // dialog offering to move them would be a dialog about nothing.
-        let (d4, _h4) = tempfile::tempdir().unwrap();
+        let d4 = tempfile::tempdir().unwrap();
         let home4 = root_with_instances(d4.path(), &["Mine"]);
         let mut app = app_with_roots(home4.clone(), home4.clone());
         app.offer_migration_from(Some(legacy.clone()));

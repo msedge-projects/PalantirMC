@@ -1387,8 +1387,11 @@ fn java<'a>(view: &View<'a>) -> Element<'a, Message> {
 
     body.push(Space::with_height(Length::Fixed(24.0)))
         .push(note(
-            "A version left empty is searched for on PATH when an instance that needs it is \
-             launched; a version that is set is used for that major and no other.",
+            "A version left empty is found automatically when an instance that needs it is \
+             launched: first the runtimes under the data root's java folder, then JAVA_HOME, then \
+             the standard install locations, then PATH — preferring one whose version matches \
+             what the instance asks for. A version that is set here is used for that major and no \
+             other.",
         ))
         .into()
 }
@@ -1911,6 +1914,11 @@ mod tests {
         let prefs = Prefs::default();
         let anim = SwitchAnim::default();
         let drafts = BTreeMap::new();
+        // Two directories, named but never touched: the panes read them for
+        // display only, and a test that made them real folders would be testing
+        // the filesystem rather than the pane.
+        let home = Path::new("/palantir-home");
+        let data_root = Path::new("/palantir-data");
         for choice in ColorTheme::ALL {
             theme::set_color_theme(choice);
             for developer_mode in [false, true] {
@@ -1921,6 +1929,9 @@ mod tests {
                     drafts: &drafts,
                     account: None,
                     flag_filter: "",
+                    home,
+                    data_root,
+                    data_root_pending: None,
                 };
                 let list: Element<'_, Message> = nav(Tab::Appearance, developer_mode);
                 let _ = list;
@@ -1928,6 +1939,23 @@ mod tests {
                     let element: Element<'_, Message> = pane(tab, &view);
                     let _ = element;
                 }
+                // The one pane with a branch of its own: a recorded data root
+                // that could not be applied draws an extra line, and a pane
+                // that only builds in the easy state is a pane that panics on
+                // the state somebody is actually in.
+                let pending = View {
+                    prefs: &prefs,
+                    anim: &anim,
+                    pointer: Pointer::default(),
+                    drafts: &drafts,
+                    account: None,
+                    flag_filter: "",
+                    home,
+                    data_root,
+                    data_root_pending: Some("D:/not-there".to_string()),
+                };
+                let element: Element<'_, Message> = pane(Tab::Resource, &pending);
+                let _ = element;
             }
         }
         theme::set_color_theme(original);

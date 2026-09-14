@@ -542,26 +542,38 @@ pub fn prepare_launch(
         log(line.to_string());
     }
 
-    // Java: configured path first, else PATH lookup.
+    // Java: the instance's own path when it is usable, otherwise the best
+    // runtime this machine has. A configured path that is not there any more is
+    // a reason to look further rather than a reason to refuse to start: the
+    // path belongs to a runtime that was uninstalled or moved, and the user did
+    // not ask this launcher to stop working because of it. Prism reads
+    // `AutomaticJava` (on unless switched off) and picks a runtime it can find;
+    // the same rule here means an instance keeps launching.
     let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
-    let java_bin = if configured.trim().is_empty() {
-        log("no JavaPath configured, searching PATH".to_string());
-        match find_java_on_path() {
+    let configured = configured.trim();
+    let java_bin = if configured.is_empty() {
+        String::new()
+    } else if Path::new(configured).is_file() {
+        log(format!("using the configured Java: {configured}"));
+        configured.to_string()
+    } else {
+        log(format!(
+            "the configured JavaPath '{configured}' is not there — looking for another Java"
+        ));
+        String::new()
+    };
+    let java_bin = if java_bin.is_empty() {
+        match pick_java(paths, &resolution.profile.compatible_java_majors, log) {
             Some(found) => found,
             None => {
                 log(
-                    "java not found: set JavaPath in the instance/global settings or install a Java runtime (looked for javaw/java on PATH)".to_string(),
+                    "no Java found: set a Java path in the Java tab of the settings, or install a Java runtime — looked under <data root>/java, in JAVA_HOME, in the standard install locations and on PATH".to_string(),
                 );
                 return LaunchReadiness::Blocked;
             }
         }
     } else {
-        let trimmed = configured.trim().to_string();
-        if !Path::new(&trimmed).is_file() {
-            log(format!("configured JavaPath '{trimmed}' does not exist — not launching"));
-            return LaunchReadiness::Blocked;
-        }
-        trimmed
+        java_bin
     };
     match probe_java(&java_bin) {
         Ok(detail) => log(format!("using java '{java_bin}' ({detail})")),
@@ -697,6 +709,233 @@ fn find_java_on_path() -> Option<String> {
         }
     }
     None
+}
+
+// ---- java selection -------------------------------------------------------
+
+/// Where a Java binary was found, for the log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JavaOrigin {
+    /// A runtime managed under the data root's `java/` folder.
+    Managed,
+    /// `JAVA_HOME`.
+    JavaHome,
+    /// A standard install location for this platform.
+    Installed,
+    /// Something on `PATH`.
+    Path,
+}
+
+impl JavaOrigin {
+    /// How the origin reads in the console.
+    pub fn label(self) -> &'static str {
+        match self {
+            JavaOrigin::Managed => "the data root's java folder",
+            JavaOrigin::JavaHome => "JAVA_HOME",
+            JavaOrigin::Installed => "an installed JDK",
+            JavaOrigin::Path => "PATH",
+        }
+    }
+}
+
+/// A Java binary worth trying, with the version it reports about itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaCandidate {
+    /// The executable.
+    pub bin: String,
+    /// Major version, when a `release` file said so. `None` means "ask it".
+    pub major: Option<i64>,
+    /// Where it was found.
+    pub origin: JavaOrigin,
+}
+
+/// Every Java binary on this machine worth trying, best-first.
+///
+/// * runtimes under the data root's `java/` — both the ones this launcher
+///   manages and the ones the other launcher sharing the root downloaded, in
+///   Prism's two layouts (`java/<runtime>` and `java/<vendor>/<runtime>`);
+/// * `JAVA_HOME`;
+/// * the standard install locations ([`palantir_core::java::scan_installs`]);
+/// * whatever `PATH` offers.
+///
+/// The version comes from each home's `release` file rather than from running
+/// it, so a machine with six JDKs does not pay six processes to answer "which
+/// Java is this". Anything that reports nothing is asked once, later, only if it
+/// turns out to matter.
+pub fn java_candidates(paths: &PalantirPaths) -> Vec<JavaCandidate> {
+    let mut out: Vec<JavaCandidate> = Vec::new();
+    let exe = if cfg!(windows) { "java.exe" } else { "java" };
+
+    // `<root>/java/<runtime>` and `<root>/java/<vendor>/<runtime>`, newest
+    // major first: when several are installed the newest is the one most
+    // versions want, and the exact-match pass below overrides that anyway.
+    let managed_root = paths.root.join("java");
+    let mut homes: Vec<PathBuf> = Vec::new();
+    for first in directories_in(&managed_root) {
+        if first.join("bin").is_dir() {
+            homes.push(first.clone());
+        }
+        for second in directories_in(&first) {
+            if second.join("bin").is_dir() {
+                homes.push(second);
+            }
+        }
+    }
+    let mut managed: Vec<JavaCandidate> = homes
+        .into_iter()
+        .filter_map(|home| {
+            let bin = home.join("bin").join(exe);
+            bin.is_file().then(|| JavaCandidate {
+                bin: bin.to_string_lossy().into_owned(),
+                major: home_version(&home),
+                origin: JavaOrigin::Managed,
+            })
+        })
+        .collect();
+    managed.sort_by_key(|candidate| std::cmp::Reverse(candidate.major));
+    out.extend(managed);
+
+    if let Some(java_home) = std::env::var_os("JAVA_HOME").map(PathBuf::from) {
+        let bin = java_home.join("bin").join(exe);
+        if bin.is_file() {
+            out.push(JavaCandidate {
+                bin: bin.to_string_lossy().into_owned(),
+                major: home_version(&java_home),
+                origin: JavaOrigin::JavaHome,
+            });
+        }
+    }
+
+    let mut installed: Vec<JavaCandidate> = palantir_core::java::scan_installs(System::current())
+        .into_iter()
+        .filter_map(|install| {
+            let bin = install.home.join("bin").join(exe);
+            bin.is_file().then(|| JavaCandidate {
+                bin: bin.to_string_lossy().into_owned(),
+                major: install.version.as_ref().map(|version| version.major()),
+                origin: JavaOrigin::Installed,
+            })
+        })
+        .collect();
+    installed.sort_by_key(|candidate| std::cmp::Reverse(candidate.major));
+    out.extend(installed);
+
+    if let Some(found) = find_java_on_path() {
+        out.push(JavaCandidate { bin: found, major: None, origin: JavaOrigin::Path });
+    }
+    out
+}
+
+/// Directories directly inside `dir`, sorted, ignoring anything unreadable.
+fn directories_in(dir: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    found.sort();
+    found
+}
+
+/// The major version a Java home's `release` file reports, without running it.
+fn home_version(home: &Path) -> Option<i64> {
+    palantir_core::java::probe_home(home)
+        .and_then(|install| install.version)
+        .map(|version| version.major())
+}
+
+/// The major version in a `java -version` first line.
+///
+/// The line is `openjdk version "21.0.6" 2025-01-21` (or `java version
+/// "1.8.0_402"` for the last of the 1.x line), so the number is the quoted
+/// token — not the first number in the line, which for some vendors is a build
+/// date.
+pub fn major_from_version_output(text: &str) -> Option<i64> {
+    let start = text.find('"')? + 1;
+    let rest = &text[start..];
+    let end = rest.find('"')?;
+    let quoted = &rest[..end];
+    (!quoted.is_empty()).then(|| palantir_core::java::JavaVersion::parse(quoted).major())
+}
+
+/// Ask a binary its version. `None` when it cannot be run at all.
+fn probe_java_major(bin: &str) -> Option<i64> {
+    let output = Command::new(bin).arg("-version").output().ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    major_from_version_output(&stderr).or_else(|| major_from_version_output(&stdout))
+}
+
+/// The candidate to run with, given what the version asked for.
+///
+/// Pure, so the rule is testable without a machine that happens to have the
+/// right JDK on it: a candidate whose major is in `want_majors` wins, in list
+/// order; failing that the highest known major; failing that the first
+/// candidate, whose version is unknown.
+pub fn best_java(candidates: &[JavaCandidate], want_majors: &[i64]) -> Option<JavaCandidate> {
+    candidates
+        .iter()
+        .find(|candidate| {
+            candidate.major.map(|major| want_majors.contains(&major)).unwrap_or(false)
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .filter(|candidate| candidate.major.is_some())
+                .max_by_key(|candidate| candidate.major.unwrap_or(0))
+        })
+        .or_else(|| candidates.first())
+        .cloned()
+}
+
+/// Choose a Java for this version, saying what was chosen and why.
+fn pick_java(
+    paths: &PalantirPaths,
+    want_majors: &[i64],
+    log: &mut dyn FnMut(String),
+) -> Option<String> {
+    // A candidate that never told us its version is asked now, once — but only
+    // here, where the answer decides whether it is used.
+    let candidates: Vec<JavaCandidate> = java_candidates(paths)
+        .into_iter()
+        .map(|mut candidate| {
+            if candidate.major.is_none() {
+                candidate.major = probe_java_major(&candidate.bin);
+            }
+            candidate
+        })
+        .collect();
+    let chosen = best_java(&candidates, want_majors)?;
+    match chosen.major {
+        Some(major) if want_majors.contains(&major) => log(format!(
+            "using {} (Java {major}, from {})",
+            chosen.bin,
+            chosen.origin.label()
+        )),
+        Some(major) if !want_majors.is_empty() => log(format!(
+            "using {} (Java {major}, from {}), but this version wants Java {} — expect an UnsupportedClassVersionError if it does not start",
+            chosen.bin,
+            chosen.origin.label(),
+            want_majors
+                .iter()
+                .map(|major| major.to_string())
+                .collect::<Vec<_>>()
+                .join(" or ")
+        )),
+        Some(major) => log(format!(
+            "using {} (Java {major}, from {})",
+            chosen.bin,
+            chosen.origin.label()
+        )),
+        None => log(format!(
+            "using {} (version unknown, from {})",
+            chosen.bin,
+            chosen.origin.label()
+        )),
+    }
+    Some(chosen.bin)
 }
 
 /// Probe a java binary with `java -version`; returns the first output line.
@@ -1133,6 +1372,108 @@ mod tests {
         assert_eq!(parse_server_address("   "), None);
         assert_eq!(parse_server_address("host:notaport"), None);
         assert_eq!(parse_server_address(":25565"), None);
+    }
+
+    /// A data root holding managed runtimes in both of Prism's layouts.
+    fn root_with_managed_java(specs: &[(&str, &str)]) -> (tempfile::TempDir, PalantirPaths) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = PalantirPaths::at(dir.path());
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        for (relative, version) in specs {
+            let home = paths.root.join("java").join(relative);
+            std::fs::create_dir_all(home.join("bin")).unwrap();
+            std::fs::write(home.join("bin").join(exe), b"").unwrap();
+            std::fs::write(
+                home.join("release"),
+                format!("JAVA_VERSION=\"{version}\"\nJAVA_VENDOR=\"Test\"\nOS_ARCH=\"amd64\"\n"),
+            )
+            .unwrap();
+        }
+        (dir, paths)
+    }
+
+    #[test]
+    fn a_managed_runtime_is_found_in_both_layouts_and_reads_its_own_version() {
+        // Prism keeps downloaded runtimes in `java/<runtime>` on newer builds
+        // and `java/<vendor>/<runtime>` in others, and the instance that was
+        // configured against one keeps naming it. Both have to be found — the
+        // version comes from the runtime's own `release` file, without running
+        // six JDKs to ask them.
+        let (_dir, paths) = root_with_managed_java(&[
+            ("java-runtime-delta", "21.0.6"),
+            ("adoptium/java-runtime-gamma", "17.0.12"),
+        ]);
+        let managed: Vec<JavaCandidate> = java_candidates(&paths)
+            .into_iter()
+            .filter(|candidate| candidate.origin == JavaOrigin::Managed)
+            .collect();
+        assert_eq!(managed.len(), 2, "got {managed:#?}");
+        // Newest major first, so a tie is broken toward the newer runtime.
+        assert_eq!(managed[0].major, Some(21));
+        assert_eq!(managed[1].major, Some(17));
+        assert!(managed[0].bin.ends_with("java-runtime-delta/bin/java.exe")
+            || managed[0].bin.ends_with("java-runtime-delta/bin/java"));
+    }
+
+    #[test]
+    fn java_that_does_not_exist_is_not_a_candidate() {
+        // A `java` folder with no executable in it — the shape a half-finished
+        // download leaves behind — must not be offered.
+        let (_dir, paths) = root_with_managed_java(&[("broken", "21.0.6")]);
+        let broken = paths.root.join("java").join("broken").join("bin");
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        std::fs::remove_file(broken.join(exe)).unwrap();
+        assert!(java_candidates(&paths)
+            .iter()
+            .all(|candidate| candidate.origin != JavaOrigin::Managed));
+    }
+
+    #[test]
+    fn the_version_a_java_reports_is_read_from_the_quoted_token() {
+        // `java -version` prints the version in quotes, and for some vendors
+        // the first digits on the line are a build date.
+        assert_eq!(major_from_version_output("openjdk version \"21.0.6\" 2025-01-21"), Some(21));
+        assert_eq!(major_from_version_output("java version \"1.8.0_402\""), Some(8));
+        assert_eq!(major_from_version_output("openjdk 2025-01-21 version 21"), None);
+        assert_eq!(major_from_version_output(""), None);
+        assert_eq!(major_from_version_output("\"\""), None);
+    }
+
+    #[test]
+    fn the_version_asked_for_wins_over_a_newer_one() {
+        let candidate = |major: Option<i64>, origin, bin: &str| JavaCandidate {
+            bin: bin.to_string(),
+            major,
+            origin,
+        };
+        let candidates = vec![
+            candidate(Some(23), JavaOrigin::Managed, "newest"),
+            candidate(Some(21), JavaOrigin::Installed, "wanted"),
+            candidate(Some(17), JavaOrigin::Managed, "older"),
+        ];
+        // The version's own requirement decides, not "the newest" — that is
+        // how a 1.21 instance ends up on a Java 23 that its mods reject.
+        assert_eq!(best_java(&candidates, &[21]).unwrap().bin, "wanted");
+        // Two acceptable majors: the earlier candidate in the list wins, and
+        // the list is already ordered by how good the runtime is.
+        assert_eq!(best_java(&candidates, &[23, 17]).unwrap().bin, "newest");
+        // Nothing matches: the newest there is, rather than nothing at all.
+        assert_eq!(best_java(&candidates, &[8]).unwrap().bin, "newest");
+        // No requirement: the newest.
+        assert_eq!(best_java(&candidates, &[]).unwrap().bin, "newest");
+
+        // A candidate whose version could not be read is used only when there
+        // is nothing else — an unknown runtime should never beat a known one.
+        let unknown = vec![
+            candidate(None, JavaOrigin::Path, "unknown"),
+            candidate(Some(17), JavaOrigin::Installed, "known"),
+        ];
+        assert_eq!(best_java(&unknown, &[]).unwrap().bin, "known");
+        assert_eq!(best_java(&unknown, &[17]).unwrap().bin, "known");
+        let only_unknown = vec![candidate(None, JavaOrigin::Path, "unknown")];
+        assert_eq!(best_java(&only_unknown, &[21]).unwrap().bin, "unknown");
+        // And no candidates is no answer, not a panic.
+        assert!(best_java(&[], &[21]).is_none());
     }
 
     #[test]

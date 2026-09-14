@@ -46,7 +46,6 @@ mod theme;
 use app::{console_scroll_id, Message, PalantirApp};
 use iced::widget::scrollable::RelativeOffset;
 use iced::{window, Application, Command, Element, Sandbox, Settings, Subscription, Theme};
-use palantir_core::paths::PalantirPaths;
 
 /// The size the shell would like, before the screen gets a say.
 const PREFERRED_SIZE: (f32, f32) = (1280.0, 820.0);
@@ -251,6 +250,9 @@ impl Application for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests build an app against an explicit directory; a real run
+    // gets both roots from `PalantirApp::roots`.
+    use palantir_core::paths::PalantirPaths;
 
     #[test]
     fn shells_share_title_and_theme() {
