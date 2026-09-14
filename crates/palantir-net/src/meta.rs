@@ -197,8 +197,14 @@ impl OnlineMetaStore {
     }
 
     /// Build the version-list URL for a uid.
+    ///
+    /// `{uid}/index.json`, which is the layout the service serves: the older
+    /// flat `{uid}.json` answers 404 for every uid, so a client built on it
+    /// cannot list a single loader build. Prism's own metadata repository
+    /// serves both shapes for the versions it migrated to the newer one; ours
+    /// only needs the one that is always there.
     pub fn version_list_url(&self, uid: &str) -> String {
-        format!("{}/{}.json", self.base_url, uid)
+        format!("{}/{}/index.json", self.base_url, uid)
     }
 
     /// Load a version file using `fetcher` (cache hit reads disk, miss fetches
@@ -226,9 +232,16 @@ impl OnlineMetaStore {
         fetcher: &dyn Fetcher,
     ) -> Result<Vec<VersionEntry>, palantir_core::error::Error> {
         let url = self.version_list_url(uid);
-        let cache_path = self.list_cache_path(uid);
-        let bytes = self.load_or_fetch(&url, &cache_path, fetcher)?;
-        parse_version_list(&bytes, &cache_path, uid)
+        let paths = self.list_cache_paths(uid);
+        // A list already on disk is the answer, whichever layout wrote it.
+        for path in &paths {
+            if let Ok(bytes) = std::fs::read(path) {
+                return parse_version_list(&bytes, path, uid);
+            }
+        }
+        self.fetch_and_cache(&url, &paths[0], fetcher).and_then(|bytes| {
+            parse_version_list(&bytes, &paths[0], uid)
+        })
     }
 
     fn version_cache_path(&self, uid: &str, version: &str) -> PathBuf {
@@ -236,7 +249,18 @@ impl OnlineMetaStore {
     }
 
     fn list_cache_path(&self, uid: &str) -> PathBuf {
-        self.cache_dir.join(format!("{uid}.json"))
+        self.cache_dir.join(uid).join("index.json")
+    }
+
+    /// Where a version list may already be on disk, in the order it is tried:
+    /// the current layout first, then the flat file a cache written before the
+    /// change holds. Reading the old one costs nothing and stops an existing
+    /// install from having to re-fetch every list it already has.
+    fn list_cache_paths(&self, uid: &str) -> [PathBuf; 2] {
+        [
+            self.list_cache_path(uid),
+            self.cache_dir.join(format!("{uid}.json")),
+        ]
     }
 
     fn load_or_fetch(
@@ -251,6 +275,16 @@ impl OnlineMetaStore {
                 Err(e) => return Err(palantir_core::error::Error::io(cache_path, e)),
             }
         }
+        self.fetch_and_cache(url, cache_path, fetcher)
+    }
+
+    /// Fetch `url` and write it to `cache_path`, creating the directory.
+    fn fetch_and_cache(
+        &self,
+        url: &str,
+        cache_path: &Path,
+        fetcher: &dyn Fetcher,
+    ) -> Result<Vec<u8>, palantir_core::error::Error> {
         let bytes: Vec<u8> =
             fetcher.fetch(url).map_err(|e| -> palantir_core::error::Error { e.into() })?;
         if let Some(parent) = cache_path.parent() {
@@ -475,7 +509,7 @@ mod tests {
         let s = OnlineMetaStore::new("https://meta.example.invalid/v1", tmp.path());
         assert_eq!(
             s.version_list_url("net.minecraft"),
-            "https://meta.example.invalid/v1/net.minecraft.json"
+            "https://meta.example.invalid/v1/net.minecraft/index.json"
         );
     }
 
@@ -540,12 +574,32 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].version, "1.20.4");
         assert!(list[0].recommended);
-        let cached = tmp.path().join("meta").join("net.minecraft.json");
+        // Written in the layout Prism itself reads.
+        let cached = tmp.path().join("meta").join("net.minecraft").join("index.json");
         assert!(cached.exists());
         // offline hit
         let s2 = store_in(tmp.path());
         let list2 = s2.version_list_with("net.minecraft", &MapFetcher::new()).unwrap();
         assert_eq!(list2.len(), 1);
+    }
+
+    /// A cache written before the layout change is still a cache. Reading the
+    /// flat file costs nothing; re-fetching every list on every machine that
+    /// already had one is the alternative.
+    #[test]
+    fn version_list_with_reads_the_older_flat_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let meta = tmp.path().join("meta");
+        std::fs::create_dir_all(&meta).unwrap();
+        std::fs::write(
+            meta.join("net.minecraft.json"),
+            r#"{"formatVersion":1,"versions":[{"version":"1.20.4","type":"release"}]}"#,
+        )
+        .unwrap();
+        let s = store_in(tmp.path());
+        let list = s.version_list_with("net.minecraft", &MapFetcher::new()).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].version, "1.20.4");
     }
 
     #[test]

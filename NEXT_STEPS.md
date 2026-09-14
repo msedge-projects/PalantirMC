@@ -752,3 +752,127 @@ which is what makes an instance created in either launcher open in the other.
 Moving it to a PalantirMC-named directory would be a one-line default and a
 broken promise for anyone with instances already there; it needs a migration
 story first.
+
+## 16. Why an instance this launcher created could not launch
+
+Three defects, all in the path from *create an instance* to *the game starts*,
+and all three passed their unit tests because the fixtures supplied exactly the
+bytes the code expected. The fix is the code; the reason to read this is the
+method, which is now automated in CI.
+
+### 16.1 A component with no version was looked up as `<uid>/.json`
+
+`Instance::create` writes the profile Prism writes: `net.minecraft` pinned, and
+an `org.lwjgl3` slot with **no** version. Resolution asked the metadata store for
+`org.lwjgl3` at version `""` -- the URL `…/v1/org.lwjgl3/.json`, which does not
+exist -- reported the component as unresolvable, and a single unresolvable
+component is a hard error, so `prepare_launch` refused to start anything. A
+Fabric instance was worse: the loader's own metadata requires
+`net.fabricmc.intermediary` with **no version and no component listing it at
+all**, and nothing added it.
+
+Both are one rule in Prism (`ComponentUpdateTask`): a component that names no
+version takes the version something else requires of it (`equals` outranks
+`suggests`), and a component something requires but the profile does not list is
+added. Two uids — `net.fabricmc.intermediary`, `org.quiltmc.hashed` — are
+mappings that follow the game, and Prism resolves both to the Minecraft version
+being launched. All of that now happens in `palantir_core::resolve`, in rounds:
+load what brings its own version, then fill what the requirements decide, then
+add and resolve what was only required, until nothing changes. What is still not
+decidable from the metadata is still an error, and there is a test that holds
+that line, so the fills cannot have been bought by inventing a version.
+
+**The compat fixture was hiding it.** `seed_meta_cache` called
+`profile.set_version("org.lwjgl3", "3.3.3", true)` before resolving, with the
+comment "so offline resolution stays clean" — the test was pinning by hand the
+exact version the launcher never pins. That call is gone; the test now asserts
+the slot is still versionless before resolving, which is what makes it a
+regression test rather than a fixture.
+
+### 16.2 The version-list URL was a layout the service does not serve
+
+`OnlineMetaStore::version_list_url` built `{base}/{uid}.json`. Every uid answers
+**404** there: `net.minecraft.json`, `org.lwjgl3.json`,
+`net.fabricmc.fabric-loader.json` all 404, while `{uid}/index.json` returns the
+list. The desktop's own `catalog.rs` had the right layout with the flat shape as
+a fallback, which is why the create dialog could list Minecraft releases and
+loader builds while the `MetaStore` implementation could not. Both stores, and
+both cache paths, now use `<uid>/index.json` and still *read* a flat file a
+cache written earlier holds, so an existing install does not re-fetch every list
+it already has.
+
+### 16.3 The loader was installed as a synthesized patch, which deleted it
+
+`instances::create` wrote `patches/<uid>.json` built from a table of main
+classes. A patch does not add to a component, it **replaces** the metadata's
+version file for that uid — and the synthesized file had a `mainClass`, some
+`+traits`, and **no `libraries` at all**. So the loader jar, its ASM stack and
+the mappings it needs were never on the classpath, and the game died on the first
+missing class. Two of the four entry points were invented rather than copied:
+Forge and NeoForge start through `io.github.zekerzhayard.forgewrapper.installer.Main`
+in the metadata, while the table said `net.minecraft.launchwrapper.Launch` and
+`cpw.mods.bootstraplauncher.BootstrapLauncher`.
+
+Checked against the service, all four loaders are self-sufficient when
+registered as a component with a version:
+
+| uid | mainClass | libraries (1.21.1 / 1.12.2) |
+|---|---|---|
+| `net.fabricmc.fabric-loader` | `…knot.KnotClient` | 7 (ASM, sponge-mixin, the loader) |
+| `org.quiltmc.quilt-loader` | `…knot.KnotClient` | metadata-provided, requires intermediary |
+| `net.neoforged` | `…forgewrapper.installer.Main` | 24 libs + 40 maven files |
+| `net.minecraftforge` | `…forgewrapper.installer.Main` / legacy `launchwrapper.Launch` | 30 / 19 |
+
+`instances::create` therefore registers the component
+(`PackProfile::set_version`) and nothing else. `palantir_loader::plan_loader_install`
+and its main-class table are deleted rather than deprecated: keeping a function
+that produces a broken loader would invite the bug back. `write_patch` stays —
+it is the override path, and it is what a user's own patch file should go
+through.
+
+### 16.4 The gate: CI, not a laptop
+
+`crates/palantir-net/tests/live.rs` holds five `#[ignore]`d tests that ask the
+real services, and a `live` job runs them on `master` (and by hand) with
+`-- --ignored --test-threads=1`. They cover the three defects directly:
+
+* a created instance resolves against the live metadata service: severity
+  clean, `net.minecraft.client.main.Main`, an asset index with a 40-char sha1,
+  the versionless LWJGL slot filled to a `3.x` and its libraries and host
+  natives on the classpath, Java 21;
+* a Fabric instance gets the loader's own libraries (`fabric-loader`,
+  `sponge-mixin`) and the mappings component the loader only *requires*, at the
+  game version;
+* version lists parse for `net.minecraft`, `net.fabricmc.fabric-loader` and
+  `org.lwjgl3`, and release entries carry their `sha256`;
+* a fetched version file is cached at the path the **offline** store reads and
+  its bytes match the digest the service published;
+* Microsoft issues a device code for the client id the launcher ships — the one
+  step of sign-in that needs no human and fails when the id, scope or endpoint
+  is wrong.
+
+They are deliberately about identity and shape, not version numbers, so they do
+not need an edit every Minecraft release. A live test that is skipped when the
+network is unavailable is a live test that reports success while proving
+nothing, so a failure there is a failure.
+
+### 16.5 Still not proven by any of this
+
+* **A real game launch.** Resolution, the classpath and the cache are checked;
+  actually starting the JVM and watching the window appear is not, and that is
+  the remaining end-to-end gap. Both halves are in place for it — the install
+  plan and the launch script — so a `--verbose` run of the built exe on a real
+  machine is the next step, not a new feature.
+* **A full install of a modded instance.** `install::plan`/`run` are unit-tested
+  against fixtures; nothing downloads a real Forge maven tree. The plan is
+  derived from the same resolved profile the live tests validate, so the risk is
+  in the downloader rather than the plan.
+* **Persisting what resolution decided.** Prism writes the filled versions and
+  the added dependency components back into `mmc-pack.json`; this resolves them
+  in memory on every launch. Launching is identical either way, and the instance
+  page showing `Intermediary` as a component would need the write-back.
+* **Old versions.** The rules are exercised against 1.21.1. Legacy profiles lean
+  harder on `suggests` (LWJGL 2) and on quirks `org.lwjgl3: 3.1.2` /
+  `org.lwjgl: 2.9.1` fallbacks, which are **not** implemented: no defensible
+  version is invented, and a legacy pack that pins nothing gets a clear error
+  instead.

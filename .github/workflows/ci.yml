@@ -107,6 +107,42 @@ jobs:
         continue-on-error: true
         run: cargo fmt --all -- --check
 
+  # The tests above are offline and deterministic, which is what makes them
+  # useful and also what makes them blind: fixtures supplied the bytes the code
+  # expected, so a URL the service stopped serving and a version nothing ever
+  # filled both passed them for weeks. This job asks the real services instead.
+  #
+  # `--ignored` runs only the live tests; `--test-threads=1` keeps their
+  # requests polite and the output readable. It needs no build of the app, so it
+  # is a compile of three crates plus a few megabytes of metadata.
+  live:
+    name: Live services
+    needs: test
+    # Same reason as packaging: a PR pays for the questions that can change its
+    # verdict, and this one's verdict does not depend on the PR.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-live-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-live-
+
+      # A live test that is skipped when the network is down is a live test that
+      # reports success while proving nothing, so a failure here is a failure.
+      - name: Run the live tests
+        run: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+
   # Packaging is the expensive half -- two release builds with LTO, ~14 billed
   # minutes against ~4 for test + lint -- and its result is identical for a
   # given tree, so a pull request gets the fast questions only and `master`

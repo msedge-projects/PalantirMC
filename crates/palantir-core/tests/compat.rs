@@ -137,6 +137,7 @@ fn groups_file_matches_prism_layout_at_data_root() {
 fn seed_meta_cache(meta_dir: &std::path::Path) {
     std::fs::create_dir_all(meta_dir.join("net.minecraft")).unwrap();
     std::fs::create_dir_all(meta_dir.join("net.fabricmc.fabric-loader")).unwrap();
+    std::fs::create_dir_all(meta_dir.join("net.fabricmc.intermediary")).unwrap();
     std::fs::write(
         meta_dir.join("net.minecraft").join("1.21.1.json"),
         json::to_document_string(&serde_json::json!({
@@ -148,7 +149,9 @@ fn seed_meta_cache(meta_dir: &std::path::Path) {
             "type": "release",
             "assets": "17",
             "mainClass": "net.minecraft.client.main.Main",
-            "minecraftArguments": "--username ${auth_player_name} --version ${version_name}"
+            "minecraftArguments": "--username ${auth_player_name} --version ${version_name}",
+            // The real file names the LWJGL slot the pack never versions.
+            "requires": [{"uid": "org.lwjgl3", "suggests": "3.3.3"}]
         }))
         .unwrap(),
     )
@@ -164,13 +167,31 @@ fn seed_meta_cache(meta_dir: &std::path::Path) {
             "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
             "+traits": ["fabric"],
             "+jvmArgs": ["-Dfabric.gameJar=minecraft.jar"],
+            // The real loader requires the mappings and names no version.
+            "requires": [
+                {"uid": "net.minecraft", "equals": "1.21.1"},
+                {"uid": "net.fabricmc.intermediary"}
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        meta_dir.join("net.fabricmc.intermediary").join("1.21.1.json"),
+        json::to_document_string(&serde_json::json!({
+            "formatVersion": 1,
+            "uid": "net.fabricmc.intermediary",
+            "version": "1.21.1",
+            "order": 11,
+            "name": "Intermediary Mappings",
+            "+traits": ["intermediary", "fabric"],
             "requires": [{"uid": "net.minecraft", "equals": "1.21.1"}]
         }))
         .unwrap(),
     )
     .unwrap();
-    // Vanilla profiles also carry an `org.lwjgl3` slot with no version yet;
-    // give it a version + seeded meta so offline resolution stays clean.
+    // The LWJGL slot: seeded, never versioned in `mmc-pack.json` -- exactly the
+    // shape that used to make resolution fail.
     std::fs::create_dir_all(meta_dir.join("org.lwjgl3")).unwrap();
     std::fs::write(
         meta_dir.join("org.lwjgl3").join("3.3.3.json"),
@@ -196,18 +217,40 @@ fn resolve_fabric_instance_end_to_end() {
     let instance = Instance::create(&paths.instances_dir(), "Fabric 1.21.1", "1.21.1").unwrap();
     let mut profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
     profile.set_version("net.fabricmc.fabric-loader", "0.16.5", true);
-    profile.set_version("org.lwjgl3", "3.3.3", true);
     profile.save(&instance.mmc_pack_path()).unwrap();
 
     let mut store = OfflineMetaStore::new(paths.meta_dir());
     let ctx = RuntimeContext::current_host();
-    let resolution = resolve(&PackProfile::load(&instance.mmc_pack_path()).unwrap(), &instance.patches_dir(), &mut store, &ctx)
-        .unwrap();
-    assert_eq!(resolution.severity(), ProblemSeverity::None);
+    let saved = PackProfile::load(&instance.mmc_pack_path()).unwrap();
+    // The `org.lwjgl3` slot this instance was created with carries no version.
+    // Leaving it that way is the point: the dependency machinery has to fill it
+    // from `net.minecraft`'s requirement, or the instance cannot start.
+    assert!(
+        saved
+            .components()
+            .iter()
+            .any(|c| c.uid == "org.lwjgl3" && c.version.is_empty()),
+        "the fixture stopped covering the versionless LWJGL slot"
+    );
+    let resolution = resolve(&saved, &instance.patches_dir(), &mut store, &ctx).unwrap();
+    assert_eq!(resolution.severity(), ProblemSeverity::None, "problems: {:?}", resolution.problems);
     assert_eq!(resolution.profile.minecraft_version, "1.21.1");
     assert_eq!(resolution.profile.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
     assert!(resolution.profile.has_trait("fabric"));
     assert_eq!(resolution.profile.addn_jvm_arguments, vec!["-Dfabric.gameJar=minecraft.jar"]);
+
+    // Both slots the pack does not version were decided during resolution: the
+    // LWJGL slot from the requirement that named it, and the mappings from the
+    // game version, added because the loader Requires them.
+    let lwjgl = resolution.components.iter().find(|c| c.uid == "org.lwjgl3").unwrap();
+    assert_eq!(lwjgl.version, "3.3.3");
+    let mappings = resolution
+        .components
+        .iter()
+        .find(|c| c.uid == "net.fabricmc.intermediary")
+        .expect("the mappings dependency was never resolved");
+    assert_eq!(mappings.version, "1.21.1");
+    assert!(resolution.profile.has_trait("intermediary"));
 
     // The Fabric loader's `equals` requirement is satisfied by net.minecraft.
     assert!(!resolution.problems.iter().any(|p| p.message.contains("requires")));

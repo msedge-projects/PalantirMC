@@ -3,8 +3,9 @@
 //! The GUI needs more than a folder name: every card shows the game version,
 //! the mod loader and its build, playtime, mod counts and the memory ceiling,
 //! and the Create Instance dialog must produce an instance that really has the
-//! chosen loader installed (a `patches/<uid>.json` plus the matching
-//! `mmc-pack.json` component), not just a renamed folder.
+//! chosen loader registered as a versioned `mmc-pack.json` component (see
+//! [`register_loader`]; its libraries and entry point come from the same
+//! metadata as Minecraft's), not just a renamed folder.
 //!
 //! All of it is plain filesystem work on `palantir-core`, so the whole module is
 //! unit-tested against temp dirs — no window, no network.
@@ -229,11 +230,11 @@ pub struct CreatedInstance {
     pub warnings: Vec<String>,
 }
 
-/// Create an instance and install the requested loader for real.
+/// Create an instance and record the requested loader for real.
 ///
 /// Order matters: `Instance::create` writes `instance.cfg` + `mmc-pack.json`,
-/// then the loader patch is written through `palantir-loader` (which also
-/// registers the component), then settings/icon, then a single save.
+/// then the loader component is registered in that profile, then
+/// settings/icon, then a single save.
 pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstance, String> {
     let name = spec.name.trim();
     if name.is_empty() {
@@ -252,18 +253,25 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
         match spec.loader_build.as_deref().map(str::trim) {
             Some(build) if !build.is_empty() => {
                 let uid = spec.loader.uid().unwrap_or_default();
-                match palantir_loader::plan_loader_install(uid, spec.game.trim(), build) {
-                    Ok(patch) => {
-                        if let Err(error) = palantir_loader::write_patch(&instance, uid, &patch) {
-                            warnings.push(format!(
-                                "{} {} was not installed: {error}",
-                                spec.loader.label(),
-                                build
-                            ));
-                        }
-                    }
-                    Err(error) => warnings
-                        .push(format!("{} {} was not installed: {error}", spec.loader.label(), build)),
+                // The loader becomes a *component with a version*, which is what
+                // Prism writes, and its version file then comes from the same
+                // metadata service as Minecraft's.
+                //
+                // What this used to do is write a synthesized
+                // `patches/<uid>.json`. A patch does not add to a component, it
+                // *replaces* it, and the synthesized file carried a main class
+                // and no libraries at all: the loader jar, the ASM stack it
+                // loads and Forge's ForgeWrapper never reached the classpath, so
+                // the game stopped on the first missing class. The invented
+                // entry points were wrong too -- the metadata starts Forge and
+                // NeoForge through ForgeWrapper, not through the launchwrapper
+                // or bootstraplauncher names that were written here.
+                if let Err(error) = register_loader(&instance, uid, build) {
+                    warnings.push(format!(
+                        "{} {} was not installed: {error}",
+                        spec.loader.label(),
+                        build
+                    ));
                 }
             }
             _ => warnings.push(format!(
@@ -296,6 +304,33 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
         let _ = std::fs::create_dir_all(dir);
     }
     Ok(CreatedInstance { id, warnings })
+}
+
+/// Register a mod loader as a component of `instance`'s `mmc-pack.json`.
+///
+/// The version is the loader build the user picked; everything else about the
+/// loader (its libraries, its entry point, what it requires) belongs to the
+/// metadata for that uid/version pair, exactly as it does for Minecraft.
+///
+/// Refuses to write a component that could not be resolved: an empty uid or
+/// build would leave a slot with nothing to load, which is precisely the state
+/// that used to make a freshly created instance unlaunchable.
+fn register_loader(instance: &Instance, uid: &str, build: &str) -> Result<(), String> {
+    let uid = uid.trim();
+    let build = build.trim();
+    if uid.is_empty() {
+        return Err("this loader has no component uid".to_string());
+    }
+    if build.is_empty() {
+        return Err("no build version was given".to_string());
+    }
+    let path = instance.mmc_pack_path();
+    let mut profile = PackProfile::load(&path)
+        .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+    profile.set_version(uid, build, true);
+    profile
+        .save(&path)
+        .map_err(|error| format!("writing {} failed: {error}", path.display()))
 }
 
 // ---- Icons -------------------------------------------------------------
@@ -497,12 +532,22 @@ mod tests {
         assert!(created.warnings.is_empty(), "warnings: {:?}", created.warnings);
 
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
-        let patch = instance.patches_dir().join("net.fabricmc.fabric-loader.json");
-        assert!(patch.is_file(), "loader patch must be written");
         let profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
         assert_eq!(profile.get("net.fabricmc.fabric-loader").unwrap().version, "0.19.5");
         assert_eq!(profile.get("net.minecraft").unwrap().version, "1.21.1");
         assert!(instance.mods_dir().is_dir(), "mods folder is created up front");
+
+        // The loader is a component of the profile, and *only* that: a patch
+        // file here would replace the metadata's version file for the loader
+        // and take its libraries with it, which is how every loader used to end
+        // up missing its jars.
+        assert!(
+            !instance
+                .patches_dir()
+                .join("net.fabricmc.fabric-loader.json")
+                .exists(),
+            "the loader must come from the metadata, not from an invented patch"
+        );
 
         // …and the card agrees with the disk.
         let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
