@@ -346,14 +346,27 @@ pub fn resolve(
                 slots[index].pinned.clone()
             } else if !slots[index].cached.is_empty() {
                 slots[index].cached.clone()
-            } else if let Some(req) = wanted.get(&uid) {
-                if req.equals_version.is_empty() {
-                    req.suggests.clone()
-                } else {
-                    req.equals_version.clone()
-                }
             } else {
-                game_locked_version(&uid, &game_version)
+                // What something else requires of this component, then the two
+                // uids that follow the game, then nothing. A requirement can
+                // name a uid and no version -- that is exactly how the Fabric
+                // loader requires its mappings -- so an empty answer here means
+                // "ask the next rule", not "no version".
+                let asked = wanted
+                    .get(&uid)
+                    .map(|req| {
+                        if req.equals_version.is_empty() {
+                            req.suggests.clone()
+                        } else {
+                            req.equals_version.clone()
+                        }
+                    })
+                    .unwrap_or_default();
+                if asked.is_empty() {
+                    game_locked_version(&uid, &game_version)
+                } else {
+                    asked
+                }
             };
             if !patched && target.is_empty() {
                 // Round 1 has no basis for a decision; a later round may have
