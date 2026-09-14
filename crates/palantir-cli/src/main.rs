@@ -123,12 +123,10 @@ fn create(instances_dir: &str, name: &str, mc_version: &str) -> Result<()> {
 
 fn launch_script(dir: &String, meta_dir: Option<String>) -> Result<()> {
     let instance = Instance::open(Path::new(dir)).context("opening instance")?;
+    let paths = PalantirPaths::detect();
     let meta = match meta_dir {
         Some(m) => PathBuf::from(m),
-        None => {
-            let paths = PalantirPaths::detect();
-            paths.meta_dir()
-        }
+        None => paths.meta_dir(),
     };
     let mut store = palantir_core::resolve::OfflineMetaStore::new(meta);
     let profile = PackProfile::load(&instance.mmc_pack_path()).unwrap_or_default();
@@ -141,16 +139,10 @@ fn launch_script(dir: &String, meta_dir: Option<String>) -> Result<()> {
         }
         bail!("resolution failed with errors");
     }
-    let mut vars = launch::profile_var_map(
-        &resolution.profile,
-        &instance.name(),
-        &instance.id(),
-        instance.root(),
-        &instance.game_root(),
-        &instance.game_root().join("resources"),
-        &instance.root().join("assets"),
-        &instance.root().join("libraries"),
-    );
+    // The same mapping the window builds, from the same place: a CLI dry run
+    // that substituted a different path than the launcher would be a dry run of
+    // a different command.
+    let mut vars = launch::instance_var_map(&paths, &instance, &resolution.profile);
     vars.insert("version_name".into(), resolution.profile.minecraft_version.clone());
     let mc_args = launch::process_minecraft_args(&resolution.profile, None, None, &vars);
     print!(

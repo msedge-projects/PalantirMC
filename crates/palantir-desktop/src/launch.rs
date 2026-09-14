@@ -517,16 +517,11 @@ pub fn prepare_launch(
         maximized: model.get_bool("LaunchMaximized", Some("OverrideWindow"), false),
     };
     let game_root = instance.game_root();
-    let mut vars = launch::profile_var_map(
-        &resolution.profile,
-        &name,
-        &id,
-        instance.root(),
-        &game_root,
-        &game_root.join("resources"),
-        &instance.root().join("assets"),
-        &instance.root().join("libraries"),
-    );
+    // Every shared directory comes from the data root, in one place, because
+    // this is the mapping the game reads `${assets_root}` and
+    // `${library_directory}` out of: the assets are shared by every instance and
+    // live at the root, not inside the instance folder.
+    let mut vars = launch::instance_var_map(paths, &instance, &resolution.profile);
     vars.insert("version_name".to_string(), resolution.profile.minecraft_version.clone());
     let mc_args = launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
     let script = launch::create_launch_script(

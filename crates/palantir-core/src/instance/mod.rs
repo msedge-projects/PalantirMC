@@ -272,6 +272,16 @@ impl Instance {
         self.game_root().join("bin")
     }
 
+    /// `game_root()/resources` — where a *legacy* asset index's files are
+    /// reconstructed by logical name (`MinecraftInstance::resourcesDir`).
+    ///
+    /// The one place `${game_assets}` points for a `legacy`/`pre-1.6` index, so
+    /// the install step and the launch line must both ask it rather than each
+    /// guessing `minecraft/resources`.
+    pub fn resources_dir(&self) -> PathBuf {
+        self.game_root().join("resources")
+    }
+
     /// `natives/` inside the instance root.
     pub fn natives_dir(&self) -> PathBuf {
         self.root.join("natives")

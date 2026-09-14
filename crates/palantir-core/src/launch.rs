@@ -178,6 +178,50 @@ pub fn profile_var_map(
     m
 }
 
+/// The full variable mapping for `profile` running in `instance`, with every
+/// *shared* directory taken from the data root.
+///
+/// This exists because the primitive above takes five paths that all look
+/// plausible and only one of which is right. `${assets_root}` and
+/// `${library_directory}` name the **launcher-wide** `assets/` and
+/// `libraries/` — the ones `palantir-desktop`'s install step downloads into and
+/// the ones every instance shares — while `${game_directory}` and
+/// `${game_assets}` are inside the instance. A caller that passed the instance
+/// folder for all of them built a command line that pointed the game at
+/// `instances/<id>/assets`, where the asset index is not, and Minecraft exits
+/// with a failed asset index before it draws a frame.
+///
+/// `MinecraftInstance::makeProfileVarMapping` is the reference; the rules it
+/// encodes are:
+///
+/// * `${game_directory}` — the instance's game root (`minecraft/`);
+/// * `${game_assets}` — [`crate::assets::game_assets_dir`], which is the
+///   instance's `resources/` for a `legacy`/`pre-1.6` index and the shared
+///   `assets/<index id>` for every modern one;
+/// * `${assets_root}` — the shared `assets/`;
+/// * `${library_directory}` — the shared `libraries/`.
+pub fn instance_var_map(
+    paths: &crate::paths::PalantirPaths,
+    instance: &crate::instance::Instance,
+    profile: &LaunchProfile,
+) -> BTreeMap<String, String> {
+    let assets_root = paths.assets_dir();
+    profile_var_map(
+        profile,
+        &instance.name(),
+        &instance.id(),
+        &instance.root(),
+        &instance.game_root(),
+        &crate::assets::game_assets_dir(
+            &assets_root,
+            &profile.assets_or_default().id,
+            &instance.resources_dir(),
+        ),
+        &assets_root,
+        &paths.libraries_dir(),
+    )
+}
+
 /// `--username ${auth_player_name} ...` style argument list
 /// (`processMinecraftArgs`). `vars` must already contain the profile
 /// mapping; session tokens are added here.
@@ -397,6 +441,80 @@ mod tests {
         m.insert("version_name".to_string(), "1.20.4".into());
         m.insert("game_directory".to_string(), "/inst/minecraft".into());
         m
+    }
+
+    /// A data root with one usable instance in it.
+    fn rooted() -> (tempfile::TempDir, crate::paths::PalantirPaths, crate::instance::Instance) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::paths::PalantirPaths::at(dir.path());
+        std::fs::create_dir_all(paths.instances_dir()).unwrap();
+        let instance =
+            crate::instance::Instance::create(&paths.instances_dir(), "Rooted", "1.21.1")
+                .expect("instance fixture");
+        (dir, paths, instance)
+    }
+
+    #[test]
+    fn shared_directories_come_from_the_data_root_and_not_the_instance() {
+        // The bug this function exists to make impossible: `${assets_root}` and
+        // `${library_directory}` name the launcher-wide folders, where the
+        // install step actually put those files. Pointing the game at
+        // `instances/<id>/assets` makes Minecraft fail its asset index before it
+        // draws a frame, and the command line looks entirely reasonable.
+        let (_dir, paths, instance) = rooted();
+        let map = instance_var_map(&paths, &instance, &profile());
+
+        assert_eq!(map["assets_root"], paths.assets_dir().to_string_lossy());
+        assert_eq!(map["library_directory"], paths.libraries_dir().to_string_lossy());
+        assert_eq!(map["game_directory"], instance.game_root().to_string_lossy());
+        assert_eq!(map["assets_index_name"], "17");
+        // A modern index is hash-addressed, so `${game_assets}` is the shared
+        // folder for that index id — not the instance, and not `resources/`.
+        assert_eq!(map["game_assets"], paths.assets_dir().join("17").to_string_lossy());
+
+        // And the paths are not merely "somewhere else": they are the folders
+        // the shared files live in, while the instance's own are different.
+        assert_ne!(map["assets_root"], instance.root().join("assets").to_string_lossy());
+        assert_ne!(map["library_directory"], instance.local_libraries_dir().to_string_lossy());
+        assert!(!paths.assets_dir().starts_with(instance.root()));
+        assert!(!paths.libraries_dir().starts_with(instance.root()));
+    }
+
+    #[test]
+    fn a_legacy_index_points_game_assets_at_the_instance_resources() {
+        // `legacy`/`pre-1.6` predate the hash-addressed layout: their files are
+        // reconstructed by logical name *inside the instance*, so the folder the
+        // game is told to read is the instance's, and the install step's
+        // reconstruction target has to be the same one.
+        let (_dir, paths, instance) = rooted();
+        let mut legacy = profile();
+        legacy.minecraft_assets = Some(AssetIndexInfo::bare("legacy"));
+        let map = instance_var_map(&paths, &instance, &legacy);
+        assert_eq!(map["game_assets"], instance.resources_dir().to_string_lossy());
+        assert_eq!(map["game_assets"], instance.game_root().join("resources").to_string_lossy());
+        // The shared folders do not move for it.
+        assert_eq!(map["assets_root"], paths.assets_dir().to_string_lossy());
+    }
+
+    #[test]
+    fn the_mapping_is_what_the_argument_substitution_reads() {
+        // End to end through the one call the launch line makes: the argument
+        // the game actually receives must name the shared assets folder.
+        let (_dir, paths, instance) = rooted();
+        let mut p = profile();
+        p.minecraft_arguments =
+            "--assetsDir ${assets_root} --assetIndex ${assets_index_name}".into();
+        let map = instance_var_map(&paths, &instance, &p);
+        let args = process_minecraft_args(&p, None, None, &map);
+        assert_eq!(
+            args,
+            vec![
+                "--assetsDir".to_string(),
+                paths.assets_dir().to_string_lossy().into_owned(),
+                "--assetIndex".to_string(),
+                "17".to_string(),
+            ]
+        );
     }
 
     #[test]
