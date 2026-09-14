@@ -31,7 +31,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use iced::gradient::Linear;
 use iced::overlay::menu;
 use iced::theme::Palette as IcedPalette;
-use iced::widget::{button, checkbox, container, pick_list, scrollable, text_input};
+use iced::widget::{
+    button, checkbox, container, pick_list, progress_bar, scrollable, text_input,
+};
 use iced::{Background, Border, Color, Font, Gradient, Radians, Theme};
 
 /// Build a color from sRGB bytes (const-friendly, readable hex in the source).
@@ -1133,6 +1135,26 @@ impl From<Field> for iced::theme::TextInput {
     }
 }
 
+// ---- Bar (progress) ----------------------------------------------------
+
+/// The install progress bar.
+///
+/// A plain function rather than a unit struct, because `progress_bar` is one of
+/// the widgets that take `impl Fn(&Theme) -> Appearance` — the same spelling
+/// [`card`] and the rule styles use — so the colours are read at paint time and
+/// the bar follows the look Settings switches to without a second stylesheet.
+///
+/// The track is the inset colour the fields use, so an empty bar reads as part
+/// of the surface it sits on; the fill is the accent, the palette's one
+/// saturated colour and therefore the one thing on screen that means moving.
+pub fn bar(_theme: &Theme) -> progress_bar::Appearance {
+    progress_bar::Appearance {
+        background: surface_input().into(),
+        bar: accent().into(),
+        border_radius: R_CHIP.into(),
+    }
+}
+
 // ---- Thin (scrollable) -------------------------------------------------
 
 /// Slim scrollbar: small, low-contrast and cheap to composite on both wgpu
@@ -1489,6 +1511,23 @@ mod tests {
     fn field_converts_into_the_input_style() {
         let style: iced::theme::TextInput = Field.into();
         assert!(matches!(style, iced::theme::TextInput::Custom(_)));
+    }
+
+    /// The progress bar is painted from the palette rather than being a second
+    /// stylesheet: an inset track so an empty bar reads as part of the surface,
+    /// and an accent fill, which is the one colour in this look that means
+    /// moving.
+    #[test]
+    fn the_progress_bar_is_painted_from_the_palette() {
+        let _guard = theme_lock();
+        let theme = app_theme();
+        let appearance = bar(&theme);
+        assert_eq!(appearance.background, surface_input().into());
+        assert_eq!(appearance.bar, accent().into());
+        assert_ne!(
+            appearance.background, appearance.bar,
+            "a track the fill is invisible against is a bar that never moves"
+        );
     }
 
     #[test]

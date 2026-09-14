@@ -22,9 +22,11 @@
 //! `MinecraftInstance::getNativePath` points, so both launchers run the same
 //! extracted libraries.
 //!
-//! Log lines travel back to the GUI through the `iced::subscription::channel`
-//! sender owned by the worker thread (`Vec<String>` batches); the final outcome
-//! arrives as a done message. See `app.rs` for the subscription.
+//! Three things travel back to the GUI through the `iced::subscription::channel`
+//! sender owned by the worker thread: `Vec<String>` batches of log lines, the
+//! running progress of whatever phase is fetching (a level, deliberately
+//! droppable — see `send_progress`), and the final outcome as a done message.
+//! See `app.rs` for the subscription.
 
 use futures::channel::mpsc::Sender;
 use palantir_core::{
@@ -484,6 +486,7 @@ pub fn prepare_launch(
     store: &mut dyn MetaStore,
     fetcher: &(dyn Fetcher + Sync),
     log: &mut dyn FnMut(String),
+    progress: &mut dyn FnMut(install::Progress),
 ) -> LaunchReadiness {
     // Resolved dir: honors the `InstanceDir` override in prismlauncher.cfg.
     let instance = match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
@@ -550,7 +553,14 @@ pub fn prepare_launch(
     for problem in &install_plan.problems {
         log(format!("install: {problem}"));
     }
-    let report = install::run(&install_plan, fetcher, install::DEFAULT_THREADS, log);
+    // The phases that fetch are handed a [`install::Reporter`], built from the
+    // two taps this function was given: a phase that draws a bar and writes no
+    // lines, or writes lines and reports no bar, is not something a caller can
+    // ask for by accident.
+    let report = {
+        let mut reporter = install::Reporter::new(&mut *log, &mut *progress);
+        install::run(&install_plan, fetcher, install::DEFAULT_THREADS, &mut reporter)
+    };
     log(format!("install: {}", report.summary()));
     for failure in &report.failed {
         log(format!("install failed: {failure}"));
@@ -638,6 +648,7 @@ pub fn prepare_launch(
             &resolution.profile.compatible_java_name,
             fetcher,
             log,
+            progress,
         ) {
             Some(found) => found,
             None => {
@@ -1054,6 +1065,7 @@ fn pick_java(
     want_name: &str,
     fetcher: &(dyn Fetcher + Sync),
     log: &mut dyn FnMut(String),
+    progress: &mut dyn FnMut(install::Progress),
 ) -> Option<String> {
     // 1 and 2: what this launcher's own settings say.
     for (major, path) in java.for_majors(want_majors) {
@@ -1112,13 +1124,17 @@ fn pick_java(
         name: want_name,
         os: &host,
     };
-    match java_runtime::ensure_runtime(
-        paths,
-        &request,
-        fetcher,
-        java_runtime::DOWNLOAD_THREADS,
-        log,
-    ) {
+    let fetched = {
+        let mut reporter = install::Reporter::new(&mut *log, &mut *progress);
+        java_runtime::ensure_runtime(
+            paths,
+            &request,
+            fetcher,
+            java_runtime::DOWNLOAD_THREADS,
+            &mut reporter,
+        )
+    };
+    match fetched {
         Ok(bin) => return Some(bin),
         Err(reason) => log(format!(
             "no Java for this version could be fetched: {reason}"
@@ -1298,9 +1314,20 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     // now reports progress while it works — and a buffer that only left the
     // closure every 25 lines is exactly what made a long asset download look
     // frozen instead of busy.
+    //
+    // The two taps are separate closures over separate *handles* rather than one
+    // closure over `sender`: both need to send, and `Sender::try_send` wants a
+    // `&mut`, which only one borrower can hold at a time. Cloning a channel
+    // handle is how a futures mpsc sender is shared, and neither closure outlives
+    // this block.
     let readiness = {
+        let mut lines_sender = sender.clone();
+        let mut progress_sender = sender.clone();
         let mut log = |line: String| {
-            let _ = send_batch(&mut sender, run_id, vec![line], &journal);
+            let _ = send_batch(&mut lines_sender, run_id, vec![line], &journal);
+        };
+        let mut progress = |level: install::Progress| {
+            send_progress(&mut progress_sender, run_id, level);
         };
         let auth = MicrosoftAuth::with_public_client_id();
         let prepared = match prepare_auth(&params.account, &auth, &mut log) {
@@ -1330,6 +1357,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
                     &mut store,
                     &fetcher,
                     &mut log,
+                    &mut progress,
                 )
             }
             None => LaunchReadiness::Blocked,
@@ -1651,6 +1679,19 @@ impl LaunchLogFile {
         }
     }
 
+}
+
+/// Forward one progress report; the GUI keeps only the latest.
+///
+/// Deliberately unlike [`send_batch`]: a report that cannot be delivered right
+/// now is *dropped* rather than retried. A progress level is not an event — the
+/// next one supersedes it, and every one of them is a fact the window already
+/// knows how to lose — so blocking the downloader on a window that is a frame
+/// behind would be the wrong trade twice over. Nothing here touches the journal:
+/// a level is not a line, and a log that grows by a line per 2% of a download is
+/// a log nobody reads.
+fn send_progress(sender: &mut Sender<Message>, run_id: u64, progress: install::Progress) {
+    let _ = sender.try_send(Message::LaunchProgress { run_id, progress });
 }
 
 /// Forward one batch; `false` means the GUI is gone and the worker should stop.
@@ -2288,6 +2329,7 @@ mod tests {
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
+            &mut |_| {},
         );
         assert!(matches!(readiness, LaunchReadiness::Blocked));
         assert!(lines.iter().any(|l| l.contains("cannot open instance")));
@@ -2312,6 +2354,7 @@ mod tests {
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
+            &mut |_| {},
         );
         assert!(matches!(readiness, LaunchReadiness::Blocked));
         let text = lines.join("\n");
@@ -2343,6 +2386,12 @@ mod tests {
         let mut store = OfflineMetaStore::new(paths.meta_dir());
         let fetcher = MapFetcher::new();
         let mut lines = Vec::new();
+        // Levels as well as lines: this is the only path through
+        // `prepare_launch` that reaches the install phase with nothing missing,
+        // so it is the one that can show the two taps arriving separately — a
+        // phase that says nothing and a phase that draws nothing are both
+        // silent, and only one of them is a bug.
+        let mut levels: Vec<install::Progress> = Vec::new();
         let readiness = prepare_launch(
             &paths,
             &instance.id(),
@@ -2351,12 +2400,20 @@ mod tests {
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
+            &mut |level| levels.push(level),
         );
         let text = lines.join("\n");
         // Everything about the install phase must be clean…
         assert!(text.contains("install:"), "got: {text}");
         assert!(!text.contains("install failed"), "got: {text}");
         assert!(!text.contains("files are missing"), "got: {text}");
+        // …and nothing missing means no phase fetched anything, so no level was
+        // reported. A bar drawn for a phase with no work would be a claim that
+        // something is happening, which is the opposite of what this phase did.
+        assert!(
+            levels.is_empty(),
+            "a fully installed instance has nothing to report: {levels:?}"
+        );
         // …and the only acceptable blocker is the runtime that is not
         // installed on every machine, or a real plan if one is.
         match readiness {
@@ -2418,6 +2475,7 @@ mod tests {
             &mut store,
             &fetcher,
             &mut |line| lines.push(line),
+            &mut |_| {},
         );
         let text = lines.join("\n");
         assert!(
@@ -2638,6 +2696,42 @@ mod tests {
         let text = std::fs::read_to_string(journal.path()).unwrap();
         assert!(!text.contains("eyJhbG"), "the token reached the disk: {text}");
         assert!(text.contains("--accessToken <redacted>"), "{text}");
+    }
+
+    /// A progress report is a *level*, not an event: when the window is a frame
+    /// behind, the newest report is the only one worth having, so a full channel
+    /// drops it instead of retrying. That is the difference from [`send_batch`],
+    /// and it matters because the alternative is a downloader waiting on a window
+    /// — and because a level must never reach the run log as a line.
+    #[test]
+    fn a_progress_report_is_dropped_rather_than_waited_for() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Busy", "1.21.1").unwrap();
+        let journal = LaunchLogFile::open(&paths, &instance.id());
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(1);
+
+        send_progress(&mut tx, 7, install::Progress::new("asset objects", 1, 5057, 0));
+        send_progress(
+            &mut tx,
+            7,
+            install::Progress::new("asset objects", 102, 5057, 1_000_000),
+        );
+
+        // Both calls returned: the second one did not wait for room, which is
+        // the property this test exists for.
+        let Ok(Message::LaunchProgress { run_id, progress }) = rx.try_recv() else {
+            panic!("expected a progress report");
+        };
+        assert_eq!((run_id, progress.done), (7, 1), "the report that fit is the one that arrived");
+        assert!(
+            rx.try_recv().is_err(),
+            "a report that did not fit was dropped, not queued"
+        );
+        let logged = std::fs::read_to_string(journal.path()).unwrap_or_default();
+        assert!(
+            !logged.contains("asset objects"),
+            "a level is not a line in the run log: {logged}"
+        );
     }
 
     #[test]

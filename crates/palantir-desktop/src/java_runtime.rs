@@ -148,7 +148,7 @@ pub fn install_runtime(
     files: &[RuntimeFile],
     fetcher: &(dyn Fetcher + Sync),
     threads: usize,
-    log: &mut dyn FnMut(String),
+    reporter: &mut install::Reporter<'_>,
 ) -> Result<usize, String> {
     let dir = runtime_dir(paths, name);
     if let Err(error) = palantir_core::util::ensure_dir(&dir) {
@@ -166,7 +166,7 @@ pub fn install_runtime(
         jobs.push((file.url.clone(), dest));
         wanted.push(file);
     }
-    log(format!(
+    reporter.log(format!(
         "installing Java '{name}': {} file(s) to fetch, {already} already present",
         jobs.len()
     ));
@@ -175,9 +175,11 @@ pub fn install_runtime(
         // One result per job, in job order — and progress while it works, on
         // the same cadence as the asset phase: a JRE is a few hundred files, and
         // a phase that says nothing between starting and finishing is as easy
-        // to mistake for a hang here as it is there.
+        // to mistake for a hang here as it is there. The label carries the
+        // runtime's name, because a bar that says "files" while a JRE unpacks
+        // is a bar that does not say what the 50 MB is for.
         let label = format!("Java '{name}'");
-        let results = install::download_with_progress(fetcher, &jobs, threads, &label, log);
+        let results = install::download_with_progress(fetcher, &jobs, threads, &label, reporter);
         for (index, (_url, result)) in results.into_iter().enumerate() {
             let file = match wanted.get(index) {
                 Some(file) => *file,
@@ -242,7 +244,7 @@ pub fn ensure_runtime(
     request: &RuntimeRequest<'_>,
     fetcher: &(dyn Fetcher + Sync),
     threads: usize,
-    log: &mut dyn FnMut(String),
+    reporter: &mut install::Reporter<'_>,
 ) -> Result<String, String> {
     if request.name.trim().is_empty() {
         return Err(
@@ -253,7 +255,7 @@ pub fn ensure_runtime(
     let name = request.name.trim();
     let binary = java_binary(paths, name);
     if binary.is_file() {
-        log(format!("'{name}' is already unpacked at {}", binary.display()));
+        reporter.log(format!("'{name}' is already unpacked at {}", binary.display()));
         return Ok(binary.to_string_lossy().into_owned());
     }
     if request.majors.is_empty() {
@@ -278,7 +280,7 @@ pub fn ensure_runtime(
             }
         };
     if from_cache {
-        log("using the cached Java runtime list (the service could not be reached)".to_string());
+        reporter.log("using the cached Java runtime list (the service could not be reached)");
     }
 
     let mut last = String::from("no runtime entry was published for this platform");
@@ -304,7 +306,7 @@ pub fn ensure_runtime(
                 let cache = meta_dir.join(JAVA_RUNTIMES_UID).join(format!("{version}.json"));
                 match std::fs::read(&cache) {
                     Ok(bytes) => {
-                        log(format!("{version}: {remote_error} — using the cached copy"));
+                        reporter.log(format!("{version}: {remote_error} — using the cached copy"));
                         bytes
                     }
                     Err(_) => {
@@ -335,7 +337,7 @@ pub fn ensure_runtime(
             );
             continue;
         }
-        log(format!(
+        reporter.log(format!(
             "{version}: fetching {name} for {} from {}",
             request.os, entry.url
         ));
@@ -367,9 +369,9 @@ pub fn ensure_runtime(
             last = format!("{version}: the manifest for '{name}' lists no files");
             continue;
         }
-        match install_runtime(paths, name, &files, fetcher, threads, log) {
+        match install_runtime(paths, name, &files, fetcher, threads, reporter) {
             Ok(count) => {
-                log(format!(
+                reporter.log(format!(
                     "Java '{name}' is ready ({count} file(s) fetched) at {}",
                     binary.display()
                 ));
@@ -464,13 +466,17 @@ mod tests {
             },
         ];
         let mut lines: Vec<String> = Vec::new();
+        let mut levels: Vec<install::Progress> = Vec::new();
         let count = install_runtime(
             &paths,
             "java-runtime-delta",
             &files,
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |line| lines.push(line),
+            &mut install::Reporter::new(
+                &mut |line| lines.push(line),
+                &mut |level| levels.push(level),
+            ),
         )
         .unwrap();
         assert_eq!(count, 2);
@@ -478,22 +484,18 @@ mod tests {
         assert!(runtime_dir(&paths, "java-runtime-delta").join("lib/modules").is_file());
         assert!(lines.iter().any(|line| line.contains("java-runtime-delta")));
         // The same progress cadence the asset phase uses: a runtime install is
-        // hundreds of files, so it has to say it is moving while it moves.
-        let progress: Vec<&String> = lines
-            .iter()
-            .filter(|line| line.starts_with("Java '"))
-            .collect();
+        // hundreds of files, so it has to show it is moving while it moves. The
+        // label names the runtime, because a bar that said "files" while a JRE
+        // unpacks would not say what the megabytes are for.
+        let first = levels.first().expect("the runtime install reports its first file");
+        assert_eq!(first.label, "Java 'java-runtime-delta'");
+        assert_eq!((first.done, first.total), (1, 2));
+        let last = levels.last().unwrap();
+        assert_eq!((last.done, last.total), (2, 2), "and ends at the last");
+        assert_eq!(last.percent(), 100);
         assert!(
-            progress
-                .first()
-                .is_some_and(|line| line.starts_with("Java 'java-runtime-delta': 1/2 (50%")),
-            "progress starts with the first file: {progress:?}"
-        );
-        assert!(
-            progress
-                .last()
-                .is_some_and(|line| line.starts_with("Java 'java-runtime-delta': 2/2 (100%")),
-            "and ends at the last: {progress:?}"
+            !lines.iter().any(|line| line.starts_with("Java '")),
+            "a level is not a console line: {lines:?}"
         );
         #[cfg(unix)]
         {
@@ -512,7 +514,7 @@ mod tests {
             &files,
             &MapFetcher::new(),
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap();
         assert_eq!(count, 0);
@@ -536,7 +538,7 @@ mod tests {
             &files,
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("could not be installed"), "{err}");
@@ -561,7 +563,7 @@ mod tests {
             &files,
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("is not there"), "{err}");
@@ -620,7 +622,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "windows-x64"),
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |line| lines.push(line),
+            &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
         .unwrap();
         let expected = java_binary(&paths, "java-runtime-delta");
@@ -637,7 +639,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "windows-x64"),
             &MapFetcher::new(),
             DOWNLOAD_THREADS,
-            &mut |line| lines.push(line),
+            &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
         .unwrap();
         assert_eq!(again, binary);
@@ -664,7 +666,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "windows-x64"),
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("does not match the published"), "{err}");
@@ -691,7 +693,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "linux-riscv64"),
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("archive"), "{err}");
@@ -705,7 +707,7 @@ mod tests {
             &request(&[21], "", "windows-x64"),
             &MapFetcher::new(),
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("compatibleJavaName"), "{err}");
@@ -719,7 +721,7 @@ mod tests {
             &request(&[], "java-runtime-delta", "windows-x64"),
             &MapFetcher::new(),
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(err.contains("compatibleJavaMajors"), "{err}");
@@ -733,7 +735,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "solaris-sparc"),
             &runtime_fetcher(),
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap_err();
         assert!(
@@ -753,7 +755,7 @@ mod tests {
             &request(&[23, 21], "java-runtime-delta", "windows-x64"),
             &runtime_fetcher(),
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap();
         assert_eq!(binary, java_binary(&paths, "java-runtime-delta").to_string_lossy());
@@ -769,7 +771,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "windows-x64"),
             &fetcher,
             DOWNLOAD_THREADS,
-            &mut |_| {},
+            &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap();
         // Remove what was installed, keep the metadata, and serve only the
@@ -786,7 +788,7 @@ mod tests {
             &request(&[21], "java-runtime-delta", "windows-x64"),
             &partial,
             DOWNLOAD_THREADS,
-            &mut |line| lines.push(line),
+            &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
         .unwrap_err();
         assert!(lines.iter().any(|line| line.contains("using the cached copy")), "{lines:?}");

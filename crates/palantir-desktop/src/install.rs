@@ -20,17 +20,28 @@
 //!   was just written would be theatre.
 //! * **Assets** are the index plus its objects. The index is one file; the
 //!   objects are addressed by hash under `assets/objects/<xx>/<hash>`, which is
-//!   also how Prism stores them, so both launchers share one copy.
+//!   also how Prism stores them, so both launchers share one copy — but the
+//!   *URL* they come from is a different path with the same hash in it
+//!   ([`palantir_core::assets::object_cdn_path`]). The storage layout has an
+//!   `objects/` segment and the CDN layout does not, and the first version of
+//!   this module sent every asset request to the storage one, which is a 404 on
+//!   every object (see `NEXT_STEPS.md` §19).
 //! * **Natives** are extracted flat into `<instance>/natives/` after the jars
 //!   land, because that is the directory `-Djava.library.path` points at.
 //!
 //! Everything here is testable without a network: [`plan`] and [`run`] take a
 //! [`Fetcher`], so tests hand them a map of canned bodies and assert on what
 //! ended up on disk.
+//!
+//! **Progress** reaches a caller through a [`Reporter`], which carries the two
+//! kinds of report a phase has: [`Reporter::log`] for the few lines worth
+//! keeping, and [`Reporter::report`] for the running count a window draws as a
+//! bar.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use palantir_core::assets::{object_relative_path, AssetIndex};
+use palantir_core::assets::{object_cdn_path, object_relative_path, AssetIndex};
 use palantir_core::paths::PalantirPaths;
 use palantir_core::version::{LaunchProfile, Library, RuntimeContext};
 use palantir_net::download_many_with_progress;
@@ -417,6 +428,111 @@ fn library_label(library: &Library) -> String {
     }
 }
 
+// ---- progress -------------------------------------------------------------
+
+/// What a phase is working on, as a *level* rather than a line of text.
+///
+/// The console gets a handful of lines per phase; a window gets a bar, and a bar
+/// needs numbers, not a formatted sentence. Keeping the numbers structured is
+/// also what lets the bar and the status text be one fact drawn twice instead of
+/// two strings that can drift apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    /// What is being fetched, named the way the phase names itself
+    /// (`files`, `asset objects`, `Java 'java-runtime-delta'`).
+    pub label: String,
+    /// Files finished so far.
+    pub done: usize,
+    /// Files this phase will fetch in total.
+    pub total: usize,
+    /// Bytes received so far, as the downloader counted them.
+    pub bytes: u64,
+}
+
+impl Progress {
+    /// A report for a phase that has finished `done` of `total` files.
+    pub fn new(label: impl Into<String>, done: usize, total: usize, bytes: u64) -> Progress {
+        Progress { label: label.into(), done, total, bytes }
+    }
+
+    /// How full the bar is, in `0.0..=1.0`.
+    ///
+    /// A phase with nothing to fetch reads as full, because being over is the
+    /// one thing a bar should say about it — the alternative is a phase that
+    /// finished instantly leaving a bar at zero for the next one to move.
+    pub fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            return 1.0;
+        }
+        (self.done as f32 / self.total as f32).clamp(0.0, 1.0)
+    }
+
+    /// The same value as a whole percent, for the text beside the bar.
+    pub fn percent(&self) -> u32 {
+        (self.fraction() * 100.0).round() as u32
+    }
+
+    /// Bytes received so far, in megabytes.
+    pub fn megabytes(&self) -> f64 {
+        self.bytes as f64 / (1024.0 * 1024.0)
+    }
+
+    /// One line of text for the status bar: `asset objects 715/5057 (14%)`.
+    ///
+    /// Short on purpose: this is the same fact as the bar, for the pages the bar
+    /// is not drawn on and for a window too narrow to hold both.
+    pub fn status_line(&self) -> String {
+        format!("{} {}/{} ({}%)", self.label, self.done, self.total, self.percent())
+    }
+}
+
+/// Where a phase reports what it is doing.
+///
+/// Two channels in one object, because a phase has both kinds of report and a
+/// caller that wires up one and forgets the other is a bug that only shows up on
+/// a slow connection:
+///
+/// * **lines** ([`Reporter::log`]) — few, meaningful, and written to the
+///   instance's launch log. What a phase started doing and how it ended belong
+///   here.
+/// * **levels** ([`Reporter::report`]) — the running count while it works.
+///   Frequent, disposable, and deliberately *not* journalled: a log file that
+///   grows a line every 2% of a 458 MB download is a log nobody reads.
+pub struct Reporter<'a> {
+    line: &'a mut dyn FnMut(String),
+    /// `None` for a caller that only wants lines (the dry run, and the tests
+    /// that assert on what was said rather than on how far it got).
+    progress: Option<&'a mut dyn FnMut(Progress)>,
+}
+
+impl<'a> Reporter<'a> {
+    /// A reporter with both channels.
+    pub fn new(
+        line: &'a mut dyn FnMut(String),
+        progress: &'a mut dyn FnMut(Progress),
+    ) -> Reporter<'a> {
+        Reporter { line, progress: Some(progress) }
+    }
+
+    /// A reporter for a caller with nowhere to draw: lines still go somewhere,
+    /// levels are dropped.
+    pub fn lines_only(line: &'a mut dyn FnMut(String)) -> Reporter<'a> {
+        Reporter { line, progress: None }
+    }
+
+    /// Report a line.
+    pub fn log(&mut self, line: impl Into<String>) {
+        (self.line)(line.into());
+    }
+
+    /// Report a level.
+    pub fn report(&mut self, progress: Progress) {
+        if let Some(sink) = self.progress.as_mut() {
+            sink(progress);
+        }
+    }
+}
+
 // ---- running --------------------------------------------------------------
 
 /// Fetch everything the plan lists and extract the natives.
@@ -425,7 +541,7 @@ fn library_label(library: &Library) -> String {
 /// until the index is on disk: phase one is the planned files, phase two reads
 /// the index it just wrote and fetches the hashes it names.
 ///
-/// Both phases report progress through `log` while they work (see
+/// Both phases report through `reporter` while they work (see
 /// [`download_with_progress`]): a phase that fetches thousands of small files
 /// says nothing between starting and finishing otherwise, and a silent screen
 /// is indistinguishable from a hang — which is how a resumable install gets
@@ -434,7 +550,7 @@ pub fn run(
     plan: &InstallPlan,
     fetcher: &(dyn Fetcher + Sync),
     threads: usize,
-    log: &mut dyn FnMut(String),
+    reporter: &mut Reporter,
 ) -> InstallReport {
     let mut report = InstallReport {
         present: plan.present,
@@ -442,13 +558,15 @@ pub fn run(
         ..InstallReport::default()
     };
     if !plan.jobs.is_empty() {
-        log(format!("downloading {} file(s)…", plan.jobs.len()));
+        reporter.log(format!("downloading {} file(s)…", plan.jobs.len()));
         let jobs: Vec<(String, PathBuf)> = plan
             .jobs
             .iter()
             .map(|job| (job.url.clone(), job.dest.clone()))
             .collect();
-        let results = download_with_progress(fetcher, &jobs, threads, "files", log);
+        let started = Instant::now();
+        let bytes_before = report.bytes;
+        let results = download_with_progress(fetcher, &jobs, threads, "files", reporter);
         for (index, (url, result)) in results.into_iter().enumerate() {
             let job = &plan.jobs[index];
             match result {
@@ -469,10 +587,20 @@ pub fn run(
             }
             let _ = url;
         }
+        // `report.downloaded` is this phase's count, successes only: a file
+        // that failed its digest is reported on its own line right after, and a
+        // phase-end line that counted it as done would be the one place the
+        // launcher claimed to have installed something it removed.
+        reporter.log(phase_done_line(
+            "files",
+            report.downloaded,
+            report.bytes - bytes_before,
+            started.elapsed(),
+        ));
     }
 
     if let Some(assets) = &plan.assets {
-        run_assets(assets, fetcher, threads, &mut report, log);
+        run_assets(assets, fetcher, threads, &mut report, reporter);
     }
 
     if !plan.natives.is_empty() {
@@ -493,7 +621,7 @@ pub fn run(
             }
         }
         if report.natives_extracted > 0 {
-            log(format!(
+            reporter.log(format!(
                 "extracted {} native file(s) into {}",
                 report.natives_extracted,
                 plan.natives_dir.display()
@@ -503,47 +631,48 @@ pub fn run(
     report
 }
 
-/// Progress lines a bulk phase prints at most.
+/// Progress reports a bulk phase draws at most.
 ///
-/// One line per ~2% of the phase, so a 5000-file asset index gets a line every
-/// hundred files or so: enough to show movement on a console nobody wants a
-/// line per file on.
+/// One report per ~2% of the phase, so a 5000-file asset index gets a report
+/// every hundred files or so: enough to keep a bar moving without asking the
+/// window to redraw for every file.
 const PROGRESS_REPORTS: usize = 50;
 
-/// The number of finished files between two progress lines.
+/// The number of finished files between two progress reports.
 ///
-/// Rounded up, so the count of lines stays near [`PROGRESS_REPORTS`] rather
+/// Rounded up, so the count of reports stays near [`PROGRESS_REPORTS`] rather
 /// than doubling for a phase whose size does not divide evenly.
 fn progress_step(total: usize) -> usize {
     total.div_ceil(PROGRESS_REPORTS).max(1)
 }
 
-/// One progress line, e.g. `files: 126/5057 (2%, 3.4 MB)`.
+/// The line a phase leaves behind when it is over.
 ///
-/// `bytes` is what the phase has actually received so far, which is why a phase
-/// whose sources publish no sizes can still show movement.
-fn progress_line(label: &str, done: usize, total: usize, bytes: u64) -> String {
-    let percent = match total {
-        0 => 100,
-        total => done * 100 / total,
-    };
-    let megabytes = bytes as f64 / (1024.0 * 1024.0);
-    format!("{label}: {done}/{total} ({percent}%, {megabytes:.1} MB)")
+/// The per-tick lines became a bar, and a bar leaves nothing on disk. The run
+/// log still has to answer the question it was read for — how long a first
+/// install of hundreds of megabytes actually took — so each phase writes one
+/// line when it finishes, with what it moved and how long it took to move it.
+fn phase_done_line(label: &str, files: usize, bytes: u64, elapsed: Duration) -> String {
+    format!(
+        "{label}: done — {files} file(s), {:.1} MB in {:.1} s",
+        bytes as f64 / (1024.0 * 1024.0),
+        elapsed.as_secs_f64()
+    )
 }
 
-/// Fetch every job in parallel, logging progress while it works.
+/// Fetch every job in parallel, reporting progress while it works.
 ///
 /// The downloads stay parallel inside [`download_many_with_progress`]; the
-/// reporting happens on this thread, once per finished file, so the lines reach
-/// `log` in order and need no locking. The first file and the last are always
-/// reported — the first says the phase is alive, the last that it is over — and
-/// the rest follow [`progress_step`].
+/// reporting happens on this thread, once per finished file, so the reports
+/// reach `reporter` in order and need no locking. The first file and the last are
+/// always reported — the first says the phase is alive, the last that it is
+/// over — and the rest follow [`progress_step`].
 pub(crate) fn download_with_progress(
     fetcher: &(dyn Fetcher + Sync),
     jobs: &[(String, PathBuf)],
     threads: usize,
     label: &str,
-    log: &mut dyn FnMut(String),
+    reporter: &mut Reporter,
 ) -> Vec<(String, Result<u64, palantir_net::Error>)> {
     let total = jobs.len();
     let step = progress_step(total);
@@ -551,7 +680,7 @@ pub(crate) fn download_with_progress(
     download_many_with_progress(fetcher, jobs, threads.max(1), &mut |done, bytes| {
         if done == 1 || done == total || done - reported >= step {
             reported = done;
-            log(progress_line(label, done, total, bytes));
+            reporter.report(Progress::new(label, done, total, bytes));
         }
     })
 }
@@ -562,7 +691,7 @@ fn run_assets(
     fetcher: &(dyn Fetcher + Sync),
     threads: usize,
     report: &mut InstallReport,
-    log: &mut dyn FnMut(String),
+    reporter: &mut Reporter,
 ) {
     let text = match std::fs::read_to_string(&assets.index_path) {
         Ok(text) => text,
@@ -591,23 +720,24 @@ fn run_assets(
         if object.hash.len() < 2 {
             continue;
         }
-        let rel = object_relative_path(&object.hash);
-        let dest = assets.assets_dir.join(&rel);
+        // The path on disk, not the path on the CDN: separate helpers, and this
+        // is the one place both are in play.
+        let dest = assets.assets_dir.join(object_relative_path(&object.hash));
         if let Ok(meta) = std::fs::metadata(&dest) {
             if meta.is_file() && (object.size <= 0 || meta.len() >= object.size as u64) {
                 report.present += 1;
                 continue;
             }
         }
-        jobs.push((
-            format!("{ASSET_OBJECT_BASE_URL}/{rel}"),
-            dest,
-        ));
+        jobs.push((asset_object_url(&object.hash), dest));
         labels.push(name.clone());
     }
     if !jobs.is_empty() {
-        log(format!("downloading {} asset object(s)…", jobs.len()));
-        let results = download_with_progress(fetcher, &jobs, threads, "asset objects", log);
+        reporter.log(format!("downloading {} asset object(s)…", jobs.len()));
+        let started = Instant::now();
+        let bytes_before = report.bytes;
+        let objects_before = report.objects_downloaded;
+        let results = download_with_progress(fetcher, &jobs, threads, "asset objects", reporter);
         for (index_in_jobs, (url, result)) in results.into_iter().enumerate() {
             match result {
                 Ok(bytes) => {
@@ -620,15 +750,32 @@ fn run_assets(
             }
             let _ = url;
         }
+        reporter.log(phase_done_line(
+            "asset objects",
+            report.objects_downloaded - objects_before,
+            report.bytes - bytes_before,
+            started.elapsed(),
+        ));
     }
-    reconstruct(assets, &index, log);
+    reconstruct(assets, &index, reporter);
+}
+
+/// Where one asset object is fetched from.
+///
+/// The hash is the same one the file is stored under, but the *path* is not:
+/// the CDN serves `/<xx>/<hash>` and this launcher stores
+/// `objects/<xx>/<hash>` under its data root. Building the URL from the storage
+/// path is what sent all 5057 object requests of a first install to a 404
+/// (`NEXT_STEPS.md` §19), so the two are separate helpers with separate tests.
+pub fn asset_object_url(hash: &str) -> String {
+    format!("{ASSET_OBJECT_BASE_URL}/{}", object_cdn_path(hash))
 }
 
 /// Materialise the logical-name layout legacy indexes expect.
 ///
 /// Only reachable for `legacy` (into the instance's `resources/`) and `pre-1.6`
 /// (into `assets/virtual/<id>/`); a modern index returns immediately.
-fn reconstruct(assets: &AssetPlan, index: &AssetIndex, log: &mut dyn FnMut(String)) {
+fn reconstruct(assets: &AssetPlan, index: &AssetIndex, reporter: &mut Reporter) {
     if assets.reconstruct.is_empty() {
         return;
     }
@@ -655,7 +802,7 @@ fn reconstruct(assets: &AssetPlan, index: &AssetIndex, log: &mut dyn FnMut(Strin
                 copied += 1;
             }
         }
-        log(format!("reconstructed {} asset(s) into {}", copied, target.display()));
+        reporter.log(format!("reconstructed {} asset(s) into {}", copied, target.display()));
     }
 }
 
@@ -703,6 +850,49 @@ mod tests {
         let paths = PalantirPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
         (dir, paths)
+    }
+
+    /// The URL one asset object is served from, spelled out here rather than
+    /// built with the production helper.
+    ///
+    /// A fixture that derives its expected URL the same way the code derives the
+    /// real one agrees with a mistake, which is exactly how every asset request
+    /// went to `/objects/<xx>/<hash>` for a 404 without a single test noticing
+    /// (`NEXT_STEPS.md` §19). This is the literal shape the resource CDN serves.
+    fn cdn_url(hash: &str) -> String {
+        let prefix = hash.get(0..2).unwrap_or("");
+        format!("{ASSET_OBJECT_BASE_URL}/{prefix}/{hash}")
+    }
+
+    /// Run a plan and keep every line it wrote (the levels go nowhere).
+    fn run_lines(
+        plan: &InstallPlan,
+        fetcher: &(dyn Fetcher + Sync),
+        threads: usize,
+    ) -> (InstallReport, Vec<String>) {
+        let mut lines: Vec<String> = Vec::new();
+        let report = {
+            let mut reporter = Reporter::lines_only(&mut |line| lines.push(line));
+            run(plan, fetcher, threads, &mut reporter)
+        };
+        (report, lines)
+    }
+
+    /// Run a plan and keep both kinds of report, which is what a test that
+    /// asserts on the bar and on the log at once needs.
+    fn run_both(
+        plan: &InstallPlan,
+        fetcher: &(dyn Fetcher + Sync),
+        threads: usize,
+    ) -> (InstallReport, Vec<String>, Vec<Progress>) {
+        let mut lines: Vec<String> = Vec::new();
+        let mut levels: Vec<Progress> = Vec::new();
+        let report = {
+            let mut reporter =
+                Reporter::new(&mut |line| lines.push(line), &mut |level| levels.push(level));
+            run(plan, fetcher, threads, &mut reporter)
+        };
+        (report, lines, levels)
     }
 
     /// A profile with one Mojang-style library (downloads block) and one
@@ -961,8 +1151,7 @@ mod tests {
 
         let mut fetcher = MapFetcher::new();
         fetcher.insert(&plan.jobs[0].url, native_bytes.clone());
-        let mut lines = Vec::new();
-        let report = run(&plan, &fetcher, 2, &mut |line| lines.push(line));
+        let (report, lines) = run_lines(&plan, &fetcher, 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.downloaded, 1);
@@ -993,7 +1182,7 @@ mod tests {
         let mut fetcher = MapFetcher::new();
         fetcher.insert(&plan.jobs[0].url, b"a different file".to_vec());
 
-        let report = run(&plan, &fetcher, 1, &mut |_| {});
+        let (report, _) = run_lines(&plan, &fetcher, 1);
         assert!(!report.is_complete());
         assert!(report.failed[0].contains("sha1 mismatch"), "{:?}", report.failed);
         assert!(
@@ -1063,16 +1252,9 @@ mod tests {
 
         let mut fetcher = MapFetcher::new();
         fetcher.insert(&plan.jobs[0].url, index_body.clone().into_bytes());
-        fetcher.insert(
-            &format!("{ASSET_OBJECT_BASE_URL}/objects/aa/aa11"),
-            b"abcd".to_vec(),
-        );
-        fetcher.insert(
-            &format!("{ASSET_OBJECT_BASE_URL}/objects/bb/bb22"),
-            b"abc".to_vec(),
-        );
-        let mut lines = Vec::new();
-        let report = run(&plan, &fetcher, 2, &mut |line| lines.push(line));
+        fetcher.insert(&cdn_url("aa11"), b"abcd".to_vec());
+        fetcher.insert(&cdn_url("bb22"), b"abc".to_vec());
+        let (report, lines) = run_lines(&plan, &fetcher, 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.downloaded, 1, "the index");
@@ -1100,14 +1282,14 @@ mod tests {
         });
         let mut fetcher = MapFetcher::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
-        fetcher.insert(&format!("{ASSET_OBJECT_BASE_URL}/objects/aa/aa11"), b"abcd".to_vec());
+        fetcher.insert(&cdn_url("aa11"), b"abcd".to_vec());
 
         let first = plan(&paths, &paths.root, &profile, &ctx);
-        run(&first, &fetcher, 1, &mut |_| {});
+        run_lines(&first, &fetcher, 1);
         let second = plan(&paths, &paths.root, &profile, &ctx);
         assert!(second.is_noop(), "jobs: {:?}", second.jobs);
         assert!(second.summary().contains("already installed"));
-        let report = run(&second, &MapFetcher::new(), 1, &mut |_| {});
+        let (report, _) = run_lines(&second, &MapFetcher::new(), 1);
         assert!(report.is_complete());
         assert_eq!(report.objects_downloaded, 0);
         assert_eq!(report.present, 2, "the index and the one object");
@@ -1122,7 +1304,7 @@ mod tests {
         profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo::bare("17"));
         let plan = plan(&paths, &paths.root, &profile, &ctx);
         assert!(plan.jobs.is_empty());
-        let report = run(&plan, &MapFetcher::new(), 1, &mut |_| {});
+        let (report, _) = run_lines(&plan, &MapFetcher::new(), 1);
         assert!(report.problems.iter().any(|p| p.contains("no download URL")));
     }
 
@@ -1150,15 +1332,40 @@ mod tests {
         let plan = plan(&paths, &instance_root, &profile, &ctx);
         let mut fetcher = MapFetcher::new();
         fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
-        fetcher.insert(&format!("{ASSET_OBJECT_BASE_URL}/objects/cc/cc33"), b"hi".to_vec());
-        let mut lines = Vec::new();
-        let report = run(&plan, &fetcher, 1, &mut |line| lines.push(line));
+        fetcher.insert(&cdn_url("cc33"), b"hi".to_vec());
+        let (report, lines) = run_lines(&plan, &fetcher, 1);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         let reconstructed = instance_root.join("minecraft").join("resources").join("lang/en_US.lang");
         assert!(reconstructed.is_file(), "legacy assets land under resources/");
         assert_eq!(std::fs::read(&reconstructed).unwrap(), b"hi");
         assert!(lines.iter().any(|line| line.contains("reconstructed")));
+    }
+
+    /// The whole URL, spelled out as the literal Mojang's CDN serves it.
+    ///
+    /// The fixture helpers build their URLs from the hash, so they can only
+    /// disagree with production about the *path rule*; this is the one place that
+    /// writes down the finished string, which is what makes a change to the base
+    /// URL or to the path a disagreement with a recorded fact instead of with
+    /// another copy of the same computation.
+    #[test]
+    fn the_asset_object_url_is_the_cdn_layout() {
+        assert_eq!(
+            asset_object_url("9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5"),
+            "https://resources.download.minecraft.net/9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5"
+        );
+        assert_eq!(
+            asset_object_url("9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5")
+                .strip_prefix(ASSET_OBJECT_BASE_URL)
+                .unwrap(),
+            "/9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5",
+            "the CDN path has no `objects/` segment; the storage path does"
+        );
+        // The storage path is still what the file is called on disk, and the two
+        // must stay different functions: the bug was one helper serving both.
+        assert!(object_relative_path("aabb").starts_with("objects/"));
+        assert!(!object_cdn_path("aabb").starts_with("objects/"));
     }
 
     #[test]
@@ -1216,7 +1423,8 @@ mod tests {
     /// A phase of thousands of small files has to show it is moving without
     /// printing a line per file: the first file says the phase started before
     /// any real delay, the last says it finished, and the ones between are
-    /// spaced by [`progress_step`].
+    /// spaced by [`progress_step`]. None of them is a console line — they are
+    /// the levels a window draws as a bar.
     #[test]
     fn a_bulk_phase_reports_progress_without_narrating_every_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -1231,8 +1439,12 @@ mod tests {
         }
 
         let mut lines: Vec<String> = Vec::new();
-        let results =
-            download_with_progress(&fetcher, &jobs, 4, "files", &mut |line| lines.push(line));
+        let mut levels: Vec<Progress> = Vec::new();
+        let results = {
+            let mut reporter =
+                Reporter::new(&mut |line| lines.push(line), &mut |level| levels.push(level));
+            download_with_progress(&fetcher, &jobs, 4, "files", &mut reporter)
+        };
 
         assert_eq!(results.len(), FILES);
         assert!(
@@ -1240,38 +1452,68 @@ mod tests {
             "every file arrived"
         );
         assert!(
-            lines[0].starts_with("files: 1/1000 (0%"),
-            "the phase says it is alive on its first file: {lines:?}"
+            lines.is_empty(),
+            "a bulk phase puts nothing on the console between starting and \
+             finishing — the count is a level, not a line: {lines:?}"
         );
-        let last = lines.last().unwrap();
+        let first = levels.first().expect("the phase reports its first file");
+        assert_eq!((first.done, first.total), (1, FILES), "the phase is alive at once");
+        let last = levels.last().unwrap();
+        assert_eq!(last.done, FILES, "and says when it is over");
+        assert_eq!(last.percent(), 100);
+        assert_eq!(last.fraction(), 1.0);
+        assert_eq!(last.bytes, (FILES * EACH) as u64, "with the bytes it carried");
         assert!(
-            last.starts_with("files: 1000/1000 (100%"),
-            "and that it finished, with the bytes it carried: {last}"
+            levels.len() <= PROGRESS_REPORTS + 2,
+            "a report per file would be {FILES} redraws, got {}: {levels:?}",
+            levels.len()
         );
-        assert!(last.contains("3.9 MB"), "1000 × 4096 bytes: {last}");
-        assert!(
-            lines.len() <= PROGRESS_REPORTS + 2,
-            "a line per file would be 1000 lines of console, got {}: {lines:?}",
-            lines.len()
-        );
+    }
+
+    /// The bar and the status text are one fact, and a phase with nothing left
+    /// to fetch reads as full rather than as an empty bar for the next phase to
+    /// move.
+    #[test]
+    fn a_progress_report_reads_as_a_fraction_and_a_line() {
+        let empty = Progress::new("files", 0, 0, 0);
+        assert_eq!(empty.fraction(), 1.0, "a phase with no work is over");
+        assert_eq!(empty.percent(), 100);
+        assert_eq!(empty.status_line(), "files 0/0 (100%)");
+
+        let half = Progress::new("asset objects", 715, 5057, 65_000_000);
+        assert!((half.fraction() - 0.141_39).abs() < 0.0001, "got {}", half.fraction());
+        assert_eq!(half.percent(), 14);
+        assert_eq!(half.status_line(), "asset objects 715/5057 (14%)");
+        assert!((half.megabytes() - 61.99).abs() < 0.02, "got {}", half.megabytes());
+
+        // A report that outran its total (a phase whose size changed under it)
+        // still has to stay inside the bar.
+        let over = Progress::new("files", 9, 4, 0);
+        assert_eq!(over.fraction(), 1.0);
+        assert_eq!(over.percent(), 100);
     }
 
     #[test]
-    fn the_progress_cadence_is_a_step_not_a_line_per_file() {
+    fn the_progress_cadence_is_a_step_not_a_report_per_file() {
         assert_eq!(progress_step(0), 1, "an empty phase still finishes in one step");
         assert_eq!(progress_step(1), 1);
         assert_eq!(progress_step(PROGRESS_REPORTS), 1);
-        assert_eq!(progress_step(5057), 102, "a line every ~2% of 5057 files");
-        assert_eq!(progress_step(120), 3, "rounded up, so 120 files get ~40 lines");
-        assert_eq!(progress_line("files", 1, 4, 0), "files: 1/4 (25%, 0.0 MB)");
+        assert_eq!(progress_step(5057), 102, "a report every ~2% of 5057 files");
+        assert_eq!(progress_step(120), 3, "rounded up, so 120 files get ~40 reports");
+        // What a phase leaves on disk when the levels it drew are gone.
         assert_eq!(
-            progress_line("asset objects", 4, 4, 2 * 1024 * 1024),
-            "asset objects: 4/4 (100%, 2.0 MB)"
+            phase_done_line("asset objects", 5057, 480 * 1024 * 1024, Duration::from_secs(91)),
+            "asset objects: done — 5057 file(s), 480.0 MB in 91.0 s"
+        );
+        assert_eq!(
+            phase_done_line("files", 0, 0, Duration::from_millis(7)),
+            "files: done — 0 file(s), 0.0 MB in 0.0 s"
         );
     }
 
-    /// The phase that made the launcher look dead is the asset one, so the
-    /// lines have to come out of a real [`run`] and not just the helper.
+    /// The phase that made the launcher look dead is the asset one, so both of
+    /// its reports — the level the bar draws and the line the log keeps — have
+    /// to come out of a real [`run`] and not just the helper.
     #[test]
     fn the_asset_phase_reports_progress_while_it_downloads() {
         let (_dir, paths) = test_paths();
@@ -1305,15 +1547,11 @@ mod tests {
             index_body.into_bytes(),
         );
         for (hash, body) in bodies {
-            fetcher.insert(
-                &format!("{ASSET_OBJECT_BASE_URL}/{}", object_relative_path(&hash)),
-                body.into_bytes(),
-            );
+            fetcher.insert(&cdn_url(&hash), body.into_bytes());
         }
 
         let plan = plan(&paths, &paths.root, &profile, &ctx);
-        let mut lines: Vec<String> = Vec::new();
-        let report = run(&plan, &fetcher, 4, &mut |line| lines.push(line));
+        let (report, lines, levels) = run_both(&plan, &fetcher, 4);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.objects_downloaded, OBJECTS);
@@ -1323,26 +1561,41 @@ mod tests {
                 .any(|line| line.contains("downloading 120 asset object(s)")),
             "the phase is announced: {lines:?}"
         );
-        let progress: Vec<&String> = lines
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("asset objects: done — 120 file(s)")),
+            "and its outcome is one line, with what it moved: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("/120 (")),
+            "no tick line survives on the console: {lines:?}"
+        );
+        // Two phases fetch here: the index in the file phase, then the objects.
+        // Both report, and each names itself — a bar that said "files" while the
+        // 458 MB moved would not say what the megabytes are for.
+        assert!(
+            levels.first().is_some_and(|level| level.label == "files"),
+            "the index is fetched in the file phase: {levels:?}"
+        );
+        let objects: Vec<&Progress> = levels
             .iter()
-            .filter(|line| line.starts_with("asset objects: "))
+            .filter(|level| level.label == "asset objects")
             .collect();
-        assert!(
-            progress
-                .first()
-                .is_some_and(|line| line.starts_with("asset objects: 1/120 (0%")),
-            "the first object is reported: {progress:?}"
+        assert_eq!(
+            objects.len() + 1,
+            levels.len(),
+            "every level is either the index or an object: {levels:?}"
         );
+        let first = objects.first().expect("the phase reports its first object");
+        assert_eq!((first.done, first.total), (1, OBJECTS));
+        let last = objects.last().unwrap();
+        assert_eq!(last.done, OBJECTS, "the last object is reported");
+        assert_eq!(last.percent(), 100);
         assert!(
-            progress
-                .last()
-                .is_some_and(|line| line.starts_with("asset objects: 120/120 (100%")),
-            "the last object is reported: {progress:?}"
-        );
-        assert!(
-            progress.len() > 1 && progress.len() < OBJECTS / 2,
-            "a few lines, not one per object: {}",
-            progress.len()
+            objects.len() > 1 && objects.len() < OBJECTS / 2,
+            "a few reports, not one per object: {}",
+            objects.len()
         );
     }
 }

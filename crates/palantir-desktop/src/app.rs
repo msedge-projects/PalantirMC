@@ -36,8 +36,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use iced::widget::{
-    button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
-    scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
+    button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list,
+    progress_bar, row, scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
 };
 use iced::widget::image::Handle;
 use iced::{window, Command, Element, Length, Padding, Point, Subscription, Theme};
@@ -52,6 +52,7 @@ use crate::browse::{self, ContentType, Hit, ImportedPack};
 use crate::catalog::{self, LoaderKind, VersionCatalog};
 use crate::glyphs::glyph;
 use crate::icons::instance_handle;
+use crate::install::Progress;
 use crate::instances::{self, InstanceCard, LoadedInstances, NewInstance};
 use crate::launch::{
     self, open_in_file_manager, ActiveRunData, AccountRef, ChildSlot, LaunchDefaults, LaunchParams,
@@ -70,6 +71,20 @@ pub const CONSOLE_LINE_CAP: usize = 20_000;
 
 /// How many of the newest console lines the view renders.
 pub const CONSOLE_VIEW_LINES: usize = 500;
+
+/// Height of the progress bar in the status strip, in pixels.
+///
+/// Thin on purpose: this strip is chrome, and a bar with the weight of a button
+/// in it would read as a control to press. The copy above the console is the one
+/// with room to be looked at.
+const STATUS_BAR_HEIGHT: f32 = 6.0;
+
+/// Width of the same bar. Fixed rather than filling, so the status text keeps
+/// its room and a long directory path in it cannot push the bar off the edge.
+const STATUS_BAR_WIDTH: f32 = 200.0;
+
+/// Height of the progress bar above the console, where the numbers live.
+const LOG_BAR_HEIGHT: f32 = 8.0;
 
 /// Icon-rail width, as the eye measures it.
 ///
@@ -898,6 +913,17 @@ pub enum Message {
         /// Final line.
         note: String,
     },
+    /// How far the phase that is fetching has got.
+    ///
+    /// Separate from [`Message::LaunchLog`] because it is a different kind of
+    /// fact: a log batch is something that happened and is kept, a progress
+    /// report is a level the window redraws and is free to miss.
+    LaunchProgress {
+        /// Run id.
+        run_id: u64,
+        /// What the phase has finished so far.
+        progress: Progress,
+    },
 
     // ---- settings form ----
     /// Display name field.
@@ -1087,6 +1113,12 @@ pub struct PalantirApp {
     run_seq: u64,
     install_seq: u64,
     active_run: Option<ActiveRunData>,
+    /// How far the running launch's current phase has got, if one is fetching.
+    ///
+    /// Kept for the run's whole life rather than read from the console: the bar
+    /// and the status line are both drawn from this, and the console no longer
+    /// carries a line per tick to scrape a number out of.
+    run_progress: Option<Progress>,
     child: ChildSlot,
     /// Whether the window is maximized, so the caption button can offer
     /// Maximize or Restore. Kept in sync by [`Message::MaximizedChanged`] and
@@ -1180,6 +1212,7 @@ impl PalantirApp {
             run_seq: 0,
             install_seq: 0,
             active_run: None,
+            run_progress: None,
             child: Arc::new(Mutex::new(None)),
             maximized: false,
             last_bar_press: None,
@@ -1239,6 +1272,7 @@ impl PalantirApp {
             run_seq: 0,
             install_seq: 0,
             active_run: None,
+            run_progress: None,
             child: Arc::new(Mutex::new(None)),
             maximized: false,
             last_bar_press: None,
@@ -1440,6 +1474,10 @@ impl PalantirApp {
         let mut all: Vec<String> = Vec::new();
         let readiness = {
             let mut log = |line: String| all.push(line);
+            // This shell has no subscriptions, so there is nowhere to draw a bar
+            // and nothing to send a level to: the dry run reports the lines it
+            // always did.
+            let mut progress = |_: Progress| {};
             let auth = palantir_net::MicrosoftAuth::with_public_client_id();
             match launch::prepare_auth(&run.account, &auth, &mut log) {
                 Ok(prepared) => {
@@ -1452,6 +1490,7 @@ impl PalantirApp {
                         &mut store,
                         &fetcher,
                         &mut log,
+                        &mut progress,
                     )
                 }
                 Err(error) => {
@@ -1598,6 +1637,9 @@ impl PalantirApp {
             account,
             defaults,
         });
+        // Nothing is fetching yet: sign-in and resolution come first, and a bar
+        // left over from the previous run would claim this one had started it.
+        self.run_progress = None;
         self.page = Page::Logs;
         self.set_status(format!("Starting '{id}'…"));
         self.push_console(vec![format!("launch requested for '{id}'")]);
@@ -3117,10 +3159,24 @@ impl PalantirApp {
                 }
                 Command::none()
             }
+            Message::LaunchProgress { run_id, progress } => {
+                let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
+                if current == run_id && current != 0 {
+                    // The status line tracks the level, because the console no
+                    // longer carries one: without this the strip at the bottom
+                    // would sit on the phase's opening line for the minutes the
+                    // phase takes. `set_status` does not touch the console, so
+                    // the wording never becomes log spam.
+                    self.set_status(progress.status_line());
+                    self.run_progress = Some(progress);
+                }
+                Command::none()
+            }
             Message::LaunchDone { run_id, note } => {
                 let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
                     self.active_run = None;
+                    self.run_progress = None;
                     self.set_status(note.clone());
                     self.push_console(vec![note]);
                 }
@@ -4069,7 +4125,12 @@ impl PalantirApp {
         // end on every line of output — so a tween would spend its frames
         // fighting that snap for the same pixels. The render is capped instead
         // (`scroll::LOG_RENDER_CAP`), which is what makes the wheel cheap here.
-        column![
+        //
+        // The console itself is unaffected by the bar above it: a phase's ticks
+        // are levels now, so the lines keep scrolling only with things that
+        // happened — which is what makes "the console says how far along it is"
+        // no longer this page's job.
+        let mut page = column![
             row![
                 text("Logs").size(24).font(theme::semibold()),
                 chip(format!("{total} line(s)"), theme::chip_neutral),
@@ -4092,6 +4153,12 @@ impl PalantirApp {
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
+        ]
+        .spacing(12);
+        if let Some(progress) = &self.run_progress {
+            page = page.push(self.view_progress_strip(progress));
+        }
+        page.push(
             container(
                 scrollable(lines)
                     .id(console_scroll_id())
@@ -4102,8 +4169,7 @@ impl PalantirApp {
             .padding(10)
             .width(Length::Fill)
             .height(Length::Fill),
-        ]
-        .spacing(12)
+        )
         .into()
     }
 
@@ -5302,25 +5368,73 @@ impl PalantirApp {
     }
 
     /// Slim status strip at the bottom.
+    ///
+    /// The status-line copy of the progress bar lives here rather than on the
+    /// Logs page alone because this strip is the one piece of chrome *every*
+    /// page has. A launch pushes the window to Logs, but nothing stops the user
+    /// from clicking away from it — and a first install of several hundred
+    /// megabytes is exactly when they will.
     fn view_status_bar(&self) -> Element<'_, Message> {
         let color = if self.status_is_error { theme::danger() } else { theme::text_muted() };
+        let mut bar = row![
+            text(format!("{} instance(s)", self.cards.len())).size(11),
+            text("·").size(11),
+            text(self.status.clone()).size(11).style(iced::theme::Text::Color(color)),
+        ]
+        .spacing(8)
+        .align_items(iced::Alignment::Center);
+        if let Some(progress) = &self.run_progress {
+            bar = bar.push(
+                progress_bar(0.0..=1.0, progress.fraction())
+                    .width(Length::Fixed(STATUS_BAR_WIDTH))
+                    .height(Length::Fixed(STATUS_BAR_HEIGHT))
+                    .style(theme::bar),
+            );
+        }
+        bar = bar.push(horizontal_space());
+        bar = bar.push(
+            text(format!(
+                "selected: {}",
+                self.selected.as_deref().unwrap_or("none")
+            ))
+            .size(11),
+        );
+        container(bar)
+            .style(theme::toast)
+            .padding([5, 12])
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// The progress bar with its numbers, above the console on the Logs page.
+    ///
+    /// One state, drawn twice: the strip at the bottom is a bar and a short
+    /// line, and this is where what is being fetched is spelled out — the phase,
+    /// how far along it is, and how many megabytes have arrived. Nothing is
+    /// drawn between phases, because between phases there is nothing honest to
+    /// show.
+    fn view_progress_strip(&self, progress: &Progress) -> Element<'_, Message> {
         container(
             row![
-                text(format!("{} instance(s)", self.cards.len())).size(11),
-                text("·").size(11),
-                text(self.status.clone()).size(11).style(iced::theme::Text::Color(color)),
-                horizontal_space(),
+                text(progress.label.as_str()).size(12),
+                progress_bar(0.0..=1.0, progress.fraction())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(LOG_BAR_HEIGHT))
+                    .style(theme::bar),
                 text(format!(
-                    "selected: {}",
-                    self.selected.as_deref().unwrap_or("none")
+                    "{} / {} · {}% · {:.1} MB",
+                    progress.done,
+                    progress.total,
+                    progress.percent(),
+                    progress.megabytes()
                 ))
-                .size(11),
+                .size(12),
             ]
-            .spacing(8)
+            .spacing(12)
             .align_items(iced::Alignment::Center),
         )
-        .style(theme::toast)
-        .padding([5, 12])
+        .style(theme::inset)
+        .padding([8, 10])
         .width(Length::Fill)
         .into()
     }
@@ -5349,6 +5463,11 @@ impl PalantirApp {
     /// Whether a launch is streaming.
     pub fn is_running(&self) -> bool {
         self.active_run.is_some()
+    }
+
+    /// What the bar is drawing, if a phase is fetching.
+    pub fn run_progress(&self) -> Option<&Progress> {
+        self.run_progress.as_ref()
     }
 
     /// The page currently shown.
@@ -7381,6 +7500,53 @@ mod tests {
         assert!(app.is_running());
         let _ = app.update(Message::LaunchDone { run_id, note: "done".to_string() });
         assert!(!app.is_running());
+        assert_eq!(app.status(), "done");
+    }
+
+    /// A progress report reaches the bar and the status line, and reaches the
+    /// console not at all: the whole point of the change is that "how far along"
+    /// stops being a line of text somebody has to read out of a scrollback.
+    #[test]
+    fn a_progress_report_moves_the_bar_and_not_the_console() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths.clone());
+        let created = instances::create(&paths, &NewInstance::vanilla("Runnable", "26.2")).unwrap();
+        app.reload_instances();
+
+        // Before a launch there is no bar to move, and a stray report for one
+        // that never started must not create one.
+        let _ = app.update(Message::LaunchProgress {
+            run_id: 7,
+            progress: Progress::new("files", 1, 4, 0),
+        });
+        assert!(app.run_progress().is_none(), "no run is fetching");
+
+        let _ = app.update(Message::PlayInstance(created.id.clone()));
+        let run_id = app.active_run.as_ref().unwrap().run_id;
+        assert!(
+            app.run_progress().is_none(),
+            "a run that has only just started is not fetching yet"
+        );
+        let before = app.console().len();
+
+        let report = Progress::new("asset objects", 715, 5057, 66_000_000);
+        let _ = app.update(Message::LaunchProgress { run_id: run_id + 1, progress: Progress::new("files", 1, 4, 0) });
+        assert!(app.run_progress().is_none(), "a stale run must not move the bar");
+        let _ = app.update(Message::LaunchProgress { run_id, progress: report.clone() });
+        assert_eq!(app.run_progress(), Some(&report));
+        assert_eq!(app.console().len(), before, "a level is not a line");
+        assert!(
+            app.status().contains("asset objects 715/5057 (14%)"),
+            "the status line tracks the level: {}",
+            app.status()
+        );
+        assert!(!app.status_is_error());
+
+        // The run ends: the bar goes with it, including after a stale done.
+        let _ = app.update(Message::LaunchDone { run_id: run_id + 1, note: "stale".to_string() });
+        assert!(app.run_progress().is_some(), "a stale done must not clear it");
+        let _ = app.update(Message::LaunchDone { run_id, note: "done".to_string() });
+        assert!(app.run_progress().is_none());
         assert_eq!(app.status(), "done");
     }
 
