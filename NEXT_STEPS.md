@@ -876,3 +876,81 @@ nothing, so a failure there is a failure.
   `org.lwjgl: 2.9.1` fallbacks, which are **not** implemented: no defensible
   version is invented, and a legacy pack that pins nothing gets a clear error
   instead.
+
+## 17. Adopting PandoraLauncher's engine
+
+Decision taken 14 Sep: stop re-deriving the launcher engine and take
+[PandoraLauncher](https://github.com/Moulberry/PandoraLauncher)'s instead. Two
+facts made that the cheap path rather than a gamble. It is **Rust** — a
+workspace of eleven crates, `nbt` and `schema` up through `auth`, `bridge`,
+`command` and `backend` — so its code is of a kind this tree can host; and it is
+**MIT, Copyright (c) 2025 Moulberry**, which is GPL-3.0-compatible and needs
+only that the notice travel with the code. It now does:
+`THIRD_PARTY_NOTICES.md`, `licenses/PandoraLauncher-LICENSE.txt`, and a doc
+comment at the top of each adopted crate saying where it came from. There is
+nothing to hide and no reason to hide it — the licence makes the reuse lawful,
+and the notice is one file.
+
+### 17.1 What is in the workspace now
+
+* `crates/nbt` — 2,455 lines, the NBT reader/writer (decode, encode, SNBT).
+* `crates/schema` — 3,062 lines, the wire types: version manifests, asset
+  indexes, Java runtime components, loader manifests, instance and content
+  records.
+
+These two are the leaves — neither depends on another Pandora crate — so they
+came first and `backend`/`auth`/`bridge` build on them. Both are workspace
+members like any of ours: no separate vendor tree, the same commands, the same
+editor. Their manifests spell dependency versions out (upstream inherits them
+from its own workspace root) and keep `edition = "2024"`, which upstream's
+let-chains require and which needs a toolchain of 1.85 or newer — this machine
+has 1.98. The code itself is byte-identical apart from `_name` on the non-unix
+arm of `get_shared_library_path_for_name` (its argument is unused there), with
+upstream's style lints allowed at the crate root so a later upstream change can
+be **merged rather than re-derived**. `clippy::correctness` is deliberately not
+among the allows.
+
+Nothing in `palantir-*` imports either crate yet, so the shipped exe is
+unchanged in size and behaviour as of this step.
+
+### 17.2 The order of the rest
+
+`auth` (needs `schema`, `oauth2`, async `reqwest`) → `bridge`, `command`, `t`,
+`ftree` → `backend` (34 files, ~19.7k lines; brings `tokio`, `rusqlite`,
+`rayon`, `image`, `zip`, `tar`, `runas` and the `windows` crate). Each arrives
+the same way: copy, spell the manifest out, verify, record any edit in the
+notice. The clone used for this is a depth-1 checkout kept outside the tree, so
+further crates and future upstream merges come from the same source.
+
+Two mechanical facts to expect when `backend` lands. It is async throughout
+while `palantir-*` is blocking by design, so the seam between them is a real
+piece of work rather than a rename. And its instance model is Pandora's, not
+Prism's, while this launcher reads and writes `instance.cfg` / `mmc-pack.json`;
+that mapping is the part with no upstream code to copy.
+
+`cargo fmt` is advisory in CI and upstream formats at `max_width = 120` against
+this repo's default 100, so a future `cargo fmt --all` would report on the
+adopted crates. Their formatting is left as upstream wrote it on purpose.
+
+### 17.3 The blocker that is not code
+
+Pandora's auth hardcodes its own Azure application id
+(`e5226706-5096-431d-9516-ae48fe263401`). Signing in under an app registration
+we do not own would tie every user's login to someone else's tenant and to
+someone else's ability to revoke it — telling detail: upstream carries a
+`force_client_id` override for exactly this. So adopting their auth means
+adopting its **flow** (authorization code + PKCE against a loopback listener,
+`XboxLive.signin` + `XboxLive.offline_access`, XBL → XSTS → `login_with_xbox`,
+and expiry corrected by the clock skew the service reports) under an id **we**
+register. Ours is currently `palantir_net::DEFAULT_MICROSOFT_CLIENT_ID` —
+Prism's public id — which is the likeliest single reason sign-in fails at all,
+and which no amount of copied code fixes.
+
+### 17.4 Verification of this step
+
+`cargo test --workspace --all-targets --locked` green (0 + 4 + 167 + 8 + 336 +
+6 + 27 + 99, the six live tests ignored as designed) and `cargo clippy
+--workspace --all-targets --locked -- -D clippy::correctness` exits 0 with the
+workspace warning count **unchanged at 51** — the two adopted crates contribute
+none, because their own warnings were triaged into the crate-root allows rather
+than left to accumulate.
