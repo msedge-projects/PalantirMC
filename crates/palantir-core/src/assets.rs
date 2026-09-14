@@ -55,9 +55,28 @@ impl AssetIndex {
 /// Storage-relative path of an object:
 /// `objects/<first two hash chars>/<full hash>`
 /// (`AssetsUtils::getAssetPath` layout).
+///
+/// This is the layout **on disk**, under the data root's `assets/` folder — the
+/// one Prism writes too. It is not a URL: the CDN serves the same object at
+/// [`object_cdn_path`], with no `objects/` segment, and asking it for this
+/// string is a 404 (see `NEXT_STEPS.md` §19).
 pub fn object_relative_path(hash: &str) -> String {
     let prefix = hash.get(0..2).unwrap_or("");
     format!("objects/{prefix}/{hash}")
+}
+
+/// URL-relative path of an object on Mojang's resource CDN:
+/// `<first two hash chars>/<full hash>`, to be appended to
+/// `https://resources.download.minecraft.net`.
+///
+/// Separate from [`object_relative_path`] on purpose. Both are derived from the
+/// hash, which is exactly why one helper served both for so long and sent every
+/// asset request to a path the CDN does not have: the storage layout has an
+/// `objects/` segment and the CDN layout does not. Two functions with two names
+/// make that difference something the compiler and a test can hold apart.
+pub fn object_cdn_path(hash: &str) -> String {
+    let prefix = hash.get(0..2).unwrap_or("");
+    format!("{prefix}/{hash}")
 }
 
 /// Directory that `${game_assets}` points to (`AssetsUtils::getAssetsDir`).
@@ -106,6 +125,24 @@ mod tests {
             "objects/9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5"
         );
         assert_eq!(object_relative_path("a"), "objects//a"); // degenerate hash tolerated
+    }
+
+    /// The CDN path is written out as the literal Mojang's resource server
+    /// serves, not re-derived through the storage helper. The bug this guards
+    /// against was invisible precisely because every fixture built its expected
+    /// URL the same way production built the real one, so both agreed on a path
+    /// the server has never had.
+    #[test]
+    fn the_cdn_path_has_no_objects_segment() {
+        let hash = "9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5";
+        assert_eq!(object_cdn_path(hash), "9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5");
+        assert_eq!(object_cdn_path("a"), "/a"); // degenerate hash tolerated
+        assert_eq!(
+            object_relative_path(hash).strip_prefix("objects/").unwrap(),
+            object_cdn_path(hash),
+            "the two layouts differ by exactly the storage segment"
+        );
+        assert!(!object_cdn_path(hash).starts_with("objects/"));
     }
 
     #[test]

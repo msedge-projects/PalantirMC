@@ -498,3 +498,91 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
         binary.url
     );
 }
+
+/// Where Mojang's resource CDN serves asset objects. The same string the
+/// desktop crate calls `ASSET_OBJECT_BASE_URL`, spelled out here because the
+/// point of this test is to not share an assumption with the code it checks.
+const ASSET_OBJECT_BASE_URL: &str = "https://resources.download.minecraft.net";
+
+/// One real asset object, fetched from the URL the launcher builds for it.
+///
+/// The bug this exists for: the URL was derived from the *storage* path
+/// (`objects/<xx>/<hash>`, the layout under the data root's `assets/` folder,
+/// which is also what Prism writes), and the CDN has no such path — it serves
+/// `/<xx>/<hash>`. So a first install made one request per object, got 5057 of
+/// 5057 back as 404, moved zero bytes and refused to launch. Every unit fixture
+/// agreed with the code, because every fixture built its expected URL through
+/// the same helper the code built the real one.
+///
+/// What is asserted is identity as well as status: the bytes served at the
+/// object's URL must hash to the object's own name. A 200 from an error page, a
+/// redirect to a bucket listing, or an object served under the wrong path would
+/// all pass a length check and fail this one.
+#[test]
+#[ignore = "live: reaches Mojang's asset CDN"]
+fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
+    use palantir_core::assets::{object_cdn_path, object_relative_path, AssetIndex};
+    use sha1::{Digest, Sha1};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let mut store = live_store(&tmp.path().join("meta"));
+    let game = store
+        .version_file("net.minecraft", GAME)
+        .expect("fetching the game version file");
+    let index = game
+        .asset_index
+        .filter(|index| index.known)
+        .unwrap_or_else(|| panic!("{GAME} no longer publishes a downloadable asset index"));
+    assert!(
+        index.url.starts_with("https://"),
+        "the asset index is served from {}",
+        index.url
+    );
+
+    let fetcher = palantir_net::BlockingHttpFetcher::new(Duration::from_secs(120));
+    let index_bytes = fetcher
+        .fetch(&index.url)
+        .unwrap_or_else(|e| panic!("{}: {e}", index.url));
+    let parsed = AssetIndex::parse(&String::from_utf8_lossy(&index_bytes))
+        .expect("parsing the live asset index");
+    assert!(
+        parsed.objects.len() > 1000,
+        "an index of {} object(s) is not the game's assets",
+        parsed.objects.len()
+    );
+
+    // Any object will do, but a real one: the index is what a first install
+    // downloads, so the first entry it names is what a first install fetches.
+    let (name, object) = parsed.objects.iter().next().expect("the index is empty");
+    let url = format!("{ASSET_OBJECT_BASE_URL}/{}", object_cdn_path(&object.hash));
+    let bytes = fetcher.fetch(&url).unwrap_or_else(|e| {
+        panic!(
+            "'{name}' is not served at {url}: {e} — this is the URL the launcher \
+             builds for every asset object"
+        )
+    });
+    let digest = Sha1::digest(&bytes);
+    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    assert_eq!(
+        digest, object.hash,
+        "{url} served bytes that are not the object the index names"
+    );
+    if object.size > 0 {
+        assert_eq!(
+            bytes.len() as i64,
+            object.size,
+            "{url} served the right digest at the wrong length"
+        );
+    }
+
+    // And the layout this used to build: the storage path is not a URL the CDN
+    // serves, which is the whole reason the two helpers have different names.
+    let storage = format!("{ASSET_OBJECT_BASE_URL}/{}", object_relative_path(&object.hash));
+    assert_ne!(storage, url);
+    assert!(
+        fetcher.fetch(&storage).is_err(),
+        "{storage} is served by the CDN after all, so the storage layout is a \
+         working URL and this assertion — the record of the 404 that mattered — \
+         can go"
+    );
+}
