@@ -250,7 +250,12 @@ impl Default for Prefs {
             show_skin_selector_in_sidebar: false,
             quick_instances_in_sidebar: true,
             show_jump_in_section: true,
-            minimize_on_launch: true,
+            // Off, and it was on. Minimizing on launch reads as the launcher
+            // stealing itself away at the exact moment the user wants to know
+            // what is happening — and a first install of hundreds of megabytes
+            // is exactly when it did. The switch is still in Behavior for a
+            // user who wants the desktop back while the game loads.
+            minimize_on_launch: false,
             hide_right_sidebar: false,
             compact_instance_cards: false,
             show_play_time: false,
@@ -594,7 +599,7 @@ mod tests {
         let prefs = Prefs::default();
         assert!(prefs.advanced_rendering, "a GPU is there until proven otherwise");
         assert!(prefs.show_worlds_tab && prefs.show_files_tab && prefs.show_screenshots_tab);
-        assert!(prefs.minimize_on_launch);
+        assert!(!prefs.minimize_on_launch, "launching must not hide the window");
         assert!(prefs.warn_unknown_modpacks);
         assert!(!prefs.native_decorations, "the shell draws its own frame");
         assert!(!prefs.hide_right_sidebar);
@@ -649,7 +654,7 @@ mod tests {
         let back = load(&paths);
         assert_eq!(back.theme(), ColorTheme::Oled);
         assert!(back.advanced_rendering, "an absent field is the default, not false");
-        assert!(back.minimize_on_launch);
+        assert!(!back.minimize_on_launch, "an absent field is the default here too");
         assert_eq!(back.concurrent_downloads(), DEFAULT_CONCURRENT_DOWNLOADS);
     }
 
