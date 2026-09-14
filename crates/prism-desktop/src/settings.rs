@@ -109,6 +109,11 @@ impl Flag {
     /// flag claiming to be wired is read under that name by something outside
     /// this module. Without it, `wired` would be a predicate nothing could
     /// check — which is how it came to claim four flags the shell never read.
+    ///
+    /// Test-only, and deliberately so: nothing at runtime needs the field's
+    /// name, and a `pub fn` the shell never calls is the next piece of dead
+    /// weight this dialog would carry.
+    #[cfg(test)]
     pub const fn field(self) -> &'static str {
         match self {
             Flag::SyncThemeAcrossDevices => "sync_theme_across_devices",
@@ -200,18 +205,18 @@ impl Flag {
     /// below pins the set so that claim is a deliberate edit rather than a
     /// default.
     pub const fn wired(self) -> bool {
-        match self {
-            // Read by the views: two rail entries drop out, an instance card
-            // loses its chip row, the playtime chip is not drawn, the right
-            // panel is not drawn, and launching minimizes the window.
+        // Read by the views: two rail entries drop out, an instance card loses
+        // its chip row, the playtime chip is not drawn, the right panel is not
+        // drawn, and launching minimizes the window.
+        matches!(
+            self,
             Flag::ShowWorldsTab
-            | Flag::ShowScreenshotsTab
-            | Flag::MinimizeOnLaunch
-            | Flag::HideRightSidebar
-            | Flag::CompactInstanceCards
-            | Flag::ShowPlayTime => true,
-            _ => false,
-        }
+                | Flag::ShowScreenshotsTab
+                | Flag::MinimizeOnLaunch
+                | Flag::HideRightSidebar
+                | Flag::CompactInstanceCards
+                | Flag::ShowPlayTime
+        )
     }
 
     /// What the window does differently while this setting is on.
@@ -1453,10 +1458,12 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
             "App cache",
             "Cached component metadata, re-fetched on demand. Cleaning it cannot lose an \
              instance: the files it holds are all downloadable again.",
-            button(text("Purge cache").size(13).font(theme::semibold()))
-                .on_press(Message::PurgeCache)
-                .style(theme::danger())
-                .padding([10, 14]),
+            Element::from(
+                button(text("Purge cache").size(13).font(theme::semibold()))
+                    .on_press(Message::PurgeCache)
+                    .style(theme::danger())
+                    .padding([10, 14]),
+            ),
         ),
     ]
     .spacing(0)
@@ -1587,7 +1594,10 @@ mod tests {
         };
         let mut prefs = Prefs::default();
         let before: Vec<bool> = others().collect();
-        Flag::ShowFilesTab.set(&mut prefs, !Flag::ShowFilesTab.get(&prefs));
+        // Read first, then write: `set` takes the same `prefs` mutably, and the
+        // one-line form does not borrow-check.
+        let flipped = !Flag::ShowFilesTab.get(&prefs);
+        Flag::ShowFilesTab.set(&mut prefs, flipped);
         let after: Vec<bool> = ALL_FLAGS
             .into_iter()
             .filter(|flag| *flag != Flag::ShowFilesTab)

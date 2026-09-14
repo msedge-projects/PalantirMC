@@ -40,7 +40,7 @@ use iced::widget::{
     scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
 };
 use iced::widget::image::Handle;
-use iced::{window, Border, Color, Command, Element, Length, Padding, Point, Subscription, Theme};
+use iced::{window, Command, Element, Length, Padding, Point, Subscription, Theme};
 use prism_core::instance::groups::Groups;
 use prism_core::instance::Instance;
 use prism_core::paths::PrismPaths;
@@ -5257,7 +5257,7 @@ fn instance_card(
     // entirely when nothing lands in it — an empty row still costs its own
     // height and the gap above it — and because which chips are present is
     // then a list a test can read.
-    let mut chips: Vec<(String, fn(&Theme) -> container::Appearance)> = Vec::new();
+    let mut chips: Vec<(String, ChipStyle)> = Vec::new();
     if chrome.shows(CardChip::PlayTime) {
         chips.push((playtime, theme::chip_neutral));
     }
@@ -5311,8 +5311,12 @@ fn instance_card(
         .into()
 }
 
+/// How a chip paints itself, named so that a card's list of chips is a type
+/// rather than a paragraph.
+type ChipStyle = fn(&Theme) -> container::Appearance;
+
 /// A labelled small pill; `label` may be empty (renders nothing).
-fn chip(label: String, style: fn(&Theme) -> container::Appearance) -> Element<'static, Message> {
+fn chip(label: String, style: ChipStyle) -> Element<'static, Message> {
     let content: Element<'static, Message> = if label.is_empty() {
         Element::from(text("").size(11))
     } else {

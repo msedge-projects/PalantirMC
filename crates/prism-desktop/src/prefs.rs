@@ -391,7 +391,11 @@ mod tests {
         let (_dir, paths) = root();
         save(
             &paths,
-            &Prefs { color_theme: "dark".into(), microsoft_client_id: "mine".into() },
+            &Prefs {
+                color_theme: "dark".into(),
+                microsoft_client_id: "mine".into(),
+                ..Prefs::default()
+            },
         )
         .unwrap();
         // Changing the theme is not a reason to forget a configured client id,
