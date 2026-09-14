@@ -308,11 +308,20 @@ pub fn extract_zip_file(path: impl AsRef<Path>, dest: impl AsRef<Path>) -> Resul
 /// `.dylib`, while older archives ship `.jnilib`, so the suffix is rewritten on
 /// the way out when the caller asks for it.
 ///
+/// `excludes` is the library's own `extract.exclude` list — the metadata saying
+/// which archive entries are *not* natives. Mojang's `extract: {"exclude":
+/// ["META-INF/"]}` is the one that matters: without it the flat strip below
+/// turns `META-INF/MANIFEST.MF` into `natives/MANIFEST.MF`, a file that is not a
+/// native and has no business on the JVM's library path. Matching is by prefix,
+/// as Prism's is, and against the name inside the archive rather than the
+/// flattened one.
+///
 /// Returns how many files were written.
 pub fn extract_zip_file_flat(
     path: impl AsRef<Path>,
     dest: impl AsRef<Path>,
     rename_jnilib: bool,
+    excludes: &[String],
 ) -> Result<usize> {
     let path = path.as_ref();
     let dest = dest.as_ref();
@@ -327,6 +336,12 @@ pub fn extract_zip_file_flat(
         let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
         index += 1;
         if file.is_dir() {
+            continue;
+        }
+        if excludes
+            .iter()
+            .any(|prefix| !prefix.is_empty() && file.name().starts_with(prefix.as_str()))
+        {
             continue;
         }
         // `enclosed_name` already refuses `..` and absolute paths; taking the
@@ -589,7 +604,9 @@ mod tests {
         std::fs::write(&zip_path, &bytes).unwrap();
         let natives = dir.path().join("natives");
 
-        let written = extract_zip_file_flat(&zip_path, &natives, true).unwrap();
+        // No exclusions: the manifest is flattened rather than dropped, which
+        // is what the exclude list below exists to prevent.
+        let written = extract_zip_file_flat(&zip_path, &natives, true, &[]).unwrap();
         assert_eq!(written, 3);
         assert_eq!(std::fs::read(natives.join("liblwjgl.so")).unwrap(), b"so");
         // Flat: the JVM is pointed at this directory, so a nested copy would be
@@ -604,8 +621,35 @@ mod tests {
         assert!(!natives.join("libopenal.jnilib").exists());
 
         let plain = dir.path().join("plain");
-        extract_zip_file_flat(&zip_path, &plain, false).unwrap();
+        extract_zip_file_flat(&zip_path, &plain, false, &[]).unwrap();
         assert!(plain.join("libopenal.jnilib").is_file());
+    }
+
+    #[test]
+    fn native_jars_honour_the_metadata_exclude_list() {
+        // Mojang's native libraries carry `extract: {"exclude": ["META-INF/"]}`.
+        // Prefix matching is what makes it a directory, not one file: the strip
+        // that flattens every path would otherwise leave `MANIFEST.MF` sitting
+        // on the JVM's library path.
+        let bytes = build_zip(&[
+            ("META-INF/MANIFEST.MF", b"manifest"),
+            ("META-INF/versions/9/module-info.class", b"class"),
+            ("liblwjgl.so", b"so"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("natives.jar");
+        std::fs::write(&zip_path, &bytes).unwrap();
+        let natives = dir.path().join("natives");
+        let excludes = vec!["META-INF/".to_string()];
+        let written = extract_zip_file_flat(&zip_path, &natives, false, &excludes).unwrap();
+        assert_eq!(written, 1, "only the shared library is a native");
+        assert!(natives.join("liblwjgl.so").is_file());
+        assert!(!natives.join("MANIFEST.MF").exists());
+        assert!(!natives.join("module-info.class").exists());
+        // An empty prefix must not swallow the whole archive.
+        let empty = vec![String::new()];
+        let all = dir.path().join("all");
+        assert_eq!(extract_zip_file_flat(&zip_path, &all, false, &empty).unwrap(), 3);
     }
 
     #[test]
@@ -615,7 +659,7 @@ mod tests {
         let zip_path = dir.path().join("natives.jar");
         std::fs::write(&zip_path, &bytes).unwrap();
         let natives = dir.path().join("natives");
-        let err = extract_zip_file_flat(&zip_path, &natives, false).unwrap_err();
+        let err = extract_zip_file_flat(&zip_path, &natives, false, &[]).unwrap_err();
         assert!(matches!(err, Error::UnsafePath(_)), "got {err:?}");
         assert!(!dir.path().join("evil.dll").exists());
     }
@@ -623,7 +667,8 @@ mod tests {
     #[test]
     fn native_extraction_reports_a_missing_jar() {
         let dir = tempfile::tempdir().unwrap();
-        let err = extract_zip_file_flat(dir.path().join("nope.jar"), dir.path(), false).unwrap_err();
+        let err =
+            extract_zip_file_flat(dir.path().join("nope.jar"), dir.path(), false, &[]).unwrap_err();
         assert!(matches!(err, Error::Io { .. }), "got {err:?}");
     }
 

@@ -3,8 +3,12 @@
 //! Supports Modrinth (`.mrpack`, `modrinth.index.json`) and CurseForge
 //! (`manifest.json`) packs. Imports create a Prism instance, write the
 //! `overrides` tree into the instance root and register the loader in
-//! `mmc-pack.json`. No network access is performed: remote files listed in
-//! the indexes are not downloaded.
+//! `mmc-pack.json`.
+//!
+//! No network access is performed anywhere in this module. [`plan_pack`] reads
+//! a pack's index and returns the remote files it lists ([`PackFile`]) so the
+//! caller — which owns the HTTP client and the progress bar — can fetch them;
+//! the import functions write only what is inside the zip.
 
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
@@ -284,43 +288,257 @@ pub fn import_mrpack(
     let name = name.as_ref();
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| Error::Zip(e.to_string()))?;
-    let index_text = read_zip_text(&mut archive, "modrinth.index.json").map_err(|e| match e {
+    let plan = plan_mrpack(&mut archive).map_err(|e| match e {
         Error::Zip(_) => Error::InvalidPack("missing modrinth.index.json".to_string()),
         other => other,
     })?;
-    let index: serde_json::Value =
-        serde_json::from_str(&index_text).map_err(|e| Error::Json(e.to_string()))?;
-    let mc_version = index
-        .get("dependencies")
-        .and_then(|d| d.get("minecraft"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::InvalidPack("modrinth.index.json missing dependencies.minecraft".to_string()))?
-        .to_string();
+    let mc_version = plan.minecraft.as_str();
     if mc_version.is_empty() {
         return Err(Error::InvalidPack("empty dependencies.minecraft".to_string()));
     }
-    let overrides_dir = index
-        .get("overrides")
-        .and_then(|v| v.as_str())
-        .unwrap_or("overrides")
-        .to_string();
-    let instance = palantir_core::instance::Instance::create(instances_dir, name, mc_version.as_str())
+    let instance = palantir_core::instance::Instance::create(instances_dir, name, mc_version)
         .map_err(core_err)?;
-    extract_overrides(&mut archive, overrides_dir.as_str(), instance.root())?;
-    let mut loaders: Vec<(String, String)> = Vec::new();
+    extract_overrides(&mut archive, plan.overrides.as_str(), instance.root())?;
+    register_loaders(&instance, &plan.loaders)?;
+    Ok(instance.root().to_path_buf())
+}
+
+/// One file a pack's index lists.
+///
+/// Nothing in this crate fetches these — the module performs no network access
+/// at all — so the list is handed back to the caller, which owns the HTTP
+/// client, the thread pool and the progress bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackFile {
+    /// Instance-relative destination, as the pack writes it (`mods/sodium.jar`).
+    pub path: String,
+    /// Candidate download URLs, in the order the pack lists them. The first is
+    /// the one a downloader should use; the rest are mirrors worth trying when
+    /// it fails.
+    pub downloads: Vec<String>,
+    /// `sha1` hex digest when the pack publishes one.
+    pub sha1: Option<String>,
+    /// Declared size in bytes (`0` when the pack publishes none).
+    pub size: u64,
+}
+
+impl PackFile {
+    /// The destination under an instance root, or `None` when the pack names a
+    /// path that must not be written.
+    ///
+    /// Refusing is deliberate rather than sanitising: a pack is untrusted input
+    /// and a rewritten path would silently install a file somewhere the pack
+    /// did not ask for. Interesting cases get dropped and reported instead.
+    pub fn relative_path(&self) -> Option<PathBuf> {
+        let path = Path::new(self.path.as_str());
+        if path.as_os_str().is_empty() || path.is_absolute() {
+            return None;
+        }
+        for component in path.components() {
+            match component {
+                Component::CurDir | Component::Normal(_) => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            }
+        }
+        Some(path.to_path_buf())
+    }
+
+    /// Whether the file that is already at `dest` can be left alone.
+    pub fn satisfied_at(&self, dest: &Path) -> bool {
+        match std::fs::metadata(dest) {
+            Ok(meta) if meta.is_file() => self.size == 0 || meta.len() >= self.size,
+            _ => false,
+        }
+    }
+}
+
+/// What a pack asks for, read without writing anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackPlan {
+    /// Minecraft version (`dependencies.minecraft` / `minecraft.version`).
+    pub minecraft: String,
+    /// Loader components, ready to be registered in `mmc-pack.json`.
+    pub loaders: Vec<(String, String)>,
+    /// Files with somewhere to fetch them from.
+    pub files: Vec<PackFile>,
+    /// Name of the overrides directory inside the zip (`overrides` by default).
+    pub overrides: String,
+    /// Entries that are listed but will not be installed, each with the reason.
+    ///
+    /// CurseForge lands here in full: its `files[]` is `projectID`/`fileID`
+    /// pairs that only resolve through the CurseForge API, which needs a key
+    /// this launcher does not have. Saying so is the whole point of the field —
+    /// an import that quietly installed the overrides and none of the mods is
+    /// what this used to do.
+    pub skipped: Vec<String>,
+}
+
+impl PackPlan {
+    /// How many of the pack's entries will not be fetched.
+    pub fn skipped_count(&self) -> usize {
+        self.skipped.len()
+    }
+}
+
+/// Read a pack's index out of its zip container.
+///
+/// Both formats are read here so one call answers "what does this pack want?"
+/// for either: the Minecraft version, the loader components, and the remote
+/// files — the part an import used to drop on the floor.
+pub fn plan_pack(zip_bytes: impl AsRef<[u8]>) -> Result<PackPlan> {
+    let data = zip_bytes.as_ref();
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| Error::Zip(e.to_string()))?;
+    if archive.by_name("modrinth.index.json").is_ok() {
+        return plan_mrpack(&mut archive);
+    }
+    if archive.by_name("manifest.json").is_ok() {
+        return plan_curseforge(&mut archive);
+    }
+    Err(Error::InvalidPack(
+        "neither modrinth.index.json nor manifest.json is present".to_string(),
+    ))
+}
+
+/// The Modrinth half of [`plan_pack`].
+fn plan_mrpack(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Result<PackPlan> {
+    let text = read_zip_text(archive, "modrinth.index.json")?;
+    let index: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| Error::Json(e.to_string()))?;
+    let mut plan = PackPlan {
+        minecraft: index
+            .get("dependencies")
+            .and_then(|d| d.get("minecraft"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        overrides: index
+            .get("overrides")
+            .and_then(|v| v.as_str())
+            .unwrap_or("overrides")
+            .to_string(),
+        ..PackPlan::default()
+    };
     if let Some(deps) = index.get("dependencies").and_then(|v| v.as_object()) {
         for (key, value) in deps {
             if let Some(uid) = mrpack_loader_uid(key.as_str()) {
-                if let Some(version) = value.as_str() {
-                    if !version.is_empty() {
-                        loaders.push((uid.to_string(), version.to_string()));
-                    }
+                if let Some(version) = value.as_str().filter(|v| !v.is_empty()) {
+                    plan.loaders.push((uid.to_string(), version.to_string()));
                 }
             }
         }
     }
-    register_loaders(&instance, &loaders)?;
-    Ok(instance.root().to_path_buf())
+    let entries = match index.get("files").and_then(|v| v.as_array()) {
+        Some(entries) => entries,
+        None => return Ok(plan),
+    };
+    for entry in entries {
+        let path = entry.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        // `env.client == "unsupported"` is the pack saying the file is for the
+        // server. Installing it anyway is a client that crashes on startup, so
+        // the pack's own answer is honoured rather than second-guessed.
+        let client_env = entry
+            .get("env")
+            .and_then(|env| env.get("client"))
+            .and_then(|v| v.as_str());
+        if client_env == Some("unsupported") {
+            continue;
+        }
+        let downloads: Vec<String> = entry
+            .get("downloads")
+            .and_then(|v| v.as_array())
+            .map(|urls| {
+                urls.iter()
+                    .filter_map(|u| u.as_str())
+                    .filter(|u| !u.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let file = PackFile {
+            path: path.to_string(),
+            downloads,
+            sha1: entry
+                .get("hashes")
+                .and_then(|h| h.get("sha1"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            size: entry.get("fileSize").and_then(|v| v.as_u64()).unwrap_or(0),
+        };
+        if file.downloads.is_empty() {
+            plan.skipped.push(format!("{path} (the index lists no download URL)"));
+        } else if file.relative_path().is_none() {
+            plan.skipped
+                .push(format!("{path} (unsafe path — refusing to write it)"));
+        } else {
+            plan.files.push(file);
+        }
+    }
+    Ok(plan)
+}
+
+/// The CurseForge half of [`plan_pack`].
+///
+/// Its `files[]` names a project and a file id, never a URL: resolving those is
+/// the CurseForge API, and every request there needs a key. The entries are
+/// therefore reported as skipped with the reason, which turns "the import
+/// silently fetched nothing" into a line the user can read.
+fn plan_curseforge(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Result<PackPlan> {
+    let text = read_zip_text(archive, "manifest.json")?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| Error::Json(e.to_string()))?;
+    let minecraft = manifest.get("minecraft");
+    let mut plan = PackPlan {
+        minecraft: minecraft
+            .and_then(|m| m.get("version"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        overrides: manifest
+            .get("overrides")
+            .and_then(|v| v.as_str())
+            .unwrap_or("overrides")
+            .to_string(),
+        ..PackPlan::default()
+    };
+    if let Some(arr) = minecraft.and_then(|m| m.get("modLoaders")).and_then(|v| v.as_array()) {
+        let mut primary: Option<(String, String)> = None;
+        let mut first: Option<(String, String)> = None;
+        for entry in arr {
+            let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(parsed) = parse_curse_loader_id(id, plan.minecraft.as_str()) else {
+                continue;
+            };
+            if first.is_none() {
+                first = Some(parsed.clone());
+            }
+            if entry.get("primary").and_then(|v| v.as_bool()).unwrap_or(false) {
+                primary = Some(parsed);
+                break;
+            }
+        }
+        if let Some(chosen) = primary.or(first) {
+            plan.loaders.push(chosen);
+        }
+    }
+    if let Some(files) = manifest.get("files").and_then(|v| v.as_array()) {
+        for entry in files {
+            let project = entry
+                .get("projectID")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let file = entry
+                .get("fileID")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            plan.skipped.push(format!(
+                "CurseForge project {project} file {file} (needs the CurseForge API)"
+            ));
+        }
+    }
+    Ok(plan)
 }
 
 /// Import a CurseForge pack from memory.
@@ -341,60 +559,18 @@ pub fn import_curseforge(
     let name = name.as_ref();
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| Error::Zip(e.to_string()))?;
-    let manifest_text = read_zip_text(&mut archive, "manifest.json").map_err(|e| match e {
+    let plan = plan_curseforge(&mut archive).map_err(|e| match e {
         Error::Zip(_) => Error::InvalidPack("missing manifest.json".to_string()),
         other => other,
     })?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&manifest_text).map_err(|e| Error::Json(e.to_string()))?;
-    let mc_version = manifest
-        .get("minecraft")
-        .and_then(|m| m.get("version"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::InvalidPack("manifest.json missing minecraft.version".to_string()))?
-        .to_string();
+    let mc_version = plan.minecraft.as_str();
     if mc_version.is_empty() {
         return Err(Error::InvalidPack("empty minecraft.version".to_string()));
     }
-    let overrides_dir = manifest
-        .get("overrides")
-        .and_then(|v| v.as_str())
-        .unwrap_or("overrides")
-        .to_string();
-    let instance = palantir_core::instance::Instance::create(instances_dir, name, mc_version.as_str())
+    let instance = palantir_core::instance::Instance::create(instances_dir, name, mc_version)
         .map_err(core_err)?;
-    extract_overrides(&mut archive, overrides_dir.as_str(), instance.root())?;
-    let mut loaders: Vec<(String, String)> = Vec::new();
-    if let Some(arr) = manifest
-        .get("minecraft")
-        .and_then(|m| m.get("modLoaders"))
-        .and_then(|v| v.as_array())
-    {
-        let mut primary: Option<(String, String)> = None;
-        let mut first: Option<(String, String)> = None;
-        for entry in arr {
-            let id = match entry.get("id").and_then(|v| v.as_str()) {
-                Some(s) => s,
-                None => continue,
-            };
-            let parsed = match parse_curse_loader_id(id, mc_version.as_str()) {
-                Some(p) => p,
-                None => continue,
-            };
-            if first.is_none() {
-                first = Some(parsed.clone());
-            }
-            let is_primary = entry.get("primary").and_then(|v| v.as_bool()).unwrap_or(false);
-            if is_primary {
-                primary = Some(parsed);
-                break;
-            }
-        }
-        if let Some(p) = primary.or(first) {
-            loaders.push(p);
-        }
-    }
-    register_loaders(&instance, &loaders)?;
+    extract_overrides(&mut archive, plan.overrides.as_str(), instance.root())?;
+    register_loaders(&instance, &plan.loaders)?;
     Ok(instance.root().to_path_buf())
 }
 
@@ -512,5 +688,111 @@ mod tests {
             Some(("net.fabricmc.fabric-loader".to_string(), "0.16.9".to_string()))
         );
         assert_eq!(parse_curse_loader_id("unknown-1.0", "1.20.1"), None);
+    }
+
+    #[test]
+    fn plans_the_files_an_mrpack_lists() {
+        let index = serde_json::json!({
+            "formatVersion": 1,
+            "dependencies": {"minecraft": "1.20.1", "fabric-loader": "0.16.9"},
+            "files": [
+                {
+                    "path": "mods/sodium.jar",
+                    "hashes": {"sha1": "aa11"},
+                    "fileSize": 400,
+                    "downloads": ["https://cdn.example.invalid/sodium.jar", "https://mirror.invalid/sodium.jar"]
+                },
+                {
+                    "path": "mods/server-only.jar",
+                    "hashes": {"sha1": "bb22"},
+                    "fileSize": 10,
+                    "env": {"client": "unsupported", "server": "required"},
+                    "downloads": ["https://cdn.example.invalid/server.jar"]
+                },
+                {
+                    "path": "../../escape.jar",
+                    "hashes": {"sha1": "cc33"},
+                    "downloads": ["https://cdn.example.invalid/escape.jar"]
+                },
+                {
+                    "path": "mods/no-url.jar",
+                    "hashes": {"sha1": "dd44"}
+                }
+            ]
+        });
+        let bytes = build_zip(&[(
+            "modrinth.index.json",
+            serde_json::to_vec(&index).unwrap().as_slice(),
+        )]);
+        let plan = plan_pack(bytes.as_slice()).unwrap();
+        assert_eq!(plan.minecraft, "1.20.1");
+        assert_eq!(
+            plan.loaders,
+            vec![("net.fabricmc.fabric-loader".to_string(), "0.16.9".to_string())]
+        );
+        // The server-only file is the pack's own decision and is not installed;
+        // the unsafe and URL-less entries are reported, not written.
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].path, "mods/sodium.jar");
+        assert_eq!(plan.files[0].downloads.len(), 2, "mirrors are kept in order");
+        assert_eq!(plan.files[0].sha1.as_deref(), Some("aa11"));
+        assert_eq!(plan.files[0].size, 400);
+        assert_eq!(plan.skipped_count(), 2);
+        assert!(plan.skipped.iter().any(|line| line.contains("escape.jar")));
+        assert!(plan.skipped.iter().any(|line| line.contains("no-url.jar")));
+        assert_eq!(
+            plan.files[0].relative_path(),
+            Some(PathBuf::from("mods").join("sodium.jar"))
+        );
+        assert!(PackFile {
+            path: "C:\\windows\\x.jar".to_string(),
+            downloads: vec!["u".to_string()],
+            sha1: None,
+            size: 0,
+        }
+        .relative_path()
+        .is_none());
+    }
+
+    #[test]
+    fn a_curseforge_plan_reports_what_it_cannot_fetch() {
+        let manifest = serde_json::json!({
+            "manifestType": "minecraftModpack",
+            "manifestVersion": 1,
+            "minecraft": {"version": "1.20.1", "modLoaders": [{"id": "forge-47.2.0", "primary": true}]},
+            "overrides": "overrides",
+            "files": [{"projectID": 306612, "fileID": 1234, "required": true}]
+        });
+        let bytes = build_zip(&[(
+            "manifest.json",
+            serde_json::to_vec(&manifest).unwrap().as_slice(),
+        )]);
+        let plan = plan_pack(bytes.as_slice()).unwrap();
+        assert_eq!(plan.minecraft, "1.20.1");
+        assert_eq!(
+            plan.loaders,
+            vec![("net.minecraftforge".to_string(), "47.2.0".to_string())]
+        );
+        assert!(plan.files.is_empty());
+        assert_eq!(plan.skipped_count(), 1);
+        assert!(plan.skipped[0].contains("306612"));
+        assert!(plan.skipped[0].contains("CurseForge API"));
+    }
+
+    #[test]
+    fn a_pack_file_is_satisfied_by_a_big_enough_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = PackFile {
+            path: "mods/a.jar".to_string(),
+            downloads: vec!["u".to_string()],
+            sha1: None,
+            size: 4,
+        };
+        let dest = dir.path().join("a.jar");
+        assert!(!file.satisfied_at(&dest));
+        std::fs::write(&dest, b"abc").unwrap();
+        assert!(!file.satisfied_at(&dest), "a short file is fetched again");
+        std::fs::write(&dest, b"abcd").unwrap();
+        assert!(file.satisfied_at(&dest));
     }
 }

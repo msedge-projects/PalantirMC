@@ -24,4 +24,6 @@ pub use archive::{
 };
 pub use install::write_patch;
 pub use jar::{scan_jar, scan_jar_file, JarInfo};
-pub use modpack::{detect_format, import_curseforge, import_mrpack, PackFormat};
+pub use modpack::{
+    detect_format, import_curseforge, import_mrpack, plan_pack, PackFile, PackFormat, PackPlan,
+};
