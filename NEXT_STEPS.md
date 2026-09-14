@@ -1122,7 +1122,112 @@ button. `winshot.activate` (an Alt tap, then `SetForegroundWindow`) before the
 click is the whole fix; the session is `.scratch/drive2.py`. The shell's own
 hit-test is not implicated: `WM_NCHITTEST` answers `HTCLIENT` for a card button.
 
-Still open: the asset phase was not watched to its end here (the session ended
-at 159 MB of 458 MB and closed the window), so the closing line and the last
-90% of the bar remain untested against the real CDN, and the game has still not
-been launched out of a completed install.
+That left two things open, and both are answered now — a later run from the same
+window finished the phase and the game launched out of it:
+
+```
+asset objects: done — 5057 file(s), 458.2 MB in 81.2 s
+install: installed 0 file(s) (458.2 MB), 101 already present, 5057 asset object(s)
+using java [java-runtime-epsilon/bin/java.exe] (openjdk version 25.0.1)
+[21:26:40] [main/INFO]: Loading Minecraft 26.2 with Fabric Loader 0.19.5
+```
+
+Two numbers to read out of that. `458.2 MB in 81.2 s` is 5.6 MB/s, and §20
+measures this line at 8.9 MB/s through eight connections — so a third of that
+phase was spent not downloading. And `installed 0 file(s) (458.2 MB), 101
+already present` is the other half of the trade, and the reason a second launch
+is not a second download: the plan carried 458.2 MB of work, the filesystem said
+every one of those files was already there, and the launch fetched nothing. The
+458.2 MB is what the plan *would* have moved.
+
+The run is also where the four complaints in §20 come from: it started the game
+through the console build of Java, having held hundreds of megabytes to get
+there.
+
+## 20. Slower than the line, fatter than the files, and wearing a console
+
+None of this was visible from the bar. It came out of the completed install
+above — the first one this launcher ever finished — and out of measuring the
+real CDN instead of trusting the fixture.
+
+### The command prompt was one window, not two complaints
+
+A JRE ships two launchers for the same JVM: `bin/java.exe`, a console program,
+and `bin/javaw.exe`, the same thing with no console. The launcher ran
+`java.exe`. A GUI process that starts a console program gets a console window
+allocated for it, so what the player sees is a command prompt behind the game —
+titled with the `java.exe` path and wearing Java's own icon. With that window
+there, the taskbar entry belongs to *it*, not to the game, which is why it reads
+as the game launching with someone else's logo and name. One cause, not two.
+
+Both halves of the fix are wanted, because either alone leaves a path that
+flashes a console. `java_runtime::launcher_binary` runs `javaw.exe` when it sits
+next to the `java.exe` (the *completeness* check still looks for `java.exe`,
+which is the file the manifest lists). `launch::hide_console` spawns with
+`CREATE_NO_WINDOW`, which covers what the binary choice cannot: a `java.exe`
+configured by hand, the two `java -version` probes, and the `cmd /C start` this
+launcher uses to open a URL.
+
+### 458 MB moved, and the launcher carried it in memory first
+
+`BlockingHttpFetcher::fetch` read the whole body (`response.bytes()`) and then
+copied it again (`.to_vec()`), and `download_bytes` asked for that *before*
+writing anything. With eight of those in flight the peak was
+`2 x threads x file size`, and these files are not small: the largest library
+this index installs is **37.4 MB**, the top five being 37.4, 22.9, 14.5, 8.0 and
+2.9 MB. Eight of the big ones at once is **598 MB**; even the asset phase alone
+is 172 MB. That is the shape of the complaint — a footprint in the hundreds of
+megabytes, moving with the file sizes, seen while the game was starting.
+
+`Fetcher::fetch_to` writes into a sink instead. The default stays
+fetch-then-write, so the in-memory test fetchers are unchanged, and
+`BlockingHttpFetcher` overrides it to stream the response through `reqwest`'s
+`copy_to`. `download_bytes` now writes into a `BufWriter` over the `.part` file
+and renames it, so a bulk phase costs one `WRITE_BUFFER` (64 KB) per worker — a
+megabyte across sixteen workers, whatever the files weigh.
+`download_bytes_streams_the_body_instead_of_holding_it` is the guard: its
+fetcher's `fetch` is a hard error, so going back to buffering fails the test
+rather than the user's machine.
+
+### 5.6 MB/s on a line that does 8.9
+
+Against the real object CDN, one keep-alive connection per worker, five-second
+windows, and then against an unrelated origin to see whose ceiling it was:
+
+| connections | `resources.download.minecraft.net` | `speed.cloudflare.com` |
+| --- | --- | --- |
+| 1 | 1.55 MB/s | — |
+| 8 | 8.86 MB/s | 8.79 MB/s |
+| 24 | 10.25 MB/s | — |
+
+Two origins agreeing at eight connections, and tripling to twenty-four worth
+16%, says the ceiling is the **line** — about 85 Mbit/s here — and not the CDN.
+So `DEFAULT_THREADS` goes 8 → 16: most of that 16%, half the sockets of 24, and
+nothing to gain above it.
+
+The rest of the gap was not the connection count but the *assignment*.
+`download_many_with_progress` sliced the jobs into one contiguous chunk per
+thread and let each worker drain its own, so the phase finished when its slowest
+chunk did. Jobs arrive in map-iteration order and these files are wildly
+unequal — median 10 KB, mean 93 KB, and the largest 1% holding 46% of the bytes
+— so over 400 random orders the heaviest of eight chunks averaged **1.31x** the
+average chunk (worst 1.83x). The phase therefore used ~**76%** of the bandwidth
+it had; the other quarter was workers idle with unclaimed jobs behind them.
+Dealt largest-first into the emptiest chunk those same objects divide into eight
+chunks of 57.3 MB, a 1.000x spread.
+
+The fix is smaller than the dealing rule: a shared `AtomicUsize`, so a worker
+takes the next job the moment it is free and the queue outlives any one chunk.
+`download_many_keeps_every_worker_busy` holds the concurrency with a rendezvous
+fetcher that fails — after ten seconds, as an error and not a pass — unless all
+four workers are in flight at once.
+
+Together: sixteen threads at about 10 MB/s against a 458 MB index is ~46 s of
+transfer instead of the 81 s measured, with a flat footprint instead of a
+spiking one.
+
+Worth knowing for a later pass, and a bigger win than everything above: this
+machine's `.minecraft` already holds **4227 of those 5057 objects**, so an
+install able to adopt an existing store would move **122 MB** instead of 458 MB.
+That is a product decision — whose files to trust, and what to say when it uses
+them — rather than a tuning one, which is why it is not in this change.
