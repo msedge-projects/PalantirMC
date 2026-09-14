@@ -2703,9 +2703,14 @@ mod tests {
 
     /// A progress report is a *level*, not an event: when the window is a frame
     /// behind, the newest report is the only one worth having, so a full channel
-    /// drops it instead of retrying. That is the difference from [`send_batch`],
-    /// and it matters because the alternative is a downloader waiting on a window
-    /// — and because a level must never reach the run log as a line.
+    /// drops it instead of retrying the way [`send_batch`] does. That matters
+    /// because the alternative is a downloader waiting on a window — and because
+    /// a level must never reach the run log as a line.
+    ///
+    /// The exact buffer accounting is `futures`' own (a sender buffers up to its
+    /// capacity), so what is asserted is the outcome rather than the boundary:
+    /// sixteen reports down a channel of one all *return*, the ones that arrive
+    /// arrive in order, and fewer arrive than were sent.
     #[test]
     fn a_progress_report_is_dropped_rather_than_waited_for() {
         let (_dir, paths) = test_root();
@@ -2713,22 +2718,34 @@ mod tests {
         let journal = LaunchLogFile::open(&paths, &instance.id());
         let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(1);
 
-        send_progress(&mut tx, 7, install::Progress::new("asset objects", 1, 5057, 0));
-        send_progress(
-            &mut tx,
-            7,
-            install::Progress::new("asset objects", 102, 5057, 1_000_000),
-        );
+        const SENT: usize = 16;
+        for done in 1..=SENT {
+            send_progress(
+                &mut tx,
+                7,
+                install::Progress::new("asset objects", done, 5057, done as u64 * 1024),
+            );
+        }
 
-        // Both calls returned: the second one did not wait for room, which is
-        // the property this test exists for.
-        let Ok(Message::LaunchProgress { run_id, progress }) = rx.try_recv() else {
-            panic!("expected a progress report");
-        };
-        assert_eq!((run_id, progress.done), (7, 1), "the report that fit is the one that arrived");
+        let mut arrived: Vec<usize> = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            match message {
+                Message::LaunchProgress { run_id, progress } => {
+                    assert_eq!(run_id, 7);
+                    arrived.push(progress.done);
+                }
+                other => panic!("expected a progress report, got {other:?}"),
+            }
+        }
+        assert!(!arrived.is_empty(), "the first report has to be delivered");
         assert!(
-            rx.try_recv().is_err(),
-            "a report that did not fit was dropped, not queued"
+            arrived.windows(2).all(|pair| pair[0] < pair[1]),
+            "the reports that arrived are the ones that were sent, in order: {arrived:?}"
+        );
+        assert!(
+            arrived.len() < SENT,
+            "every report travelling a channel of one would mean nothing was \
+             dropped, so the downloader would be waiting on the window: {arrived:?}"
         );
         let logged = std::fs::read_to_string(journal.path()).unwrap_or_default();
         assert!(
