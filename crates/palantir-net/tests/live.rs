@@ -62,37 +62,42 @@ fn resolve_against_the_live_service(
     .expect("resolving the profile")
 }
 
-/// The newest Fabric build and the game it pins itself to.
+/// The newest Fabric build, and the newest Minecraft release the service has
+/// Fabric mappings for.
 ///
-/// Fabric's version list is game-agnostic — no entry pins Minecraft — so the
-/// game a build supports is only in the version *file*: exactly the thing the
-/// launcher reads before it can claim a build works. Asking the service for the
-/// pair, instead of naming one, is what keeps this test from needing an edit
-/// every release.
-fn newest_fabric_build(store: &mut OnlineMetaStore) -> (String, String) {
-    let list = store
+/// Fabric's metadata never names a Minecraft version — the loader requires the
+/// mappings by uid alone, and *which* game it belongs to is whichever
+/// `net.fabricmc.intermediary` exists, because the resolver locks that uid to the
+/// game version. So the coherent pair to test with is the newest build plus a
+/// release the service has mappings for, and asking for it here keeps the test
+/// off the Minecraft release calendar.
+///
+/// Both lists arrive **newest first**; `catalog.rs` sorts explicitly rather than
+/// trusting that, which is why a wrong assumption here showed up as a claim that
+/// no Fabric build supports anything.
+fn newest_fabric_pair(store: &mut OnlineMetaStore) -> (String, String) {
+    let builds = store
         .version_list(FABRIC_UID)
         .expect("fabric version list is required for this test");
-    assert!(!list.is_empty(), "the service listed no Fabric builds at all");
-    let mut tried = 0usize;
-    for entry in list.iter().rev().filter(|e| !e.version.is_empty()) {
-        if tried >= 20 {
-            break;
-        }
-        tried += 1;
-        let file = match store.version_file(FABRIC_UID, &entry.version) {
-            Ok(file) => file,
-            Err(_) => continue,
-        };
-        if let Some(pin) = file
-            .requires
-            .iter()
-            .find(|r| r.uid == "net.minecraft" && !r.equals_version.is_empty())
+    let build = builds
+        .iter()
+        .find(|e| !e.version.is_empty())
+        .expect("the service listed no Fabric builds at all")
+        .version
+        .clone();
+
+    let releases = store
+        .version_list("net.minecraft")
+        .expect("the release list is required for this test");
+    for entry in releases.iter().filter(|e| e.type_ == "release").take(12) {
+        if store
+            .version_file("net.fabricmc.intermediary", &entry.version)
+            .is_ok()
         {
-            return (entry.version.clone(), pin.equals_version.clone());
+            return (build, entry.version.clone());
         }
     }
-    panic!("none of the {tried} newest Fabric builds names a Minecraft version it supports");
+    panic!("none of the twelve newest Minecraft releases has Fabric mappings on the service");
 }
 
 /// Instance creation and instance loading, end to end, against the service the
@@ -190,7 +195,7 @@ fn a_created_instance_resolves_against_the_live_service() {
 fn a_fabric_instance_gets_its_loader_and_mappings_from_the_live_service() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let mut store = live_store(&tmp.path().join("meta"));
-    let (build, game) = newest_fabric_build(&mut store);
+    let (build, game) = newest_fabric_pair(&mut store);
 
     let instances = tmp.path().join("instances");
     std::fs::create_dir_all(&instances).expect("creating the instances dir");
