@@ -954,3 +954,50 @@ and which no amount of copied code fixes.
 workspace warning count **unchanged at 51** — the two adopted crates contribute
 none, because their own warnings were triaged into the crate-root allows rather
 than left to accumulate.
+
+## 18. The first artifact built from the Java work, and where it is
+
+`60829d1` pushed the Java-runtime work and the two adopted crates together, and
+run [`34839292132`](https://github.com/MSedgeMC/PalantirMC/actions/runs/34839292132)
+is the first run to cover either. **All five jobs green** — `Test workspace`,
+`Lint`, `Live services`, `Build exe (x86_64-pc-windows-msvc)`,
+`Build exe (x86_64-pc-windows-gnu)` — so the live tests pass in CI against the
+real metadata service, which is the only place the new `net.minecraft.java`
+parsing has ever been asked a question a fixture did not write.
+
+| Artifact | bytes | sha256 |
+|---|---|---|
+| `PalantirMC.exe` (msvc, recommended) | 8,417,280 | `ee6cc365937499b6343a7622636c5c3b68e20f20a7829b096cec32bb681ad633` |
+| `PalantirMC.exe` (gnu) | 8,660,480 | `cc890fa59872b05e9635004eb9569bb56369fc9226abc2b15849f1d6faef155f` |
+
+Both downloaded from the run, both hashes matched the sidecars the runner wrote,
+and both pass `check_exe.py` (msvc imports 18 DLLs, gnu 27, all of them
+Windows'). `tools/launch_check.py` then ran them off-screen:
+
+| | msvc | gnu |
+|---|---|---|
+| window appears | 0.20 s | 0.30 s |
+| idle windows | 0.0 ms ×5, one 15.6 ms | 0.0 ms ×6 |
+| working set | 29.2 MB (peak 33.9) | 30.0 MB (peak 34.7) |
+| UI thread | responsive, 0 ms | responsive, 0 ms |
+
+That matches §10's shape, including the single stray window, which is the
+recorded transient rather than a target difference.
+
+**Where the files are.** `dist/PalantirMC.exe` is now the msvc build from this
+run — the byte count differs from the 8,441,856 that was there, so it is a
+different binary and the sidecar beside it is the hash of the new one.
+`dist/PalantirMC-gnu-60829d1.exe` is the gnu build, and both raw artifact
+directories are under `dist/ci-60829d1/`. None of it is committed: `dist/` is
+ignored, and CI's upload is the copy that expires — 14 days, so a build worth
+keeping wants a tag.
+
+### The one thing left unverified by this run
+
+`java_runtime`'s *download* half. The live test checks the metadata parses and
+that a published digest is the digest its manifest URL serves; nothing in CI
+fetches a runtime's few hundred files, because that is a few hundred megabytes
+and a filesystem. So the code path that installs a JRE is exercised only by the
+fixture-backed tests in `java_runtime.rs`. A machine with no Java at an accepted
+major is the way to close it, and it is the same shape of gap as §16.5's real
+game launch.
