@@ -91,13 +91,19 @@ tree has exercised it end to end. Everything here is a five-second visual check:
 
 ## 4. Known gaps (missing features, not regressions)
 
-- **Microsoft sign-in.** Not implemented; offline accounts only. The About page
-  says so out loud.
-- **Assets and libraries are not downloaded at launch.** Launch resolves the
-  pack, probes Java and streams output; a fresh instance reports what is missing
-  instead of failing silently.
-- **Modpack import copies overrides only** — the remote files a `.mrpack` lists
-  are not fetched.
+- **Microsoft sign-in.** Implemented (device-code flow in `accounts.rs` +
+  `palantir-net::auth`, with refresh at launch and the token stored in the
+  accounts file). This line said the opposite for several revisions after the
+  work landed.
+- **Assets and libraries are not downloaded at launch.** Stale in the same way:
+  `install::plan` + `install::run` fetch libraries, natives, the asset index and
+  its objects, and a managed JRE, and a launch refuses to start when a file is
+  missing rather than reporting it. See §19 and §20.
+- **CurseForge packs still import overrides only.** A CurseForge `manifest.json`
+  lists its files as `projectID`/`fileID` pairs, which only resolve through the
+  CurseForge API and that API needs a key at the caller's expense. Modrinth
+  `.mrpack` files *are* fetched (§22); the CurseForge half is reported as
+  `N entries not installed` instead of pretending.
 - **Per-frame cost while interacting is not addressed.** iced 0.12 repaints the
   whole window per input event and exposes no partial redraw, so a stream of
   mouse events still costs tens of percent of a core on an integrated-GPU
@@ -1293,3 +1299,69 @@ move it.
 Still unverified, and only the desktop can say: that the segment visibly
 slides, and that a launch now leaves the window where it is. CI compiles and
 tests this; it cannot watch either one.
+
+## 22. An audit of "does this launcher do everything a launcher does", and the eight things it found
+
+Reading the code rather than the feature list, because the feature list had gone
+stale: §4 still claimed Microsoft sign-in was not implemented a dozen revisions
+after it was. Eight real gaps came out of it. Seven are now closed; the eighth
+(CurseForge file downloads) cannot be, and says so where a user can read it.
+
+**The worst one first: installing a modpack did nothing.** `ContentType::Modpacks`
+answered `"mods"` for its target folder, so `Install` on a pack downloaded the
+`.mrpack` into the selected instance's mod folder and reported success. The game
+then read a zip as a broken mod jar, and none of the pack — no mods, no configs,
+no loader — was present. There was no test for it because the folder mapping
+looked like a table lookup. Now the pack *is* the instance: `install_pack`
+downloads the archive, imports it (overrides written, loader registered in
+`mmc-pack.json`) and populates the files its index lists. `target_folder` returns
+`Option<&str>` and answers `None` for a pack, which is what stops the old path
+from being reachable again by accident — and a test asserts that `None`.
+
+**Pack files are fetched now, in both directions.** `palantir_loader::plan_pack`
+reads either index and returns the remote files (`PackFile`), honouring three
+rules that matter: `env.client == "unsupported"` files are skipped (they are the
+server's, and installing them is a crash), a `path` that escapes the instance is
+*refused and reported* rather than rewritten, and every file is checked against
+the `sha1` the pack publishes — a mismatch is deleted, because the next launch
+would trust it. The loader still does no network of its own; the fetching lives
+in `browse::fetch_pack_files`, which runs through the same thread pool and the
+same streaming `.part`→rename path as the install phases. Dropping a `.mrpack`
+on the window goes through the same function, off the UI thread, with the same
+bar.
+
+**Modrinth dependencies are followed.** `ModrinthProjectVersion` now carries
+`dependencies`, and `install_with_dependencies` installs the `required` ones —
+resolved with the same game/loader rules as the requested file, transitively, with
+a project-id set so two mods needing Fabric API install it once and a cycle in
+user-generated metadata terminates. `optional` and `embedded` are deliberately
+left alone, and a dependency hosted off Modrinth is named in the status line
+rather than guessed at.
+
+**The window size setting reached nothing.** `windowParams` was written into the
+launch *script* — a Prism-compat artifact this launcher never reads back — so an
+instance set to 1920x1080 opened at 854x480. `--width`/`--height` are Minecraft's
+own options (its parser defaults to 854x480, the same numbers), so those are what
+the game is now spawned with, and only when the instance overrides its window:
+`OverrideWindow` off means "let the game decide". "Maximized" has no argument in
+Minecraft, so it is translated into the monitor's work area and the log says so
+instead of pretending the window manager did it.
+
+**Two correctness fixes in the install plan.** Asset objects are named after
+their own digest, so the download loop now hashes each one it fetched and deletes
+a mismatch; before, a corrupted object was trusted forever because the present
+path checks size and not content. And native jars carry their library's
+`extract.exclude` list to the extractor, so `META-INF/` entries are dropped
+instead of being flattened into `natives/MANIFEST.MF` — a file that is not a
+native, sitting on the JVM's library path.
+
+**What this did not fix, on purpose:** CurseForge file downloads (no API key),
+Forge/NeoForge still have no test coverage beyond the generic path, there is
+still one game at a time, and there is no self-update check. Those are named in
+§4 rather than left for a user to discover.
+
+New tests, all offline: `plan_pack` for both formats including the skipped-entry
+rules, the exclude list in the native extractor, dependency parsing against the
+real API shape, the window-argument decision table, a pack fetch that verifies
+and drops a tampered file, and the bar's precedence and hand-over in `app`.
+Nothing here was watched on a desktop, because none of it is a pixel.
