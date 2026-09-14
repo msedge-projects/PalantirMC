@@ -131,7 +131,13 @@ pub struct Prefs {
 
     // ---- Display > Behavior -------------------------------------------
     /// Get out of the way when the game starts.
-    #[serde(skip_serializing_if = "is_true")]
+    ///
+    /// Off by default, so it is written only when a user turns it on. The
+    /// predicate flips with the default rather than staying put: the file is
+    /// the *diff* from the defaults, and a field whose default changes has to
+    /// change its predicate with it or every file starts carrying a line that
+    /// says nothing.
+    #[serde(skip_serializing_if = "is_false")]
     pub minimize_on_launch: bool,
     /// Hide the right-hand panel unless it is asked for.
     #[serde(skip_serializing_if = "is_false")]
@@ -635,6 +641,9 @@ mod tests {
             color_theme: "dark".into(),
             advanced_rendering: false,
             show_worlds_tab: false,
+            // Off by default, on here: the direction that has to be *kept* is
+            // the one away from the default, whichever way that is.
+            minimize_on_launch: true,
             ..Prefs::default()
         };
         save(&paths, &changed).unwrap();
@@ -642,6 +651,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path(&paths)).unwrap()).unwrap();
         assert_eq!(parsed["advanced_rendering"], serde_json::json!(false));
         assert_eq!(parsed["show_worlds_tab"], serde_json::json!(false));
+        assert_eq!(parsed["minimize_on_launch"], serde_json::json!(true));
         assert_eq!(load(&paths), changed, "a written file must read back identical");
     }
 
