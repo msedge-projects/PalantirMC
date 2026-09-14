@@ -620,3 +620,51 @@ of these is asserted by `GATES.md`, and the first two are visible in the capture
    dark and `active:scale(0.95)`; ours interpolate between palette colours
    instead. Same intent, not the same arithmetic, and not measurable from a
    still capture either way.
+
+## 13. The Settings dialog: what it now is, and what it does not do yet
+
+The reference's dialog is three groups and **eleven** tabs — Display (Appearance,
+Features, Behavior, Language, Feature flags), Account (Profile, Social, Privacy),
+Instances (Synced settings, Java installations, Resource management). All eleven
+are now panes in `crates/prism-desktop/src/settings.rs`, in that order, with the
+group headings printed once per run of tabs, and `Feature flags` hidden until
+developer mode is on (six presses on the version in the footer, as the reference
+does). The section list is a scrollable column of real buttons, the pane is a
+second independent scrollable at `min(65vh, 600px)`, and both scroll through
+`scroll.rs` so a wheel over them glides rather than jumps.
+
+**Six switches are wired, and the rest say so.**
+
+| Switch | What it changes |
+|---|---|
+| Show Worlds tab | rail entry; hiding it while on the page also leaves the page |
+| Show Screenshots tab | rail entry; same fallback |
+| Minimize app | `window::minimize` — but only once a launch has actually started |
+| Hide right sidebar | the panel is not drawn at all |
+| Compact mode | cards lose their metadata chips and tighten up |
+| Show play time | the playtime chip is drawn on library and sidebar cards |
+
+Every other switch is drawn **disabled with the reason under it** rather than as a
+control that silently forgets. That is a deliberate trade: the reference has
+sixteen switches and this launcher can honour six, and a switch that moves while
+nothing happens is indistinguishable from a working one until the user notices.
+
+Two tests hold that line, and one of them was written because the line had
+already been crossed:
+
+1. `every_flag_names_a_field_that_carries_its_value` writes each flag's field
+   name into a one-key prefs file and reads it back through the flag, so a
+   typo — or a field renamed and missed — cannot pass.
+2. `every_wired_flag_is_read_outside_this_module` scans every source file except
+   `settings.rs` for `prefs.<field>` and fails if a flag marked wired is read
+   nowhere else. **Four flags were marked wired in the revision before this one
+   while nothing read them**; the switch slid, the value reached the disk, and
+   the window never changed. That is the bug this test exists for.
+
+**Not done in this pass.** The panes that describe an account (Profile, Social,
+Synced settings) draw what the reference draws but act on nothing, because there
+is no Modrinth account to act through. `Privacy`'s telemetry and Discord RPC
+switches are drawn disabled: neither has an endpoint or a socket behind it. The
+`Resource management` pane's "Purge cache" and `Java installations`' detection
+follow the shell's existing behaviour rather than the reference's exact wording,
+and neither has been compared against the live app on a real display yet.

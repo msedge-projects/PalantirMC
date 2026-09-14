@@ -24,6 +24,7 @@
 //! [`gpu`]. Nothing here hardcodes a backend.
 
 mod accounts;
+mod anim;
 mod app;
 mod brand;
 mod browse;
@@ -39,6 +40,7 @@ mod native;
 mod prefs;
 mod screenshots;
 mod scroll;
+mod settings;
 mod theme;
 
 use app::{console_scroll_id, Message, PrismApp};

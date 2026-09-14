@@ -90,6 +90,20 @@ pub enum Glyph {
     Download,
     /// Filled square (stop).
     Stop,
+    /// Paintbrush (the Settings dialog's Appearance tab).
+    Paintbrush,
+    /// Light bulb (its Features tab).
+    Bulb,
+    /// A pill with a knob (its Feature flags tab).
+    Toggle,
+    /// Heart (its Social tab).
+    Heart,
+    /// Shield (its Privacy tab).
+    Shield,
+    /// Cup (its Java installations tab).
+    Coffee,
+    /// Dial (its Resource management tab).
+    Gauge,
 }
 
 impl Glyph {
@@ -125,18 +139,30 @@ impl Glyph {
             "upload" => Glyph::Upload,
             "download" | "import" => Glyph::Download,
             "stop" | "kill" | "minus" => Glyph::Stop,
+            // The Settings dialog's own tab icons. Each is a distinct glyph
+            // rather than a reuse of the rail's, because the section list sits
+            // beside the rail and two identical marks in one window read as a
+            // relationship that does not exist.
+            "paintbrush" | "brush" | "appearance" | "theme" => Glyph::Paintbrush,
+            "bulb" | "lightbulb" | "features" => Glyph::Bulb,
+            "switch" | "toggle" | "flags" => Glyph::Toggle,
+            "heart" | "social" => Glyph::Heart,
+            "shield" | "privacy" => Glyph::Shield,
+            "coffee" | "java" => Glyph::Coffee,
+            "gauge" | "resource" | "performance" => Glyph::Gauge,
             _ => Glyph::Info,
         }
     }
 
     /// Every key [`Glyph::from_name`] understands (used by the tests below).
     #[cfg(test)]
-    pub fn names() -> [&'static str; 28] {
+    pub fn names() -> [&'static str; 35] {
         [
             "play", "compass", "cube", "globe", "terminal", "sliders", "person", "info", "plus",
             "folder", "refresh", "close", "minimize", "maximize", "restore", "check", "trash",
             "edit", "copy", "chevron", "search", "upload", "download", "stop", "gear", "help",
-            "update", "image",
+            "update", "image", "paintbrush", "bulb", "switch", "heart", "shield", "coffee",
+            "gauge",
         ]
     }
 }
@@ -409,6 +435,76 @@ fn draw(frame: &mut Frame, glyph: Glyph, ink: Ink) {
             2.0,
             &[(6.6, 6.6), (17.4, 6.6), (17.4, 17.4), (6.6, 17.4), (6.6, 6.6)],
         ),
+        Glyph::Paintbrush => {
+            // A diamond head with a tapered tip, and the handle running up to
+            // the corner. The head is *filled* and the handle *stroked*, which
+            // is what separates a brush from an arrow at 16 pixels.
+            ink.fill(frame, &[(6.0, 13.6), (10.4, 9.2), (14.8, 13.6), (10.4, 18.0)]);
+            ink.fill(frame, &[(6.0, 13.6), (10.4, 18.0), (4.2, 20.4)]);
+            ink.poly(frame, 2.0, &[(13.4, 10.6), (19.6, 4.4)]);
+        }
+        Glyph::Bulb => {
+            ink.ring(frame, 1.8, 12.0, 9.6, 5.8);
+            ink.poly(frame, 1.8, &[(9.5, 14.8), (9.5, 19.6)]);
+            ink.poly(frame, 1.8, &[(14.5, 14.8), (14.5, 19.6)]);
+            // The filament, which is what stops the base reading as a plug.
+            ink.poly(frame, 1.6, &[(10.2, 17.4), (12.0, 15.2), (13.8, 17.4)]);
+            ink.poly(frame, 1.9, &[(8.8, 20.6), (15.2, 20.6)]);
+        }
+        Glyph::Toggle => {
+            // A stadium drawn as two caps and the two edges between them, with
+            // the knob at the far end: the shape of the control this marks.
+            ink.arc(frame, 1.8, 9.0, 12.0, 4.8, 90.0, 270.0);
+            ink.poly(frame, 1.8, &[(9.0, 7.2), (15.0, 7.2)]);
+            ink.arc(frame, 1.8, 15.0, 12.0, 4.8, -90.0, 90.0);
+            ink.poly(frame, 1.8, &[(15.0, 16.8), (9.0, 16.8)]);
+            ink.dot(frame, 15.0, 12.0, 2.6);
+        }
+        Glyph::Heart => ink.fill(
+            frame,
+            &[
+                (12.0, 20.6),
+                (5.0, 13.6),
+                (4.2, 10.4),
+                (5.8, 6.8),
+                (8.8, 5.2),
+                (12.0, 7.4),
+                (15.2, 5.2),
+                (18.2, 6.8),
+                (19.8, 10.4),
+                (19.0, 13.6),
+            ],
+        ),
+        Glyph::Shield => {
+            ink.poly(
+                frame,
+                1.8,
+                &[
+                    (12.0, 3.6),
+                    (19.2, 6.6),
+                    (19.2, 11.8),
+                    (12.0, 20.4),
+                    (4.8, 11.8),
+                    (4.8, 6.6),
+                    (12.0, 3.6),
+                ],
+            );
+            ink.poly(frame, 1.6, &[(8.8, 11.6), (11.2, 14.0), (15.6, 9.2)]);
+        }
+        Glyph::Coffee => {
+            ink.poly(frame, 1.9, &[(4.8, 8.8), (15.4, 8.8)]);
+            ink.poly(frame, 1.9, &[(5.8, 8.8), (6.8, 19.2), (13.4, 19.2), (14.4, 8.8)]);
+            ink.arc(frame, 1.8, 15.0, 12.6, 3.0, -75.0, 75.0);
+            ink.poly(frame, 1.6, &[(9.2, 3.0), (9.2, 6.2)]);
+            ink.poly(frame, 1.6, &[(12.4, 3.0), (12.4, 6.2)]);
+        }
+        Glyph::Gauge => {
+            // The upper half of a dial, with the needle pointing past the mark
+            // and the hub it turns on.
+            ink.arc(frame, 1.9, 12.0, 15.4, 8.0, 180.0, 360.0);
+            ink.poly(frame, 1.9, &[(12.0, 15.4), (17.2, 10.4)]);
+            ink.dot(frame, 12.0, 15.4, 1.6);
+        }
         Glyph::Restore => {
             // The two squares of the Windows "restore" icon, with only the
             // visible edges of the back one drawn so they do not overlap.
@@ -551,6 +647,25 @@ mod tests {
         // Unknown input is a neutral dot, never a panic.
         assert_eq!(Glyph::from_name(""), Glyph::Info);
         assert_eq!(Glyph::from_name("nonsense"), Glyph::Info);
+    }
+
+    #[test]
+    fn the_settings_tab_icons_are_all_distinct() {
+        // These are what the Settings dialog's section list draws, one per tab.
+        // A duplicate, or a key that fell through to the `Info` dot, would make
+        // several tabs look like the same pane.
+        let keys = [
+            "paintbrush", "bulb", "options", "globe", "switch", "person", "heart", "shield",
+            "refresh", "coffee", "gauge",
+        ];
+        let mut seen: Vec<Glyph> = Vec::new();
+        for key in keys {
+            let glyph = Glyph::from_name(key);
+            assert_ne!(glyph, Glyph::Info, "'{key}' fell through to the fallback glyph");
+            assert!(!seen.contains(&glyph), "'{key}' collides with another tab icon");
+            seen.push(glyph);
+        }
+        assert_eq!(seen.len(), 11, "one distinct icon per settings tab");
     }
 
     #[test]

@@ -755,6 +755,22 @@ pub fn option_row(_: &Theme) -> container::Appearance {
     }
 }
 
+/// A solid rounded block of one colour.
+///
+/// The switch is built from two of these rather than from a canvas: the track
+/// and the knob are both plain rounded rectangles, and painting them as
+/// containers means the colour that moves is computed by a pure function (see
+/// `settings::switch_colors`) instead of inside a draw call. Unlike a canvas
+/// this also keeps the widget tree diffable, so a switch that is not moving
+/// costs nothing at all.
+pub fn plate(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Appearance {
+    move |_: &Theme| container::Appearance {
+        background: Some(color.into()),
+        border: Border { radius: radius.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
 /// Square behind an instance icon in a card/grid.
 pub fn icon_tile(background: Color) -> impl Fn(&Theme) -> container::Appearance {
     move |_: &Theme| container::Appearance {
@@ -828,6 +844,11 @@ pub enum Role {
     WindowExternallyHovered { hovered: bool },
     /// Title-bar close control (red on hover).
     WindowClose,
+    /// One entry in the Settings dialog's section list.
+    ///
+    /// The reference's `rounded-xl px-4 py-2` row: `--color-button-bg-selected`
+    /// behind the open pane, `--color-button-bg` on hover, on a 20px radius.
+    NavItem { active: bool },
 }
 
 /// A [`button::StyleSheet`] wrapper so call sites can write
@@ -869,6 +890,11 @@ pub fn destructive() -> Btn {
 /// One color-theme choice in Settings.
 pub fn theme_card(selected: bool) -> Btn {
     Btn(Role::ThemeCard { selected })
+}
+
+/// One row of the Settings dialog's section list.
+pub fn nav_item(active: bool) -> Btn {
+    Btn(Role::NavItem { active })
 }
 /// Title-bar control.
 pub fn window_button() -> Btn {
@@ -992,6 +1018,22 @@ impl Btn {
                 background: if hovered { Some(danger().into()) } else { None },
                 text_color: if hovered { Color::WHITE } else { text_dim() },
                 border: Border { radius: 6.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::NavItem { active } => button::Appearance {
+                // Dark `--color-button-bg-selected` is `--color-brand-highlight`
+                // (the accent at 25%) carrying `--color-brand` as its text, and
+                // `--color-button-bg` is `surface-4` carrying `--color-contrast`.
+                // The row is `rounded-xl`, which is Omorphia's `--radius-xl`.
+                background: if active {
+                    Some(alpha(accent(), 0.25).into())
+                } else if hovered {
+                    Some(surface_hover().into())
+                } else {
+                    None
+                },
+                text_color: if active { accent() } else if hovered { text() } else { text_muted() },
+                border: Border { radius: R_PANE.into(), ..Default::default() },
                 ..Default::default()
             },
         };

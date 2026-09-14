@@ -57,10 +57,12 @@ use crate::launch::{
     self, open_in_file_manager, ActiveRunData, AccountRef, ChildSlot, LaunchParams,
 };
 use crate::mods::{list_content_names, list_mods, set_mod_enabled, ModEntry};
+use crate::anim;
 use crate::native::{self, ResizeEdge};
-use crate::prefs;
+use crate::prefs::{self, Prefs};
 use crate::screenshots;
 use crate::scroll;
+use crate::settings;
 use crate::theme::{self, ColorTheme};
 
 /// Maximum console lines kept in memory.
@@ -208,6 +210,10 @@ pub const CARDS_PER_ROW: usize = 2;
 /// Instance icon side inside a card.
 pub const CARD_ICON: f32 = 52.0;
 
+/// Instance icon side inside a compact card, proportionally smaller so the
+/// card's own padding is still what reads as the tighter one.
+pub const COMPACT_CARD_ICON: f32 = 40.0;
+
 /// Subscription id of the one-shot instance scan.
 pub const LOAD_ID: &str = "palantirmc-instances";
 /// Subscription id of the one-shot metadata catalog load.
@@ -251,17 +257,9 @@ const CREATE_BODY_CONFIGURE: f32 = 440.0;
 const DIALOG_WIDTH: f32 = 600.0;
 const DIALOG_MAX_HEIGHT: f32 = 560.0;
 
-/// The Settings dialog is two columns — a section list and a pane — so it is
-/// wider than the single-column dialogs, and its pane scrolls instead of growing
-/// the dialog. Both numbers are chosen to fit the 980x640 minimum window with
-/// the title bar above and the status bar below.
-const SETTINGS_DIALOG_WIDTH: f32 = 860.0;
-const SETTINGS_NAV_WIDTH: f32 = 236.0;
-const SETTINGS_PANE_HEIGHT: f32 = 404.0;
-
-/// Width of one color-theme card, so the four cards make a 2x2 grid that fills
-/// the pane exactly.
-const THEME_CARD_WIDTH: f32 = 272.0;
+// The Settings dialog's own measurements — its width, the section list's width,
+// the pane's height and the color-theme card — live in [`crate::settings`],
+// beside the panes that use them.
 
 /// Label of the ungrouped group.
 pub const UNGROUPED_LABEL: &str = instances::UNGROUPED_LABEL;
@@ -675,6 +673,38 @@ pub enum Message {
         /// Height of the visible part.
         view_height: f32,
     },
+    // ---- the Settings dialog ----
+    /// Show a different pane of the Settings dialog.
+    OpenSettingsTab(settings::Tab),
+    /// A settings switch was released. The value is flipped from the settings
+    /// file rather than carried in the message, so a click and a keyboard
+    /// activation cannot disagree about what the switch was.
+    ToggleFlag(settings::Flag),
+    /// A settings text field was typed into.
+    SettingsDraft(settings::Field, String),
+    /// The pointer arrived on a switch.
+    SwitchHover(&'static str),
+    /// The pointer left a switch.
+    SwitchLeft(&'static str),
+    /// A switch was pressed, which shrinks its knob until the release.
+    SwitchDown(&'static str),
+    /// The Feature flags search box changed.
+    FlagFilterChanged(String),
+    /// The version in the Settings footer was clicked. Six of these toggle
+    /// developer mode, which is how the reference reveals its hidden tab.
+    SettingsFooterPressed,
+    /// One frame of the dialog pane's own scroll tween.
+    SettingsWheel(scroll::Wheel),
+    /// The dialog pane's viewport moved by something other than the wheel.
+    SettingsScrolled {
+        offset: f32,
+        content_height: f32,
+        view_height: f32,
+    },
+    /// Reveal the data root in the file manager.
+    OpenDataRoot,
+    /// Delete this launcher's cached component metadata.
+    PurgeCache,
     /// Global search box.
     SearchChanged(String),
     /// Select an instance by id.
@@ -1052,12 +1082,42 @@ pub struct PrismApp {
     /// Where the pointer was when the armed patch first saw it move, so the
     /// drag waits for real movement instead of a click's jitter.
     bar_origin: Option<Point>,
+    /// This launcher's own settings, cached.
+    ///
+    /// Read from disk once and written back on every change, rather than read
+    /// per frame: the Settings dialog draws twenty switches and several panes,
+    /// and a file read behind each of them would be a disk hit per repaint.
+    prefs: Prefs,
+    /// Which pane the Settings dialog is showing.
+    settings_tab: settings::Tab,
+    /// Where the dialog's own pane is scrolled.
+    ///
+    /// Separate from `page_scroll`, because the pane sits *over* a page that is
+    /// still there: sharing one offset would open the pane wherever the library
+    /// had been left, and leave the library wherever the pane ended up.
+    settings_scroll: scroll::ScrollAnim,
+    /// Text the user is typing into a settings field, before it parses.
+    settings_drafts: std::collections::BTreeMap<settings::Field, String>,
+    /// Which switch the pointer is over, and which is held down.
+    switch_pointer: settings::Pointer,
+    /// Every switch's knob position, and the slides carrying them there.
+    switches: anim::SwitchAnim,
+    /// Filter text for the Feature flags pane.
+    flag_filter: String,
+    /// Clicks on the Settings footer's version, of which the sixth toggles
+    /// developer mode (the reference counts `> 5`).
+    footer_presses: u8,
 }
 
 impl PrismApp {
     /// Build against an explicit data root, loading instances synchronously.
     pub(crate) fn with_paths(paths: PrismPaths) -> Self {
         let (accounts, accounts_warn) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
+        // Read once and cached: the Settings dialog draws twenty switches and
+        // several panes, and a file read behind each of them would be a disk hit
+        // per repaint. Putting the stored theme in force is the entry point's
+        // job, not a constructor's — see `main`.
+        let prefs = prefs::load(&paths);
         let mut app = PrismApp {
             instances_dir: paths.configured_instances_dir(),
             paths,
@@ -1092,6 +1152,14 @@ impl PrismApp {
             last_bar_press: None,
             bar_armed: None,
             bar_origin: None,
+            prefs,
+            settings_tab: settings::Tab::Appearance,
+            settings_scroll: scroll::ScrollAnim::default(),
+            settings_drafts: std::collections::BTreeMap::new(),
+            switch_pointer: settings::Pointer::default(),
+            switches: anim::SwitchAnim::default(),
+            flag_filter: String::new(),
+            footer_presses: 0,
         };
         if let Some(warn) = accounts_warn {
             app.set_error(warn.clone());
@@ -1106,6 +1174,7 @@ impl PrismApp {
     /// resolving the data root, so the window paints immediately.
     pub(crate) fn pending(paths: PrismPaths) -> Self {
         let (accounts, _) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
+        let prefs = prefs::load(&paths);
         PrismApp {
             instances_dir: paths.configured_instances_dir(),
             paths,
@@ -1140,6 +1209,14 @@ impl PrismApp {
             last_bar_press: None,
             bar_armed: None,
             bar_origin: None,
+            prefs,
+            settings_tab: settings::Tab::Appearance,
+            settings_scroll: scroll::ScrollAnim::default(),
+            settings_drafts: std::collections::BTreeMap::new(),
+            switch_pointer: settings::Pointer::default(),
+            switches: anim::SwitchAnim::default(),
+            flag_filter: String::new(),
+            footer_presses: 0,
         }
     }
 
@@ -1452,6 +1529,20 @@ impl PrismApp {
         self.push_console(vec![format!("launch requested for '{id}'")]);
     }
 
+    /// Minimize the window for a launch that has actually started.
+    ///
+    /// The check is on `active_run` rather than on the preference alone, so
+    /// that a press which could *not* start — no instance selected, a run
+    /// already going — does not hide the window the user is still reading. The
+    /// message that explains why is on screen behind it.
+    fn minimize_for_launch(&self) -> Command<Message> {
+        if self.active_run.is_some() && self.prefs.minimize_on_launch {
+            window::minimize(window::Id::MAIN, true)
+        } else {
+            Command::none()
+        }
+    }
+
     fn kill_running(&mut self) {
         // The outcome is decided while the child slot is locked and applied
         // afterwards: holding the lock across a `self` mutation would not
@@ -1725,12 +1816,28 @@ impl PrismApp {
     /// just asked to.
     fn set_color_theme(&mut self, theme: ColorTheme) {
         theme::set_color_theme(theme);
-        match prefs::save_theme(&self.paths, theme) {
+        // The cached copy is what carries every other preference, so the theme
+        // is written through *it* rather than to the file behind its back — a
+        // separate write of one key would be undone by the next switch, which
+        // saves the whole struct.
+        self.prefs.color_theme = theme.id().to_string();
+        match prefs::save(&self.paths, &self.prefs) {
             Ok(()) => self.set_status(format!("Color theme: {}", theme.label())),
             Err(error) => self.set_error(format!(
                 "Color theme: {} (could not be saved: {error})",
                 theme.label()
             )),
+        }
+    }
+
+    /// Write the preferences, reporting a failure without undoing the change.
+    ///
+    /// A settings file that cannot be written is worth saying out loud — the
+    /// switch would appear to have taken and then be gone at the next launch —
+    /// but it is not a reason to refuse the change that was just made.
+    fn save_prefs(&mut self) {
+        if let Err(error) = prefs::save(&self.paths, &self.prefs) {
+            self.set_error(format!("Could not save settings: {error}"));
         }
     }
 
@@ -2164,17 +2271,31 @@ impl PrismApp {
                 Command::none()
             }
             Message::PageScrollTick => {
-                // One frame: ease toward the target and hand the offset to iced.
-                // `tick` lands exactly on the target, so the last frame leaves
-                // nothing to animate and the subscription stands down.
-                self.page_scroll.tick(Instant::now());
-                scrollable::scroll_to(
+                // One frame for everything that eases: the page, the Settings
+                // pane, and any switch knob still travelling. Each `tick` lands
+                // exactly on its target, so the last frame leaves nothing moving
+                // and the subscription stands down.
+                let now = Instant::now();
+                self.switches.tick(now);
+                self.page_scroll.tick(now);
+                let mut commands = vec![scrollable::scroll_to(
                     page_scroll_id(),
                     scrollable::AbsoluteOffset {
                         x: 0.0,
                         y: self.page_scroll.offset,
                     },
-                )
+                )];
+                if self.settings_scroll.animating() {
+                    self.settings_scroll.tick(now);
+                    commands.push(scrollable::scroll_to(
+                        settings::scroll_id(),
+                        scrollable::AbsoluteOffset {
+                            x: 0.0,
+                            y: self.settings_scroll.offset,
+                        },
+                    ));
+                }
+                Command::batch(commands)
             }
             Message::PageScrolled { offset, content_height, view_height } => {
                 // A scroll nobody eased. Adopting it — rather than re-applying
@@ -2183,6 +2304,141 @@ impl PrismApp {
                 // search result list grows or shrinks.
                 self.page_scroll.observe(content_height, view_height);
                 self.page_scroll.resync(offset);
+                Command::none()
+            }
+            // ---- the Settings dialog -------------------------------------
+            Message::OpenSettingsTab(tab) => {
+                if self.settings_tab != tab {
+                    self.settings_tab = tab;
+                    // The pane's scroll belongs to the pane: opening a new one
+                    // starts at the top, which is what the reference's
+                    // `forceCheck` does after a tab change.
+                    self.settings_scroll.restart();
+                    // A half-typed field belongs to the pane that was open.
+                    // Carrying the draft over would show it again the next time
+                    // that pane came up.
+                    self.settings_drafts.clear();
+                }
+                Command::none()
+            }
+            Message::ToggleFlag(flag) => {
+                // The value is flipped from the settings file rather than
+                // carried in the message, so what the switch does cannot
+                // disagree with what it was showing.
+                let value = !flag.get(&self.prefs);
+                flag.set(&mut self.prefs, value);
+                self.switches.set(flag.id(), value, Instant::now());
+                self.switch_pointer.pressed = None;
+                // A switch can take away the screen it was pressed from: with
+                // the Worlds entry hidden, being *on* Worlds would leave a page
+                // whose rail button no longer exists. Landing on Home is the
+                // one page every configuration keeps.
+                if !self.rail_shows(self.page) {
+                    self.page = Page::Home;
+                }
+                self.save_prefs();
+                Command::none()
+            }
+            Message::SettingsDraft(field, text) => {
+                // The draft is what is on screen; the setting is what has been
+                // written. They differ while a field is empty or half-typed,
+                // which is exactly why the field cannot be drawn from the
+                // setting: clearing "6" to retype it would put the 6 back under
+                // the caret.
+                field.commit(&mut self.prefs, &text);
+                self.settings_drafts.insert(field, text);
+                self.save_prefs();
+                Command::none()
+            }
+            Message::SwitchHover(id) => {
+                self.switch_pointer.hovered = settings::Flag::from_id(id);
+                Command::none()
+            }
+            Message::SwitchLeft(id) => {
+                let flag = settings::Flag::from_id(id);
+                // Only if it is still *this* switch: a leave for one switch can
+                // arrive after an enter for another, and clearing blindly would
+                // unlight the one the pointer is on.
+                if self.switch_pointer.hovered == flag {
+                    self.switch_pointer.hovered = None;
+                }
+                if self.switch_pointer.pressed == flag {
+                    self.switch_pointer.pressed = None;
+                }
+                Command::none()
+            }
+            Message::SwitchDown(id) => {
+                self.switch_pointer.pressed = settings::Flag::from_id(id);
+                Command::none()
+            }
+            Message::FlagFilterChanged(text) => {
+                self.flag_filter = text;
+                Command::none()
+            }
+            Message::SettingsFooterPressed => {
+                // `> 5`, as the reference counts it. The version is a click
+                // target rather than a button, and five clicks is short enough
+                // to find by accident, which is why it takes six.
+                self.footer_presses = self.footer_presses.saturating_add(1);
+                if self.footer_presses > 5 {
+                    self.footer_presses = 0;
+                    self.prefs.developer_mode = !self.prefs.developer_mode;
+                    let enabled = self.prefs.developer_mode;
+                    // Hiding the tab while it is the open pane would leave a
+                    // pane behind a tab that is no longer in the list.
+                    if !enabled && self.settings_tab == settings::Tab::FeatureFlags {
+                        self.settings_tab = settings::Tab::Appearance;
+                    }
+                    self.save_prefs();
+                    self.set_status(if enabled {
+                        "Developer mode enabled."
+                    } else {
+                        "Developer mode disabled."
+                    });
+                }
+                Command::none()
+            }
+            Message::SettingsWheel(wheel) => {
+                self.settings_scroll.wheel(wheel, Instant::now());
+                Command::none()
+            }
+            Message::SettingsScrolled { offset, content_height, view_height } => {
+                self.settings_scroll.observe(content_height, view_height);
+                self.settings_scroll.resync(offset);
+                Command::none()
+            }
+            Message::OpenDataRoot => {
+                let dir = match self.prefs.app_directory.as_deref() {
+                    Some(moved) if !moved.trim().is_empty() => PathBuf::from(moved),
+                    _ => self.paths.root.clone(),
+                };
+                match launch::open_in_file_manager(&dir) {
+                    Ok(()) => Command::none(),
+                    Err(error) => {
+                        self.set_error(format!("Could not open {}: {error}", dir.display()));
+                        Command::none()
+                    }
+                }
+            }
+            Message::PurgeCache => {
+                // This launcher's own cache, which is what `cache_dir` is in
+                // this tree — **not** Prism's `meta/`, which Prism itself reads
+                // and which deleting would break for the other launcher.
+                let cache = self.paths.meta_dir();
+                let result = std::fs::remove_dir_all(&cache);
+                match result {
+                    Ok(()) => {
+                        self.set_status(format!("Cache cleared: {}", cache.display()));
+                    }
+                    // A cache that was never written is not a failure, and
+                    // saying so beats reporting an error for a no-op.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        self.set_status("Cache was already empty.".to_string());
+                    }
+                    Err(error) => {
+                        self.set_error(format!("Could not clear the cache: {error}"));
+                    }
+                }
                 Command::none()
             }
             Message::Refresh => {
@@ -2208,7 +2464,7 @@ impl PrismApp {
             }
             Message::PlayInstance(id) => {
                 self.start_launch(Some(id));
-                Command::none()
+                self.minimize_for_launch()
             }
             Message::KillPressed => {
                 self.kill_running();
@@ -2321,6 +2577,9 @@ impl PrismApp {
             }
             Message::OpenSettings => {
                 self.modal = Modal::Settings;
+                // The pane's scroll belongs to the pane, so opening the dialog
+                // starts it at the top rather than wherever it was left.
+                self.settings_scroll.restart();
                 Command::none()
             }
             Message::SetColorTheme(theme) => {
@@ -2767,10 +3026,16 @@ impl PrismApp {
                 let _ = sender.try_send(Message::TaskDone(Box::new(Task::ShotsLoaded(tiles))));
             }));
         }
-        if self.page_scroll.animating() {
-            // Only while something is moving. A page that has settled asks for
-            // no frames at all — the reason this is a subscription rather than a
-            // timer the app owns.
+        if self.page_scroll.animating()
+            || self.settings_scroll.animating()
+            || self.switches.animating()
+        {
+            // Only while something is moving. A page that has settled, a pane
+            // that has stopped and a switch that has arrived all ask for no
+            // frames at all — the reason this is a subscription rather than a
+            // timer the app owns, and the reason a switch is animated at all:
+            // its slide costs frames for 200 ms after a click and nothing while
+            // the dialog sits still.
             subs.push(frame_ticks());
         }
         if self.microsoft.pending {
@@ -2876,14 +3141,20 @@ impl PrismApp {
         // step by hand.
         native::set_caption_target(caption_target());
 
-        let body = row![
+        let mut body = row![
             self.view_rail(),
             // The reference's 1px hairline between the rail and the page.
             rail_hairline(),
             self.view_content(),
-            self.view_sidebar(),
-        ]
-        .height(Length::Fill);
+        ];
+        // The panel is *not drawn* rather than drawn at zero width: an empty
+        // 320px column would move the page's right edge back and leave the
+        // window looking like it had lost its content, which is the opposite of
+        // what "hide the sidebar" asks for.
+        if !self.prefs.hide_right_sidebar {
+            body = body.push(self.view_sidebar());
+        }
+        let body = body.height(Length::Fill);
 
         let shell = column![
             self.view_title_bar(),
@@ -3027,6 +3298,23 @@ impl PrismApp {
             .into()
     }
 
+    /// Whether the rail carries an entry for `page`.
+    ///
+    /// The reference hides its instance tabs (Worlds, Files, Screenshots)
+    /// behind Display → Features, and the rail is where this shell keeps that
+    /// same set — so the switch has to reach the list the rail draws, not only
+    /// the page a click opens. Anything that hides an entry must also make sure
+    /// the page is not the one on screen, or the shell would vanish into a
+    /// panel it no longer has a way back to; [`Message::ToggleFlag`] handles
+    /// that side.
+    fn rail_shows(&self, page: Page) -> bool {
+        match page {
+            Page::Worlds => self.prefs.show_worlds_tab,
+            Page::Screenshots => self.prefs.show_screenshots_tab,
+            _ => true,
+        }
+    }
+
     /// "No instances running" / "Running <name>" chip.
     fn view_run_chip(&self) -> Element<'_, Message> {
         let (color, label) = match self.active_run.as_ref() {
@@ -3057,7 +3345,7 @@ impl PrismApp {
         // 48px button inside the 58px container.
         let mut rail =
             column![].spacing(4).padding([0, 5]).align_items(iced::Alignment::Center);
-        for page in Page::rail() {
+        for page in Page::rail().into_iter().filter(|page| self.rail_shows(*page)) {
             rail = rail.push(rail_icon(
                 page.icon(),
                 page.tooltip(),
@@ -3256,6 +3544,7 @@ impl PrismApp {
                 line = line.push(instance_card(
                     card,
                     self.selected.as_deref() == Some(card.id.as_str()),
+                    CardChrome::from_prefs(&self.prefs),
                 ));
             }
             if chunk.len() < CARDS_PER_ROW {
@@ -3974,51 +4263,35 @@ impl PrismApp {
 
     /// The launcher's own settings: a section list beside the active pane.
     ///
-    /// Laid out like the reference client's dialog — DISPLAY / ACCOUNT /
-    /// INSTANCES down the left, the pane on the right, the product version and
-    /// the OS along the bottom. Only Appearance is editable, and the rest of the
-    /// list is drawn as plain labels: a row that looks like a button but leads to
-    /// an empty pane is a bug in a button's clothes.
+    /// Every tab in the list is a real button onto a real pane. The previous
+    /// version drew ten of the eleven as plain labels, on the argument that a
+    /// button leading to an empty pane is a lie — which was true, and is why the
+    /// panes now exist rather than the labels disappearing.
     fn view_settings_dialog(&self) -> Element<'_, Message> {
-        let nav = column![
-            nav_section("DISPLAY"),
-            nav_row("sliders", "Appearance", true),
-            nav_row("info", "Features", false),
-            nav_row("compass", "Behavior", false),
-            nav_row("globe", "Language", false),
-            nav_section("ACCOUNT"),
-            nav_row("person", "Profile", false),
-            nav_row("person", "Social", false),
-            nav_row("info", "Privacy", false),
-            nav_section("INSTANCES"),
-            nav_row("refresh", "Synced settings", false),
-            nav_row("cube", "Java installations", false),
-            iced::widget::Space::with_height(Length::Fill),
-            text("Prism's own settings stay in prismlauncher.cfg.")
-                .size(10)
-                .style(iced::theme::Text::Color(theme::text_dim())),
-        ]
-        .spacing(3)
-        .padding(Padding::from([8, 10]));
-
-        let pane = scrollable(appearance_pane())
-            .style(iced::theme::Scrollable::custom(theme::Thin))
-            .height(Length::Fixed(SETTINGS_PANE_HEIGHT));
-
+        let view = settings::View {
+            prefs: &self.prefs,
+            anim: &self.switches,
+            pointer: self.switch_pointer,
+            drafts: &self.settings_drafts,
+            account: self.accounts.selected_account(),
+            flag_filter: &self.flag_filter,
+        };
         let body = row![
-            container(nav).width(Length::Fixed(SETTINGS_NAV_WIDTH)),
+            container(settings::nav(self.settings_tab, self.prefs.developer_mode))
+                .width(Length::Fixed(settings::NAV_WIDTH)),
             vertical_rule(1u16),
-            container(pane).padding([0, 18]).width(Length::Fill),
-        ]
-        .height(Length::Fixed(SETTINGS_PANE_HEIGHT + 16.0));
+            container(settings::pane(self.settings_tab, &view))
+                .padding([0, 18])
+                .width(Length::Fill),
+        ];
 
         container(column![
             modal_header("Settings"),
             body,
-            container(settings_footer()).padding([12, 22]),
+            container(settings::footer(self.prefs.developer_mode)).padding([12, 22]),
         ])
         .style(theme::modal)
-        .width(Length::Fixed(SETTINGS_DIALOG_WIDTH))
+        .width(Length::Fixed(settings::DIALOG_WIDTH))
         .max_height(DIALOG_MAX_HEIGHT)
         .into()
     }
@@ -4583,12 +4856,17 @@ impl PrismApp {
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
-            row![
-                chip(format!("{} mods", card.mods_total), theme::chip_neutral),
-                chip(card.playtime_label(), theme::chip_neutral),
-                chip(format!("{} MiB", card.max_mem_mb), theme::chip_neutral),
-            ]
-            .spacing(6),
+            {
+                let mut chips = row![chip(
+                    format!("{} mods", card.mods_total),
+                    theme::chip_neutral
+                )]
+                .spacing(6);
+                if self.prefs.show_play_time {
+                    chips = chips.push(chip(card.playtime_label(), theme::chip_neutral));
+                }
+                chips.push(chip(format!("{} MiB", card.max_mem_mb), theme::chip_neutral))
+            },
         ]
         .spacing(10);
         if let Some(problem) = &card.problem {
@@ -4916,7 +5194,52 @@ fn rail_hairline() -> Element<'static, Message> {
         .into()
 }
 
-fn instance_card(card: &InstanceCard, selected: bool) -> Element<'static, Message> {
+/// What a library card draws beyond the instance itself.
+///
+/// Two switches reach the same card, so they travel together as one value
+/// rather than as two positional `bool`s — three booleans in a row at a call
+/// site is a place where the wrong one eventually gets passed and nothing says
+/// so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CardChrome {
+    /// Draw the playtime chip.
+    show_play_time: bool,
+    /// Drop the metadata chips and tighten the card up.
+    compact: bool,
+}
+
+impl CardChrome {
+    fn from_prefs(prefs: &Prefs) -> CardChrome {
+        CardChrome { show_play_time: prefs.show_play_time, compact: prefs.compact_instance_cards }
+    }
+
+    /// Whether a given chip is drawn on the card.
+    ///
+    /// A pure function of the two switches rather than four `if`s spread
+    /// through the layout, so what "compact" *removes* is a testable claim
+    /// instead of something only a screenshot could settle.
+    fn shows(self, chip: CardChip) -> bool {
+        match chip {
+            CardChip::PlayTime => self.show_play_time,
+            CardChip::Mods | CardChip::Loader | CardChip::Group => !self.compact,
+        }
+    }
+}
+
+/// One of the metadata chips a library card can carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CardChip {
+    PlayTime,
+    Mods,
+    Loader,
+    Group,
+}
+
+fn instance_card(
+    card: &InstanceCard,
+    selected: bool,
+    chrome: CardChrome,
+) -> Element<'static, Message> {
     let body_card = card.clone();
     let name = card.name.clone();
     let subtitle = card.subtitle();
@@ -4930,40 +5253,60 @@ fn instance_card(card: &InstanceCard, selected: bool) -> Element<'static, Messag
         None
     };
 
-    let info = column![
-        text(name).size(16).font(theme::semibold()),
-        text(subtitle).size(14),
-        row![
-            chip(playtime, theme::chip_neutral),
-            chip(format!("{} mods", body_card.mods_total), theme::chip_neutral),
-            match loader_chip {
-                Some(label) => chip(label, theme::chip),
-                None => chip("Vanilla".to_string(), theme::chip_neutral),
-            },
-            match group_chip {
-                Some(group) => chip(group, theme::chip_neutral),
-                None => chip("".to_string(), theme::chip_neutral),
-            },
-        ]
-        .spacing(6),
+    // Collected before they are drawn for two reasons: the row is omitted
+    // entirely when nothing lands in it — an empty row still costs its own
+    // height and the gap above it — and because which chips are present is
+    // then a list a test can read.
+    let mut chips: Vec<(String, fn(&Theme) -> container::Appearance)> = Vec::new();
+    if chrome.shows(CardChip::PlayTime) {
+        chips.push((playtime, theme::chip_neutral));
+    }
+    if chrome.shows(CardChip::Mods) {
+        chips.push((format!("{} mods", body_card.mods_total), theme::chip_neutral));
+    }
+    if chrome.shows(CardChip::Loader) {
+        let label = loader_chip.unwrap_or_else(|| "Vanilla".to_string());
+        chips.push((label, theme::chip));
+    }
+    if chrome.shows(CardChip::Group) {
+        if let Some(group) = group_chip {
+            chips.push((group, theme::chip_neutral));
+        }
+    }
+
+    let mut info = column![
+        text(name).size(if chrome.compact { 14 } else { 16 }).font(theme::semibold()),
+        text(subtitle).size(if chrome.compact { 12 } else { 14 }),
     ]
     .spacing(5)
     .width(Length::Fill);
+    if !chips.is_empty() {
+        let mut line = row![].spacing(6);
+        for (label, style) in chips {
+            line = line.push(chip(label, style));
+        }
+        info = info.push(line);
+    }
 
-    let body = button(row![icon_tile(&body_card.icon, CARD_ICON, selected), info].spacing(12).align_items(iced::Alignment::Center))
-        .on_press(Message::SelectInstance(id))
-        .style(theme::card_area(selected))
-        .padding(10)
-        .width(Length::Fill);
+    let icon = if chrome.compact { COMPACT_CARD_ICON } else { CARD_ICON };
+    let body = button(
+        row![icon_tile(&body_card.icon, icon, selected), info]
+            .spacing(if chrome.compact { 9 } else { 12 })
+            .align_items(iced::Alignment::Center),
+    )
+    .on_press(Message::SelectInstance(id))
+    .style(theme::card_area(selected))
+    .padding(if chrome.compact { 7 } else { 10 })
+    .width(Length::Fill);
 
     let play = button(glyph("play", 16.0, theme::on_accent()))
         .on_press(Message::PlayInstance(play_id))
         .style(theme::primary())
-        .padding(12);
+        .padding(if chrome.compact { 9 } else { 12 });
 
     container(row![body, play].spacing(8).align_items(iced::Alignment::Center))
         .style(if selected { theme::card_selected } else { theme::card })
-        .padding(8)
+        .padding(if chrome.compact { 6 } else { 8 })
         .width(Length::Fill)
         .into()
 }
@@ -5214,196 +5557,6 @@ fn page_scroller<'a>(content: impl Into<Element<'a, Message>> + 'a) -> Element<'
         .style(iced::theme::Scrollable::custom(theme::Thin))
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
-}
-
-/// A group heading in the Settings dialog's section list.
-fn nav_section(label: &str) -> Element<'static, Message> {
-    container(
-        text(label.to_string())
-            .size(10)
-            .style(iced::theme::Text::Color(theme::text_dim())),
-    )
-    .padding(Padding { top: 12.0, right: 12.0, bottom: 4.0, left: 12.0 })
-    .into()
-}
-
-/// One row of the Settings dialog's section list.
-///
-/// `active` is the pane the dialog is showing. The inactive rows are labels,
-/// not buttons: there is one pane behind this list, and eight rows that did
-/// nothing when clicked would be eight lies.
-fn nav_row(icon: &str, label: &str, active: bool) -> Element<'static, Message> {
-    let color = if active { theme::accent() } else { theme::text_dim() };
-    container(
-        row![
-            glyph(icon, 15.0, color),
-            text(label.to_string())
-                .size(13)
-                .style(iced::theme::Text::Color(color)),
-        ]
-        .spacing(10)
-        .align_items(iced::Alignment::Center),
-    )
-    .style(if active { theme::nav_active } else { theme::nav_idle })
-    .padding([8, 12])
-    .width(Length::Fill)
-    .into()
-}
-
-/// The version and platform line along the bottom of the Settings dialog.
-///
-/// The reference client prints its own version and the Windows build here;
-/// both are things a user is asked for when something goes wrong, so they are
-/// read from the product and the OS rather than typed into the source.
-fn settings_footer() -> Element<'static, Message> {
-    let platform = native::windows_version().unwrap_or_else(|| std::env::consts::OS.to_string());
-    let dim = iced::theme::Text::Color(theme::text_dim());
-    row![
-        glyph("info", 16.0, theme::text_dim()),
-        column![
-            text(format!("{} {}", brand::APP_NAME, brand::version())).size(11).style(dim),
-            text(platform).size(11).style(dim),
-        ]
-        .spacing(1),
-    ]
-    .spacing(10)
-    .align_items(iced::Alignment::Center)
-    .into()
-}
-
-/// The Appearance pane: the color-theme grid, then the switch that cannot work
-/// yet.
-fn appearance_pane() -> Element<'static, Message> {
-    let current = theme::color_theme();
-    let mut cards = column![].spacing(12);
-    for couple in ColorTheme::ALL.chunks(2) {
-        let mut line = row![].spacing(12);
-        for choice in couple {
-            line = line.push(theme_choice(*choice, *choice == current));
-        }
-        cards = cards.push(line);
-    }
-
-    let dim = iced::theme::Text::Color(theme::text_muted());
-    let dimmer = iced::theme::Text::Color(theme::text_dim());
-    column![
-        text("Color theme").size(16).font(theme::bold()),
-        text(format!(
-            "Select your preferred color theme across {}.",
-            brand::APP_NAME
-        ))
-        .size(12)
-        .style(dim),
-        cards,
-        horizontal_rule(1u16),
-        row![
-            column![
-                text("Sync theme across devices").size(13).font(theme::bold()),
-                text(
-                    "Use this theme everywhere you're signed in. Turn this off to keep \
-                     a separate theme on this device."
-                )
-                .size(11)
-                .style(dim),
-                text(
-                    "Not available yet: syncing needs a Modrinth account, and this \
-                     launcher signs in to Microsoft only."
-                )
-                .size(11)
-                .style(dimmer),
-            ]
-            .spacing(3)
-            .width(Length::Fill),
-            // No `on_toggle`, so iced draws the switch disabled — which is the
-            // truth, rather than a control that silently forgets.
-            checkbox("", false).style(theme::Tick),
-        ]
-        .spacing(14)
-        .align_items(iced::Alignment::Start),
-    ]
-    .spacing(14)
-    .padding(Padding { top: 2.0, right: 2.0, bottom: 8.0, left: 2.0 })
-    .into()
-}
-
-/// One color-theme card: a miniature of the theme, then its name and a radio.
-///
-/// The miniature is painted *from that theme's palette*, not from a picture of
-/// it, so a card cannot promise something the theme does not deliver — the
-/// Light card is white because choosing Light really does paint white, and the
-/// OLED card is black because it really is black.
-fn theme_choice(choice: ColorTheme, selected: bool) -> Element<'static, Message> {
-    let palette = choice.palette();
-    let preview = container(
-        row![
-            container(text(""))
-                .width(Length::Fixed(30.0))
-                .height(Length::Fixed(30.0))
-                .style(swatch(palette.bg_rail, 8.0)),
-            column![
-                bar(96.0, 9.0, theme::alpha(palette.text, 0.85)),
-                bar(62.0, 7.0, theme::alpha(palette.text, 0.45)),
-            ]
-            .spacing(8),
-        ]
-        .spacing(12)
-        .align_items(iced::Alignment::Center),
-    )
-    .style(move |_: &Theme| container::Appearance {
-        background: Some(palette.bg.into()),
-        border: Border { radius: 8.0.into(), width: 1.0, color: palette.border },
-        ..Default::default()
-    })
-    .padding(14)
-    .width(Length::Fill)
-    .height(Length::Fixed(84.0));
-
-    let radio = container(text(""))
-        .width(Length::Fixed(15.0))
-        .height(Length::Fixed(15.0))
-        .style(move |_: &Theme| container::Appearance {
-            background: selected.then(|| theme::accent().into()),
-            border: Border {
-                radius: 999.0.into(),
-                width: 2.0,
-                color: if selected { theme::accent() } else { theme::text_dim() },
-            },
-            ..Default::default()
-        });
-
-    let label = row![
-        radio,
-        text(choice.label()).size(12).style(iced::theme::Text::Color(
-            if selected { theme::accent() } else { theme::text() }
-        )),
-    ]
-    .spacing(8)
-    .align_items(iced::Alignment::Center);
-
-    button(column![preview, label].spacing(10).width(Length::Fill))
-        .on_press(Message::SetColorTheme(choice))
-        .style(theme::theme_card(selected))
-        .padding(10)
-        .width(Length::Fixed(THEME_CARD_WIDTH))
-        .into()
-}
-
-/// A rounded color plate, for the miniature's sidebar block.
-fn swatch(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Appearance {
-    move |_: &Theme| container::Appearance {
-        background: Some(color.into()),
-        border: Border { radius: radius.into(), ..Default::default() },
-        ..Default::default()
-    }
-}
-
-/// One line of fake text in a theme miniature.
-fn bar(width: f32, height: f32, color: Color) -> Element<'static, Message> {
-    container(text(""))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .style(swatch(color, height / 2.0))
         .into()
 }
 
@@ -6074,12 +6227,179 @@ mod tests {
         let original = theme::color_theme();
         // Building the pane is the test: each card paints its own palette, so
         // a theme whose colors were never resolved would fail to construct.
+        // The card's own geometry is checked in `settings`, where the pane now
+        // lives; this is the app-level check that the dialog reaches it.
         for theme in ColorTheme::ALL {
             theme::set_color_theme(theme);
-            let pane: Element<'_, Message> = appearance_pane();
-            let _ = pane;
+            let (_dir, paths) = test_paths();
+            let mut app = PrismApp::with_paths(paths);
+            let _ = app.update(Message::OpenSettings);
+            let _ = app.update(Message::OpenSettingsTab(settings::Tab::Appearance));
+            let dialog: Element<'_, Message> = app.view_settings_dialog();
+            let _ = dialog;
         }
         theme::set_color_theme(original);
+    }
+
+    #[test]
+    fn every_settings_tab_opens_a_pane_without_a_panic() {
+        // The dialog's whole surface, reached through the real messages rather
+        // than by calling the pane directly: a tab that is in the list but not
+        // in `pane`'s match, or a pane that panics on a fresh profile, is a
+        // blank dialog for the user and nothing at all in the type system.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+        let _ = app.update(Message::OpenSettings);
+        for tab in settings::Tab::ALL {
+            let _ = app.update(Message::OpenSettingsTab(tab));
+            assert_eq!(app.settings_tab, tab, "{} did not open", tab.label());
+            let dialog: Element<'_, Message> = app.view_settings_dialog();
+            let _ = dialog;
+        }
+        // And the hidden one is reachable, but only once developer mode is on.
+        let _ = app.update(Message::OpenSettingsTab(settings::Tab::FeatureFlags));
+        for _ in 0..6 {
+            let _ = app.update(Message::SettingsFooterPressed);
+        }
+        assert!(app.prefs.developer_mode, "six presses should reveal the hidden tab");
+        assert_eq!(app.settings_tab, settings::Tab::FeatureFlags);
+        // Hiding it again must not leave the hidden pane on screen.
+        for _ in 0..6 {
+            let _ = app.update(Message::SettingsFooterPressed);
+        }
+        assert!(!app.prefs.developer_mode);
+        assert_eq!(app.settings_tab, settings::Tab::Appearance, "the hidden pane stayed open");
+    }
+
+    #[test]
+    fn a_switch_flips_its_setting_and_remembers_it() {
+        // The whole path a click takes: the message, the cached prefs, the disk,
+        // and the animation that draws it. A switch that only moved would pass
+        // any check that looked at the view alone.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+        assert!(app.prefs.show_files_tab, "the shipped default");
+
+        let _ = app.update(Message::ToggleFlag(settings::Flag::ShowFilesTab));
+        assert!(!app.prefs.show_files_tab);
+        assert!(!prefs::load(&paths).show_files_tab, "the change did not reach the disk");
+        assert!(app.switches.animating(), "the switch should be sliding");
+
+        // And it survives a restart, which is the only thing that makes it a
+        // preference rather than a temporary lie.
+        let reopened = PrismApp::with_paths(paths);
+        assert!(!reopened.prefs.show_files_tab);
+    }
+
+    #[test]
+    fn a_switch_that_hides_a_page_leaves_it_before_it_can_hide_it() {
+        // The failure this pins: turning the Worlds entry off *while on*
+        // Worlds would leave the shell drawing a page whose only route was the
+        // rail button that just went, with no way back to anything else.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+
+        let _ = app.update(Message::PageSelected(Page::Worlds));
+        assert_eq!(app.page, Page::Worlds);
+        assert!(app.rail_shows(Page::Worlds));
+
+        let _ = app.update(Message::ToggleFlag(settings::Flag::ShowWorldsTab));
+        assert!(!app.rail_shows(Page::Worlds));
+        assert_eq!(app.page, Page::Home, "the hidden page stayed on screen");
+        // The switch next to it is not this switch's business.
+        assert!(app.rail_shows(Page::Screenshots));
+
+        // And the entry comes back with the switch, which is what makes the
+        // fallback a detour rather than a one-way door.
+        let _ = app.update(Message::ToggleFlag(settings::Flag::ShowWorldsTab));
+        assert!(app.rail_shows(Page::Worlds));
+    }
+
+    #[test]
+    fn the_card_switches_remove_exactly_what_they_say_they_remove() {
+        // The switches reach the card through `CardChrome`, so what "compact"
+        // takes away is a claim that can be read here instead of only being
+        // visible in a screenshot.
+        let shipped = CardChrome::from_prefs(&Prefs::default());
+        assert!(!shipped.shows(CardChip::PlayTime), "playtime ships hidden");
+        assert!(shipped.shows(CardChip::Mods));
+
+        let played = CardChrome { show_play_time: true, compact: false };
+        assert!(played.shows(CardChip::PlayTime));
+        assert!(played.shows(CardChip::Loader) && played.shows(CardChip::Group));
+
+        let compact = CardChrome { show_play_time: false, compact: true };
+        for chip in [CardChip::Mods, CardChip::Loader, CardChip::Group] {
+            assert!(!compact.shows(chip), "compact left {chip:?} on the card");
+        }
+        // Compact is not "everything off": the playtime chip belongs to the
+        // other switch and must survive on its own.
+        let both = CardChrome { show_play_time: true, compact: true };
+        assert!(both.shows(CardChip::PlayTime));
+    }
+
+    #[test]
+    fn a_settings_field_keeps_what_is_being_typed_and_writes_what_parses() {
+        // The draft is what is on screen; the setting is what has been written.
+        // Without the draft, clearing a number to retype it would put the old
+        // value back under the caret.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths.clone());
+
+        let _ = app.update(Message::SettingsDraft(settings::Field::ConcurrentDownloads, String::new()));
+        assert_eq!(
+            app.settings_drafts.get(&settings::Field::ConcurrentDownloads).map(String::as_str),
+            Some(""),
+            "an empty field must show as empty, not snap back to the default"
+        );
+        assert_eq!(
+            app.prefs.concurrent_downloads(),
+            prefs::DEFAULT_CONCURRENT_DOWNLOADS,
+            "an empty field must not have been written"
+        );
+
+        let _ = app.update(Message::SettingsDraft(
+            settings::Field::ConcurrentDownloads,
+            "9".to_string(),
+        ));
+        assert_eq!(app.prefs.concurrent_downloads(), 9);
+        assert_eq!(prefs::load(&paths).concurrent_downloads(), 9, "it did not reach the disk");
+    }
+
+    #[test]
+    fn the_settings_pane_has_its_own_scroll() {
+        // The pane sits over a page that is still there. Sharing one offset
+        // would open the pane wherever the library was left and leave the
+        // library wherever the pane ended up.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PrismApp::with_paths(paths);
+
+        let _ = app.update(Message::PageWheel(scroll::Wheel {
+            notches: -3.0,
+            content_height: 4_000.0,
+            view_height: 400.0,
+        }));
+        assert!(app.scroll_state().animating());
+
+        let _ = app.update(Message::SettingsWheel(scroll::Wheel {
+            notches: -1.0,
+            content_height: 4_000.0,
+            view_height: 400.0,
+        }));
+        assert!(app.settings_scroll.animating());
+
+        // Opening a tab starts the pane at the top, and leaves the page alone.
+        let page_before = app.scroll_state().target;
+        let _ = app.update(Message::OpenSettingsTab(settings::Tab::Java));
+        assert_eq!(app.settings_scroll.offset, 0.0, "the pane did not start at the top");
+        assert_eq!(app.settings_scroll.target, 0.0);
+        assert!(!app.settings_scroll.animating());
+        assert_eq!(app.scroll_state().target, page_before, "the page scroll moved with the pane");
     }
 
     fn test_paths() -> (tempfile::TempDir, PrismPaths) {
