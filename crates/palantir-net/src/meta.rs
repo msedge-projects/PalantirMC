@@ -43,6 +43,25 @@ pub trait Fetcher: Sync {
     /// [`crate::Error::Http`] (or [`crate::Error::Io`] for cache-adjacent
     /// failures) on any transport problem.
     fn fetch(&self, url: &str) -> Result<Vec<u8>, crate::Error>;
+
+    /// Fetch `url`, writing the body into `sink`, and return how many bytes
+    /// went in.
+    ///
+    /// This is the shape a bulk download wants, and the default is the plain
+    /// one: fetch the body, then write all of it. [`BlockingHttpFetcher`]
+    /// overrides it to stream the response straight into `sink` instead, which
+    /// is what keeps a launcher's footprint flat while it fetches eight files
+    /// at once. Holding bodies whole costs `2 x threads x file size`: the
+    /// largest library this index installs is 37 MB, and eight of those in
+    /// flight is what put this launcher into the hundreds of megabytes during a
+    /// first install.
+    fn fetch_to(&self, url: &str, sink: &mut dyn std::io::Write) -> Result<u64, crate::Error> {
+        let bytes = self.fetch(url)?;
+        sink.write_all(&bytes)
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
+        u64::try_from(bytes.len())
+            .map_err(|_| crate::Error::http(url, format!("body too large ({} bytes)", bytes.len())))
+    }
 }
 
 /// Blocking HTTP fetcher backed by `reqwest`.
@@ -74,10 +93,13 @@ impl BlockingHttpFetcher {
     fn from_client(client: reqwest::blocking::Client, timeout: Duration) -> Self {
         BlockingHttpFetcher { client, timeout }
     }
-}
 
-impl Fetcher for BlockingHttpFetcher {
-    fn fetch(&self, url: &str) -> Result<Vec<u8>, crate::Error> {
+    /// Send a `GET`, turning a transport problem or a non-success status into
+    /// [`crate::Error::Http`].
+    ///
+    /// Shared by both body shapes so a 404 is reported the same way whether the
+    /// caller wanted the bytes or a stream of them.
+    fn get(&self, url: &str) -> Result<reqwest::blocking::Response, crate::Error> {
         let response = self
             .client
             .get(url)
@@ -88,7 +110,28 @@ impl Fetcher for BlockingHttpFetcher {
         if !status.is_success() {
             return Err(crate::Error::http(url, format!("http status {status}")));
         }
-        response.bytes().map(|b| b.to_vec()).map_err(|e| crate::Error::http(url, e.to_string()))
+        Ok(response)
+    }
+}
+
+impl Fetcher for BlockingHttpFetcher {
+    fn fetch(&self, url: &str) -> Result<Vec<u8>, crate::Error> {
+        self.get(url)?
+            .bytes()
+            .map(|b| b.to_vec())
+            .map_err(|e| crate::Error::http(url, e.to_string()))
+    }
+
+    /// Stream the body into `sink`, never holding more than one chunk of it.
+    ///
+    /// `copy_to` is `reqwest`'s own loop over the response reader, so the
+    /// timeout above still governs the request and a truncated transfer still
+    /// surfaces as [`crate::Error::Http`].
+    fn fetch_to(&self, url: &str, sink: &mut dyn std::io::Write) -> Result<u64, crate::Error> {
+        let mut response = self.get(url)?;
+        response
+            .copy_to(sink)
+            .map_err(|e| crate::Error::http(url, e.to_string()))
     }
 }
 

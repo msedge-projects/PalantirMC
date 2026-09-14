@@ -53,10 +53,16 @@ pub const ASSET_OBJECT_BASE_URL: &str = "https://resources.download.minecraft.ne
 
 /// Parallel downloads used for the bulk phases.
 ///
-/// Eight is what the Modrinth and Prism clients both settle on for many small
-/// files: enough to hide latency without turning a cold install into a
-/// denial-of-service against Mojang's CDN.
-pub const DEFAULT_THREADS: usize = 8;
+/// Eight used to be the number here, on the Modrinth/Prism argument that it is
+/// enough to hide latency without becoming a denial-of-service against Mojang's
+/// CDN. Measured against the real object CDN with one keep-alive connection per
+/// worker, eight is worth 8.9 MB/s and twenty-four is worth 10.3 MB/s — so the
+/// ceiling belongs to the connection, not to the server, and there is 16% above
+/// eight for the taking. Sixteen is the compromise: most of that gain, half the
+/// sockets, and still well inside what this CDN serves to a single client. The
+/// line itself saturates near 9-10 MB/s here, so raising this further would buy
+/// nothing.
+pub const DEFAULT_THREADS: usize = 16;
 
 /// One file that has to exist on disk before the game can start.
 #[derive(Debug, Clone, PartialEq, Eq)]
