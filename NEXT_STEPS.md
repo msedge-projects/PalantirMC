@@ -1231,3 +1231,65 @@ machine's `.minecraft` already holds **4227 of those 5057 objects**, so an
 install able to adopt an existing store would move **122 MB** instead of 458 MB.
 That is a product decision — whose files to trust, and what to say when it uses
 them — rather than a tuning one, which is why it is not in this change.
+
+## 21. The launch gets a bar of its own, and stops hiding the window
+
+Two things a launch still did to the person watching it. It minimized the window
+the moment Play was pressed, and everything it had to say after the install —
+signing in, resolving a version, unpacking a JRE, waiting for the JVM — was a
+console line in a scrollback nobody was reading.
+
+### The minimize was a default, not a decision
+
+`minimize_on_launch` shipped `true`, so the window left at exactly the moment a
+first install of 458 MB began, which is the one time it is worth watching. It
+defaults to `false` now and the switch stays in Behavior for anyone who wants the
+desktop back while a game loads. Nothing needed migrating: a preferences file
+exists only once a setting has been written, and this one had never been.
+
+### A launch reports as a level too
+
+`install::Progress` gained `starting(label)`: the same shape as a phase report
+with a flag saying there is no total to be a fraction of. A bar cannot answer
+how far along *signing in* is, and inventing a percentage is the one place this
+launcher's progress would lie, so both views answer
+`Progress::is_indeterminate()` with a **sliding segment** instead of a fill. That
+segment is a canvas widget in `glyphs` beside the icon drawing; `slide_offset` is
+the whole rule and it *wraps* rather than clamping, so the segment comes back on
+the other side instead of sticking at the end.
+
+Three levels make the launch's bar, each sent from where the launcher actually
+reaches it:
+
+| level | sent when | what it replaces |
+| --- | --- | --- |
+| `preparing '<instance>'` | the worker starts | nothing — the sign-in and resolve block was console-only |
+| the install phases | as before | unchanged: they report their own finer levels over the top |
+| `starting '<instance>'` | the plan is ready, the JVM about to spawn | `spawning '…'` and `process started, streaming output…` |
+
+### The bar has to end, and that is the careful part
+
+`Message::LaunchStarted` ends it, sent when the game's *own output* says its
+window is up: `Backend library:`, `OpenGL Version:`, `OpenGL Renderer:`,
+`Sound engine started`, `Created: ` — graphics and sound lines that all run after
+the window exists. The exact alternative is to ask Windows whether the child
+process owns a visible window; that is FFI in the one path with no fixtures,
+where the log states the same fact in a form a test can pin down.
+
+The failure mode was chosen on purpose. A version that renames all five markers
+leaves the bar travelling until the process exits — honest for too long — where
+matching the loader's bootstrap lines would clear it while the player is still
+waiting, which is a bar that lies early. It is a separate message from
+`LaunchDone` because it is a third kind of fact: not a line that happened, not a
+level that keeps changing, but the end of the waiting.
+
+The tick that moves the segment is the same thread-and-channel shape as the
+scroll tween's frames, and it is asked for only while a bar with no total is on
+screen — twelve and a half ticks a second, none during a determinate phase and
+none once the game is up. The phase lives in the app state rather than being
+read from the clock, so the drawing stays a function of state and the tests can
+move it.
+
+Still unverified, and only the desktop can say: that the segment visibly
+slides, and that a launch now leaves the window where it is. CI compiles and
+tests this; it cannot watch either one.
