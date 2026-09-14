@@ -15,13 +15,33 @@
 //!   lets [`AccountEntry::needs_refresh`] decide — before a launch, not during
 //!   one — that the session has to be renewed.
 //!
-//! The on-disk shape is `{selected, list[]}`. Fields added after the first
-//! release all carry `#[serde(default)]`, so an `accounts.json` written by an
-//! earlier build still loads (its entries are simply offline accounts) and a
-//! file written by this one remains readable by that build, which ignores the
-//! keys it does not know.
+//! **The file is the other launcher's, not ours.** It sits at the data root
+//! beside the instances, and Prism reads it on every start, so this launcher
+//! reads *and writes* Prism's shape — `formatVersion` 3:
+//!
+//! ```json
+//! { "accounts": [ { "type": "MSA", "active": true,
+//!                   "profile": { "id": "<32 hex>", "name": "Steve" },
+//!                   "ygg": { "token": "<game token>", "exp": 1789405992 },
+//!                   "msa": { "refresh_token": "…" },
+//!                   "entitlement": { "ownsMinecraft": true, "canPlayMinecraft": true } } ],
+//!   "formatVersion": 3 }
+//! ```
+//!
+//! Two reasons, and the second is the serious one: an account already in that
+//! file signs the user in on the first run, which is most of what makes adopting
+//! an existing install worth anything — and a launcher that wrote *its own*
+//! shape over that file would sign the user out of the other launcher and drop
+//! the token chain it needs. So the parsed document is kept whole and only the
+//! fields this launcher owns are patched, which leaves capes, skins, the Xbox
+//! chain and the per-account client id exactly as they were.
+//!
+//! A file written by an earlier build of *this* launcher (`{selected, list[]}`)
+//! still loads — its entries come back as offline accounts, tokens and all — and
+//! is rewritten in the shared shape, so nobody loses a sign-in to the change.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 /// How an account authenticates.
@@ -201,15 +221,209 @@ fn md5_bytes(data: &[u8]) -> [u8; 16] {
     hasher.finalize().into()
 }
 
-/// On-disk document shape.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-struct AccountsDoc {
-    /// Uuid of the selected account, if any.
-    #[serde(default)]
-    selected: Option<String>,
-    /// Known accounts.
-    #[serde(default)]
-    list: Vec<AccountEntry>,
+/// The `formatVersion` this launcher writes: the other launcher's MSA-era file.
+pub const ACCOUNTS_FORMAT_VERSION: i64 = 3;
+
+/// A fresh document in the shared shape.
+fn empty_document() -> Value {
+    json!({ "accounts": [], "formatVersion": ACCOUNTS_FORMAT_VERSION })
+}
+
+/// One account out of the file, whichever of the two shapes it came from.
+///
+/// Returns `None` for an object with no name at all: there is nothing to show
+/// and nothing to sign in as, and inventing one would put a blank row in the
+/// accounts list.
+fn entry_from_object(object: &Value) -> Option<AccountEntry> {
+    let text = |value: &Value| {
+        value.as_str().map(str::to_string).filter(|text| !text.trim().is_empty())
+    };
+    let kind = match object["type"].as_str() {
+        Some(kind) if kind.eq_ignore_ascii_case("msa") => AccountKind::Msa,
+        // The shape this launcher wrote before it read the shared one.
+        Some(kind) if kind.eq_ignore_ascii_case("offline") => AccountKind::Offline,
+        // A file carrying the token blocks but no usable `type` is an MSA
+        // account as far as anything here is concerned: only an online account
+        // has an `msa`/`ygg` block to carry.
+        _ if object.get("msa").is_some() || object.get("ygg").is_some() => AccountKind::Msa,
+        _ => AccountKind::Offline,
+    };
+    let kind = match object["kind"].as_str() {
+        Some(legacy) if legacy.eq_ignore_ascii_case("msa") => AccountKind::Msa,
+        Some(legacy) if legacy.eq_ignore_ascii_case("offline") => AccountKind::Offline,
+        _ => kind,
+    };
+    let username = text(&object["profile"]["name"])
+        .or_else(|| text(&object["ygg"]["extra"]["userName"]))
+        .or_else(|| text(&object["username"]))?;
+    // `profile.id` is the profile UUID as 32 hex digits with no dashes, which is
+    // the form this launcher uses everywhere else.
+    let uuid = text(&object["profile"]["id"])
+        .or_else(|| text(&object["uuid"]))
+        .unwrap_or_default();
+    Some(AccountEntry {
+        username,
+        uuid: uuid.to_lowercase(),
+        kind,
+        access_token: text(&object["ygg"]["token"]).or_else(|| text(&object["access_token"])),
+        refresh_token: text(&object["msa"]["refresh_token"])
+            .or_else(|| text(&object["refresh_token"])),
+        // `ygg.exp` is in **seconds**; every expiry this launcher holds is in
+        // milliseconds.
+        expires_at_ms: object["ygg"]["exp"]
+            .as_i64()
+            .map(|seconds| seconds.saturating_mul(1000))
+            .or_else(|| object["expires_at_ms"].as_i64()),
+        entitled: object["entitlement"]["ownsMinecraft"]
+            .as_bool()
+            .or_else(|| object["entitled"].as_bool()),
+    })
+}
+
+/// The accounts in a parsed shared document, and which one is active.
+fn entries_from_document(document: &Value) -> (Option<String>, Vec<AccountEntry>) {
+    let mut list: Vec<AccountEntry> = Vec::new();
+    let mut selected: Option<String> = None;
+    for object in document["accounts"].as_array().into_iter().flatten() {
+        let Some(entry) = entry_from_object(object) else {
+            continue;
+        };
+        if object["active"].as_bool().unwrap_or(false) && selected.is_none() {
+            selected = Some(entry.uuid.clone());
+        }
+        list.push(entry);
+    }
+    (selected, list)
+}
+
+/// The accounts in the `{selected, list[]}` document an earlier build of *this*
+/// launcher wrote. Read, never written.
+fn entries_from_legacy_document(document: &Value) -> (Option<String>, Vec<AccountEntry>) {
+    let selected = document["selected"].as_str().map(str::to_string);
+    let list: Vec<AccountEntry> = document["list"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(entry_from_object)
+        .collect();
+    (selected, list)
+}
+
+/// Whether an object in the file is `entry`.
+///
+/// The profile id decides; the name is the fallback, for an account the user
+/// signed into a build that wrote no id.
+fn same_account(object: &Value, entry: &AccountEntry) -> bool {
+    let id = object["profile"]["id"].as_str().or_else(|| object["uuid"].as_str());
+    if let Some(id) = id {
+        if id.eq_ignore_ascii_case(&entry.uuid) {
+            return true;
+        }
+    }
+    object["profile"]["name"].as_str().or_else(|| object["username"].as_str())
+        == Some(entry.username.as_str())
+}
+
+/// Write the fields this launcher owns onto an account object, in place.
+///
+/// Everything else in the object is left exactly as it was — that is the whole
+/// point: the object belongs to the other launcher, and this one is only
+/// updating the tokens it just minted.
+fn write_entry(object: &mut Value, entry: &AccountEntry, active: bool) {
+    let Some(map) = object.as_object_mut() else {
+        return;
+    };
+    map.insert(
+        "type".to_string(),
+        json!(if entry.is_microsoft() { "MSA" } else { "Offline" }),
+    );
+    map.insert("active".to_string(), json!(active));
+
+    // `profile` is patched rather than replaced, so a cape, a skin and its
+    // `data` blob survive.
+    {
+        let profile = map.entry("profile".to_string()).or_insert_with(|| json!({}));
+        if !profile.is_object() {
+            *profile = json!({});
+        }
+        if let Some(profile) = profile.as_object_mut() {
+            profile.insert("id".to_string(), json!(entry.uuid));
+            profile.insert("name".to_string(), json!(entry.username));
+        }
+    }
+
+    match entry.access_token.as_deref() {
+        Some(token) => {
+            let ygg = map.entry("ygg".to_string()).or_insert_with(|| json!({}));
+            if !ygg.is_object() {
+                *ygg = json!({});
+            }
+            if let Some(ygg) = ygg.as_object_mut() {
+                ygg.insert("token".to_string(), json!(token));
+                match entry.expires_at_ms {
+                    // Seconds on disk, milliseconds here: the file's shape is the
+                    // other launcher's and is not negotiable.
+                    Some(millis) => {
+                        ygg.insert("exp".to_string(), json!(millis / 1000));
+                    }
+                    None => {
+                        ygg.remove("exp");
+                    }
+                }
+            }
+        }
+        None => {
+            map.remove("ygg");
+        }
+    }
+
+    if let Some(refresh) = entry.refresh_token.as_deref() {
+        let msa = map.entry("msa".to_string()).or_insert_with(|| json!({}));
+        if !msa.is_object() {
+            *msa = json!({});
+        }
+        if let Some(msa) = msa.as_object_mut() {
+            msa.insert("refresh_token".to_string(), json!(refresh));
+        }
+        // Which Azure application the refresh token belongs to is what the
+        // launcher reading this needs in order to renew it. The tokens this one
+        // mints come from the same public client id the reference uses, so that
+        // is what is recorded — and an account that already names one keeps it.
+        map.entry("msa-client-id".to_string())
+            .or_insert_with(|| json!(palantir_net::DEFAULT_MICROSOFT_CLIENT_ID));
+    }
+
+    if entry.is_microsoft() {
+        match entry.entitled {
+            Some(entitled) => {
+                map.insert(
+                    "entitlement".to_string(),
+                    json!({ "ownsMinecraft": entitled, "canPlayMinecraft": entitled }),
+                );
+            }
+            // Not answered is not "no": saying it here would tell the other
+            // launcher the user does not own the game.
+            None => {
+                map.remove("entitlement");
+            }
+        }
+    } else {
+        map.remove("entitlement");
+    }
+
+    // Keys this launcher's own earlier shape used, so a rewritten file does not
+    // carry two names for one thing.
+    for legacy in [
+        "username",
+        "uuid",
+        "kind",
+        "access_token",
+        "refresh_token",
+        "expires_at_ms",
+        "entitled",
+    ] {
+        map.remove(legacy);
+    }
 }
 
 /// In-memory store bound to one `accounts.json` path.
@@ -218,6 +432,9 @@ pub struct AccountsStore {
     path: PathBuf,
     selected: Option<String>,
     list: Vec<AccountEntry>,
+    /// The file as it was parsed, so a save keeps every field this launcher does
+    /// not model.
+    document: Value,
 }
 
 impl AccountsStore {
@@ -225,24 +442,49 @@ impl AccountsStore {
     /// warning; a corrupt file yields an empty store plus a warning message
     /// (never an error: the launcher must keep working).
     pub fn load_with_report(path: &Path) -> (Self, Option<String>) {
+        let empty = |document: Value| AccountsStore {
+            path: path.to_path_buf(),
+            selected: None,
+            list: Vec::new(),
+            document,
+        };
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
-            Err(_) => {
+            Err(_) => return (empty(empty_document()), None),
+        };
+        let parsed: Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(error) => {
                 return (
-                    AccountsStore { path: path.to_path_buf(), selected: None, list: Vec::new() },
-                    None,
-                );
+                    empty(empty_document()),
+                    Some(format!("accounts file is corrupt, starting empty: {error}")),
+                )
             }
         };
-        match serde_json::from_slice::<AccountsDoc>(&bytes) {
-            Ok(doc) => (
-                AccountsStore { path: path.to_path_buf(), selected: doc.selected, list: doc.list },
+        if parsed.get("accounts").is_some() || parsed.get("formatVersion").is_some() {
+            let (selected, list) = entries_from_document(&parsed);
+            (
+                AccountsStore { path: path.to_path_buf(), selected, list, document: parsed },
                 None,
-            ),
-            Err(e) => (
-                AccountsStore { path: path.to_path_buf(), selected: None, list: Vec::new() },
-                Some(format!("accounts file is corrupt, starting empty: {e}")),
-            ),
+            )
+        } else if parsed.get("list").is_some() {
+            // An earlier build of this launcher. Its accounts are read, and the
+            // document starts empty so the next save writes the shared shape.
+            let (selected, list) = entries_from_legacy_document(&parsed);
+            (
+                AccountsStore {
+                    path: path.to_path_buf(),
+                    selected,
+                    list,
+                    document: empty_document(),
+                },
+                None,
+            )
+        } else {
+            (
+                empty(empty_document()),
+                Some("accounts file does not look like an accounts file, starting empty".to_string()),
+            )
         }
     }
 
@@ -281,12 +523,37 @@ impl AccountsStore {
         self.list.iter().find(|a| a.uuid == uuid)
     }
 
-    /// Persist to disk (creating parent directories as needed).
+    /// Persist to disk in the shared shape (creating parent directories as
+    /// needed).
+    ///
+    /// Every account object already in the file is carried over field for field
+    /// and only what this launcher owns is written onto it, so signing in here
+    /// does not sign the user out there.
     pub fn save(&self) -> Result<(), String> {
-        let doc = AccountsDoc { selected: self.selected.clone(), list: self.list.clone() };
-        let text = match serde_json::to_string_pretty(&doc) {
+        let mut document = if self.document.is_object() {
+            self.document.clone()
+        } else {
+            empty_document()
+        };
+        let existing: Vec<Value> = document["accounts"].as_array().cloned().unwrap_or_default();
+        let mut accounts: Vec<Value> = Vec::with_capacity(self.list.len());
+        for entry in &self.list {
+            let mut object = existing
+                .iter()
+                .find(|object| same_account(object, entry))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            if !object.is_object() {
+                object = json!({});
+            }
+            write_entry(&mut object, entry, self.selected.as_deref() == Some(entry.uuid.as_str()));
+            accounts.push(object);
+        }
+        document["accounts"] = Value::Array(accounts);
+        document["formatVersion"] = json!(ACCOUNTS_FORMAT_VERSION);
+        let text = match serde_json::to_string_pretty(&document) {
             Ok(text) => text,
-            Err(e) => return Err(format!("serializing accounts: {e}")),
+            Err(error) => return Err(format!("serializing accounts: {error}")),
         };
         if let Some(parent) = self.path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
@@ -434,13 +701,153 @@ mod tests {
         assert_eq!(back.selected_uuid(), Some(alex.as_str()));
         assert_eq!(back.selected_account().map(|a| a.username.as_str()), Some("Alex"));
 
-        // Raw document has the required shape.
+        // The raw document is the *shared* shape, and says which account is
+        // active the way the other launcher reads it.
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert!(raw.get("selected").is_some());
-        assert_eq!(raw["list"].as_array().unwrap().len(), 2);
-        assert!(raw["list"][0].get("username").is_some());
-        assert!(raw["list"][0].get("uuid").is_some());
+        assert_eq!(raw["formatVersion"], serde_json::json!(ACCOUNTS_FORMAT_VERSION));
+        assert_eq!(raw["accounts"].as_array().unwrap().len(), 2);
+        assert_eq!(raw["accounts"][0]["profile"]["name"], serde_json::json!("Steve"));
+        assert_eq!(raw["accounts"][1]["profile"]["name"], serde_json::json!("Alex"));
+        assert_eq!(raw["accounts"][0]["active"], serde_json::json!(false));
+        assert_eq!(raw["accounts"][1]["active"], serde_json::json!(true));
+        assert_eq!(raw["accounts"][1]["type"], serde_json::json!("Offline"));
+        assert!(
+            raw["accounts"][1]["profile"]["id"].as_str().is_some(),
+            "an account is named by its profile id: {raw}"
+        );
+    }
+
+    /// A file in the shape the other launcher writes, including the parts this
+    /// launcher does not model.
+    fn prism_accounts_file() -> serde_json::Value {
+        serde_json::json!({
+            "accounts": [
+                {
+                    "active": true,
+                    "entitlement": {"canPlayMinecraft": true, "ownsMinecraft": true},
+                    "msa": {
+                        "exp": 1789323188,
+                        "extra": {"ext_expires_in": 3599},
+                        "iat": 1789319589,
+                        "refresh_token": "M.C555_refresh"
+                    },
+                    "msa-client-id": "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb",
+                    "profile": {
+                        "cape": "b9d4f2e0-6109-43f7-97aa-84250ce3c1dd",
+                        "id": "119bed4a98cd44b399434000dacd244c",
+                        "name": "WSedge",
+                        "skin": {"id": "s1", "url": "http://textures/skin", "variant": "classic"}
+                    },
+                    "type": "MSA",
+                    "xrp-mc": {"exp": 1789377191, "iat": 1789319591, "token": "xbox-token"},
+                    "ygg": {"exp": 1789405992, "iat": 1789319592, "token": "game-token"}
+                },
+                {
+                    "active": false,
+                    "profile": {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "Second"},
+                    "type": "Offline"
+                }
+            ],
+            "formatVersion": 3
+        })
+    }
+
+    #[test]
+    fn an_account_the_other_launcher_saved_signs_the_user_in_here() {
+        // The whole point of sharing the file: somebody who already has an
+        // account is signed in on the first run of this launcher, with the
+        // Minecraft token and the refresh token and the expiry in seconds the
+        // other launcher wrote.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("accounts.json");
+        std::fs::write(&path, prism_accounts_file().to_string()).unwrap();
+
+        let (store, warn) = AccountsStore::load_with_report(&path);
+        assert!(warn.is_none(), "{warn:?}");
+        assert_eq!(store.list().len(), 2);
+        let account = store.selected_account().expect("the active account is selected");
+        assert_eq!(account.username, "WSedge");
+        assert_eq!(account.uuid, "119bed4a98cd44b399434000dacd244c");
+        assert!(account.is_microsoft());
+        assert_eq!(account.access_token.as_deref(), Some("game-token"));
+        assert_eq!(account.refresh_token.as_deref(), Some("M.C555_refresh"));
+        assert_eq!(account.expires_at_ms, Some(1_789_405_992_000), "seconds became milliseconds");
+        assert_eq!(account.entitled, Some(true));
+        // `active` is the selection, not `active` plus a separate key.
+        assert_eq!(store.selected_uuid(), Some("119bed4a98cd44b399434000dacd244c"));
+        assert!(!store.list()[1].is_microsoft());
+        // Its Minecraft token is good for hours yet, so nothing renews.
+        assert!(!account.needs_refresh(1_789_400_000_000));
+        assert!(account.needs_refresh(1_789_405_992_000), "and it renews when it is not");
+    }
+
+    #[test]
+    fn saving_keeps_every_field_this_launcher_does_not_model() {
+        // The failure this prevents is the serious one: rewriting the file into
+        // this launcher's own shape signs the user out of the *other* launcher
+        // and throws away the token chain it needs to get back in.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("accounts.json");
+        std::fs::write(&path, prism_accounts_file().to_string()).unwrap();
+
+        let (mut store, _) = AccountsStore::load_with_report(&path);
+        store
+            .update_tokens("119bed4a98cd44b399434000dacd244c", "new-game-token", None, 1_800_000_000_000)
+            .unwrap();
+        store.save().unwrap();
+
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let first = &raw["accounts"][0];
+        assert_eq!(first["ygg"]["token"], serde_json::json!("new-game-token"));
+        assert_eq!(first["ygg"]["exp"], serde_json::json!(1_800_000_000));
+        // Untouched, field for field.
+        assert_eq!(first["xrp-mc"]["token"], serde_json::json!("xbox-token"));
+        assert_eq!(first["msa-client-id"], serde_json::json!("c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"));
+        assert_eq!(first["profile"]["cape"], serde_json::json!("b9d4f2e0-6109-43f7-97aa-84250ce3c1dd"));
+        assert_eq!(first["profile"]["skin"]["url"], serde_json::json!("http://textures/skin"));
+        assert_eq!(first["msa"]["extra"]["ext_expires_in"], serde_json::json!(3599));
+        assert_eq!(first["entitlement"]["ownsMinecraft"], serde_json::json!(true));
+        // The second account is still there, still not active.
+        assert_eq!(raw["accounts"][1]["profile"]["name"], serde_json::json!("Second"));
+        assert_eq!(raw["accounts"][1]["active"], serde_json::json!(false));
+        // And it reads back the same way.
+        let (back, _) = AccountsStore::load_with_report(&path);
+        assert_eq!(back.list().len(), 2);
+        assert_eq!(back.selected_account().unwrap().access_token.as_deref(), Some("new-game-token"));
+    }
+
+    #[test]
+    fn signing_in_here_does_not_erase_an_account_saved_there() {
+        // A second Microsoft account added by this launcher must not remove the
+        // one the other launcher saved, and both must be in the file afterwards.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("accounts.json");
+        std::fs::write(&path, prism_accounts_file().to_string()).unwrap();
+        let (mut store, _) = AccountsStore::load_with_report(&path);
+        store
+            .upsert_microsoft(AccountEntry::microsoft(
+                "NewPlayer",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "token-b",
+                "refresh-b",
+                1_900_000_000_000,
+                Some(true),
+            ))
+            .unwrap();
+        store.save().unwrap();
+
+        let (back, _) = AccountsStore::load_with_report(&path);
+        let mut names: Vec<&str> = back.list().iter().map(|a| a.username.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["NewPlayer", "Second", "WSedge"]);
+        assert_eq!(back.selected_uuid(), Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        // The one that was active before is still an account, now inactive.
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["accounts"][0]["active"], serde_json::json!(false));
+        assert_eq!(raw["accounts"][0]["msa"]["refresh_token"], serde_json::json!("M.C555_refresh"));
     }
 
     #[test]
@@ -559,10 +966,16 @@ mod tests {
         store.save().unwrap();
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        let entry = &raw["list"][0];
-        assert!(entry.get("kind").is_some());
-        assert!(entry.get("access_token").is_none(), "no empty token keys");
-        assert!(entry.get("refresh_token").is_none());
+        let entry = &raw["accounts"][0];
+        assert_eq!(entry["type"], serde_json::json!("Offline"));
+        assert_eq!(entry["active"], serde_json::json!(true));
+        assert!(entry.get("ygg").is_none(), "no token block for a name-only account");
+        assert!(entry.get("msa").is_none());
+        assert!(entry.get("entitlement").is_none(), "and nothing to claim about owning the game");
+        // None of this launcher's own old keys leak into the shared shape.
+        for legacy in ["kind", "access_token", "refresh_token", "expires_at_ms", "entitled"] {
+            assert!(entry.get(legacy).is_none(), "{legacy} should not be written");
+        }
     }
 
     #[test]

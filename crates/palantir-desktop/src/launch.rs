@@ -1411,8 +1411,18 @@ mod tests {
         // Newest major first, so a tie is broken toward the newer runtime.
         assert_eq!(managed[0].major, Some(21));
         assert_eq!(managed[1].major, Some(17));
-        assert!(managed[0].bin.ends_with("java-runtime-delta/bin/java.exe")
-            || managed[0].bin.ends_with("java-runtime-delta/bin/java"));
+        // Compared as path components rather than as a string: the separator is
+        // not the same on every platform these tests run on.
+        let expected = if cfg!(windows) {
+            "java-runtime-delta/bin/java.exe"
+        } else {
+            "java-runtime-delta/bin/java"
+        };
+        assert!(
+            Path::new(&managed[0].bin).ends_with(expected),
+            "got {} for the newest managed runtime",
+            managed[0].bin
+        );
     }
 
     #[test]
