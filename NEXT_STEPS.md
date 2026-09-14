@@ -668,3 +668,32 @@ switches are drawn disabled: neither has an endpoint or a socket behind it. The
 `Resource management` pane's "Purge cache" and `Java installations`' detection
 follow the shell's existing behaviour rather than the reference's exact wording,
 and neither has been compared against the live app on a real display yet.
+
+## 14. Driving the shell for a capture: what works, and what does not
+
+Capturing a *page* is easy — `tools/winshot.py --launch ... --park` renders the
+window off-screen through `PrintWindow` and never touches the desk. Capturing
+the *ninth* settings tab is not, because getting there means clicking, and this
+shell's input does not accept injected input. Measured, not assumed:
+
+| Delivery | Result |
+|---|---|
+| `PostMessage(WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP)` | no change at all |
+| `SendMessage` of the same | no change at all |
+| `PostMessage(WM_KEYDOWN/WM_KEYUP)`, and the same sent | no change at all |
+| real `SetCursorPos` + `mouse_event` | works |
+
+Two controls keep that table honest. `PrintWindow` is live rather than a cached
+frame — resizing the parked window re-renders it and the capture changes — and
+the click itself is checked by reading the rail rather than by eye: the selected
+entry is the only one with an accent plate behind it, and after every injected
+click Home still had it.
+
+So `winshot.py` grew a `--script` session (`click`, `msgclick`, `sendclick`,
+`key`, `sendkey`, `shot`, `activate`, `resize`, `wait`) so the probes are
+repeatable, and `--park`, which is now applied the moment the window is found
+rather than after `--settle` — six seconds of the app over somebody's work is
+six seconds of exactly what parking is for. The finding is the point: a future
+session should not re-derive it. A screenshot walk of every page and pane needs
+either the real pointer or a capture path inside the app that sets its own
+state, and nothing in between will do it.

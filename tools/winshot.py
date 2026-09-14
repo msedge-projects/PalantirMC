@@ -21,10 +21,15 @@ client is Tauri) often refuses to draw itself off-screen, and this shell does no
 
     python tools/winshot.py --launch path/to/App.exe --settle 6 --out shot.png
     python tools/winshot.py --title "Modrinth App" --out shot.png
-    python tools/winshot.py --launch ... --click 92,180 --click 92,240 --out x.png
+    python tools/winshot.py --launch app.exe --script session.txt --settle 6
 
 ``--click`` takes client-area coordinates and is applied in order, each followed
-by ``--click-settle``, so a screenshot series across pages is one invocation.
+by ``--click-settle``, so a screenshot series across pages is one invocation --
+but it moves the real pointer. ``--script`` is the one to use on a machine
+somebody is working on: it posts the messages the mouse would have sent, so it
+stages a whole session of clicks and screenshots with no cursor, no focus change
+and no window raised. Script lines are ``click X Y``, ``shot OUT.png`` and
+``wait SECONDS``.
 """
 
 import argparse
@@ -49,11 +54,38 @@ user32.ShowWindow.argtypes = [w.HWND, ctypes.c_int]
 user32.SetForegroundWindow.argtypes = [w.HWND]
 user32.GetForegroundWindow.restype = w.HWND
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+user32.PostMessageW.restype = w.BOOL
+user32.SendMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+user32.SendMessageW.restype = w.LPARAM
+user32.MapVirtualKeyW.argtypes = [w.UINT, w.UINT]
+user32.MapVirtualKeyW.restype = w.UINT
+user32.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, w.UINT]
+user32.SetWindowPos.restype = w.BOOL
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
 user32.ClientToScreen.argtypes = [w.HWND, ctypes.POINTER(w.POINT)]
 user32.IsWindow.argtypes = [w.HWND]
 user32.IsWindowVisible.argtypes = [w.HWND]
 
 PW_RENDERFULLCONTENT = 0x00000002
+WM_MOUSEMOVE = 0x0200
+WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
+MK_LBUTTON = 0x0001
+WM_ACTIVATE = 0x0006
+WM_SETFOCUS = 0x0007
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+WM_CHAR = 0x0102
+MAPVK_VK_TO_VSC = 0
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_NOMOVE = 0x0002
+SM_XVIRTUALSCREEN = 76
+SM_CXVIRTUALSCREEN = 78
 SW_RESTORE = 9
 SW_SHOW = 5
 
@@ -212,12 +244,153 @@ def grab(hwnd, method="auto"):
 
 
 def click_client(hwnd, x, y):
+    """Click by moving the real pointer. Steals the cursor from whoever is using
+    the machine, so `post_click_client` is what a session wants."""
     ox, oy, _, _ = client_origin(hwnd)
     user32.SetCursorPos(int(ox + x), int(oy + y))
     time.sleep(0.15)
     user32.mouse_event(0x0002, 0, 0, 0, 0)
     time.sleep(0.05)
     user32.mouse_event(0x0004, 0, 0, 0, 0)
+
+
+def post_click_client(hwnd, x, y):
+    """Click without touching the real pointer, focus or z-order.
+
+    The coordinates ride in the message itself, which is where winit reads a
+    mouse input's position from -- so the shell sees a press and release at
+    (x, y) and the pointer somebody else is using never moves, never hovers a
+    different window and is never stolen mid-drag. The preceding move is what
+    makes hover states real: this shell draws them from its own pointer
+    tracking, and a press with no move before it arrives with no hover behind
+    it.
+    """
+    packed = (int(y) << 16) | (int(x) & 0xFFFF)
+    user32.PostMessageW(hwnd, WM_MOUSEMOVE, 0, packed)
+    time.sleep(0.05)
+    user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, packed)
+    time.sleep(0.08)
+    user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, packed)
+    # Leave the pointer where the click left it, so the frame that is captured
+    # shows the pressed state resolved rather than a button held down.
+    time.sleep(0.05)
+    user32.PostMessageW(hwnd, WM_MOUSEMOVE, 0, packed)
+
+
+def post_click(hwnd, x, y, send=False):
+    """Press and release at client (x, y) with a message rather than the mouse.
+
+    Which of `PostMessage` and `SendMessage` a window honours is not something a
+    caller can know in advance: a message loop that reads the pointer's live
+    position rather than the coordinates in the message will drop a posted click
+    and answer one that is delivered on its own thread instead. The session
+    script therefore lets each click say which it wants, and the answer is
+    recorded rather than guessed at.
+    """
+    deliver = user32.SendMessageW if send else user32.PostMessageW
+    packed = (int(y) << 16) | (int(x) & 0xFFFF)
+    deliver(hwnd, WM_MOUSEMOVE, 0, packed)
+    time.sleep(0.06)
+    deliver(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, packed)
+    time.sleep(0.09)
+    deliver(hwnd, WM_LBUTTONUP, 0, packed)
+    time.sleep(0.06)
+    deliver(hwnd, WM_MOUSEMOVE, 0, packed)
+
+
+def tell_active(hwnd):
+    """Tell the window it is active and focused without taking the foreground.
+
+    Posted rather than set: `SetForegroundWindow` would pull the user out of
+    whatever they are doing, while these two messages change nothing on screen
+    and only alter what the window believes about itself -- which matters
+    because an unfocused window is entitled to ignore a click.
+    """
+    user32.PostMessageW(hwnd, WM_ACTIVATE, 1, 0)
+    time.sleep(0.05)
+    user32.PostMessageW(hwnd, WM_SETFOCUS, 0, 0)
+    time.sleep(0.05)
+
+
+def post_key(hwnd, vk, send=False):
+    """Press and release a virtual key, for the shortcuts the shell subscribes to."""
+    deliver = user32.SendMessageW if send else user32.PostMessageW
+    scan = user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)
+    down = (scan << 16) | 1
+    up = (scan << 16) | 1 | (1 << 30) | (1 << 31)
+    deliver(hwnd, WM_KEYDOWN, vk, down)
+    time.sleep(0.06)
+    deliver(hwnd, WM_KEYUP, vk, up)
+    time.sleep(0.06)
+
+
+def park_offscreen(hwnd):
+    """Move the window past the right edge of the desktop, without activating it.
+
+    The same treatment `launch_check.py` gives a launch: the app still draws, its
+    UI thread still pumps and `PrintWindow` still renders it, but it is not over
+    anybody's work and it never takes the foreground, so a capture session on a
+    machine in use is invisible rather than disruptive.
+    """
+    left, top, right, _ = window_rect(hwnd)
+    width = max(400, right - left)
+    x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN) + user32.GetSystemMetrics(SM_CXVIRTUALSCREEN) + 200
+    user32.SetWindowPos(hwnd, None, x, 8, width, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    left, top, _, _ = window_rect(hwnd)
+    return left, top
+
+
+def run_script(hwnd, path, method, click_settle):
+    """Drive a capture session from a small script.
+
+    Lines are `click X Y` (real pointer), `msgclick X Y` and `sendclick X Y`
+(posted and delivered messages, no pointer), `key VK` and `sendkey VK`,
+`shot OUT.png`, `activate`, `resize W H` and `wait SECONDS`; `#` comments and
+blank lines are ignored. A session is worth scripting rather than
+    re-launching per screenshot: a tab that has to be reached through four
+    clicks would otherwise cost four app starts, and the first frame of a
+    window is never the frame worth comparing.
+    """
+    shots = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        for number, raw in enumerate(handle, 1):
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            verb = parts[0].lower()
+            if verb == "click" and len(parts) == 3:
+                post_click_client(hwnd, float(parts[1]), float(parts[2]))
+                time.sleep(click_settle)
+            elif verb in ("msgclick", "sendclick") and len(parts) == 3:
+                post_click(hwnd, float(parts[1]), float(parts[2]), send=verb == "sendclick")
+                time.sleep(click_settle)
+            elif verb in ("key", "sendkey") and len(parts) == 2:
+                post_key(hwnd, int(parts[1], 0), send=verb == "sendkey")
+                time.sleep(click_settle)
+            elif verb == "activate":
+                tell_active(hwnd)
+                time.sleep(click_settle)
+            elif verb == "resize" and len(parts) == 3:
+                user32.SetWindowPos(hwnd, None, 0, 0, int(parts[1]), int(parts[2]),
+                                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE)
+                time.sleep(click_settle)
+            elif verb == "shot" and len(parts) == 2:
+                image, how = grab(hwnd, method)
+                if image is None:
+                    print(f"{path}:{number}: capture failed", file=sys.stderr)
+                    return shots
+                os.makedirs(os.path.dirname(os.path.abspath(parts[1])), exist_ok=True)
+                image.save(parts[1])
+                print(f"{parts[1]}: {image.width}x{image.height} via {how}")
+                shots += 1
+            elif verb == "wait" and len(parts) == 2:
+                time.sleep(float(parts[1]))
+            else:
+                print(f"{path}:{number}: cannot read {line!r}", file=sys.stderr)
+                return shots
+    return shots
 
 
 def main():
@@ -233,13 +406,22 @@ def main():
     parser.add_argument("--settle", type=float, default=6.0,
                         help="seconds to wait after the window appears (default 6)")
     parser.add_argument("--click", action="append", default=[],
-                        help="client-area X,Y to click before capturing; repeatable")
+                        help="client-area X,Y to click before capturing; repeatable. "
+                             "Moves the real pointer -- prefer --script")
+    parser.add_argument("--script",
+                        help="file of `click X Y`, `shot OUT.png` and `wait SECONDS` "
+                             "lines, driven with posted messages and no cursor")
     parser.add_argument("--click-settle", type=float, default=1.2)
+    parser.add_argument("--park", action="store_true",
+                        help="move the window past the desktop edge as soon as it "
+                             "appears, so a capture session never covers the screen")
     parser.add_argument("--method", choices=("auto", "print", "screen"), default="auto")
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--out", help="where to write the single capture")
     parser.add_argument("--keep", action="store_true",
                         help="leave a launched process running")
     args = parser.parse_args()
+    if not args.out and not args.script:
+        parser.error("one of --out or --script is required")
 
     make_dpi_aware()
 
@@ -280,30 +462,47 @@ def main():
         print("no window found", file=sys.stderr)
         return 2
 
+    # Off the desk before anything else, not after the app has settled: the
+    # window exists from the moment it is found, and six seconds of it sitting
+    # over somebody's work is six seconds of exactly what `--park` is for.
+    if args.park:
+        left, top = park_offscreen(hwnd)
+        print(f"parked at {left},{top}")
+
     time.sleep(args.settle)
 
     # Resolve again once the app has settled: the largest visible window of the
     # process is the one worth shooting, and by now there is no chance of
     # picking up a helper that appeared first.
     settled = find_window(pid=proc.pid) if proc is not None else find_window(title=args.title)
-    if settled is not None:
+    if settled is not None and settled != hwnd:
         hwnd = settled
+        if args.park:
+            left, top = park_offscreen(hwnd)
+            print(f"re-parked at {left},{top}")
 
     for click in args.click:
         x, y = (float(v) for v in click.split(","))
         click_client(hwnd, x, y)
         time.sleep(args.click_settle)
 
-    image, method = grab(hwnd, args.method)
-    if image is None:
-        print("capture failed", file=sys.stderr)
-        return 3
+    if args.script:
+        shots = run_script(hwnd, args.script, args.method, args.click_settle)
+        ox, oy, cw, ch = client_origin(hwnd)
+        print(f"{shots} shot(s); client {cw}x{ch} at screen {ox},{oy}")
+        if shots == 0:
+            return 3
+    else:
+        image, method = grab(hwnd, args.method)
+        if image is None:
+            print("capture failed", file=sys.stderr)
+            return 3
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    image.save(args.out)
-    ox, oy, cw, ch = client_origin(hwnd)
-    print(f"{args.out}: {image.width}x{image.height} via {method} "
-          f"(client {cw}x{ch} at screen {ox},{oy})")
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        image.save(args.out)
+        ox, oy, cw, ch = client_origin(hwnd)
+        print(f"{args.out}: {image.width}x{image.height} via {method} "
+              f"(client {cw}x{ch} at screen {ox},{oy})")
 
     if proc is not None and not args.keep:
         proc.terminate()
