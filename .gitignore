@@ -2,9 +2,6 @@
 /dist
 *.log
 .palantir-test-data/
-# The editor tooling's own project marker: local, machine-specific, and not
-# part of the launcher.
-/.freebuff/
 /.unlazy/
 /.unlazy-hook-state.json
 # Window captures and one-off pixel probes used by tools/panel_gate.py. They are
