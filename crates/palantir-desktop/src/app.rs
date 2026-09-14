@@ -2572,15 +2572,17 @@ impl PalantirApp {
                 self.content_progress = None;
                 match result {
                     Ok(line) => {
-                        self.browse.last_result = Some(line.clone());
-                        self.set_status(line.clone());
-                        self.push_console(vec![line.clone()]);
                         // A modpack install *created* an instance, so the cards
-                        // and the instance list are stale now in a way the other
-                        // content types cannot make them.
+                        // and the instance list are stale in a way the other
+                        // content types cannot make them. Reloading first, because
+                        // it writes a status line of its own and the result is
+                        // what the user asked to see.
                         if self.browse.content_type == ContentType::Modpacks {
                             self.reload_instances();
                         }
+                        self.browse.last_result = Some(line.clone());
+                        self.set_status(line.clone());
+                        self.push_console(vec![line.clone()]);
                         self.refresh_selection_caches();
                     }
                     Err(error) => {
@@ -2602,11 +2604,13 @@ impl PalantirApp {
                 self.content_progress = None;
                 match result {
                     Ok(line) => {
+                        // A pack install always creates an instance, so the list
+                        // on screen is stale by definition — and reloading it
+                        // writes its own status line, so the result has to be
+                        // reported *after* the reload rather than before.
+                        self.reload_instances();
                         self.set_status(line.clone());
                         self.push_console(vec![line]);
-                        // A pack install always creates an instance, so the list
-                        // on screen is stale by definition.
-                        self.reload_instances();
                     }
                     Err(error) => self.set_error(format!("Installing the pack failed: {error}")),
                 }
@@ -7743,10 +7747,21 @@ mod tests {
     fn a_content_install_draws_the_bar_and_hands_it_back() {
         let (_dir, paths) = test_paths();
         let mut app = PalantirApp::with_paths(paths.clone());
-        let created = instances::create(&paths, &NewInstance::vanilla("Modded", "26.2")).unwrap();
+        // A loadered instance, because a mod cannot be installed into a vanilla
+        // one and the install would be refused before any of this.
+        let created = instances::create(
+            &paths,
+            &NewInstance {
+                loader: LoaderKind::Fabric,
+                loader_build: Some("0.19.5".to_string()),
+                ..NewInstance::vanilla("Modded", "26.2")
+            },
+        )
+        .unwrap();
         app.reload_instances();
         app.selected = Some(created.id.clone());
         let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
+        assert!(app.browse_state().installing.is_some(), "the install started");
         let seq = app.install_seq;
         let level = Progress::starting("installing Sodium");
         let _ = app.update(Message::ContentProgress { seq, progress: level.clone() });

@@ -1311,10 +1311,15 @@ mod tests {
     fn the_asset_index_and_its_objects_are_installed() {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
+        // The bodies come first and the hashes are their real digests: an asset
+        // object is *named* after its own sha1, so a fixture with invented
+        // hashes is a fixture the downloader is right to reject.
+        let (click, meta) = (&b"abcd"[..], &b"abc"[..]);
+        let (click_hash, meta_hash) = (sha1_hex(click), sha1_hex(meta));
         let index_body = json!({
             "objects": {
-                "minecraft/sounds/click.ogg": { "hash": "aa11", "size": 4 },
-                "pack.mcmeta": { "hash": "bb22", "size": 3 }
+                "minecraft/sounds/click.ogg": { "hash": click_hash, "size": click.len() },
+                "pack.mcmeta": { "hash": meta_hash, "size": meta.len() }
             }
         })
         .to_string();
@@ -1338,8 +1343,8 @@ mod tests {
 
         let mut fetcher = MapFetcher::new();
         fetcher.insert(&plan.jobs[0].url, index_body.clone().into_bytes());
-        fetcher.insert(&cdn_url("aa11"), b"abcd".to_vec());
-        fetcher.insert(&cdn_url("bb22"), b"abc".to_vec());
+        fetcher.insert(&cdn_url(&click_hash), click.to_vec());
+        fetcher.insert(&cdn_url(&meta_hash), meta.to_vec());
         let (report, lines) = run_lines(&plan, &fetcher, 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
@@ -1347,15 +1352,62 @@ mod tests {
         assert_eq!(report.objects_downloaded, 2);
         assert_eq!(report.present, 0, "nothing was on disk before this run");
         assert!(paths.assets_dir().join("indexes").join("17.json").is_file());
-        assert!(paths.assets_dir().join("objects").join("aa").join("aa11").is_file());
+        assert!(paths
+            .assets_dir()
+            .join(object_relative_path(&click_hash))
+            .is_file());
         assert!(lines.iter().any(|line| line.contains("2 asset object(s)")));
+    }
+
+    #[test]
+    fn an_asset_object_that_is_not_what_its_name_says_is_thrown_away() {
+        // The object is addressed by its own digest, so bytes that do not hash
+        // to the name they are stored under are not the object. Keeping them
+        // would be permanent: the present path checks size, not content, so
+        // every later launch would trust a corrupt file.
+        let (_dir, paths) = test_paths();
+        let ctx = RuntimeContext::current_host();
+        let real = &b"abcd"[..];
+        let hash = sha1_hex(real);
+        let index_body = json!({
+            "objects": { "pack.mcmeta": { "hash": hash, "size": real.len() } }
+        })
+        .to_string();
+        let mut profile = LaunchProfile::default();
+        profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo {
+            path: None,
+            sha1: sha1_hex(index_body.as_bytes()),
+            size: index_body.len() as i64,
+            url: "https://piston-meta.mojang.com/17.json".into(),
+            total_size: 4,
+            id: "17".into(),
+            known: true,
+        });
+        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let mut fetcher = MapFetcher::new();
+        fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
+        // Same length, different bytes: the case a size check cannot see.
+        fetcher.insert(&cdn_url(&hash), b"wxyz".to_vec());
+        let (report, _) = run_lines(&plan, &fetcher, 1);
+
+        assert!(!report.is_complete());
+        assert_eq!(report.objects_downloaded, 0);
+        assert!(
+            report.failed.iter().any(|line| line.contains("sha1 mismatch")),
+            "failures: {:?}",
+            report.failed
+        );
+        assert!(!paths.assets_dir().join(object_relative_path(&hash)).exists());
     }
 
     #[test]
     fn a_second_install_finds_everything_present() {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
-        let index_body = json!({ "objects": { "a": { "hash": "aa11", "size": 4 } } }).to_string();
+        let body = &b"abcd"[..];
+        let hash = sha1_hex(body);
+        let index_body =
+            json!({ "objects": { "a": { "hash": hash, "size": body.len() } } }).to_string();
         let mut profile = LaunchProfile::default();
         profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo {
             path: None,
@@ -1368,7 +1420,7 @@ mod tests {
         });
         let mut fetcher = MapFetcher::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
-        fetcher.insert(&cdn_url("aa11"), b"abcd".to_vec());
+        fetcher.insert(&cdn_url(&hash), body.to_vec());
 
         let first = plan(&paths, &paths.root, &profile, &ctx);
         run_lines(&first, &fetcher, 1);
@@ -1398,8 +1450,10 @@ mod tests {
     fn legacy_indexes_are_reconstructed_by_logical_name() {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
+        let body = &b"hi"[..];
+        let hash = sha1_hex(body);
         let index_body = json!({
-            "objects": { "lang/en_US.lang": { "hash": "cc33", "size": 2 } }
+            "objects": { "lang/en_US.lang": { "hash": hash, "size": body.len() } }
         })
         .to_string();
         let mut profile = LaunchProfile::default();
@@ -1418,7 +1472,7 @@ mod tests {
         let plan = plan(&paths, &instance_root, &profile, &ctx);
         let mut fetcher = MapFetcher::new();
         fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
-        fetcher.insert(&cdn_url("cc33"), b"hi".to_vec());
+        fetcher.insert(&cdn_url(&hash), body.to_vec());
         let (report, lines) = run_lines(&plan, &fetcher, 1);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
