@@ -871,8 +871,11 @@ mod tests {
         threads: usize,
     ) -> (InstallReport, Vec<String>) {
         let mut lines: Vec<String> = Vec::new();
+        // Each tap is bound inside the block that uses it, so the borrows end
+        // with the block and the vectors can be read (and returned) afterwards.
         let report = {
-            let mut reporter = Reporter::lines_only(&mut |line| lines.push(line));
+            let mut collect = |line: String| lines.push(line);
+            let mut reporter = Reporter::lines_only(&mut collect);
             run(plan, fetcher, threads, &mut reporter)
         };
         (report, lines)
@@ -888,8 +891,9 @@ mod tests {
         let mut lines: Vec<String> = Vec::new();
         let mut levels: Vec<Progress> = Vec::new();
         let report = {
-            let mut reporter =
-                Reporter::new(&mut |line| lines.push(line), &mut |level| levels.push(level));
+            let mut collect_line = |line: String| lines.push(line);
+            let mut collect_level = |level: Progress| levels.push(level);
+            let mut reporter = Reporter::new(&mut collect_line, &mut collect_level);
             run(plan, fetcher, threads, &mut reporter)
         };
         (report, lines, levels)
@@ -1441,8 +1445,9 @@ mod tests {
         let mut lines: Vec<String> = Vec::new();
         let mut levels: Vec<Progress> = Vec::new();
         let results = {
-            let mut reporter =
-                Reporter::new(&mut |line| lines.push(line), &mut |level| levels.push(level));
+            let mut collect_line = |line: String| lines.push(line);
+            let mut collect_level = |level: Progress| levels.push(level);
+            let mut reporter = Reporter::new(&mut collect_line, &mut collect_level);
             download_with_progress(&fetcher, &jobs, 4, "files", &mut reporter)
         };
 

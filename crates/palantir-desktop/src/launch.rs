@@ -2041,6 +2041,7 @@ mod tests {
             "java-runtime-delta",
             &MapFetcher::new(),
             &mut |line| lines.push(line),
+            &mut |_| {},
         )
         .unwrap();
         assert_eq!(found, named);
@@ -2056,6 +2057,7 @@ mod tests {
             "java-runtime-gamma",
             &MapFetcher::new(),
             &mut |line| lines.push(line),
+            &mut |_| {},
         )
         .unwrap();
         assert_eq!(found, fallback);
@@ -2079,6 +2081,7 @@ mod tests {
             "java-runtime-delta",
             &MapFetcher::new(),
             &mut |line| lines.push(line),
+            &mut |_| {},
         );
         let text = lines.join("\n");
         assert!(text.contains("not there"), "{text}");
