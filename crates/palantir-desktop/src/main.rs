@@ -145,9 +145,12 @@ fn main() -> iced::Result {
     // an app has no business changing global state, and keeping it that way is
     // what stops the test suite's fifty-odd app constructions from racing each
     // other through the palette.
-    let paths = PalantirPaths::detect();
+    // Both roots, from the one place that resolves them: the settings live in
+    // this launcher's own directory, and the game data lives wherever those
+    // settings say — which may be an install another launcher created.
+    let (home, _data) = PalantirApp::roots();
     theme::set_os_prefers_light(native::system_prefers_light());
-    theme::set_color_theme(prefs::load(&paths).theme());
+    theme::set_color_theme(prefs::load(&home).theme());
     let mut settings = Settings::default();
     settings.window = window_settings();
     settings.antialiasing = false;
@@ -171,7 +174,7 @@ impl Sandbox for State {
     type Message = Message;
 
     fn new() -> Self {
-        State { app: PalantirApp::new() }
+        State { app: PalantirApp::boot() }
     }
 
     fn title(&self) -> String {
@@ -214,7 +217,7 @@ impl Application for App {
         // Ask the window what state it is already in: without this the maximize
         // button cannot know whether to offer Maximize or Restore.
         let probe = window::fetch_maximized(window::Id::MAIN, Message::MaximizedChanged);
-        (App { app: PalantirApp::pending(PalantirPaths::detect()) }, probe)
+        (App { app: PalantirApp::boot_pending() }, probe)
     }
 
     fn title(&self) -> String {

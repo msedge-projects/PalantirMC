@@ -24,6 +24,7 @@
 //!   knob cannot quietly stop landing on the end of its own track.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use iced::widget::{
     button, column, container, row, scrollable, text, text_input, Column, MouseArea, Space,
@@ -467,6 +468,16 @@ pub struct View<'a> {
     pub account: Option<&'a AccountEntry>,
     /// Filter text for the Feature flags pane's search box.
     pub flag_filter: &'a str,
+    /// This launcher's own directory: where these settings are written.
+    pub home: &'a Path,
+    /// The data root in use: where the instances, libraries and assets are.
+    ///
+    /// Read from the shell rather than from the setting, because the two differ
+    /// exactly while a typed path is waiting to be applied — and the pane must
+    /// describe the folder that is really holding the instances.
+    pub data_root: &'a Path,
+    /// A data root that has been recorded but could not be applied.
+    pub data_root_pending: Option<String>,
 }
 
 // ---- The dialog ----------------------------------------------------------
@@ -1383,13 +1394,14 @@ fn java<'a>(view: &View<'a>) -> Element<'a, Message> {
 }
 
 /// Instances > Resource management.
+///
+/// Two directories, both named: the data root the instances are read from, and
+/// this launcher's own folder where these settings are written. They are
+/// separate on purpose — the data root can be an install another launcher
+/// created, while the settings have to live somewhere that is ours — and a pane
+/// that showed only one of them is how somebody ends up unable to find either.
 fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
-    let root = view
-        .prefs
-        .app_directory
-        .clone()
-        .unwrap_or_else(|| "(Prism's data root)".to_string());
-    column![
+    let mut body = column![
         section(
             "App directory",
             Some("Where instances, caches and downloads live.".to_string()),
@@ -1400,29 +1412,32 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
             row![
                 column![
                     text("Current directory").size(18).font(theme::semibold()).style(strong()),
-                    text(root).size(13).style(muted()),
+                    text(view.data_root.display().to_string()).size(13).style(muted()),
                 ]
-                .spacing(4)
-                .width(Length::Fill),
-                button(text("Open folder").size(13).font(theme::semibold()))
-                    .on_press(Message::OpenDataRoot)
-                    .style(theme::secondary())
-                    .padding([10, 14]),
+        .spacing(4)
+        .width(Length::Fill),
+        button(text("Open folder").size(13).font(theme::semibold()))
+            .on_press(Message::OpenDataRoot)
+            .style(theme::secondary())
+            .padding([10, 14]),
             ]
             .spacing(16)
             .align_items(Alignment::Center),
         )
         .width(Length::Fill),
-        Space::with_height(Length::Fixed(8.0)),
-        note(
-            "A directory set here is used instead of Prism's data root for this launcher's own \
-             files.",
+        Space::with_height(Length::Fixed(14.0)),
+        setting_row(
+            "Settings directory",
+            "This launcher's own preferences, kept beside nothing else: it does not move with \
+             the data root, so where the game data lives is remembered independently of it.",
+            text(view.home.display().to_string()).size(12).style(muted()).into(),
         ),
         Space::with_height(Length::Fixed(16.0)),
         field_row(
             view,
-            "Override directory",
-            "An absolute path, or empty to use Prism's root.",
+            "Use a different directory",
+            "An absolute path, or empty for this launcher's own folder. It takes effect as soon \
+             as it names a directory that exists.",
             Field::AppDirectory,
             true
         ),
@@ -1468,8 +1483,21 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
             ),
         ),
     ]
-    .spacing(0)
-    .into()
+    .spacing(0);
+
+    // A path that has been typed but could not be applied is said out loud.
+    // The alternative — showing it as the current directory — is a pane that
+    // claims instances live somewhere they do not, which is worse than the
+    // setting not working yet.
+    if let Some(pending) = &view.data_root_pending {
+        body = body.push(Space::with_height(Length::Fixed(12.0))).push(note(format!(
+            "Recorded but not in use: {pending} is not a directory that is there, so the \
+             instances above are still the ones being read. Create it and this launcher picks it \
+             up, or clear the field to come back here."
+        )));
+    }
+
+    body.into()
 }
 
 // ---- The color-theme cards ----------------------------------------------

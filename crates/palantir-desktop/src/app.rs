@@ -416,6 +416,9 @@ pub enum Modal {
     /// Microsoft device-code sign-in (the code and its progress live in
     /// [`PalantirApp::microsoft`]).
     Microsoft,
+    /// The first-run question about where the game data should live. The install
+    /// it is about lives in [`PalantirApp::welcome`].
+    Welcome,
 }
 
 impl Modal {
@@ -769,6 +772,10 @@ pub enum Message {
     SetColorTheme(ColorTheme),
     /// Close whatever dialog is open.
     CloseModal,
+    /// Use the install the first-run dialog found, where it is.
+    DataRootUseExisting,
+    /// Start in this launcher's own folder, leaving that install alone.
+    DataRootStartFresh,
     /// Create step 1 → step 2 (custom setup).
     CreateCustomSetup,
     /// Create dialog search text.
@@ -1036,6 +1043,17 @@ impl ShotTile {
 
 /// The application state (runtime-agnostic; both shells in `main.rs` use it).
 pub struct PalantirApp {
+    /// This launcher's own directory — where its settings live, and nothing
+    /// else.
+    ///
+    /// Deliberately separate from [`PalantirApp::paths`]: the data root is where
+    /// the *game* lives and may be an install another launcher created, while
+    /// this one is ours and does not move. One field for both would store the
+    /// answer about where the data root is *inside* the data root, which is the
+    /// trap worth naming: an install that was adopted, and then moved, would
+    /// carry the note of where it went off with it.
+    home: PalantirPaths,
+    /// The data root in use: instances, assets, libraries, accounts.
     paths: PalantirPaths,
     instances_dir: PathBuf,
     cards: Vec<InstanceCard>,
@@ -1107,19 +1125,34 @@ pub struct PalantirApp {
     /// Clicks on the Settings footer's version, of which the sixth toggles
     /// developer mode (the reference counts `> 5`).
     footer_presses: u8,
+    /// The install the first-run dialog is offering, while it is open.
+    ///
+    /// Present only between the window opening and the question being answered.
+    /// It carries the count so the dialog can say how much is already there
+    /// instead of asking the user to take it on faith — and so the button can
+    /// say "use the 3 instances you already have" rather than "use it".
+    welcome: Option<palantir_core::paths::LegacyInstall>,
 }
 
 impl PalantirApp {
-    /// Build against an explicit data root, loading instances synchronously.
-    pub(crate) fn with_paths(paths: PalantirPaths) -> Self {
+    /// Build against explicit roots, loading instances synchronously.
+    ///
+    /// `home` is where this launcher's settings live and `paths` is where the
+    /// game data does; a real run gets the pair from [`PalantirApp::roots`].
+    pub(crate) fn with_roots(home: PalantirPaths, paths: PalantirPaths) -> Self {
         let (accounts, accounts_warn) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
         // Read once and cached: the Settings dialog draws twenty switches and
         // several panes, and a file read behind each of them would be a disk hit
-        // per repaint. Putting the stored theme in force is the entry point's
-        // job, not a constructor's — see `main`.
-        let prefs = prefs::load(&paths);
+        // per repaint. The settings file is deliberately read from `home`: a
+        // window whose data root points into another launcher's install must
+        // still find its own preferences, or adopting that install would reset
+        // the theme and ask the first-run question over again. Putting the
+        // stored theme in force is the entry point's job, not a constructor's —
+        // see `main`.
+        let prefs = prefs::load(&home);
         let mut app = PalantirApp {
             instances_dir: paths.configured_instances_dir(),
+            home,
             paths,
             cards: Vec::new(),
             groups: Groups::default(),
@@ -1160,6 +1193,7 @@ impl PalantirApp {
             switches: anim::SwitchAnim::default(),
             flag_filter: String::new(),
             footer_presses: 0,
+            welcome: None,
         };
         if let Some(warn) = accounts_warn {
             app.set_error(warn.clone());
@@ -1172,11 +1206,12 @@ impl PalantirApp {
 
     /// Instant placeholder for the `Application` shell: no disk IO beyond
     /// resolving the data root, so the window paints immediately.
-    pub(crate) fn pending(paths: PalantirPaths) -> Self {
+    pub(crate) fn pending_roots(home: PalantirPaths, paths: PalantirPaths) -> Self {
         let (accounts, _) = crate::accounts::AccountsStore::load_with_report(&paths.accounts_file());
-        let prefs = prefs::load(&paths);
+        let prefs = prefs::load(&home);
         PalantirApp {
             instances_dir: paths.configured_instances_dir(),
+            home,
             paths,
             cards: Vec::new(),
             groups: Groups::default(),
@@ -1217,12 +1252,45 @@ impl PalantirApp {
             switches: anim::SwitchAnim::default(),
             flag_filter: String::new(),
             footer_presses: 0,
+            welcome: None,
         }
     }
 
-    /// Detect the data root like Prism does.
-    pub fn new() -> Self {
-        PalantirApp::with_paths(PalantirPaths::detect())
+    /// Both roots, resolved the way a real run resolves them.
+    ///
+    /// The entry point asks for this rather than assembling the pair itself, so
+    /// the window and the settings pane cannot disagree about which directory is
+    /// which — and so that "where do the settings live" has exactly one answer
+    /// in the crate. [`PalantirPaths::detect`] re-derives the home directory
+    /// internally; both calls are environment lookups, so they cannot disagree.
+    pub fn roots() -> (PalantirPaths, PalantirPaths) {
+        (PalantirPaths::home(), PalantirPaths::detect())
+    }
+
+    /// Build for a real run: both roots, plus the first-run question.
+    pub fn boot() -> Self {
+        let (home, data) = PalantirApp::roots();
+        let mut app = PalantirApp::with_roots(home, data);
+        app.offer_migration();
+        app
+    }
+
+    /// The same, for the `Application` shell's instant placeholder.
+    pub fn boot_pending() -> Self {
+        let (home, data) = PalantirApp::roots();
+        let mut app = PalantirApp::pending_roots(home, data);
+        app.offer_migration();
+        app
+    }
+
+    /// Build against a single directory that is both roots.
+    ///
+    /// What almost every test wants: one temporary directory holding the
+    /// settings and the instances, with no first-run question and no access to
+    /// the machine's real `%APPDATA%`. A real run calls [`PalantirApp::boot`].
+    #[cfg(test)]
+    pub(crate) fn with_paths(paths: PalantirPaths) -> Self {
+        PalantirApp::with_roots(paths.clone(), paths)
     }
 
     /// Window title.
@@ -1821,7 +1889,7 @@ impl PalantirApp {
         // separate write of one key would be undone by the next switch, which
         // saves the whole struct.
         self.prefs.color_theme = theme.id().to_string();
-        match prefs::save(&self.paths, &self.prefs) {
+        match prefs::save(&self.home, &self.prefs) {
             Ok(()) => self.set_status(format!("Color theme: {}", theme.label())),
             Err(error) => self.set_error(format!(
                 "Color theme: {} (could not be saved: {error})",
@@ -1836,9 +1904,132 @@ impl PalantirApp {
     /// switch would appear to have taken and then be gone at the next launch —
     /// but it is not a reason to refuse the change that was just made.
     fn save_prefs(&mut self) {
-        if let Err(error) = prefs::save(&self.paths, &self.prefs) {
+        if let Err(error) = prefs::save(&self.home, &self.prefs) {
             self.set_error(format!("Could not save settings: {error}"));
         }
+    }
+
+    // ---- where the game data lives ----------------------------------------
+
+    /// Ask, once, which install the game data should live in.
+    ///
+    /// Called by the two entry-point constructors and nowhere else, so the
+    /// question is put exactly once per run and never from inside a test: an app
+    /// built against a temporary directory must not be offered the machine's
+    /// real other-launcher install. The tests exercise the decision below
+    /// instead, on an install they made up.
+    ///
+    /// Nothing is asked when there is nothing to ask about — a portable tree is
+    /// already a complete install whose settings belong on the stick, a root
+    /// that has been answered is not asked about twice, and nothing is offered
+    /// to somebody whose own folder already holds instances, because they are
+    /// set up rather than migrating.
+    fn offer_migration(&mut self) {
+        self.offer_migration_from(palantir_core::paths::legacy_install());
+    }
+
+    /// The same decision, on an install that has already been found.
+    ///
+    /// Split out because discovery reads this machine's real `%APPDATA%`, and a
+    /// decision that can only be exercised on a machine that happens to have
+    /// both launchers on it is a decision no test can hold. Everything that
+    /// decides *whether to ask* is in here.
+    fn offer_migration_from(&mut self, install: Option<palantir_core::paths::LegacyInstall>) {
+        let Some(install) = install else {
+            return;
+        };
+        if self.prefs.data_root_asked || self.home.is_portable() {
+            return;
+        }
+        // Already pointed somewhere, by a hand-edited file or by a build that
+        // predates the question. That *is* an answer, and asking again would look
+        // like the setting had been ignored.
+        if self.prefs.app_directory.is_some() {
+            return;
+        }
+        if palantir_core::paths::count_instances(&self.home.root) > 0 {
+            return;
+        }
+        self.welcome = Some(install);
+        self.modal = Modal::Welcome;
+    }
+
+    /// Record that the first-run question was answered.
+    fn answer_migration(&mut self) {
+        self.prefs.data_root_asked = true;
+        self.welcome = None;
+        self.modal = Modal::None;
+    }
+
+    /// Apply a typed data root, once it names a directory that is really there.
+    ///
+    /// A half-typed path does not exist, and that is what makes this safe from a
+    /// text input: nothing moves until the field holds a directory the user can
+    /// see. Until then the path is only a stored preference, and the pane says
+    /// so rather than drawing a setting that has quietly done nothing.
+    fn apply_data_root_setting(&mut self) {
+        match self.prefs.app_directory.clone() {
+            // Cleared: back to this launcher's own folder. An empty field has no
+            // half-typed state that could mean "somewhere else, but not yet", so
+            // it is unambiguous.
+            None => self.rebind_data_root(),
+            Some(configured) => {
+                let candidate = PathBuf::from(configured.trim());
+                if candidate.is_absolute() && candidate.is_dir() {
+                    self.rebind_data_root();
+                }
+            }
+        }
+    }
+
+    /// The recorded data root, when it is not the one in use.
+    ///
+    /// Non-empty only while the setting names something that could not be
+    /// applied — a path that is not there, or one that is not absolute.
+    fn data_root_pending(&self) -> Option<String> {
+        let configured = self.prefs.app_directory.as_deref()?.trim();
+        if configured.is_empty() || PathBuf::from(configured) == self.paths.root {
+            return None;
+        }
+        Some(configured.to_string())
+    }
+
+    /// Point the data root at whatever the setting now says, and re-read
+    /// everything that lives there.
+    ///
+    /// The accounts file, the instance list and the group file are all under the
+    /// root, so moving it invalidates all three at once. Everything else is
+    /// either cached above the root (this launcher's preferences, the color
+    /// theme) or read on demand (version metadata, screenshots), and is
+    /// deliberately left alone: nothing here should discard a loaded page
+    /// because a path changed.
+    fn rebind_data_root(&mut self) {
+        let root =
+            palantir_core::paths::resolve_data_root(&self.home, self.prefs.app_directory.as_deref());
+        if root == self.paths.root {
+            return;
+        }
+        self.paths = PalantirPaths::at(root);
+        // A root that does not exist yet is normal — it is the "start fresh"
+        // answer — and creating the skeleton here is what makes the adopted
+        // folder ready before the first instance is created in it.
+        if let Err(error) = self.paths.ensure_layout() {
+            self.set_error(format!("Could not create {}: {error}", self.paths.root.display()));
+        }
+        let (accounts, warning) =
+            crate::accounts::AccountsStore::load_with_report(&self.paths.accounts_file());
+        self.accounts = accounts;
+        if let Some(warning) = warning {
+            self.set_error(warning);
+        }
+        // The selection, the mod list and the worlds belong to instances in the
+        // root that was just left.
+        self.selected = None;
+        self.cards.clear();
+        self.mods.clear();
+        self.worlds.clear();
+        self.shots = ShotState::default();
+        self.reload_instances();
     }
 
     // ---- create dialog ---------------------------------------------------
@@ -2350,6 +2541,13 @@ impl PalantirApp {
                 // the caret.
                 field.commit(&mut self.prefs, &text);
                 self.settings_drafts.insert(field, text);
+                // The data root is the one field that changes what is *on
+                // screen* rather than what a switch will do, so it is applied
+                // rather than merely stored. See `apply_data_root_setting` for
+                // why that is safe to do from a text input.
+                if field == settings::Field::AppDirectory {
+                    self.apply_data_root_setting();
+                }
                 self.save_prefs();
                 Command::none()
             }
@@ -2411,10 +2609,11 @@ impl PalantirApp {
                 Command::none()
             }
             Message::OpenDataRoot => {
-                let dir = match self.prefs.app_directory.as_deref() {
-                    Some(moved) if !moved.trim().is_empty() => PathBuf::from(moved),
-                    _ => self.paths.root.clone(),
-                };
+                // The root in use, not the setting: they differ exactly while a
+                // typed path names a directory that is not there yet, and the
+                // button says "the data root", so it must open the one that is
+                // holding the instances.
+                let dir = self.paths.root.clone();
                 match launch::open_in_file_manager(&dir) {
                     Ok(()) => Command::none(),
                     Err(error) => {
@@ -2596,7 +2795,38 @@ impl PalantirApp {
                 if self.microsoft.pending {
                     self.microsoft = MicrosoftState::default();
                 }
+                // Closing the first-run question is not an answer to it, so
+                // `data_root_asked` stays as it was and the next start asks
+                // again — a dialog that silently chooses for the user is worse
+                // than one that comes back.
+                self.welcome = None;
                 self.modal = Modal::None;
+                Command::none()
+            }
+            Message::DataRootUseExisting => {
+                if let Some(install) = self.welcome.clone() {
+                    self.prefs.app_directory = Some(install.root.display().to_string());
+                    self.answer_migration();
+                    self.rebind_data_root();
+                    self.save_prefs();
+                    self.set_status(format!(
+                        "Game data: {} — {} instance{} already there.",
+                        install.root.display(),
+                        install.instances,
+                        if install.instances == 1 { "" } else { "s" }
+                    ));
+                }
+                Command::none()
+            }
+            Message::DataRootStartFresh => {
+                self.prefs.app_directory = None;
+                self.answer_migration();
+                self.rebind_data_root();
+                self.save_prefs();
+                self.set_status(format!(
+                    "Game data: {} — nothing was imported.",
+                    self.paths.root.display()
+                ));
                 Command::none()
             }
             Message::CreateCustomSetup => {
@@ -3045,7 +3275,7 @@ impl PalantirApp {
             // The sign-in flow lives and dies with the dialog: it is asked for
             // only while the dialog is open, and dropping the subscription is
             // what tells the worker thread to stop polling.
-            let client_id = prefs::load(&self.paths).microsoft_client_id();
+            let client_id = prefs::load(&self.home).microsoft_client_id();
             subs.push(microsoft_sign_in(client_id));
         }
         subs.push(Self::window_state());
@@ -4208,6 +4438,60 @@ impl PalantirApp {
         modal_shell("Microsoft sign-in", body.into(), footer, 520.0)
     }
 
+    /// The first-run question: use the install that is already on this machine,
+    /// or start in this launcher's own folder.
+    ///
+    /// Both answers are real, and neither is destructive: "use it" points the
+    /// data root at the existing install and writes nothing to it, while "start
+    /// fresh" leaves that install exactly where it was. There is deliberately no
+    /// third option that copies, because copying a modern install means moving
+    /// ten gigabytes of libraries and assets to gain nothing — the versions,
+    /// libraries and assets are content-addressed and identical either way.
+    fn view_welcome_dialog(&self) -> Element<'_, Message> {
+        let Some(install) = self.welcome.clone() else {
+            // The dialog should only be up while there is something to offer. A
+            // view without it would be a dialog asking about nothing, so this
+            // degrades to the content area instead.
+            return self.view_page();
+        };
+        let plural = if install.instances == 1 { "instance" } else { "instances" };
+        let body: Element<'_, Message> = column![
+            text(format!(
+                "{} instance{plural} from another launcher {}",
+                install.instances,
+                if install.instances == 1 { "is" } else { "are" }
+            ))
+            .size(14)
+            .font(theme::semibold()),
+            text(install.root.display().to_string())
+                .size(12)
+                .style(iced::theme::Text::Color(theme::text_muted())),
+            text(
+                "Use it and this launcher reads those instances, libraries and accounts where they \
+                 are — nothing is copied, and the other launcher keeps working. Or start in \
+                 PalantirMC's own folder, which leaves that install untouched."
+            )
+            .size(12)
+            .style(iced::theme::Text::Color(theme::text_muted())),
+        ]
+        .spacing(10)
+        .into();
+        let footer: Element<'_, Message> = row![
+            button(text("Start fresh").size(12))
+                .on_press(Message::DataRootStartFresh)
+                .style(theme::secondary())
+                .padding([7, 16]),
+            horizontal_space(),
+            button(text(format!("Use the {}", install.instances_label())).size(12))
+                .on_press(Message::DataRootUseExisting)
+                .style(theme::primary())
+                .padding([7, 16]),
+        ]
+        .spacing(10)
+        .into();
+        modal_shell("Where should the game data live?", body, footer, 560.0)
+    }
+
     /// About / help page.
     fn view_about(&self) -> Element<'_, Message> {
         let rows: Vec<(String, String)> = vec![
@@ -4278,6 +4562,9 @@ impl PalantirApp {
             drafts: &self.settings_drafts,
             account: self.accounts.selected_account(),
             flag_filter: &self.flag_filter,
+            home: &self.home.root,
+            data_root: &self.paths.root,
+            data_root_pending: self.data_root_pending(),
         };
         let body = row![
             container(settings::nav(self.settings_tab, self.prefs.developer_mode))
@@ -4307,6 +4594,7 @@ impl PalantirApp {
             Modal::Import => self.view_import_dialog(),
             Modal::Settings => self.view_settings_dialog(),
             Modal::Microsoft => self.view_microsoft_dialog(),
+            Modal::Welcome => self.view_welcome_dialog(),
             Modal::ConfirmDelete(id) => view_confirm_delete(id),
         };
         // One container, centred on both axes. (A wrapper around the dialog
@@ -6414,6 +6702,226 @@ mod tests {
         let paths = PalantirPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
         (dir, paths)
+    }
+
+    /// A temporary root holding real instances for `names`.
+    ///
+    /// Made with the same call the Create dialog makes, not with bare folders: a
+    /// bare folder is not an instance — `instances::load` skips it — and a
+    /// fixture that the code under test would not count is a fixture that proves
+    /// nothing.
+    fn root_with_instances(dir: &std::path::Path, names: &[&str]) -> PalantirPaths {
+        let paths = PalantirPaths::at(dir);
+        std::fs::create_dir_all(paths.instances_dir()).unwrap();
+        for name in names {
+            instances::create(&paths, &NewInstance::vanilla(name, "1.21.1"))
+                .unwrap_or_else(|error| panic!("could not make the '{name}' fixture: {error}"));
+        }
+        paths
+    }
+
+    /// An app whose settings live in `home` and whose game data lives in `data`.
+    fn app_with_roots(home: PalantirPaths, data: PalantirPaths) -> PalantirApp {
+        PalantirApp::with_roots(home, data)
+    }
+
+    #[test]
+    fn a_test_app_is_never_offered_the_machines_real_install() {
+        // The guard on the whole migration: `offer_migration` reads this
+        // machine's real `%APPDATA%`, so it must not be reachable from a
+        // constructor a test uses. Failing this test means a suite that passes
+        // or fails depending on what is installed on the reviewer's box.
+        let (_dir, paths) = test_paths();
+        let app = PalantirApp::with_paths(paths);
+        assert_eq!(app.modal(), &Modal::None);
+        assert!(app.welcome.is_none());
+    }
+
+    #[test]
+    fn the_first_run_question_is_asked_only_when_there_is_something_to_ask() {
+        use palantir_core::paths::LegacyInstall;
+
+        // An install to offer, and an empty home with no instances of its own.
+        let (home_dir, home) = test_paths();
+        let legacy = LegacyInstall { root: home_dir.path().join("elsewhere"), instances: 3 };
+
+        let mut app = app_with_roots(home.clone(), home.clone());
+        app.offer_migration_from(Some(legacy.clone()));
+        assert_eq!(app.modal(), &Modal::Welcome, "an empty home is a first run");
+        assert_eq!(app.welcome.as_ref().map(|i| i.instances), Some(3));
+
+        // Already answered: not asked again, however much is waiting to be
+        // imported.
+        let (_d2, home2) = test_paths();
+        let mut app = app_with_roots(home2.clone(), home2.clone());
+        app.prefs.data_root_asked = true;
+        app.offer_migration_from(Some(legacy.clone()));
+        assert_eq!(app.modal(), &Modal::None);
+
+        // Already pointing somewhere: that is an answer too.
+        let (_d3, home3) = test_paths();
+        let mut app = app_with_roots(home3.clone(), home3.clone());
+        app.prefs.app_directory = Some("D:/already/chosen".to_string());
+        app.offer_migration_from(Some(legacy.clone()));
+        assert_eq!(app.modal(), &Modal::None);
+
+        // Instances of our own already: somebody is already set up, and a
+        // dialog offering to move them would be a dialog about nothing.
+        let (d4, _h4) = tempfile::tempdir().unwrap();
+        let home4 = root_with_instances(d4.path(), &["Mine"]);
+        let mut app = app_with_roots(home4.clone(), home4.clone());
+        app.offer_migration_from(Some(legacy.clone()));
+        assert_eq!(app.modal(), &Modal::None);
+
+        // No other launcher on the machine: nothing to offer.
+        let (_d5, home5) = test_paths();
+        let mut app = app_with_roots(home5.clone(), home5.clone());
+        app.offer_migration_from(None);
+        assert_eq!(app.modal(), &Modal::None);
+    }
+
+    #[test]
+    fn using_the_install_it_found_adopts_it_where_it_is() {
+        // Adoption, not import: the instances, libraries and accounts are read
+        // where they already are. Copying a modern install means moving ten
+        // gigabytes to gain nothing, because the assets are identical either
+        // way.
+        let (home_dir, home) = test_paths();
+        let legacy = root_with_instances(&home_dir.path().join("other-launcher"), &["One", "Two"]);
+        let mut app = app_with_roots(home.clone(), home.clone());
+        std::fs::write(legacy.accounts_file(), b"{}").unwrap();
+
+        app.offer_migration_from(Some(palantir_core::paths::LegacyInstall {
+            root: legacy.root.clone(),
+            instances: 2,
+        }));
+        let _ = app.update(Message::DataRootUseExisting);
+
+        assert_eq!(app.paths.root, legacy.root, "the data root did not move");
+        assert_eq!(app.home.root, home.root, "the settings asked to move with it");
+        assert_eq!(app.modal(), &Modal::None, "the dialog stayed open");
+        assert_eq!(app.cards.len(), 2, "the adopted instances were not loaded");
+        // Written down, in the settings' own directory: the next run resolves
+        // the same root without asking.
+        let saved = prefs::load(&home);
+        assert!(saved.data_root_asked);
+        assert_eq!(saved.app_directory.as_deref(), Some(legacy.root.to_str().unwrap()));
+        assert_eq!(palantir_core::paths::recorded_data_root(&home), saved.app_directory);
+    }
+
+    #[test]
+    fn starting_fresh_lands_in_this_launchers_own_folder() {
+        let (home_dir, home) = test_paths();
+        let legacy = root_with_instances(&home_dir.path().join("other-launcher"), &["Theirs"]);
+        let mut app = app_with_roots(home.clone(), home.clone());
+        app.offer_migration_from(Some(palantir_core::paths::LegacyInstall {
+            root: legacy.root.clone(),
+            instances: 1,
+        }));
+        let _ = app.update(Message::DataRootStartFresh);
+
+        assert_eq!(app.paths.root, home.root);
+        assert_eq!(app.modal(), &Modal::None);
+        let saved = prefs::load(&home);
+        assert!(saved.data_root_asked, "the question must not come back");
+        assert_eq!(saved.app_directory, None, "fresh is the absence of a pointer");
+        // And the other install is exactly where it was: not one byte of it was
+        // touched, which is the promise the button makes.
+        assert!(legacy.instances_dir().join("Theirs").is_dir());
+    }
+
+    #[test]
+    fn closing_the_question_without_answering_asks_again_next_time() {
+        let (home_dir, home) = test_paths();
+        let legacy = root_with_instances(&home_dir.path().join("other-launcher"), &["Theirs"]);
+        let mut app = app_with_roots(home.clone(), home.clone());
+        app.offer_migration_from(Some(palantir_core::paths::LegacyInstall {
+            root: legacy.root.clone(),
+            instances: 1,
+        }));
+        let _ = app.update(Message::CloseModal);
+
+        assert_eq!(app.modal(), &Modal::None);
+        assert!(app.welcome.is_none());
+        assert!(!prefs::load(&home).data_root_asked, "closing is not an answer");
+    }
+
+    #[test]
+    fn a_typed_root_takes_effect_when_it_names_a_directory_that_exists() {
+        let (home_dir, home) = test_paths();
+        let target = root_with_instances(&home_dir.path().join("target"), &["Moved"]);
+        let mut app = app_with_roots(home.clone(), home.clone());
+        assert!(app.data_root_pending().is_none());
+
+        // Half-typed: no such directory, so nothing moves and the pane can say
+        // exactly what is wrong instead of showing a setting that did nothing.
+        let absent = home_dir.path().join("not-there-yet");
+        let _ = app.update(Message::SettingsDraft(
+            settings::Field::AppDirectory,
+            absent.display().to_string(),
+        ));
+        assert_eq!(app.paths.root, home.root, "a path that is not there moved the root");
+        assert_eq!(app.data_root_pending(), Some(absent.display().to_string()));
+
+        // A directory that is there is applied at once, and the instances that
+        // live in it are what the shell now shows.
+        let _ = app.update(Message::SettingsDraft(
+            settings::Field::AppDirectory,
+            target.root.display().to_string(),
+        ));
+        assert_eq!(app.paths.root, target.root);
+        assert!(app.data_root_pending().is_none());
+        assert_eq!(app.cards.len(), 1);
+        assert_eq!(app.cards[0].id, "Moved");
+
+        // Clearing the field comes back to this launcher's own folder.
+        let _ = app.update(Message::SettingsDraft(settings::Field::AppDirectory, String::new()));
+        assert_eq!(app.paths.root, home.root);
+        assert!(app.data_root_pending().is_none());
+    }
+
+    #[test]
+    fn a_relative_path_is_never_used_as_the_data_root() {
+        // A relative path would mean a different install depending on the
+        // working directory the window was started from.
+        let (_dir, home) = test_paths();
+        let mut app = app_with_roots(home.clone(), home.clone());
+        let _ = app.update(Message::SettingsDraft(
+            settings::Field::AppDirectory,
+            "some/relative/place".to_string(),
+        ));
+        assert_eq!(app.paths.root, home.root);
+        assert_eq!(app.data_root_pending(), Some("some/relative/place".to_string()));
+    }
+
+    #[test]
+    fn adopting_a_root_replaces_the_instances_and_their_accounts() {
+        // Everything under the root moves at once: a screen still listing the
+        // old root's instances, or still signed into its accounts, would be the
+        // half-done migration this exists to avoid.
+        let (home_dir, home) = test_paths();
+        let mine = root_with_instances(&home_dir.path().join("mine"), &["Keeper"]);
+        let theirs = root_with_instances(&home_dir.path().join("theirs"), &["A", "B"]);
+        let mut app = app_with_roots(home.clone(), mine.clone());
+        // Something selected, plus a mod list read from the root we are leaving.
+        let _ = app.update(Message::SelectInstance("Keeper".to_string()));
+        assert_eq!(app.cards.len(), 1);
+
+        app.prefs.app_directory = Some(theirs.root.display().to_string());
+        let _ = app.update(Message::SettingsDraft(
+            settings::Field::AppDirectory,
+            theirs.root.display().to_string(),
+        ));
+
+        assert_eq!(app.paths.root, theirs.root);
+        let mut ids: Vec<&str> = app.cards.iter().map(|card| card.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["A", "B"]);
+        assert!(app.selected.is_none(), "the old selection survived the move");
+        assert!(app.mods.is_empty());
+        // The new root was given the layout it needs to be usable as a root.
+        assert!(theirs.cache_dir().is_dir());
+        assert!(theirs.libraries_dir().is_dir());
     }
 
     fn catalog_with(game: &[&str], fabric: &[(&str, bool, &str)]) -> VersionCatalog {

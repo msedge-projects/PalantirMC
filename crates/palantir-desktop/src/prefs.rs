@@ -4,7 +4,13 @@
 //! is not ours to rewrite: a Prism user's heap sizes, Java paths and instance
 //! directory live in it, and a typo written by a second program would break
 //! their launcher. So the settings that belong to *this* product go in their own
-//! file next to it, written atomically and left alone if it is unparseable.
+//! file, written atomically and left alone if it is unparseable.
+//!
+//! That file lives at [`PalantirPaths::home`] — this product's own directory —
+//! and **not** at the data root, which is the whole reason the two are separate
+//! paths. The data root can be an install another launcher created, and it can
+//! change; where this launcher's own settings live cannot, or the answer about
+//! where the game data should go would be stored inside the thing it answers.
 //!
 //! Only what the shell actually offers is stored, and every field is skipped
 //! when it still holds its default — so a user who has changed nothing gets a
@@ -24,8 +30,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::theme::ColorTheme;
 
-/// The preferences file, under the data root.
-pub const PREFS_FILE: &str = "palantirmc-desktop.json";
+/// The preferences file, under this product's own directory.
+///
+/// The name is [`palantir_core::paths::PREFS_FILE`] rather than a second
+/// literal: core reads one key out of this file to resolve the data root, and a
+/// second spelling of the name here is the one way the two could stop meaning
+/// the same file.
+pub const PREFS_FILE: &str = palantir_core::paths::PREFS_FILE;
 
 /// Concurrent downloads when nothing is configured.
 pub const DEFAULT_CONCURRENT_DOWNLOADS: u32 = 6;
@@ -172,9 +183,24 @@ pub struct Prefs {
     /// Keep the full copy details on screen rather than behind a hover.
     #[serde(skip_serializing_if = "is_false")]
     pub always_show_copy_details: bool,
-    /// The data root, when it has been moved off Prism's.
+    /// The data root, when it has been moved off this product's own directory.
+    ///
+    /// This is the pointer [`palantir_core::paths::resolve_data_root`] reads, and
+    /// it is the *only* place the location is stored: an install adopted from
+    /// another launcher is recorded here as its existing path rather than copied
+    /// into a new one, which is why adopting gigabytes of libraries and assets
+    /// costs one line of JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_directory: Option<String>,
+    /// Whether the first-run question — use the install that is already on this
+    /// machine, or start in this product's own folder — has been put to the user.
+    ///
+    /// Without this the question would come back on every start, and a dialog
+    /// that reappears until it is obeyed is not a question. It is written when
+    /// the dialog is *answered*, so a window closed without an answer asks again
+    /// rather than silently choosing.
+    #[serde(skip_serializing_if = "is_false")]
+    pub data_root_asked: bool,
     /// A Java binary per major version, keyed by the major ("25", "21", …).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub java_paths: BTreeMap<String, String>,
@@ -218,6 +244,7 @@ impl Default for Prefs {
             max_concurrent_writes: None,
             always_show_copy_details: false,
             app_directory: None,
+            data_root_asked: false,
             java_paths: BTreeMap::new(),
         }
     }
@@ -285,9 +312,9 @@ impl Prefs {
     }
 }
 
-/// Where the preferences live for a data root.
-pub fn path(paths: &PalantirPaths) -> PathBuf {
-    paths.root.join(PREFS_FILE)
+/// Where the preferences live: this product's own directory, not the data root.
+pub fn path(home: &PalantirPaths) -> PathBuf {
+    home.root.join(PREFS_FILE)
 }
 
 /// Read the preferences, falling back to the defaults.
@@ -296,8 +323,8 @@ pub fn path(paths: &PalantirPaths) -> PathBuf {
 /// treated the same way rather than being an error the user has to deal with.
 /// The corrupt file is left in place — overwriting it would destroy whatever
 /// the user was editing when it broke.
-pub fn load(paths: &PalantirPaths) -> Prefs {
-    std::fs::read_to_string(path(paths))
+pub fn load(home: &PalantirPaths) -> Prefs {
+    std::fs::read_to_string(path(home))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
@@ -307,11 +334,11 @@ pub fn load(paths: &PalantirPaths) -> Prefs {
 ///
 /// Atomic so a crash mid-write cannot leave a half-written file that the next
 /// run reads as the defaults: the theme would silently reset.
-pub fn save(paths: &PalantirPaths, prefs: &Prefs) -> Result<(), String> {
+pub fn save(home: &PalantirPaths, prefs: &Prefs) -> Result<(), String> {
     let text = serde_json::to_string_pretty(prefs).map_err(|error| error.to_string())?;
     let mut bytes = text.into_bytes();
     bytes.push(b'\n');
-    palantir_core::util::atomic_write(&path(paths), &bytes).map_err(|error| error.to_string())
+    palantir_core::util::atomic_write(&path(home), &bytes).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -527,6 +554,7 @@ mod tests {
             max_concurrent_writes: Some(2),
             always_show_copy_details: true,
             app_directory: Some("D:/minecraft".into()),
+            data_root_asked: true,
             java_paths,
         };
         save(&paths, &every).unwrap();
@@ -549,6 +577,54 @@ mod tests {
             assert!(back.advanced_rendering, "text: {text:?}");
             assert_eq!(back.concurrent_downloads(), DEFAULT_CONCURRENT_DOWNLOADS);
         }
+    }
+
+    #[test]
+    fn the_pointer_the_shell_writes_is_the_one_core_reads() {
+        // Two crates, one key. The shell writes `app_directory` through serde and
+        // core reads it by hand, so nothing but this test connects the two — and
+        // a rename on either side would otherwise leave every start resolving
+        // this product's folder while the settings pane showed something else.
+        let (_dir, paths) = root();
+        assert_eq!(palantir_core::paths::recorded_data_root(&paths), None);
+        let prefs = Prefs { app_directory: Some("D:/minecraft".into()), ..Prefs::default() };
+        save(&paths, &prefs).unwrap();
+        assert_eq!(
+            palantir_core::paths::recorded_data_root(&paths).as_deref(),
+            Some("D:/minecraft")
+        );
+        assert_eq!(
+            palantir_core::paths::resolve_data_root(&paths, Some("D:/minecraft")),
+            std::path::PathBuf::from("D:/minecraft")
+        );
+    }
+
+    #[test]
+    fn answering_the_first_run_question_survives_a_restart() {
+        // A question that comes back on every start is not a question. A window
+        // closed *without* answering leaves it unasked, so the next start asks
+        // again rather than silently deciding.
+        let (_dir, paths) = root();
+        assert!(!load(&paths).data_root_asked, "a fresh install has not been asked");
+        let answered = Prefs { data_root_asked: true, ..Prefs::default() };
+        save(&paths, &answered).unwrap();
+        assert!(load(&paths).data_root_asked);
+        let text = std::fs::read_to_string(path(&paths)).unwrap();
+        assert!(text.contains("data_root_asked"), "got: {text}");
+    }
+
+    #[test]
+    fn declining_the_question_is_not_recorded_as_a_pointer_to_somewhere() {
+        // "Start in this product's own folder" is the *absence* of a pointer,
+        // and an absent pointer has to mean the default rather than an empty
+        // path that `resolve_data_root` would then have to guess about.
+        let (_dir, paths) = root();
+        let declined = Prefs { data_root_asked: true, ..Prefs::default() };
+        save(&paths, &declined).unwrap();
+        let back = load(&paths);
+        assert_eq!(back.app_directory, None);
+        assert_eq!(palantir_core::paths::recorded_data_root(&paths), None);
+        assert_eq!(palantir_core::paths::resolve_data_root(&paths, None), paths.root);
     }
 
     #[test]
