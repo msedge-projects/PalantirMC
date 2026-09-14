@@ -29,10 +29,10 @@ One real failure was found and fixed, and it was worth having: see §8.1.
 
 What the compiler was checking:
 
-- `crates/prism-gui` lost its `backend.rs` module plus the `Page`/`Route` types,
+- `crates/palantir-gui` lost its `backend.rs` module plus the `Page`/`Route` types,
   the `Error::Json` variant, and its `serde`/`serde_json` dependencies. Its
   `lib.rs` and `model.rs` were rewritten around the leftovers.
-- `crates/prism-desktop/src/theme.rs` lost `ColorTheme::is_active`.
+- `crates/palantir-desktop/src/theme.rs` lost `ColorTheme::is_active`.
 - `Cargo.toml`/`Cargo.lock` lost unused dependencies (see §7).
 
 Two checks *were* possible without a compiler and both pass, so the risk is
@@ -142,16 +142,16 @@ failures were real rather than configuration:
 | Run | Result |
 |---|---|
 | `eeca48d` | Test ✅ · Lint ❌ 169 `unwrap`/`expect` errors · gnu ✅ · msvc ❌ `VCRUNTIME140.dll` |
-| `7b29170` | Test ✅ · Lint ❌ 16 in `prism-gui` · gnu ✅ · msvc ✅ |
+| `7b29170` | Test ✅ · Lint ❌ 16 in `palantir-gui` · gnu ✅ · msvc ✅ |
 | `3dee1fc` | **all four ✅** |
 
-**The lint job found a genuine bug, twice.** `prism-core` and `prism-gui` deny
+**The lint job found a genuine bug, twice.** `palantir-core` and `palantir-gui` deny
 `unwrap_used`/`expect_used` crate-wide while their own doc comment states the
-rule as "no `unwrap`/`expect` *outside tests*", and `prism-loader` already
+rule as "no `unwrap`/`expect` *outside tests*", and `palantir-loader` already
 carries the `cfg_attr(test, allow(...))` line that makes the two agree. Neither
 crate had ever been run through clippy (the component is not installed for the
 local toolchain), so 153 and 16 errors respectively had been sitting there. The
-first fix gave the `allow` *before* the `deny` in `prism-gui`; inner attributes
+first fix gave the `allow` *before* the `deny` in `palantir-gui`; inner attributes
 apply in sequence, so the deny still won -- the second run is what showed the
 order mattered.
 
@@ -201,23 +201,23 @@ anything but the probe files; delete it from the repository settings, or after
 Deleted, because nothing referenced them and they would otherwise sit in the
 repo forever:
 
-- `crates/prism-core/examples/dbg_ini.rs` — a scratch debug harness with
+- `crates/palantir-core/examples/dbg_ini.rs` — a scratch debug harness with
   hardcoded `println!`s, superseded by `ini.rs`'s own unit tests.
-- `crates/prism-core/examples/prism-cli.rs` — a strict subset of
-  `crates/prism-cli/src/main.rs` (4 subcommands against its 8). The example had
+- `crates/palantir-core/examples/palantir-cli.rs` — a strict subset of
+  `crates/palantir-cli/src/main.rs` (4 subcommands against its 8). The example had
   been stale since phase 2.
 - `build.log`, `build_dbg.log` — leftover build output, already matched by
   `*.log`.
 - `.unlazy/` — an empty scratch directory from a working ledger, now also
   ignored in `.gitignore`.
-- `prism-gui`'s `backend.rs`: a `GuiBackend` trait, an `App` driver and a
+- `palantir-gui`'s `backend.rs`: a `GuiBackend` trait, an `App` driver and a
   `HeadlessBackend` written for a frontend that had not been chosen yet. iced is
   the frontend and drives the models directly, so this was a second, unreachable
   path. Its `Page`/`Route` navigation types duplicated the real `Page` enum in
   `app.rs`, with fewer pages.
-- Unused dependencies: `anyhow` in `prism-desktop`, `anyhow` in `prism-core`'s
+- Unused dependencies: `anyhow` in `palantir-desktop`, `anyhow` in `palantir-core`'s
   dev-dependencies (it existed for the deleted examples), and `serde` +
-  `serde_json` in `prism-gui` (only the removed `AppSnapshot` JSON round-trip
+  `serde_json` in `palantir-gui` (only the removed `AppSnapshot` JSON round-trip
   used them). `Cargo.lock` was updated to match in the same pass.
 - `theme.rs`'s `ColorTheme::is_active` — defined, never called.
 
@@ -626,7 +626,7 @@ of these is asserted by `GATES.md`, and the first two are visible in the capture
 The reference's dialog is three groups and **eleven** tabs — Display (Appearance,
 Features, Behavior, Language, Feature flags), Account (Profile, Social, Privacy),
 Instances (Synced settings, Java installations, Resource management). All eleven
-are now panes in `crates/prism-desktop/src/settings.rs`, in that order, with the
+are now panes in `crates/palantir-desktop/src/settings.rs`, in that order, with the
 group headings printed once per run of tabs, and `Feature flags` hidden until
 developer mode is on (six presses on the version in the footer, as the reference
 does). The section list is a scrollable column of real buttons, the pane is a
@@ -699,3 +699,56 @@ six seconds of exactly what parking is for. The finding is the point: a future
 session should not re-derive it. A screenshot walk of every page and pane needs
 either the real pointer or a capture path inside the app that sets its own
 state, and nothing in between will do it.
+
+## 15. The rename: PalantirMC all the way down
+
+The workspace no longer carries another project's name anywhere of its own:
+
+| Before | After |
+|---|---|
+| `crates/prism-core` (package `prism-core`, lib `prism_core`) | `crates/palantir-core` |
+| `crates/prism-net` / `-loader` / `-gui` / `-cli` / `-desktop` | `crates/palantir-*` |
+| `PrismPaths` | `PalantirPaths` |
+| `PrismApp` | `PalantirApp` |
+| `PrismVersion` | `PalantirVersion` |
+| `MicrosoftOAuth::prism_client_id` / `with_prism_client_id` | `::public_client_id` / `with_public_client_id` |
+| `.prism-test-data/`, `prism-cli-test-` | `.palantir-test-data/`, `palantir-cli-test-` |
+
+Two things this pass fixed rather than renamed:
+
+1. **The launch script wrote the wrong launcher's name into the game.**
+   `windowTitle` was a hardcoded `"Prism Launcher: {instance}"`, and the desktop
+   shell and the CLI both passed `"Prism Launcher"` as the `launcherBrand` — so
+   the Minecraft window's own title bar, and the crash report, credited a
+   launcher that did not start the game. The name now lives in one place
+   ([`palantir_core::PRODUCT_NAME`]), `windowTitle` takes it from the same
+   argument as `launcherBrand`, and `brand::APP_NAME` is that constant rather
+   than a second literal.
+2. The crate descriptions said "Prism-compatible launcher core". They now name
+   the product; compatibility is a property of the *formats*, documented where
+   the formats are read.
+
+**What was deliberately kept, and why.** References to *Prism Launcher the
+project* are not branding, they are the record of where this launcher's data
+comes from, and three kinds cannot be renamed without breaking something real:
+
+* `prismlauncher.cfg`, `%APPDATA%\PrismLauncher`, `~/Library/Application
+  Support/PrismLauncher` — these are the files and folders the launcher reads and
+  writes. Renaming the strings would stop it finding an existing install.
+* `meta.prismlauncher.org/v1` — the metadata service the version catalog,
+  libraries and assets are fetched from. It is their endpoint.
+* The instance icons and the licence: `assets/ATTRIBUTION` records that the art
+  is carved from `prismlauncher.exe`, (c) Prism Launcher contributors,
+  GPL-3.0-only, and the About page says the same. Attribution is a condition of
+  shipping the art, not a brand.
+
+The compatibility tests keep names like
+`instance_cfg_reproduces_prism_bytes_from_the_same_settings`, because that is
+what they assert: our output matches a file that launcher wrote.
+
+**Not changed on purpose: the data root.** The launcher still discovers and
+uses Prism's data root (`%APPDATA%\PrismLauncher` or an existing portable dir),
+which is what makes an instance created in either launcher open in the other.
+Moving it to a PalantirMC-named directory would be a one-line default and a
+broken promise for anyone with instances already there; it needs a migration
+story first.

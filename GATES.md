@@ -1,6 +1,6 @@
 # Gates: PalantirMC's shell matches the reference client
 
-OWNS: crates/prism-desktop/src/**, tools/panel_gate.py, NEXT_STEPS.md
+OWNS: crates/palantir-desktop/src/**, tools/panel_gate.py, NEXT_STEPS.md
 
 Scope: the shell's chrome, surfaces, shape and type match the Modrinth App as
 measured off its own running window rather than estimated from screenshots, and

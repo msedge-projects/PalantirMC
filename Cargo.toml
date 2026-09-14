@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/prism-core",
-    "crates/prism-net",
-    "crates/prism-loader",
-    "crates/prism-gui",
-    "crates/prism-cli",
-    "crates/prism-desktop",
+    "crates/palantir-core",
+    "crates/palantir-net",
+    "crates/palantir-loader",
+    "crates/palantir-gui",
+    "crates/palantir-cli",
+    "crates/palantir-desktop",
 ]
 
 [workspace.package]

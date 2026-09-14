@@ -2548,6 +2548,88 @@ dependencies = [
 ]
 
 [[package]]
+name = "palantir-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "palantir-core",
+ "palantir-loader",
+ "palantir-net",
+ "serde_json",
+]
+
+[[package]]
+name = "palantir-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "palantir-desktop"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "iced",
+ "image",
+ "md-5",
+ "palantir-core",
+ "palantir-gui",
+ "palantir-loader",
+ "palantir-net",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tempfile",
+ "wgpu",
+ "windows-sys 0.52.0",
+ "zip",
+]
+
+[[package]]
+name = "palantir-gui"
+version = "0.1.0"
+dependencies = [
+ "palantir-core",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "palantir-loader"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "memmap2 0.9.11",
+ "palantir-core",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 1.0.69",
+ "zip",
+]
+
+[[package]]
+name = "palantir-net"
+version = "0.1.0"
+dependencies = [
+ "palantir-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "palette"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2749,88 +2831,6 @@ name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
-
-[[package]]
-name = "prism-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "prism-core",
- "prism-loader",
- "prism-net",
- "serde_json",
-]
-
-[[package]]
-name = "prism-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "uuid",
-]
-
-[[package]]
-name = "prism-desktop"
-version = "0.1.0"
-dependencies = [
- "futures",
- "iced",
- "image",
- "md-5",
- "prism-core",
- "prism-gui",
- "prism-loader",
- "prism-net",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "tempfile",
- "wgpu",
- "windows-sys 0.52.0",
- "zip",
-]
-
-[[package]]
-name = "prism-gui"
-version = "0.1.0"
-dependencies = [
- "prism-core",
- "tempfile",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "prism-loader"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "memmap2 0.9.11",
- "prism-core",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "thiserror 1.0.69",
- "zip",
-]
-
-[[package]]
-name = "prism-net"
-version = "0.1.0"
-dependencies = [
- "prism-core",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 1.0.69",
- "uuid",
-]
 
 [[package]]
 name = "proc-macro-crate"

@@ -139,7 +139,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=pathlib.Path,
-        default=pathlib.Path("crates/prism-desktop/assets/fonts"),
+        default=pathlib.Path("crates/palantir-desktop/assets/fonts"),
     )
     args = parser.parse_args()
 

@@ -1,0 +1,82 @@
+[package]
+name = "palantir-desktop"
+description = "PalantirMC — Minecraft launcher (iced)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The package is `palantir-desktop` -- the workspace member, the `-p` selector
+# and every `palantir_desktop::` path depend on it -- while the *executable* is
+# the product the user sees. Naming the binary here means `cargo build
+# --release` and CI emit `PalantirMC.exe` directly, instead of every packaging
+# step having to copy `palantir-desktop.exe` to a new name.
+[[bin]]
+name = "PalantirMC"
+path = "src/main.rs"
+
+[dependencies]
+# `image` paints the instance-icon art read out of the reference client's
+# binary; `canvas` draws the launcher's own
+# chrome (see `crate::glyphs`) as tintable vectors instead of bitmaps.
+# `advanced` only re-exports the widget internals (`iced::advanced`) that a
+# custom `Widget` needs, which is what `crate::scroll`'s wheel guard is. It is
+# an empty feature flag — no new crate enters the build — and the alternative
+# would be a second, competing scroll implementation instead of a small widget
+# that sits inside iced's own.
+iced = { version = "0.12", features = ["image", "canvas", "advanced"] }
+palantir-core = { path = "../palantir-core" }
+palantir-gui = { path = "../palantir-gui" }
+palantir-net = { path = "../palantir-net" }
+palantir-loader = { path = "../palantir-loader" }
+futures = "0.3"
+# Same version/features as `palantir-net`, which already pulls reqwest into the
+# workspace: browsing the Modrinth API needs headers (a User-Agent), which the
+# metadata fetcher cannot set.
+reqwest = { version = "0.11", features = ["blocking"] }
+# Offline account UUIDs are `java.util.UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
+# which is MD5-based; matching it is what makes the same name the same player in
+# Prism, the vanilla launcher, and here.
+md-5 = "0.10"
+# Mojang publishes a `sha1` per library and asset; Modrinth publishes one per
+# file. Verifying either needs exactly this digest.
+sha1 = "0.10"
+serde.workspace = true
+serde_json.workspace = true
+# Screenshots are shown as generated thumbnails rather than originals: a
+# 1080p screenshot is 8 MB of pixels, and a page of them would commit more
+# memory than the machines this launcher targets have. Already in the lock file
+# as iced's own dependency, so this adds no download.
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+# The renderer is chosen from what this machine can actually provide, which
+# means asking wgpu the same question iced asks it (see `crate::gpu`). Already in
+# the workspace lock file as iced's own dependency, so this adds no download; it
+# only makes the same crate nameable from here.
+wgpu = "0.19"
+
+[dev-dependencies]
+tempfile = "3"
+# The install tests build a small native jar and assert on what the extractor
+# writes, which needs a zip *writer*. Same version `palantir-loader` already pulls
+# in, so this adds nothing to the build.
+zip = "0.6"
+
+# The shell needs two Win32 calls iced 0.12 does not expose: the monitor work
+# area (so the window opens at a size the screen can actually hold) and the OS
+# resize loop. iced wraps winit's `drag_window` but has no equivalent of
+# `drag_resize_window`, so an undecorated window cannot be resized from its
+# edges without this. Already in the workspace lock file via winit 0.29, so it
+# costs no new download; the feature list is deliberately just these modules.
+[target.'cfg(windows)'.dependencies]
+# `Win32_System_Registry` is read-only use rather than another call into the
+# window: the shell asks Windows for the system light/dark preference (so the
+# color theme can follow the OS) and for its own version string, both of which
+# live in the registry and both of which iced has no API for.
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Registry",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

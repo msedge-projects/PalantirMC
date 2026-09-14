@@ -20,7 +20,7 @@ It deliberately does not try to be a parser. It knows four things:
 Anything it cannot be sure about it reports rather than guesses, so a clean run
 means "nothing structural is wrong", not "this compiles".
 
-    python tools/rust_balance.py crates/prism-desktop/src/*.rs
+    python tools/rust_balance.py crates/palantir-desktop/src/*.rs
 """
 
 from __future__ import annotations

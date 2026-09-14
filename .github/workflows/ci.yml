@@ -166,7 +166,7 @@ jobs:
       - name: Build release
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p prism-desktop --target ${{ matrix.target }}
+        run: cargo build --release --locked -p palantir-desktop --target ${{ matrix.target }}
 
       - name: Stage artifact and hash it
         shell: pwsh

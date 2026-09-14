@@ -1,0 +1,16 @@
+[package]
+name = "palantir-core"
+description = "PalantirMC's launcher core: config, instance management, version resolution"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
