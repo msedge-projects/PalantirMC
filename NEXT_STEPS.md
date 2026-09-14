@@ -645,9 +645,11 @@ second independent scrollable at `min(65vh, 600px)`, and both scroll through
 | Show play time | the playtime chip is drawn on library and sidebar cards |
 
 Every other switch is drawn **disabled with the reason under it** rather than as a
-control that silently forgets. That is a deliberate trade: the reference has
-sixteen switches and this launcher can honour six, and a switch that moves while
-nothing happens is indistinguishable from a working one until the user notices.
+control that silently forgets. That is a deliberate trade: the dialog names
+**twenty** switches and this launcher can honour six of them, and a switch that
+moves while nothing happens is indistinguishable from a working one until the
+user notices. Fourteen rows therefore carry their own explanation, which is the
+list of what is left to wire.
 
 Two tests hold that line, and one of them was written because the line had
 already been crossed:
