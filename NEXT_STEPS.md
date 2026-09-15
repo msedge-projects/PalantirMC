@@ -1365,3 +1365,51 @@ rules, the exclude list in the native extractor, dependency parsing against the
 real API shape, the window-argument decision table, a pack fetch that verifies
 and drops a tampered file, and the bar's precedence and hand-over in `app`.
 Nothing here was watched on a desktop, because none of it is a pixel.
+
+## 23. The reference client, driven with the cursor and measured off its own pixels
+
+The last few passes compared this shell to the Modrinth App through one capture
+of its home page. This one went through the app: launched it, pinned its client
+to 1280x720 so its captures and ours compare 1:1, **hovered every rail entry to
+read its tooltip**, clicked every destination, opened the create dialog and the
+settings dialog and backed out with Esc, and typed into the Discover search box.
+Nothing was created, installed or deleted in the user's own data; the one
+lasting change is the window size it remembers. `REFERENCE.md` is the result,
+and `tools/refwalk.py` + `tools/refsample.py` + `tools/refocr.ps1` are how to do
+it again.
+
+**Two of the three findings were invisible from a stylesheet.** The app paints
+`#00da75`, not the green-500 (`#1bd96a`) its own token ladder names, and its
+active rail plate is a 12px-radius square rather than the `rounded-full` its
+markup asks for. Both are now pinned by tests and by G9/G10, and both fail on the
+build that preceded this one, which is what makes a passing run mean something.
+
+**What the walk cost, and what it could not reach.** Injected mouse and key
+messages do not reach a WebView2 window — `NEXT_STEPS.md` §14 recorded the same
+for our own iced shell — so every click is the real pointer with the window
+raised, and a screenshot session takes over the desk for its duration. The
+window also had to be *shown*: launched from a background shell this app creates
+its Tauri window with `WS_VISIBLE` unset and leaves it that way, and the first
+attempt measured a minimised window's restore rectangle while `PrintWindow` drew
+the maximised layout. Two surfaces remain unmeasured and are named in
+`REFERENCE.md`: the instance page (unreachable without creating an instance in
+the user's own Modrinth data) and the Servers page (which the reference itself
+walls behind "Modrinth App update required" at 0.204).
+
+**One tab was deliberately not copied.** The reference's Discover strip has six
+tabs to our five, the sixth being Servers. `project_type:server` answers 0 hits
+through Modrinth's public search API, so a tab for it could only ever be empty —
+and a tab that can never return anything is worse than one that is absent. It is
+recorded in `REFERENCE.md` instead of drawn.
+
+**What changed in the shell.** The accent, its two derived states, the
+`--color-brand-highlight` plate, the 12px plate radius, the rail's leading
+entries and their tooltips, the 8px rail inset, and the Discover strip: modpacks
+first and selected by default, 36px pills with a white label in both states, and
+"Resource Packs"/"Data Packs" capitalised as the reference sets them. Chrome,
+page, raised surface, input and divider were already exact and did not move.
+
+Still open, and unchanged from §12's list: the panel's scrollbar band, the
+panel's sections drawn as cards where the reference divides them, its missing
+left hairline, the accordion that does not open, and the hover/press arithmetic
+that no still capture can measure.
