@@ -7683,6 +7683,10 @@ mod tests {
     fn browse_search_and_install_are_sequenced() {
         let (_dir, paths) = test_paths();
         let mut app = PalantirApp::with_paths(paths);
+        // On the mods tab, because the strip opens on modpacks -- the
+        // reference's own default -- and a modpack needs no selected instance
+        // (it *is* an instance), which is the rule this test is not about.
+        let _ = app.update(Message::BrowseTypePicked(ContentType::Mods));
         let _ = app.update(Message::BrowseQueryChanged("sodium".to_string()));
         assert!(app.browse_state().loading);
         let seq = app.browse_state().seq;
@@ -7716,6 +7720,9 @@ mod tests {
         let created = instances::create(&paths, &NewInstance::vanilla("Plain", "26.2")).unwrap();
         app.reload_instances();
         app.selected = Some(created.id.clone());
+        // A mod into a vanilla instance, which is the refusal under test: the
+        // modpacks tab installs by creating an instance and never asks.
+        let _ = app.update(Message::BrowseTypePicked(ContentType::Mods));
         let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
         assert!(app.status().contains("vanilla"), "status: {}", app.status());
         assert!(app.browse_state().installing.is_none());
@@ -7736,6 +7743,9 @@ mod tests {
         .unwrap();
         app.reload_instances();
         app.selected = Some(created.id.clone());
+        // The mods tab, because the strip opens on modpacks (the reference's
+        // default) and a modpack installs by creating an instance instead.
+        let _ = app.update(Message::BrowseTypePicked(ContentType::Mods));
         let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
         assert!(app.browse_state().installing.is_some());
         let seq = app.install_seq;
@@ -7800,6 +7810,9 @@ mod tests {
         .unwrap();
         app.reload_instances();
         app.selected = Some(created.id.clone());
+        // The mods tab, because the strip opens on modpacks (the reference's
+        // default) and a modpack installs by creating an instance instead.
+        let _ = app.update(Message::BrowseTypePicked(ContentType::Mods));
         let _ = app.update(Message::BrowseInstall("P".to_string(), "Sodium".to_string()));
         assert!(app.browse_state().installing.is_some(), "the install started");
         let seq = app.install_seq;
