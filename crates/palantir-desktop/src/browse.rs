@@ -35,8 +35,18 @@ pub const SEARCH_LIMIT: usize = 20;
 /// Content tabs exposed by Modrinth's public project types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ContentType {
-    /// Java/Fabric/Forge/Quilt mods.
+    /// Modrinth modpacks.
+    ///
+    /// First, and the default, because that is where the reference opens its
+    /// Discover page: its tab strip was measured as Modpacks, Mods, Resource
+    /// Packs, Data Packs, Shaders, with the Modpacks pill filled. It also has a
+    /// sixth tab, Servers, which this shell does not carry -- `project_type:server`
+    /// answers 0 hits through the public search API, so a tab for it could only
+    /// ever be empty, and a dead tab is worse than an absent one. `REFERENCE.md`
+    /// records the difference.
     #[default]
+    Modpacks,
+    /// Java/Fabric/Forge/Quilt mods.
     Mods,
     /// Client-side resource packs.
     ResourcePacks,
@@ -44,19 +54,21 @@ pub enum ContentType {
     DataPacks,
     /// Shader packs.
     Shaders,
-    /// Modrinth modpacks.
-    Modpacks,
 }
 
 impl ContentType {
     /// Label shown in the Browse tab strip.
+    ///
+    /// "Packs" is capitalised in both entries because that is how the reference
+    /// sets them; read off its tab strip, where OCR returned "Data Packs" whole
+    /// and merged "ResourcePacks" out of the same line.
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Mods => "Mods",
-            Self::ResourcePacks => "Resource packs",
-            Self::DataPacks => "Data packs",
-            Self::Shaders => "Shaders",
             Self::Modpacks => "Modpacks",
+            Self::Mods => "Mods",
+            Self::ResourcePacks => "Resource Packs",
+            Self::DataPacks => "Data Packs",
+            Self::Shaders => "Shaders",
         }
     }
 
@@ -71,9 +83,9 @@ impl ContentType {
         }
     }
 
-    /// All supported tabs in product order.
+    /// All supported tabs, in the order the reference draws them.
     pub const fn all() -> [Self; 5] {
-        [Self::Mods, Self::ResourcePacks, Self::DataPacks, Self::Shaders, Self::Modpacks]
+        [Self::Modpacks, Self::Mods, Self::ResourcePacks, Self::DataPacks, Self::Shaders]
     }
 
     /// Folder inside an instance this content goes into.
@@ -847,6 +859,24 @@ mod tests {
         );
         assert!(!ContentType::Modpacks.needs_loader());
         assert_eq!(ContentType::Modpacks.api_value(), "modpack");
+    }
+
+    /// The strip's order and its opening tab are the reference's, measured off
+    /// its own Discover page (`REFERENCE.md`): Modpacks first and selected.
+    #[test]
+    fn tabs_lead_with_modpacks() {
+        assert_eq!(ContentType::default(), ContentType::Modpacks);
+        let labels: Vec<&str> = ContentType::all().iter().map(|k| k.label()).collect();
+        assert_eq!(
+            labels,
+            ["Modpacks", "Mods", "Resource Packs", "Data Packs", "Shaders"]
+        );
+        // Every tab still maps to a project type the search API answers for;
+        // the reference's sixth tab (Servers) is deliberately absent, because
+        // `project_type:server` returns nothing.
+        for kind in ContentType::all() {
+            assert!(!kind.api_value().is_empty());
+        }
     }
 
     #[test]

@@ -76,6 +76,16 @@ pub struct Palette {
     pub text_dim: Color,
     /// The accent (Modrinth green).
     pub accent: Color,
+    /// The accent at 25% over the chrome, as a solid.
+    ///
+    /// `--color-brand-highlight`, which is what an active rail entry and the
+    /// selected tab in the reference's own tab strip are filled with. It is a
+    /// solid here rather than an alpha because the surfaces it lands on are not
+    /// all the chrome: compositing `accent` at 25% over the *page* answers
+    /// `#104832`, while the reference's pill measures `#1d5540` -- the answer you
+    /// get over `#27292e`. Measured both places it appears: `#1d5540` in the tab
+    /// strip, `#1d563f` under the rail's active entry.
+    pub brand_highlight: Color,
     /// Accent, hovered.
     pub accent_hover: Color,
     /// Accent, pressed.
@@ -125,9 +135,23 @@ impl Palette {
             text: rgb(0xFF, 0xFF, 0xFF),            // --color-text-primary
             text_muted: rgb(0xB0, 0xBA, 0xC5),      // --color-text-default
             text_dim: rgb(0x96, 0xA2, 0xB0),        // --color-text-tertiary
-            accent: rgb(0x1B, 0xD9, 0x6A),          // green-500, --color-brand
-            accent_hover: rgb(0x42, 0xE6, 0x86),    // green-400: dark hovers by brightness(1.25)
-            accent_dim: rgb(0x0F, 0xAA, 0x4F),      // green-600: pressed is brightness(0.8)
+            // Measured, not transcribed. The stylesheet's ladder says green-500
+            // (`#1bd96a`) is dark `--color-brand`, and the app as installed is
+            // not painted that: `#00da75` is what the call-to-action button, the
+            // logo mark and the active rail icon all measure, flat, off a
+            // capture of the running window (see `REFERENCE.md`). A palette
+            // transcribed from a sheet the app no longer obeys is a palette
+            // that is wrong in a way no gate can see, so the measurement wins.
+            accent: rgb(0x00, 0xDA, 0x75),
+            brand_highlight: rgb(0x1D, 0x55, 0x40),
+            // Derived by the rule this palette already documents rather than
+            // taken from a ladder rung: hover is `brightness(1.25)` and pressed
+            // `brightness(0.8)`, applied to the accent above (0, 218, 117), which
+            // is `#00ff92` and `#00ae5e`. The ladder's green-400/green-600 were
+            // the same rule applied to green-500, which is the colour this file
+            // no longer uses.
+            accent_hover: rgb(0x00, 0xFF, 0x92),
+            accent_dim: rgb(0x00, 0xAE, 0x5E),
             on_accent: rgb(0x00, 0x00, 0x00),       // --color-accent-contrast is black in dark
             danger: rgb(0xFF, 0x49, 0x6E),          // red-500
             danger_hover: rgb(0xFF, 0x69, 0x84),    // red-400
@@ -180,6 +204,11 @@ impl Palette {
             text_muted: rgb(0x2C, 0x2E, 0x31),      // --color-text-default
             text_dim: rgb(0x48, 0x4D, 0x54),        // --color-text-tertiary
             accent: rgb(0x04, 0x91, 0x4F),          // green-700, the readable rung (see above)
+            // Derived by the rule the dark theme's is measured by -- 25% of the
+            // accent over that theme's chrome -- because the reference's light
+            // theme was not measured. 160,214,197 is that composite over
+            // `#EDEDED`.
+            brand_highlight: rgb(0xB3, 0xD6, 0xC5),
             accent_hover: rgb(0x00, 0xAF, 0x5C),    // green-600, light --color-brand: hover is brighter
             accent_dim: rgb(0x03, 0x74, 0x3F),      // green-700 at brightness(0.8), the pressed rule
             on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
@@ -222,9 +251,13 @@ impl Palette {
             text: rgb(0xFF, 0xFF, 0xFF),
             text_muted: rgb(0xB0, 0xBA, 0xC5),
             text_dim: rgb(0x96, 0xA2, 0xB0),
-            accent: rgb(0x1B, 0xD9, 0x6A),
-            accent_hover: rgb(0x42, 0xE6, 0x86),
-            accent_dim: rgb(0x0F, 0xAA, 0x4F),
+            // The dark theme's measured accent and its two derived states, on
+            // this theme's own chrome for the highlight: OLED differs from dark
+            // only in how dark its surfaces are, and it carries the same brand.
+            accent: rgb(0x00, 0xDA, 0x75),
+            accent_hover: rgb(0x00, 0xFF, 0x92),
+            accent_dim: rgb(0x00, 0xAE, 0x5E),
+            brand_highlight: rgb(0x0C, 0x42, 0x2B),
             on_accent: rgb(0x00, 0x00, 0x00),
             danger: rgb(0xFF, 0x49, 0x6E),
             danger_hover: rgb(0xFF, 0x69, 0x84),
@@ -394,6 +427,7 @@ palette_accessors! {
     text_muted(text_muted): "Secondary text.",
     text_dim(text_dim): "Tertiary text / inactive rail icons.",
     accent(accent): "The accent.",
+    brand_highlight(brand_highlight): "The accent at 25% over the chrome, as a solid.",
     accent_hover(accent_hover): "Accent, hovered.",
     accent_dim(accent_dim): "Accent, pressed.",
     on_accent(on_accent): "Text on top of the accent.",
@@ -421,9 +455,14 @@ pub const R_CARD: f32 = 16.0;
 pub const R_BUTTON: f32 = 12.0;
 /// Chip/pill corner radius: `--radius-sm`.
 pub const R_CHIP: f32 = 8.0;
-/// Corner radius that makes a 48px rail button a circle. The reference's rail
-/// entries are `rounded-full`, and at 48px square that is 24.
-pub const R_RAIL: f32 = 24.0;
+/// Corner radius of the rail's active plate.
+///
+/// The reference's rail entries are `rounded-full` in its stylesheet, which at
+/// 48px square is 24 -- and the app does not draw that. Measured down the plate's
+/// own top-left corner in a capture of the running window, the inset reaches 11
+/// at its widest, i.e. a 12px radius: `--radius-md`, the same rung the buttons
+/// use. The measurement is what this is, the same way the accent above is.
+pub const R_RAIL: f32 = 12.0;
 /// Modal corner radius: `--radius-lg`, as cards.
 pub const R_MODAL: f32 = 16.0;
 /// Corner radius on the page pane's top-left, and only there.
@@ -851,6 +890,14 @@ pub enum Role {
     /// The reference's `rounded-xl px-4 py-2` row: `--color-button-bg-selected`
     /// behind the open pane, `--color-button-bg` on hover, on a 20px radius.
     NavItem { active: bool },
+    /// One tab in a page's own tab strip (Discover's content types).
+    ///
+    /// Not a [`Role::Chip`], which is a bordered pill: measured off the
+    /// reference's strip, the selected tab has no border at all, is filled with
+    /// `--color-brand-highlight`, stands 36px tall and keeps a white label in
+    /// both states. A chip and a tab looked similar enough to be the same
+    /// component that they were one until the capture disagreed.
+    Tab { active: bool },
 }
 
 /// A [`button::StyleSheet`] wrapper so call sites can write
@@ -877,6 +924,10 @@ pub fn rail_button(active: bool) -> Btn {
 /// Selectable pill.
 pub fn chip_button(active: bool) -> Btn {
     Btn(Role::Chip { active })
+}
+/// One tab in a page's own tab strip.
+pub fn tab_button(active: bool) -> Btn {
+    Btn(Role::Tab { active })
 }
 /// The clickable body of an instance card (the card itself is a container).
 pub fn card_area(selected: bool) -> Btn {
@@ -938,11 +989,15 @@ impl Btn {
                 ..Default::default()
             },
             Role::Rail { active } => button::Appearance {
-                // The reference's active entry is `--color-brand-highlight` --
-                // the accent at 25% -- on a fully round button, and its hover is
-                // `--color-button-bg`, which is `surface-4`. Ours was a 12px
-                // rounded square at 16% over a 7% white wash, which read as a
-                // different component rather than as the same one lit up.
+                // `--color-brand-highlight` (the accent at 25%) over the chrome,
+                // which is what the reference's active entry is; hover is
+                // `--color-button-bg`, `surface-4`. The composite was measured
+                // rather than assumed: the accent at 25% over `#27292e` is
+                // `#1d5540`, and the reference's own plate samples `#1d5540` in
+                // its tab strip and `#1d563f` in its rail -- one level apart, on
+                // two different surfaces. This was 16% over a 7% white wash
+                // before, which read as a different component rather than as the
+                // same one lit up.
                 background: if active {
                     Some(alpha(accent(), 0.25).into())
                 } else if hovered {
@@ -952,6 +1007,21 @@ impl Btn {
                 },
                 text_color: if active { accent() } else if hovered { text() } else { text_dim() },
                 border: Border { radius: R_RAIL.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::Tab { active } => button::Appearance {
+                // The strip's own background is the page, but the fill is not a
+                // composite of the page and the accent -- see
+                // [`Palette::brand_highlight`] -- so it is the solid token.
+                background: if active {
+                    Some(brand_highlight().into())
+                } else if hovered {
+                    Some(alpha(text(), 0.08).into())
+                } else {
+                    None
+                },
+                text_color: text(),
+                border: Border { radius: R_BUTTON.into(), ..Default::default() },
                 ..Default::default()
             },
             Role::Chip { active } => button::Appearance {
@@ -1484,6 +1554,48 @@ mod tests {
         let chip_on = button::StyleSheet::active(&chip_button(true), &theme);
         let chip_off = button::StyleSheet::active(&chip_button(false), &theme);
         assert_ne!(chip_on.border.color, chip_off.border.color);
+
+        // A tab is not a chip: the selected one is a solid fill with no border,
+        // and its label stays the page's own text colour in both states.
+        let tab_on = button::StyleSheet::active(&tab_button(true), &theme);
+        let tab_off = button::StyleSheet::active(&tab_button(false), &theme);
+        assert_ne!(tab_on.background, tab_off.background);
+        assert_eq!(tab_on.border.width, 0.0);
+        assert_eq!(tab_on.text_color, tab_off.text_color);
+    }
+
+    /// The tokens whose value is a *measurement* rather than a transcription.
+    ///
+    /// Each of these disagreed with the project's stylesheet ladder and was
+    /// settled by sampling the running app (`REFERENCE.md`). They are pinned
+    /// here because a value that is quietly re-derived from the sheet is wrong
+    /// in a way no other test can see: the shell still paints, the numbers still
+    /// look plausible, and the window is a different colour than the one it was
+    /// measured against.
+    #[test]
+    fn measured_tokens_keep_their_measured_values() {
+        let palette = Palette::dark();
+        assert_eq!(palette.accent, rgb(0x00, 0xDA, 0x75), "the accent is the app's own paint");
+        assert_eq!(
+            palette.brand_highlight,
+            rgb(0x1D, 0x55, 0x40),
+            "the active plate's fill"
+        );
+        assert_eq!(R_RAIL, 12.0, "the plate is a rounded square, not a circle");
+        // The composite the highlight is a solid of: the accent at 25% over the
+        // chrome. If the accent moves, this has to move with it.
+        let a = palette.accent;
+        let chrome = palette.surface;
+        let mixed = Color {
+            r: a.r * 0.25 + chrome.r * 0.75,
+            g: a.g * 0.25 + chrome.g * 0.75,
+            b: a.b * 0.25 + chrome.b * 0.75,
+            a: 1.0,
+        };
+        let expect = palette.brand_highlight;
+        for (got, want) in [(mixed.r, expect.r), (mixed.g, expect.g), (mixed.b, expect.b)] {
+            assert!((got - want).abs() <= 0.01, "accent@25% over chrome should be the highlight");
+        }
     }
 
     #[test]

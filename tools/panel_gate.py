@@ -41,6 +41,13 @@ REF = {
     "panel_row": (0x3A, 0x43, 0x41),  # a row inside such a card
     "page": (0x16, 0x18, 0x1C),  # the page pane
     "chrome": (0x27, 0x29, 0x2E),  # the raised chrome that frames it
+    # Not from the panel: these two are the *brand's* own fills, measured off the
+    # call-to-action button ("+ Create an instance") and off the plate behind
+    # whichever rail entry is active. Both are flat -- 75% and 86% of their own
+    # regions -- which is what makes a modal colour the right instrument for
+    # them. See tools/refsample.py and REFERENCE.md for the samples.
+    "accent": (0x00, 0xDA, 0x75),  # the brand green as the app paints it
+    "plate": (0x1D, 0x55, 0x40),  # accent at 25% over the chrome, as a solid
 }
 
 TOL = 6
@@ -408,6 +415,55 @@ def main() -> int:
         )
     else:
         g.check(False, "panel card is brand-tinted like the reference", "no card found")
+
+    # G9/G10: the brand's two fills, searched rather than sampled.
+    #
+    # The accent is the fill of whatever primary button a page happens to draw
+    # and the plate is behind whichever rail entry is active, so both move with
+    # the page and a fixed coordinate would only ever measure one page. What does
+    # not move is that each is a *flat fill* -- thousands of pixels of one colour
+    # -- while an antialiased edge of the same hue is a rounding error, so the
+    # modal colour of the pixels that pass a hue test finds them and a threshold
+    # would not.
+    def modal_where(predicate):
+        counts: dict[tuple[int, int, int], int] = {}
+        for y in range(0, h, 2):
+            for x in range(0, w, 2):
+                c = px(x, y)
+                if predicate(c):
+                    counts[c] = counts.get(c, 0) + 1
+        if not counts:
+            return None, 0
+        best = max(counts, key=counts.get)
+        return best, counts[best]
+
+    accent_px, accent_n = modal_where(
+        lambda c: c[1] > 140 and c[1] - c[0] > 60 and c[1] - c[2] > 40
+    )
+    print(
+        "accent fill #%02x%02x%02x over %d sampled px" % ((accent_px or (0, 0, 0)) + (accent_n,))
+    )
+    g.check(
+        accent_px is not None and near(accent_px, REF["accent"], 6),
+        "the accent is the brand green the app paints",
+        "#%02x%02x%02x against #%02x%02x%02x" % ((accent_px or (0, 0, 0)) + REF["accent"]),
+    )
+
+    # The plate is a dark green: green above blue above red, and all three inside
+    # the band the two measured surfaces occupy. A selected card's 6% tint
+    # (`#25` green ~52) and the panel's wash (green 34) both fall outside it, so
+    # the only thing that answers is the plate itself.
+    plate_px, plate_n = modal_where(
+        lambda c: c[0] < 48 and 60 <= c[1] <= 110 and 40 <= c[2] <= 92 and c[2] > c[0]
+    )
+    print(
+        "active plate #%02x%02x%02x over %d sampled px" % ((plate_px or (0, 0, 0)) + (plate_n,))
+    )
+    g.check(
+        plate_px is not None and near(plate_px, REF["plate"], 8),
+        "the active plate is the brand highlight",
+        "#%02x%02x%02x against #%02x%02x%02x" % ((plate_px or (0, 0, 0)) + REF["plate"]),
+    )
 
     print()
     if not g.ran:

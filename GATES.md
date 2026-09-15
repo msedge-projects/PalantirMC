@@ -20,8 +20,10 @@ environment-dependent: it is runnable here and stands as a recorded manual
 result elsewhere. The reference numbers G1--G6 assert against are baked into
 the checker, so those gates need nothing but the capture under test.
 
-Result: **7 met, 0 unmet, 0 abandoned** for the build at `84d5f4a`, captured into
-`.scratch/pal-final.png` (1257x707). G8 is met by inspection.
+Result: **9 met, 0 unmet, 0 abandoned** for the build at `84d5f4a`, captured into
+`.scratch/pal-final.png` (1257x707) — G1--G7 there, and G9--G10 added in the
+reference walk recorded in `REFERENCE.md`, which re-measured the running app
+(0.204) at a pinned 1280x720 client. G8 is met by inspection.
 
 - [x] G1: the panel's gutter carries the brand tint, where the build it replaced
       painted the neutral raised grey (`#27292e`, whose green sits five levels
@@ -80,6 +82,26 @@ Result: **7 met, 0 unmet, 0 abandoned** for the build at `84d5f4a`, captured int
       gate FAILED (1): panel gutter is a dark brand tint`. Run again after every
       change to the checker; two revisions of this script passed the reference
       while also passing the old build, which is the failure this gate catches.
+
+- [x] G9: the accent is the brand green the app *paints*, `#00da75`, not the
+      green-500 (`#1bd96a`) its stylesheet's ladder says
+  CHECK: python tools/panel_gate.py .scratch/ref-02-page-1.png --only accent
+  EXPECT: panel gate passed [accent]
+  EVIDENCE: `#00da75` over 267 sampled px of the reference's Discover page, and
+      the same value over 1676 px of its Home page. The build it replaced
+      answers `#1bd96a` (7268 px) and fails by 27 levels on green. Found by
+      searching rather than sampling: the accent is the fill of whichever
+      primary button a page draws, so a fixed coordinate measures one page only.
+
+- [x] G10: the plate behind an active rail entry is `--color-brand-highlight`
+      (`#1d5540`, the accent at 25% over the chrome), not an accent wash on a
+      different composite
+  CHECK: python tools/panel_gate.py .scratch/ref-01-home.png --only plate
+  EXPECT: panel gate passed [plate]
+  EVIDENCE: the reference answers `#1d563f` under the rail entry and `#1d5540`
+      in its tab strip -- one level apart, on two surfaces. The build it
+      replaced answers `#264237`, the 16%-over-7%-white composite it used to
+      draw, and fails.
 
 - [x] G8: the two windows agree as a picture, judged by looking at them side by
       side rather than by any number -- the acceptance the user actually asked

@@ -374,13 +374,26 @@ impl Page {
     }
 
     /// Pages that get a rail entry, in order.
+    ///
+    /// The reference's rail, read off its own window by hovering each entry and
+    /// reading the tooltip it draws (`REFERENCE.md` has the whole table), is
+    /// Home, Discover content, Skin selector, Screenshots, Modrinth Hosting --
+    /// and then its instance-scoped surfaces are *inside* an instance, not in
+    /// the rail at all.
+    ///
+    /// This shell serves content for one instance at a time and keeps that
+    /// content as pages, so the first three entries are the reference's in its
+    /// order and the instance-scoped ones follow, past the divider the rail
+    /// already draws. Reordering rather than regrouping is deliberate: it is
+    /// the part of the reference's arrangement this shell can honour without
+    /// pretending a page it still needs has gone away.
     pub fn rail() -> [Page; 6] {
         [
             Page::Home,
             Page::Browse,
+            Page::Screenshots,
             Page::Mods,
             Page::Worlds,
-            Page::Screenshots,
             Page::Logs,
         ]
     }
@@ -390,9 +403,9 @@ impl Page {
         [
             Page::Home,
             Page::Browse,
+            Page::Screenshots,
             Page::Mods,
             Page::Worlds,
-            Page::Screenshots,
             Page::Logs,
             Page::Settings,
             Page::Accounts,
@@ -3859,10 +3872,13 @@ impl PalantirApp {
     fn view_rail(&self) -> Element<'_, Message> {
         // The reference's rail is `p-[0.5rem] pt-0 gap-[0.25rem]`: 4px between
         // entries and nothing above the first one, so the stack meets the bar and
-        // reads as attached to it. The horizontal padding is what is left of the
-        // 48px button inside the 58px container.
+        // reads as attached to it. The 8px padding is the reference's own inset,
+        // measured: its active plate occupies x 8..56 of a 64px rail. This
+        // container is 58px and the west resize band paints the other 6, so the
+        // 2 here and the 6 there add up to that 8 -- at 5 the plate landed three
+        // pixels left of where the reference draws it.
         let mut rail =
-            column![].spacing(4).padding([0, 5]).align_items(iced::Alignment::Center);
+            column![].spacing(4).padding([0, 2]).align_items(iced::Alignment::Center);
         for page in Page::rail().into_iter().filter(|page| self.rail_shows(*page)) {
             rail = rail.push(rail_icon(
                 page.icon(),
@@ -6158,13 +6174,17 @@ fn grip(
 
 /// Centered informational note.
 fn browse_type_tabs(active: ContentType) -> Element<'static, Message> {
+    // The reference's strip, measured: 36px pills on the page's own colour, a
+    // 13px white label, and the selected one filled with
+    // `--color-brand-highlight`. It was a 12px bordered chip at 28px tall, which
+    // read as a row of tags rather than as the page's tabs.
     let mut tabs = row![].spacing(6);
     for content_type in ContentType::all() {
         tabs = tabs.push(
-            button(text(content_type.label()).size(12))
+            button(text(content_type.label()).size(13))
                 .on_press(Message::BrowseTypePicked(content_type))
-                .style(theme::chip_button(content_type == active))
-                .padding([6, 10]),
+                .style(theme::tab_button(content_type == active))
+                .padding([10, 12]),
         );
     }
     tabs.into()
@@ -7455,6 +7475,26 @@ mod tests {
         assert!(Modal::Create.is_open());
         assert!(Modal::Import.is_open());
         assert!(Modal::ConfirmDelete("x".into()).is_open());
+    }
+
+    /// The rail's leading entries and their tooltips are the reference's.
+    ///
+    /// Read off its own window by hovering each entry and OCR-ing the tooltip it
+    /// draws (`REFERENCE.md` has the whole table). The three it leads with are
+    /// the three this shell can honour in that order; what follows them is the
+    /// instance-scoped content the reference keeps inside an instance instead.
+    #[test]
+    fn rail_leads_with_the_reference_entries() {
+        let rail = Page::rail();
+        assert_eq!(&rail[..3], &[Page::Home, Page::Browse, Page::Screenshots]);
+        assert_eq!(Page::Home.tooltip(), "Home");
+        assert_eq!(Page::Browse.tooltip(), "Discover content");
+        assert_eq!(Page::Screenshots.tooltip(), "Screenshots");
+        // Every page, rail or not, is still reachable and still has an icon.
+        for page in Page::all() {
+            assert!(!page.icon().is_empty());
+            assert!(!page.title().is_empty());
+        }
     }
 
     #[test]
