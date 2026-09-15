@@ -20,10 +20,13 @@ environment-dependent: it is runnable here and stands as a recorded manual
 result elsewhere. The reference numbers G1--G6 assert against are baked into
 the checker, so those gates need nothing but the capture under test.
 
-Result: **9 met, 0 unmet, 0 abandoned** for the build at `84d5f4a`, captured into
-`.scratch/pal-final.png` (1257x707) — G1--G7 there, and G9--G10 added in the
-reference walk recorded in `REFERENCE.md`, which re-measured the running app
-(0.204) at a pinned 1280x720 client. G8 is met by inspection.
+Result: **9 met, 0 unmet, 0 abandoned** for the build at `bbebaaa`, captured into
+`.scratch/pal-bbebaaa.png` (1257x707) from the exe CI built for that commit.
+G1--G7 were established on the build at `84d5f4a` (`.scratch/pal-final.png`) and
+still hold there and here. G9--G10 came from the reference walk recorded in
+`REFERENCE.md`, which re-measured the running app (0.204) at a pinned 1280x720
+client — and they *fail* on `84d5f4a`, which is the build they replace, so the
+control still discriminates with them in place. G8 is met by inspection.
 
 - [x] G1: the panel's gutter carries the brand tint, where the build it replaced
       painted the neutral raised grey (`#27292e`, whose green sits five levels
@@ -89,9 +92,10 @@ reference walk recorded in `REFERENCE.md`, which re-measured the running app
   EXPECT: panel gate passed [accent]
   EVIDENCE: `#00da75` over 267 sampled px of the reference's Discover page, and
       the same value over 1676 px of its Home page. The build it replaced
-      answers `#1bd96a` (7268 px) and fails by 27 levels on green. Found by
-      searching rather than sampling: the accent is the fill of whichever
-      primary button a page draws, so a fixed coordinate measures one page only.
+      answers `#1bd96a` (7268 px) and fails by 27 levels on green; the build at
+      `bbebaaa` answers `#00da75` over 4210 px. Found by searching rather than
+      sampling: the accent is the fill of whichever primary button a page draws,
+      so a fixed coordinate measures one page only.
 
 - [x] G10: the plate behind an active rail entry is `--color-brand-highlight`
       (`#1d5540`, the accent at 25% over the chrome), not an accent wash on a
@@ -101,7 +105,8 @@ reference walk recorded in `REFERENCE.md`, which re-measured the running app
   EVIDENCE: the reference answers `#1d563f` under the rail entry and `#1d5540`
       in its tab strip -- one level apart, on two surfaces. The build it
       replaced answers `#264237`, the 16%-over-7%-white composite it used to
-      draw, and fails.
+      draw, and fails. The build at `bbebaaa` answers `#1e5640` over 526 px,
+      one level off the reference's rail plate.
 
 - [x] G8: the two windows agree as a picture, judged by looking at them side by
       side rather than by any number -- the acceptance the user actually asked
