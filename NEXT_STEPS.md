@@ -1473,3 +1473,27 @@ gutter. It passes on the reference's own capture and fails on the build it
 replaces — the replaced build had an in-page heading, a rule and a Refresh chip,
 so its column holds one band where the reference's holds three, and its page
 background is the old inset panel's `#34363c` rather than the page's `#16181c`.
+
+**What the runner could confirm, and what it could not.** All five jobs of the run
+that built this page are green ([35456763423](https://github.com/MSedgeMC/PalantirMC/actions/runs/35456763423)),
+the exe it produced is hash-checked against its own sidecar
+(`e424a9d6…7bb0`) and staged at `dist/ci-d23ed32/msvc/`, and the first gate of the
+new set is verified against a capture of *that* build: its title bar reads `Home`
+on the Home page, where the build it replaces carried only a product name and a
+version and named no page at all. The other eight page gates are pending a
+capture of this build, and for an environmental reason rather than a doubtful
+one. Driving the rail needs a click, this shell ignores injected mouse messages
+(§14), and the desk was unattended by the time the runner's exe was staged --
+`GetForegroundWindow()` answers 0, so there is no focus holder for a real click to
+arrive through, and neither `SetForegroundWindow` nor the Alt-tap unlock nor
+raising the window topmost changes that. Two things stand in for the capture: the
+text-box model the gap constants rest on was checked against a previous capture of
+this shell, and `GATES.md` names the one command that finishes the rest when
+somebody is at the keyboard.
+
+**What one click will settle.** Whether iced's text boxes are the 30px and 20px
+this port assumes. If they are taller -- some renderers add the font's line gap --
+the heading and subtext ink will land a pixel or two lower than the reference
+draws them, which the `[gaps]` and `[centring]` gates have room for but the
+`[heading]`/`[subtext]` ink-box gates do not. The fix would be one constant, and
+knowing that before porting the next page is worth more than the nine gates.

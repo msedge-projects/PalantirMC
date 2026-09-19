@@ -6,6 +6,7 @@ Screenshots page first, then the rest, each one against numbers measured off the
 Modrinth App's own window rather than estimated from a screenshot of it.
 
     python tools/page_gate.py .scratch/pal-shots.png
+    python tools/page_gate.py .scratch/pal-home.png --page home
 
 Exits 0 and prints `page gate passed` only when every assertion holds.
 
@@ -44,6 +45,7 @@ except ImportError:  # pragma: no cover - environment guard, not logic
     raise SystemExit(2)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import refsample  # noqa: E402  (Windows OCR, the same reader the walk uses)
 from panel_gate import (  # noqa: E402
     INSET,
     Gate,
@@ -51,6 +53,11 @@ from panel_gate import (  # noqa: E402
     horizontal_edge,
     vertical_edge,
 )
+
+# The pages this gate knows, and the name each puts in the title bar. The bar's
+# label is the page's own name (`REFERENCE.md`): Home reads "Home" and
+# Screenshots reads "Screenshots", which is also the entire heading that page has.
+PAGES = {"home": "Home", "screenshots": "Screenshots"}
 
 # ---- The reference's own page, measured from its capture -------------------
 REF = {
@@ -75,6 +82,9 @@ REF = {
     "gutter": 11,      # the scrollbar band the content is centred inside
     "centre_drop": 20,  # how far below the column's middle the block sits
 }
+
+# The bar's own name: 16px semibold white, the same size the reference sets it.
+BAR_HEAD = 48
 
 TOL = 6
 # Ink is counted at a threshold that separates it from the page it sits on, and
@@ -153,11 +163,16 @@ def modal(im, x0, x1, y0, y1, bg, thr):
 def main() -> int:
     argv = sys.argv[1:]
     only = None
+    page = "screenshots"
     if "--only" in argv:
         i = argv.index("--only")
         only = argv[i + 1]
         del argv[i : i + 2]
-    if len(argv) != 1:
+    if "--page" in argv:
+        i = argv.index("--page")
+        page = argv[i + 1]
+        del argv[i : i + 2]
+    if len(argv) != 1 or page not in PAGES:
         print(__doc__)
         return 2
 
@@ -165,6 +180,26 @@ def main() -> int:
     if not path.exists():
         print(f"capture not found: {path}")
         return 2
+
+    # G17 first, and off the uncropped capture: it is the one assertion that does
+    # not need the columns, so a page whose column cannot be found still reports
+    # where its name is. Read by OCR rather than by ink, because "the bar names
+    # the page" is a claim about words.
+    g = Gate(only)
+    scope = f" [{only}]" if only else ""
+    want = PAGES[page]
+    named = [
+        line
+        for line in refsample.ocr(path)
+        if line["y"] < BAR_HEAD and line["text"].strip().strip("|").strip() == want
+    ]
+    g.check(
+        bool(named),
+        "[barname] the title bar names the page it is showing",
+        f"read {' | '.join(l['text'] for l in named) if named else 'nothing'} "
+        f"where {want!r} was expected (bar labels: "
+        f"{', '.join(repr(l['text']) for l in refsample.ocr(path) if l['y'] < BAR_HEAD)})",
+    )
 
     im, frame = crop_window_frame(Image.open(path).convert("RGB"))
     w0, h0 = im.size
@@ -175,7 +210,6 @@ def main() -> int:
         + (f" (cropped a {frame}px frame)" if frame else "")
         + f" -> {w}x{h} after a {INSET}px inset"
     )
-    g = Gate(only)
 
     # The page column, found rather than assumed: the rail's right edge on the
     # left, the panel's left edge on the right, exactly as `panel_gate` locates
@@ -221,10 +255,19 @@ def main() -> int:
         f"{len(found)} bands" + (" (the replaced build drew an in-page heading, a rule and a Refresh chip)" if len(found) > 3 else ""),
     )
     if len(found) != 3:
+        # Everything below measures the three bands, so there is nothing to say
+        # about them here -- but the verdict still has to be the whole run's, not
+        # this early exit's: scoped to a gate that needs the bands, "nothing ran"
+        # is not a pass, and scoped to one that does not, it is not a failure.
         print()
         if g.failures:
-            print(f"page gate FAILED{'' if not only else f' [{only}]'} ({len(g.failures)}): " + ", ".join(g.failures))
-        return 1
+            print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
+            return 1
+        if not g.ran:
+            print(f"no assertion matched --only {only!r} (it needs the three bands)")
+            return 2
+        print(f"page gate passed{scope}")
+        return 0
     (art_y0, art_y1), (head_y0, head_y1), (sub_y0, sub_y1) = found
 
     art = columns_in(im, x0, x1, art_y0, art_y1, page, SHAPE)
@@ -313,7 +356,6 @@ def main() -> int:
     if not g.ran:
         print(f"no assertion matched --only {only!r}")
         return 2
-    scope = f" [{only}]" if only else ""
     if g.failures:
         print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
         return 1
