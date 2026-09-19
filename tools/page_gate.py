@@ -140,6 +140,61 @@ def columns_in(im, x0, x1, y0, y1, bg, thr):
     return lo, hi
 
 
+def first_strong_edge(im, lo, hi, frac=0.6):
+    """The first *nearly* strongest vertical boundary in `[lo, hi)`.
+
+    `panel_gate.vertical_edge` answers with the strongest one, and for this one
+    boundary that is the wrong question: the panel carries a scrollbar in its outer
+    band, the window carries a resize grip outside that, and both are harder edges
+    than the panel's own left side -- a brand wash against a page, a few levels
+    apart. The strongest boundary therefore lands *inside* the panel and the "page
+    column" comes back as page-plus-panel, whose cards put ink in every row and
+    hide the page's own bands. The first boundary that is within `frac` of the
+    strongest is the page's right edge in both clients, which is what this gate
+    is about.
+    """
+    w, h = im.size
+    ys = range(2, h - 2, 3)
+    scores = {}
+    for x in range(max(lo, 1), min(hi, w)):
+        scores[x] = sum(
+            1 for y in ys if diff(im.getpixel((x, y)), im.getpixel((x - 1, y))) > 6
+        )
+    if not scores:
+        return None, 0
+    best = max(scores.values())
+    for x in sorted(scores):
+        if scores[x] >= best * frac:
+            return x, scores[x]
+    return None, best
+
+
+def page_bottom(im, x0, x1, top, page):
+    """The last row of the page column: where the page colour stops.
+
+    Found by colour rather than by assuming the column runs to the window's edge,
+    because that is the difference between the two clients: the reference's page
+    column does run to the bottom, and this shell's is cut short by its own status
+    strip, which is chrome with a 1px rule above it. One gate has to judge both, so
+    it measures the run of page colour that starts under the bar and ends where
+    that colour does. (Below the status strip the window's resize grip is painted
+    in the page's own colour again, which is exactly why the run is followed from
+    the top rather than searched for from the bottom.)
+    """
+    pix = im.load()
+    last = top
+    for y in range(top, im.height):
+        hits = sum(1 for x in range(x0, x1, 3) if diff(pix[x, y], page) <= 6)
+        # Mostly page colour, not entirely: the column's content is narrow -- the
+        # illustration is 216 of its 900-odd columns -- so a row through it is still
+        # three-quarters page, while the first row of the shell's status strip is
+        # none of it.
+        if hits < (x1 - x0) // 3 * 0.5:
+            break
+        last = y
+    return last
+
+
 def modal(im, x0, x1, y0, y1, bg, thr):
     """The commonest colour at least `thr` from `bg` inside a band.
 
@@ -215,11 +270,20 @@ def main() -> int:
     # left, the panel's left edge on the right, exactly as `panel_gate` locates
     # them, so a window of another size still measures the same column.
     pane_left, pane_score = vertical_edge(im, int(w * 0.02), int(w * 0.2))
-    panel_left, panel_score = vertical_edge(im, int(w * 0.62), w - 2)
+    # The panel's *left* edge, which is the first strong boundary on that side
+    # rather than the strongest -- see `first_strong_edge` for why that distinction
+    # is the difference between measuring the page and measuring the page plus the
+    # panel.
+    panel_left, panel_score = first_strong_edge(im, int(w * 0.62), w - 2)
     if pane_left is None or panel_left is None:
         print("\npage gate FAILED: the column's boundaries were not found")
         return 1
-    x0, x1 = pane_left + 2, panel_left - 2
+    # Six pixels in from each boundary, not two: the columns' own edges are a
+    # gradient between the surfaces (the rail's chrome into the page, the page into
+    # the panel's wash), and those transition columns are ink at every row -- which
+    # reads as one band from the top of the page to the bottom and hides the three
+    # that are actually there.
+    x0, x1 = pane_left + 6, panel_left - 6
     # The column's own background: the modal colour of it, which is the page
     # because a page is mostly empty.
     page, page_n = modal(im, x0, x1, 0, h - 1, (0, 0, 0), 0)
@@ -242,8 +306,12 @@ def main() -> int:
         print("\npage gate FAILED: the page's top edge was not found")
         return 1
     top = bar_bottom + 20
-    print(f"page top y={bar_bottom} (score {bar_score}), scanning from y={top}")
-    found = bands(rows_with_content(im, x0, x1, top, h - 1, page, SHAPE))
+    bottom = page_bottom(im, x0, x1, top, page)
+    print(
+        f"page top y={bar_bottom} (score {bar_score}), scanning from y={top} "
+        f"to y={bottom} where the page colour ends"
+    )
+    found = bands(rows_with_content(im, x0, x1, top, bottom, page, SHAPE))
     print("content bands: " + ", ".join(f"y {b[0]}..{b[1]}" for b in found))
 
     # G11: one cluster, and only one. The reference's Screenshots page draws no
@@ -338,7 +406,7 @@ def main() -> int:
     # ignores -- so both centres are half-way along that box, the vertical one
     # dropped by the 20px the reference's taller content box produces.
     content_centre = (art[0] + art[1]) / 2
-    column_top, column_bottom = bar_bottom + 1, h - 1
+    column_top, column_bottom = bar_bottom + 1, bottom
     want_x = (pane_left + panel_left - REF["gutter"]) / 2
     block_centre = (art_y0 + sub_y1) / 2
     want_y = (column_top + column_bottom) / 2 + REF["centre_drop"]

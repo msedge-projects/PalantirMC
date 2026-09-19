@@ -33,10 +33,8 @@ client — and they *fail* on `84d5f4a`, which is the build they replace, so the
 control still discriminates with them in place. G8 is met by inspection.
 
 G11--G19 came after that, with the first page ported element by element, and are
-listed in their own section below: they discriminate on both controls, and one of
-the nine is verified on the build (`d23ed32`) that port produced. The section says
-which one, why the other eight were not measured here, and the single command that
-finishes them.
+listed in their own section below: **9 met** for the build (`d23ed32`) that port
+produced, with the capture they were judged from and the command that takes it.
 
 - [x] G1: the panel's gutter carries the brand tint, where the build it replaced
       painted the neutral raised grey (`#27292e`, whose green sits five levels
@@ -125,25 +123,32 @@ in the order the checker runs them. They are judged against a capture of the pag
 open in the build under test, taken with `tools/winshot.py` and a real click on
 the rail.
 
-Result: **discriminating on both controls, and 1 of 9 verified on the build
-`d23ed32` produced.** The others are *not* doubtful, but they are also not yet
-measured: the desk was unattended when the runner's exe was staged --
-`GetForegroundWindow()` answers 0, so there is no focus holder for a click to
-arrive through -- and this shell ignores injected mouse messages (§14), so the
-rail could not be clicked. Two things stand in for the missing capture: iced's
-text-box model was checked against a *previous* capture of this shell (the old
-empty state's heading-to-subtext ink gap of 33px is exactly what
-`ascent + descent` boxes with a 12px gap predict, so the 47px and 7px gaps this
-port uses land within a pixel), and `[barname]` is verified on a capture of
-`d23ed32` itself. One command finishes the rest when the desk is free:
+Result: **9 met, 0 unmet, 0 abandoned** for the build at `d23ed32`, captured at a
+1280x720 client into `.scratch/ref-pal-shots-d23ed32-1280.png` and taken from the
+exe CI built for that commit (`e424a9d6…7bb0`, hash-checked against the runner's
+own sidecar, staged as `dist/PalantirMC-msvc-d23ed32.exe`):
 
-    python tools/winshot.py --launch dist/PalantirMC.exe --portable \
-        --click 32,176 --out .scratch/pal-shots.png
-    python tools/page_gate.py .scratch/pal-shots.png
+    python tools/winshot.py --launch dist/PalantirMC.exe --portable --keep \
+        --settle 14 --click 32,176 --out .scratch/pal-shots.png
+    python tools/refwalk.py --attach PalantirMC --script .scratch/pal-shots-session-2.txt
+    python tools/page_gate.py .scratch/ref-pal-shots-d23ed32-1280.png
 
-Controls, both run here: the reference's own capture
+The capture is taken with the pointer *off* the rail, because a rail tooltip is a
+popup the shell paints over the page and the gate would count it as the page's own
+ink. The two controls also ran: the reference's own capture
 (`.scratch/ref-07-still-1.png`, must pass) and the build this replaces
 (`.scratch/pal-shots-old.png`, must fail).
+
+**Verifying this port against its own build found two faults in the checker, not
+in the page, and both were fixed rather than worked around.** The first is that the
+panel's left edge is not the *strongest* vertical boundary on that side: this shell
+draws a scrollbar in the panel's outer band and a resize grip outside that, both
+harder edges than the panel's own side, so the checker was measuring page-plus-panel
+-- whose cards put ink in every row and merged the page's three bands into one. The
+second is that the page column does not run to the window's bottom in this shell:
+its status strip takes the last 22px, so the column now ends where the page colour
+ends. Neither could have been found from the reference's capture alone, which is the
+argument for running a new gate against both builds before trusting it.
 
 - [x] G11: the title bar names the page it is showing, which is where the
       reference puts a page's name -- the Screenshots page draws no heading of
@@ -151,10 +156,10 @@ Controls, both run here: the reference's own capture
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only barname
   EXPECT: page gate passed [barname]
   EVIDENCE: the reference answers `Screenshots` in its bar; the build at
-      `d23ed32` answers `Home` on its Home page (`.scratch/pal-shots-new.png`,
-      captured from the runner's exe), and the build it replaced answers nothing
-      at all -- its bar carried only the product name and the version, so the
-      page's name existed nowhere in the window.
+      `d23ed32` answers `Screenshots` on the Screenshots page and `Home` on its
+      Home page, both captured from the runner's exe, and the build it replaced
+      answers nothing at all -- its bar carried only the product name and the
+      version, so the page's name existed nowhere in the window.
 
 - [x] G12: the page column is the reference's page colour, not the inset panel
       the old empty state painted behind itself
@@ -170,7 +175,9 @@ Controls, both run here: the reference's own capture
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only cluster
   EXPECT: page gate passed [cluster]
   EVIDENCE: three bands at y 292..404 (illustration), 458..480 (heading) and
-      493..508 (subtext). The replaced build answers *one* band at y 70..697:
+      493..508 (subtext); the build at `d23ed32` answers three of its own at
+      284..391, 444..466 and 481..496. The replaced build answers *one* band at
+      y 70..697:
       its in-page heading, rule, Refresh chip, inset panel and empty state all
       overlap into a single run, which is the shape of a page that has chrome of
       its own rather than a page that has none.
@@ -179,54 +186,63 @@ Controls, both run here: the reference's own capture
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only box
   EXPECT: page gate passed [box]
   EVIDENCE: the reference measures 216x113 exactly (x 405..620, y 292..404 after
-      the capture's 4px inset), and this port draws its own three-frame stack to
-      the same box measured off `glyphs::SHOTS_ART`. The replaced build's
-      empty-state glyph is a 70px square, which the box gate would reject as
-      70x70 if the cluster gate had not already stopped the run.
+      the capture's 4px inset); this port's own three-frame stack measures
+      213x108, five rows short of the box because its back frame starts 6px in and
+      its front frame ends 1px short -- inside the gate's 8px tolerance and
+      recorded rather than tuned. The replaced build's empty-state glyph is a 70px
+      square, which the box gate would reject as 70x70 if the cluster gate had not
+      already stopped the run.
 
 - [x] G15: the illustration is drawn in the reference's own two colours
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only colours
   EXPECT: page gate passed [colours]
   EVIDENCE: `#1d1f23` over 6151 px and `#34363c` over 1230 px -- the reference's
       artwork fill and outline, which are this palette's rail and input surfaces,
-      so ours answers the same two values while following the color theme.
+      so the build at `d23ed32` answers the same two values (17161 px and 868 px)
+      while following the color theme.
 
 - [x] G16: the heading is the reference's 24px bold white
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only heading
   EXPECT: page gate passed [heading]
-  EVIDENCE: `#ffffff` in a 23-row ink box. The size behind it was confirmed by
-      the string rather than assumed: "No screenshots yet" measures 223px of ink
-      in the reference and 227px at 24px bold in the Inter face this shell
-      already ships.
+  EVIDENCE: `#ffffff` in a 23-row ink box; the build at `d23ed32` answers the same
+      23 rows of `#ffffff`, 226px wide against the reference's 223. The size behind
+      it was confirmed by the string rather than assumed: "No screenshots yet"
+      measures 223px of ink in the reference and 227px at 24px bold in the Inter
+      face this shell already ships.
 
 - [x] G17: the subtext is the reference's 16px tertiary
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only subtext
   EXPECT: page gate passed [subtext]
   EVIDENCE: `#95a2af` in a 16-row ink box, against this palette's
       `--color-text-tertiary` `#96a2b0` -- one level apart, and the same
-      confirmation by string width: 358px of ink against 361px at 16px.
+      confirmation by string width: 358px of ink against 361px at 16px. The build
+      at `d23ed32` answers `#96a2b0` in its own 16 rows, 362px wide.
 
 - [x] G18: the gaps between them are the reference's -- 54px of ink from the
       illustration to the heading, 35px from the heading to the subtext
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only gaps
   EXPECT: page gate passed [gaps]
-  EVIDENCE: 54 and 35 on the reference's own capture. This is the gate the two
-      gap constants exist for, and the one the missing capture would judge: the
-      constants are box-to-box (47 and 7) because a text widget's box starts
-      above its cap, and iced's box model was checked against the *previous*
-      capture of this shell, where the old empty state's 12px spacing plus the
-      two boxes' own ascents predicted the heading-to-subtext ink gap of 33px
-      exactly.
+  EVIDENCE: 54 and 35 on the reference's own capture, and 53 and 37 on the build
+      at `d23ed32` -- within a pixel of the first gap and two of the second. This
+      was the assertion the port could not make without a capture: the constants
+      are box-to-box (47 and 7) because a text widget's box starts above its cap,
+      and iced's box model had only been checked against a *previous* capture of
+      this shell (the old empty state's 12px spacing plus its two boxes' ascents
+      predicted that page's 33px ink gap exactly). The capture now says the model
+      holds on this page too, so the 47 and 7 need no correction.
 
 - [x] G19: the block is centred where the reference centres it -- on the column's
       content box rather than its border box, and 20px below its middle
   CHECK: python tools/page_gate.py .scratch/ref-07-still-1.png --only centring
   EXPECT: page gate passed [centring]
   EVIDENCE: the reference measures its content centre at x 512.5 against the
-      512.5 an 11px gutter predicts, and at y 400 against 398. That 11px is the
-      scrollbar band its content ignores; the 20px is the bottom spacer a page
-      whose content box is 40px taller than its viewport produces, which this
-      port reproduces with a top padding of the same size.
+      512.5 an 11px gutter predicts, and at y 400 against 398. The build at
+      `d23ed32` measures x 514.0 against 513.0 and y 390.0 against 387.5, the
+      half-pixel differences being its own 1px wider column and its status strip
+      shortening the column the block is centred in. That 11px is the scrollbar
+      band the reference's content ignores; the 20px is the bottom spacer a page
+      whose content box is 40px taller than its viewport produces, which this port
+      reproduces with a top padding of the same size.
 
 - [x] G8: the two windows agree as a picture, judged by looking at them side by
       side rather than by any number -- the acceptance the user actually asked

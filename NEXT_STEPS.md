@@ -1474,26 +1474,34 @@ replaces — the replaced build had an in-page heading, a rule and a Refresh chi
 so its column holds one band where the reference's holds three, and its page
 background is the old inset panel's `#34363c` rather than the page's `#16181c`.
 
-**What the runner could confirm, and what it could not.** All five jobs of the run
-that built this page are green ([35456763423](https://github.com/MSedgeMC/PalantirMC/actions/runs/35456763423)),
-the exe it produced is hash-checked against its own sidecar
-(`e424a9d6…7bb0`) and staged at `dist/ci-d23ed32/msvc/`, and the first gate of the
-new set is verified against a capture of *that* build: its title bar reads `Home`
-on the Home page, where the build it replaces carried only a product name and a
-version and named no page at all. The other eight page gates are pending a
-capture of this build, and for an environmental reason rather than a doubtful
-one. Driving the rail needs a click, this shell ignores injected mouse messages
-(§14), and the desk was unattended by the time the runner's exe was staged --
-`GetForegroundWindow()` answers 0, so there is no focus holder for a real click to
-arrive through, and neither `SetForegroundWindow` nor the Alt-tap unlock nor
-raising the window topmost changes that. Two things stand in for the capture: the
-text-box model the gap constants rest on was checked against a previous capture of
-this shell, and `GATES.md` names the one command that finishes the rest when
-somebody is at the keyboard.
+**What the runner confirmed.** All five jobs of the run that built this page are
+green ([35456763423](https://github.com/MSedgeMC/PalantirMC/actions/runs/35456763423)),
+the exe it produced is hash-checked against its own sidecar (`e424a9d6…7bb0`) and
+staged as `dist/PalantirMC.exe`, `dist/PalantirMC-msvc-d23ed32.exe` and
+`dist/PalantirMC-gnu-d23ed32.exe`, and all nine page gates were then run against a
+capture of that exe with the Screenshots page open: **9 met, 0 unmet**. Its
+measurements against the reference's, side by side: the illustration 213x108
+against 216x113 (the port's own artwork, five rows short of the box because its
+back frame starts 6px in), both texts 23 and 16 ink rows and the same two colours
+to within a level, the ink gaps 53 and 37 against 54 and 35, and the block's centre
+x 514.0 / y 390.0 against 513.0 / 387.5.
 
-**What one click will settle.** Whether iced's text boxes are the 30px and 20px
-this port assumes. If they are taller -- some renderers add the font's line gap --
-the heading and subtext ink will land a pixel or two lower than the reference
-draws them, which the `[gaps]` and `[centring]` gates have room for but the
-`[heading]`/`[subtext]` ink-box gates do not. The fix would be one constant, and
-knowing that before porting the next page is worth more than the nine gates.
+**The gap constants were the open question, and the capture closed it.** They are
+box-to-box (47px and 7px) rather than ink-to-ink, because a text widget's box
+starts above its cap; if iced's boxes carried the font's line gap as well as its
+ascent and descender, the heading and subtext would have landed a few pixels below
+where the reference draws them. They landed within a pixel and two. So the model
+the port was built on holds, and the next page can use it without a capture to
+check first.
+
+**Verifying the port found two faults in the gate, not in the page.** Both were
+instrument errors that only a capture of *this* shell could expose, and both are
+fixed in the tool rather than worked around in the expectations: the panel's left
+edge is not the strongest vertical boundary on that side (this shell puts a
+scrollbar and then a resize grip beyond it), so the gate was measuring the panel as
+part of the page column and merging the page's three content bands into one; and
+the page column here does not run to the window's bottom, because the status strip
+takes the last 22px, so the column now ends where the page colour ends. The first
+attempt at the capture failed for a third reason worth recording: click the rail
+and a tooltip stays under the pointer, and a tooltip is the *shell's* popup painted
+over the page -- the capture for the gate parks the pointer on the page instead.

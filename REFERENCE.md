@@ -186,6 +186,28 @@ in-game will appear here." measures 358 against 361 at 16px regular.
 The page draws **nothing else**: no heading, no rule, no button, no drop target.
 That is the whole of the cluster, and `tools/page_gate.py` asserts it as one.
 
+### How close the port landed
+
+Measured off the build CI produced (`d23ed32`) on the same 1280x720 client, with
+`tools/page_gate.py` as the judge — 9 met, 0 unmet:
+
+| Thing | Reference | This launcher |
+| --- | --- | --- |
+| Illustration box | 216x113 | 213x108 |
+| Heading ink | 23 rows, `#ffffff` | 23 rows, `#ffffff`, 226px wide |
+| Subtext ink | 16 rows, `#95a2af` | 16 rows, `#96a2b0`, 362px wide |
+| Gap, art -> heading | 54 | 53 |
+| Gap, heading -> subtext | 35 | 37 |
+| Content centre | x 512.5, y 400.0 | x 514.0, y 390.0 |
+
+The illustration is five rows short of the box because the port's own back frame
+starts 6px inside it and its front frame ends a pixel early — within the gate's
+tolerance, and left as measured rather than tuned. The two gaps land within a pixel
+and two, which answers the question the port could not answer from pixels alone:
+the gaps are stated box-to-box (47 and 7) because a text widget's box begins above
+its cap, and iced's boxes do carry the descender without a line gap, so the ink
+lands where the reference's does.
+
 ### What is not copied
 
 - **The artwork.** The measured box, palette and gaps are copied; the drawing
