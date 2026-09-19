@@ -7626,10 +7626,15 @@ mod tests {
     #[test]
     fn the_empty_state_lands_on_the_reference_landmarks() {
         // Inter's metrics, as the reference's rendering shows them: at 24px the
-        // heading's cap is 18px under a 24px ascent, at 16px the subtext's is 12
-        // under a 16px ascent.
+        // heading's cap is 18px under a 24px ascent, and at 16px the subtext's is
+        // 12 under a 16px one. A line's *box* is what a layout can space, and it
+        // is taller than its ascent: ascent plus the descender below the baseline
+        // (6px at 24, 4 at 16), because a box that stopped at the baseline would
+        // clip the descenders 24px text has.
         const TITLE_ASCENT: f32 = 24.0;
+        const TITLE_BOX: f32 = 30.0;
         const TITLE_CAP: f32 = 18.0;
+        const DETAIL_BOX: f32 = 20.0;
         let art_top = 296.0;
         let art_bottom = art_top + glyphs::SHOTS_ART.1;
         assert_eq!(art_bottom, 409.0);
@@ -7639,7 +7644,7 @@ mod tests {
             (title_cap - 462.0).abs() <= 0.5,
             "heading cap lands at {title_cap}, the reference draws it at 462"
         );
-        let detail_box_top = title_box_top + TITLE_ASCENT + EMPTY_DETAIL_GAP;
+        let detail_box_top = title_box_top + TITLE_BOX + EMPTY_DETAIL_GAP;
         let detail_cap = detail_box_top + (EMPTY_DETAIL_SIZE - 12.0);
         assert!(
             (detail_cap - 497.0).abs() <= 1.0,
@@ -7651,9 +7656,9 @@ mod tests {
         // taller box. Column 49..720, block 296..513, centre 404.5 against 384.5.
         let block_height = glyphs::SHOTS_ART.1
             + EMPTY_ART_GAP
-            + TITLE_ASCENT
+            + TITLE_BOX
             + EMPTY_DETAIL_GAP
-            + EMPTY_DETAIL_SIZE;
+            + DETAIL_BOX;
         assert_eq!(block_height, 217.0);
         let centred = 49.0 + (720.0 - 49.0) / 2.0 + EMPTY_STATE_PADDING.top / 2.0;
         let block_centre = art_top + block_height / 2.0;
