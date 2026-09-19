@@ -243,6 +243,105 @@ pub fn glyph(name: &str, side: f32, color: Color) -> Element<'static, Message> {
         .into()
 }
 
+/// The empty-state illustration's own box, in logical pixels.
+///
+/// 216x113 is a measurement, not a taste: it is the box the Modrinth App's
+/// Screenshots empty state occupies on a 1280x720 client (`REFERENCE.md`, and
+/// `.scratch/ref-07-still-1.png` x 409..624, y 296..408), and the gaps recorded
+/// around it -- 47px to the heading's line box, 7px on to the subtext -- are
+/// measured from this box's bottom edge. What is *not* copied is what the
+/// reference draws inside it: that artwork is Modrinth's, and this repo ships no
+/// third-party art without a notice, so the drawing here is ours.
+pub const SHOTS_ART: (f32, f32) = (216.0, 113.0);
+
+/// The Screenshots page's empty-state illustration: three cascaded pictures.
+///
+/// Three frames rather than the reference's fan of four, drawn to fill the same
+/// box corner to corner so the page's spacing survives the substitution. The
+/// colours are the reference's own measured pair for this artwork -- `#1d1f23`
+/// for the frames' fill, `#34363c` for their outline -- which are this palette's
+/// rail and input surfaces, so the illustration follows the color theme like
+/// every other surface rather than pinned to one look.
+pub fn shots_art(frame: Color, fill: Color) -> Element<'static, Message> {
+    Canvas::new(ShotsArt { frame, fill })
+        .width(Length::Fixed(SHOTS_ART.0))
+        .height(Length::Fixed(SHOTS_ART.1))
+        .into()
+}
+
+/// A rounded rectangle as a path.
+///
+/// Written out because this iced version's canvas has no rounded-rectangle
+/// primitive -- `Path` offers `rectangle`, `line` and `circle` only -- and four
+/// lines with quadratic corners is the whole of what the missing one would do.
+fn rounded_rect(top_left: Point, size: Size, radius: f32) -> Path {
+    let r = radius.min(size.width / 2.0).min(size.height / 2.0);
+    let (x, y, w, h) = (top_left.x, top_left.y, size.width, size.height);
+    Path::new(|b| {
+        b.move_to(Point::new(x + r, y));
+        b.line_to(Point::new(x + w - r, y));
+        b.quadratic_curve_to(Point::new(x + w, y), Point::new(x + w, y + r));
+        b.line_to(Point::new(x + w, y + h - r));
+        b.quadratic_curve_to(Point::new(x + w, y + h), Point::new(x + w - r, y + h));
+        b.line_to(Point::new(x + r, y + h));
+        b.quadratic_curve_to(Point::new(x, y + h), Point::new(x, y + h - r));
+        b.line_to(Point::new(x, y + r));
+        b.quadratic_curve_to(Point::new(x, y), Point::new(x + r, y));
+        b.close();
+    })
+}
+
+/// The canvas program behind [`shots_art`].
+struct ShotsArt {
+    frame: Color,
+    fill: Color,
+}
+
+impl<Message> canvas::Program<Message> for ShotsArt {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut surface = Frame::new(renderer, bounds.size());
+        // Drawn against the measured box rather than the canvas it was given, so
+        // the geometry below reads as the coordinates it was measured in.
+        let kx = bounds.width / SHOTS_ART.0;
+        let ky = bounds.height / SHOTS_ART.1;
+        let pen = Stroke {
+            style: Style::Solid(self.frame),
+            width: (1.5 * kx).max(1.0),
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            line_dash: LineDash::default(),
+        };
+        // Back to front, each 132x76 and 40px right and 16px down from the one
+        // behind it: 84 + 132 = 216 and 38 + 76 = 114, so the last frame's far
+        // corner is the box's.
+        for (x, y) in [(4.0, 6.0), (44.0, 22.0), (84.0, 38.0)] {
+            let card = rounded_rect(
+                Point::new(x * kx, y * ky),
+                Size::new(132.0 * kx, 76.0 * ky),
+                10.0 * kx,
+            );
+            surface.fill(&card, self.fill);
+            surface.stroke(&card, pen.clone());
+            // A sun in each frame's top-left corner, so the stack reads as
+            // pictures rather than as three blank cards.
+            surface.fill(
+                &Path::circle(Point::new((x + 24.0) * kx, (y + 22.0) * ky), 7.0 * kx),
+                self.frame,
+            );
+        }
+        vec![surface.into_geometry()]
+    }
+}
+
 /// The canvas program behind [`glyph`].
 struct Icon {
     glyph: Glyph,

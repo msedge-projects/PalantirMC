@@ -30,6 +30,8 @@ Script lines, one action per line, `#` comments welcome:
     type TEXT             real keystrokes, for a search box
     wait S                let the UI settle before the next action
     shot NAME             capture to <out-dir>/ref-<NAME>.png, and OCR it
+    burst NAME N MS       N raw captures <MS> apart, no OCR, for a transition
+    mark NAME             one raw capture, no OCR (the cheap end of `shot`)
     ocr NAME              re-run OCR on an existing capture
     sample NAME X0 Y0 X1 Y1   print a region's structure and labels
     note TEXT             a line in the log, so a session explains itself
@@ -221,6 +223,28 @@ class RefWindow:
         time.sleep(settle)
         self.note(f"hover {int(x)},{int(y)}")
 
+    def burst(self, name: str, count: int, interval_ms: float) -> None:
+        """Raw captures a fixed interval apart, for a transition.
+
+        `shot` OCRs every frame, which costs about two seconds each and makes it
+        useless for measuring motion: a 300ms fade sampled by it is one frame.
+        A burst does nothing but `PrintWindow`, so the interval the caller asks
+        for is close to the interval it gets -- the wall-clock stamp of each
+        frame is logged, and that stamp is what the analysis trusts rather than
+        the interval that was requested.
+        """
+        started = time.perf_counter()
+        frames = []
+        for i in range(count):
+            at = time.perf_counter() - started
+            path = self.capture(f"{name}-{i:02d}")
+            frames.append((at, path.name))
+            rest = (i + 1) * interval_ms / 1000.0 - (time.perf_counter() - started)
+            if rest > 0:
+                time.sleep(rest)
+        self.note(f"burst {name}: {count} frames, "
+                  f"t={', '.join(f'{t:.2f}' for t, _ in frames)}")
+
     def capture(self, name: str) -> Path:
         """A client-area capture, plus OCR of it."""
         image, how = W.grab(self.hwnd, "print")
@@ -257,10 +281,14 @@ def run_script(window: RefWindow, lines: list[str]) -> int:
                 window.resize(int(parts[1]), int(parts[2]), want)
             elif verb == "activate":
                 window.show()
-            elif verb == "click" and len(parts) == 3:
+            elif verb == "click" and len(parts) in (3, 4):
+                # The optional fourth token is the settle time. The guard used to
+                # read `== 3` while the body read `parts[3]`, so the faster settle
+                # this reaches for was unreachable -- and a burst after a click
+                # needs it, because 1.4s of settling is a fade that has finished.
                 window.click(float(parts[1]), float(parts[2]),
                              float(parts[3]) if len(parts) > 3 else 1.4)
-            elif verb == "hover" and len(parts) == 3:
+            elif verb == "hover" and len(parts) in (3, 4):
                 window.hover(float(parts[1]), float(parts[2]),
                              float(parts[3]) if len(parts) > 3 else 1.6)
             elif verb == "key" and len(parts) == 2:
@@ -277,6 +305,10 @@ def run_script(window: RefWindow, lines: list[str]) -> int:
             elif verb == "shot" and len(parts) == 2:
                 path = window.capture(parts[1])
                 RS.ocr(path, refresh=True)
+            elif verb == "mark" and len(parts) == 2:
+                window.capture(parts[1])
+            elif verb == "burst" and len(parts) == 4:
+                window.burst(parts[1], int(parts[2]), float(parts[3]))
             elif verb == "ocr" and len(parts) == 2:
                 path = window.out_dir / f"ref-{parts[1]}.png"
                 for ln in RS.ocr(path, refresh=True):

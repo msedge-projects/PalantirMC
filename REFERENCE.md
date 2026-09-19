@@ -124,6 +124,106 @@ project's stylesheet ladder (`green-500`), and the app as installed paints
 `#00da75` — the call-to-action button, the logo mark and the active rail icon
 all measure it flat.
 
+## The title bar, measured again
+
+The first pass read the bar as three separate 48px headers, one per column. It is
+not: it is **one chrome bar across the whole width** -- x 0..1279 at y 0..47 all
+measures `#27292e` -- with a **1px `#42444a` rule** at y 48 across it, and only
+then do the three columns begin (the page surface from y 49). The page column's
+top-left corner is cut with a **16px radius** (the first page-coloured row is
+49 + 16 - sqrt(...) at each x: 66 at x 65, 50 at x 78, 49 from x 82).
+
+Its contents, left to right, all measured on the Screenshots page at a pinned
+1280x720 client:
+
+| Thing | Measured |
+| --- | --- |
+| Logo mark | 28px, x 12..40, `#00da75` |
+| Wordmark "Modrinth" | x 50..162, cap 19px (its own art, not type) |
+| **Back** | a 30px outlined circle, x 175..204, ring `#37393e`, a left-pointing filled triangle inside, dim |
+| **Forward** | the same at x 224..253, a right-pointing triangle |
+| Page icon | 18px, x 257..274, `#afbac4` |
+| Page title | 16px semibold, white, from x 283 (`Screenshots` ends at 377) |
+
+The two circles are the find of this pass. The earlier walk recorded them as
+"an unidentified dim pair of hollow glyphs" because OCR sees nothing in a ring;
+reading them at 1px shows a back and a forward arrow, both dim because neither
+has anything to do -- the reference's rail navigation does not push history, and
+only in-instance navigation does. They are **not ported**: this shell's pages are
+flat, so a history stack here would be a new feature wearing another launcher's
+chrome, and the honest version of that is a change of its own (`NEXT_STEPS.md`
+§24).
+
+The bar's own title is also where the reference keeps the *page's* name: the
+Screenshots page draws no heading of its own, and neither does Home (its bar
+reads `Home`). Discover's bar reads `Discover modpacks` -- the page and its
+current tab -- so the bar is a running statement of where you are, which is what
+ours now draws too (`Page::title()` and `Page::icon()`).
+
+## The Screenshots page, measured
+
+Session 05 walked the reference to this page and captured it; sessions 06-08
+measured what moves. The client was pinned to **1280x720**, so every number below
+is a client pixel at device scale 1.0.
+
+| Thing | Measured |
+| --- | --- |
+| Page column | x 65..979 (`#16181c`), from y 49 down |
+| Illustration | x 409..624, y 296..408 -- **216x113** |
+| Its fill / outline | `#1d1f23` (6151 px) / `#34363c` (1230 px) |
+| Heading ink | rows 462..484 (23 rows: cap 18 + descender), pure `#ffffff` |
+| Subtext ink | rows 497..512 (16 rows), `#95a2af` |
+| Gap, art -> heading | 54px of ink (408 -> 462) |
+| Gap, heading -> subtext | 35px of ink (462 -> 497) |
+| Content centre x | 516.5 -- the column's middle is 522.5, i.e. an **11px** scrollbar gutter the centring ignores |
+| Content centre y | 404.5 -- the column's middle is 384.5, i.e. **20px below it**, which is what a content box 40px taller than its viewport produces |
+
+The sizes behind those ink rows were confirmed rather than assumed, by the width
+of the strings in the Inter face this shell already ships: "No screenshots yet"
+measures 223px of ink against 227px at 24px bold, and "Screenshots you take
+in-game will appear here." measures 358 against 361 at 16px regular.
+
+The page draws **nothing else**: no heading, no rule, no button, no drop target.
+That is the whole of the cluster, and `tools/page_gate.py` asserts it as one.
+
+### What is not copied
+
+- **The artwork.** The measured box, palette and gaps are copied; the drawing
+  inside is ours (three cascaded picture frames rather than the reference's fan).
+  Modrinth's illustration is its own art and this repository ships no third-party
+  art without a notice.
+- **The Refresh chip.** This page used to draw an in-page "Screenshots" heading,
+  a rule and a Refresh button, none of which the reference has. Removing them is
+  what let the page be one cluster; the rescan they drove still runs on entering
+  the page, which is when the reference's own page reloads too.
+- **The populated grid.** The reference's own data root has no instances, so its
+  Screenshots page is only ever the empty state here. What it draws once there
+  are screenshots is unmeasured, and ours keeps the grid it already had.
+
+### What moves, and what does not
+
+Measured with a new `burst` verb in `tools/refwalk.py` (raw captures a fixed
+interval apart, where `shot` would OCR each frame and cost two seconds):
+
+- **The page does not fade.** Twenty-six frames starting at the click show the
+  Screenshots page fully drawn in the *first* frame -- same heading ink, same
+  ink box, same brightness as the settled capture. The page switches; nothing
+  animates. (An earlier session mistook 1-level antialiasing differences between
+  captures for a fade. It is not: the reference antialiases text in colour
+  (ClearType), so glyph edges read differently from ours, which is also why the
+  page gate compares modal ink colours and ink boxes rather than glyph bitmaps.)
+- **The page has no hover.** The title, the empty state and the panel's header
+  were each hovered and each capture differs from the unhovered one only by that
+  same subpixel noise.
+- **The rail plate is instant** at 40ms sampling, and the rail tooltip appears
+  inside the first 1.4s of the burst -- no transition to measure.
+- **The right panel is the animated part**: its promo block (x 997..1279,
+  y 479..710) changes between captures two seconds apart with nothing hovered,
+  and its card area rotates too. Neither is ours to copy -- both are Modrinth's
+  own promotions -- but it is why a whole-window diff of the reference is useless
+  as evidence: every panel-inclusive comparison carries motion that has nothing
+  to do with what is being measured.
+
 ## Surfaces measured, with what they contain
 
 - **Home** — hero "Welcome to Modrinth" / "Ready to start playing?" with a
@@ -134,8 +234,8 @@ all measure it flat.
   chips, version, "Install").
 - **Skin selector** — in-page heading, "Saved skins" and "Default skins" grids,
   "Add skin", and a drag-and-drop target.
-- **Screenshots** — empty state "No screenshots yet" / "Screenshots you take
-  in-game will appear here."
+- **Screenshots** — as measured above: one centred cluster, the page's name in
+  the title bar instead of a heading, and no controls.
 - **Servers** — "Modrinth App update required", "You need to update to use
   Modrinth Hosting through the Modrinth App", and a "Reload to update" button.
 - **Create instance** (opened, captured, escaped) — three cards: "Custom setup"
@@ -149,6 +249,11 @@ all measure it flat.
 
 ## What this changes here
 
+0. **The bar.** It now names the page it belongs to -- an 18px glyph in the
+   secondary tint, 9px, then the title at 16px semibold white, all three
+   measured -- and it is one drag patch like the brand, so the strip under the
+   pointer is never dead. `tools/page_gate.py` is the page-content oracle:
+   reference numbers in, one capture in, a verdict out.
 1. **The accent.** `#00da75` replaces `#1bd96a`, with hover and pressed derived
    by the rule the palette already documents (`brightness(1.25)` / `0.8`).
 2. **The rail.** The active plate is a 12px-radius `#1d563f` square, not a
@@ -158,6 +263,11 @@ all measure it flat.
    divider, where the reference keeps its own instance content.
 4. **The tab strip.** Modpacks leads, and the strip carries the reference's
    order for the types we serve.
+5. **The Screenshots page.** The in-page heading, the rule and the Refresh chip
+   are gone; what is left is the measured cluster -- the 216x113 illustration,
+   the 24px bold white heading, the 16px tertiary subtext -- centred 20px below
+   the column's middle and 11px of gutter left of it, exactly where the
+   reference's own content lands.
 
 ## Still to port, and why each is not done here
 

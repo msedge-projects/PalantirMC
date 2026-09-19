@@ -1413,3 +1413,63 @@ Still open, and unchanged from §12's list: the panel's scrollbar band, the
 panel's sections drawn as cards where the reference divides them, its missing
 left hairline, the accordion that does not open, and the hover/press arithmetic
 that no still capture can measure.
+
+## 24. The Screenshots page, copied off the reference's window
+
+The port after §23's shell pass, and the first one done *per page* rather than
+across the shell, because that is the shape the work has: 400-500 element-states
+for the whole app, captured in sessions and ported with the reference's own
+numbers in hand.
+
+**The pass.** `tools/refwalk.py` drove the installed Modrinth App to the
+Screenshots page and captured everything it has: the page, its empty state, the
+title bar, every hover, and — new — its motion. The measurement tools grew two
+verbs for that last part: `shot` OCRs each frame and so costs about two seconds,
+which makes it useless for a 300ms transition, so `burst NAME N MS` captures raw
+frames at an interval and `mark` captures one without OCR. (The `click` and
+`hover` verbs' optional settle argument used to be unreachable — the guard read
+three tokens while the body read a fourth — which is what a burst after a click
+needs.)
+
+**What the page turned out to be.** Nothing but a centred cluster: a 216x113
+illustration, a 24px bold white heading, a 16px tertiary subtext, the gaps
+between them 54px and 35px of ink, the whole block centred 20px below the column's
+middle and 11px of scrollbar gutter left of it. No heading of its own — the page's
+name is in the title bar, which is a shell change that came with this page — no
+rule, no button, no drop target.
+
+**Three corrections to the previous pass.** The bar is *one* chrome bar across
+the whole window with a 1px `#42444a` rule under it, not three per-column headers;
+the page's top-left corner is a 16px radius, not a cut of unspecified size; and
+the two "unidentified dim hollow glyphs" beside the wordmark are **back and
+forward**, 30px outlined circles with a filled triangle in each, dim because the
+reference's rail navigation does not push history. They are recorded, not ported:
+this shell's pages are flat, so a history stack would be a new feature wearing
+another launcher's chrome.
+
+**What was not copied, and why.** The illustration's *artwork*: the box, the
+palette (`#1d1f23` fill, `#34363c` outline — which are this palette's rail and
+input surfaces, so the artwork follows the color theme) and the gaps are the
+reference's, the drawing is ours. The Refresh chip: the reference has no control
+on this page, and removing ours is what makes the page one cluster; the rescan it
+drove still runs on entering the page, which is when the reference's page reloads
+too. And the populated grid, because the reference's own data root has no
+instances, so that state has never been seen.
+
+**The motion result is a negative one, and worth having.** Twenty-six frames
+starting at the click show the Screenshots page fully drawn in the *first* frame:
+no fade, no slide, and no hover response anywhere on the page. An earlier session
+read 1-level differences between captures as a fade; they are ClearType's colour
+fringing, which is also why no gate may compare glyph bitmaps between the two
+clients. The animated surface in the reference is its right-panel promos
+(x 997..1279, y 485..710), which are Modrinth's own and are not ours to draw —
+but they are why a whole-window diff of the reference is not evidence.
+
+**The gates.** `tools/page_gate.py` is new and is the page-content oracle, where
+`panel_gate.py` judges the shell: the page colour, that the column holds exactly
+one cluster, the illustration's 216x113 box and its two colours, the heading's
+ink colour and box, the subtext's, both gaps, and the centring including the
+gutter. It passes on the reference's own capture and fails on the build it
+replaces — the replaced build had an in-page heading, a rule and a Refresh chip,
+so its column holds one band where the reference's holds three, and its page
+background is the old inset panel's `#34363c` rather than the page's `#16181c`.

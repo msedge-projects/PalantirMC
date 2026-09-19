@@ -165,6 +165,67 @@ const CAPTION_BUTTON_HEIGHT: f32 = CAPTION_GLYPH + 2.0 * CAPTION_PAD[0];
 /// Gap between the title bar's controls.
 const TITLE_BAR_SPACING: f32 = 6.0;
 
+/// Side of the glyph the title bar draws for the page, and the gap to its name.
+///
+/// Measured off the reference client's own bar on a 1280x720 client: an 18px
+/// glyph at x 257..274, then 9px, then the page's name from x 283. Drawn at the
+/// size it measures rather than at the rail's 22, because the bar's icon is not
+/// the rail's -- see `REFERENCE.md`.
+const PAGE_GLYPH: f32 = 18.0;
+/// Gap between that glyph and the page's name.
+const PAGE_CLUSTER_GAP: f32 = 9.0;
+
+/// Size of the page's name in the bar.
+///
+/// 16px semibold, measured by its cap height (12.5px over rows 18..30) and
+/// confirmed by its advance: "Screenshots" measures 95px of ink there and 97px
+/// at 16px in the Inter face the shell ships.
+const PAGE_TITLE_SIZE: f32 = 16.0;
+
+/// Width of the drag patch the page's icon and name sit in.
+///
+/// Wide enough for the longest name this shell has at [`PAGE_TITLE_SIZE`]
+/// ("Screenshots", 97px) plus its glyph and gap, and no wider, so the search
+/// field keeps its room at the window's 980px minimum.
+const PAGE_CLUSTER_WIDTH: f32 = 150.0;
+
+/// The Screenshots page's empty state, as the reference draws it.
+///
+/// Every number is a measurement of the Modrinth App at a pinned 1280x720
+/// client (`REFERENCE.md`, `.scratch/ref-07-still-1.png`): the illustration's
+/// box, then its 24px bold heading with the cap at y 462, then its 16px tertiary
+/// subtext with the cap at y 497. Between those landmarks sit the gaps below --
+/// 47px of *box*, not of ink, because a text widget's box starts above its cap:
+/// at 24px the ascent is 24px and the cap 18, so the heading's box begins 6px
+/// above the cap, and 409 + 47 + 6 = 462 on the nose.
+const EMPTY_ART_GAP: f32 = 47.0;
+/// Gap between the empty state's heading and its subtext.
+const EMPTY_DETAIL_GAP: f32 = 7.0;
+/// The heading's size.
+const EMPTY_TITLE_SIZE: f32 = 24.0;
+/// The subtext's size.
+const EMPTY_DETAIL_SIZE: f32 = 16.0;
+
+/// Padding the empty state is centred inside, which is where two of the
+/// reference's own habits live.
+///
+/// * **40px below.** The reference's page content is 40px taller than the
+///   viewport it is drawn in (its pages carry a bottom spacer), so a block
+///   centred in it lands 20px below the column's middle -- measured: the empty
+///   state's centre is y 404 in a column that spans 49..720, whose middle is
+///   384. A top padding of 40 is that same 20px on a box that is *not* taller
+///   than its viewport.
+/// * **11px on the right.** The block's centre measures x 516.5 in a column
+///   spanning 65..979, whose middle is 522.5 -- the 11px a stable scrollbar
+///   gutter takes, so centring ignores it. A right padding of 11 puts the content
+///   centre back where the reference has it.
+const EMPTY_STATE_PADDING: Padding = Padding {
+    top: 40.0,
+    right: 11.0,
+    bottom: 0.0,
+    left: 0.0,
+};
+
 /// Where the title bar's maximize control sits, for the window's hit test.
 ///
 /// The button is answered as *non-client* — that is what makes Windows 11
@@ -696,6 +757,8 @@ pub enum Task {
 pub enum BarArea {
     /// Logo, product name and version.
     Brand,
+    /// The page's icon and title, which name where you are.
+    Page,
     /// The empty stretch between the search box and the run chip.
     Middle,
     /// The "running instance" chip.
@@ -3758,6 +3821,24 @@ impl PalantirApp {
             .align_items(iced::Alignment::Center),
         );
 
+        // The bar names the page you are on, the way the reference's does. It is
+        // a drag patch like the brand: a strip of the bar that does nothing under
+        // the pointer reads as a broken window, and both clients' bars drag from
+        // anywhere they are not a control.
+        let page_cluster = grabbable(
+            BarArea::Page,
+            Length::Fixed(PAGE_CLUSTER_WIDTH),
+            self.bar_armed == Some(BarArea::Page),
+            row![
+                glyph(self.page.icon(), PAGE_GLYPH, theme::text_muted()),
+                text(self.page.title())
+                    .size(PAGE_TITLE_SIZE)
+                    .font(theme::semibold()),
+            ]
+            .spacing(PAGE_CLUSTER_GAP)
+            .align_items(iced::Alignment::Center),
+        );
+
         let search = container(
             text_input("Search your instances…", &self.search)
                 .on_input(Message::SearchChanged)
@@ -3777,6 +3858,7 @@ impl PalantirApp {
 
         let bar = row![
             dragging_area,
+            page_cluster,
             search,
             grabbable(
                 BarArea::Middle,
@@ -3959,15 +4041,60 @@ impl PalantirApp {
     /// so it says what will appear here rather than showing an empty box — and
     /// it distinguishes "still looking" from "none yet", which otherwise look
     /// identical for the second it takes to scan.
+    ///
+    /// **What the reference does here, and this page now does too.** Its
+    /// Screenshots page draws no heading, no rule and no control at all: the
+    /// page's name lives in the title bar, and the column holds nothing but the
+    /// illustration and two centred lines. This page used to draw an in-page
+    /// "Screenshots" heading, a rule and a Refresh chip, none of which the
+    /// reference has. Rescanning survives the chip's removal because the scan runs
+    /// on entering the page ([`Message::PageSelected`]), which is also when the
+    /// reference's own page reloads; `Message::RefreshScreenshots` stays reachable
+    /// for a caller that wants it again without leaving and returning.
+    ///
+    /// The scan's own "still looking" state is this shell's, not the reference's
+    /// -- it has no such state to copy, because its list is local -- so it borrows
+    /// the empty state's geometry and says what it is doing.
     fn view_screenshots(&self) -> Element<'_, Message> {
+        if self.shots.tiles.is_empty() {
+            let (title, detail) = if self.shots.loading {
+                (
+                    "Looking for screenshots…",
+                    "Reading the screenshots folders of your instances.",
+                )
+            } else {
+                (
+                    "No screenshots yet",
+                    "Screenshots you take in-game will appear here.",
+                )
+            };
+            let empty = column![
+                glyphs::shots_art(theme::surface_input(), theme::bg_rail()),
+                column![
+                    text(title).size(EMPTY_TITLE_SIZE).font(theme::bold()),
+                    text(detail)
+                        .size(EMPTY_DETAIL_SIZE)
+                        .style(iced::theme::Text::Color(theme::text_dim())),
+                ]
+                .spacing(EMPTY_DETAIL_GAP)
+                .align_items(iced::Alignment::Center),
+            ]
+            .spacing(EMPTY_ART_GAP)
+            .align_items(iced::Alignment::Center);
+
+            return container(empty)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(EMPTY_STATE_PADDING)
+                .center_x()
+                .center_y()
+                .into();
+        }
+
         let header = column![
             row![
                 text("Screenshots").size(24).font(theme::semibold()),
-                if self.shots.tiles.is_empty() {
-                    text("").size(12)
-                } else {
-                    text(format!("{}", self.shots.tiles.len())).size(13)
-                },
+                text(format!("{}", self.shots.tiles.len())).size(13),
                 horizontal_space(),
                 button(
                     row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)]
@@ -3982,39 +4109,6 @@ impl PalantirApp {
             horizontal_rule(1u16),
         ]
         .spacing(14);
-
-        if self.shots.tiles.is_empty() {
-            let (title, detail) = if self.shots.loading {
-                (
-                    "Looking for screenshots…",
-                    "Reading the screenshots folders of your instances.",
-                )
-            } else {
-                (
-                    "No screenshots yet",
-                    "Screenshots you take in-game will appear here.",
-                )
-            };
-            let empty = column![
-                glyph("image", 70.0, theme::text_dim()),
-                text(title).size(17).font(theme::bold()),
-                text(detail).size(12).style(iced::theme::Text::Color(theme::text_muted())),
-            ]
-            .spacing(12)
-            .align_items(iced::Alignment::Center);
-
-            return column![
-                header,
-                container(empty)
-                    .style(theme::inset)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x()
-                    .center_y(),
-            ]
-            .spacing(14)
-            .into();
-        }
 
         let mut grid = column![].spacing(12);
         for chunk in self.shots.tiles.chunks(SHOTS_PER_ROW) {
@@ -7495,6 +7589,77 @@ mod tests {
             assert!(!page.icon().is_empty());
             assert!(!page.title().is_empty());
         }
+    }
+
+    /// The bar names the page, at the size the reference's bar names it.
+    ///
+    /// The reference draws the page's own glyph and title in its title bar
+    /// (`REFERENCE.md`: an 18px glyph at x 257..274 and its 16px title from
+    /// x 283 on a 1280 client), which is where its pages get their names -- the
+    /// Screenshots page itself draws no heading. The width below is what the
+    /// patch has to hold, taken from the longest title this shell has at that
+    /// size: "Screenshots" measures 97px in the Inter face the shell ships.
+    #[test]
+    fn the_bar_names_the_page_at_the_measured_size() {
+        assert_eq!(PAGE_GLYPH, 18.0);
+        assert_eq!(PAGE_TITLE_SIZE, 16.0);
+        assert_eq!(PAGE_CLUSTER_GAP, 9.0);
+        const SCREENSHOTS_AT_16: f32 = 97.0;
+        assert!(
+            PAGE_CLUSTER_WIDTH >= PAGE_GLYPH + PAGE_CLUSTER_GAP + SCREENSHOTS_AT_16,
+            "the patch is narrower than the longest title it has to hold"
+        );
+        // Every page's name fits, not just the longest one by eye.
+        for page in Page::all() {
+            assert!(page.title().chars().count() <= "Screenshots".len());
+        }
+    }
+
+    /// The empty state's landmarks reproduce the reference's own capture.
+    ///
+    /// The reference, pinned to a 1280x720 client, draws its illustration at
+    /// y 296..408, its heading's cap at 462 and its subtext's cap at 497, with the
+    /// page column starting at y 49. Those three numbers are what the gaps
+    /// between the widgets have to add up to; text boxes are what the layout can
+    /// actually space, so the ascent the cap sits under is part of the sum. This
+    /// is the arithmetic the gap constants encode, checked rather than trusted.
+    #[test]
+    fn the_empty_state_lands_on_the_reference_landmarks() {
+        // Inter's metrics, as the reference's rendering shows them: at 24px the
+        // heading's cap is 18px under a 24px ascent, at 16px the subtext's is 12
+        // under a 16px ascent.
+        const TITLE_ASCENT: f32 = 24.0;
+        const TITLE_CAP: f32 = 18.0;
+        let art_top = 296.0;
+        let art_bottom = art_top + glyphs::SHOTS_ART.1;
+        assert_eq!(art_bottom, 409.0);
+        let title_box_top = art_bottom + EMPTY_ART_GAP;
+        let title_cap = title_box_top + (TITLE_ASCENT - TITLE_CAP);
+        assert!(
+            (title_cap - 462.0).abs() <= 0.5,
+            "heading cap lands at {title_cap}, the reference draws it at 462"
+        );
+        let detail_box_top = title_box_top + TITLE_ASCENT + EMPTY_DETAIL_GAP;
+        let detail_cap = detail_box_top + (EMPTY_DETAIL_SIZE - 12.0);
+        assert!(
+            (detail_cap - 497.0).abs() <= 1.0,
+            "subtext cap lands at {detail_cap}, the reference draws it at 497"
+        );
+        // And the whole block sits 20px below the column's middle, which is what
+        // centring it in a box 40px taller than the viewport produces -- the
+        // reference's own habit, and the padding above repeats it without the
+        // taller box. Column 49..720, block 296..513, centre 404.5 against 384.5.
+        let block_height = glyphs::SHOTS_ART.1
+            + EMPTY_ART_GAP
+            + TITLE_ASCENT
+            + EMPTY_DETAIL_GAP
+            + EMPTY_DETAIL_SIZE;
+        assert_eq!(block_height, 217.0);
+        let centred = 49.0 + (720.0 - 49.0) / 2.0 + EMPTY_STATE_PADDING.top / 2.0;
+        let block_centre = art_top + block_height / 2.0;
+        assert_eq!(block_centre, centred);
+        // The right padding is the scrollbar gutter the reference centres inside.
+        assert_eq!(EMPTY_STATE_PADDING.right, 11.0);
     }
 
     #[test]
