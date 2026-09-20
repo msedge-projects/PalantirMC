@@ -42,7 +42,14 @@ G11--G19 came after that, with the first page ported element by element, and are
 listed in their own section below: **9 met** for the build (`d23ed32`) that port
 produced, with the capture they were judged from and the command that takes it.
 G20--G29 are the second page -- Home -- and are **10 met, 0 unmet** on this build,
-with the three captures that show the oracle discriminating.
+with the three captures that show the oracle discriminating -- and they were then
+re-run against the exe CI built for it (run
+[35531424667](https://github.com/MSedgeMC/PalantirMC/actions/runs/35531424667),
+green in all five jobs), hash-checked against the runner's own sidecar there
+(`10b99cea…0be1a`, and `df42046f…` for the GNU target) and staged as
+`dist/PalantirMC.exe`: `python tools/appshot.py --exe dist/ci-cb5a98f/msvc/PalantirMC.exe
+--page home --out .scratch/pal-home-cb5a98f.png` writes the same numbers as the debug
+build, so **12 met, 0 unmet** hold on the release build too.
 
 Later runs of the page gates used the launcher's own capture path rather than the
 window tool, which is a change to *how* the evidence is taken rather than to what is

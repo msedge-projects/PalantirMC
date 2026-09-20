@@ -347,6 +347,47 @@ second, denser page rather than assumed.
   reference's own strings stay theirs; ours say this launcher's name in the same
   positions, at the same sizes, in the same colours.
 
+## The Discover page, measured (not yet ported)
+
+Measured off `.scratch/ref-02-page-1.png`, a 1280x720 capture from the first rail
+walk, and recorded here because the port is per page and this is the next one. What
+is *not* here is the card's interior rhythm: the icon, title, author, description,
+tags, stats and Install button each need their own pass, and guessing them would be
+the thing this file exists to prevent.
+
+| Thing | Measured |
+| --- | --- |
+| Page column | x 60..941, page `#16181c` |
+| Tab strip | a `#27292e` rounded container, x 84..690, y 78..111 |
+| Its labels | 14px; Modpacks x 109, Mods x 198, Resource Packs x 255, Data Packs x 424, Servers x 621 -- all on ink row y 89 |
+| Search field | fill `#34363c`, x 84..941, y 128..170 (42 tall), placeholder 16px at x 107 |
+| Sort / View row | two controls, x 84..339 and x 348..491, on ink rows y 186..214 |
+| Result count | right-aligned at x 812 and 869 on the same rows -- "2" and "917" |
+| Cards | x 84..941 (858 wide), **140 tall**, a **14px** gap between them, fill `#27292e`, radius ~14 |
+| First card | y 227..366, then 381..520, 535..674, 689..828 |
+| Card icon | 100x100, 16px from the card's top and 17px from its left |
+| Install button | ~94x36 at x 831..924, y 242..278, label `#00da75` with a `+` glyph |
+| Card title | 20px at x 218; author 14px at x 436 on the same line |
+| Card description | 16px at x 218, wrapping (y 278 and 296) |
+| Card stats | 16px at x 771..928, y 305 |
+| Card tag row | 16px at x 246, y 334; "2 days ago" right-aligned at x 847 |
+
+**Two things this page does differently from the two ported so far.** Its right
+panel is a *filter* column -- "Search content...", Environment (Client / Server),
+Game version, Open source -- and it is **331px wide against the 299px** every other
+capture shows, so the panel's width is the page's business rather than the shell's.
+And the page itself has no in-page heading at all: the tab strip is the first thing
+in the column, and the page's name is in the title bar (`Discover modpacks`, with
+the active tab in it).
+
+**Where this launcher stands.** A capture of our Discover page at the same size
+(`tools/appshot.py --page browse`): it draws an in-page "Browse Modpacks" heading at
+y 79 which the reference does not have, its tabs sit on ink row 131 rather than 89,
+its search field on 183 rather than 128..170, and its right panel holds "Getting
+started" rather than the filter column. The tab list is also five types where the
+reference's strip has five *and* Servers; ours are Modpacks, Mods, Resource Packs,
+Data Packs, Shaders.
+
 ## Surfaces measured, with what they contain
 
 - **Home** — hero "Welcome to Modrinth" / "Ready to start playing?" with a
