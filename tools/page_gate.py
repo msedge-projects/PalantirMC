@@ -2,11 +2,22 @@
 
 `panel_gate.py` judges the shell -- the rail, the page pane, the right panel. This
 judges what a *page* draws inside that pane, because the port is per page: the
-Screenshots page first, then the rest, each one against numbers measured off the
+Screenshots page first, then Home, each one against numbers measured off the
 Modrinth App's own window rather than estimated from a screenshot of it.
 
     python tools/page_gate.py .scratch/pal-shots.png
     python tools/page_gate.py .scratch/pal-home.png --page home
+
+Both halves of every control are on disk, at the same client size, from the same
+command -- `python tools/appshot.py --page X --out Y` for this launcher and the
+capture the walk took for the reference:
+
+    reference   .scratch/ref-01-home.png     passes (12/12)
+    ours        .scratch/pal-home-new.png    passes (12/12)
+    the build this port replaces
+                .scratch/pal-home-oldctrl.png  fails on the first assertion: the
+                old page drew one card holding everything, so its column has one
+                band where the reference's has seven
 
 Exits 0 and prints `page gate passed` only when every assertion holds.
 
@@ -28,10 +39,14 @@ thing that makes a passing run mean anything. Both controls are recorded:
       the first gate: it drew an in-page "Screenshots" heading, a rule and a
       Refresh chip, so its page column has more than one cluster in it
 
-Captures are `PrintWindow` grabs from `tools/winshot.py`, taken off-screen and
-without activating the window. `.scratch/ref-07-still-1.png` is not committed --
-it is a screenshot of another product -- so the reference half of the control is a
-recorded manual result, and the numbers below are what it measured.
+A capture of *this* launcher comes from the launcher: iced hands the process its
+own frame, so `--shot` writes the pixels the shell drew rather than the
+compositor's opinion of a window parked off the desktop. `tools/appshot.py` drives
+it. The reference's captures are `PrintWindow` grabs from `tools/winshot.py`, taken
+off-screen and without activating the window. None of those files are committed --
+they are screenshots of another product, and two of them are of this one before a
+port -- so the reference half of each control is a recorded result, and the numbers
+below are what it measured.
 """
 from __future__ import annotations
 
@@ -215,6 +230,366 @@ def modal(im, x0, x1, y0, y1, bg, thr):
     return best, counts[best]
 
 
+def core(im, x0, x1, y0, y1, bg, slack=12):
+    """The commonest colour among a band's *strongest* ink.
+
+    `modal` answers for a solid fill and mis-answers for thin type: a 16px regular
+    line on the reference's dotted backdrop is all antialiasing, and its
+    most-common colour at any threshold is a half-lit edge -- `#34383d` against a
+    token of `#b0bac5`. Comparing only against the brightest ink, within `slack`
+    levels of the band's strongest pixel, asks the question the assertion is
+    actually about -- what colour the glyph's core is drawn in -- and answers
+    `#afbac4` for that line, one level off its token. Neither the reference's
+    WebView nor this toolkit draws type as a field of one colour; a tolerance is
+    part of the measurement, not a kindness to it.
+    """
+    pix = im.load()
+    lit = [
+        (diff(pix[x, y], bg), pix[x, y])
+        for y in range(y0, y1 + 1)
+        for x in range(x0, x1)
+        if diff(pix[x, y], bg) > 12
+    ]
+    if not lit:
+        return None, 0
+    bar = max(d for d, _ in lit) - slack
+    counts: dict[tuple[int, int, int], int] = {}
+    for d, c in lit:
+        if d >= bar:
+            counts[c] = counts.get(c, 0) + 1
+    if not counts:
+        return None, 0
+    best = max(counts, key=counts.get)
+    return best, counts[best]
+
+
+def darkest(im, x0, x1, y0, y1, ceiling=100):
+    """The commonest *near-black* colour in a band.
+
+    For a label drawn on a bright fill, brightness is the wrong direction to look:
+    the reference's Import button is `#34363c` with `#b0bac5` on it, but its brand
+    button is `#00da75` with `#000000`, and black is only 74 levels from the page --
+    below every threshold that finds the green around it. So this asks the other
+    question: of the pixels that are nearly black, which colour is there most?
+    """
+    pix = im.load()
+    counts: dict[tuple[int, int, int], int] = {}
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1):
+            c = pix[x, y]
+            if sum(c) <= ceiling:
+                counts[c] = counts.get(c, 0) + 1
+    if not counts:
+        return None, 0
+    best = max(counts, key=counts.get)
+    return best, counts[best]
+
+
+def dense_rows(im, x0, x1, y0, y1, bg, thr, share):
+    """Rows that are mostly ink across `x0..x1`.
+
+    The illustration needs a different question from every other band. Its frames
+    are filled with `#1d1f23`, 21 levels from the page -- *below* the reference's
+    own dot texture at 57 -- so no threshold sees the artwork's fill without also
+    seeing the backdrop. What separates them is not brightness but width: a row of
+    the illustration is a hundred ink pixels across, a row of dots is two pixels
+    every nine. Requiring most of the band's width to be ink asks exactly that, and
+    is why this band's height is measured with a `share` rather than a threshold.
+    """
+    out = []
+    for y in range(y0, y1):
+        hits = sum(1 for x in range(x0, x1) if diff(im.getpixel((x, y)), bg) > thr)
+        if hits >= share * (x1 - x0):
+            out.append(y)
+    return out
+
+
+# ---- Home: the welcome screen ----------------------------------------
+#
+# Every number is the reference's own, measured off `.scratch/ref-01-home.png`
+# and cross-checked against `WelcomeScreen.vue` -- the component that draws it,
+# which states the layout in utility classes outright. Where the two agreed, the
+# capture is what is recorded here, because ink is what a capture can be asked
+# about.
+#
+#     illustration   y 223..322, ink 96x99 in a 100x100 slot, centre x 516.5
+#     title          ink rows 352..371, #ffffff, x 392..640
+#     description    ink rows 393..408, #b0bac5, x 431..603
+#     brand button   y 435..474 (40 tall), x 414..619, fill #00da75, ink #000000
+#     hint row       y 491..510 (20 tall), text #96a2b0, key cap 20x20 at 436..455
+#     prompt         ink rows 625..638, #96a2b0
+#     import button  y 657..696 (40 tall), x 407..626, #34363c inside #42444a
+#     gaps           ink to ink: 30, 22, 27, 17 -- and 19 before the import button
+#
+# The hero's centring is the one geometry that has to be stated relative to the
+# column rather than absolutely, and it is exact in both clients: the reference's
+# page column is 49..720 and its hero's centre is 366.5, which is 18 above the
+# column's middle; this shell's column is 41px shorter (a status strip and a pane
+# inset the reference has no equivalent of) and the same 18 holds, because both
+# pin a fixed block 24px off the bottom and grow the hero above it.
+HOME = {
+    "art_box": 100,
+    "title_ink_rows": 20,
+    "desc_ink_rows": 16,
+    "hint_rows": 20,
+    "prompt_ink_rows": 14,
+    "title": (0xFF, 0xFF, 0xFF),
+    "desc": (0xB0, 0xBA, 0xC5),
+    "hint": (0x96, 0xA2, 0xB0),
+    "brand_fill": (0x00, 0xDA, 0x75),
+    "brand_ink": (0x00, 0x00, 0x00),
+    "base_fill": (0x34, 0x36, 0x3C),
+    "base_ring": (0x42, 0x44, 0x4A),
+    "button_h": 40,
+    "cap_box": 20,
+    "art_to_title": 30,
+    "title_to_desc": 22,
+    "desc_to_button": 27,
+    "button_to_hint": 17,
+    "prompt_to_import": 19,
+    "hero_above_middle": 18,
+    "paths_found": 7,
+}
+
+# Ink at a threshold the reference's own backdrop cannot pass. Its dot texture
+# lifts a pixel by at most 20 levels over the page, and the faintest thing this
+# page draws -- the illustration's own fill -- is 21 and up, so 60 is above the
+# texture and below everything that is a control. Without that margin the 415x478
+# grid of dots reads as one band from the art to the top of the page.
+HOME_INK = 60
+
+
+def home_gate(g, im, x0, x1, paper, pane_left, panel_left, top, bottom, scope, only=None) -> int:
+    """Judge the Home page's welcome screen.
+
+    `paper` is the page column's own colour and the two `*_left` values are the
+    column's boundaries -- the same three things the caller measured to find it.
+    Passing them in rather than re-measuring keeps one definition of the column
+    shared by both pages.
+    """
+    found = bands(rows_with_content(im, x0, x1, top, bottom, paper, HOME_INK))
+    print("content bands: " + ", ".join(f"y {b[0]}..{b[1]}" for b in found))
+
+    # G20: seven clusters. The reference draws an illustration, a title, a
+    # description, a button, a hint row, a prompt and an import button, and
+    # nothing else -- no card around them, no rule, no in-page heading. The build
+    # this replaced drew all three of those, which is what this notices.
+    g.check(
+        len(found) == HOME["paths_found"],
+        "[clusters] the hero is illustration, title, description, button, hint, "
+        "prompt, import -- and nothing else",
+        f"{len(found)} bands"
+        + (
+            " (the replaced build drew a card, an in-page heading, a rule and two chips)"
+            if len(found) != HOME["paths_found"]
+            else ""
+        ),
+    )
+    if len(found) != HOME["paths_found"]:
+        print()
+        if g.failures:
+            print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
+            return 1
+        if not g.ran:
+            print(f"no assertion matched --only {only}")
+            return 2
+        print(f"page gate passed{scope}")
+        return 0
+
+    (art0, art1), (t0, t1), (d0, d1), (b0, b1), (h0, h1), (p0, p1), (i0, i1) = found
+    art = columns_in(im, x0, x1, art0, art1, paper, HOME_INK)
+    title = columns_in(im, x0, x1, t0, t1, paper, HOME_INK)
+    desc = columns_in(im, x0, x1, d0, d1, paper, HOME_INK)
+    brand = columns_in(im, x0, x1, b0, b1, paper, HOME_INK)
+    hint = columns_in(im, x0, x1, h0, h1, paper, HOME_INK)
+    prompt = columns_in(im, x0, x1, p0, p1, paper, HOME_INK)
+    imp = columns_in(im, x0, x1, i0, i1, paper, HOME_INK)
+    # The illustration's footprint: `art` is the x extent its outline gives, and
+    # the height comes from the rows that are *mostly* ink across that extent,
+    # searched from the band's own top down to where the dots take over.
+    art_w = art[1] - art[0] + 1
+    dense = dense_rows(im, art[0], art[1] + 1, art0, art1 + 24, paper, 25, 0.3)
+    art_h = (dense[-1] - dense[0] + 1) if dense else art1 - art0 + 1
+    # The illustration's own bottom, which the gap below it is measured from. Not
+    # the band's: at the ink threshold the band ends where the outline does (305),
+    # and the artwork continues another eleven rows past it in ink too faint for
+    # that threshold -- so measuring the gap from the band would have reported 43
+    # where the reference's own rhythm is 30.
+    art_bottom = dense[-1] if dense else art1
+    print(
+        f"illustration {art[0]}..{art[1]} ({art_w}x{art_h}), "
+        f"title {title[0]}..{title[1]}, description {desc[0]}..{desc[1]}, "
+        f"brand {brand[0]}..{brand[1]}, hint {hint[0]}..{hint[1]}, "
+        f"prompt {prompt[0]}..{prompt[1]}, import {imp[0]}..{imp[1]}"
+    )
+
+    # G21: the illustration fills the reference's 100px slot.
+    g.check(
+        abs(art_h - HOME["art_box"]) <= 8,
+        "[illustration] the illustration is the reference's 100px square",
+        f"{art_w}x{art_h} against {HOME['art_box']}x{HOME['art_box']}",
+    )
+
+    # G22/G23: the two lines under it are the reference's sizes and colours.
+    title_ink, _ = core(im, title[0], title[1] + 1, t0, t1, paper)
+    g.check(
+        title_ink is not None
+        and near(title_ink, HOME["title"], 6)
+        and abs((t1 - t0 + 1) - HOME["title_ink_rows"]) <= 2,
+        "[title] the heading is the reference's 24px semibold white",
+        "#%02x%02x%02x in %d ink rows against #%02x%02x%02x in %d"
+        % (title_ink + (t1 - t0 + 1,) + HOME["title"] + (HOME["title_ink_rows"],)),
+    )
+    desc_ink, _ = core(im, desc[0], desc[1] + 1, d0, d1, paper)
+    g.check(
+        desc_ink is not None and near(desc_ink, HOME["desc"], 6),
+        "[description] the description is the reference's 16px #b0bac5",
+        "#%02x%02x%02x against #%02x%02x%02x" % (desc_ink + HOME["desc"])
+        if desc_ink
+        else "no ink found",
+    )
+
+    # G24: the brand button -- 40px of `#00da75` with black ink on it, which is
+    # the pair `--color-brand` and `--color-accent-contrast` resolve to in dark.
+    fill, fill_n = modal(im, brand[0], brand[1] + 1, b0, b1, paper, 60)
+    ink, ink_n = darkest(im, brand[0] + 8, brand[1] - 8, b0 + 6, b1 - 6)
+    g.check(
+        fill is not None
+        and near(fill, HOME["brand_fill"], 4)
+        and ink is not None
+        and near(ink, HOME["brand_ink"], 6)
+        and abs((b1 - b0 + 1) - HOME["button_h"]) <= 2,
+        "[brand button] 40px of the reference's brand, with black ink on it",
+        (
+            "#%02x%02x%02x (%d px) with #%02x%02x%02x label (%d px) in %d rows "
+            "against #%02x%02x%02x / #%02x%02x%02x in %d"
+            % (
+                fill + (fill_n,) + ink + (ink_n,) + (b1 - b0 + 1,)
+                + HOME["brand_fill"] + HOME["brand_ink"] + (HOME["button_h"],)
+            )
+            if fill and ink
+            else "no fill or label found"
+        ),
+    )
+
+    # G25: the hint row, and the key cap inside it. The cap is found by its own
+    # fill rather than by column arithmetic: a column of the cap is eighteen rows
+    # of `#34363c`, and a column of the 14px text beside it is two or three of
+    # antialiasing. Twelve, not eighteen, because the cap's top and bottom rows are
+    # cut by its own corner radius -- asking for the full height measures the flat
+    # middle of the cap and reports it as 16 wide when it is 18.
+    cap_cols = [
+        x
+        for x in range(hint[0], hint[1] + 1)
+        if sum(1 for y in range(h0, h1 + 1) if diff(im.getpixel((x, y)), HOME["base_fill"]) <= 6) >= 12
+    ]
+    cap_w = (cap_cols[-1] - cap_cols[0] + 1) if cap_cols else 0
+    ring, _ = modal(im, cap_cols[0], cap_cols[-1] + 1, h0, h1, HOME["base_fill"], 6) if cap_cols else (None, 0)
+    # No colour assertion on the hint's own text. It is the one band on this page
+    # whose ink is *not* the brightest thing in it -- the cap carries a brighter
+    # glyph of its own -- so the brightest-ink rule reads the cap's letter and
+    # answers `#a2acb6`, and tightening the rule to reach the sentence would be
+    # tuning a threshold to a coincidence. The ring and the geometry are asserted;
+    # the row's colour is recorded in `REFERENCE.md` instead.
+    g.check(
+        cap_cols
+        and abs(cap_w - HOME["cap_box"]) <= 3
+        and abs((h1 - h0 + 1) - HOME["hint_rows"]) <= 2
+        and ring is not None
+        and near(ring, HOME["base_ring"], 6),
+        "[hint] the hint row is 20px with a 20px key cap in the reference's colours",
+        f"row {h1 - h0 + 1} rows, cap {cap_w} wide, cap ring "
+        + ("#%02x%02x%02x" % ring if ring else "not found"),
+    )
+
+    # G26: the block at the bottom -- the prompt, and a 40px button on the basic
+    # surface inside a `#42444a` ring, which is what the reference's own Import
+    # button measures.
+    prompt_ink, _ = core(im, prompt[0], prompt[1] + 1, p0, p1, paper)
+    base_fill, _ = modal(im, imp[0] + 8, imp[1] - 8, i0 + 6, i1 - 6, paper, 60)
+    ring, _ = modal(im, imp[0], imp[0] + 2, i0 + 10, i1 - 10, paper, 20)
+    g.check(
+        prompt_ink is not None
+        and near(prompt_ink, HOME["hint"], 8)
+        and abs((p1 - p0 + 1) - HOME["prompt_ink_rows"]) <= 3
+        and base_fill is not None
+        and near(base_fill, HOME["base_fill"], 4)
+        and ring is not None
+        and near(ring, HOME["base_ring"], 6)
+        and abs((i1 - i0 + 1) - HOME["button_h"]) <= 2,
+        "[import button] 40px of the reference's basic surface inside its ring",
+        (
+            "prompt #%02x%02x%02x, button #%02x%02x%02x (%d rows) ringed %s, in %d "
+            "rows against #%02x%02x%02x / #%02x%02x%02x / #%02x%02x%02x"
+            % (
+                (prompt_ink or (0, 0, 0))
+                + (base_fill or (0, 0, 0))
+                + (i1 - i0 + 1,)
+                + ("#%02x%02x%02x" % ring if ring else "nothing", i1 - i0 + 1)
+                + HOME["hint"] + HOME["base_fill"] + HOME["base_ring"]
+            )
+        ),
+    )
+
+    # G27: the gaps, ink row to ink row. These are the page's rhythm, and the
+    # reason they are stated as ink rather than as boxes: the two clients' text
+    # boxes are different heights (a browser's line box carries half-leading, this
+    # toolkit's does not), so a port that copies `gap-6` literally puts its ink in
+    # the wrong place while looking right in the stylesheet.
+    gaps = (t0 - art_bottom, d0 - t1, b0 - d1, h0 - b1, i0 - p1)
+    wanted = (
+        HOME["art_to_title"], HOME["title_to_desc"], HOME["desc_to_button"],
+        HOME["button_to_hint"], HOME["prompt_to_import"],
+    )
+    print("gaps: " + ", ".join(f"{a} vs {b}" for a, b in zip(gaps, wanted)))
+    g.check(
+        all(abs(a - b) <= 6 for a, b in zip(gaps, wanted)),
+        "[gaps] the hero's own rhythm, ink to ink",
+        f"{gaps} against {wanted}",
+    )
+
+    # G28: every band centred on the content's centre -- the column's middle minus
+    # the 11px scrollbar gutter the reference's content is centred inside.
+    want_x = (pane_left + panel_left - REF["gutter"]) / 2
+    centres = {
+        "illustration": (art[0] + art[1]) / 2,
+        "title": (title[0] + title[1]) / 2,
+        "description": (desc[0] + desc[1]) / 2,
+        "brand": (brand[0] + brand[1]) / 2,
+        "hint": (hint[0] + hint[1]) / 2,
+        "import": (imp[0] + imp[1]) / 2,
+    }
+    off = {k: round(v - want_x, 1) for k, v in centres.items()}
+    print(f"centres against {want_x:.1f}: {off}")
+    g.check(
+        all(abs(v) <= 6 for v in off.values()),
+        "[centring] every band is centred where the reference centres it",
+        f"offsets {off} against 0",
+    )
+
+    # G29: the hero is centred in the space *above* the block at the bottom, which
+    # is 18px above the column's middle in both clients.
+    hero_centre = (art0 + h1) / 2
+    column_middle = (bottom + (top - 20)) / 2
+    print(f"hero centre {hero_centre:.1f}, column middle {column_middle:.1f}")
+    g.check(
+        abs((column_middle - hero_centre) - HOME["hero_above_middle"]) <= 5,
+        "[centring] the hero is centred above the block at the bottom",
+        f"{column_middle - hero_centre:.1f}px above the middle against "
+        f"{HOME['hero_above_middle']}",
+    )
+
+    print()
+    if not g.ran:
+        print(f"no assertion matched --only {only}")
+        return 2
+    if g.failures:
+        print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
+        return 1
+    print(f"page gate passed{scope}")
+    return 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
     only = None
@@ -285,16 +660,19 @@ def main() -> int:
     # that are actually there.
     x0, x1 = pane_left + 6, panel_left - 6
     # The column's own background: the modal colour of it, which is the page
-    # because a page is mostly empty.
-    page, page_n = modal(im, x0, x1, 0, h - 1, (0, 0, 0), 0)
+    # because a page is mostly empty. Named `paper` rather than `page`, which is
+    # the name of the page being judged -- the two words are one meaning apart and
+    # letting them share a variable silently sent every Home capture down the
+    # Screenshots path.
+    paper, paper_n = modal(im, x0, x1, 0, h - 1, (0, 0, 0), 0)
     print(
         f"column x {pane_left}..{panel_left} (scores {pane_score}/{panel_score}), "
-        f"page #{page[0]:02x}{page[1]:02x}{page[2]:02x} over {page_n} px"
+        f"page #{paper[0]:02x}{paper[1]:02x}{paper[2]:02x} over {paper_n} px"
     )
     g.check(
-        near(page, REF["page"], 3),
+        near(paper, REF["page"], 3),
         "[page] the column is the reference's page colour",
-        "#%02x%02x%02x against #%02x%02x%02x" % (page + REF["page"]),
+        "#%02x%02x%02x against #%02x%02x%02x" % (paper + REF["page"]),
     )
 
     # The scan starts below the page's own top edge, found rather than assumed:
@@ -306,12 +684,17 @@ def main() -> int:
         print("\npage gate FAILED: the page's top edge was not found")
         return 1
     top = bar_bottom + 20
-    bottom = page_bottom(im, x0, x1, top, page)
+    bottom = page_bottom(im, x0, x1, top, paper)
     print(
         f"page top y={bar_bottom} (score {bar_score}), scanning from y={top} "
         f"to y={bottom} where the page colour ends"
     )
-    found = bands(rows_with_content(im, x0, x1, top, bottom, page, SHAPE))
+    # Home judges itself, from here: the cluster of a welcome screen is not the
+    # cluster of an empty state, and the numbers are its own (`HOME` above).
+    if page == "home":
+        return home_gate(g, im, x0, x1, paper, pane_left, panel_left, top, bottom, scope, only)
+
+    found = bands(rows_with_content(im, x0, x1, top, bottom, paper, SHAPE))
     print("content bands: " + ", ".join(f"y {b[0]}..{b[1]}" for b in found))
 
     # G11: one cluster, and only one. The reference's Screenshots page draws no
@@ -338,9 +721,9 @@ def main() -> int:
         return 0
     (art_y0, art_y1), (head_y0, head_y1), (sub_y0, sub_y1) = found
 
-    art = columns_in(im, x0, x1, art_y0, art_y1, page, SHAPE)
-    head = columns_in(im, x0, x1, head_y0, head_y1, page, INK)
-    sub = columns_in(im, x0, x1, sub_y0, sub_y1, page, INK)
+    art = columns_in(im, x0, x1, art_y0, art_y1, paper, SHAPE)
+    head = columns_in(im, x0, x1, head_y0, head_y1, paper, INK)
+    sub = columns_in(im, x0, x1, sub_y0, sub_y1, paper, INK)
     art_box = (art[1] - art[0] + 1, art_y1 - art_y0 + 1)
     head_ink = head_y1 - head_y0 + 1
     sub_ink = sub_y1 - sub_y0 + 1
@@ -356,8 +739,8 @@ def main() -> int:
         "[box] the illustration fills the reference's 216x113 box",
         f"{art_box[0]}x{art_box[1]} against {REF['art_box'][0]}x{REF['art_box'][1]}",
     )
-    fill, fill_n = modal(im, art[0], art[1] + 1, art_y0, art_y1, page, 2)
-    outline, outline_n = modal(im, art[0], art[1] + 1, art_y0, art_y1, page, 60)
+    fill, fill_n = modal(im, art[0], art[1] + 1, art_y0, art_y1, paper, 2)
+    outline, outline_n = modal(im, art[0], art[1] + 1, art_y0, art_y1, paper, 60)
     g.check(
         fill is not None and near(fill, REF["art_fill"], 4)
         and outline is not None and near(outline, REF["art_frame"], 4),
@@ -370,7 +753,7 @@ def main() -> int:
     )
 
     # G13/G14: the two lines are at the reference's sizes and colours.
-    head_ink_color, _ = modal(im, head[0], head[1] + 1, head_y0, head_y1, page, INK)
+    head_ink_color, _ = modal(im, head[0], head[1] + 1, head_y0, head_y1, paper, INK)
     g.check(
         head_ink_color is not None
         and near(head_ink_color, REF["heading"], 6)
@@ -379,7 +762,7 @@ def main() -> int:
         "#%02x%02x%02x in %d ink rows against #%02x%02x%02x in %d"
         % (head_ink_color + (head_ink,) + REF["heading"] + (REF["heading_ink_rows"],)),
     )
-    sub_ink_color, _ = modal(im, sub[0], sub[1] + 1, sub_y0, sub_y1, page, INK)
+    sub_ink_color, _ = modal(im, sub[0], sub[1] + 1, sub_y0, sub_y1, paper, INK)
     g.check(
         sub_ink_color is not None
         and near(sub_ink_color, REF["subtext"], 6)

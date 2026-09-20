@@ -75,11 +75,25 @@ fn opening_size() -> (f32, f32) {
 /// the sidebar off-screen, so they could neither be read nor grabbed. Sizing
 /// from the work area fixes that at the source rather than asking the user to
 /// resize a window that is already bigger than their screen.
-fn window_settings() -> window::Settings {
-    let (width, height) = opening_size();
+fn window_settings(start: &app::Start) -> window::Settings {
+    // A `--shot` run states its size outright rather than letting the screen
+    // decide: the numbers it is checked against are client pixels of another
+    // window at an exact size, and a capture that opened at 92% of the work area
+    // would make every one of them wrong by a scale factor instead of failing.
+    let (width, height) = start
+        .size
+        .map(|(width, height)| (width as f32, height as f32))
+        .unwrap_or_else(opening_size);
+    // A capture is born off the desktop -- see `Start::is_capture`. Everything
+    // else centres itself, which is what the window is for.
+    let position = if start.is_capture() {
+        window::Position::Specific(iced::Point::new(native::beyond_every_monitor_x(), 8.0))
+    } else {
+        window::Position::Centered
+    };
     window::Settings {
         size: iced::Size::new(width, height),
-        position: window::Position::Centered,
+        position,
         min_size: Some(iced::Size::new(MINIMUM_SIZE.0, MINIMUM_SIZE.1)),
         decorations: false,
         icon: brand::window_icon(),
@@ -149,10 +163,15 @@ fn main() -> iced::Result {
     // this launcher's own directory, and the game data lives wherever those
     // settings say — which may be an install another launcher created.
     let (home, _data) = PalantirApp::roots();
+    // The command line is read before the window settings are built, because it
+    // decides two of them: a capture names its own size and is born off the
+    // desktop. The flags are still handed to `App::run` as well, which is what
+    // turns `--page` into a message once the runtime is up.
+    let start = app::Start::from_args(std::env::args().skip(1));
     theme::set_os_prefers_light(native::system_prefers_light());
     theme::set_color_theme(prefs::load(&home).theme());
     let mut settings = Settings::default();
-    settings.window = window_settings();
+    settings.window = window_settings(&start);
     settings.antialiasing = false;
     settings.fonts = FONTS
         .iter()
@@ -162,6 +181,9 @@ fn main() -> iced::Result {
     // so the shell's default is the medium face rather than the regular one.
     // Headings then ask for `theme::heading()` and everything else inherits.
     settings.default_font = theme::medium();
+    // `--page`, `--modal`, `--shot` and `--size` describe *this run*; nothing may
+    // remember them once it is over.
+    settings.flags = start;
     App::run(settings)
 }
 
@@ -209,15 +231,30 @@ pub struct App {
 
 impl Application for App {
     type Executor = iced::executor::Default;
-    type Flags = ();
+    type Flags = app::Start;
     type Message = Message;
     type Theme = Theme;
 
-    fn new(_flags: ()) -> (Self, Command<Message>) {
+    fn new(flags: app::Start) -> (Self, Command<Message>) {
         // Ask the window what state it is already in: without this the maximize
         // button cannot know whether to offer Maximize or Restore.
         let probe = window::fetch_maximized(window::Id::MAIN, Message::MaximizedChanged);
-        (App { app: PalantirApp::boot_pending() }, probe)
+        let mut app = PalantirApp::boot_pending();
+        // A capture needs its camera before it needs its page: the timer starts
+        // with the runtime, and `--page` below only decides what the frame it
+        // catches is of.
+        if let Some(path) = flags.shot.clone() {
+            app.set_shot(path, app::SHOT_SETTLE);
+        }
+        // The command line's own messages run before the window exists, which is
+        // safe: `update` is where a page's work begins, and every command it
+        // returns is dispatched once the runtime is up. They run *after* the
+        // constructor's own, so `--modal` wins over the first-run question.
+        let mut commands = vec![probe];
+        for message in flags.messages() {
+            commands.push(app.update(message));
+        }
+        (App { app }, Command::batch(commands))
     }
 
     fn title(&self) -> String {
@@ -273,7 +310,7 @@ mod tests {
 
     #[test]
     fn window_is_undecorated_and_branded() {
-        let settings = window_settings();
+        let settings = window_settings(&app::Start::default());
         assert!(!settings.decorations, "the shell paints its own title bar");
         assert!(settings.icon.is_some(), "the window carries the brand icon");
         assert_eq!(settings.min_size, Some(iced::Size::new(980.0, 640.0)));

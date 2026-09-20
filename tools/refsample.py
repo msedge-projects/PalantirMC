@@ -300,6 +300,13 @@ def ocr(path: str | Path, refresh: bool = False) -> list[dict]:
                         "-File", str(HERE / "refocr.ps1"),
                         "-Image", str(path), "-Tsv", str(tsv)],
                        check=True, capture_output=True, text=True)
+    # A capture with no words in it is a line the reader cannot answer, not a
+    # crash: `refocr.ps1` writes no file when it recognises nothing, so the empty
+    # list is what "read nothing" looks like from here. Reading a capture that has
+    # no text is exactly what a gate does when it is checking a page whose only
+    # label is in the title bar.
+    if not tsv.exists():
+        return []
     lines = []
     for row in tsv.read_text(encoding="utf-8-sig").splitlines():
         parts = row.split("\t")

@@ -36,6 +36,8 @@ import argparse
 import ctypes
 import ctypes.wintypes as w
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -341,6 +343,33 @@ def park_offscreen(hwnd):
     return left, top
 
 
+def resize_client(hwnd, want_w, want_h, tries=6):
+    """Pin the window so its *client* area is exactly `want_w` x `want_h`.
+
+    Solved rather than calculated, for the reason `refwalk.py` records: a frame's
+    borders are not the same on all four edges, so the window size that
+    *produces* a given client is found by measuring the shortfall and asking
+    again. An undecorated window (this launcher's own) converges on the first
+    try; a framed one takes two or three.
+
+    It exists so two clients' captures compare 1:1: the port's numbers are client
+    pixels of the reference at a pinned 1280x720, and a capture of this shell at
+    some other size would make every one of them wrong by a scale factor.
+    """
+    win_w, win_h = int(want_w), int(want_h)
+    cw, ch = 0, 0
+    for _ in range(tries):
+        user32.SetWindowPos(hwnd, None, 0, 0, win_w, win_h,
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE)
+        time.sleep(0.4)
+        _, _, cw, ch = client_origin(hwnd)
+        if (cw, ch) == (int(want_w), int(want_h)):
+            break
+        win_w += int(want_w) - cw
+        win_h += int(want_h) - ch
+    return cw, ch
+
+
 def run_script(hwnd, path, method, click_settle):
     """Drive a capture session from a small script.
 
@@ -398,6 +427,12 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--launch", help="executable to start")
     parser.add_argument("--cwd", help="working directory for the launch")
+    parser.add_argument("--args", default="",
+                        help="arguments for the launched executable, split like a "
+                             "shell would (`--args \"--page screenshots\"`)")
+    parser.add_argument("--client", default=None,
+                        help="pin the window so its client area is exactly WxH "
+                             "before capturing, so two windows compare 1:1")
     parser.add_argument("--portable", action="store_true",
                         help="launch in a throwaway directory holding portable.dat, "
                              "so a sandboxed app cannot touch real data")
@@ -429,14 +464,23 @@ def main():
     sandbox = None
     if args.launch:
         cwd = args.cwd
+        exe = os.path.abspath(args.launch)
         if args.portable:
             sandbox = tempfile.mkdtemp(prefix="winshot-")
             open(os.path.join(sandbox, "portable.dat"), "w").close()
+            # The marker is read *next to the executable*, not in the working
+            # directory (`palantir_core::paths::portable_dir`), so a sandboxed run
+            # needs a copy of the exe inside the sandbox and not merely a cwd.
+            # Measured the wrong way round: a `--portable` capture drew the user's
+            # own instances, because the app had found its real data root and the
+            # sandbox was only where the process happened to start.
+            exe = os.path.join(sandbox, os.path.basename(exe))
+            shutil.copy2(os.path.abspath(args.launch), exe)
             cwd = sandbox
         # Resolve before the cwd moves: `--portable` points the child at a
         # throwaway directory, so a relative executable path stops existing the
         # moment that happens.
-        proc = subprocess.Popen([os.path.abspath(args.launch)], cwd=cwd)
+        proc = subprocess.Popen([exe, *shlex.split(args.args)], cwd=cwd)
         hwnd = None
         # Wait for the *real* window, not the first thing the process puts on
         # screen. A launcher opens small helper windows -- an IME host, a hidden
@@ -482,6 +526,15 @@ def main():
     if args.park:
         left, top = park_offscreen(hwnd)
         print(f"parked at {left},{top}")
+
+    if args.client:
+        want_w, want_h = (int(v) for v in args.client.lower().split("x"))
+        got_w, got_h = resize_client(hwnd, want_w, want_h)
+        if (got_w, got_h) != (want_w, want_h):
+            print(f"WARNING: asked for a {want_w}x{want_h} client, "
+                  f"the window reports {got_w}x{got_h}", file=sys.stderr)
+        else:
+            print(f"client pinned to {got_w}x{got_h}")
 
     time.sleep(args.settle)
 
@@ -531,7 +584,6 @@ def main():
         except subprocess.TimeoutExpired:
             proc.kill()
     if sandbox:
-        import shutil
         shutil.rmtree(sandbox, ignore_errors=True)
     return 0
 

@@ -269,6 +269,94 @@ pub fn shots_art(frame: Color, fill: Color) -> Element<'static, Message> {
         .into()
 }
 
+/// The welcome hero's illustration slot, in logical pixels.
+///
+/// 100 is the reference's own number (`WelcomeScreen.vue`'s social icon is a
+/// `size-25` box, 100px) and it is what the hero's whole vertical rhythm is
+/// measured from: the reference's illustration occupies those 100 pixels corner
+/// to corner, and the 30px below it to the title's ink is what the layout
+/// produces from that box being full. What is *not* copied is the drawing inside
+/// it: the reference shows its own square brand mark, and shipping that would put
+/// another launcher's logo in this one. Ours is our own mark on the measured
+/// plate, drawn to fill the slot so the page's spacing survives the substitution.
+pub const WELCOME_ART: f32 = 100.0;
+
+/// The Home page's welcome illustration: the launcher's mark on a square plate.
+///
+/// A `#1d1f23` plate inside a `#34363c` ring, both of which are the reference's
+/// measured pair for the artwork in this slot -- and this palette's rail and
+/// input surfaces, so the plate follows the color theme like every other surface
+/// rather than being pinned to one look. The mark on it is the hourglass from
+/// `assets/brand`, two triangles meeting at the centre, drawn here as vectors so
+/// it takes the accent's colour instead of a bitmap's.
+pub fn welcome_art(frame: Color, fill: Color, accent: Color) -> Element<'static, Message> {
+    Canvas::new(WelcomeArt { frame, fill, accent })
+        .width(Length::Fixed(WELCOME_ART))
+        .height(Length::Fixed(WELCOME_ART))
+        .into()
+}
+
+/// The canvas program behind [`welcome_art`].
+struct WelcomeArt {
+    frame: Color,
+    fill: Color,
+    accent: Color,
+}
+
+impl<Message> canvas::Program<Message> for WelcomeArt {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let mut surface = Frame::new(renderer, bounds.size());
+        let k = bounds.width.min(bounds.height) / WELCOME_ART;
+        // Half a pixel in, because the outline is drawn on the path rather than
+        // inside it: a plate from 0 to 100 with a 1px stroke would have half of
+        // that stroke outside the canvas and come out a rectangle with two hard
+        // edges and two soft ones.
+        let plate = rounded_rect(Point::new(0.5 * k, 0.5 * k), Size::new(99.0 * k, 99.0 * k), 16.0 * k);
+        surface.fill(&plate, self.fill);
+        surface.stroke(
+            &plate,
+            Stroke {
+                style: Style::Solid(self.frame),
+                width: (1.0 * k).max(1.0),
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                line_dash: LineDash::default(),
+            },
+        );
+        // The mark: two triangles meeting at the plate's middle, 44 wide and 52
+        // tall, which is the totem in `assets/brand/logo512.png` reduced to the
+        // two shapes that read at this size.
+        let (cx, cy) = (50.0 * k, 50.0 * k);
+        let (half, reach) = (22.0 * k, 26.0 * k);
+        for up in [true, false] {
+            let (y_top, y_base) = if up {
+                (cy - reach, cy)
+            } else {
+                (cy + reach, cy)
+            };
+            surface.fill(
+                &Path::new(|b| {
+                    b.move_to(Point::new(cx - half, y_top));
+                    b.line_to(Point::new(cx + half, y_top));
+                    b.line_to(Point::new(cx, y_base));
+                    b.close();
+                }),
+                self.accent,
+            );
+        }
+        vec![surface.into_geometry()]
+    }
+}
+
 /// A rounded rectangle as a path.
 ///
 /// Written out because this iced version's canvas has no rounded-rectangle

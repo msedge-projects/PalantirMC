@@ -46,6 +46,28 @@ pub const fn alpha(color: Color, a: f32) -> Color {
     Color { a, ..color }
 }
 
+/// A color multiplied channel-wise, which is what CSS `filter: brightness()`
+/// does.
+///
+/// Written out because the reference's hover for a `size="lg"` button is
+/// *exactly* that filter — `[&:hover]:brightness-[--hover-brightness]`, and
+/// `--hover-brightness` is 1.25 in dark — and applying the rule to the surface it
+/// applies to (`surface-4`, `#34363c`) gives `#41434b`, which is not a rung of
+/// any ladder. The rule is the token here, so the rule is what is written.
+/// `--hover-brightness` in dark, the factor the reference's buttons, rows and
+/// tabs hover by. Light is `0.9` (it darkens instead), which is a fact about the
+/// reference this palette does not yet carry over.
+const HOVER_BRIGHTNESS: f32 = 1.25;
+
+fn lighten(color: Color, factor: f32) -> Color {
+    Color::from_rgba(
+        (color.r * factor).min(1.0),
+        (color.g * factor).min(1.0),
+        (color.b * factor).min(1.0),
+        color.a,
+    )
+}
+
 // ---- Palette -----------------------------------------------------------
 
 /// Every color the shell paints with, resolved for one look.
@@ -471,6 +493,22 @@ pub const R_MODAL: f32 = 16.0;
 /// var(--radius-xl)`, so the page is a panel whose one rounded corner notches
 /// into the chrome. It is `--radius-xl` (20), one rung above a card.
 pub const R_PANE: f32 = 20.0;
+/// Corner radius of a `size="lg"` button.
+///
+/// The reference gives every button size its own radius rather than one for the
+/// component: `xs` is `rounded-lg` (8), `sm` `rounded-[10px]`, `md` `rounded-xl`
+/// (12, which is [`R_BUTTON`]), `lg` `rounded-[14px]` and `xl` `rounded-2xl`
+/// (16). 14 is what the welcome screen's two buttons draw, and the capture
+/// agrees with the stylesheet: at 1.5px in from the brand button's left edge its
+/// fill starts 7px down from its top, which is a 14px corner to the pixel.
+pub const R_BUTTON_LG: f32 = 14.0;
+/// Corner radius of the welcome screen's key cap.
+///
+/// Six, from `rounded-md` in the `<kbd>`'s own class list — Tailwind's rung,
+/// *not* Omorphia's: this design system's `--radius-md` is 12, and reading the
+/// class names off the stylesheet's scale instead of the utility's is how a key
+/// cap ends up as rounded as a button.
+pub const R_KEYCAP: f32 = 6.0;
 
 /// The family name the five bundled Inter faces register under.
 ///
@@ -776,6 +814,28 @@ pub fn chip(_: &Theme) -> container::Appearance {
     }
 }
 
+/// The reference's `<kbd>`: the key cap in the welcome screen's hint row.
+///
+/// `inline-flex h-5 min-w-5 items-center justify-center rounded-md border
+/// border-solid border-surface-5 bg-button-bg px-1 text-xs font-normal
+/// text-primary` — so 20x20 at its smallest, `#34363c` inside a `#42444a` ring,
+/// at 12px regular. The capture agrees box for box: the reference's cap measures
+/// exactly 20x20 (x 436..455, y 491..510) with that fill and that ring.
+///
+/// Its label is `text-primary`, which in this design system is
+/// `--color-text-default` (`#b0bac5`) — the same token the description above it
+/// uses, and the reason a 12px glyph never reaches it: the cap's own "N" peaks
+/// at `#848c95` in the capture, which is what antialiasing does to a thin
+/// twelve-pixel stem, not a second color.
+pub fn keycap(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(surface_input().into()),
+        border: Border { radius: R_KEYCAP.into(), width: 1.0, color: border_strong() },
+        text_color: Some(text_muted()),
+        ..Default::default()
+    }
+}
+
 /// Neutral variant of [`chip`] (no accent: used for game versions).
 pub fn chip_neutral(_: &Theme) -> container::Appearance {
     container::Appearance {
@@ -898,6 +958,12 @@ pub enum Role {
     /// both states. A chip and a tab looked similar enough to be the same
     /// component that they were one until the capture disagreed.
     Tab { active: bool },
+    /// A `size="lg"` button in the brand color: the welcome screen's "Create an
+    /// instance".
+    BrandLarge,
+    /// A `size="lg"` button on the basic surface: the welcome screen's "Import
+    /// from launcher".
+    BaseLarge,
 }
 
 /// A [`button::StyleSheet`] wrapper so call sites can write
@@ -912,6 +978,14 @@ pub fn primary() -> Btn {
 /// Raised grey button.
 pub fn secondary() -> Btn {
     Btn(Role::Secondary)
+}
+/// A `size="lg"` brand button.
+pub fn brand_large() -> Btn {
+    Btn(Role::BrandLarge)
+}
+/// A `size="lg"` button on the basic surface.
+pub fn base_large() -> Btn {
+    Btn(Role::BaseLarge)
 }
 /// Borderless button.
 pub fn ghost() -> Btn {
@@ -970,6 +1044,57 @@ impl Btn {
                 background: Some(if pressed { accent_dim() } else if hovered { accent_hover() } else { accent() }.into()),
                 text_color: on_accent(),
                 border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                ..Default::default()
+            },
+            // `ButtonFrame.vue`: `type="colored" color="brand" size="lg"` is
+            // `bg-[--button-color] text-[var(--color-accent-contrast)]` on
+            // `h-10 rounded-[14px] px-4 gap-2 text-base font-semibold`, with a
+            // `::before` that paints a 1px ring of `linear-gradient(180deg,
+            // rgba(255,255,255,0.3), rgba(255,255,255,0))` inside its edge.
+            //
+            // Both ends of that ramp are measured on the reference's own button:
+            // its top edge reads `#4ce59e`, which is white at 30% over the fill,
+            // and its left edge at mid-height reads `#26e08a`, which is white at
+            // 15%. iced draws a border in one color, so the ramp is flattened to
+            // the 15% that most of its length is.
+            //
+            // What is deliberately not drawn is the *outer* `0 0 0 1px
+            // color-mix(in srgb, var(--button-color) 30%, transparent)` ring,
+            // because the reference as installed does not draw one: the pixel
+            // beside the button's left edge is the page, not a third of the
+            // brand over it. A stylesheet the app has outgrown is not a spec.
+            Role::BrandLarge => button::Appearance {
+                background: Some(if pressed { accent_dim() } else if hovered { accent_hover() } else { accent() }.into()),
+                text_color: on_accent(),
+                border: Border {
+                    radius: R_BUTTON_LG.into(),
+                    width: 1.0,
+                    color: alpha(text(), 0.15),
+                },
+                ..Default::default()
+            },
+            // The other half of the pair, `type="base" size="lg"`:
+            // `bg-surface-4 text-contrast [&>svg]:text-primary` with an
+            // `inset 0 0 0 1px var(--surface-5)` ring. Measured on the
+            // reference's Import button, all four of its colors are this
+            // palette's: fill `#34363c`, ring `#42444a`, label `#ffffff`, icon
+            // `#b0bac5`. Hover is the base class's shared `brightness(1.25)`,
+            // the same rule the accent's own hover is derived by, and the press
+            // is that same brightness rather than the stylesheet's
+            // `active:scale-[0.97]`: iced's button cannot transform, so a press
+            // that did nothing would be worse than one that lights up.
+            Role::BaseLarge => button::Appearance {
+                background: Some(
+                    if pressed { lighten(surface_input(), HOVER_BRIGHTNESS).into() }
+                    else if hovered { lighten(surface_input(), HOVER_BRIGHTNESS).into() }
+                    else { surface_input().into() },
+                ),
+                text_color: text(),
+                border: Border {
+                    radius: R_BUTTON_LG.into(),
+                    width: 1.0,
+                    color: border_strong(),
+                },
                 ..Default::default()
             },
             Role::Secondary => button::Appearance {
@@ -1562,6 +1687,49 @@ mod tests {
         assert_ne!(tab_on.background, tab_off.background);
         assert_eq!(tab_on.border.width, 0.0);
         assert_eq!(tab_on.text_color, tab_off.text_color);
+    }
+
+    /// The welcome screen's two buttons and its key cap.
+    ///
+    /// The values are the point, not the shapes: a 40px-tall brand button on a
+    /// 14px radius with black ink on it, and its neighbour on `surface-4` inside a
+    /// `surface-5` ring. Each of those was measurable only against a capture
+    /// (`REFERENCE.md`, `.scratch/ref-01-home.png`), and each was different before
+    /// this port -- a 12px radius, and no ring at all -- in a way that a test on
+    /// *structure* cannot see.
+    #[test]
+    fn the_welcome_buttons_and_key_cap_are_the_measured_ones() {
+        let theme = app_theme();
+
+        let brand = button::StyleSheet::active(&brand_large(), &theme);
+        assert_eq!(brand.background, Some(accent().into()));
+        assert_eq!(brand.text_color, on_accent());
+        // Black, from `--color-accent-contrast` in dark -- and the reason the
+        // plus in the button is black too: `[&>svg]:text-inherit`.
+        assert_eq!(on_accent(), rgb(0, 0, 0));
+        assert_eq!(R_BUTTON_LG, 14.0);
+        assert_eq!(brand.border.radius, R_BUTTON_LG.into());
+        // The stylesheet's 1px `::before` ramp, flattened to the 15% the capture
+        // measures over most of the button's edge.
+        assert_eq!(brand.border.color, alpha(rgb(0xFF, 0xFF, 0xFF), 0.15));
+
+        let base = button::StyleSheet::active(&base_large(), &theme);
+        assert_eq!(base.text_color, text());
+        assert_eq!(base.border.radius, R_BUTTON_LG.into());
+        // The reference's own Import button measures `#34363c` inside a `#42444a`
+        // ring, and both are this palette's tokens rather than near-misses.
+        assert_eq!(surface_input(), rgb(0x34, 0x36, 0x3C));
+        assert_eq!(border_strong(), rgb(0x42, 0x44, 0x4A));
+        assert_eq!(base.background, Some(surface_input().into()));
+        assert_eq!(base.border.color, border_strong());
+
+        // The key cap: `rounded-md` is Tailwind's 6, not Omorphia's `--radius-md`
+        // 12, and reading the wrong scale is how it becomes as round as a button.
+        let cap = keycap(&theme);
+        assert_eq!(R_KEYCAP, 6.0);
+        assert_eq!(cap.border.radius, R_KEYCAP.into());
+        assert_eq!(cap.background, Some(surface_input().into()));
+        assert_eq!(cap.border.color, border_strong());
     }
 
     /// The tokens whose value is a *measurement* rather than a transcription.

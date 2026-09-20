@@ -1,7 +1,7 @@
 # Gates: PalantirMC's shell matches the reference client
 
 OWNS: crates/palantir-desktop/src/**, tools/panel_gate.py, tools/page_gate.py,
-NEXT_STEPS.md
+tools/appshot.py, NEXT_STEPS.md
 
 Scope: the shell's chrome, surfaces, shape and type match the Modrinth App as
 measured off its own running window rather than estimated from screenshots, and
@@ -15,13 +15,19 @@ fails it -- which is the only thing that makes a passing run mean anything. G7 i
 the gate that proves that claim rather than assuming it, and G13 is where the
 page gate does the same.
 
-Captures are `PrintWindow` grabs from `tools/winshot.py`, taken off-screen and
-without activating the window. `.scratch/pal-final.png` is the capture under
-test; `.scratch/mr-home.png` and `.scratch/pal-new.png` are the control's two
-inputs and are deliberately *not* committed -- the first is a screenshot of
-another product, and the second is a superseded build. G7 is therefore
-environment-dependent: it is runnable here and stands as a recorded manual
-result elsewhere. The reference numbers G1--G6 assert against are baked into
+A capture of this launcher comes from the launcher: `--shot` makes it ask iced for
+its own frame, write it and close, so it is the frame the shell drew rather than the
+compositor's rendering of an off-screen window -- and it arrives at an exact client
+size instead of whatever the work area allows. `tools/appshot.py` drives that, and
+it is what the page gates are run against. The shell gates (`panel_gate.py`) still
+read the older `PrintWindow` captures, which are `tools/winshot.py` grabs taken
+off-screen and without activating the window.
+
+`.scratch/pal-final.png` is the capture under test for the shell gates;
+`.scratch/mr-home.png` and `.scratch/pal-new.png` are that control's two inputs and
+are deliberately *not* committed -- the first is a screenshot of another product, and
+the second is a superseded build. G7 is therefore environment-dependent: it is
+runnable here and stands as a recorded manual result elsewhere. The reference numbers G1--G6 assert against are baked into
 the checker, so those gates need nothing but the capture under test.
 
 Result: **9 met, 0 unmet, 0 abandoned** for the build at `bbebaaa`, captured into
@@ -35,6 +41,14 @@ control still discriminates with them in place. G8 is met by inspection.
 G11--G19 came after that, with the first page ported element by element, and are
 listed in their own section below: **9 met** for the build (`d23ed32`) that port
 produced, with the capture they were judged from and the command that takes it.
+G20--G29 are the second page -- Home -- and are **10 met, 0 unmet** on this build,
+with the three captures that show the oracle discriminating.
+
+Later runs of the page gates used the launcher's own capture path rather than the
+window tool, which is a change to *how* the evidence is taken rather than to what is
+asserted: the same 12 assertions are judged off the same 1280x720 client either way,
+and the 9 Screenshots numbers recorded below were re-measured off a capture of this
+build's predecessor with that path before the Home port replaced it.
 
 - [x] G1: the panel's gutter carries the brand tint, where the build it replaced
       painted the neutral raised grey (`#27292e`, whose green sits five levels
@@ -243,6 +257,97 @@ argument for running a new gate against both builds before trusting it.
       band the reference's content ignores; the 20px is the bottom spacer a page
       whose content box is 40px taller than its viewport produces, which this port
       reproduces with a top padding of the same size.
+
+### The Home page, ported element by element
+
+G20--G29 came with the second page port, and each is a number measured off the
+reference's own capture of that page (`REFERENCE.md`). The controls are on disk and
+at the same client size, from the same commands:
+
+    reference   .scratch/ref-01-home.png      12/12 pass
+    ours        .scratch/pal-home-new.png     12/12 pass
+    the build this port replaces
+                .scratch/pal-home-oldctrl.png  fails G20: its hero lived in a card,
+                                               so its column has one band where the
+                                               reference's has seven
+
+Ours is taken by the launcher itself -- `python tools/appshot.py --page home --out
+.scratch/pal-home-new.png` -- because `--shot` hands iced's own frame out of the
+process (`REFERENCE.md`, "How to re-measure it"). The replaced build's capture is
+`tools/winshot.py --launch dist/PalantirMC.exe --client 1280x720 --portable
+--settle 12 --park --method print`; that command returned a black image on some
+runs and left the launcher on "Loading your instances…" on others, which is part of
+why `--shot` exists.
+
+- [x] G20: the page column holds seven bands and nothing else -- illustration,
+      title, description, brand button, hint row, prompt, import button
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only clusters
+  EXPECT: page gate passed [clusters]
+  EVIDENCE: 7 bands at y 203..302, 332..351, 375..390, 419..459, 476..495,
+      587..600, 621..661. The reference's own capture gives the same seven, 4px
+      higher because its page column starts there. The build this replaces gives
+      one band, y 124..599: its hero sat inside a welcome card.
+
+- [x] G21: the illustration fills the reference's 100px slot
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only illustration
+  EXPECT: page gate passed [illustration]
+  EVIDENCE: 100x100 on both. The first attempt measured 55x77 -- the brand's tall
+      logo fitted into a square slot leaves 45 of the 100 pixels empty, and every
+      gap below it a dozen pixels longer than the reference's. The slot is drawn
+      now (`glyphs::welcome_art`: the measured plate, the measured two colours,
+      this launcher's own mark on it).
+
+- [x] G22: the title is the reference's 24px semibold white
+- [x] G23: the description is the reference's 16px `#b0bac5`
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only title
+  EXPECT: page gate passed [title]
+  EVIDENCE: 20 ink rows of `#ffffff`, and `#b0bac5` exactly on ours against
+      `#afbac4` on the reference -- its WebView antialiases thin type in colour,
+      so the gate asks what a line's *brightest* ink is rather than what colour is
+      most common in it, which on a dotted backdrop answers a half-lit edge.
+
+- [x] G24: the brand button is 40px of `#00da75` with black ink on it -- the pair
+      `--color-brand` and `--color-accent-contrast` resolve to in dark
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only brand
+  EXPECT: page gate passed [brand]
+  EVIDENCE: 6441 px of `#00da75` with 161 px of `#000000` on the reference, 6534
+      and 258 on ours, both 40 rows tall (ours measures 41 because the button's own
+      border is a row of fill at the edge).
+
+- [x] G25: the hint row is 20px with a 20px key cap inside a `#42444a` ring
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only hint
+  EXPECT: page gate passed [hint]
+  EVIDENCE: 20 rows on both, cap 18px on the reference and 17px on ours (the cap's
+      own corner radius cuts its outer columns), ring `#42444a` on both.
+
+- [x] G26: the block at the bottom is a 40px button of `#34363c` inside a `#42444a`
+      ring, under a 14px `#96a2b0` prompt
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only import
+  EXPECT: page gate passed [import]
+  EVIDENCE: prompt `#95a2af` / `#96a2b0` and button `#34363c`, 40 rows, ringed
+      `#42444a` / `#3d3f45`. This assertion is also what caught the block sitting
+      against the left edge of the page -- a shrink-width child of a column whose
+      other child fills is laid out at the left, 318px from the centre every other
+      band shares.
+
+- [x] G27: the hero's own rhythm, ink to ink -- 30 / 22 / 27 / 17 / 19
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only gaps
+  EXPECT: page gate passed [gaps]
+  EVIDENCE: 30 / 24 / 29 / 17 / 21 on ours against 30 / 22 / 27 / 17 / 19 on the
+      reference. The two 2px gaps are the two lines whose reference line box is
+      taller than its cap; the model the Screenshots port stated (gaps box-to-box,
+      expressed as the ink distance the reference's box produces) now holds on a
+      second and denser page rather than from one measurement.
+
+- [x] G28: every band is centred where the reference centres it -- including the
+      11px scrollbar gutter its content ignores
+- [x] G29: the hero is centred in the space *above* the block at the bottom, 18px
+      above the column's middle
+  CHECK: python tools/page_gate.py .scratch/pal-home-new.png --page home --only centring
+  EXPECT: page gate passed [centring]
+  EVIDENCE: band centres within 1px of 512.5 on ours (offsets -0.5, -1.0, -0.5,
+      -0.5, 0.0, -0.5), and the hero 18.0px above the column's middle against the
+      reference's 18.
 
 - [x] G8: the two windows agree as a picture, judged by looking at them side by
       side rather than by any number -- the acceptance the user actually asked

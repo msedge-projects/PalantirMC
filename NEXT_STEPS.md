@@ -1505,3 +1505,51 @@ takes the last 22px, so the column now ends where the page colour ends. The firs
 attempt at the capture failed for a third reason worth recording: click the rail
 and a tooltip stays under the pointer, and a tooltip is the *shell's* popup painted
 over the page -- the capture for the gate parks the pointer on the page instead.
+
+## Home ported, and a capture path that belongs to the launcher
+
+Home is the second page ported element by element, and the one whose element
+vocabulary the rest reuse: a 100px illustration slot, a 24px semibold white title,
+a 16px `#b0bac5` description, a 40px brand button with black ink on it, a 20px hint
+row with a key cap, and a 40px basic-surface button inside a `#42444a` ring under a
+14px prompt. Every number is in `REFERENCE.md`; `tools/page_gate.py --page home`
+asserts all twelve, and it fails on the build this port replaces by its first
+assertion -- that build's hero lived in a welcome card, so its page column has one
+band where the reference's has seven.
+
+**The port had three faults that only a capture could show, and the capture found
+all three.** The bottom block sat against the page's left edge: a shrink-width child
+of a column whose other child fills is laid out at the left, 318px from the centre
+every other band shares. The illustration measured 55x77 in a 100x100 slot, because
+the brand's tall logo cannot fill a square one -- so the slot is drawn instead
+(`glyphs::welcome_art`: the measured plate, the reference's measured two colours for
+artwork in that slot, and this launcher's own hourglass mark on it), which put the
+gap below it back at the reference's 30px. And the two text bands' boxes came out 2px
+shorter than the reference's, which is the line-box model the Screenshots port had
+stated from a single measurement -- now confirmed on a second, denser page.
+
+**Measuring thin type needed a new question.** The reference paints a dot texture
+over this page (415x478 dots, each up to 20 levels off the page), so a 16px regular
+line's most-common colour at any threshold is a half-lit edge: `#34383d` for a line
+whose token is `#b0bac5`. The gate now compares the *brightest* ink within 12 levels
+of the band's strongest pixel, which answers `#afbac4` -- one level off the token.
+The same texture is why the illustration's fill cannot be thresholded away from the
+backdrop at all: at 21 levels it is *fainter* than the dots, so its box is found by
+asking which rows are mostly ink across its width rather than which rows are bright.
+
+**The launcher now takes its own picture, which is the part worth keeping.** `--shot
+PATH` (with `--size WxH`) makes a run ask iced for its own frame, write it as a PNG
+and close; `--shot` also makes the window *born* past the right edge of every
+monitor, so a capture never appears over anybody's work and never needs the window
+touched from outside. `tools/appshot.py` drives it in a throwaway portable directory.
+This replaced `winshot.py --park --method print` for our own window, which had two
+faults that took a session to pin down: `PrintWindow` on a window parked off the
+desktop returns a black image on some runs and the page on others (it is the
+compositor's rendering of a window nothing is compositing), and the park/resize
+`SetWindowPos` can run before the runtime has finished booting, which blocks the
+thread that would have loaded the instances and leaves the launcher on "Loading your
+instances…" for as long as it is left open. That second one cost most of a session's
+worth of reasoning about a portable-mode bug that was not in the product at all --
+worth recording, because the same freeze will look like a launcher bug to whoever
+sees it next. `--page` is what makes a capture unattended: a page gate cannot click a
+rail entry on a desk with nobody at the keyboard.

@@ -228,6 +228,46 @@ pub fn primary_work_area() -> Option<WorkArea> {
     None
 }
 
+/// An x coordinate past the right edge of every monitor on this desktop.
+///
+/// Where a `--shot` capture's window is born. Not an off-screen *hide*: the
+/// window is created visible at a position no monitor covers, which keeps the
+/// compositor and this process's frame loop doing exactly what they do for a
+/// window in use -- the difference is only that nobody can see it. Hiding it
+/// instead would stop it being drawn, which is the opposite of what a capture
+/// needs.
+///
+/// Asked of the *virtual* desktop rather than the primary monitor, because a
+/// second monitor to the right is still somebody's screen: the earlier version of
+/// this put the window at the edge of the primary one, which on a two-monitor desk
+/// is where the work is.
+#[cfg(windows)]
+pub fn beyond_every_monitor_x() -> f32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    };
+
+    // SAFETY: `GetSystemMetrics` reads two process-wide integers and takes no
+    // pointers.
+    let left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    if width <= 0 {
+        // No monitor answered, which is the machine with no desktop at all: a
+        // large constant still keeps the window away from 0, and a capture that
+        // lands somewhere odd is better than one that covers the screen.
+        return 4000.0;
+    }
+    // Logical pixels, like every other coordinate this shell hands iced -- see
+    // `primary_work_area` for why the same division has to happen here.
+    (left + width) as f32 / system_scale_factor() + 200.0
+}
+
+/// Off Windows there is no virtual desktop to ask about.
+#[cfg(not(windows))]
+pub fn beyond_every_monitor_x() -> f32 {
+    4000.0
+}
+
 /// The launcher's own top-level window handle.
 ///
 /// iced hands out its own `window::Id`, and 0.12 offers no conversion to the

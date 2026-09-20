@@ -226,6 +226,91 @@ const EMPTY_STATE_PADDING: Padding = Padding {
     left: 0.0,
 };
 
+/// The welcome screen's own numbers, every one of them from
+/// `WelcomeScreen.vue` and the capture it was checked against
+/// (`.scratch/ref-01-home.png`, a 1280x720 client).
+///
+/// The reference lays this page out as `flex flex-col min-h-full px-6 pb-6
+/// pt-16`: a grown hero, then a fixed block at the bottom. At 1280x720 that
+/// models the capture exactly -- its page column is y 49..720, so `pt-16` puts
+/// the hero's space at 113, the bottom block (20 + 16 + 40 = 76) ends at
+/// 720 - 24, and a hero centred in the 507px that leaves sits at 222.5. Measured:
+/// the illustration's box is y 223..322, the title's ink 352..371, the
+/// description's 393..408, the brand button 435..474 and the hint row 491..510.
+///
+/// **The gaps are box-to-box, not ink-to-ink.** A text widget's box begins at the
+/// font's ascent while a browser's begins a half-leading higher, so the
+/// reference's `gap-6`/`gap-2`/`gap-4` (24/8/16) are not the numbers that put
+/// *this* launcher's ink where the reference's ink is. Each constant below is the
+/// reference's ink landmark re-expressed in this toolkit's boxes: Inter's ascent
+/// is 0.9688em and its cap 0.7275em, so a 24px line's box top is 5.8px above its
+/// cap and a 16px line's is 3.9 -- which is the whole of the arithmetic, and it
+/// reproduces the reference's 288px stack to within half a pixel.
+const HOME_ART: f32 = 100.0;
+/// The illustration's slot is `size-[6.25rem]`, and the capture's is 100 rows.
+const HOME_STACK_GAP: f32 = 24.5;
+/// Art box's bottom to the title's box top. The reference's `gap-6` is 24; the
+/// half pixel is its artwork sitting half a pixel inside its own box.
+const HOME_TITLE_GAP: f32 = 13.0;
+/// The title's box bottom to the description's box top: `gap-2`'s 8, widened by
+/// the 24px line the title's box does not have (the browser's `leading-8` is 32
+/// against this toolkit's 29.04) and the 3.9px the description's box starts above
+/// its own cap.
+const HOME_ACTION_GAP: f32 = 26.5;
+/// The description's box bottom to the button: `gap-6`'s 24 plus the 2.5 a
+/// 16px line's box is shorter than its `leading-6` line box.
+const HOME_BUTTON_GAP: f32 = 16.0;
+/// `gap-4` between the button and the hint, which needs no translation: both are
+/// boxes of known height (40 and 20) at the ends of the same stack.
+const HOME_ACTION_WIDTH: f32 = 288.0;
+/// `w-72`, the column the button and the hint are centred in.
+const HOME_TITLE_SIZE: f32 = 24.0;
+/// `text-2xl`, and `text-base`, `text-sm` for the two lines under it.
+const HOME_DESC_SIZE: f32 = 16.0;
+const HOME_HINT_SIZE: f32 = 14.0;
+/// `text-xs`: the key cap's own `N`.
+const HOME_KEYCAP_TEXT: f32 = 12.0;
+/// A button's label is `size="lg"`, which is `text-base font-semibold`.
+const HOME_BUTTON_SIZE: f32 = 16.0;
+/// `h-10`, and the icon is `[&>svg]:size-5`.
+const HOME_BUTTON_HEIGHT: f32 = 40.0;
+const HOME_ICON: f32 = 20.0;
+/// `size="lg"`'s `px-4`, and its `gap-2` between the icon and the label.
+const HOME_BUTTON_PAD_H: f32 = 16.0;
+const HOME_BUTTON_ICON_GAP: f32 = 8.0;
+/// `h-5 min-w-5`, the key cap's box, and `gap-1` around it.
+const HOME_KEYCAP: f32 = 20.0;
+const HOME_KEYCAP_GAP: f32 = 4.0;
+/// The hint row's own gap to the block at the bottom: `gap-4`'s 16 plus the 2.5
+/// the 14px prompt's box is shorter than its line box.
+const HOME_BOTTOM_GAP: f32 = 18.5;
+
+/// Padding the welcome screen is laid out inside, net of the pane's own.
+///
+/// The reference's page carries `pt-16 px-6 pb-6` measured from its column; this
+/// launcher's page is already inset by [`PANE_PADDING`], so what is added here is
+/// the difference -- and the 11px on the right that the reference's stable
+/// scrollbar gutter costs it, which is the same 11 the Screenshots page's empty
+/// state is centred inside. Both were measured off the same capture: the hero's
+/// centre is x 516.5 in a column whose middle is 522.
+///
+/// **What this cannot fix.** This shell's chrome is 41px taller than the
+/// reference's at the same window height -- 23 for a status strip the reference
+/// has no equivalent of, 18 for the pane's own inset, which does not exist on a
+/// page laid straight into the column. The hero therefore has 484px of space to
+/// be centred in rather than 507, and the block at the bottom sits 41px higher.
+/// Everything *inside* the hero is the reference's to the pixel; only where the
+/// whole composition sits, and how much room it is centred in, is this shell's.
+const HOME_PAGE_PADDING: Padding = Padding {
+    top: 64.0 - PANE_PADDING,
+    right: 24.0 - PANE_PADDING + 11.0,
+    bottom: 24.0 - PANE_PADDING,
+    left: 24.0 - PANE_PADDING,
+};
+
+/// The page pane's own inset, which every page's padding is added to.
+pub const PANE_PADDING: f32 = 18.0;
+
 /// Where the title bar's maximize control sits, for the window's hit test.
 ///
 /// The button is answered as *non-client* — that is what makes Windows 11
@@ -311,6 +396,16 @@ pub const SHOTS_ID: &str = "palantirmc-screenshots";
 pub const FRAME_ID: &str = "palantirmc-frame";
 /// Subscription id of the indeterminate bar's ticks.
 pub const BAR_ID: &str = "palantirmc-bar";
+/// Subscription id of the `--shot` capture's settle timer.
+pub const SHOT_ID: &str = "palantirmc-shot";
+/// How long a `--shot` run gives the window before taking its picture.
+///
+/// A capture has to outlast the page's own first work, and on this shell that
+/// lands within a frame or two of the window appearing: the instance scan is a
+/// file read and the page draws from the result. Three seconds is well past it
+/// while still short enough that a capture run is over before anyone notices one
+/// happened -- which matters because a capture is meant to be invisible.
+pub const SHOT_SETTLE: Duration = Duration::from_millis(3000);
 
 /// How long one sweep of the indeterminate bar takes.
 ///
@@ -473,6 +568,27 @@ impl Page {
             Page::About,
         ]
     }
+
+    /// The page a command-line token names, if it names one.
+    ///
+    /// The tokens are each page's own name lowercased, plus the reference
+    /// client's name for Browse (`discover`): that is what the page is called
+    /// everywhere the user can read it, so a shortcut asking for it is asking for
+    /// the same page by the name it wears.
+    pub fn from_name(name: &str) -> Option<Page> {
+        match name.to_ascii_lowercase().as_str() {
+            "home" => Some(Page::Home),
+            "browse" | "discover" => Some(Page::Browse),
+            "mods" => Some(Page::Mods),
+            "worlds" => Some(Page::Worlds),
+            "screenshots" | "shots" => Some(Page::Screenshots),
+            "logs" => Some(Page::Logs),
+            "settings" => Some(Page::Settings),
+            "accounts" => Some(Page::Accounts),
+            "about" => Some(Page::About),
+            _ => None,
+        }
+    }
 }
 
 /// Which loader build the dialog should use.
@@ -535,6 +651,137 @@ impl Modal {
     pub fn is_open(&self) -> bool {
         !matches!(self, Modal::None)
     }
+
+    /// The dialog a command-line token names, if it names one.
+    ///
+    /// Deliberately shorter than the enum: the three here are the dialogs a
+    /// caller can ask for without already being in the middle of something. The
+    /// rest carry state (`ConfirmDelete` an id, `Welcome` an install, `Microsoft`
+    /// a device code) that a command line has no way to supply.
+    pub fn from_name(name: &str) -> Option<Modal> {
+        match name.to_ascii_lowercase().as_str() {
+            "create" => Some(Modal::Create),
+            "import" => Some(Modal::Import),
+            "settings" | "prefs" => Some(Modal::Settings),
+            _ => None,
+        }
+    }
+}
+
+/// Where a run should start, when the command line says.
+///
+/// iced already carries flags from [`iced::Settings`] into
+/// `Application::new`, and they were empty until now; this is what fills them.
+/// Two things use it: a person who wants a shortcut that opens the launcher on a
+/// page (`PalantirMC.exe --page screenshots`), and `tools/winshot.py` capturing a
+/// page for `tools/page_gate.py`.
+///
+/// The second is why this is a *page* and not a coordinate. `NEXT_STEPS.md` §14
+/// measured that this shell ignores injected mouse messages, so arriving at a
+/// page without a real click needs a way in that is not a click -- and a real
+/// click for every page gate means the desk's pointer belongs to a test run.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Start {
+    /// The page to open on.
+    pub page: Option<Page>,
+    /// A dialog to open on top of it.
+    pub modal: Option<Modal>,
+    /// Where to write a PNG of this window's own pixels and then close, for the
+    /// page gates. `--shot PATH`.
+    pub shot: Option<PathBuf>,
+    /// The client size a capture needs, `--size 1280x720`, when the numbers being
+    /// checked are client pixels of another window at that exact size.
+    pub size: Option<(u32, u32)>,
+}
+
+impl Start {
+    /// Read `--page NAME`, `--modal NAME`, `--shot PATH` and `--size WxH` out of
+    /// an argument list.
+    ///
+    /// Unknown tokens are ignored rather than fatal. This is a GUI binary, often
+    /// started from a shortcut: refusing to open the window because a token was
+    /// misspelled would be the wrong failure, and a token with no value at all is
+    /// the same case.
+    pub fn from_args<I: IntoIterator<Item = String>>(args: I) -> Start {
+        let mut start = Start::default();
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--page" => start.page = args.next().as_deref().and_then(Page::from_name),
+                "--modal" => start.modal = args.next().as_deref().and_then(Modal::from_name),
+                "--shot" => start.shot = args.next().map(PathBuf::from),
+                "--size" => start.size = args.next().as_deref().and_then(parse_size),
+                _ => {}
+            }
+        }
+        start
+    }
+
+    /// True when the command line asked for nothing.
+    pub fn is_empty(&self) -> bool {
+        self.page.is_none() && self.modal.is_none() && self.shot.is_none()
+    }
+
+    /// Whether this run is a capture, which never appears over anybody's work.
+    ///
+    /// A shot run parks its own window past the desktop's right edge before the
+    /// first frame, from the window settings rather than by moving it afterwards:
+    /// a window that is born off-screen is never composited onto the desktop at
+    /// all, so there is nothing to see even for the instant before a move would
+    /// have landed. That is the whole reason `--shot` exists as a launcher flag
+    /// instead of a screenshot tool reaching into the window from outside -- the
+    /// other way needs `SetWindowPos` on a window in use, and the pixels it
+    /// returns are the desktop compositor's opinion of an off-screen window
+    /// rather than the window's own frame. Which is what the earlier captures
+    /// measured the hard way: `PrintWindow` on a parked window returns black on
+    /// some runs and the page on others.
+    pub fn is_capture(&self) -> bool {
+        self.shot.is_some()
+    }
+
+    /// The messages that put the app where this asks for it, in order.
+    ///
+    /// Messages rather than writes to the fields, on purpose: opening on a page
+    /// is the same thing as *selecting* it, and selecting it is what starts that
+    /// page's work (the screenshot scan, the catalogue fetch). Assigning
+    /// `app.page` would draw the page and skip all of it.
+    pub fn messages(&self) -> Vec<Message> {
+        let mut out = Vec::new();
+        if let Some(page) = self.page {
+            out.push(Message::PageSelected(page));
+        }
+        match self.modal {
+            Some(Modal::Create) => out.push(Message::OpenCreate),
+            Some(Modal::Import) => out.push(Message::OpenImport),
+            Some(Modal::Settings) => out.push(Message::OpenSettings),
+            _ => {}
+        }
+        out
+    }
+}
+
+/// Parse `1280x720` into a size.
+///
+/// `x` rather than a comma because that is how a window size is written
+/// everywhere else in this repository's tools, and a capture that quietly opened
+/// at the wrong size would make every number the gate measures wrong by a scale
+/// factor rather than failing.
+fn parse_size(text: &str) -> Option<(u32, u32)> {
+    let (width, height) = text.split_once(['x', 'X'])?;
+    let width: u32 = width.trim().parse().ok()?;
+    let height: u32 = height.trim().parse().ok()?;
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+/// A capture this run was asked for through `--shot`.
+#[derive(Debug, Clone)]
+pub struct ShotRequest {
+    /// The PNG to write.
+    pub path: PathBuf,
+    /// How long the window gets to paint and settle first: the page's own work
+    /// (an instance scan, a catalogue fetch) arrives over the first frames, and a
+    /// capture taken too early photographs the placeholder rather than the page.
+    pub delay: Duration,
 }
 
 /// The Create dialog's form state.
@@ -1001,6 +1248,11 @@ pub enum Message {
     /// Toggle log autoscroll.
     ConsoleAutoscrollToggled(bool),
 
+    /// The capture this run asked for with `--shot` is due.
+    ShotDue,
+    /// The window's own pixels, handed back by iced.
+    ShotTaken(iced::window::Screenshot),
+
     // ---- launch streaming ----
     /// One streamed batch.
     LaunchLog {
@@ -1239,6 +1491,11 @@ pub struct PalantirApp {
     mods: Vec<ModEntry>,
     worlds: Vec<String>,
     shots: ShotState,
+    /// A capture this run was asked for, or `None` for an ordinary run.
+    shot: Option<ShotRequest>,
+    /// Whether iced has already been asked for those pixels, so a subscription
+    /// that is re-asked on every update cannot produce two captures.
+    shot_taken: bool,
     run_seq: u64,
     install_seq: u64,
     /// The dropped archive whose install worker is running, if one is.
@@ -1332,6 +1589,8 @@ impl PalantirApp {
             selected: None,
             page: Page::default(),
             shots: ShotState::default(),
+            shot: None,
+            shot_taken: false,
             page_scroll: scroll::ScrollAnim::default(),
             console: VecDeque::new(),
             autoscroll: true,
@@ -1395,6 +1654,8 @@ impl PalantirApp {
             selected: None,
             page: Page::default(),
             shots: ShotState::default(),
+            shot: None,
+            shot_taken: false,
             page_scroll: scroll::ScrollAnim::default(),
             console: VecDeque::from([format!("Starting {}…", brand::APP_NAME)]),
             autoscroll: true,
@@ -1589,6 +1850,22 @@ impl PalantirApp {
     fn set_status(&mut self, message: impl Into<String>) {
         self.status = message.into();
         self.status_is_error = false;
+    }
+
+    /// Ask for a PNG of this window once it has settled, then close.
+    ///
+    /// Called by the `Application` shell's constructor out of `--shot`, so the
+    /// request is in place before the first frame. iced delivers the pixels
+    /// through [`Message::ShotTaken`], which writes them and closes the window --
+    /// see `write_shot` for why the file is written by this process rather than
+    /// read out of the window by a tool.
+    pub fn set_shot(&mut self, path: PathBuf, delay: Duration) {
+        self.shot = Some(ShotRequest { path, delay });
+    }
+
+    /// Where this run's capture is going, if it is a capture.
+    pub fn shot_path(&self) -> Option<&std::path::Path> {
+        self.shot.as_ref().map(|shot| shot.path.as_path())
     }
 
     fn set_error(&mut self, message: impl Into<String>) {
@@ -3023,6 +3300,27 @@ impl PalantirApp {
                 Command::none()
             }
             Message::BarRightClick => window::show_system_menu(window::Id::MAIN),
+            // The capture is taken here, at the point the runtime is asked for
+            // the window's frame, rather than by a tool outside the process:
+            // iced draws this window, so it is the only thing that can hand back
+            // exactly what was drawn. `write_shot` then writes it and the window
+            // closes, which is what ends a capture run.
+            Message::ShotDue => {
+                if self.shot.is_some() && !self.shot_taken {
+                    self.shot_taken = true;
+                    return window::screenshot(window::Id::MAIN, Message::ShotTaken);
+                }
+                Command::none()
+            }
+            Message::ShotTaken(shot) => {
+                if let Some(request) = self.shot.clone() {
+                    if let Err(error) = write_shot(&request.path, &shot) {
+                        eprintln!("shot failed: {error}");
+                        self.push_console(vec![format!("shot failed: {error}")]);
+                    }
+                }
+                window::close(window::Id::MAIN)
+            }
             Message::MaximizedChanged(maximized) => {
                 self.maximized = maximized;
                 Command::none()
@@ -3500,6 +3798,14 @@ impl PalantirApp {
     /// imports and the launch stream.
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs: Vec<Subscription<Message>> = Vec::new();
+        if let Some(shot) = self.shot.clone() {
+            if !self.shot_taken {
+                subs.push(one_shot(SHOT_ID, 1, move |mut sender| {
+                    std::thread::sleep(shot.delay);
+                    let _ = sender.try_send(Message::ShotDue);
+                }));
+            }
+        }
         if self.loading {
             let root = self.paths.root.clone();
             subs.push(one_shot(LOAD_ID, 8, move |mut sender| {
@@ -4013,7 +4319,7 @@ impl PalantirApp {
                 .style(theme::pane)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(18),
+                .padding(PANE_PADDING),
         )
         .style(theme::rail)
         .width(Length::Fill)
@@ -4187,55 +4493,170 @@ impl PalantirApp {
     }
 
     /// Welcome hero (no instances yet).
+    /// The welcome screen: the reference's empty Home, element for element.
+    ///
+    /// What changed, and why, is in [`HOME_ART`]'s block and `REFERENCE.md`.
+    /// The short version: this page used to be a card holding a 112px logo, a
+    /// 30px heading, a rule and two chips, and the reference has none of that.
+    /// It has no card at all, its illustration is exactly 100px square, its
+    /// heading is 24px semibold white, its description 16px `#b0bac5`, its two
+    /// buttons are 40px tall on a 14px radius (one brand-filled with black ink,
+    /// one on the basic surface), its hint row is 14px with a 20px key cap, and
+    /// its "Import from launcher" block is pinned to the bottom rather than
+    /// stacked under the hero. All of that is what this draws.
+    ///
+    /// Two strings are deliberately not the reference's: the heading's product
+    /// name, because this is not that product, and nothing else. "Ready to start
+    /// playing?", "Create an instance", "Press N to quick create an instance",
+    /// "Escaping another launcher?" and "Import from launcher" are copied
+    /// character for character, with the button labels' own weight (`font-medium`
+    /// on the base button, `font-semibold` on the brand one) and the key cap's
+    /// 12px regular.
+    ///
+    /// Its dotted backdrop is **not** drawn. `WelcomeScreen.vue` carries a
+    /// `dot-pattern` behind the hero, and the measurement of it is recorded in
+    /// `REFERENCE.md`; iced 0.12 has no way to put a canvas *behind* a widget
+    /// tree -- there is no stacking widget in the toolkit, and the only overlap
+    /// it offers is an overlay, which paints above the controls rather than
+    /// under them. The reference's own capture is what makes that a refusal and
+    /// not a shortcut: its brand button's fill is exactly `#00da75`, i.e. no dot
+    /// is drawn on top of it.
     fn view_hero(&self) -> Element<'_, Message> {
-        let hero = column![
-            container(
-                Image::new(brand::logo_handle())
-                    .width(Length::Fixed(112.0))
-                    .height(Length::Fixed(112.0)),
-            )
-            .style(theme::hero_tile)
-            .padding(14),
-            text(format!("Welcome to {}", brand::APP_NAME)).size(30).font(theme::bold()),
-            text("Ready to start playing?").size(15),
-            container(
-                button(
-                    row![
-                        text("+").size(16),
-                        text("Create an instance").size(14),
-                    ]
-                    .spacing(8)
-                    .align_items(iced::Alignment::Center),
-                )
-                .on_press(Message::OpenCreate)
-                .style(theme::primary())
-                .padding([11, 22]),
-            )
-            .padding([6, 0]),
-            text("Press N to quickly create an instance").size(12),
-            container(horizontal_rule(1u16)).padding([14, 0]).width(Length::Fixed(280.0)),
-            text("Escaping another launcher?").size(13),
-            button(
-                row![
-                    glyph("folder", 14.0, theme::text_muted()),
-                    text("Import from Prism Launcher").size(13),
-                ]
-                .spacing(8)
-                .align_items(iced::Alignment::Center),
-            )
-            .on_press(Message::OpenImport)
-            .style(theme::secondary())
-            .padding([9, 16]),
+        // The reference's slot and the reference's two colours, drawn with this
+        // launcher's own mark -- see `glyphs::welcome_art` for both halves of
+        // that sentence. The canvas rather than the brand PNG because the PNG is
+        // a tall totem: fitted into a square slot it leaves 45 of the 100 pixels
+        // empty and every gap below it a dozen pixels longer than the reference's.
+        // The reference's measured pair for artwork in this slot is `#1d1f23`
+        // inside `#34363c`, which are this palette's rail and hovered surface --
+        // the same two the Screenshots empty state is drawn with.
+        let art = container(glyphs::welcome_art(
+            theme::surface_hover(),
+            theme::bg_rail(),
+            theme::accent(),
+        ))
+        .width(Length::Fixed(HOME_ART))
+        .height(Length::Fixed(HOME_ART))
+        .center_x()
+        .center_y();
+
+        let heading = container(
+            column![
+                text(format!("Welcome to {}", brand::APP_NAME))
+                    .size(HOME_TITLE_SIZE)
+                    .font(theme::semibold())
+                    .style(iced::theme::Text::Color(theme::text())),
+                text("Ready to start playing?")
+                    .size(HOME_DESC_SIZE)
+                    .style(iced::theme::Text::Color(theme::text_muted())),
+            ]
+            .spacing(HOME_TITLE_GAP)
+            .align_items(iced::Alignment::Center),
+        )
+        .padding(Padding { top: HOME_STACK_GAP, ..Padding::ZERO });
+
+        // `type="colored" color="brand" size="lg"`: the icon inherits the
+        // label's colour, which is `--color-accent-contrast` -- black in dark.
+        let create = button(
+            row![
+                glyph("plus", HOME_ICON, theme::on_accent()),
+                text("Create an instance")
+                    .size(HOME_BUTTON_SIZE)
+                    .font(theme::semibold()),
+            ]
+            .spacing(HOME_BUTTON_ICON_GAP)
+            .align_items(iced::Alignment::Center),
+        )
+        .on_press(Message::OpenCreate)
+        .style(theme::brand_large())
+        .padding([
+            (HOME_BUTTON_HEIGHT - HOME_ICON) / 2.0,
+            HOME_BUTTON_PAD_H,
+        ]);
+
+        let hint = row![
+            text("Press")
+                .size(HOME_HINT_SIZE)
+                .style(iced::theme::Text::Color(theme::text_dim())),
+            container(text("N").size(HOME_KEYCAP_TEXT).font(theme::regular()))
+                .style(theme::keycap)
+                .width(Length::Fixed(HOME_KEYCAP))
+                .height(Length::Fixed(HOME_KEYCAP))
+                .center_x()
+                .center_y(),
+            text("to quick create an instance")
+                .size(HOME_HINT_SIZE)
+                .style(iced::theme::Text::Color(theme::text_dim())),
         ]
-        .spacing(10)
+        .spacing(HOME_KEYCAP_GAP)
         .align_items(iced::Alignment::Center);
 
-        container(container(hero).center_x().style(theme::card).padding(28))
+        let actions = container(
+            column![create, hint]
+                .spacing(HOME_BUTTON_GAP)
+                .align_items(iced::Alignment::Center),
+        )
+        .width(Length::Fixed(HOME_ACTION_WIDTH))
+        .padding(Padding { top: HOME_ACTION_GAP, ..Padding::ZERO })
+        .center_x();
+
+        let hero = column![art, heading, actions]
+            .align_items(iced::Alignment::Center)
+            .width(Length::Fill);
+
+        // `type="base" size="lg"`, with `!font-medium` over the size's own
+        // semibold: the icon takes `[&>svg]:text-primary`, a rung below the
+        // label's `text-contrast`.
+        let import = button(
+            row![
+                glyph("download", HOME_ICON, theme::text_muted()),
+                text("Import from launcher")
+                    .size(HOME_BUTTON_SIZE)
+                    .font(theme::medium()),
+            ]
+            .spacing(HOME_BUTTON_ICON_GAP)
+            .align_items(iced::Alignment::Center),
+        )
+        .on_press(Message::OpenImport)
+        .style(theme::base_large())
+        .padding([
+            (HOME_BUTTON_HEIGHT - HOME_ICON) / 2.0,
+            HOME_BUTTON_PAD_H,
+        ]);
+
+        let bottom = container(
+            column![
+                text("Escaping another launcher?")
+                    .size(HOME_HINT_SIZE)
+                    .style(iced::theme::Text::Color(theme::text_dim())),
+                import,
+            ]
+            .spacing(HOME_BOTTOM_GAP)
+            .align_items(iced::Alignment::Center),
+        )
+        // Filled and centred, not left to the column's own cross-axis sizing: a
+        // shrink-width child of a column whose other child fills ends up against
+        // the left edge, which is where this prompt and its button were measured
+        // before -- 318px left of the centre every other band shares.
+        .width(Length::Fill)
+        .center_x();
+
+        container(
+            column![
+                container(hero)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x()
+                    .center_y(),
+                bottom,
+            ]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(HOME_PAGE_PADDING)
+        .into()
     }
 
     /// Browse: Modrinth search + one-click install.
@@ -6387,7 +6808,13 @@ fn shortcut(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> O
             if modifiers.control() && text.eq_ignore_ascii_case("r") {
                 return Some(Message::Refresh);
             }
-            if !modifiers.control() && text.eq_ignore_ascii_case("n") {
+            // The reference's own quick-create binding cancels on every modifier
+            // -- `!metaKey && !ctrlKey && !altKey` in `WelcomeScreen.vue` -- so a
+            // chord that belongs to Windows is never the create dialog. It also
+            // refuses while a text field has the keyboard, which a subscription
+            // cannot see; that gap is recorded in `NEXT_STEPS.md` rather than
+            // guessed at with a focus probe on every keypress.
+            if !modifiers.control() && !modifiers.alt() && !modifiers.logo() && text.eq_ignore_ascii_case("n") {
                 return Some(Message::OpenCreate);
             }
             None
@@ -6396,6 +6823,26 @@ fn shortcut(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> O
         Key::Named(Named::Enter) => None,
         _ => None,
     }
+}
+
+/// Write a `--shot` capture to disk as a PNG.
+///
+/// The pixels come from iced rather than from the desktop, and that is the point
+/// of the whole flag: they are the frame this shell drew, at exactly its own
+/// client size, with no window procedure in between and no dependence on whether
+/// the window happens to be on a monitor. A tool outside the process can only ask
+/// the compositor what it thinks the window looks like, and a window born past
+/// the desktop's edge -- which is how a capture stays out of the way -- is one
+/// the compositor is entitled to answer "black" about.
+fn write_shot(path: &std::path::Path, shot: &iced::window::Screenshot) -> Result<(), String> {
+    let (width, height) = (shot.size.width, shot.size.height);
+    let pixels = shot.bytes.as_ref().clone();
+    let image = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| format!("{} bytes is not {width}x{height} of RGBA", shot.bytes.len()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    image.save(path).map_err(|error| error.to_string())
 }
 
 /// One-shot background job as a subscription.
@@ -8469,12 +8916,112 @@ mod tests {
             shortcut(Key::Character("r".into()), Modifiers::CTRL),
             Some(Message::Refresh)
         ));
+        // ...and no modifier at all, which is the reference's own rule: `Alt+N`
+        // and `Win+N` belong to the window manager, not to this app.
+        for chord in [Modifiers::CTRL, Modifiers::ALT, Modifiers::LOGO] {
+            assert!(
+                shortcut(Key::Character("n".into()), chord).is_none(),
+                "{chord:?}+N must not open the create dialog"
+            );
+        }
         assert!(matches!(
             shortcut(Key::Named(Named::Escape), Modifiers::default()),
             Some(Message::CloseModal)
         ));
         assert!(shortcut(Key::Named(Named::Enter), Modifiers::default()).is_none());
         assert!(shortcut(Key::Character("q".into()), Modifiers::default()).is_none());
+    }
+
+    /// The welcome screen's geometry, pinned to the reference's own numbers.
+    ///
+    /// The *stack* is the thing worth pinning rather than any one constant: the
+    /// reference's hero is 288px tall, and this one is built from nine values that
+    /// only add up to that if the box-to-box translation is right (the arithmetic
+    /// is in [`HOME_STACK_GAP`]'s block). It is also what the page's centring
+    /// depends on -- a hero of the wrong height is centred in the right place and
+    /// still puts its artwork in the wrong one.
+    #[test]
+    fn the_welcome_stack_is_the_reference_height() {
+        // This toolkit's own line boxes, from the bundled Inter's metrics: a 24px
+        // line is 29.04 tall and a 16px one 19.36.
+        let line = |size: f32| size * (0.9688 + 0.2412);
+        let stack = HOME_ART
+            + HOME_STACK_GAP
+            + line(HOME_TITLE_SIZE)
+            + HOME_TITLE_GAP
+            + line(HOME_DESC_SIZE)
+            + HOME_ACTION_GAP
+            + HOME_BUTTON_HEIGHT
+            + HOME_BUTTON_GAP
+            + HOME_KEYCAP;
+        assert!(
+            (stack - 288.0).abs() < 1.0,
+            "the hero adds up to {stack}px; the reference's is 288"
+        );
+
+        // The page's padding is the reference's own, net of the pane's inset, so
+        // what the page adds back is exactly what the reference's column does --
+        // plus the 11px gutter its stable scrollbar costs it on the right, which
+        // is what puts the hero's centre at x 516.5 rather than the column's 522.
+        assert_eq!(HOME_PAGE_PADDING.top + PANE_PADDING, 64.0);
+        assert_eq!(HOME_PAGE_PADDING.bottom + PANE_PADDING, 24.0);
+        assert_eq!(HOME_PAGE_PADDING.left + PANE_PADDING, 24.0);
+        assert_eq!(HOME_PAGE_PADDING.right + PANE_PADDING - 11.0, 24.0);
+
+        // The two boxes the reference's utility classes state outright.
+        assert_eq!(HOME_ACTION_WIDTH, 288.0);
+        assert_eq!(HOME_KEYCAP, 20.0);
+        assert_eq!(HOME_BUTTON_HEIGHT, 40.0);
+        // A 40px button whose content is a 20px icon: the padding is derived, not
+        // picked, so a bigger icon cannot quietly make a 44px button.
+        assert_eq!(HOME_BUTTON_HEIGHT - HOME_ICON, 20.0);
+    }
+
+    #[test]
+    fn a_capture_run_is_one_only_when_it_was_asked_for() {
+        // `--shot` is what makes a run a capture, and a capture is the only run
+        // that opens off the desktop at a size it was told. Every combination is
+        // checked because the three flags arrive together and are read
+        // independently: a size without a shot is an ordinary window that happens
+        // to be sized, and a shot without a size is one the screen sizes.
+        assert!(!Start::default().is_capture());
+        assert!(Start::default().is_empty());
+        let shot = Start::from_args(["--shot", "out.png"].map(str::to_string));
+        assert!(shot.is_capture() && !shot.is_empty());
+        assert_eq!(shot.shot.as_deref(), Some(std::path::Path::new("out.png")));
+        assert_eq!(shot.size, None);
+        assert_eq!(Start::from_args(["--page", "home"].map(str::to_string)).size, None);
+        assert!(Start::from_args(["--size", "1280x720"].map(str::to_string)).size.is_some());
+        assert!(!Start::from_args(["--size", "1280x720"].map(str::to_string)).is_capture());
+        // A size that is not a size is ignored rather than opening a window at
+        // zero pixels -- the same treatment an unknown `--page` gets, for the same
+        // reason: refusing to open a window is the wrong failure for a launcher.
+        for bad in ["1280", "axb", "0x720", "1280x", "-4x720"] {
+            assert_eq!(
+                Start::from_args(["--size", bad].map(str::to_string)).size,
+                None,
+                "{bad:?} parsed as a size"
+            );
+        }
+        assert_eq!(
+            Start::from_args(["--size", "1280X720"].map(str::to_string)).size,
+            Some((1280, 720))
+        );
+    }
+
+    #[test]
+    fn a_capture_is_taken_once_and_written_where_it_was_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = PalantirApp::with_paths(PalantirPaths::at(dir.path()));
+        assert!(app.shot_path().is_none(), "an ordinary run captures nothing");
+        let out = dir.path().join("nested").join("shot.png");
+        app.set_shot(out.clone(), Duration::from_millis(1));
+        assert_eq!(app.shot_path(), Some(out.as_path()));
+        // The timer's message is what asks iced for the pixels, and asking twice
+        // would leave a second `ShotTaken` writing over the first -- so the guard
+        // is the state, not the subscription's lifetime.
+        let _ = app.update(Message::ShotDue);
+        assert!(app.shot_taken);
     }
 
     #[test]

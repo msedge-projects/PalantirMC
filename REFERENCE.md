@@ -14,6 +14,26 @@ client area** so a capture of it and a capture of ours compare 1:1.
 
 ## How to re-measure it
 
+Our own side first, because it is the half that can be repeated on demand:
+
+```bash
+# capture a page of this launcher at the reference's own client size
+python tools/appshot.py --page home --size 1280x720 --out .scratch/pal-home.png
+# and judge it against the numbers below
+python tools/page_gate.py .scratch/pal-home.png --page home
+```
+
+`--shot` makes the launcher ask iced for its own frame and write it, so nothing
+reaches into the window from outside and the capture is the frame this shell drew
+rather than the compositor's rendering of a window parked off the desktop. (The
+earlier way -- `winshot.py --park --method print` -- returned a black image on one
+run and the page on the next, and could leave the launcher frozen on "Loading your
+instances…": a `SetWindowPos` on a window whose runtime has not finished booting
+blocks the thread that would have loaded them. The flag also removed the need to
+click a rail entry to reach a page, which is what a capture on an unattended desk
+cannot do.)
+
+
 ```
 # show the window: launched from a background shell it creates its Tauri window
 # hidden and never shows it, so `show` is not optional
@@ -245,6 +265,87 @@ interval apart, where `shot` would OCR each frame and cost two seconds):
   own promotions -- but it is why a whole-window diff of the reference is useless
   as evidence: every panel-inclusive comparison carries motion that has nothing
   to do with what is being measured.
+
+## The Home page, measured
+
+The densest page, and the one whose element vocabulary every other page reuses.
+Measured off `.scratch/ref-01-home.png` (a 1280x720 client, device scale 1.0) and
+cross-checked against the component that draws it: `WelcomeScreen.vue` in
+[`modrinth/code`](https://github.com/modrinth/code) states the layout in utility
+classes, and where the two agreed the capture is what is recorded here, because ink
+is what a capture can be asked about.
+
+| Thing | Measured |
+| --- | --- |
+| Illustration | y 219..318 on x 463..562 -- **100x100**, the reference's `size-25` slot |
+| Its fill / outline | `#1d1f23` / `#34363c`, the pair the Screenshots art uses too |
+| Title ink | rows 348..367, 24px semibold `#ffffff` |
+| Description ink | rows 389..404, 16px `#b0bac5`; its core ink reads `#afbac4` |
+| Brand button | y 431..470 (**40 tall**), x 410..615, fill `#00da75`, label `#000000` |
+| Hint row | y 487..506 (**20 tall**); key cap 18x18 of `#34363c` inside a `#42444a` ring |
+| Prompt ink | rows 621..634, 14px `#96a2b0` |
+| Import button | y 653..692 (**40 tall**), x 403..622, `#34363c` inside `#42444a` |
+| Gaps, ink to ink | 30 (art -> title), 22, 27, 17, 19 |
+| Hero centre | 18px above the column's middle, with the bottom block pinned 24px off its bottom |
+| Everything centred on | x 512.5 -- the column's middle minus the same 11px scrollbar gutter |
+
+The page draws **seven** things and nothing else: no card, no in-page heading, no
+rule. That is what makes the old build's version fail the gate's first assertion --
+ours drew a welcome card holding the hero, which paints as one band from y 124 to
+y 599.
+
+**Two of the reference's own numbers disagree with its stylesheet, and the
+stylesheet is right about the layout.** The hero is centred in the space *above* the
+bottom block rather than in the page (`WelcomeScreen.vue`: the hero is `flex-1`, the
+bottom block is its sibling), which is exactly the 18px above the middle the capture
+shows; and the two colours the 0.204 build paints -- `#00da75`, and the `#1d563f`
+rail plate -- are not the token ladder in `main`, which says `#1bd96a`. The capture
+is what is copied.
+
+**A thin line on a dotted backdrop is not one colour.** The reference paints a
+dot texture over this page (415x478 dots, each pixel up to 20 levels off the page),
+so a 16px regular line's most-common colour at any threshold is a half-lit edge:
+`#34383d` for a line whose token is `#b0bac5`. The gate asks what the *brightest*
+ink is within 12 levels of the strongest pixel instead, which answers `#afbac4` --
+and that is also why the illustration's own fill cannot be measured at a threshold
+that excludes the dots: at 21 levels it is *fainter* than they are, so the gate
+finds its box by asking which rows are mostly ink across its width rather than which
+rows are bright.
+
+### How close the port landed
+
+Measured off this shell's own capture at the same size (`tools/appshot.py --page
+home`), with `tools/page_gate.py --page home` as the judge — **12 met, 0 unmet**:
+
+| Thing | Reference | This launcher |
+| --- | --- | --- |
+| Illustration box | 100x100 | 100x100 |
+| Title ink | 20 rows, `#ffffff` | 20 rows, `#ffffff` |
+| Description ink | 16 rows, `#b0bac5` | 16 rows, `#b0bac5` |
+| Brand button | 40 rows, `#00da75` + `#000000` | 41 rows, `#00da75` + `#000000` |
+| Hint row | 20 rows, 18px cap | 20 rows, 17px cap |
+| Import button | 40 rows, `#34363c` in `#42444a` | 41 rows, `#34363c` in `#3d3f45` |
+| Gaps | 30 / 22 / 27 / 17 / 19 | 30 / 24 / 29 / 17 / 21 |
+| Band centres | x 512.5 | 512.0 to 513.0 -- every offset under a pixel |
+| Hero above the middle | 18 | 18.0 |
+
+The two gaps that differ by 2px are the two lines the reference sets with a line
+box taller than its cap; ours carry the same descender without the half-leading, so
+their *boxes* are 2px shorter and the ink below them starts 2px higher. That is the
+model the Screenshots port already stated -- gaps are box-to-box here, expressed as
+the ink distance the reference's own box produces -- and it is now confirmed on a
+second, denser page rather than assumed.
+
+### What is not copied
+
+- **The illustration.** The reference draws its own square brand mark in this slot.
+  The measured box, its two colours and its corners are copied; the drawing inside
+  is ours (the launcher's hourglass on the measured plate, `glyphs::welcome_art`).
+- **The right panel's promos, the "Getting started" list and the account card** --
+  all captured, all Modrinth's own content or another launcher's features.
+- **Their copy.** "Welcome to Modrinth", "Modrinth" in the title bar and the
+  reference's own strings stay theirs; ours say this launcher's name in the same
+  positions, at the same sizes, in the same colours.
 
 ## Surfaces measured, with what they contain
 
