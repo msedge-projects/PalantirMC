@@ -264,6 +264,24 @@ the receipt that the values the palette gate checks are in the copy. All three
 skip when the vendored tree is not checked out, which is `UPSTREAM.md`'s promise
 that removing it changes no test.
 
+The copy has a second half. `SCOPED` holds **139 declarations in 21 files**: the
+tokens a component, a page or `classes.scss` sets for one selector, which have no
+mode to resolve in and no cascade to merge into. They are the values that do not
+read like a design system -- `--top-bar-height: 3rem` and `--left-bar-width: 4rem`
+on `.app-contents`, `--ease-out-expo` on `:root`, the `--os-*` scrollbar knobs a
+combobox configures, `--user-avatar-badge-size` computed from the avatar's own
+size, the medal-promotion colours in `global.scss`, and the per-card hover
+factors (`.instance-item`, `[--hover-brightness: 1.1]`) -- and they are exactly
+the numbers a port needs and cannot get from the global cascade. Each row keeps
+the selector that sets it, so the answer to "what is this number for" is a rule
+name rather than a guess.
+
+Those rows are held to the same standard: the tree is walked a second time in
+Rust, the files are parsed by a reader that shares no code with the generator, and
+the two readings are compared keyed by file and line. The control -- one byte of
+one row in `tailwind-utilities.css` -- fails it with the file, the line, the
+selector and both values.
+
 The copy is compiled for tests only. It is what states, in the shell's own
 source, which 163 tokens are still waiting for a page.
 

@@ -16,9 +16,14 @@
 //! meaning anything. When the sheets change shape, both readers have to move,
 //! and a change that moves only one of them fails here. That cost is the
 //! point — it is what makes the generator safe to trust.
+//!
+//! The same standard is applied to the *scoped* half of the copy — the tokens a
+//! component, a page or `classes.scss` sets for one selector, which have no mode
+//! to resolve in. Those are re-derived here too, from the files themselves, and
+//! compared against the generated table.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::reference_tokens::vendored_tree;
 use crate::theme_tokens::{self, Kind, Row};
@@ -187,6 +192,13 @@ fn sheets_vocabulary(tree: &Path) -> Option<Vocabulary> {
     Some(vocabulary)
 }
 
+/// The declaration's value, without its `;`, its comment, or `!important`.
+fn cut(raw: &str) -> String {
+    let text = raw.split(';').next().unwrap_or(raw).trim();
+    let text = text.split("//").next().unwrap_or(text).trim();
+    text.strip_suffix("!important").unwrap_or(text).trim().to_string()
+}
+
 /// Render one row of the sheets' reading: `file|line|kind|value`.
 ///
 /// The value is cleaned *before* the chains are followed — `;`, a `//`
@@ -202,12 +214,6 @@ fn render_row(
     raw: &str,
     merged: &BTreeMap<String, (String, usize, &'static str)>,
 ) -> String {
-    // The declaration's value, without its `;`, its comment, or `!important`.
-    let cut = |raw: &str| -> String {
-        let text = raw.split(';').next().unwrap_or(raw).trim();
-        let text = text.split("//").next().unwrap_or(text).trim();
-        text.strip_suffix("!important").unwrap_or(text).trim().to_string()
-    };
     // `var(--x)` or `var(--x, fallback)`, and nothing else — the shape the
     // generator accepts (`^var\(\s*(--[\w-]+)\s*(?:,.*)?\)$`). The name's own
     // character check is what rejects a composite (`var(--x) var(--y)`), which
@@ -418,6 +424,17 @@ fn encode_gradient(text: &str) -> Option<String> {
     Some(stops.join(","))
 }
 
+/// How both readers write a kind, so the two spellings cannot drift.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Color => "Color",
+        Kind::Length => "Length",
+        Kind::Number => "Number",
+        Kind::Gradient => "Gradient",
+        Kind::Text => "Text",
+    }
+}
+
 /// The generated file's rows, keyed the same way the sheets' are.
 fn generated_rows() -> BTreeMap<(String, String), String> {
     let mut out = BTreeMap::new();
@@ -428,20 +445,184 @@ fn generated_rows() -> BTreeMap<(String, String), String> {
         ("RETRO", theme_tokens::RETRO),
     ] {
         for row in table {
-            let kind = match row.kind {
-                Kind::Color => "Color",
-                Kind::Length => "Length",
-                Kind::Number => "Number",
-                Kind::Gradient => "Gradient",
-                Kind::Text => "Text",
-            };
             // Keyed without the `--`, as the sheets' walk names them — the
             // same normalization both sides can be read by.
             let key = (mode.to_string(), row.token.trim_start_matches("--").to_string());
-            out.insert(key, format!("{}|{}|{}|{}", row.file, row.line, kind, row.value));
+            out.insert(
+                key,
+                format!("{}|{}|{}|{}", row.file, row.line, kind_name(row.kind), row.value),
+            );
         }
     }
     out
+}
+
+// ---- The scoped half of the vocabulary ---------------------------------
+//
+// Everything outside the two global sheets: a token a component, a page or
+// `classes.scss` sets for one selector. Read by two parsers that share no code
+// — this one and `tools/gen_tokens.py` — and compared row by row, keyed by the
+// file and line the declaration is on.
+
+/// A token declaration can only live in a stylesheet or an SFC style block. The
+/// list matches the generator's, including the suffixes this tree does not use
+/// yet: a `.sass` file appearing upstream is then *walked* and fails as a stale
+/// copy, rather than being invisible to both readers and passing.
+const STYLE_SUFFIXES: [&str; 6] = ["scss", "css", "sass", "less", "styl", "vue"];
+
+/// The two sheets the mode tables are built from; the scoped walk skips them.
+const GLOBAL_SHEETS: [&str; 2] = ["assets/styles/variables.scss", "assets/styles/defaults.scss"];
+
+/// Every style file under the tree, sorted, with `node_modules` left alone.
+fn style_files(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                if entry.file_name() != "node_modules" {
+                    stack.push(path);
+                }
+                continue;
+            }
+            let suffix = path.extension().and_then(|extension| extension.to_str()).unwrap_or_default();
+            if STYLE_SUFFIXES.contains(&suffix) {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// A file's path as the copy writes it: relative to the tree, forward slashes,
+/// so the same rows read the same on whichever machine generated them.
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// The declarations one file holds, as `(selector, token, raw value, line)`.
+///
+/// The selector is the innermost *rule* the declaration sits in: at-rules are
+/// transparent, so a token set inside `@media` is reported against the rule the
+/// query wraps, and a selector that runs over several lines is joined with
+/// single spaces. The generator states the same rule, and the comparison below
+/// only means something while both of them do.
+fn scoped_declarations(text: &str) -> Vec<(String, String, String, usize)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<String> = Vec::new();
+    let mut pending: Option<(String, String, String, usize)> = None;
+
+    for (index, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("<style") || line.starts_with("</style") {
+            // A component can carry more than one style block, and the rules of
+            // one are not the rules of the next.
+            stack.clear();
+            pending = None;
+            continue;
+        }
+        if let Some((selector, name, value, at)) = pending.take() {
+            let joined = format!("{value} {line}");
+            if joined.contains(';') {
+                out.push((selector, name, joined, at));
+            } else {
+                pending = Some((selector, name, joined, at));
+            }
+            continue;
+        }
+        if let Some(head) = line.strip_suffix('{') {
+            stack.push(head.split_whitespace().collect::<Vec<_>>().join(" "));
+            continue;
+        }
+        if line.starts_with('}') {
+            stack.pop();
+            continue;
+        }
+        // A declaration starts with `--` *and* holds a colon: a continuation of
+        // the property above it can start with `--` without being one
+        // (`transition: --_top-fade-height 0.05s linear,` in ScrollablePanel.vue),
+        // and reading that as a declaration invents a token. The name keeps its
+        // `--`, which is how the mode tables spell a token too.
+        if line.starts_with("--") {
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            let selector = stack
+                .iter()
+                .rev()
+                .find(|rule| !rule.starts_with('@'))
+                .cloned()
+                .unwrap_or_default();
+            let (name, value) = (name.trim().to_string(), value.trim().to_string());
+            if value.contains(';') {
+                out.push((selector, name, value, index + 1));
+            } else {
+                pending = Some((selector, name, value, index + 1));
+            }
+        }
+    }
+    out
+}
+
+/// The scoped half of the sheets' reading, keyed `path:line` and valued
+/// `selector|token|kind|value` — the rendering the generated table gets too.
+fn sheets_scoped(root: &Path) -> Option<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for path in style_files(root) {
+        let file = relative(root, &path);
+        if GLOBAL_SHEETS.contains(&file.as_str()) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).ok()?;
+        for (selector, token, raw, line) in scoped_declarations(&text) {
+            let (kind, value) = classify(&cut(&raw));
+            out.insert(
+                format!("{file}:{line}"),
+                format!("{selector}|{token}|{kind}|{value}"),
+            );
+        }
+    }
+    Some(out)
+}
+
+/// The generated scoped table, keyed the same way.
+fn generated_scoped() -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for row in theme_tokens::SCOPED {
+        out.insert(
+            format!("{}:{}", row.file, row.line),
+            format!(
+                "{}|{}|{}|{}",
+                row.selector,
+                row.token,
+                kind_name(row.kind),
+                row.value
+            ),
+        );
+    }
+    out
+}
+
+/// A comparison's value, said the way a reader checks it.
+fn describe(detail: &str) -> String {
+    let fields: Vec<&str> = detail.split('|').collect();
+    match fields.as_slice() {
+        [selector, token, kind, value] => {
+            format!("{selector} sets {token} to `{value}` ({kind})")
+        }
+        _ => detail.to_string(),
+    }
 }
 
 #[test]
@@ -593,6 +774,109 @@ fn the_generated_vocabulary_holds_the_tokens_the_palette_paints() {
              the palette has stopped being transcribed from the reference"
         );
     }
+}
+
+#[test]
+fn the_generated_scoped_vocabulary_is_the_sheets() {
+    let Some(theirs) = sheets_scoped(&vendored_tree()) else {
+        return;
+    };
+    let ours = generated_scoped();
+
+    // One problem per row that only one reader found. Keyed by file and line
+    // rather than zipped in order: two declarations on the same token at
+    // different lines are two rows, and an ordered comparison would report the
+    // one that shifted instead of the one that differs.
+    let mut problems: Vec<String> = Vec::new();
+    for (key, detail) in &theirs {
+        match ours.get(key) {
+            Some(mine) if mine == detail => {}
+            Some(mine) => problems.push(format!(
+                "{key}\n    the sheets say {}, and the copy {}",
+                describe(detail),
+                describe(mine)
+            )),
+            None => problems.push(format!(
+                "{key}\n    the sheets say {}, and the copy has no row for it",
+                describe(detail)
+            )),
+        }
+    }
+    for (key, detail) in &ours {
+        if !theirs.contains_key(key) {
+            problems.push(format!(
+                "{key}\n    the copy says {}, and no sheet declares it",
+                describe(detail)
+            ));
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "\nthe scoped half of theme_tokens.rs has drifted from the sheets ({} row(s) of {}):\n\n\
+         {}\n\nfix: run `python tools/gen_tokens.py` and commit what it writes\n",
+        problems.len(),
+        theirs.len(),
+        problems
+            .iter()
+            .take(20)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    );
+}
+
+#[test]
+fn the_generated_scoped_vocabulary_covers_every_declared_token() {
+    // The copy has to be complete as well as correct, and the count comes from a
+    // line scan rather than from either parser: a declaration is a line that
+    // starts with `--` and holds a colon. A walker that skipped a file, or lost
+    // track of a block and swallowed the declarations in it, fails here instead
+    // of shipping a copy with a hole in it.
+    if crate::reference_tokens::Sheets::load().is_none() {
+        return;
+    }
+    let root = vendored_tree();
+
+    let mut per_file: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in theme_tokens::SCOPED {
+        *per_file.entry(row.file).or_default() += 1;
+    }
+    assert!(
+        !per_file.is_empty(),
+        "the scoped table is empty: the generator or this scan broke"
+    );
+
+    let mut problems = Vec::new();
+    for path in style_files(&root) {
+        let file = relative(&root, &path);
+        if GLOBAL_SHEETS.contains(&file.as_str()) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let declared = text
+            .lines()
+            .filter(|line| {
+                let line = line.trim();
+                line.starts_with("--") && line.contains(':')
+            })
+            .count();
+        let copied = per_file.get(file.as_str()).copied().unwrap_or(0);
+        if declared != copied {
+            problems.push(format!(
+                "vendor/modrinth-app/{file}: the sheets declare {declared} token(s) on lines of \
+                 their own, and the copy holds {copied}"
+            ));
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "\n{}\n\nfix: run `python tools/gen_tokens.py` and commit what it writes\n",
+        problems.join("\n")
+    );
 }
 
 /// The row type the two tables above hold, named so the signature reads.

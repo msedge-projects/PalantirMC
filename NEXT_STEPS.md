@@ -1920,6 +1920,45 @@ it `Text`; and the one real disagreement between the languages --
 half-away, so the two chose 178 and 179 on the same token. Both now add 0.5 and
 truncate.
 
+### The half that is not a cascade
+
+The first cut of this copied the two global sheets, which is the design system.
+It was not everything: the reference declares **139 more tokens in 21 files** --
+components, pages, `classes.scss`, `global.scss`, `tailwind-utilities.css` -- and
+those belong to a *selector*, not to a mode. `--top-bar-height: 3rem` and
+`--left-bar-width: 4rem` on `.app-contents` are the shell's own chrome numbers;
+the `--os-*` scrollbar knobs a combobox configures are a control's geometry;
+`--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1)` on `:root` is the motion curve
+§27 said was missing; and the per-card hover factors (`.instance-item`,
+`[--hover-brightness: 1.1]`) are precisely the ones §27 listed as "not carried
+over, each for a stated reason". They are all in `SCOPED` now, each row carrying
+the rule that sets it.
+
+They are checked the way the mode tables are: the tree is walked a second time in
+Rust, each file parsed by a reader that shares no code with the generator, the two
+readings compared keyed by file and line; and a third test counts declarations per
+file by a line scan, so a walker that skipped a file or invented a row fails
+rather than shipping a copy with a hole in it.
+
+Three things that check found, all of them worth the second reader:
+
+1. **An invented token.** `ScrollablePanel.vue` writes
+   `transition: opacity 0.1s ease, --_top-fade-height 0.05s linear,` -- and the
+   continuation line starts with `--`. The walker read it as a declaration and the
+   copy held a token called `--_top-fade-height 0.05s linear,`. The *comparison*
+   could not see it, because both readers agreed with each other; the count could,
+   and the rule is now stated in both: a declaration is a line that starts with
+   `--` **and holds a colon**.
+2. **A spelling.** The generator wrote the token with its `--` and the Rust reader
+   stripped it, so every one of the 139 rows differed by two characters -- which
+   reported as *all* rows wrong, and is what a spelling difference looks like from
+   the inside.
+3. **Two files that had been invisible**: `classes.scss` (42 declarations, the
+   per-component values behind the buttons) and `Avatar.vue`, `ScrollablePanel.vue`,
+   `NotificationToast.vue`, `ProjectCard.vue` -- every one of them declaring
+   underscore-prefixed names that the first scan's pattern could not match. That
+   scan was mine and it was wrong; the walker was right.
+
 ### The number the coverage report was understating
 
 The older gate's `-- --nocapture` report said **148 tokens, 26 held, 122 not
@@ -1959,3 +1998,21 @@ The other half of the directive is where the work is *checked*: a full
 targeted test locally, then push and `gh run watch` the run that does all of it.
 `AGENTS.md` §3 now says so instead of implying that a local workspace run is the
 gate.
+
+### What is still not copied, and why each one is a decision
+
+With both halves in, every `--token` the reference declares -- 756 mode rows and
+139 scoped rows -- is held by the shell at the value the reference gives it. What
+is deliberately *not* copied, unchanged from §27 and worth keeping in one place:
+
+* **The wordmark and the brand art** (the logo's PNGs, the cube in the splash):
+  Modrinth's trademarks, not GPL code, and the shell draws its own mark.
+* **The reference's own copy**: strings and translations are content, not design.
+* **The Tauri shell**: window creation, the tray, updater and OS integration are
+  the other framework's shape; this launcher is iced.
+* **The Servers tab**: the page is in the tree and cannot return results here.
+* **What a structural change would cost**: per-card hover (`brightness-110`) needs
+  an iced hover state; `duration-150` transitions need the `anim.rs` pattern on
+  hover, i.e. a message per pointer move over every control, which §8 measured and
+  rejected. Those are recorded in §27 and are quoted above rather than silently
+  skipped.

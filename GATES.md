@@ -641,7 +641,16 @@ writes `crates/palantir-desktop/src/theme_tokens.rs`.
       `@extend` lines (`html` extends `.light-properties`; `.oled-mode` and
       `.retro-mode` extend `.dark-mode`) rather than assumed, `var()` chains
       followed to the end, `rem` resolved at the reference's 16px root, and every
-      row carrying the **file and line** it is declared on.
+      row carrying the **file and line** it is declared on. The copy has a second
+      half: `SCOPED`, **139 declarations in 21 files** -- the tokens a component,
+      a page or `classes.scss` sets for one selector, which have no mode to
+      resolve in and no cascade to merge into: `--top-bar-height` and
+      `--left-bar-width` on `.app-contents`, the `--brand-gradient-*` wiring on
+      `.app-sidebar`, the `--os-*` scrollbar knobs a combobox configures,
+      `--ease-out-expo` on `:root`, the medal-promotion colours in `global.scss`,
+      and the per-card hover factors (`.instance-item`, `[--hover-brightness:
+      1.1]`) that §27 recorded as not carried over. Those are held now, each with
+      the selector that sets it.
       What makes it a copy rather than a transcription is that the sheets are read
       a *second* time, in Rust, by parsers that share no code with the generator:
       `the_generated_vocabulary_is_the_sheets` re-derives the cascade and compares
@@ -672,10 +681,49 @@ writes `crates/palantir-desktop/src/theme_tokens.rs`.
       the one rule the two can state identically.
       Regenerating is `python tools/gen_tokens.py`; nothing in the file is edited
       by hand, and the gate's failure message is the instruction to re-run it.
-      Result: **3 met, 0 unmet** on commits `3b39f76` and `78b69ab`, whose CI run
+
+- [x] G52: the scoped half of the copy is the sheets too
+  CHECK: cargo test -p palantir-desktop --locked the_generated_scoped_vocabulary_is_the_sheets
+  EXPECT: test result: ok
+  EVIDENCE: the same standard as G51, applied to the 21 files outside the two
+      global sheets. The tree is walked here, each file is parsed by a reader that
+      shares no code with the generator -- innermost rule tracked, at-rules
+      transparent, multi-line values joined -- and the two readings are compared
+      keyed by `file:line`, naming the selector, the token and both values when
+      they disagree. **The control:** one byte of one row
+      (`cubic-bezier(0.16, 1, 0.3, 1)` -> `...2)`) fails it with
+      `ui/src/styles/tailwind-utilities.css:2`, the selector and both values.
+      **What it found was two bugs in the readers, which is what a second reader
+      is for.** The token was spelled two ways: the generator wrote `--ease-out-expo`
+      and the Rust reader stripped the dashes, so every row of the table differed
+      by two characters -- reported as all 139 rows wrong rather than as one, which
+      is how a spelling difference looks. And the mode-table convention had been
+      copied without thinking: a line that starts with `--` *and holds no colon*
+      is a continuation of the property above it, not a declaration
+      (`transition: --_top-fade-height 0.05s linear,` in `ScrollablePanel.vue`),
+      and reading it as one invented a token called
+      `--_top-fade-height 0.05s linear,` that the copy held as if the reference had
+      declared it. The comparison could not see that one -- both readers agreed on
+      the invented row -- and G53's count could.
+
+- [x] G53: the scoped copy is complete, counted by something neither parser can fool
+  CHECK: cargo test -p palantir-desktop --locked the_generated_scoped_vocabulary_covers_every_declared_token
+  EXPECT: test result: ok
+  EVIDENCE: a declaration is a line that starts with `--` and holds a colon, which
+      is a rule a line scan can apply without any of the parsers' state: every
+      style file's declaration count is read that way and compared with the number
+      of rows the copy holds for that file. A walker that skipped a file, lost
+      track of a block, or invented a row fails here -- and this is the test that
+      caught the invented `--_top-fade-height` row above, in a file where both
+      parsers agreed with each other. It reports
+      `ScrollablePanel.vue: the sheets declare 3 token(s) on lines of their own, and the copy holds 4`.
+
+      Result: **5 met, 0 unmet** on commit `3b39f76` and the scoped work after it,
+      whose CI runs are
       [35623738312](https://github.com/MSedgeMC/PalantirMC/actions/runs/35623738312)
-      is green in all five jobs, `Test workspace` included. Nothing here draws, so
-      no page gate was re-run: this module reads files and compares strings, and
+      and [35624755229](https://github.com/MSedgeMC/PalantirMC/actions/runs/35624755229),
+      both green in all five jobs, `Test workspace` included. Nothing here draws,
+      so no page gate was re-run: this module reads files and compares strings, and
       the exe the run built is unchanged in behaviour from the one before it.
 
 ## What these gates cannot say

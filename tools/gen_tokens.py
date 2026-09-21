@@ -58,6 +58,17 @@ REM = 16.0
 # never taken.
 BARE_VAR = re.compile(r"^var\(\s*(--[\w-]+)\s*(?:,.*)?\)$")
 
+# The two sheets the mode tables are built from. Everything else in the tree
+# that declares a token goes in `SCOPED` instead: those declarations belong to a
+# selector, not to a mode.
+GLOBAL_SHEETS = {VARIABLES.resolve(), DEFAULTS.resolve()}
+
+# A token declaration can only live in a stylesheet or an SFC style block. The
+# list is wider than the tree currently uses (there is no `.sass` or `.less`
+# here) so that a sheet upstream adds one of those in is walked and fails as a
+# stale copy, rather than being invisible and passing.
+STYLE_SUFFIXES = (".scss", ".css", ".sass", ".less", ".styl", ".vue")
+
 
 def upstream_commit() -> str:
     """The commit UPSTREAM.md pins, for the generated file's header."""
@@ -330,6 +341,83 @@ def rust_string(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def parse_scoped(text: str) -> list[tuple[str, str, str, int]]:
+    """(selector, token, raw value, line) for every declaration in a file.
+
+    Not `parse_blocks`, which is built around the two global sheets: there a
+    declaration sits directly under a top-level block. These files are SFC style
+    blocks and nested rules, so what is reported is the *innermost rule* a
+    declaration sits in -- at-rules are transparent, which is what makes
+    `@media (prefers-reduced-motion) { .a { --x: 1 } }` report `.a` rather than
+    the query, and a selector that runs over several lines is joined with single
+    spaces so both readers derive the same string.
+    """
+    out: list[tuple[str, str, str, int]] = []
+    stack: list[str] = []
+    pending: tuple[str, str, str, int] | None = None
+
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("<style") or line.startswith("</style"):
+            # A component can carry more than one style block, and the rules of
+            # one are not the rules of the next.
+            stack.clear()
+            pending = None
+            continue
+        if pending is not None:
+            selector, name, value, at = pending
+            joined = f"{value} {line}"
+            if ";" in joined:
+                out.append((selector, name, joined, at))
+                pending = None
+            else:
+                pending = (selector, name, joined, at)
+            continue
+        if line.endswith("{"):
+            stack.append(" ".join(line[:-1].split()))
+            continue
+        if line.startswith("}"):
+            if stack:
+                stack.pop()
+            continue
+        # A declaration starts with `--` *and* holds a colon. A continuation of
+        # a property above it can start with `--` without being one --
+        # ScrollablePanel.vue transitions `--_top-fade-height 0.05s linear,` on a
+        # line of its own -- and reading that as a declaration invents a token,
+        # which the copy would then hold as if the reference had declared it.
+        if line.startswith("--") and ":" in line:
+            name, _, value = line.partition(":")
+            selector = next((part for part in reversed(stack) if not part.startswith("@")), "")
+            name, value = name.strip(), value.strip()
+            if ";" in value:
+                out.append((selector, name, value, lineno))
+            else:
+                pending = (selector, name, value, lineno)
+    return out
+
+
+def scoped_rows() -> list[tuple[str, int, str, str, str, str]]:
+    """(file, line, selector, token, kind, value) for every scoped declaration.
+
+    The file is relative to the vendored tree's root with forward slashes, so
+    the copy reads the same whichever machine generated it -- the Rust reader
+    normalizes its own paths to match.
+    """
+    rows: list[tuple[str, int, str, str, str, str]] = []
+    for path in sorted(TREE.rglob("*")):
+        if not path.is_file() or path.suffix not in STYLE_SUFFIXES:
+            continue
+        if path.resolve() in GLOBAL_SHEETS or "node_modules" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for selector, name, raw, line in parse_scoped(text):
+            kind, encoded = classify(cut_value(raw))
+            rows.append((path.relative_to(TREE).as_posix(), line, selector, name, kind, encoded))
+    return rows
+
+
 def load_cascade() -> list[tuple[str, dict[str, tuple[str, str, int]]]]:
     """Every mode, resolved. The order of the modes is the order of the tables."""
     variable_blocks = {block.selector: block for block in parse_blocks(VARIABLES.read_text(encoding="utf-8"))}
@@ -392,6 +480,15 @@ HEADER = """//! The reference's full token vocabulary, generated -- not written 
 //! never edit this file by hand -- change the sheet or the generator, run the
 //! generator, commit what it writes.
 //!
+//! It holds two kinds of thing. The **mode tables** -- `LIGHT`, `DARK`, `OLED`,
+//! `RETRO` -- are the global cascade: {counts}. `SCOPED` is the rest of the
+//! vocabulary, {scoped}: the tokens a single stylesheet, component or page sets
+//! for one selector (`--hover-brightness: 1` on a card, `--ease-out-expo` on
+//! `:root`, the `--os-*` scrollbar knobs a combobox configures). Those have no
+//! mode to resolve in and no cascade to merge into, so they are kept beside the
+//! selector that sets them -- and they are in the copy for the same reason the
+//! rest is: the reference states them, and a value in a comment cannot fail.
+//!
 //! Compiled into the test build only (`#[cfg(test)]` in `main.rs`): the
 //! palette paints from `theme.rs`, and this copy is what the vocabulary gate
 //! checks the sheets against. When a page starts consuming a token at
@@ -431,12 +528,38 @@ pub struct Row {{
     pub kind: Kind,
     pub value: &'static str,
 }}
+
+/// One token a single sheet, component or page declares for one selector.
+///
+/// Scoped rather than global: it applies to that rule, not to a mode. The
+/// selector is the innermost *rule* the declaration sits in -- at-rules are
+/// transparent, so a token set inside `@media` is reported against the rule the
+/// query wraps.
+#[derive(Debug, Clone, Copy)]
+pub struct Scoped {{
+    pub file: &'static str,
+    pub line: u32,
+    pub selector: &'static str,
+    pub token: &'static str,
+    pub kind: Kind,
+    pub value: &'static str,
+}}
 """
 
 
-def emit(modes: list[tuple[str, dict[str, tuple[str, str, int, str]]]]) -> str:
+def emit(
+    modes: list[tuple[str, dict[str, tuple[str, str, int, str]]]],
+    scoped: list[tuple[str, int, str, str, str, str]],
+) -> str:
     counts = ", ".join(f"{len(table)} {label.lower()}" for label, table in modes)
-    out = [HEADER.format(commit=upstream_commit(), counts=counts)]
+    files = len({row[0] for row in scoped})
+    out = [
+        HEADER.format(
+            commit=upstream_commit(),
+            counts=counts,
+            scoped=f"{len(scoped)} declarations in {files} files, outside those two sheets",
+        )
+    ]
     for label, table in modes:
         out.append(f"pub const {label}: &[Row] = &[")
         for name, (kind, value, line, file) in table.items():
@@ -446,6 +569,14 @@ def emit(modes: list[tuple[str, dict[str, tuple[str, str, int, str]]]]) -> str:
             )
         out.append("];")
         out.append("")
+    out.append("pub const SCOPED: &[Scoped] = &[")
+    for file, line, selector, token, kind, value in scoped:
+        out.append(
+            f"    Scoped {{ file: {rust_string(file)}, line: {line}, "
+            f"selector: {rust_string(selector)}, token: {rust_string(token)}, "
+            f"kind: Kind::{kind}, value: {rust_string(value)} }},"
+        )
+    out.append("];")
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -454,12 +585,18 @@ def main() -> None:
         if not path.exists():
             raise SystemExit(f"{path} is missing: the vendored reference tree is not checked out")
     modes = load_cascade()
+    scoped = scoped_rows()
     # A table that came out empty or tiny means the parser stopped matching the
     # sheets' shape, which must fail here rather than ship as a short copy.
     for label, table in modes:
         if len(table) < 150:
             raise SystemExit(f"{label} resolved to {len(table)} tokens, far below what these sheets declare")
-    written = emit(modes)
+    if len(scoped) < 60:
+        raise SystemExit(
+            f"the scoped walk found {len(scoped)} declarations, and these files declare more: "
+            "a parser that stopped matching the shape would ship a short copy silently"
+        )
+    written = emit(modes, scoped)
     OUT.write_text(written, encoding="utf-8", newline="\n")
     for label, table in modes:
         colours = sum(1 for _, (kind, _, _, _) in table.items() if kind == "Color")
@@ -471,6 +608,10 @@ def main() -> None:
             f"{label}: {len(table)} tokens -- {colours} colours, {lengths} lengths, "
             f"{numbers} numbers, {gradients} gradients, {texts} text"
         )
+    print(
+        f"scoped: {len(scoped)} declarations in {len({row[0] for row in scoped})} file(s), "
+        "outside the two global sheets"
+    )
     print(f"wrote {OUT.relative_to(REPO)} ({len(written.splitlines())} lines)")
 
 
