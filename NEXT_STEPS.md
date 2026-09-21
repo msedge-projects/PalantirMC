@@ -1651,3 +1651,95 @@ is a change of *feature* rather than of drawing.
 Next: the instance page's own tab strip (Mods / Worlds / Files / Screenshots) and
 the create-instance chooser's three cards, both of which need an instance to exist
 in the reference's data root before they can be walked and captured.
+
+## 27. The interaction, app-wide, because it is the one rule every control shares
+
+The port had been page by page, and the four things a copy can differ in --
+pixels, type, style and motion -- were being discovered one surface at a time.
+This pass took the one of the four that *every* control shares and read it out of
+the reference's own components instead of measuring it off a page: what a hover
+does, what a press does, and what a disabled control is.
+
+**The light theme hovered the wrong way, and that is the whole reason it was
+worth doing.** `--hover-brightness` is `1.25` in `.dark-mode` and **`0.9` in
+`.light-properties`**: dark mode *lights a control up* on hover and light mode
+*darkens it*. The shell had a single `const HOVER_BRIGHTNESS: f32 = 1.25` with a
+comment admitting the other value existed ("a fact about the reference this
+palette does not yet carry over"), so on the light theme every button, tab and row
+went brighter under the pointer where the reference's goes darker -- and the three
+themes that share dark's factor hid the bug from every capture the gates take,
+because a capture is of a control nobody is pointing at.
+
+### What replaced it
+
+Hover and press are now **one filter over a control's whole appearance**, which
+is what a CSS filter on an element is:
+
+* `theme::hover_brightness()` reads the factor from the theme in force -- 1.25 for
+dark, OLED and retro, 0.9 for light -- so no role has to know which theme it is
+drawn in;
+* `theme::filtered()` multiplies the fill, the label and the ring together. The
+old arithmetic moved the fill only, which is invisible on an `outlined` button:
+its hover *is* the label;
+* `theme::PRESS_BRIGHTNESS` (0.8, from `classes.scss`'s `.button-base`) replaces
+the per-role pressed rungs. The live component's press is `active:scale-[0.97]`
+and iced cannot paint a widget smaller than the box it was laid out in, so the
+press is a brightness -- the same number the dark palette had already derived by
+hand, which is why nothing in dark moves;
+* `theme::DISABLED_OPACITY` (0.5) replaces three different fades (0.35 on the
+fill, 0.4 on the label) and the invented surface behind a disabled ghost button.
+`disabled:opacity-50` is one opacity on the element, and a quiet button with no
+fill does not grow one by being disabled.
+
+Three palette rungs died with it: `accent_hover`, `accent_dim` and
+`danger_hover` were the rule spelled out per theme, which is exactly how light's
+came out pointing the wrong way. A rung cannot follow the theme that produced it;
+a filter over the theme's own colour can.
+
+### What holds it
+
+| Gate | What it asserts |
+|---|---|
+| `hover_goes_the_way_the_theme_says` | dark's hover is brighter than its base, light's is darker, and the factors are 1.25 / 0.9 |
+| `hover_moves_the_label_and_the_ring_too` | an outlined control (a fill-less one) still hovers, and a filled one moves all three of its colours by the factor |
+| `disabled_buttons_are_dimmed` | fill, label and ring all at 0.5, and a ghost keeps its absent fill |
+| `the_reference_still_states_the_factor_this_copy_reads` | reads `vendor/modrinth-app` and asserts the numbers are still in it -- `--hover-brightness: 1.25`/`0.9`, `active:scale-[0.97]`, `disabled:opacity-50`, `duration-150`. It **returns early** rather than failing if the vendored tree is absent, because `UPSTREAM.md` promises that removing it changes no test |
+
+The last one is the interesting one, and it is the shape the rest of the copy
+wants: "this is the reference's number" stops being a claim in a comment when the
+comment's number is checked against the file it came from, and the copy is
+verbatim because `vendor/modrinth-app` is a pinned, hash-checked blob tree rather
+than a paraphrase. It skips on a missing tree by design, so the day the reference
+moves the test tells us which line to re-read rather than silently passing.
+
+### What this pass did not do, and how "everything" stands
+
+What is **not** carried over, each for a stated reason rather than an oversight:
+
+1. **Transitions.** `ButtonFrame.vue` is `duration-150 ease-out` on six
+properties; iced has no transition, so a hover lands in one frame. Drawing it
+would mean the `anim.rs` deadline pattern (which exists, for switches and the
+scroll glide) attached to *hover* state, i.e. a message per pointer move over
+every control -- the per-move cost measured in §8, and the reason that fix was
+there in the first place.
+2. **The press's `scale-[0.97]`.** A brightness stands in for it.
+3. **Per-component hover factors.** Omorphia's buttons share one factor, but its
+cards do not: an instance card is `brightness-110`, a world card
+`[--hover-brightness:1.25]`, an `InstanceItem` `1.1`. Those are cards, and iced
+containers have no hover state -- each one would need a `MouseArea` and a message,
+which is a change of shape rather than of value.
+4. **The type scale and the surfaces that are still our own.** Nothing in this
+pass moved a font size or a colour that a gate already measures.
+
+The inventory the four dimensions have to cover, so this is not mistaken for the
+whole job: **pixels** -- the shell, Home, Discover, the loading page and
+Screenshots are ported and gated, the instance page and its tab strip, the
+create-instance chooser's three cards, the library grid, the mods/worlds/files
+screens, the project pages and the eleven Settings panes are not; **type** -- the
+reference's ladder is 10/12/14/16/18/20/24/32/48 with heading and title at weight
+800 and body at 500, and every size this shell draws was measured off the
+reference rather than taken from the ladder, which is right where they agree and
+unexplained where they do not (11, 13, 15 and 28 are all drawn here and none is a
+rung); **style** -- this pass, plus the four panel gaps in §12; **motion** -- the
+switch slide is in, the scroll glide is in, the splash fade is in, and the
+accordion in §12.4, the page transitions, the modal in/out and the toast are not.

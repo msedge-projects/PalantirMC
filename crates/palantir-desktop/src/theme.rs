@@ -46,26 +46,84 @@ pub const fn alpha(color: Color, a: f32) -> Color {
     Color { a, ..color }
 }
 
+/// The factor hovering multiplies a control by, per theme.
+///
+/// `--hover-brightness`, which `ButtonFrame.vue`'s base classes apply as
+/// `[&:not(:disabled):hover]:brightness-[--hover-brightness]` on every button in
+/// the reference. It is **two values, not one**: `1.25` in `.dark-mode` and
+/// **`0.9` in `.light-properties`** (`assets/styles/variables.scss`), so light
+/// mode *darkens* a control on hover where dark mode lights it up. The factor was
+/// a single `1.25` here -- "light is 0.9, which is a fact about the reference this
+/// palette does not yet carry over" -- and a light theme that brightened on hover
+/// was the visible cost of that: the same gesture went the wrong way.
+///
+/// Read from the theme rather than stored per role, because it is one rule the
+/// reference states once, like [`PRESS_BRIGHTNESS`].
+pub fn hover_brightness() -> f32 {
+    match color_theme().resolve(os_prefers_light()) {
+        ColorTheme::Light => 0.9,
+        _ => 1.25,
+    }
+}
+
+/// The factor a press multiplies a control by.
+///
+/// A press is *not* a brightness in the live rule: `ButtonFrame.vue` carries
+/// `enabled:active:scale-[0.97]`, and a scale has no equivalent here -- iced lays
+/// a widget out and then paints the layout it was handed, so a control cannot
+/// draw itself 3% smaller without shrinking the space it occupies. The older
+/// `classes.scss` states the same intent as a filter (`&:active:not(&:disabled,
+/// ...) { filter: brightness(0.8) }`), which is a press that still reads, so that
+/// is the value, and it is the colour stand-in for the 0.97 the toolkit cannot
+/// transform. The dark palette derived the same number by hand before this -- its
+/// `accent_dim` was exactly `accent x 0.8` -- which is why nothing in dark moves.
+pub const PRESS_BRIGHTNESS: f32 = 0.8;
+
+/// How much of a control survives being disabled: `disabled:opacity-50` in
+/// `ButtonFrame.vue`'s base classes, which is one opacity on the whole element.
+pub const DISABLED_OPACITY: f32 = 0.5;
+
 /// A color multiplied channel-wise, which is what CSS `filter: brightness()`
 /// does.
 ///
-/// Written out because the reference's hover for a `size="lg"` button is
-/// *exactly* that filter — `[&:hover]:brightness-[--hover-brightness]`, and
-/// `--hover-brightness` is 1.25 in dark — and applying the rule to the surface it
-/// applies to (`surface-4`, `#34363c`) gives `#41434b`, which is not a rung of
-/// any ladder. The rule is the token here, so the rule is what is written.
-/// `--hover-brightness` in dark, the factor the reference's buttons, rows and
-/// tabs hover by. Light is `0.9` (it darkens instead), which is a fact about the
-/// reference this palette does not yet carry over.
-const HOVER_BRIGHTNESS: f32 = 1.25;
-
-fn lighten(color: Color, factor: f32) -> Color {
+/// Written out because the reference's hover is *exactly* that filter, and
+/// applying the rule to the surface it applies to (`surface-4`, `#34363c`) gives
+/// `#41434b`, which is not a rung of any ladder. The rule is the token here, so
+/// the rule is what is written.
+fn brightness(color: Color, factor: f32) -> Color {
     Color::from_rgba(
         (color.r * factor).min(1.0),
         (color.g * factor).min(1.0),
         (color.b * factor).min(1.0),
         color.a,
     )
+}
+
+/// A whole appearance through that filter.
+///
+/// A CSS filter applies to the *element*, so this moves the label and the ring
+/// with the fill. Doing it to the fill alone is the smaller mistake than it
+/// looks: a `type="colored"` button's label is `--color-accent-contrast`, which
+/// is black in dark and does not move, but a `type="base"` button's label is
+/// `--color-contrast` and a `type="outlined"` one has no fill at all -- there the
+/// label *is* the hover, and brightening a fill that is not there draws nothing.
+fn filtered(appearance: button::Appearance, factor: f32) -> button::Appearance {
+    if factor == 1.0 {
+        return appearance;
+    }
+    let background = appearance.background.map(|background| match background {
+        Background::Color(color) => Background::Color(brightness(color, factor)),
+        gradient => gradient,
+    });
+    button::Appearance {
+        background,
+        text_color: brightness(appearance.text_color, factor),
+        border: Border {
+            color: brightness(appearance.border.color, factor),
+            ..appearance.border
+        },
+        ..appearance
+    }
 }
 
 // ---- Palette -----------------------------------------------------------
@@ -108,16 +166,10 @@ pub struct Palette {
     /// get over `#27292e`. Measured both places it appears: `#1d5540` in the tab
     /// strip, `#1d563f` under the rail's active entry.
     pub brand_highlight: Color,
-    /// Accent, hovered.
-    pub accent_hover: Color,
-    /// Accent, pressed.
-    pub accent_dim: Color,
     /// Text on top of the accent.
     pub on_accent: Color,
     /// Destructive actions.
     pub danger: Color,
-    /// Destructive, hovered.
-    pub danger_hover: Color,
     /// The welcome logo tile's own surface.
     pub hero: Color,
     /// The dimmed wash behind a dialog.
@@ -166,17 +218,8 @@ impl Palette {
             // that is wrong in a way no gate can see, so the measurement wins.
             accent: rgb(0x00, 0xDA, 0x75),
             brand_highlight: rgb(0x1D, 0x55, 0x40),
-            // Derived by the rule this palette already documents rather than
-            // taken from a ladder rung: hover is `brightness(1.25)` and pressed
-            // `brightness(0.8)`, applied to the accent above (0, 218, 117), which
-            // is `#00ff92` and `#00ae5e`. The ladder's green-400/green-600 were
-            // the same rule applied to green-500, which is the colour this file
-            // no longer uses.
-            accent_hover: rgb(0x00, 0xFF, 0x92),
-            accent_dim: rgb(0x00, 0xAE, 0x5E),
             on_accent: rgb(0x00, 0x00, 0x00),       // --color-accent-contrast is black in dark
             danger: rgb(0xFF, 0x49, 0x6E),          // red-500
-            danger_hover: rgb(0xFF, 0x69, 0x84),    // red-400
             hero: rgb(0x13, 0x1F, 0x17),            // --brand-gradient-strong-bg, light end
             backdrop: alpha(rgb(0x16, 0x18, 0x1C), 0.64), // --splash-overlay
             modal: rgb(0x27, 0x29, 0x2E),           // surface-3: a modal is a card that floats
@@ -231,11 +274,8 @@ impl Palette {
             // theme was not measured. 160,214,197 is that composite over
             // `#EDEDED`.
             brand_highlight: rgb(0xB3, 0xD6, 0xC5),
-            accent_hover: rgb(0x00, 0xAF, 0x5C),    // green-600, light --color-brand: hover is brighter
-            accent_dim: rgb(0x03, 0x74, 0x3F),      // green-700 at brightness(0.8), the pressed rule
             on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
             danger: rgb(0xCB, 0x22, 0x45),          // red-600, light --color-red
-            danger_hover: rgb(0xED, 0x46, 0x61),    // red-500
             hero: rgb(0xE6, 0xF4, 0xEC),            // brand gradient over a light surface
             backdrop: alpha(rgb(0xEB, 0xEB, 0xEB), 0.7),
             modal: rgb(0xF8, 0xF8, 0xF8),           // surface-3
@@ -273,16 +313,13 @@ impl Palette {
             text: rgb(0xFF, 0xFF, 0xFF),
             text_muted: rgb(0xB0, 0xBA, 0xC5),
             text_dim: rgb(0x96, 0xA2, 0xB0),
-            // The dark theme's measured accent and its two derived states, on
-            // this theme's own chrome for the highlight: OLED differs from dark
-            // only in how dark its surfaces are, and it carries the same brand.
+            // The dark theme's measured accent and the highlight below it, on
+            // this theme's own chrome: OLED differs from dark only in how dark
+            // its surfaces are, and it carries the same brand.
             accent: rgb(0x00, 0xDA, 0x75),
-            accent_hover: rgb(0x00, 0xFF, 0x92),
-            accent_dim: rgb(0x00, 0xAE, 0x5E),
             brand_highlight: rgb(0x0C, 0x42, 0x2B),
             on_accent: rgb(0x00, 0x00, 0x00),
             danger: rgb(0xFF, 0x49, 0x6E),
-            danger_hover: rgb(0xFF, 0x69, 0x84),
             hero: rgb(0x13, 0x1F, 0x17),
             backdrop: alpha(rgb(0x00, 0x00, 0x00), 0.7),
             modal: rgb(0x10, 0x10, 0x13),           // surface-3
@@ -450,11 +487,8 @@ palette_accessors! {
     text_dim(text_dim): "Tertiary text / inactive rail icons.",
     accent(accent): "The accent.",
     brand_highlight(brand_highlight): "The accent at 25% over the chrome, as a solid.",
-    accent_hover(accent_hover): "Accent, hovered.",
-    accent_dim(accent_dim): "Accent, pressed.",
     on_accent(on_accent): "Text on top of the accent.",
     danger(danger): "Destructive actions.",
-    danger_hover(danger_hover): "Destructive, hovered.",
     sidebar_top(sidebar_top): "Top of the right panel's brand wash.",
     sidebar_bottom(sidebar_bottom): "Bottom of the right panel's brand wash.",
     sidebar_surface(sidebar_surface): "A card inside the right panel.",
@@ -1103,10 +1137,38 @@ pub fn close_button() -> Btn {
 }
 
 impl Btn {
+    /// The look a control has right now, and the one place the reference's
+    /// interaction is applied.
+    ///
+    /// Hover and press are a *filter over the whole appearance* rather than a
+    /// second colour per role, for the reason [`filtered`] gives: that is what
+    /// `ButtonFrame.vue`'s `brightness-[--hover-brightness]` is, and it is what
+    /// makes the light theme's hover go the other way without a single role
+    /// having to know which theme is in force.
     fn appearance(&self, hovered: bool, pressed: bool) -> button::Appearance {
+        let factor = if pressed {
+            PRESS_BRIGHTNESS
+        } else if hovered {
+            hover_brightness()
+        } else {
+            1.0
+        };
+        filtered(self.role(hovered), factor)
+    }
+
+    /// The role's own look, before the interaction above is applied.
+    ///
+    /// `hovered` is read for the roles whose *structure* changes -- a fill
+    /// appearing, a label moving up a rung, a row picking the raised surface --
+    /// and never for a brightness, which is the filter's job. There is no third
+    /// state: the reference's press is `active:scale-[0.97]` and nothing else,
+    /// so a press has no structure of its own to draw. Two mechanisms baking the
+    /// same rule is how this got a light theme that brightened while the
+    /// reference's darkened.
+    fn role(&self, hovered: bool) -> button::Appearance {
         let base = match self.0 {
             Role::Primary => button::Appearance {
-                background: Some(if pressed { accent_dim() } else if hovered { accent_hover() } else { accent() }.into()),
+                background: Some(accent().into()),
                 text_color: on_accent(),
                 border: Border { radius: R_BUTTON.into(), ..Default::default() },
                 ..Default::default()
@@ -1129,7 +1191,7 @@ impl Btn {
             // beside the button's left edge is the page, not a third of the
             // brand over it. A stylesheet the app has outgrown is not a spec.
             Role::BrandLarge => button::Appearance {
-                background: Some(if pressed { accent_dim() } else if hovered { accent_hover() } else { accent() }.into()),
+                background: Some(accent().into()),
                 text_color: on_accent(),
                 border: Border {
                     radius: R_BUTTON_LG.into(),
@@ -1143,17 +1205,14 @@ impl Btn {
             // `inset 0 0 0 1px var(--surface-5)` ring. Measured on the
             // reference's Import button, all four of its colors are this
             // palette's: fill `#34363c`, ring `#42444a`, label `#ffffff`, icon
-            // `#b0bac5`. Hover is the base class's shared `brightness(1.25)`,
-            // the same rule the accent's own hover is derived by, and the press
-            // is that same brightness rather than the stylesheet's
-            // `active:scale-[0.97]`: iced's button cannot transform, so a press
-            // that did nothing would be worse than one that lights up.
+            // `#b0bac5`. Its hover is the base class's shared
+            // `brightness(1.25)` and nothing structural, which is why this arm is
+            // now a single colour: `surface-4` x 1.25 is `#41434b`, and that is
+            // not a rung of any ladder -- it is the filter, which
+            // [`Btn::appearance`] applies to the fill, the label and the ring
+            // together.
             Role::BaseLarge => button::Appearance {
-                background: Some(
-                    if pressed { lighten(surface_input(), HOVER_BRIGHTNESS).into() }
-                    else if hovered { lighten(surface_input(), HOVER_BRIGHTNESS).into() }
-                    else { surface_input().into() },
-                ),
+                background: Some(surface_input().into()),
                 text_color: text(),
                 border: Border {
                     radius: R_BUTTON_LG.into(),
@@ -1204,16 +1263,7 @@ impl Btn {
                 // [`Palette::brand_highlight`] -- so it is the solid token, and
                 // the unselected tabs carry the raised surface so that the row
                 // of them is the strip's plate.
-                background: Some(
-                    if active {
-                        brand_highlight()
-                    } else if hovered {
-                        lighten(surface(), HOVER_BRIGHTNESS)
-                    } else {
-                        surface()
-                    }
-                    .into(),
-                ),
+                background: Some(if active { brand_highlight() } else { surface() }.into()),
                 text_color: text(),
                 // The seam between two tabs is square: the radius is what makes
                 // the whole row read as one plate with rounded ends rather than
@@ -1262,7 +1312,7 @@ impl Btn {
             },
             Role::Danger => button::Appearance {
                 background: Some(alpha(danger(), if hovered { 0.24 } else { 0.14 }).into()),
-                text_color: if hovered { danger_hover() } else { danger() },
+                text_color: danger(),
                 border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(danger(), 0.45) },
                 ..Default::default()
             },
@@ -1347,16 +1397,24 @@ impl button::StyleSheet for Btn {
     }
 
     fn disabled(&self, _theme: &Theme) -> button::Appearance {
+        // `disabled:opacity-50`, which is the whole of what `ButtonFrame.vue`
+        // does to a button it will not let you press -- one opacity on the
+        // element, so the fill, the label and the ring fade by the same amount.
+        // This used to fade them by three different amounts (0.35 on the fill,
+        // 0.4 on the label) and to *add* a surface behind a ghost button that had
+        // none: a CSS opacity composites whatever is there, and inventing a fill
+        // for a button that deliberately has none is not the same shape of thing.
+        // The older `classes.scss` pair (`grayscale(50%)` plus `opacity: 0.5`) is
+        // not drawn either -- it belongs to a button component the app has
+        // stopped using, and desaturating the accent would make a disabled brand
+        // button the only grey thing on its page.
         let mut base = self.appearance(false, false);
         base.background = base.background.map(|background| match background {
-            iced::Background::Color(color) => alpha(color, 0.35).into(),
+            iced::Background::Color(color) => alpha(color, DISABLED_OPACITY).into(),
             gradient => gradient,
         });
-        if base.background.is_none() {
-            // Ghost buttons need *some* surface so the disabled state reads.
-            base.background = Some(alpha(text(), 0.04).into());
-        }
-        base.text_color = alpha(base.text_color, 0.4);
+        base.text_color = alpha(base.text_color, DISABLED_OPACITY);
+        base.border.color = alpha(base.border.color, DISABLED_OPACITY);
         base
     }
 }
@@ -1704,6 +1762,17 @@ mod tests {
         0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
     }
 
+    /// The solid colour of an appearance's fill, which the interaction tests
+    /// below compare. A gradient fill would panic here on purpose: every role
+    /// this asks about fills with a colour, and a role that started filling with
+    /// a gradient should be looked at rather than silently skipped.
+    fn fill(appearance: button::Appearance) -> Color {
+        match appearance.background {
+            Some(Background::Color(color)) => color,
+            other => panic!("no legal fill: {other:?}"),
+        }
+    }
+
     /// WCAG contrast ratio between two opaque colors.
     fn contrast(a: Color, b: Color) -> f32 {
         let (high, low) = {
@@ -1964,9 +2033,99 @@ mod tests {
     fn disabled_buttons_are_dimmed() {
         let theme = app_theme();
         let disabled = button::StyleSheet::disabled(&primary(), &theme);
-        assert!(disabled.text_color.a < 1.0);
+        // `disabled:opacity-50` on the element, so every part of the button
+        // fades by the same amount -- and the ghost keeps its absent fill,
+        // because an opacity composites what is there rather than adding a
+        // surface to a button that deliberately has none.
+        assert_eq!(disabled.text_color.a, DISABLED_OPACITY);
+        assert_eq!(fill(disabled).a, DISABLED_OPACITY);
         let ghost_disabled = button::StyleSheet::disabled(&ghost(), &theme);
-        assert!(ghost_disabled.background.is_some(), "ghost buttons need a disabled surface");
+        assert!(ghost_disabled.background.is_none());
+        assert_eq!(ghost_disabled.text_color.a, DISABLED_OPACITY);
+    }
+
+    /// The reference's interaction is one filter over the whole element, and
+    /// the light theme's goes the *other way*.
+    ///
+    /// `--hover-brightness` is `1.25` in dark and `0.9` in light, which is the
+    /// fact this shell did not carry over: it had a single `1.25`, so every
+    /// control in the light theme lit up on hover where the reference's dims.
+    #[test]
+    fn hover_goes_the_way_the_theme_says() {
+        let _lock = theme_lock();
+        let theme = app_theme();
+
+        set_color_theme(ColorTheme::Dark);
+        assert_eq!(hover_brightness(), 1.25);
+        let dark_rest = button::StyleSheet::active(&primary(), &theme);
+        let dark_hover = button::StyleSheet::hovered(&primary(), &theme);
+        assert!(luminance(fill(dark_hover)) > luminance(fill(dark_rest)));
+
+        set_color_theme(ColorTheme::Light);
+        assert_eq!(hover_brightness(), 0.9);
+        let light_rest = button::StyleSheet::active(&primary(), &theme);
+        let light_hover = button::StyleSheet::hovered(&primary(), &theme);
+        assert!(luminance(fill(light_hover)) < luminance(fill(light_rest)), "light mode hovers by darkening");
+
+        set_color_theme(ColorTheme::Dark);
+    }
+
+    /// A filter is on the element, so the label and the ring move with the
+    /// fill -- and on a `type="outlined"` button, which has no fill at all, the
+    /// label is the whole of the hover.
+    #[test]
+    fn hover_moves_the_label_and_the_ring_too() {
+        let _lock = theme_lock();
+        let theme = app_theme();
+        set_color_theme(ColorTheme::Dark);
+
+        let rest = button::StyleSheet::active(&head_ring(), &theme);
+        let hover = button::StyleSheet::hovered(&head_ring(), &theme);
+        assert!(rest.background.is_none(), "the ring is a border and a label, not a fill");
+        assert!(luminance(hover.text_color) > luminance(rest.text_color));
+        assert!(luminance(hover.border.color) > luminance(rest.border.color));
+
+        let large_rest = button::StyleSheet::active(&base_large(), &theme);
+        let large_hover = button::StyleSheet::hovered(&base_large(), &theme);
+        for (before, after) in [
+            (fill(large_rest), fill(large_hover)),
+            (large_rest.text_color, large_hover.text_color),
+            (large_rest.border.color, large_hover.border.color),
+        ] {
+            assert!((after.r - (before.r * 1.25).min(1.0)).abs() < 0.002);
+        }
+
+        // A press is the same one rule with the stylesheet's `brightness(0.8)`
+        // standing in for the `active:scale-[0.97]` this toolkit cannot draw.
+        let pressed = button::StyleSheet::pressed(&primary(), &theme);
+        let accent_rest = button::StyleSheet::active(&primary(), &theme);
+        assert!(luminance(fill(pressed)) < luminance(fill(accent_rest)));
+    }
+
+    /// The numbers above are a copy of the reference's, so the copy is checked
+    /// against the file it came from when that tree is present.
+    ///
+    /// `vendor/modrinth-app` is reference material rather than a dependency --
+    /// removing it changes no test (`UPSTREAM.md` says so, and this one skips
+    /// rather than fails) -- but while it is here, "the factor is 1.25 and 0.9"
+    /// stops being a claim in a comment.
+    #[test]
+    fn the_reference_still_states_the_factor_this_copy_reads() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/modrinth-app");
+        let Ok(variables) = std::fs::read_to_string(root.join("assets/styles/variables.scss")) else {
+            return;
+        };
+        assert!(variables.contains("--hover-brightness: 1.25;"), "dark `--hover-brightness`");
+        assert!(variables.contains("--hover-brightness: 0.9;"), "light `--hover-brightness`");
+
+        let frame = std::fs::read_to_string(root.join("ui/src/components/base/buttons/ButtonFrame.vue"))
+            .unwrap_or_default();
+        // What a press and a disabled button are, where the code says they are
+        // not a brightness: both are string-matched against the component that
+        // states them, so a pass here means the token is still the reference's.
+        assert!(frame.contains("active:scale-[0.97]"), "the reference's press");
+        assert!(frame.contains("disabled:opacity-50"), "the reference's disabled");
+        assert!(frame.contains("duration-150"), "the transition duration");
     }
 
     #[test]

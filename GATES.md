@@ -482,6 +482,57 @@ number in it is a pure function of the clock in `app::SplashState`.
       measurement in the window, invisible to either client alone and caught by
       this comparison.
 
+## The interaction, on every control at once
+
+G42--G45 are unit tests rather than captures, and they have to be: a capture is
+of a control nobody is pointing at, so no picture of either client can show a
+hover. What they assert instead is the reference's own rule, which its components
+state in full (`REFERENCE.md`, "The interactions").
+
+```
+cargo test -p palantir-desktop --locked theme::tests
+```
+
+- [x] G42: a hover goes the way the theme says it goes -- brighter in dark, and
+      **darker in light**, which is the half this shell did not have
+  CHECK: cargo test -p palantir-desktop hover_goes_the_way_the_theme_says
+  EXPECT: test result: ok
+  EVIDENCE: `--hover-brightness` is 1.25 in `.dark-mode` and 0.9 in
+      `.light-properties`; the test switches the theme in force and asserts the
+      direction of the move, not just the factor. The build this replaces answers
+      `1.25` under both themes -- its `HOVER_BRIGHTNESS` was one constant with a
+      comment saying light was 0.9 "not yet carried over" -- so it fails here by
+      the first light-theme assertion.
+
+- [x] G43: the hover is a filter over the whole control -- fill, label and ring --
+      so a control with no fill still answers the pointer
+  CHECK: cargo test -p palantir-desktop hover_moves_the_label_and_the_ring_too
+  EXPECT: test result: ok
+  EVIDENCE: the head's ring (a border and a label, `background: None`) brightens
+      both; the `size=lg` base button moves all three of its colours by 1.25. The
+      replaced build lightened the fill only, which on an outlined button is a
+      hover that draws nothing.
+
+- [x] G44: a disabled control is `opacity-50` on the whole element, and a quiet
+      button does not gain a fill by being disabled
+  CHECK: cargo test -p palantir-desktop disabled_buttons_are_dimmed
+  EXPECT: test result: ok
+  EVIDENCE: fill, label and ring all at 0.5; the ghost's `background` stays
+      `None`. The replaced build faded the fill to 0.35 and the label to 0.4, and
+      *added* a surface behind the ghost so the state would read.
+
+- [x] G45: the numbers above are still the reference's -- read out of
+      `vendor/modrinth-app` rather than restated in a comment
+  CHECK: cargo test -p palantir-desktop the_reference_still_states_the_factor_this_copy_reads
+  EXPECT: test result: ok
+  EVIDENCE: asserts `--hover-brightness: 1.25` and `: 0.9` in
+      `assets/styles/variables.scss` and `active:scale-[0.97]`,
+      `disabled:opacity-50` and `duration-150` in `ButtonFrame.vue`. It returns
+      early when the vendored tree is absent, which is deliberate: `UPSTREAM.md`
+      promises that removing it changes no test, and a check that fails when the
+      reference is not checked out would break that promise instead of keeping
+      it.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

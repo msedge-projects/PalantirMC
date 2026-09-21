@@ -172,6 +172,38 @@ project's stylesheet ladder (`green-500`), and the app as installed paints
 `#00da75` — the call-to-action button, the logo mark and the active rail icon
 all measure it flat.
 
+## The interactions, from the components that state them
+
+A still capture cannot show a hover, and the reference's own source states every
+one of these, so this part of the port is read rather than photographed. It is
+its own table because the values are *rules*, not pixels: a `brightness()` is not
+a rung of the palette and deriving one by hand is how this shell ended up with a
+light theme that hovered the wrong way.
+
+| Where | What it says |
+| --- | --- |
+| `assets/styles/variables.scss`: `.dark-mode` | `--hover-brightness: 1.25` |
+| `ditto`: `.light-properties` | `--hover-brightness: **0.9**` |
+| `ui/src/components/base/buttons/ButtonFrame.vue`, base classes | `transition-[background-color,color,box-shadow,filter,opacity,transform] duration-150 ease-out`, `enabled:active:scale-[0.97]`, hover and focus-visible `brightness-[--hover-brightness]`, `disabled:opacity-50` |
+| `ditto`, sizes | `xs` 28px `rounded-lg`, `sm` 32 `rounded-[10px]`, `md` 36 `rounded-xl`, `lg` 40 `rounded-[14px] px-4`, `xl` 48 `rounded-2xl px-3.5`; label `text-sm`/`text-base`, weight 600 except `xl` at 800 |
+| `ditto`, types | `base` = `bg-surface-4 text-contrast`; `colored` = `bg-[--button-color]` + `--color-accent-contrast`; `outlined` and `quiet` = no fill |
+| `ditto`, interactions | `surface` = hover fills `bg-surface-4`; `filled` = hover keeps the fill and the contrast label; `none` = `hover:!brightness-100` |
+| `assets/styles/classes.scss`, `.button-base` (the older component) | hover `brightness(0.85)`, active `brightness(0.8)`, disabled `grayscale(50%)` + `opacity: 0.5` |
+| `app-frontend/.../onboarding-checklist/index.vue` | rows `hover:brightness-110 active:brightness-90`, complete rows `opacity-50`; accordion button `hover:brightness-110` |
+| `app-frontend/.../library/instance-group/instance-card.vue`, `library/WorldItem.vue`, `library/InstanceItem.vue` | a card hovers at `brightness-110` / `[--hover-brightness:1.25]` / `1.1` |
+
+The shell applies the two `--hover-brightness` values and the `opacity-50`
+(`theme::hover_brightness`, `theme::DISABLED_OPACITY`) as one filter over a
+control's whole appearance — fill, label and ring — because that is what a CSS
+filter on an element does. Three things in the table are **not** drawn, and the
+reason is the toolkit rather than the reference: the 150ms transition (iced has
+no transitions; a state change lands in one frame), the `scale-[0.97]` press
+(a widget is laid out and then painted, and cannot paint itself 3% smaller), and
+the per-component factors on the right-hand rows of the table — a card's hover is
+a `MouseArea`-shaped change this shell has not built yet. The press uses
+`classes.scss`'s `brightness(0.8)` instead, which is the same intent as the 0.97
+and is the value the dark palette had already derived by hand.
+
 ## The title bar, measured again
 
 The first pass read the bar as three separate 48px headers, one per column. It is
