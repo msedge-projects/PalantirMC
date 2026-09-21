@@ -1,7 +1,7 @@
 # Gates: PalantirMC's shell matches the reference client
 
 OWNS: crates/palantir-desktop/src/**, tools/panel_gate.py, tools/page_gate.py,
-tools/appshot.py, NEXT_STEPS.md
+tools/appshot.py, tools/shellcmp.py, NEXT_STEPS.md
 
 Scope: the shell's chrome, surfaces, shape and type match the Modrinth App as
 measured off its own running window rather than estimated from screenshots, and
@@ -447,6 +447,40 @@ number in it is a pure function of the clock in `app::SplashState`.
   EVIDENCE: the two stops match the tokens composited by hand, within 0.01, and the
       fade is alpha-only (the colours never move -- a browser's `opacity`, not a
       dim towards black).
+
+- [x] G39: the plate behind the active rail entry is a **circle**, not a rounded
+      rectangle -- the one thing the colour assertion above cannot see, and which
+      this shell got wrong for a release
+  CHECK: python tools/panel_gate.py .scratch/port-ours-shots4.png --only plate
+  EXPECT: panel gate passed [plate]
+  EVIDENCE: ours: top row 14px = 31% of the widest 44px; the reference's own Home
+      capture: 14px = 33% of 42px. Renderings of the two candidates at the same
+      48px read 33% for a circle and 62% for a 12px radius, so the 40% threshold
+      is the shape rather than a tolerance. The replaced build drew the 12px
+      radius, off a reading of the plate's corner that said 11.
+
+- [x] G40: the plate is as wide as it is tall, which is what separates "a circle on
+      a 48px entry" from "a circle on a smaller one"
+  CHECK: python tools/panel_gate.py .scratch/port-ours-shots4.png --only plate
+  EXPECT: panel gate passed [plate]
+  EVIDENCE: ours 44px against a 46px height; the reference 42 against 46. A square
+      plate passes this and fails G39; a 12px radius does the same. Only a circle
+      passes both.
+
+- [x] G41: the head's rule is at y 48, the pane's corner is a 20px radius, and the
+      rail's plate rows are the reference's -- measured on **both** clients, which
+      is what catches a difference between two windows that each look right alone
+  CHECK: python tools/shellcmp.py .scratch/ref-01-home.png=REFERENCE
+      .scratch/port-ours-shots4.png=OURS
+  EXPECT: shell comparison passed
+  EVIDENCE: the rule at y 48 on both; the pane's corner rows 62/53/50/49 there
+      against 62/54/50/49 here, one row apart at one of four probes; the plate's
+      rows (top, widest, bottom) 16/42/16 there against 14/44/14 here -- symmetric
+      on both, which a rounded rectangle cannot be. Before the 6px band above the
+      head was removed, this shell's rule was at y 54 and its plate began at y 51
+      where the reference's begins at 48, a 6px offset in every vertical
+      measurement in the window, invisible to either client alone and caught by
+      this comparison.
 
 ## What these gates cannot say
 

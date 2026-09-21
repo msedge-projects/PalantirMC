@@ -82,6 +82,15 @@ pub enum Glyph {
     Copy,
     /// Downward chevron (a dropdown).
     Chevron,
+    /// Chevron pointing back, for the head's history button.
+    ///
+    /// Its own glyph rather than [`Glyph::Chevron`] turned on its side: this
+    /// toolkit has no rotation for canvases, and a left arrow is not a rotated
+    /// dropdown -- it is taller than it is wide, where a dropdown is the other
+    /// way round.
+    ChevronBack,
+    /// Chevron pointing forward. The other half of that pair.
+    ChevronForward,
     /// Magnifier (search).
     Search,
     /// Arrow leaving a tray (upload).
@@ -135,6 +144,8 @@ impl Glyph {
             "edit" | "pencil" | "rename" => Glyph::Edit,
             "copy" | "duplicate" => Glyph::Copy,
             "chevron" | "dropdown" => Glyph::Chevron,
+            "chevron-back" | "back" | "previous" => Glyph::ChevronBack,
+            "chevron-forward" | "forward" | "next" => Glyph::ChevronForward,
             "search" | "find" => Glyph::Search,
             "upload" => Glyph::Upload,
             "download" | "import" => Glyph::Download,
@@ -156,13 +167,13 @@ impl Glyph {
 
     /// Every key [`Glyph::from_name`] understands (used by the tests below).
     #[cfg(test)]
-    pub fn names() -> [&'static str; 35] {
+    pub fn names() -> [&'static str; 37] {
         [
             "play", "compass", "cube", "globe", "terminal", "sliders", "person", "info", "plus",
             "folder", "refresh", "close", "minimize", "maximize", "restore", "check", "trash",
-            "edit", "copy", "chevron", "search", "upload", "download", "stop", "gear", "help",
-            "update", "image", "paintbrush", "bulb", "switch", "heart", "shield", "coffee",
-            "gauge",
+            "edit", "copy", "chevron", "chevron-back", "chevron-forward", "search", "upload",
+            "download", "stop", "gear", "help", "update", "image", "paintbrush", "bulb",
+            "switch", "heart", "shield", "coffee", "gauge",
         ]
     }
 }
@@ -807,6 +818,12 @@ fn draw(frame: &mut Frame, glyph: Glyph, ink: Ink) {
             );
         }
         Glyph::Chevron => ink.poly(frame, 2.0, &[(6.2, 9.6), (12.0, 15.4), (17.8, 9.6)]),
+        // The head's history pair. Stated in the 24-unit grid at the size the
+        // reference's own window draws them: its back arrow's ink measures 7px
+        // wide and 13px tall at a 16px icon, which in this grid is 9.5 by 19.5
+        // with a 3-unit (2px) stroke.
+        Glyph::ChevronBack => ink.poly(frame, 3.0, &[(16.0, 2.5), (6.5, 12.0), (16.0, 21.5)]),
+        Glyph::ChevronForward => ink.poly(frame, 3.0, &[(8.0, 2.5), (17.5, 12.0), (8.0, 21.5)]),
         Glyph::Search => {
             ink.ring(frame, 1.8, 10.6, 10.6, 6.4);
             ink.poly(frame, 2.0, &[(15.4, 15.4), (20.4, 20.4)]);

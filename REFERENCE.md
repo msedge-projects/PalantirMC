@@ -81,7 +81,7 @@ button at x 1250..1262.
 | --- | --- |
 | Container | 64px wide, chrome `#27292e` |
 | Entry | 48x48 at x 8..56, vertical pitch 52 (4px gap) |
-| Active entry | plate `#1d563f`, radius ~11-12 (**not** a circle) |
+| Active entry | plate `#1d563f`, a **circle** on the 48px entry (see below) |
 | Active icon | `#00da75`, 22px |
 | Idle icon | `#afbac4`, 22px |
 | Divider | a short rule, y 582..586 in the 720px client |
@@ -101,6 +101,34 @@ Hovering each entry names it, which is how the destination list was read:
 A click at 688 while a dialog was open closed the dialog and changed no page, so
 that element is not a navigation entry — recorded as unidentified, most likely
 the account avatar or a footer control.
+
+### The plate is a circle, and the rail's foot is its own cluster
+
+Two things in that table were read wrong, and both are now settled by the pixels
+*and* by the reference's own source, which is the strongest pair of readings
+available:
+
+- **The active plate is a circle.** It was recorded as "radius ~11-12 (**not** a
+  circle)", from an arc through the plate's top-left corner. Counting the width of
+  each of the plate's rows instead gives 14, 26, 30, 40, 44, 46, 48 — narrowing
+  symmetrically back to 14 at the bottom. That is a circle of radius 24 on a 48px
+  entry. A 12px radius cannot produce it: its first row would be 24px wide, and
+  its widest row would begin 12 rows in rather than 17. `NavButton.vue` agrees —
+  `w-12 h-12 rounded-full` with a selected state that is a `::before` at
+  `inset: 0` with `border-radius: 50%` — and with the source and the shapes in
+  agreement there is nothing left to fit.
+- **The rail's foot is a cluster, and the eighth entry is the account.** The
+  bottom four tiles sit at the foot of the rail, not after the fifth entry: a
+  16px icon at y 576..591 (the create button inside `QuickInstanceSwitcher`), then
+  Settings at y 624..647, then a 20px brand-green mark at y 678..697. That last one
+  is `LogInIcon class="text-brand"` — the account entry while signed out, which is
+  what the walk's "12px element at y 682..694" was. Their pitch is 52, the same as
+  the top five, and they end 8px above the window's foot.
+
+One more line from the source: the rail's divider is `mx-2 h-px bg-surface-5`
+inside the rail's own 8px padding, so it spans x 16..47 — 32px, not the entry's
+48 — and it sits 16 rows below the fifth entry (measured at y 320, where the fifth
+entry ends at 304).
 
 ## The page column
 
@@ -150,8 +178,12 @@ The first pass read the bar as three separate 48px headers, one per column. It i
 not: it is **one chrome bar across the whole width** -- x 0..1279 at y 0..47 all
 measures `#27292e` -- with a **1px `#42444a` rule** at y 48 across it, and only
 then do the three columns begin (the page surface from y 49). The page column's
-top-left corner is cut with a **16px radius** (the first page-coloured row is
-49 + 16 - sqrt(...) at each x: 66 at x 65, 50 at x 78, 49 from x 82).
+top-left corner is cut with a **20px radius**, which is the reference's own
+`--radius-xl` (`1.25rem`) on `.app-contents` -- `border-top-left-radius:
+var(--radius-xl)` -- and what a fit through the corner's own rows gives: at x 72
+the first page-coloured row is 53, at x 80 it is 50, and at x 82 it is 49. Solving
+the arc for r at x 72 (8 rows in) gives r = 20 and not the 16 an earlier reading
+said; at 16 the row at x 72 would be 55.
 
 Its contents, left to right, all measured on the Screenshots page at a pinned
 1280x720 client:
@@ -179,6 +211,57 @@ Screenshots page draws no heading of its own, and neither does Home (its bar
 reads `Home`). Discover's bar reads `Discover modpacks` -- the page and its
 current tab -- so the bar is a running statement of where you are, which is what
 ours now draws too (`Page::title()` and `Page::icon()`).
+
+### The head, from `App.vue` and then from the pixels
+
+`App.vue`'s `.app-grid-statusbar` is the whole thing, and it is short enough to
+state completely. `bg-bg-raised`, `h-[--top-bar-height]` (3rem, 48px),
+`padding-left: 0.25rem` around a `p-2` section, and left to right:
+
+| Element | Its own classes | Measured in the reference's window |
+| --- | --- | --- |
+| `TextLogo` | `h-7 w-auto shrink-0` | ink x 12..35, y 10..36 — a 28px box at x 8 |
+| back | `IconButton type=outlined`, `!h-7 !min-w-7 !w-7 !border !border-surface-4 !p-0`, `gap-2` | a 28px ring at x 172..200, ink y 9..38 |
+| forward | the same | the same at x 208..236 |
+| `Breadcrumbs` | `pl-4`, entries `gap-1.5`, `text-base font-medium leading-6` | a 20px visual at x 253..273, label from x 279 |
+| right section | `flex shrink-0 ml-auto items-center` | the sidebar toggle (`mr-3`), `AppActionBar` (`mr-3`), `WindowControls` |
+
+Two things follow from that table and neither was in this shell before this
+change:
+
+- **The head has no search field and no refresh button.** The reference's search
+  is the *library's* own toolbar — `LibraryToolbar`'s first row is an `Input` with
+  `wrapper-class="min-w-[16rem] flex-1"`, its placeholder is `app.library.search.
+  placeholder` (`Search`), and the same page's heading is `app.library.library`
+  (`Library`) over `flex flex-col gap-3 pb-16`. Its refresh lives in
+  `AppActionBar`, in the head's right section, next to the running-instance chip.
+  So the instance search moved to Home's toolbar, which is where the reference puts
+  it, and the bar draws the two rings instead.
+- **The two rings are dim, and they are dim in the reference's own build too.**
+  Its rail navigation does not push history, so neither has anywhere to go. The
+  source's `:class="{ 'opacity-20': !canNavigateBack }"` would put a disabled
+  chevron at roughly `#292b2f` over the chrome — all but invisible — while the
+  installed build paints `#96a2b0`, its `--color-text-tertiary`. The visible one is
+  copied. The ring itself measures `#404248` flat, where the source's
+  `--color-button-border` (`rgba(193, 190, 209, 0.12)`) over the chrome resolves to
+  `#3a3b42`; the pixels win, as everywhere else the two disagree, and that is the
+  third such disagreement after the accent and the brand highlight.
+
+### The band that was above the head
+
+This shell wrapped its whole window in a 6px band of resize grips on every edge,
+and the top one was painted in the page's colour. It was 6px of the window that
+was not the head: the head began at y 6 and put its rule at y 54, where the
+reference's head begins at y 0 and its rule is at y 48. Both windows drew every
+part to the same numbers and could never line up, which is the kind of difference
+a gate measuring either window alone would never see.
+
+It is gone from the top and kept on the other three edges, which is safe because
+the band was only ever a fallback: the `native` hit test already answers
+`y < RESIZE_BAND` for the top edge (see `native::edge_at`) and the head is a drag
+patch across its whole width. The measurements above are now the reference's own
+to the pixel — the rule at y 48, the pane's corner rows at 62/53/50/49 and the
+plate's rows at 14/26/44/48/44/26/14 — which is how the removal was checked.
 
 ## The Screenshots page, measured
 
@@ -547,3 +630,21 @@ as timers.
 - **The hover/press arithmetic** — `hover:brightness(1.25)` and
   `active:scale(0.95)` are the reference's, and a still capture cannot measure
   scale; recorded in `NEXT_STEPS.md` §12 as before.
+- **The mark's ink.** The head's mark is a 28px box in both clients because
+  that is the reference's `h-7`, but the two marks are different art and the ink
+  inside the box is not the same size: the reference's spans x 12..35 and y 10..36,
+  while ours spans 16 by 25 in the same box, because `logo512.png`'s own ink box is
+  `107,23..404,487` of 512 — a tall, narrow mark. Redrawing ours to fill the box
+  the way the reference's does is a change to the art, not to the head.
+- **The rail's entries.** Its five are Home, Discover, Skin selector, Screenshots
+  and Modrinth Hosting, and its foot is create, Settings, account. Ours are Home,
+  Browse, Screenshots, the instances folder, and then create, Settings, Accounts,
+  About — because this shell's Mods, Worlds, Logs and per-instance Settings live
+  under an instance rather than in the rail, and the reference's Skins and Hosting
+  have no counterpart here (see the note on the Skin selector above). The geometry
+  is copied exactly; the list is not copied at all, and copying it would mean
+  restructuring navigation rather than drawing a page.
+- **The window controls.** The reference draws its own caption buttons inside the
+  web view; this shell's are iced's, in the head's right section at the same place
+  and size, with Snap Layouts routed through the non-client hit test rather than
+  through a Tauri window-command.

@@ -142,9 +142,54 @@ fn title_bar_padding() -> Padding {
         top: TITLE_BAR_PAD,
         right: 10.0,
         bottom: TITLE_BAR_PAD,
-        left: 10.0,
+        // 8, not 10, because the reference's own mark starts at client x 8: its
+        // status bar is `padding-left: 0.25rem` holding a `p-2` section, and the
+        // 28px TextLogo lands there. Measuring the installed window agrees to the
+        // pixel.
+        left: 8.0,
     }
 }
+
+/// Side of the brand mark in the head.
+///
+/// The reference's is `h-7 w-auto` -- 28px tall -- and its own window measures
+/// the mark's ink at x 8..36, y 10..38.
+pub const HEAD_MARK: f32 = 28.0;
+
+/// Gap between the mark and the product's name.
+pub const HEAD_BRAND_GAP: f32 = 8.0;
+
+/// The brand cluster's drag patch hugs its content.
+///
+/// It used to be a fixed 156px with the content centred inside it, and the
+/// centring is what put this shell's first history ring at x 176 where the
+/// reference has it at 171: the patch's leftover width was being split either
+/// side of the mark. A shrink patch has no leftover to split and the mark starts
+/// where the reference's does, at x 8. Nothing is lost from the drag strip either
+/// -- [`BarArea::Middle`] covers the whole middle of the bar, so the strip a user
+/// can grab runs from the mark to the run chip whether or not this patch has
+/// slack in it.
+const BRAND_CLUSTER_WIDTH: Length = Length::Shrink;
+
+/// Gap between the head's two history rings.
+///
+/// The reference's own window puts them 8px apart (`gap-2`), which is what its
+/// two 28px ink boxes 8px apart measure.
+const HEAD_RING_GAP: f32 = 8.0;
+
+/// The rail's divider: its width, and the space above it.
+///
+/// The reference's divider is `mx-2 h-px bg-surface-5` inside the rail's own 8px
+/// padding, so it spans x 16..47 of the 64px rail, and it sits 16 rows below the
+/// fifth entry. The space is 16 less the 4 the column already puts between every
+/// child, because the two together are the gap the reference draws.
+const RAIL_DIVIDER_WIDTH: f32 = 32.0;
+const RAIL_DIVIDER_GAP: f32 = 12.0;
+
+/// Gap between the history pair and the page's breadcrumb.
+///
+/// The reference's `Breadcrumbs` is `pl-4`.
+const HEAD_CRUMB_GAP: f32 = 16.0;
 
 /// Side of a caption control's glyph.
 ///
@@ -167,13 +212,18 @@ const TITLE_BAR_SPACING: f32 = 6.0;
 
 /// Side of the glyph the title bar draws for the page, and the gap to its name.
 ///
+/// The box, not the ink: the reference's breadcrumb visual for a page is a 20px
+/// slot (`size-5`) whose glyph's own ink measures 18px. This shell's glyphs inset
+/// their ink inside their canvas the way its do, so the canvas is the reference's
+/// 20 and the ink lands where its does.
+///
 /// Measured off the reference client's own bar on a 1280x720 client: an 18px
 /// glyph at x 257..274, then 9px, then the page's name from x 283. Drawn at the
 /// size it measures rather than at the rail's 22, because the bar's icon is not
 /// the rail's -- see `REFERENCE.md`.
-const PAGE_GLYPH: f32 = 18.0;
-/// Gap between that glyph and the page's name.
-const PAGE_CLUSTER_GAP: f32 = 9.0;
+const PAGE_GLYPH: f32 = 20.0;
+/// Gap between that glyph and the page's name: the reference's `gap-1.5`.
+const PAGE_CLUSTER_GAP: f32 = 6.0;
 
 /// Size of the page's name in the bar.
 ///
@@ -182,12 +232,13 @@ const PAGE_CLUSTER_GAP: f32 = 9.0;
 /// at 16px in the Inter face the shell ships.
 const PAGE_TITLE_SIZE: f32 = 16.0;
 
-/// Width of the drag patch the page's icon and name sit in.
+/// The breadcrumb's drag patch, for the same reason as the brand's.
 ///
-/// Wide enough for the longest name this shell has at [`PAGE_TITLE_SIZE`]
-/// ("Screenshots", 97px) plus its glyph and gap, and no wider, so the search
-/// field keeps its room at the window's 980px minimum.
-const PAGE_CLUSTER_WIDTH: f32 = 150.0;
+/// The fixed 140 it used to be had the page's own name centred inside it, which
+/// is a second, quieter way for the two clients to disagree about a number that
+/// both state: the reference's `Breadcrumbs` is `pl-4` and then the entry, so its
+/// icon begins exactly 16px after the ring before it.
+const PAGE_CLUSTER_WIDTH: Length = Length::Shrink;
 
 /// The Screenshots page's empty state, as the reference draws it.
 ///
@@ -4281,32 +4332,40 @@ impl PalantirApp {
             return self.view_splash();
         }
 
-        let mut body = row![
-            self.view_rail(),
-            // The reference's 1px hairline between the rail and the page.
-            rail_hairline(),
-            self.view_content(),
-        ];
+        // The rule under the head stops at the rail's right edge. It used to run
+        // the bar's full width, which put 1px of `#42444a` across the rail at y 48
+        // -- a line the reference does not have, because its rule is
+        // `.app-contents::before`'s border and `.app-contents` starts at x 64. So
+        // the rule travels with the content rather than with the bar, and it covers
+        // the sidebar as well: in the reference it runs to the window's right edge.
+        let mut right = row![self.view_content()].height(Length::Fill);
         // The panel is *not drawn* rather than drawn at zero width: an empty
         // 320px column would move the page's right edge back and leave the
         // window looking like it had lost its content, which is the opposite of
         // what "hide the sidebar" asks for.
         if !self.prefs.hide_right_sidebar {
-            body = body.push(self.view_sidebar());
+            right = right.push(self.view_sidebar());
         }
-        let body = body.height(Length::Fill);
 
-        let shell = column![
-            self.view_title_bar(),
-            // ...and the one under the bar. Both are the separators between the
-            // raised chrome and the content, drawn rather than set as borders
-            // because iced paints a container's border on every edge.
-            hairline(),
-            body,
-            self.view_status_bar(),
+        let body = row![
+            self.view_rail(),
+            // The reference's 1px hairline between the rail and the page.
+            rail_hairline(),
+            column![
+                // The separator between the raised chrome and the content, drawn
+                // rather than set as a border because iced paints a container's
+                // border on every edge.
+                hairline(),
+                right,
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
         ]
-        .width(Length::Fill)
         .height(Length::Fill);
+
+        let shell = column![self.view_title_bar(), body, self.view_status_bar()]
+            .width(Length::Fill)
+            .height(Length::Fill);
 
         // An undecorated window has no frame of its own, so the shell draws one
         // itself: a band of resize grips on every edge and corner, painted in
@@ -4317,13 +4376,18 @@ impl PalantirApp {
         // reaches iced at all; the bands are what keeps the window resizable if
         // that shim could not be installed — and they keep the drawn layout
         // exactly as verified, since the region Windows owns is the same strip.
+        // There is no band along the top. There was, and it cost 6px of every
+        // measurement in the window: the reference's head occupies y 0..47 of its
+        // client and its rule is at y 48, while this shell's head began at y 6 and
+        // put its rule at y 54, so the two windows' contents could never line up
+        // even though every part of them was drawn to the same numbers. The band
+        // was the only thing at the top that was not the head, and its job is
+        // already done twice over: Windows owns the top 6px through the same
+        // `native` hit test that owns the other three edges (see `native::edge_at`,
+        // which reads `y < RESIZE_BAND` whatever is drawn there), and the head
+        // itself is a drag patch from its left edge to its right. Removing it is
+        // what lets the head be the head.
         column![
-            row![
-                grip(ResizeEdge::NorthWest, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
-                grip(ResizeEdge::North, Length::Fill, theme::app_bg),
-                grip(ResizeEdge::NorthEast, Length::Fixed(native::RESIZE_BAND), theme::app_bg),
-            ]
-            .height(Length::Fixed(native::RESIZE_BAND)),
             row![
                 // The side bands match the rail and sidebar, which are the same
                 // colour as each other, so the seam is invisible.
@@ -4426,28 +4490,50 @@ impl PalantirApp {
             .into()
     }
 
-    /// Undecorated title bar: logo, product name, global search, run chip and
-    /// the window controls. The empty area starts an OS window drag.
+    /// Undecorated title bar, in the reference's own order: the mark and the
+    /// product's name, the two history rings, the page's breadcrumb, then the run
+    /// chip and the window controls, with everything between them a place to grab
+    /// the window.
+    ///
+    /// The bar no longer carries a search field or a refresh button. Neither is in
+    /// the reference's status bar -- its search is the library's own toolbar, one
+    /// level down, and its refresh is the action bar's -- and a head that holds
+    /// controls the head it copies does not hold is the difference between a copy
+    /// and a resemblance. The instance search moved to Home's toolbar, which is
+    /// where the reference keeps it.
     fn view_title_bar(&self) -> Element<'_, Message> {
         // Everything in the bar that is not a control is a place to grab the
         // window: the brand cluster, the empty middle, and the run chip. Wrapping
         // each in a mouse area is what turns a title bar you had to aim at into
         // one you can drag from anywhere, and a right-click on any of them opens
         // the native window menu.
+        // The brand cluster: the mark, then the name, then nothing. The version
+        // chip that used to sit here is the reference's own counter-example -- its
+        // bar carries its mark, its wordmark and then controls, and no build
+        // number -- and About is where a version belongs anyway.
         let dragging_area = grabbable(
             BarArea::Brand,
-            Length::Fixed(190.0),
+            BRAND_CLUSTER_WIDTH,
             self.bar_armed == Some(BarArea::Brand),
             row![
                 Image::new(brand::logo_handle())
-                    .width(Length::Fixed(22.0))
-                    .height(Length::Fixed(22.0)),
-                text(brand::APP_NAME).size(15).font(theme::bold()),
-                text(format!("v{}", brand::version())).size(11),
+                    .width(Length::Fixed(HEAD_MARK))
+                    .height(Length::Fixed(HEAD_MARK)),
+                text(brand::APP_NAME).size(18).font(theme::semibold()),
             ]
-            .spacing(8)
+            .spacing(HEAD_BRAND_GAP)
             .align_items(iced::Alignment::Center),
         );
+
+        // The history pair. Drawn and inert: the reference's two rings are the
+        // same, because its rail navigation does not push history and neither
+        // does this one's. They are here because the head is a thing to copy
+        // rather than a thing to improve -- see `REFERENCE.md`.
+        let history = row![
+            head_ring("chevron-back", "Back"),
+            head_ring("chevron-forward", "Forward"),
+        ]
+        .spacing(HEAD_RING_GAP);
 
         // The bar names the page you are on, the way the reference's does. It is
         // a drag patch like the brand: a strip of the bar that does nothing under
@@ -4455,7 +4541,7 @@ impl PalantirApp {
         // anywhere they are not a control.
         let page_cluster = grabbable(
             BarArea::Page,
-            Length::Fixed(PAGE_CLUSTER_WIDTH),
+            PAGE_CLUSTER_WIDTH,
             self.bar_armed == Some(BarArea::Page),
             row![
                 glyph(self.page.icon(), PAGE_GLYPH, theme::text_muted()),
@@ -4467,15 +4553,6 @@ impl PalantirApp {
             .align_items(iced::Alignment::Center),
         );
 
-        let search = container(
-            text_input("Search your instances…", &self.search)
-                .on_input(Message::SearchChanged)
-                .style(theme::Field)
-                .padding([8, 10])
-                .width(Length::Fill),
-        )
-        .width(Length::Fixed(300.0));
-
         // The maximize control is answered as non-client — that is exactly what
         // makes Windows 11 put Snap Layouts on it — so iced never sees the
         // pointer arrive and cannot work out a hover of its own. The window's
@@ -4485,9 +4562,14 @@ impl PalantirApp {
         let maximized = self.window_is_maximized();
 
         let bar = row![
-            dragging_area,
+            // The brand and the history pair travel together: the reference's 8px
+            // `ml-2` is between them, and the row's own `TITLE_BAR_SPACING` is
+            // between everything, so grouping them is the only way to state both.
+            row![dragging_area, history].spacing(HEAD_RING_GAP).align_items(iced::Alignment::Center),
+            // 16 less the row's own 6, so the gap the two add up to is the
+            // reference's `pl-4`.
+            iced::widget::Space::with_width(Length::Fixed(HEAD_CRUMB_GAP - TITLE_BAR_SPACING)),
             page_cluster,
-            search,
             grabbable(
                 BarArea::Middle,
                 Length::Fill,
@@ -4500,10 +4582,6 @@ impl PalantirApp {
                 self.bar_armed == Some(BarArea::RunChip),
                 self.view_run_chip(),
             ),
-            button(glyph("refresh", 14.0, theme::text_dim()))
-                .on_press(Message::Refresh)
-                .style(theme::ghost())
-                .padding([5, 9]),
             button(glyph("minimize", CAPTION_GLYPH, theme::text_dim()))
                 .on_press(Message::WindowMinimize)
                 .style(theme::window_button())
@@ -4601,8 +4679,13 @@ impl PalantirApp {
         // container is 58px and the west resize band paints the other 6, so the
         // 2 here and the 6 there add up to that 8 -- at 5 the plate landed three
         // pixels left of where the reference draws it.
+        // `align_items(Start)` and not `Center`: the tile is 48px in a 58px
+        // container, so centring it and then adding the reference's own 2px inset
+        // would put the plate at x 11 where the reference draws it at x 8 -- the
+        // measurement said 11, which is how the two mistakes were found. From the
+        // start, 6px of resize band plus 2px of inset is the reference's 8.
         let mut rail =
-            column![].spacing(4).padding([0, 2]).align_items(iced::Alignment::Center);
+            column![].spacing(4).padding([0, 2]).align_items(iced::Alignment::Start);
         for page in Page::rail().into_iter().filter(|page| self.rail_shows(*page)) {
             rail = rail.push(rail_icon(
                 page.icon(),
@@ -4611,7 +4694,18 @@ impl PalantirApp {
                 Message::PageSelected(page),
             ));
         }
-        rail = rail.push(horizontal_rule(1u16));
+        // The rail's divider: 16px below the last entry and 32px wide, inset 8px
+        // either side of the entry's own 48. The reference's is a `mx-2 h-px
+        // bg-surface-5` inside the rail's 8px padding, and it measures x 16..47 at
+        // y 320 of its own window -- 16 rows below the fifth entry, which ends at
+        // 304. The 4px the column already puts between children is subtracted from
+        // the 16 so the gap the two add up to is the reference's.
+        rail = rail.push(iced::widget::Space::with_height(Length::Fixed(RAIL_DIVIDER_GAP)));
+        rail = rail.push(
+            container(horizontal_rule(1u16))
+                .width(Length::Fixed(RAIL_DIVIDER_WIDTH))
+                .padding([0, 8]),
+        );
         rail = rail.push(rail_icon("folder", "Instances folder", false, Message::OpenInstancesFolder));
         rail = rail.push(iced::widget::Space::with_height(Length::Fill));
         rail = rail.push(rail_icon("plus", "Create instance (N)", false, Message::OpenCreate));
@@ -4786,25 +4880,65 @@ impl PalantirApp {
                     || card.subtitle().to_lowercase().contains(&needle)
             })
             .collect();
-        let mut grid = column![
+        // The populated Home is the reference's `LibrarySection`: a "Library"
+        // heading, a toolbar of two 8px rows, then the groups -- `flex flex-col
+        // gap-3 pb-16 min-h-[500px]`, so 12px from the heading to the toolbar and
+        // 8px inside it. The toolbar's first row is the search field and the two
+        // create buttons; the second is its sort and filter menus, which this
+        // library has no counterpart for, so the count that used to sit beside the
+        // heading and the rescan that used to sit beside the create button are
+        // what fills it. The strings are the reference's own (`app.library.
+        // search.placeholder` is "Search", `app.library.library` is "Library").
+        let toolbar = column![
             row![
-                text("Instances").size(24).font(theme::semibold()),
-                text(format!("{}", self.cards.len())).size(13),
-                horizontal_space(),
-                button(row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)].spacing(6))
-                    .on_press(Message::Refresh)
-                    .style(theme::secondary())
-                    .padding([6, 12]),
-                button(text("+ New instance").size(12))
-                    .on_press(Message::OpenCreate)
-                    .style(theme::primary())
-                    .padding([6, 12]),
+                container(
+                    text_input("Search", &self.search)
+                        .on_input(Message::SearchChanged)
+                        .style(theme::Field)
+                        .padding([8, 10])
+                        .width(Length::Fill),
+                )
+                .width(Length::Fill),
+                button(
+                    row![
+                        glyph("plus", 16.0, theme::on_accent()),
+                        text("New instance").size(14).font(theme::semibold()),
+                    ]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center),
+                )
+                .on_press(Message::OpenCreate)
+                .style(theme::primary())
+                .padding([8, 16]),
             ]
-            .spacing(10)
+            .spacing(8)
             .align_items(iced::Alignment::Center),
-            horizontal_rule(1u16),
+            row![
+                text(format!(
+                    "{} {}",
+                    self.cards.len(),
+                    if self.cards.len() == 1 { "instance" } else { "instances" }
+                ))
+                .size(13),
+                horizontal_space(),
+                button(
+                    row![
+                        glyph("refresh", 14.0, theme::text_muted()),
+                        text("Refresh").size(12),
+                    ]
+                    .spacing(6)
+                    .align_items(iced::Alignment::Center),
+                )
+                .on_press(Message::Refresh)
+                .style(theme::secondary())
+                .padding([6, 12]),
+            ]
+            .spacing(8)
+            .align_items(iced::Alignment::Center),
         ]
-        .spacing(14);
+        .spacing(8);
+
+        let mut grid = column![text("Library").size(24).font(theme::semibold()), toolbar].spacing(12);
         if visible.is_empty() {
             grid = grid.push(centered_note(format!("Nothing matches '{}'.", self.search)));
         }
@@ -6778,9 +6912,41 @@ impl PalantirApp {
 /// The label used to be dropped on the floor (`_label`), so six rail buttons
 /// looked identical whether you were pointing at one or not. The tooltip is the
 /// reference UI's answer to that: a single icon per destination, named on hover.
+/// One of the head's two history rings.
+///
+/// Inert on purpose -- see [`theme::Role::HeadRing`] -- and named by a tooltip
+/// rather than a label, because the reference names them the same way: an
+/// `aria-label` plus a v-tooltip on the ring itself.
+fn head_ring(icon: &str, label: &str) -> Element<'static, Message> {
+    let ring = button(
+        container(glyph(icon, theme::HEAD_CHEVRON_GLYPH, theme::HEAD_CHEVRON))
+            .center_x()
+            .center_y(),
+    )
+    .style(theme::head_ring())
+    .padding([0, 0])
+    .width(Length::Fixed(theme::HEAD_RING_BUTTON))
+    .height(Length::Fixed(theme::HEAD_RING_BUTTON));
+    tooltip(
+        ring,
+        container(text(label.to_string()).size(12))
+            .style(theme::Tooltip)
+            .padding([6, 10]),
+        tooltip::Position::Bottom,
+    )
+    .gap(6)
+    .padding(0)
+    .into()
+}
+
+/// One rail entry: a 48px tile whose active plate is a circle.
+///
+/// The glyph is 22px rather than the tile's own 24: the reference's entries hold
+/// an icon whose ink measures 22px in its own window, and that one pixel of
+/// clearance on each side is what keeps a 48px circle from reading as full.
 fn rail_icon(icon: &str, label: &str, active: bool, message: Message) -> Element<'static, Message> {
     let color = if active { theme::accent() } else { theme::text_muted() };
-    let tile = button(container(glyph(icon, 24.0, color)).center_x().center_y())
+    let tile = button(container(glyph(icon, 22.0, color)).center_x().center_y())
         .on_press(message)
         .style(theme::rail_button(active))
         .padding([0, 0])
@@ -8525,18 +8691,63 @@ mod tests {
     /// size: "Screenshots" measures 97px in the Inter face the shell ships.
     #[test]
     fn the_bar_names_the_page_at_the_measured_size() {
-        assert_eq!(PAGE_GLYPH, 18.0);
+        // The box, not the ink. The reference's breadcrumb visual is a 20px slot
+        // (`size-5`) whose glyph's ink measures 18px in its own window, and the
+        // gap to the label is its `gap-1.5`.
+        assert_eq!(PAGE_GLYPH, 20.0);
         assert_eq!(PAGE_TITLE_SIZE, 16.0);
-        assert_eq!(PAGE_CLUSTER_GAP, 9.0);
-        const SCREENSHOTS_AT_16: f32 = 97.0;
-        assert!(
-            PAGE_CLUSTER_WIDTH >= PAGE_GLYPH + PAGE_CLUSTER_GAP + SCREENSHOTS_AT_16,
-            "the patch is narrower than the longest title it has to hold"
-        );
-        // Every page's name fits, not just the longest one by eye.
+        assert_eq!(PAGE_CLUSTER_GAP, 6.0);
+        let _ = PAGE_CLUSTER_WIDTH;
+        // Every page's name fits, not just the longest one by eye: "Screenshots"
+        // measures 97px in the Inter face the shell ships, and no page's name is
+        // longer.
         for page in Page::all() {
             assert!(page.title().chars().count() <= "Screenshots".len());
         }
+    }
+
+    /// The head's own numbers, which are the reference's.
+    ///
+    /// Every one of these is stated in the reference's stylesheet and confirmed
+    /// against a capture of its running window at a pinned 1280x720 client: the
+    /// bar is `h-[--top-bar-height]` (3rem, 48px) with the mark `h-7` (28px) at
+    /// x 8, the history pair `!h-7 !w-7` (28px) `gap-2` (8px) apart with their ink
+    /// at x 171..200 and 207..236, and `Breadcrumbs` is `pl-4` (16px) after them.
+    #[test]
+    fn the_head_is_the_reference_bars_size() {
+        assert_eq!(TITLE_BAR_HEIGHT, 48.0);
+        assert_eq!(title_bar_padding().left, 8.0);
+        assert_eq!(HEAD_MARK, 28.0);
+        assert_eq!(theme::HEAD_RING_BUTTON, 28.0);
+        assert_eq!(HEAD_RING_GAP, 8.0);
+        assert_eq!(HEAD_CRUMB_GAP, 16.0);
+        assert_eq!(theme::HEAD_CHEVRON_GLYPH, 16.0);
+        // The rings have to fit inside the bar's content box, or the row would
+        // clip them and the head's height would stop being the bar's.
+        assert!(theme::HEAD_RING_BUTTON <= TITLE_BAR_CONTENT_HEIGHT);
+        // The two drag patches hug their content rather than being fixed widths
+        // with the content centred in them: centring is what put this shell's
+        // first ring five pixels right of the reference's.
+        assert!(matches!(BRAND_CLUSTER_WIDTH, Length::Shrink));
+        assert!(matches!(PAGE_CLUSTER_WIDTH, Length::Shrink));
+    }
+
+    /// The rail's active plate is a circle.
+    ///
+    /// `NavButton.vue` is `w-12 h-12 rounded-full` and its selected state is a
+    /// `::before` at `inset: 0` with `border-radius: 50%`, so the plate's radius is
+    /// half the entry. The reference's own window draws it: at its widest the plate
+    /// spans the whole 48px entry and its top row spans 14. A 12px radius -- what
+    /// this was, off a reading of the plate's corner that said 11 -- shares the
+    /// widest row and differs everywhere else, which is why
+    /// `tools/panel_gate.py` measures the shape rather than the size.
+    #[test]
+    fn the_rail_plate_is_a_circle() {
+        assert_eq!(RAIL_BUTTON, 48.0);
+        assert_eq!(theme::R_RAIL, RAIL_BUTTON / 2.0);
+        // And the divider is the reference's `mx-2 h-px` inside its 8px padding.
+        assert_eq!(RAIL_DIVIDER_WIDTH, 32.0);
+        assert_eq!(RAIL_DIVIDER_GAP + 4.0, 16.0);
     }
 
     /// The empty state's landmarks reproduce the reference's own capture.

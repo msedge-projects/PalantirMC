@@ -465,6 +465,105 @@ def main() -> int:
         "#%02x%02x%02x against #%02x%02x%02x" % ((plate_px or (0, 0, 0)) + REF["plate"]),
     )
 
+    # G11: the plate behind the active rail entry is a *circle*, not a rounded
+    # rectangle.
+    #
+    # The colour assertion above cannot see this and said the right thing about
+    # the wrong shape for a release. `NavButton.vue` is `w-12 h-12 rounded-full`
+    # whose selected state is a `::before` at `inset: 0` with `border-radius:
+    # 50%`, and the reference's own window draws exactly that -- but this shell
+    # drew a 12px radius, which is what a reading of the plate's corner arc had
+    # said, and the two agree on the fill and on the widest row and disagree
+    # everywhere else.
+    #
+    # Row width is what separates them, so it is what is measured. Across a 48px
+    # plate:
+    #
+    #     circle, r=24      10, 26, 30, ... 48 (widest, 7 rows either side of the
+    #                       centre), ... 30, 26, 12
+    #     rounded, r=12     24, 26, 34, ... 48 (widest, 12 rows either side), ...
+    #
+    # i.e. a circle's top row is about a quarter of its widest and a 12px radius's
+    # is about a half. The test is stated as that ratio: the widest row must be the
+    # plate's own height and the top row must be under 40% of it. A square plate
+    # fails both, a 12px radius fails the second, and only a circle passes.
+    # The rows are counted against the plate's *own* colour rather than against
+    # the hue band above, which is what the first attempt at this did and what it
+    # got wrong: the band is wide enough to also admit the antialiased edge of the
+    # logo in the head and the plate's own icon, so the box it measured ran from
+    # y 9 to y 91 and its widest row was the icon. The colour the assertion above
+    # just agreed on is exact, so the shape is counted at that colour.
+    # The plate's colour, taken from the modal fill above when there is one and
+    # from the dark-green band otherwise: the two reference captures this gate is
+    # run against disagree about which entry is active (the walk's Home capture
+    # has Home selected, its Screenshots capture has the page open before the rail
+    # repaints), and a shape assertion should not depend on that. Both candidates
+    # are flat fills of the same component, so reading either is reading the
+    # plate; what is *not* read is the icon on it, which is the accent and far
+    # brighter.
+    candidates = [
+        c
+        for c in (plate_px,)
+        if c is not None
+    ] or [(0x1D, 0x56, 0x3F)]
+
+    def widest_run(y: int) -> tuple[int, int]:
+        """The longest horizontal run of plate colour on row `y`, and where it starts."""
+        best = (0, 0)
+        for cand in candidates:
+            run = 0
+            for x in range(0, w):
+                if near(px(x, y), cand, 6):
+                    run += 1
+                    if run > best[0]:
+                        best = (run, x - run + 1)
+                else:
+                    run = 0
+        return best
+
+    rows = {y: widest_run(y) for y in range(0, h)}
+    # A plate row is one with a run of at least a quarter of the plate's own
+    # width; the antialiased scatter of the same colour elsewhere is a few pixels.
+    solid = [y for y, (n, _) in rows.items() if n >= 12]
+    if not solid:
+        g.check(False, "the plate is a circle, not a rounded rectangle", "no plate found")
+        g.check(False, "the plate is as wide as it is tall", "no plate found")
+    else:
+        top, bottom = min(solid), max(solid)
+        left = min(rows[y][1] for y in solid)
+        right = max(rows[y][1] + rows[y][0] - 1 for y in solid)
+        widths = {y: rows[y][0] for y in range(top, bottom + 1)}
+        widest_y = max(widths, key=widths.get)
+        widest = widths[widest_y]
+        # The entry is inset 8px in a 64px rail, so a 48px plate runs x 8..55.
+        # The corner rows carry the same antialiasing as everything else here, so
+        # the ratio is read off the first row that has any plate in it at all.
+        first = widths[top]
+        print(
+            "active plate rows: top %d px at y %d, widest %d px at y %d, "
+            "bottom %d px at y %d (box x %d..%d, y %d..%d)"
+            % (first, top, widest, widest_y, widths[bottom], bottom, left, right, top, bottom)
+        )
+        tall = bottom - top + 1
+        g.check(
+            widest >= tall * 0.85,
+            "the plate is as wide as it is tall",
+            f"widest row {widest}px against a {tall}px height",
+        )
+        # The discriminating number, and the only one the two shapes do not share.
+        # The middle row is not asserted: the box is the rows with a *solid* run of
+        # the plate's colour, which stops a row or two short of the plate's
+        # geometric top and bottom, so `widest_y` against the box's middle is a
+        # statement about the threshold rather than about the plate. The top row's
+        # share of the widest row is not: both shapes have the same widest row and
+        # the same rows counted, so the ratio between them is the shape.
+        g.check(
+            first * 100 < widest * 40,
+            "the plate is a circle, not a rounded rectangle",
+            f"top row {first}px = {first * 100 // max(widest, 1)}% of the widest "
+            f"{widest}px (a circle is ~30%, a 12px radius 50%), widest at y {widest_y}",
+        )
+
     print()
     if not g.ran:
         print(f"no assertion matched --only {only!r}")

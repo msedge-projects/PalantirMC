@@ -1606,3 +1606,48 @@ has one result layout), the API's `total_hits` in the count (the parse keeps the
 and drops the total), **project icons** in the cards' 100x100 slots (a fetch per
 card), and Discover's **filter column** (331px wide against the shell's 299, and
 "porting it" means porting facets, which is a search change rather than a page's).
+
+## 26. The head, the rail's plate and the band above them
+
+The reference's own source arrived in this pass (`github.com/modrinth/code`, read
+as a specification — see `THIRD_PARTY_NOTICES.md`), and it settled three things
+that pixels alone had left as fits. Each is recorded in `REFERENCE.md` with the
+line of source and the row of pixels that agree about it.
+
+**The active plate is a circle.** It had been recorded as a 12px radius off an arc
+through the plate's corner, and drawn that way for a release. `NavButton.vue` is
+`w-12 h-12 rounded-full` and its selected state is a `::before` at `inset: 0` with
+`border-radius: 50%`; counting the plate's own row widths in a capture gives 14,
+26, 30, 40, 44, 46, 48 and back down again, which is a circle and cannot be a 12px
+radius. `tools/panel_gate.py` now measures the *shape* — the top row's share of the
+widest row — because its colour assertion passed on both and always would have: a
+circle and a rounded square are the same fill.
+
+**The head has no search field.** The reference's search is the library's own
+toolbar, one level down, and its refresh is the action bar's, in the head's right
+section. The instance search moved to Home's toolbar, where the reference keeps it,
+and the head draws the file's two history rings instead: 28px, 8px apart, a 1px
+`#404248` ring with a dim chevron, inert because this shell's pages are flat for the
+same reason the reference's rail navigation is. Gaps are stated box to box in the
+source and now in this shell: 8px from the mark to the name, 8px between the rings,
+16px (its `pl-4`) from the pair to the breadcrumb.
+
+**There was a 6px band above the head.** The window's resize grips wrap it on every
+edge, and the top one was painted page-coloured, so the head began at y 6 and its
+rule sat at y 54 where the reference's begins at 0 and ends at 48. It is gone from
+the top and kept on the other three edges, which is safe because the band was only
+ever the fallback for an edge the native hit test already owns. `tools/shellcmp.py`
+is the tool that can see this: it measures the frame on both captures in one run,
+and no gate that looks at a single window could.
+
+What is deliberately not copied: the rail's *list* (its five entries are Home,
+Discover, Skin selector, Screenshots and Modrinth Hosting, and its foot is create,
+Settings, account; ours has Mods, Worlds, Logs and per-instance Settings under an
+instance instead, and no Skin selector or Hosting page to point at), the
+reference's brand art inside the head's mark box, and the window controls' own
+drawing. Each is in `REFERENCE.md`'s "what is not copied" with the reason, and each
+is a change of *feature* rather than of drawing.
+
+Next: the instance page's own tab strip (Mods / Worlds / Files / Screenshots) and
+the create-instance chooser's three cards, both of which need an instance to exist
+in the reference's data root before they can be walked and captured.

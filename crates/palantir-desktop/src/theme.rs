@@ -477,14 +477,50 @@ pub const R_CARD: f32 = 16.0;
 pub const R_BUTTON: f32 = 12.0;
 /// Chip/pill corner radius: `--radius-sm`.
 pub const R_CHIP: f32 = 8.0;
-/// Corner radius of the rail's active plate.
+/// Corner radius of the rail's active plate: 24 on a 48px entry, i.e. a circle.
 ///
-/// The reference's rail entries are `rounded-full` in its stylesheet, which at
-/// 48px square is 24 -- and the app does not draw that. Measured down the plate's
-/// own top-left corner in a capture of the running window, the inset reaches 11
-/// at its widest, i.e. a 12px radius: `--radius-md`, the same rung the buttons
-/// use. The measurement is what this is, the same way the accent above is.
-pub const R_RAIL: f32 = 12.0;
+/// This was 12, on a reading of the plate's own corner that said the inset
+/// reached 11 at its widest. The reading was wrong and the source says why:
+/// `NavButton.vue` is `w-12 h-12 rounded-full` and its selected state is a
+/// `::before` at `inset: 0` with `border-radius: 50%`. Re-measuring the plate by
+/// the width of each of its rows settles it -- 14px at the top row, 30 at 4 rows
+/// down, 44 at 11, 48 from 7 rows either side of the centre -- which is a circle
+/// of radius 24 and cannot be a 12px radius, whose top row would be 24px wide
+/// and whose widest row would begin 12 rows in rather than 17.
+///
+/// The source and the pixels agreeing is the reason this is stated as the
+/// reference's own token rather than as a fit: `rounded-full` on a 48px box
+/// *is* 24.
+pub const R_RAIL: f32 = 24.0;
+
+/// The ring around the head's back and forward buttons.
+///
+/// `IconButton type="outlined"` draws its border in `--color-button-border`,
+/// which the dark theme sets to `rgba(193, 190, 209, 0.12)` -- but the ring the
+/// installed 0.204 paints measures `#404248` flat, which is that colour at 0.16
+/// over the chrome. The pixels win, as they do everywhere the two disagree, and
+/// the number is stated opaque because that is what a 1px ring on a known
+/// surface resolves to.
+pub const HEAD_RING: Color = rgb(0x40, 0x42, 0x48);
+
+/// Side of one of those rings, and of the chevron drawn inside it.
+///
+/// The reference's pair is `!h-7 !w-7` (28px) with an 8px gap; in its own
+/// window the two rings' ink boxes measure 28px wide and 8px apart, at x 172 and
+/// x 208 of a 1280px client.
+pub const HEAD_RING_BUTTON: f32 = 28.0;
+/// Side of the chevron inside one.
+pub const HEAD_CHEVRON_GLYPH: f32 = 16.0;
+
+/// Ink of the chevrons inside those two rings.
+///
+/// The source's `:class="{ 'opacity-20': !canNavigateBack }"` would put a
+/// disabled chevron 20% of white over the chrome, near enough `#292b2f` to be
+/// invisible; the reference's own window paints `#96a2b0`, which is its
+/// `--color-text-tertiary` and a chevron you can see. The reference draws the
+/// one that is visible, so this is the one that is copied, and the disabled
+/// treatment is recorded in `REFERENCE.md` rather than drawn.
+pub const HEAD_CHEVRON: Color = rgb(0x96, 0xA2, 0xB0);
 /// Modal corner radius: `--radius-lg`, as cards.
 pub const R_MODAL: f32 = 16.0;
 /// Corner radius on the page pane's top-left, and only there.
@@ -945,6 +981,15 @@ pub enum Role {
     WindowExternallyHovered { hovered: bool },
     /// Title-bar close control (red on hover).
     WindowClose,
+    /// One of the head's two history buttons.
+    ///
+    /// A ring rather than a fill: the reference's `IconButton type="outlined"`
+    /// is transparent with a 1px border and no hover of its own, and the pair in
+    /// its own window never lights up because nothing in its rail navigation
+    /// pushes history. This shell's pages are flat for the same reason, so the
+    /// pair is drawn in that state and is inert -- a control that answers a
+    /// press by doing nothing would be worse than one that does not offer.
+    HeadRing,
     /// One entry in the Settings dialog's section list.
     ///
     /// The reference's `rounded-xl px-4 py-2` row: `--color-button-bg-selected`
@@ -997,6 +1042,10 @@ pub fn ghost() -> Btn {
 /// Icon-rail entry.
 pub fn rail_button(active: bool) -> Btn {
     Btn(Role::Rail { active })
+}
+/// One of the head's two history rings.
+pub fn head_ring() -> Btn {
+    Btn(Role::HeadRing)
 }
 /// Selectable pill.
 pub fn chip_button(active: bool) -> Btn {
@@ -1249,6 +1298,16 @@ impl Btn {
                 background: if hovered { Some(danger().into()) } else { None },
                 text_color: if hovered { Color::WHITE } else { text_dim() },
                 border: Border { radius: 6.0.into(), ..Default::default() },
+                ..Default::default()
+            },
+            Role::HeadRing => button::Appearance {
+                background: None,
+                text_color: HEAD_CHEVRON,
+                border: Border {
+                    radius: (HEAD_RING_BUTTON / 2.0).into(),
+                    width: 1.0,
+                    color: HEAD_RING,
+                },
                 ..Default::default()
             },
             Role::NavItem { active } => button::Appearance {
@@ -1879,7 +1938,12 @@ mod tests {
             rgb(0x1D, 0x55, 0x40),
             "the active plate's fill"
         );
-        assert_eq!(R_RAIL, 12.0, "the plate is a rounded square, not a circle");
+        // A circle on a 48px entry, which is what `rounded-full` plus a `::before`
+        // at `inset: 0` with `border-radius: 50%` is, and what the reference's own
+        // window draws: the plate's rows go 14, 30, 44, 48, 44, 30, 14 down the
+        // entry. The assertion here used to read 12 and say "a rounded square, not
+        // a circle", which is exactly the mistake it was guarding.
+        assert_eq!(R_RAIL, 24.0, "the plate is a circle on a 48px entry");
         // The composite the highlight is a solid of: the accent at 25% over the
         // chrome. If the accent moves, this has to move with it.
         let a = palette.accent;
