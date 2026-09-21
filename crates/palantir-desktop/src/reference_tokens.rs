@@ -46,6 +46,7 @@
 //! naming the file and line the reference states the token on. Two readers
 //! that share no code agreeing is the check; either one alone is a claim.
 
+use crate::theme_tokens;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -546,6 +547,58 @@ fn colour(ours: &'static str, field: &'static str, value: Color, token: &'static
     }
 }
 
+/// A length claim: ours as a px constant, the reference's token as its name.
+///
+/// `field` is deliberately `None` -- the palette-accounting test reads those to
+/// prove every colour is classified, and a radius is not a colour.
+fn length(ours: &'static str, value: f32, token: &'static str) -> Claim {
+    Claim {
+        ours,
+        field: None,
+        value: Value::Length(value),
+        against: Against::Token(token),
+    }
+}
+
+/// The fields a radius claim reads out of the generated copy, flattened over
+/// `Row` and `Scoped` so one match can take either. `file` is carried and never
+/// read today: the failure message prints the token's name rather than its
+/// location, because the location is whatever the copy says, and a stale copy is
+/// the vocabulary gate's failure to raise, not this one's.
+#[allow(dead_code)]
+struct RowRef<'a> {
+    file: &'a str,
+    line: u32,
+    kind: crate::theme_tokens::Kind,
+    value: &'a str,
+}
+
+/// Every radius the shell draws, against the `--radius-*` token it names.
+///
+/// These were transcribed by hand when the components were ported and carried
+/// only a comment as their receipt; the vocabulary copy exists now, so the
+/// comment is retired. Each constant's doc in `theme.rs` states *which*
+/// component it styles, which is the part a sheet cannot say.
+fn radius_claims() -> Vec<Claim> {
+    vec![
+        length("R_CARD", crate::theme::R_CARD, "radius-lg"),
+        length("R_BUTTON", crate::theme::R_BUTTON, "radius-md"),
+        length("R_CHIP", crate::theme::R_CHIP, "radius-sm"),
+        length("R_MODAL", crate::theme::R_MODAL, "radius-lg"),
+        // Deliberately absent: R_KEYCAP. It is 6, from Tailwind's own `rounded-md`
+        // rung, *not* from Omorphia's `--radius-md` (12) -- the `<kbd>` it copies
+        // spells `rounded-md` in the utility's meaning, and theme.rs's note on
+        // the constant is the record of that reading. A token claim would pin it
+        // to the wrong scale.
+        // R_BUTTON_LG (14) is absent for the same shape of reason: the reference
+        // gives each *button size* its own radius in ButtonFrame.vue's class
+        // strings (`lg` is literally `rounded-[14px]`), not a rung of the radius
+        // ladder -- the sheet's `--radius-md` is 12 and is `md`'s, not `lg`'s. It
+        // is measured, not transcribed, so it belongs to the size test's world
+        // where the capture that confirmed it lives.
+    ]
+}
+
 fn deviating(
     ours: &'static str,
     field: &'static str,
@@ -827,6 +880,9 @@ fn claims(theme: ColorTheme) -> Vec<Claim> {
         ColorTheme::Oled => (Palette::oled(), oled_claims(&Palette::oled())),
         ColorTheme::Dark | ColorTheme::System => (Palette::dark(), dark_claims(&Palette::dark())),
     };
+    // Radii are modeless -- no `--radius-*` token moves between modes -- so one
+    // copy of the claims rides along with whichever theme is being checked.
+    list.extend(radius_claims());
     list.extend(aliases(&palette));
     list
 }
@@ -879,9 +935,52 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
         }
     };
 
-    let (theirs, line) = match sheets.value(theme, token) {
-        Ok(value) => value,
-        Err(problem) => return Some(format!("{}: {problem}", claim.ours)),
+    // A radius is modeless -- no `--radius-*` token moves between modes -- and
+    // it is declared on the `html` block, which the per-mode maps above
+    // deliberately do not hold: their values carry line numbers that only name
+    // `variables.scss`, and a merged map would make every failure message name
+    // the wrong sheet. The generated vocabulary holds the merged form, so a
+    // radius is read from there; the vocabulary gate guarantees the row is the
+    // sheets'. `find` is on the bare name because the copy spells tokens with
+    // their `--`.
+    let modeless = token.starts_with("radius");
+    let (theirs, line) = if modeless {
+        let bare = format!("--{token}");
+        // The radii are on `LIGHT`'s table (the `html` block merges into every
+        // mode), so that is the row that carries the file and line. `SCOPED` is
+        // only the fallback: a radius a component overrides per-selector is a
+        // different claim, and this is not that yet.
+        let from_light = theme_tokens::LIGHT.iter().find(|row| row.token == bare);
+        let row = match from_light {
+            Some(row) => RowRef { file: row.file, line: row.line, kind: row.kind, value: row.value },
+            None => match crate::theme_tokens::SCOPED.iter().find(|row| row.token == bare) {
+                Some(row) => RowRef { file: row.file, line: row.line, kind: row.kind, value: row.value },
+                None => {
+                    return Some(format!(
+                        "{}: --{token} is not in the copy; run `python tools/gen_tokens.py`",
+                        claim.ours
+                    ));
+                }
+            },
+        };
+        match row {
+            RowRef { kind: crate::theme_tokens::Kind::Length, value, line, .. } => {
+                (Value::Length(value.parse().unwrap_or(f32::NAN)), line as usize)
+            }
+            RowRef { value, kind, .. } => {
+                return Some(format!(
+                    "{}: --{token} is held as {} ({:?}), not a length",
+                    claim.ours,
+                    value,
+                    kind
+                ));
+            }
+        }
+    } else {
+        match sheets.value(theme, token) {
+            Ok(value) => value,
+            Err(problem) => return Some(format!("{}: {problem}", claim.ours)),
+        }
     };
 
     let difference = match (&claim.value, &theirs) {
@@ -1110,21 +1209,19 @@ fn our_font_weights() -> Vec<(&'static str, u32)> {
     ]
 }
 
-/// The sizes this shell draws that the reference never writes down itself. Each
-/// one is a decision, and the reason is where the decision was made.
-const MEASURED_SIZES: [(f32, &str); 2] = [
-    (
-        15.0,
-        "the Settings dialog's section headings and the create dialog's field titles, measured \
-         off the reference's own window while those panes were ported; the ladder has 14 and 16 \
-         and neither fills that box",
-    ),
-    (
-        28.0,
-        "the device-code panel's code, measured off the reference's own dialog: it is the one \
-         string in the shell that has to be readable across a desk",
-    ),
-];
+/// The sizes this shell draws that the reference never writes down itself.
+///
+/// This used to hold two entries. Both retired onto the reference's own
+/// `text-[Npx]` classes the day the vendored components were read for the
+/// headings they actually contain, rather than the sizes a capture suggested:
+/// its Settings section headings are `text-lg` (18px) and its modal headings
+/// `text-xl` (20px), so 15 was never a size the reference states anywhere; and
+/// the one string that has to read across a desk -- the device code -- stands in
+/// the reference's own big-modal slot, `HostingUpdateRequired.vue`'s
+/// `text-3xl` (32px), whose dialog is the closest thing the reference draws to
+/// one. The list is kept empty and the test keeps its shape: the next size that
+/// is neither a rung nor a class needs a reason, and this is where it goes.
+const MEASURED_SIZES: [(f32, &str); 0] = [];
 
 // ---- The tests ----------------------------------------------------------
 

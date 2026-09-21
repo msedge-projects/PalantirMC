@@ -879,6 +879,44 @@ fn the_generated_scoped_vocabulary_covers_every_declared_token() {
     );
 }
 
+#[test]
+fn the_chrome_is_the_scoped_copy() {
+    // The shell's chrome numbers -- the top bar's height, the rail's width, the
+    // right panel's -- are the reference's own scoped tokens, declared on
+    // `.app-contents` in `App.vue`, and they were transcribed by hand before the
+    // copy existed. A constant whose only receipt is a comment saying where it
+    // came from is exactly the shape of claim this module retires: the row is
+    // read and the two are compared. `SCOPED` is compiled in, so this holds
+    // without the vendored tree too; when the tree moves and the generator is
+    // re-run, this is the test that says the chrome moved with it.
+    for (token, ours, name) in [
+        ("--top-bar-height", crate::app::TITLE_BAR_HEIGHT, "TITLE_BAR_HEIGHT"),
+        ("--left-bar-width", crate::app::RAIL_WIDTH, "RAIL_WIDTH"),
+        ("--right-bar-width", crate::app::SIDEBAR_WIDTH, "SIDEBAR_WIDTH"),
+    ] {
+        let Some(row) = theme_tokens::SCOPED
+            .iter()
+            .find(|row| row.token == token && row.file == "app-frontend/src/App.vue")
+        else {
+            panic!("the copy no longer holds {token}: the chrome has nothing to be transcribed from");
+        };
+        if row.kind != Kind::Length {
+            panic!("{token} is a {:?}, not a length: the copy changed shape", row.kind);
+        }
+        let px = row.value;
+        let Ok(theirs) = px.parse::<f32>() else {
+            panic!("{token} is `{}`, which is not a length in px", row.value);
+        };
+        assert!(
+            (ours - theirs).abs() < 0.01,
+            "{name} is {ours}px and the reference's {token} is {theirs}px\n    \
+             vendor/modrinth-app/{}:{}  {token}",
+            row.file,
+            row.line
+        );
+    }
+}
+
 /// The row type the two tables above hold, named so the signature reads.
 #[allow(dead_code)]
 fn row_type_witness(_row: &Row) {}
