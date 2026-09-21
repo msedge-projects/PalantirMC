@@ -1712,6 +1712,19 @@ verbatim because `vendor/modrinth-app` is a pinned, hash-checked blob tree rathe
 than a paraphrase. It skips on a missing tree by design, so the day the reference
 moves the test tells us which line to re-read rather than silently passing.
 
+### What the runner confirmed
+
+Commit `b08e9d2`, run
+[35593826385](https://github.com/MSedgeMC/PalantirMC/actions/runs/35593826385): all
+five jobs green, and the exe it produced is `60f7a6ac43c35ea8e5f5762bec3042cba15e8bd2438e4e247cd367eb87d0de91`
+(4,120,864 bytes), hash-checked against the sidecar the runner wrote and staged as
+`dist/PalantirMC.exe` with the raw artifact under `dist/ci-b08e9d2/msvc/`. The
+Home, Discover and Screenshots page gates were then re-run against captures of
+that build (`tools/appshot.py`) and all three pass, which is the static half of
+the claim: nothing a gate already measures moved. The hover half cannot be
+captured at all -- there is no pointer in an unattended capture -- so it is
+asserted by the four unit tests above and by the vendored source they read.
+
 ### What this pass did not do, and how "everything" stands
 
 What is **not** carried over, each for a stated reason rather than an oversight:

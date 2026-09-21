@@ -493,6 +493,13 @@ state in full (`REFERENCE.md`, "The interactions").
 cargo test -p palantir-desktop --locked theme::tests
 ```
 
+Result: **4 met, 0 unmet** on commit `b08e9d2`, whose CI run
+[35593826385](https://github.com/MSedgeMC/PalantirMC/actions/runs/35593826385) is
+green in all five jobs. The three page gates were re-run against captures of the
+exe that run produced (`palantirx86_64-pc-windows-msvc`, hash-checked against the
+runner's own sidecar as `60f7a6ac…de91`) and pass, so the resting states these
+tests leave alone are still the ones G20--G35 measure.
+
 - [x] G42: a hover goes the way the theme says it goes -- brighter in dark, and
       **darker in light**, which is the half this shell did not have
   CHECK: cargo test -p palantir-desktop hover_goes_the_way_the_theme_says
