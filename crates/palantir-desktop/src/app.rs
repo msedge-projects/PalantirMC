@@ -5310,7 +5310,7 @@ impl PalantirApp {
         let text_column = column![
             title_row,
             text(hit.description.clone())
-                .size(15)
+                .size(14)
                 .style(iced::theme::Text::Color(theme::text_muted())),
             horizontal_space(),
             row![
@@ -5643,7 +5643,7 @@ impl PalantirApp {
                 .size(12),
             horizontal_rule(1u16),
             self.microsoft_card(),
-            text("Offline accounts").size(15).font(theme::bold()),
+            text("Offline accounts").size(16).font(theme::semibold()),
             row![
                 text_input("Username", &self.account_input)
                     .on_input(Message::AccountNameChanged)
@@ -5669,7 +5669,7 @@ impl PalantirApp {
                         icon_tile("steve", 36.0, false),
                         column![
                             row![
-                                text(account.username.clone()).size(15).font(theme::bold()),
+                                text(account.username.clone()).size(16).font(theme::semibold()),
                                 chip(
                                     account.kind.label().to_string(),
                                     if account.kind.is_online() {
@@ -5739,7 +5739,7 @@ impl PalantirApp {
             .find(|account| account.is_microsoft())
             .cloned();
         let mut content = column![
-            text("Microsoft account").size(15).font(theme::bold()),
+            text("Microsoft account").size(16).font(theme::semibold()),
             text("Signing in uses the Microsoft device-code flow: this launcher shows a code, you type it at microsoft.com/link on any device, and the launcher polls until you are done. The tokens it receives are stored next to your instances and renewed automatically before a launch.")
                 .size(12),
         ]
@@ -5801,7 +5801,9 @@ impl PalantirApp {
             text("Sign in with Microsoft").size(16).font(theme::bold()),
             text("Open the page below and enter this code.")
                 .size(12),
-            container(text(code.clone()).size(28).font(theme::bold()))
+            // 32 is the reference's big-modal heading (`text-3xl`), which is the
+            // closest thing it draws to a string that must read across a desk.
+            container(text(code.clone()).size(32).font(theme::bold()))
                 .style(theme::card)
                 .padding([14, 20])
                 .width(Length::Fill)
@@ -5927,11 +5929,11 @@ impl PalantirApp {
             .spacing(14)
             .align_items(iced::Alignment::Center),
             horizontal_rule(1u16),
-            text("Shortcuts").size(15).font(theme::bold()),
+            text("Shortcuts").size(16).font(theme::semibold()),
             text("N — create an instance     ·     Esc — close a dialog     ·     Ctrl+R — rescan instances").size(12),
             text("Drag & drop — drop a PNG for a custom instance icon, or a .mrpack/.zip to import a pack").size(12),
             horizontal_rule(1u16),
-            text("Paths").size(15).font(theme::bold()),
+            text("Paths").size(16).font(theme::semibold()),
         ]
         .spacing(10);
         for (label, value) in rows {
@@ -5944,7 +5946,7 @@ impl PalantirApp {
             );
         }
         body = body.push(horizontal_rule(1u16));
-        body = body.push(text("Honest status").size(15).font(theme::bold()));
+        body = body.push(text("Honest status").size(16).font(theme::semibold()));
         body = body.push(text("• Launching fetches the version metadata, libraries, the client jar, the asset index and its objects, extracts the natives, probes Java and streams the game's output. A file that cannot be downloaded blocks the launch and says which one it was.").size(12));
         body = body.push(text("• Microsoft sign-in uses the device-code flow; the refresh token is stored in accounts.json and the session is renewed automatically before a launch.").size(12));
         body = body.push(text("• Offline account UUIDs are derived from the name the way Java does, so the same name is the same player in every launcher.").size(12));
@@ -7334,7 +7336,7 @@ fn centered_note(message: impl Into<String>) -> Element<'static, Message> {
 /// The delete confirmation dialog.
 fn view_confirm_delete(id: &str) -> Element<'static, Message> {
     let body: Element<'static, Message> = column![
-        text(format!("Delete '{id}'?")).size(15).font(theme::bold()),
+        text(format!("Delete '{id}'?")).size(16).font(theme::semibold()),
         text("This removes the instance folder from disk. It cannot be undone.").size(12),
     ]
     .spacing(8)
