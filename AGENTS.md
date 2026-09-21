@@ -58,7 +58,14 @@ cargo build --release --locked -p palantir-desktop      # only if the exe matter
 ```
 
 `--locked` is deliberate everywhere: it is how a manifest and `Cargo.lock` that
-have drifted are caught before the runner catches them. `package` depends on
+have drifted are caught before the runner catches them.
+
+These are the commands **CI** runs, and CI is where they have to pass. On a
+machine where a full workspace run does not finish inside a working session, the
+loop that works is the targeted one -- `cargo test -p <the crate you changed>
+--locked` while you iterate -- and then push and `gh run watch` the run that does
+all of it. A local workspace run is a convenience; the runner's answer is the
+gate, which is §1's rule read from the other end. `package` depends on
 `test`, so a compile or test failure is cheap to fix and the release build is
 what a late failure costs.
 
