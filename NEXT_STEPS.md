@@ -1794,6 +1794,16 @@ palette.surface [Dark]: ours #26282d, reference #27292e
 which is both halves of what the harness is for: the token, the line it lives on,
 and the fact that the alias carrying the same value is checked too.
 
+#### What the runner confirmed
+
+Commit `b7cb7a8`, run
+[35601175367](https://github.com/MSedgeMC/PalantirMC/actions/runs/35601175367):
+all five jobs green, `Test workspace` including the six new tests. The page gates
+were not re-run for this commit and did not need to be: the module reads the
+reference's sheets and this crate's own sources, and draws nothing -- the
+rendered exe is byte-identical in behaviour to the one before it, which the
+release build of the run is the artifact of.
+
 #### The skip path, and how not to check it
 
 `UPSTREAM.md` promises that removing the vendored tree changes no test. Five tests
