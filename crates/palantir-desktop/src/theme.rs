@@ -957,7 +957,10 @@ pub enum Role {
     /// `--color-brand-highlight`, stands 36px tall and keeps a white label in
     /// both states. A chip and a tab looked similar enough to be the same
     /// component that they were one until the capture disagreed.
-    Tab { active: bool },
+    /// A tab in a page's own strip. `first`/`last` say whether it is one of the
+    /// strip's outer ends: the strip's plate is the row of tabs itself (see
+    /// [`tab_button_at`]), so only those two keep a corner radius.
+    Tab { active: bool, first: bool, last: bool },
     /// A `size="lg"` button in the brand color: the welcome screen's "Create an
     /// instance".
     BrandLarge,
@@ -1000,8 +1003,21 @@ pub fn chip_button(active: bool) -> Btn {
     Btn(Role::Chip { active })
 }
 /// One tab in a page's own tab strip.
+///
+/// The strip's plate is the *row of tabs itself* rather than a container around
+/// them: `background` is the raised surface for every tab and
+/// `--color-brand-highlight` for the selected one, and only the two outer ends
+/// carry a corner radius. That is how the reference's strip is built and it is
+/// also the only shape this toolkit measures correctly -- a container wrapped
+/// around the row hands its child a bound of its own and the labels collapse to
+/// nothing, which was captured twice and is recorded in `REFERENCE.md`.
 pub fn tab_button(active: bool) -> Btn {
-    Btn(Role::Tab { active })
+    Btn(Role::Tab { active, first: false, last: false })
+}
+
+/// The same, for one of the strip's outer ends.
+pub fn tab_button_at(active: bool, first: bool, last: bool) -> Btn {
+    Btn(Role::Tab { active, first, last })
 }
 /// The clickable body of an instance card (the card itself is a container).
 pub fn card_area(selected: bool) -> Btn {
@@ -1134,19 +1150,37 @@ impl Btn {
                 border: Border { radius: R_RAIL.into(), ..Default::default() },
                 ..Default::default()
             },
-            Role::Tab { active } => button::Appearance {
-                // The strip's own background is the page, but the fill is not a
-                // composite of the page and the accent -- see
-                // [`Palette::brand_highlight`] -- so it is the solid token.
-                background: if active {
-                    Some(brand_highlight().into())
-                } else if hovered {
-                    Some(alpha(text(), 0.08).into())
-                } else {
-                    None
-                },
+            Role::Tab { active, first, last } => button::Appearance {
+                // The fill is not a composite of the page and the accent -- see
+                // [`Palette::brand_highlight`] -- so it is the solid token, and
+                // the unselected tabs carry the raised surface so that the row
+                // of them is the strip's plate.
+                background: Some(
+                    if active {
+                        brand_highlight()
+                    } else if hovered {
+                        lighten(surface(), HOVER_BRIGHTNESS)
+                    } else {
+                        surface()
+                    }
+                    .into(),
+                ),
                 text_color: text(),
-                border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                // The seam between two tabs is square: the radius is what makes
+                // the whole row read as one plate with rounded ends rather than
+                // as a row of separate pills.
+                // `Radius`'s order is top-left, top-right, bottom-right,
+                // bottom-left.
+                border: Border {
+                    radius: [
+                        if first { R_BUTTON } else { 0.0 },
+                        if last { R_BUTTON } else { 0.0 },
+                        if last { R_BUTTON } else { 0.0 },
+                        if first { R_BUTTON } else { 0.0 },
+                    ]
+                    .into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Role::Chip { active } => button::Appearance {
@@ -1346,6 +1380,102 @@ pub fn bar(_theme: &Theme) -> progress_bar::Appearance {
     progress_bar::Appearance {
         background: surface_input().into(),
         bar: accent().into(),
+        border_radius: R_CHIP.into(),
+    }
+}
+
+// ---- Splash (the loading page) -----------------------------------------
+
+/// The reference's splash tokens, taken from its `variables.scss` (the
+/// `.dark-mode` block) rather than measured.
+///
+/// They have to come from the stylesheet, because the splash is a *stack* of
+/// translucent layers and a capture of the stack reports only the flat result:
+/// sampling the pixels gives one colour per row, which is a function of three
+/// tokens the source states outright. Values as written there:
+///
+/// * `--splash-tint-top: rgba(66, 131, 92, 0.275)`
+/// * `--splash-tint-bottom: rgba(17, 35, 43, 0.5)`
+/// * `--splash-overlay: rgba(22, 24, 28, 0.64)`
+///
+/// Light mode states its own three (a pale green over a pale blue). This
+/// launcher's settings still have no light palette for the chrome, so the
+/// splash is written once, in the dark look the rest of these tokens describe;
+/// splitting it per look is the same change the rest of the palette is waiting
+/// on, not a separate one.
+pub const SPLASH_TINT_TOP: Color = alpha(rgb(66, 131, 92), 0.275);
+pub const SPLASH_TINT_BOTTOM: Color = alpha(rgb(17, 35, 43), 0.5);
+pub const SPLASH_OVERLAY: Color = alpha(rgb(22, 24, 28), 0.64);
+
+/// Where the reference's tint gradient stops, as a fraction of the window:
+/// `--splash-tint-bottom` sits at `97.29%` and the last two percent carry the
+/// bottom stop's colour unchanged.
+pub const SPLASH_TINT_STOP: f32 = 0.9729;
+
+/// Composite `tint` under [`SPLASH_OVERLAY`], then that pair over `base`: the
+/// colour a pixel of the reference's splash background shows.
+///
+/// The arithmetic is source-over twice, written out so the layer stack can be
+/// asserted on instead of only looked at. `base` stands in for the reference's
+/// cube artwork, which it paints opaque at `--splash-cube-opacity` over
+/// `--color-bg`; that art is theirs and this repo ships none of it, so the
+/// launcher uses the colour it is laid over. `REFERENCE.md` records that.
+pub fn splash_sample(tint: Color, base: Color) -> Color {
+    /// One source-over step: `top` composited onto `bottom`.
+    fn over(top: Color, bottom: Color) -> Color {
+        let a = top.a + bottom.a * (1.0 - top.a);
+        if a <= 0.0 {
+            return Color::TRANSPARENT;
+        }
+        Color {
+            r: (top.r * top.a + bottom.r * bottom.a * (1.0 - top.a)) / a,
+            g: (top.g * top.a + bottom.g * bottom.a * (1.0 - top.a)) / a,
+            b: (top.b * top.a + bottom.b * bottom.a * (1.0 - top.a)) / a,
+            a,
+        }
+    }
+    over(SPLASH_OVERLAY, over(tint, base))
+}
+
+/// The splash's whole background, as one gradient.
+///
+/// The reference stacks three elements for this (a tint gradient, an overlay
+/// gradient over it, and opaque art under both) and iced has no z-order, so the
+/// stack is resolved into the single vertical gradient the layers add up to.
+/// `180deg` is the CSS angle it used, and iced spells that as half a turn.
+///
+/// `fade` scales every stop, which is the `0.3s` opacity transition the
+/// reference fades the whole page out with.
+///
+/// Scaling alpha rather than the colours is what a browser's `opacity` does:
+/// the layer thins and what is behind it shows through, instead of the layer
+/// dimming towards black. Everything the page paints takes this factor, so the
+/// page can never be caught half-faded with one part of it still solid.
+pub fn splash_background_at(fade: f32) -> Linear {
+    let fade = fade.clamp(0.0, 1.0);
+    let base = bg();
+    let top = alpha(splash_sample(SPLASH_TINT_TOP, base), fade);
+    let bottom = alpha(splash_sample(SPLASH_TINT_BOTTOM, base), fade);
+    Linear::new(Radians(std::f32::consts::PI))
+        .add_stop(0.0, top)
+        .add_stop(SPLASH_TINT_STOP, bottom)
+        .add_stop(1.0, bottom)
+}
+
+/// The splash's progress bar.
+///
+/// `ProgressBar.vue`: `height: 0.5rem`, `background-color:
+/// var(--color-button-bg)` (which is `--surface-4` in dark, `#34363c`), `border-
+/// radius: var(--radius-lg)` -- 16px on an 8px bar, so what is drawn is a 4px
+/// cap -- and a fill of `var(--color-brand)`. `fade` thins both, because the
+/// page fades as one thing.
+pub fn splash_bar_at(fade: f32) -> progress_bar::Appearance {
+    let fade = fade.clamp(0.0, 1.0);
+    progress_bar::Appearance {
+        background: alpha(surface_input(), fade).into(),
+        bar: alpha(accent(), fade).into(),
+        // `--radius-lg` (16px) on an 8px bar, which is a pill; `R_CHIP` is the
+        // half-girth that draws the same thing.
         border_radius: R_CHIP.into(),
     }
 }
@@ -1847,5 +1977,60 @@ mod tests {
         assert_eq!(dialog.shadow.blur_radius, 0.0);
         assert!(dialog.background.is_some());
         assert_eq!(dialog.border.width, 1.0);
+    }
+
+    #[test]
+    fn the_loading_pages_background_is_its_three_layers_resolved() {
+        // The reference stacks a tint gradient, a 64% overlay and opaque art;
+        // iced has no z-order, so the stack is resolved here. These two pairs are
+        // the source's own numbers composited by hand -- `rgba(66, 131, 92,
+        // 0.275)` and `rgba(17, 35, 43, 0.5)` under `rgba(22, 24, 28, 0.64)` over
+        // `--color-bg` -- so the assertion is that the arithmetic in
+        // `splash_sample` is the arithmetic the tokens describe.
+        let background = splash_background_at(1.0);
+        let stops: Vec<_> = background.stops.iter().flatten().collect();
+        assert_eq!(stops.len(), 3, "two tint stops and the flat bottom past 97.29%");
+        assert_eq!(stops[0].offset, 0.0);
+        assert_eq!(stops[1].offset, SPLASH_TINT_STOP);
+        assert_eq!(stops[2].offset, 1.0);
+        assert_eq!(stops[1].color, stops[2].color, "the last 2.7% does not move");
+        for (stop, expected) in stops.iter().zip([rgb(26, 35, 34), rgb(21, 26, 31)]) {
+            let got = stop.color;
+            assert!(
+                (got.r - expected.r).abs() < 0.01
+                    && (got.g - expected.g).abs() < 0.01
+                    && (got.b - expected.b).abs() < 0.01,
+                "{:?} is not the resolved layer stack",
+                got
+            );
+            assert_eq!(got.a, 1.0, "three layers over an opaque base leave nothing translucent");
+        }
+    }
+
+    #[test]
+    fn the_loading_pages_fade_thins_every_layer_at_once() {
+        // A browser's `opacity` thins the layer rather than dimming it towards
+        // black, so what is asserted is the alpha and not the colour.
+        let half = splash_background_at(0.5);
+        let full = splash_background_at(1.0);
+        for (thinned, solid) in half.stops.iter().flatten().zip(full.stops.iter().flatten()) {
+            assert_eq!(thinned.color.a, 0.5);
+            assert_eq!(solid.color.a, 1.0);
+            assert_eq!(
+                (thinned.color.r, thinned.color.g, thinned.color.b),
+                (solid.color.r, solid.color.g, solid.color.b),
+                "the fade is alpha only"
+            );
+        }
+        // The bar follows the same factor, track and fill together.
+        let Background::Color(track) = splash_bar_at(0.25).background else {
+            panic!("the bar's track is one colour")
+        };
+        let Background::Color(fill) = splash_bar_at(0.25).bar else {
+            panic!("the bar's fill is one colour")
+        };
+        assert_eq!((track.a, fill.a), (0.25, 0.25));
+        assert_eq!(splash_bar_at(1.0).background, surface_input().into());
+        assert_eq!(splash_bar_at(1.0).bar, accent().into());
     }
 }

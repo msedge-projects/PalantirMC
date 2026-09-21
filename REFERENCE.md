@@ -347,7 +347,7 @@ second, denser page rather than assumed.
   reference's own strings stay theirs; ours say this launcher's name in the same
   positions, at the same sizes, in the same colours.
 
-## The Discover page, measured (not yet ported)
+## The Discover page, measured and ported
 
 Measured off `.scratch/ref-02-page-1.png`, a 1280x720 capture from the first rail
 walk, and recorded here because the port is per page and this is the next one. What
@@ -358,11 +358,14 @@ the thing this file exists to prevent.
 | Thing | Measured |
 | --- | --- |
 | Page column | x 60..941, page `#16181c` |
-| Tab strip | a `#27292e` rounded container, x 84..690, y 78..111 |
-| Its labels | 14px; Modpacks x 109, Mods x 198, Resource Packs x 255, Data Packs x 424, Servers x 621 -- all on ink row y 89 |
-| Search field | fill `#34363c`, x 84..941, y 128..170 (42 tall), placeholder 16px at x 107 |
-| Sort / View row | two controls, x 84..339 and x 348..491, on ink rows y 186..214 |
+| Tab strip | a `#27292e` plate, x 84..690, **y 68..114** (47 tall), its pills inset 6px |
+| Its pills | 35 tall, 20px of side padding; "Modpacks" is x 89..192 (104 wide) |
+| The selected pill | fill `#1d5540` (`--color-brand-highlight`) |
+| Its labels | 14px white; Modpacks x 109, Mods x 198, Resource Packs x 255, Data Packs x 424, Servers x 621 -- ink rows 88..95 |
+| Search field | fill `#34363c`, x 84..941, **y 122..170** (48 tall), placeholder 16px |
+| Sort / View row | two controls, x 84..339 and x 348..491, **y 178..213** (36 tall) |
 | Result count | right-aligned at x 812 and 869 on the same rows -- "2" and "917" |
+| Gaps | strip to field **7px**, field to sort row **8px**, both box to box |
 | Cards | x 84..941 (858 wide), **140 tall**, a **14px** gap between them, fill `#27292e`, radius ~14 |
 | First card | y 227..366, then 381..520, 535..674, 689..828 |
 | Card icon | 100x100, 16px from the card's top and 17px from its left |
@@ -372,21 +375,71 @@ the thing this file exists to prevent.
 | Card stats | 16px at x 771..928, y 305 |
 | Card tag row | 16px at x 246, y 334; "2 days ago" right-aligned at x 847 |
 
-**Two things this page does differently from the two ported so far.** Its right
-panel is a *filter* column -- "Search content...", Environment (Client / Server),
+Four of those numbers are corrected from the first pass, and the corrections are
+worth keeping because they were the earlier pass's mistakes, not rounding:
+
+* the strip is **47** rows tall, not 33. Its pills are 35 rows inset 6px in the
+  plate; the 33 was measured between the two rows where the plate's rounded ends
+  are at their widest, which is 14 rows short of the plate.
+* the field is **48**, not 42, and starts at 122 rather than 128: the earlier
+  numbers were the *placeholder's* ink rows read as the field's box.
+* the gaps are **7** and **8**, not 17 and 16 -- the earlier pass measured ink to
+  ink across two text boxes, which is a line-box question this page does not
+  have, because a strip and a field are filled shapes.
+* the sort row is **36** tall, not 28.
+
+The port was written to the first (wrong) set and then corrected to the second by
+`tools/page_gate.py`, which measures both clients the same way and states the
+gaps -- that is the whole reason the page gates exist.
+
+**Two things this page does differently from the two ported before it** (the
+Screenshots page and Home): its right panel is a *filter* column -- "Search content...", Environment (Client / Server),
 Game version, Open source -- and it is **331px wide against the 299px** every other
 capture shows, so the panel's width is the page's business rather than the shell's.
 And the page itself has no in-page heading at all: the tab strip is the first thing
 in the column, and the page's name is in the title bar (`Discover modpacks`, with
 the active tab in it).
 
-**Where this launcher stands.** A capture of our Discover page at the same size
-(`tools/appshot.py --page browse`): it draws an in-page "Browse Modpacks" heading at
-y 79 which the reference does not have, its tabs sit on ink row 131 rather than 89,
-its search field on 183 rather than 128..170, and its right panel holds "Getting
-started" rather than the filter column. The tab list is also five types where the
-reference's strip has five *and* Servers; ours are Modpacks, Mods, Resource Packs,
-Data Packs, Shaders.
+**Where this launcher stands, after the port.** A capture of our Discover page at
+the same size (`tools/appshot.py --page browse --out .scratch/pal-discover.png`)
+now measures: strip y 70..117 (48 rows, 545 wide), gap 7, field y 125..171 (47
+rows, 879 of the column's 903), gap 8, sort row y 180..214 (35 rows). Its title
+bar reads `Discover modpacks`, its first thing in the column is the plate rather
+than a heading, and there is no Search button.
+
+**What the port draws, and what it does not.**
+
+* **The strip.** The plate is the *row of tabs itself* rather than a container
+  around them: each pill is filled `--surface-3`, the selected one
+  `--color-brand-highlight`, the seams between them are square and only the two
+  outer ends keep the 12px radius. That is what the reference's own pixels show,
+  and it is also the only shape this toolkit measures correctly -- a container
+  wrapped around the row hands its child a bound derived from the column's
+  cross-axis size (0 for a shrink-width column), and every label collapses to
+  nothing. That was captured twice, at 22px and 40px wide pills, before the
+  container came out.
+* **The Sort control** is real: `browse::Sort` carries the reference's five orders
+  -- Relevance, Downloads, Follows, Newest, Updated -- as Modrinth's own `index`
+  values, and picking one re-runs the search rather than re-sorting what is on
+  screen.
+* **No View control.** The reference toggles its results between a list and a
+  grid; this shell has one result layout, and a control that toggles nothing is
+  worse than its absence.
+* **The count** on the right is what this client kept (`SEARCH_LIMIT`), not the
+  API's `total_hits`, which the search response carries and `parse_search` does
+  not yet read.
+* **A card's icon slot** is the measured 100x100 box holding the content type's
+  glyph. The reference loads each project's own icon there, which is a network
+  fetch per card this shell does not do yet.
+* **The right panel is still this shell's.** The reference's Discover panel is a
+  *filter* column 331px wide -- "Search content...", Environment (Client /
+  Server), Game version, Open source -- against the 299px every other page's
+  panel measures. Porting it means porting the filters themselves (facets on the
+  search, a different panel width per page), which is its own change rather than
+  a page's.
+* **Servers** is still absent from the strip: the reference has a sixth tab for
+  it, and `project_type:server` answers 0 hits through the public search API, so
+  a tab for it could only ever be empty.
 
 ## Surfaces measured, with what they contain
 
@@ -432,6 +485,50 @@ Data Packs, Shaders.
    the 24px bold white heading, the 16px tertiary subtext -- centred 20px below
    the column's middle and 11px of gutter left of it, exactly where the
    reference's own content lands.
+
+## The loading page, ported
+
+The reference's splash is `components/ui/SplashScreen.vue` and
+`components/ui/ProgressBar.vue`, and it is a *layer stack*, which is why it is read
+from those files rather than from a capture: a capture of a stack reports the flat
+result, and the tokens are what state what the layers are.
+
+| Thing | The reference's own numbers |
+| --- | --- |
+| The column | centred on the window, `gap: 1rem` (16px), colour `--color-contrast` |
+| The wordmark | `height: 2.25rem` (36px), `width: fit-content` |
+| The bar | `max-width: 20rem` (320px), `height: 0.5rem` (8px), radius `--radius-lg` |
+| The bar's track | `--color-button-bg` -- `#34363c` in dark |
+| The bar's fill | `--color-brand`, and `width` transitions over 0.3s ease-out |
+| Its ramp | `fakeLoadingIncrease()`: +2% every 5ms, stopping at 95 |
+| The minimum display | `MIN_DISPLAY_MS = 500` |
+| The fade | `opacity 0.3s ease-in-out`, then the app appears |
+| Layer 1 (bottom) | `--color-bg` (`#16181c`), opaque, full window |
+| Layer 2 | the same colour with `cube.png` centred at 180vw x 180vh, `opacity: 0.8`, blend `normal` |
+| Layer 3 | `linear-gradient(180deg, rgba(66,131,92,0.275) 0%, rgba(17,35,43,0.5) 97.29%)` |
+| Layer 4 (top) | `linear-gradient(0deg, rgba(22,24,28,0.64), rgba(22,24,28,0.64))` over layer 3 |
+
+**What the port draws.** The same column at the same sizes, over those four layers
+resolved into one gradient -- iced 0.12 has no z-order to stack them with, so
+the two gradients are composited over `--color-bg` by `theme::splash_sample`
+(source-over twice), which answers `#1a2322` at the top of the window and
+`#151a1f` at 97.29% down it. The bar, the 500ms minimum, the 0.3s fade and the
+ramp are the reference's algorithms, written as functions of the clock rather than
+as timers.
+
+**What is not copied.**
+
+- **The cube artwork** (`assets/loading/cube.png`) is Modrinth's, and this repo
+  ships no third-party art without a notice. The layer it sits in is drawn as the
+  flat colour the reference lays it over; the port's background is therefore the
+  reference's gradient without its texture.
+- **The wordmark** in the 36px slot is this launcher's emblem and name, where the
+  reference draws its own logotype.
+- **The line under the bar** is this shell's status while the scan runs
+  ("Loading instances..."), where the reference only fills that slot during a rare
+  directory move.
+- **Light mode** has its own three splash tints. This launcher's chrome still has
+  no light palette, so the splash is written once, in the dark look.
 
 ## Still to port, and why each is not done here
 

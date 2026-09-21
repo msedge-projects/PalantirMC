@@ -38,6 +38,24 @@ pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
     )
 }
 
+/// Build a Modrinth search URL constrained to one project type *and* sorted by
+/// one of Modrinth's own `index` values.
+///
+/// `index` is the API's name for the sort order (`relevance`, `downloads`,
+/// `follows`, `newest`, `updated`), and it is spelled the same way here as it is
+/// on the wire so the caller has one vocabulary rather than two. The reference's
+/// Discover page offers the same list, in the same order, behind its Sort
+/// control.
+pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String {
+    let facets = format!(r#"[["project_type:{project_type}"]]"#);
+    format!(
+        "{}&facets={}&index={}",
+        search_url(query),
+        percent_encode(&facets),
+        percent_encode(index)
+    )
+}
+
 /// Build the version-list URL for a project id or slug.
 ///
 /// Calls `GET /v2/project/{project}/version` (all loaders/game versions;
@@ -276,6 +294,18 @@ mod tests {
     #[test]
     fn search_url_empty_query() {
         assert_eq!(search_url(""), "https://api.modrinth.com/v2/search?query=&limit=50");
+    }
+
+    #[test]
+    fn a_sorted_search_carries_both_the_type_and_the_order() {
+        // The facet is JSON and has to be percent-encoded, and `index` is the
+        // API's own name for the order -- one parameter each, in the order the
+        // API documents them.
+        assert_eq!(
+            search_url_sorted("sodium", "mod", "downloads"),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=50\
+             &facets=%5B%5B%22project_type%3Amod%22%5D%5D&index=downloads"
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ use std::time::Duration;
 use palantir_loader::{PackFile, PackPlan};
 use palantir_net::download_many_with_progress;
 use palantir_net::meta::{BlockingHttpFetcher, Fetcher};
-use palantir_net::modrinth::{search_url_with_project_type, version_url, ModrinthProjectVersion};
+use palantir_net::modrinth::{search_url_sorted, version_url, ModrinthProjectVersion};
 use serde::Deserialize;
 use sha1::Digest;
 
@@ -56,6 +56,65 @@ pub enum ContentType {
     Shaders,
 }
 
+/// The order Discover asks Modrinth for.
+///
+/// The reference's Sort control offers Relevance, Downloads, Follows, Newest and
+/// Updated, and these are the API's own `index` values for exactly those, in its
+/// own spelling -- so the control's label and the query string are two names for
+/// one thing rather than a mapping nobody can check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    /// Best match for the query: what the API does when asked for nothing, and
+    /// what the reference's Discover page opens on.
+    #[default]
+    Relevance,
+    /// Most downloaded first.
+    Downloads,
+    /// Most followed first.
+    Follows,
+    /// Newest projects first.
+    Newest,
+    /// Most recently updated first.
+    Updated,
+}
+
+impl Sort {
+    /// Label in the Sort control, as the reference sets it.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Relevance => "Relevance",
+            Self::Downloads => "Downloads",
+            Self::Follows => "Follows",
+            Self::Newest => "Newest",
+            Self::Updated => "Updated",
+        }
+    }
+
+    /// Modrinth's `index` value.
+    pub const fn api_value(self) -> &'static str {
+        match self {
+            Self::Relevance => "relevance",
+            Self::Downloads => "downloads",
+            Self::Follows => "follows",
+            Self::Newest => "newest",
+            Self::Updated => "updated",
+        }
+    }
+
+    /// Every order the control offers, in the reference's order.
+    pub const fn all() -> [Self; 5] {
+        [Self::Relevance, Self::Downloads, Self::Follows, Self::Newest, Self::Updated]
+    }
+}
+
+/// The label is what `pick_list` draws in the closed control and beside each
+/// entry, so the two can never disagree about what an order is called.
+impl std::fmt::Display for Sort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 impl ContentType {
     /// Label shown in the Browse tab strip.
     ///
@@ -69,6 +128,22 @@ impl ContentType {
             Self::ResourcePacks => "Resource Packs",
             Self::DataPacks => "Data Packs",
             Self::Shaders => "Shaders",
+        }
+    }
+
+    /// The glyph the Discover page draws in this type's card icon slot.
+    ///
+    /// The reference loads the *project's* own icon into that slot, which is a
+    /// network fetch per card this shell does not do yet; the type's glyph in the
+    /// same measured box is what it draws instead, so the cards are still
+    /// distinguishable at a glance. `REFERENCE.md` records the difference.
+    pub const fn page_glyph(self) -> &'static str {
+        match self {
+            Self::Modpacks => "cube",
+            Self::Mods => "shield",
+            Self::ResourcePacks => "image",
+            Self::DataPacks => "folder",
+            Self::Shaders => "bulb",
         }
     }
 
@@ -216,13 +291,27 @@ pub fn search_typed(
     query: &str,
     content_type: ContentType,
 ) -> Result<Vec<Hit>, String> {
+    search_sorted(client, query, content_type, Sort::Relevance)
+}
+
+/// The same search, in the order Discover's Sort control asked for.
+///
+/// One implementation rather than two, because the only difference is the URL:
+/// the filtering, the type check and the limit are the parts that must not
+/// drift apart between the sorted and unsorted paths.
+pub fn search_sorted(
+    client: &reqwest::blocking::Client,
+    query: &str,
+    content_type: ContentType,
+    sort: Sort,
+) -> Result<Vec<Hit>, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
     let body = get_text(
         client,
-        &search_url_with_project_type(trimmed, content_type.api_value()),
+        &search_url_sorted(trimmed, content_type.api_value(), sort.api_value()),
     )?;
     let mut hits = parse_search(&body)?;
     hits.retain(|hit| hit.project_type.eq_ignore_ascii_case(content_type.api_value()));

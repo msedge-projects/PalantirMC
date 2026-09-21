@@ -365,3 +365,96 @@ why `--shot` exists.
       outstanding step and green discs with checks for the two complete ones --
       the reference's own marker vocabulary. Differences that remain and are not
       claimed by any gate above are recorded in `NEXT_STEPS.md` §12.
+
+## The Discover page, and the loading page
+
+Two surfaces at once, because they are the two the port was waiting on: Discover's
+own chrome, and the splash the launcher shows while it loads.
+
+```
+python tools/page_gate.py .scratch/ref-02-page-1.png --page discover   # the reference
+python tools/page_gate.py .scratch/pal-discover.png  --page discover   # ours
+```
+
+The captures are 1280x720 clients, ours from
+`python tools/appshot.py --exe target/debug/PalantirMC.exe --page browse --out .scratch/pal-discover.png --size 1280x720`,
+which opens the launcher off the desktop and has it write its own frame -- no
+window control, no cursor, no screen capture.
+
+- [x] G30: the page draws **no heading** above its tab strip -- the first thing in
+      the column is a plate, which is what the reference does and what the build
+      this port replaces did not (it drew an in-page "Browse Modpacks" heading)
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only heading
+  EXPECT: page gate passed [heading]
+  EVIDENCE: the first band's fill is `#27292e`; the replaced build's first band is
+      `#ffffff` ink on the page.
+
+- [x] G31: the strip is **47 rows** of tabs with the selected one filled
+      `#1d5540`, and the labels are inside it
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only strip
+  EXPECT: page gate passed [strip]
+  EVIDENCE: 48 rows and 545px wide on ours, 47 and 607 on the reference; the
+      replaced build's was 23 rows of 28px chips with no plate at all.
+
+- [x] G32: the search field is the raised inset colour, **48 rows**, and spans the
+      column -- the reference has **no Search button** beside it
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only search
+  EXPECT: page gate passed [search]
+  EVIDENCE: `#34363c` in 47 rows, 879 of the column's 903 (the reference: 48, 851
+      of 869); the replaced build's field was 37 rows and 452 wide, with a button
+      in the other half.
+
+- [x] G33: the two gaps are the reference's own **7px and 8px** box to box
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only gaps
+  EXPECT: page gate passed [gaps]
+  EVIDENCE: 7px after the strip on both clients. The replaced build was 16px, from
+      ink-to-ink numbers taken off a different crop.
+
+- [x] G34: the Sort row follows the field by **8px** and is **36 rows** tall
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only sort
+  EXPECT: page gate passed [sort]
+  EVIDENCE: 8px and 35 rows on ours, 8 and 36 on the reference.
+
+- [x] G35: the title bar names the page -- `Discover modpacks`, the type in the
+      bar because the page draws no heading of its own
+  CHECK: python tools/page_gate.py .scratch/pal-discover.png --page discover --only barname
+  EXPECT: page gate passed [barname]
+  EVIDENCE: the bar reads `Discover` and `modpacks` (OCR splits the two words when
+      the kerning opens a gap, which is why this page's check looks for the type
+      rather than for one exact line). The replaced build read `Browse`.
+
+The loading page's gates are unit tests rather than captures, and deliberately so:
+the splash is up for 800 milliseconds, so a capture of it is a race, while every
+number in it is a pure function of the clock in `app::SplashState`.
+
+- [x] G36: the bar ramps at the reference's rate -- +2% every 5ms, ceiling 95 --
+      and reads full once the work behind it is done
+  CHECK: cargo test -p palantir-desktop the_loading_page_fills_at_the_references_rate
+  EXPECT: test result: ok
+  EVIDENCE: 40.0% at 100ms, 95.0% at 30s, 100.0% after `loaded()`.
+
+- [x] G37: the page keeps `MIN_DISPLAY_MS` (500ms) before it fades, fades over the
+      reference's 300ms ease-in-out, and never fades while its work is unfinished
+  CHECK: cargo test -p palantir-desktop the_loading_page_keeps_its_minimum_display
+  EXPECT: test result: ok
+  EVIDENCE: opaque at 499ms, mid-fade a quarter of the way in, gone (and `done()`)
+      at 800ms; a page whose scan never lands stays opaque for 30s.
+
+- [x] G38: the splash's background is the reference's four layers resolved --
+      `#1a2322` at the top of the window, `#151a1f` at 97.29% down it, opaque
+  CHECK: cargo test -p palantir-desktop the_loading_pages_background_is_its_three_layers_resolved
+  EXPECT: test result: ok
+  EVIDENCE: the two stops match the tokens composited by hand, within 0.01, and the
+      fade is alpha-only (the colours never move -- a browser's `opacity`, not a
+      dim towards black).
+
+## What these gates cannot say
+
+- **No gate compares glyph bitmaps between the clients.** Their ClearType colour
+  fringing makes the same word two different pictures, so every text assertion
+  here is about ink rows, ink colour and position rather than about pixels.
+- **No capture of the loading page.** The splash's numbers are asserted as
+  functions and its tokens as composited colours; what it *looks like* on screen
+  has been reasoned from the reference's own stylesheet rather than photographed
+  on both clients side by side, which is the one thing `G8` above asks for and
+  this page does not yet have.

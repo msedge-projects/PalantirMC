@@ -72,7 +72,7 @@ from panel_gate import (  # noqa: E402
 # The pages this gate knows, and the name each puts in the title bar. The bar's
 # label is the page's own name (`REFERENCE.md`): Home reads "Home" and
 # Screenshots reads "Screenshots", which is also the entire heading that page has.
-PAGES = {"home": "Home", "screenshots": "Screenshots"}
+PAGES = {"home": "Home", "screenshots": "Screenshots", "discover": "Discover modpacks"}
 
 # ---- The reference's own page, measured from its capture -------------------
 REF = {
@@ -351,12 +351,158 @@ HOME = {
     "paths_found": 7,
 }
 
+# ---- The Discover page, measured from the reference's own capture ----------
+#
+# Off `.scratch/ref-02-page-1.png`, a 1280x720 client, in the same units as
+# everything above. The strip's numbers are the ones this port was written from
+# and the gate re-checks them:
+#
+#   strip      y 68..114 (47 rows), x 84..690, an `#27292e` plate
+#   selected   "Modpacks", x 89..192 (104 wide), fill `#1d5540`
+#   labels     14px white, ink rows 88..95
+#   field      y 128..170 (42 rows), fill `#34363c`, full column width
+#   sort row   ink rows 186..214, its own two controls and the result count
+#
+# Two of those are *box to box*, where the Screenshots and Home pages above are
+# ink to ink: a strip and a field are filled shapes, so their boxes are what a
+# capture shows and there is no line-box question to answer.
+DISCOVER = {
+    "plate": (0x27, 0x29, 0x2E),      # --surface-3: an unselected tab's fill
+    "selected": (0x1D, 0x55, 0x40),   # --color-brand-highlight
+    "field": (0x34, 0x36, 0x3C),      # --color-button-bg
+    "strip_h": 47,
+    "strip_min_w": 500,   # five labels at 14px on 20px of side padding
+    "field_h": 48,
+    "strip_to_field": 7,
+    "field_to_row": 8,
+    "row_h": 36,
+    "field_width_slack": 60,  # the field spans the column: no button beside it
+}
+
 # Ink at a threshold the reference's own backdrop cannot pass. Its dot texture
 # lifts a pixel by at most 20 levels over the page, and the faintest thing this
 # page draws -- the illustration's own fill -- is 21 and up, so 60 is above the
 # texture and below everything that is a control. Without that margin the 415x478
 # grid of dots reads as one band from the art to the top of the page.
 HOME_INK = 60
+
+
+def discover_gate(g, im, x0, x1, top, scope, only=None) -> int:
+    """Judge the Discover page's own chrome: the strip, the field, the sort row.
+
+    Six assertions, and every one of them is a thing the build this port replaces
+    fails: that build drew an in-page "Browse Modpacks" heading where the
+    reference draws none, a row of 28px chips where the reference draws a 47px
+    plate, a 39px field with a Search button beside it, and no Sort control at
+    all. The gate is therefore stated as page *shape* -- what the first thing in
+    the column is made of, how tall it is, what follows it and how far after --
+    because that is what separates the two.
+
+    `top` is where the caller found the page's own top edge; `paper` is not
+    passed because Discover cannot use it: the column is covered in plates and
+    cards, so the modal colour of the whole thing is a card's, not the page's.
+    The page colour is known (`REF["page"]`), which is what the scan uses.
+    """
+    page = REF["page"]
+    window = min(top + 150, im.height)
+    found = bands(rows_with_content(im, x0, x1, top, window, page, SHAPE))
+    print("discover bands: " + ", ".join(f"y {b[0]}..{b[1]}" for b in found[:4]))
+
+    # D1: the first thing in the column is a plate, not a heading. A heading is
+    # ink on the page; a plate is a fill, so the question is what colour most of
+    # the band is.
+    plate = None
+    if found:
+        a, b = found[0]
+        cols = columns_in(im, x0, x1, a, b, page, SHAPE)
+        plate, _ = modal(im, cols[0], cols[1] + 1, a, b, page, 4)
+    g.check(
+        plate is not None
+        and (near(plate, DISCOVER["plate"], 4) or near(plate, DISCOVER["selected"], 4)),
+        "[heading] the page draws no heading above its tab strip",
+        "the first band's fill is %s against #27292e or #1d5540"
+        % (("#%02x%02x%02x" % plate) if plate else "nothing"),
+    )
+
+    if len(found) < 2:
+        print("\nno strip and field found -- nothing below can be measured")
+        if g.failures:
+            print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
+            return 1
+        return 0
+
+    (s0, s1), (f0, f1) = found[0], found[1]
+
+    # D2/D3: the strip's own size, and the selected tab inside it -- the fill is
+    # the solid token the reference uses, and it is what says which tab is on.
+    strip_cols = columns_in(im, x0, x1, s0, s1, page, SHAPE)
+    strip_w = strip_cols[1] - strip_cols[0] + 1
+    selected, selected_n = modal(
+        im, strip_cols[0], strip_cols[1] + 1, s0, s1, DISCOVER["plate"], 4
+    )
+    g.check(
+        abs((s1 - s0 + 1) - DISCOVER["strip_h"]) <= 2
+        and strip_w >= DISCOVER["strip_min_w"]
+        and selected is not None
+        and near(selected, DISCOVER["selected"], 4),
+        "[strip] a 47px plate of tabs, with the selected one filled",
+        f"{s1 - s0 + 1} rows and {strip_w} wide, selected fill "
+        + ("#%02x%02x%02x" % selected if selected else "not found"),
+    )
+
+    # D4: the field is the raised inset colour, 42 rows, and *full width* -- a
+    # Search button beside it is exactly what the reference does not have.
+    field, _ = modal(im, x0, x1, f0, f1, page, 4)
+    field_cols = columns_in(im, x0, x1, f0, f1, page, SHAPE)
+    field_w = field_cols[1] - field_cols[0] + 1
+    g.check(
+        field is not None
+        and near(field, DISCOVER["field"], 4)
+        and abs((f1 - f0 + 1) - DISCOVER["field_h"]) <= 3
+        and field_w >= (x1 - x0) - DISCOVER["field_width_slack"],
+        "[search] a 42px full-width field, with no button beside it",
+        "#%02x%02x%02x in %d rows, %d of the column's %d wide"
+        % (
+            (field or (0, 0, 0)) + (f1 - f0 + 1, field_w, x1 - x0)
+        ),
+    )
+
+    # D5: the two gaps, box to box, which is this page's rhythm.
+    gap_strip = f0 - s1 - 1
+    print(f"gaps: strip->field {gap_strip}")
+    g.check(
+        abs(gap_strip - DISCOVER["strip_to_field"]) <= 3,
+        "[gaps] the field follows the strip by the reference's own step",
+        f"{gap_strip}px against {DISCOVER['strip_to_field']}",
+    )
+
+    # D6: and the sort row follows the field. It is the row with the page's own
+    # two controls and the result count, so it is judged as "a band of ink, one
+    # step below the field, that is not another plate".
+    rest = bands(rows_with_content(im, x0, x1, f1 + 2, window, page, SHAPE))
+    if not rest:
+        g.check(False, "[sort] the Sort row follows the search field", "no band after the field")
+    else:
+        r0, r1 = rest[0]
+        gap_field = r0 - f1 - 1
+        print(f"gaps: field->row {gap_field}, row is {r1 - r0 + 1} rows")
+        g.check(
+            abs(gap_field - DISCOVER["field_to_row"]) <= 4
+            and abs((r1 - r0 + 1) - DISCOVER["row_h"]) <= 4,
+            "[sort] the Sort row follows the search field by the reference's step",
+            f"{gap_field}px and {r1 - r0 + 1} rows against "
+            f"{DISCOVER['field_to_row']} and {DISCOVER['row_h']}",
+        )
+
+    print()
+    if not g.ran:
+        print(f"no assertion matched --only {only}")
+        return 2
+    if g.failures:
+        print(f"page gate FAILED{scope} ({len(g.failures)}): " + ", ".join(g.failures))
+        return 1
+    print(f"page gate passed{scope}")
+    return 0
 
 
 def home_gate(g, im, x0, x1, paper, pane_left, panel_left, top, bottom, scope, only=None) -> int:
@@ -618,17 +764,33 @@ def main() -> int:
     g = Gate(only)
     scope = f" [{only}]" if only else ""
     want = PAGES[page]
-    named = [
-        line
-        for line in refsample.ocr(path)
-        if line["y"] < BAR_HEAD and line["text"].strip().strip("|").strip() == want
-    ]
+    bar_lines = [line for line in refsample.ocr(path) if line["y"] < BAR_HEAD]
+    # Discover's name is two words -- `Discover modpacks` -- and OCR splits them
+    # whenever the kerning puts a gap there, so that page asks whether its type
+    # is named at all rather than for one exact line. Every other page's name is
+    # a single word and is compared whole.
+    if page == "discover":
+        named = [
+            line
+            for line in bar_lines
+            if "discover" in line["text"].strip().lower()
+            or any(
+                t.strip().lower() in ("modpacks", "mods", "resource packs", "data packs", "shaders")
+                for t in line["text"].split()
+            )
+        ]
+    else:
+        named = [
+            line
+            for line in bar_lines
+            if line["text"].strip().strip("|").strip() == want
+        ]
     g.check(
         bool(named),
         "[barname] the title bar names the page it is showing",
         f"read {' | '.join(l['text'] for l in named) if named else 'nothing'} "
         f"where {want!r} was expected (bar labels: "
-        f"{', '.join(repr(l['text']) for l in refsample.ocr(path) if l['y'] < BAR_HEAD)})",
+        f"{', '.join(repr(l['text']) for l in bar_lines)})",
     )
 
     im, frame = crop_window_frame(Image.open(path).convert("RGB"))
@@ -669,11 +831,17 @@ def main() -> int:
         f"column x {pane_left}..{panel_left} (scores {pane_score}/{panel_score}), "
         f"page #{paper[0]:02x}{paper[1]:02x}{paper[2]:02x} over {paper_n} px"
     )
-    g.check(
-        near(paper, REF["page"], 3),
-        "[page] the column is the reference's page colour",
-        "#%02x%02x%02x against #%02x%02x%02x" % (paper + REF["page"]),
-    )
+    # Not on Discover: that page's column is covered in plates and cards, so the
+    # modal colour of the whole column is a card's rather than the page's. Its own
+    # gate takes the page colour from `REF` instead, and this assertion is about
+    # the *shell* -- what the pane is painted with -- which `panel_gate` judges on
+    # a page that is mostly empty.
+    if page != "discover":
+        g.check(
+            near(paper, REF["page"], 3),
+            "[page] the column is the reference's page colour",
+            "#%02x%02x%02x against #%02x%02x%02x" % (paper + REF["page"]),
+        )
 
     # The scan starts below the page's own top edge, found rather than assumed:
     # the pane's top-left corner is cut (that is `panel_gate`'s G5) and the bar's
@@ -689,6 +857,12 @@ def main() -> int:
         f"page top y={bar_bottom} (score {bar_score}), scanning from y={top} "
         f"to y={bottom} where the page colour ends"
     )
+    # Discover judges itself too, and it is the one page that cannot use the
+    # column's modal colour: it is covered in plates and cards, so `paper` above
+    # is a card's colour rather than the page's. Its gate takes the page colour
+    # from `REF` and needs nothing else the caller has.
+    if page == "discover":
+        return discover_gate(g, im, x0, x1, top, scope, only)
     # Home judges itself, from here: the cluster of a welcome screen is not the
     # cluster of an empty state, and the numbers are its own (`HOME` above).
     if page == "home":

@@ -40,7 +40,7 @@ use iced::widget::{
     progress_bar, row, scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
 };
 use iced::widget::image::Handle;
-use iced::{window, Command, Element, Length, Padding, Point, Subscription, Theme};
+use iced::{window, Command, Element, Gradient, Length, Padding, Point, Subscription, Theme};
 use palantir_core::instance::groups::Groups;
 use palantir_core::instance::Instance;
 use palantir_core::paths::PalantirPaths;
@@ -48,7 +48,7 @@ use palantir_core::settings::{defaults, Settings};
 
 use crate::accounts::AccountEntry;
 use crate::brand;
-use crate::browse::{self, ContentType, Hit};
+use crate::browse::{self, ContentType, Hit, Sort};
 use crate::catalog::{self, LoaderKind, VersionCatalog};
 use crate::glyphs::{self, glyph};
 use crate::icons::instance_handle;
@@ -398,6 +398,8 @@ pub const FRAME_ID: &str = "palantirmc-frame";
 pub const BAR_ID: &str = "palantirmc-bar";
 /// Subscription id of the `--shot` capture's settle timer.
 pub const SHOT_ID: &str = "palantirmc-shot";
+/// Subscription id of the loading page's frames.
+pub const SPLASH_ID: &str = "palantirmc-splash";
 /// How long a `--shot` run gives the window before taking its picture.
 ///
 /// A capture has to outlast the page's own first work, and on this shell that
@@ -406,6 +408,73 @@ pub const SHOT_ID: &str = "palantirmc-shot";
 /// while still short enough that a capture run is over before anyone notices one
 /// happened -- which matters because a capture is meant to be invisible.
 pub const SHOT_SETTLE: Duration = Duration::from_millis(3000);
+
+// ---- The Discover page -------------------------------------------------
+
+/// The Discover page's own numbers, all of them off the reference's capture
+/// (`.scratch/ref-02-page-1.png`; `REFERENCE.md` has the table).
+///
+/// They are the page's rather than the shell's: the shell's own measurements are
+/// in `panel_gate.py`'s table, and the two were measured from different windows
+/// at the same size, so a value in one is not evidence about the other.
+/// The tab strip is 47px tall, which is the reference's own plate: its tabs sit
+/// 6px inside that, and here the pills carry the inset as their own padding.
+const BROWSE_STRIP_HEIGHT: f32 = 47.0;
+/// And 20px of side padding, which is what the reference's own pills measure:
+/// its selected "Modpacks" is 104px wide against 62px of label ink.
+const BROWSE_PILL_PAD: f32 = 20.0;
+/// The height this toolkit gives a 14px Inter label with no leading added. It is
+/// a measured fact about the text rather than a design token, and it is named
+/// because the strip's 47px is what is left once it is subtracted.
+const LABEL_LINE_BOX: f32 = 17.0;
+/// The gap between the strip, the search field and the Sort row.
+///
+/// 8px, which is what the reference's own capture measures box to box (7 after
+/// the strip, 8 after the field). The 17s and 16s that used to be here were
+/// ink-to-ink numbers from an earlier pass over a different crop, so the port had
+/// its controls two steps further apart than the page it copies. The page gate
+/// states both gaps now, which is how the disagreement was caught.
+const BROWSE_ROW_GAP: f32 = 8.0;
+/// One result card's height, and the gap between two of them.
+const BROWSE_CARD_HEIGHT: f32 = 140.0;
+const BROWSE_CARD_GAP: f32 = 14.0;
+/// The card's icon slot: 100x100, 16px from its top and 17px from its left.
+const BROWSE_CARD_ICON: f32 = 100.0;
+
+// ---- The loading page --------------------------------------------------
+
+/// The splash's own numbers, all of them from the reference's
+/// `SplashScreen.vue` and `ProgressBar.vue`.
+///
+/// * the wordmark is `height: 2.25rem` -- 36px -- with `width: fit-content`
+/// * the centred stack is `gap: 1rem`
+/// * the bar is `max-width: 20rem` (320px) and `height: 0.5rem` (8px)
+const SPLASH_LOGO_HEIGHT: f32 = 36.0;
+const SPLASH_GAP: f32 = 16.0;
+const SPLASH_BAR_WIDTH: f32 = 320.0;
+const SPLASH_BAR_HEIGHT: f32 = 8.0;
+
+/// `MIN_DISPLAY_MS` in the reference: the page stays up at least half a second,
+/// even when the work behind it is already done.
+///
+/// Without a floor the splash is a single frame on a warm cache, which reads as
+/// a flicker rather than as a loading step -- the reference keeps it and so does
+/// this shell, for the same reason.
+const SPLASH_MIN_DISPLAY: Duration = Duration::from_millis(500);
+
+/// The reference's `splash-fade-leave-active`: `opacity 0.3s ease-in-out`.
+const SPLASH_FADE: Duration = Duration::from_millis(300);
+
+/// How fast the bar fills while the work behind it has no total.
+///
+/// `fakeLoadingIncrease()` in the reference adds two percent every five
+/// milliseconds and stops at 95. This is that same rate -- 0.4%/ms -- written
+/// as a rate rather than as a loop, so the drawing stays a function of the clock
+/// and a test can ask what the bar reads a quarter of a second in.
+const SPLASH_FAKE_PER_MS: f32 = 0.4;
+/// Where the reference's fake ramp stops, so the bar never claims to be finished
+/// while there is still work on screen.
+const SPLASH_FAKE_CEILING: f32 = 95.0;
 
 /// How long one sweep of the indeterminate bar takes.
 ///
@@ -890,6 +959,8 @@ pub struct BrowseState {
     pub loading: bool,
     /// Modrinth project type currently being browsed.
     pub content_type: ContentType,
+    /// The order results are asked for in, from the page's Sort control.
+    pub sort: Sort,
     /// Request sequence.
     pub seq: u64,
     /// Results.
@@ -1305,6 +1376,11 @@ pub enum Message {
     },
     /// One frame of the indeterminate bar's travel.
     BarTick,
+    /// One frame of the loading page: advances its bar and, once the work
+    /// behind it is done, its fade.
+    SplashTick,
+    /// A tab in the Discover page's Sort control.
+    BrowseSortPicked(Sort),
 
     // ---- settings form ----
     /// Display name field.
@@ -1448,6 +1524,118 @@ impl ShotTile {
     pub scanned: bool,
 }
 
+
+/// The loading page's own state: how far through it is, and whether it is
+/// still up.
+///
+/// Times rather than a progress counter, because the reference's page is a
+/// function of the clock -- its bar fills on a timer and it dismisses itself
+/// after a fixed half second -- and because nothing else in the launcher needs
+/// to know a splash is happening. Every number below is derived from an
+/// [`Instant`] and the two flags, so a test can ask what the page looks like at
+/// any moment without waiting for one.
+#[derive(Debug, Clone, Copy)]
+pub struct SplashState {
+    /// When this process first drew a frame.
+    started: Instant,
+    /// When the fade began, if it has. `None` for as long as the page is
+    /// loading, or until the minimum display has run out.
+    fading: Option<Instant>,
+    /// Whether the loading work behind it has finished.
+    loaded: bool,
+    /// Set once the fade has finished, after which the shell draws instead.
+    done: bool,
+}
+
+impl SplashState {
+    /// A page that has not been shown yet: it starts now.
+    pub fn starting() -> Self {
+        SplashState { started: Instant::now(), fading: None, loaded: false, done: false }
+    }
+
+    /// A page that is already over, for a run that loaded before its first
+    /// frame -- the `Sandbox` shell and every test, both of which build their
+    /// state synchronously.
+    pub fn finished() -> Self {
+        SplashState {
+            started: Instant::now(),
+            fading: Some(Instant::now()),
+            loaded: true,
+            done: true,
+        }
+    }
+
+    /// Whether the shell or the loading page is what should be drawn.
+    pub fn done(&self) -> bool {
+        self.done
+    }
+
+    /// Record that the work the page was covering has finished.
+    pub fn loaded(&mut self) {
+        self.loaded = true;
+    }
+
+    /// How full the bar is, in percent.
+    ///
+    /// The same shape as the reference's: while there is work with no total the
+    /// bar creeps to 95 and waits there rather than pretending to be nearly
+    /// done, and once that work is finished it reads full. The ramp is the
+    /// reference's rate; the jump to 100 is not -- its page vanishes in the
+    /// frame the work ends, while this one still has a fade to paint, and a bar
+    /// that stops at 95 next to a launcher that has plainly finished loading is
+    /// the kind of detail a splash page exists to avoid.
+    pub fn progress(&self, now: Instant) -> f32 {
+        if self.loaded {
+            return 100.0;
+        }
+        let elapsed_ms = now.saturating_duration_since(self.started).as_secs_f32() * 1000.0;
+        (elapsed_ms * SPLASH_FAKE_PER_MS).min(SPLASH_FAKE_CEILING)
+    }
+
+    /// 1.0 while the page is opaque, 0.0 once it is gone, and the reference's
+    /// 300ms ease-in-out between the two.
+    pub fn opacity(&self, now: Instant) -> f32 {
+        let Some(fading) = self.fading else {
+            return 1.0;
+        };
+        let t = (now.saturating_duration_since(fading).as_secs_f32() / SPLASH_FADE.as_secs_f32())
+            .clamp(0.0, 1.0);
+        // `ease-in-out`: the same cubic the CSS shorthand means.
+        let eased = if t < 0.5 { 2.0 * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0 };
+        1.0 - eased
+    }
+
+    /// Advance the page to `now`, and say whether it is over.
+    ///
+    /// One place decides both transitions, so a frame that arrives late -- or a
+    /// whole second of them -- lands in the same state as one that arrives on
+    /// time: the minimum display is still honoured in full, and the fade is
+    /// measured from when it should have started rather than from when this was
+    /// last asked.
+    pub fn advance(&mut self, now: Instant) -> bool {
+        if self.done {
+            return true;
+        }
+        if !self.loaded {
+            return false;
+        }
+        let due = self.started + SPLASH_MIN_DISPLAY;
+        if now < due {
+            return false;
+        }
+        // Anchored to when the fade was *due*, not to this frame: a frame that
+        // arrives late must not stretch the fade to three hundred milliseconds
+        // from whenever the UI got round to it.
+        if self.fading.is_none() {
+            self.fading = Some(due);
+        }
+        if self.opacity(now) <= 0.0 {
+            self.done = true;
+        }
+        self.done
+    }
+}
+
 /// The application state (runtime-agnostic; both shells in `main.rs` use it).
 pub struct PalantirApp {
     /// This launcher's own directory — where its settings live, and nothing
@@ -1491,6 +1679,8 @@ pub struct PalantirApp {
     mods: Vec<ModEntry>,
     worlds: Vec<String>,
     shots: ShotState,
+    /// The loading page: whether it is still up, and how far through it is.
+    splash: SplashState,
     /// A capture this run was asked for, or `None` for an ordinary run.
     shot: Option<ShotRequest>,
     /// Whether iced has already been asked for those pixels, so a subscription
@@ -1607,6 +1797,8 @@ impl PalantirApp {
             form: SettingsForm::default(),
             mods: Vec::new(),
             worlds: Vec::new(),
+            // Already over: this constructor loaded before it had a window.
+            splash: SplashState::finished(),
             run_seq: 0,
             install_seq: 0,
             pack_installing: None,
@@ -1672,6 +1864,9 @@ impl PalantirApp {
             form: SettingsForm::default(),
             mods: Vec::new(),
             worlds: Vec::new(),
+            // Starts now: this state is built before the window paints, which
+            // is exactly what the page is for.
+            splash: SplashState::starting(),
             run_seq: 0,
             install_seq: 0,
             pack_installing: None,
@@ -1967,6 +2162,9 @@ impl PalantirApp {
 
     fn apply_loaded(&mut self, loaded: LoadedInstances) {
         self.loading = false;
+        // What the loading page was covering. It stays up for its own minimum
+        // display and then fades -- see `SplashState`.
+        self.splash.loaded();
         self.cards = loaded.cards;
         self.groups = loaded.groups;
         self.instances_dir = loaded.instances_dir;
@@ -3532,6 +3730,16 @@ impl PalantirApp {
                 }
                 Command::none()
             }
+            Message::BrowseSortPicked(sort) => {
+                // The reference's Sort dropdown re-runs the search on the spot
+                // rather than waiting to be asked again, so a result list is
+                // never shown under the order it was not fetched in.
+                self.browse.sort = sort;
+                if !self.browse.query.trim().is_empty() {
+                    self.start_browse_search();
+                }
+                Command::none()
+            }
             Message::BrowseSubmitted => {
                 self.start_browse_search();
                 Command::none()
@@ -3723,6 +3931,14 @@ impl PalantirApp {
                     .rem_euclid(1.0);
                 Command::none()
             }
+            // The page times itself: whether it is finished, and how far
+            // through its fade it is, are both read from the clock when the
+            // frame is drawn. This only has to arrive often enough to notice
+            // the work ending, and to repaint while the fade runs.
+            Message::SplashTick => {
+                self.splash.advance(Instant::now());
+                Command::none()
+            }
             Message::LaunchDone { run_id, note } => {
                 let current = self.active_run.as_ref().map(|run| run.run_id).unwrap_or(0);
                 if current == run_id && current != 0 {
@@ -3798,6 +4014,12 @@ impl PalantirApp {
     /// imports and the launch stream.
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs: Vec<Subscription<Message>> = Vec::new();
+        // The loading page is only asking for frames while it is on screen, so
+        // a run that is past it pays nothing for it -- the same rule the scroll
+        // tween and the indeterminate bar follow.
+        if !self.splash.done() {
+            subs.push(splash_ticks());
+        }
         if let Some(shot) = self.shot.clone() {
             if !self.shot_taken {
                 subs.push(one_shot(SHOT_ID, 1, move |mut sender| {
@@ -3821,13 +4043,15 @@ impl PalantirApp {
             }));
         }
         if self.browse.loading {
-            let (seq, query, content_type) = (
+            let (seq, query, content_type, sort) = (
                 self.browse.seq,
                 self.browse.query.trim().to_string(),
                 self.browse.content_type,
+                self.browse.sort,
             );
             subs.push(one_shot((BROWSE_ID, seq, content_type), 8, move |mut sender| {
-                let result = browse::client().and_then(|client| browse::search_typed(&client, &query, content_type));
+                let result = browse::client()
+                    .and_then(|client| browse::search_sorted(&client, &query, content_type, sort));
                 let _ = sender.try_send(Message::TaskDone(Box::new(Task::BrowseSearch { seq, result })));
             }));
         }
@@ -4041,6 +4265,22 @@ impl PalantirApp {
         // step by hand.
         native::set_caption_target(caption_target());
 
+        // The loading page *is* the window while it is up, rather than a layer
+        // over the shell: the reference draws it `position: fixed; inset: 0`
+        // with an opaque background, so what it shows is exactly what this
+        // returns. iced 0.12 has no z-order to stack it with, which is the same
+        // constraint the Home page's own backdrop ran into -- and here it costs
+        // nothing, because nothing of the shell is meant to be visible behind
+        // it anyway.
+        //
+        // The drawn resize bands go with it. They are the fallback for a shim
+        // that could not be installed, and on any machine where that shim did
+        // install -- which is every machine this has run on -- Windows owns the
+        // window frame regardless of what is painted inside it.
+        if !self.splash.done() {
+            return self.view_splash();
+        }
+
         let mut body = row![
             self.view_rail(),
             // The reference's 1px hairline between the rail and the page.
@@ -4104,6 +4344,88 @@ impl PalantirApp {
         .into()
     }
 
+    /// The loading page: the reference's splash screen, drawn from its own
+    /// numbers.
+    ///
+    /// **What the reference draws**, from `SplashScreen.vue` and
+    /// `ProgressBar.vue`: one centred column -- a wordmark `2.25rem` tall, `gap:
+    /// 1rem`, a `20rem`-wide `0.5rem`-tall progress bar, and an optional line of
+    /// text -- over a background of three stacked layers (a green-to-slate tint
+    /// gradient, a near-black overlay at 64%, and opaque art underneath). The
+    /// column is `justify-content: center`, so it is centred on the window and
+    /// not on anything else.
+    ///
+    /// **What this draws.** The same column at the same sizes over the same
+    /// three layers, with the layers resolved into one gradient because iced has
+    /// no z-order to stack them with (see `theme::splash_background`). The
+    /// wordmark in the slot is this launcher's own -- the reference's is its
+    /// brand art -- and the line under the bar is this shell's status while it
+    /// loads, where the reference only has something to say during a rare
+    /// directory move.
+    ///
+    /// The whole page takes one opacity factor from [`SplashState`], so it fades
+    /// as one thing rather than each part fading its own way.
+    fn view_splash(&self) -> Element<'_, Message> {
+        let now = Instant::now();
+        let fade = self.splash.opacity(now);
+
+        // The wordmark is also the page's drag patch. The reference puts a
+        // `data-tauri-drag-region` on exactly this wrapper for exactly this
+        // reason: the page covers the title bar, and a window with no title bar
+        // showing still has to be movable.
+        let wordmark = grabbable(
+            BarArea::Brand,
+            Length::Shrink,
+            false,
+            row![
+                Image::new(brand::logo_handle())
+                    .width(Length::Fixed(SPLASH_LOGO_HEIGHT))
+                    .height(Length::Fixed(SPLASH_LOGO_HEIGHT)),
+                text(brand::APP_NAME)
+                    .size(18)
+                    .font(theme::semibold())
+                    .style(iced::theme::Text::Color(theme::alpha(theme::text(), fade))),
+            ]
+            .spacing(10)
+            .align_items(iced::Alignment::Center),
+        );
+
+        let percent = self.splash.progress(now);
+        let bar = progress_bar(0.0..=100.0, percent)
+            .width(Length::Fixed(SPLASH_BAR_WIDTH))
+            .height(Length::Fixed(SPLASH_BAR_HEIGHT))
+            .style(move |_: &Theme| theme::splash_bar_at(fade));
+
+        let mut stack = column![
+            wordmark,
+            bar,
+        ]
+        .spacing(SPLASH_GAP)
+        .align_items(iced::Alignment::Center);
+
+        // The reference's third slot: a line under the bar, shown only while
+        // there is something to say. This shell always has something to say
+        // while the scan runs, so the slot is filled for as long as it is true.
+        if self.loading && !self.status.is_empty() {
+            stack = stack.push(
+                text(self.status.clone())
+                    .size(14)
+                    .style(iced::theme::Text::Color(theme::alpha(theme::text_muted(), fade))),
+            );
+        }
+
+        container(stack)
+            .style(move |_: &Theme| container::Appearance {
+                background: Some(Gradient::Linear(theme::splash_background_at(fade)).into()),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into()
+    }
+
     /// Undecorated title bar: logo, product name, global search, run chip and
     /// the window controls. The empty area starts an OS window drag.
     fn view_title_bar(&self) -> Element<'_, Message> {
@@ -4137,7 +4459,7 @@ impl PalantirApp {
             self.bar_armed == Some(BarArea::Page),
             row![
                 glyph(self.page.icon(), PAGE_GLYPH, theme::text_muted()),
-                text(self.page.title())
+                text(self.bar_title())
                     .size(PAGE_TITLE_SIZE)
                     .font(theme::semibold()),
             ]
@@ -4231,6 +4553,20 @@ impl PalantirApp {
             Page::Worlds => self.prefs.show_worlds_tab,
             Page::Screenshots => self.prefs.show_screenshots_tab,
             _ => true,
+        }
+    }
+
+    /// What the title bar names the page you are on.
+    ///
+    /// The reference's bar carries a breadcrumb rather than a page name, and on
+    /// its Discover page that breadcrumb reads `Discover modpacks` -- the *type*
+    /// in the bar, in lower case, because the page itself draws no heading of its
+    /// own. Every other page here names itself, which is what the bar was already
+    /// doing; this is the one page where the name has a part that changes.
+    fn bar_title(&self) -> String {
+        match self.page {
+            Page::Browse => format!("Discover {}", self.browse.content_type.label().to_lowercase()),
+            other => other.title().to_string(),
         }
     }
 
@@ -4660,6 +4996,32 @@ impl PalantirApp {
     }
 
     /// Browse: Modrinth search + one-click install.
+    /// Discover: the reference's browse page, to its own measurements.
+    ///
+    /// **What the reference draws** (`.scratch/ref-02-page-1.png`, recorded in
+    /// `REFERENCE.md`): the tab strip first thing in the column, then a search
+    /// field 42px tall, then a row with Sort and View on the left and the result
+    /// count on the right, then full-width 140px result cards 14px apart. There
+    /// is **no in-page heading at all** — the page's name is in the title bar
+    /// (`Discover modpacks`) — and no Search button: its search runs as you type.
+    ///
+    /// **What this draws.** That structure at those sizes. Four things differ, and
+    /// each is recorded rather than hidden:
+    ///
+    /// * the in-page heading is gone, which is the reference's own choice;
+    /// * there is no View control, because this shell has one result layout and a
+    ///   toggle that toggles nothing is worse than its absence;
+    /// * the count on the right is what this client *kept* (`SEARCH_LIMIT`), not
+    ///   the API's total, which the search response carries but `parse_search`
+    ///   does not yet read;
+    /// * a card's icon slot is the measured 100x100 box holding the content
+    ///   type's glyph. The reference loads the project's own icon there, which is
+    ///   a network fetch per card this shell does not do yet.
+    ///
+    /// What the reference *does* do and this now does too is search on input
+    /// rather than on a button: Enter still submits (and `on_submit` keeps the
+    /// keyboard path), but a field that only answers a button next to it is not
+    /// the control the reference has.
     fn view_browse(&self) -> Element<'_, Message> {
         let target = if self.browse.content_type == ContentType::Modpacks {
             // A pack is its own instance, so the selected one is irrelevant and
@@ -4677,32 +5039,42 @@ impl PalantirApp {
                 None => "no instance selected".to_string(),
             }
         };
+
+        let sort = pick_list(
+            Sort::all(),
+            Some(self.browse.sort),
+            |sort: Sort| Message::BrowseSortPicked(sort),
+        )
+        .text_size(14)
+        // 36px tall, the height the reference's own Sort control measures.
+        .padding([8, 12])
+        .style(theme::Dropdown);
+
         let mut body = column![
+            browse_type_tabs(self.browse.content_type),
+            text_input("Search content…", &self.browse.query)
+                .on_input(Message::BrowseQueryChanged)
+                .on_submit(Message::BrowseSubmitted)
+                .size(16)
+                .style(theme::Field)
+                // 48px of field: 13 above and below a 16px label, which is what
+                // the reference's own field measures box to box.
+                .padding([13, 16])
+                .width(Length::Fill),
             row![
-                text(format!("Browse {}", self.browse.content_type.label())).size(24).font(theme::semibold()),
+                sort,
                 horizontal_space(),
-                text(format!("Installing into: {target}")).size(12),
+                text(format!(
+                    "{} shown · installing into {target}",
+                    self.browse.hits.len()
+                ))
+                .size(14)
+                .style(iced::theme::Text::Color(theme::text_dim())),
             ]
-            .spacing(10)
+            .spacing(8)
             .align_items(iced::Alignment::Center),
-            row![
-                browse_type_tabs(self.browse.content_type),
-            ],
-            row![
-                text_input("Search Modrinth (e.g. sodium, jei, xaero)", &self.browse.query)
-                    .on_input(Message::BrowseQueryChanged)
-                    .on_submit(Message::BrowseSubmitted)
-                    .style(theme::Field)
-                    .padding([10, 12])
-                    .width(Length::Fill),
-                button(text("Search").size(13))
-                    .on_press(Message::BrowseSubmitted)
-                    .style(theme::primary())
-                    .padding([10, 18]),
-            ]
-            .spacing(8),
         ]
-        .spacing(14);
+        .spacing(BROWSE_ROW_GAP);
 
         if self.browse.loading {
             body = body.push(centered_note("Asking Modrinth…"));
@@ -4718,9 +5090,14 @@ impl PalantirApp {
                 "Search Modrinth for content that matches the selected instance's game version.",
             ));
         }
+        // The cards are one column 14px apart rather than a `column!` with the
+        // page's own spacing: the reference's gap is the card list's, and the
+        // controls above it are spaced differently.
+        let mut cards = column![].spacing(BROWSE_CARD_GAP).width(Length::Fill);
         for hit in &self.browse.hits {
-            body = body.push(self.browse_row(hit));
+            cards = cards.push(self.browse_row(hit));
         }
+        body = body.push(cards);
         page_scroller(body)
     }
 
@@ -4741,36 +5118,97 @@ impl PalantirApp {
         if installing {
             install_label = "Installing…".to_string();
         }
-        let install: Button<'static, Message> = if installable && !installing {
-            button(text(install_label).size(12))
-                .on_press(Message::BrowseInstall(project.clone(), title.clone()))
-                .style(theme::primary())
-                .padding([8, 16])
-        } else {
-            button(text(install_label).size(12)).style(theme::secondary()).padding([8, 16])
+        // The reference's Install is one of its basic buttons -- a raised plate
+        // with an `#00da75` label and a `+` glyph -- and not a filled one, which
+        // is why the accent here is the *ink* rather than the fill. When the
+        // button cannot do anything the ink drops to the dim tint, so the state
+        // is visible without the card having to say so in words.
+        let ink = if installable && !installing { theme::accent() } else { theme::text_dim() };
+        let install: Button<'static, Message> = {
+            let label = row![
+                glyph("plus", 14.0, ink),
+                text(install_label).size(14).style(iced::theme::Text::Color(ink)),
+            ]
+            .spacing(6)
+            .align_items(iced::Alignment::Center);
+            if installable && !installing {
+                button(label)
+                    .on_press(Message::BrowseInstall(project.clone(), title.clone()))
+                    .style(theme::secondary())
+                    .padding([8, 16])
+            } else {
+                button(label).style(theme::secondary()).padding([8, 16])
+            }
         };
+        // The card, to the reference's own rhythm: a 100px icon box 17px in
+        // from the left, the title at 20px and the author at 14px on the same
+        // line, the description at 15px wrapping under it, the Install button at
+        // the top of the right column with the download count under it, and the
+        // page's 140px total height.
+        //
+        // The icon slot holds the content type's glyph where the reference loads
+        // the project's own icon: the box, its fill and its radius are its, the
+        // drawing is ours, and `REFERENCE.md` says so.
+        let icon = container(glyph(
+            self.browse.content_type.page_glyph(),
+            BROWSE_CARD_ICON * 0.34,
+            theme::text_dim(),
+        ))
+        .style(theme::icon_tile(theme::surface_hover()))
+        .width(Length::Fixed(BROWSE_CARD_ICON))
+        .height(Length::Fixed(BROWSE_CARD_ICON))
+        .center_x()
+        .center_y();
+
+        let mut title_row = row![
+            text(hit.title.clone()).size(20).font(theme::bold()),
+        ]
+        .spacing(8)
+        .align_items(iced::Alignment::Center);
+        if !hit.author.is_empty() {
+            title_row = title_row.push(
+                text(format!("by {}", hit.author))
+                    .size(14)
+                    .style(iced::theme::Text::Color(theme::text_dim())),
+            );
+        }
+
+        let text_column = column![
+            title_row,
+            text(hit.description.clone())
+                .size(15)
+                .style(iced::theme::Text::Color(theme::text_muted())),
+            horizontal_space(),
+            row![
+                chip(
+                    self.browse.content_type.label().to_string(),
+                    theme::chip_neutral,
+                ),
+                horizontal_space(),
+                text(hit.downloads_label())
+                    .size(14)
+                    .style(iced::theme::Text::Color(theme::text_dim())),
+            ]
+            .spacing(8)
+            .align_items(iced::Alignment::Center),
+        ]
+        .spacing(6)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
         container(
             row![
-                column![
-                    row![
-                        text(hit.title.clone()).size(15).font(theme::bold()),
-                        chip(hit.project_type.clone(), theme::chip_neutral),
-                    ]
-                    .spacing(8)
-                    .align_items(iced::Alignment::Center),
-                    text(hit.byline()).size(11),
-                    text(hit.description.clone()).size(12),
-                ]
-                .spacing(4)
-                .width(Length::Fill),
-                install,
+                icon,
+                text_column,
+                container(install).align_y(iced::alignment::Vertical::Top),
             ]
-            .spacing(12)
-            .align_items(iced::Alignment::Center),
+            .spacing(BROWSE_CARD_GAP)
+            .align_items(iced::Alignment::Start),
         )
         .style(theme::card)
-        .padding(12)
+        .padding([14, 17])
         .width(Length::Fill)
+        .height(Length::Fixed(BROWSE_CARD_HEIGHT))
         .into()
     }
 
@@ -6689,17 +7127,31 @@ fn grip(
 
 /// Centered informational note.
 fn browse_type_tabs(active: ContentType) -> Element<'static, Message> {
-    // The reference's strip, measured: 36px pills on the page's own colour, a
-    // 13px white label, and the selected one filled with
-    // `--color-brand-highlight`. It was a 12px bordered chip at 28px tall, which
-    // read as a row of tags rather than as the page's tabs.
-    let mut tabs = row![].spacing(6);
-    for content_type in ContentType::all() {
+    // The reference's strip: one `#27292e` container (`--surface-3`, 33px tall)
+    // holding the tabs, with the selected pill filled with
+    // `--color-brand-highlight` and the rest transparent. Measured off its own
+    // capture: container x 84..690, y 78..111, labels on ink row y 89 at 14px.
+    //
+    // The pills are inside the container rather than a row of chips on the page,
+    // which is the difference that matters: the strip reads as one control with
+    // a selected segment, not as five separate buttons that happen to be
+    // adjacent.
+    let all = ContentType::all();
+    let mut tabs = row![].spacing(0);
+    for (index, content_type) in all.into_iter().enumerate() {
         tabs = tabs.push(
-            button(text(content_type.label()).size(13))
+            button(text(content_type.label()).size(14))
                 .on_press(Message::BrowseTypePicked(content_type))
-                .style(theme::tab_button(content_type == active))
-                .padding([10, 12]),
+                .style(theme::tab_button_at(
+                    content_type == active,
+                    index == 0,
+                    index == all.len() - 1,
+                ))
+                // The vertical padding is what is left of the plate's 47px once
+                // the 14px label's 17px line box is in it -- 15 top and bottom,
+                // against the reference's 9 plus its plate's own 6px inset. The
+                // label lands on the same row either way.
+                .padding([(BROWSE_STRIP_HEIGHT - LABEL_LINE_BOX) / 2.0, BROWSE_PILL_PAD]),
         );
     }
     tabs.into()
@@ -7043,6 +7495,31 @@ fn bar_ticks() -> Subscription<Message> {
                 // from one that is done, so this one is simply dropped.
                 Err(error) if error.is_full() => {}
                 // Closed: the bar is gone, and so is this thread.
+                Err(_) => break,
+            }
+        });
+        loop {
+            futures::future::pending::<()>().await;
+        }
+    })
+}
+
+/// Frames for the loading page, while one is on screen.
+///
+/// The same thread-and-channel shape as [`frame_ticks`] and [`bar_ticks`], and
+/// for the same reason — a channel rather than `iced::time::every`, which needs
+/// a futures-runtime feature this build does not enable. It is the fastest of
+/// the three because the page's fade is a 300ms opacity ramp: at the bar's
+/// eighty milliseconds that ramp would be four steps, which is a slideshow.
+fn splash_ticks() -> Subscription<Message> {
+    iced::subscription::channel(SPLASH_ID, 4, |mut sender| async move {
+        let _ = std::thread::spawn(move || loop {
+            std::thread::sleep(scroll::FRAME);
+            match sender.try_send(Message::SplashTick) {
+                Ok(()) => {}
+                // Full: a frame is already waiting, and frames are droppable.
+                Err(error) if error.is_full() => {}
+                // Closed: the page is gone, and so is this thread.
                 Err(_) => break,
             }
         });
@@ -9022,6 +9499,152 @@ mod tests {
         // is the state, not the subscription's lifetime.
         let _ = app.update(Message::ShotDue);
         assert!(app.shot_taken);
+    }
+
+    #[test]
+    fn the_loading_page_fills_at_the_references_rate_and_waits_at_ninety_five() {
+        let mut splash = SplashState::starting();
+        let start = splash.started;
+        assert_eq!(splash.progress(start), 0.0, "an empty bar when the page opens");
+        // `fakeLoadingIncrease`: two percent every five milliseconds.
+        let quarter = start + Duration::from_millis(100);
+        assert!((splash.progress(quarter) - 40.0).abs() < 0.01);
+        // ...and it never claims to be finished while work is still running.
+        assert_eq!(splash.progress(start + Duration::from_secs(30)), SPLASH_FAKE_CEILING);
+        // Once the work behind it is done the bar reads full, which is the one
+        // place this departs from the reference: it vanishes in the frame its
+        // work ends, while this page still has a fade to paint.
+        splash.loaded();
+        assert_eq!(splash.progress(quarter), 100.0);
+    }
+
+    #[test]
+    fn the_loading_page_keeps_its_minimum_display_then_fades_out() {
+        let mut splash = SplashState::starting();
+        let start = splash.started;
+        splash.loaded();
+        // `MIN_DISPLAY_MS`: half a second, even when the work was instant.
+        assert!(!splash.advance(start + Duration::from_millis(499)));
+        assert_eq!(splash.opacity(start + Duration::from_millis(499)), 1.0);
+        // The fade starts the moment that runs out, and takes 300ms.
+        assert!(!splash.advance(start + SPLASH_MIN_DISPLAY));
+        assert_eq!(
+            splash.opacity(start + SPLASH_MIN_DISPLAY),
+            1.0,
+            "the fade begins here, so it has not moved yet"
+        );
+        let quarter = start + SPLASH_MIN_DISPLAY + SPLASH_FADE / 4;
+        assert!(splash.opacity(quarter) < 1.0, "a quarter of the way in it has dimmed");
+        assert!(splash.opacity(quarter) > 0.0, "and it is not gone yet");
+        assert!(!splash.advance(start + SPLASH_MIN_DISPLAY + SPLASH_FADE / 2));
+        assert!(splash.advance(start + SPLASH_MIN_DISPLAY + SPLASH_FADE));
+        assert_eq!(splash.opacity(start + SPLASH_MIN_DISPLAY + SPLASH_FADE), 0.0);
+        assert!(splash.done(), "the shell draws once the page has faded");
+    }
+
+    #[test]
+    fn a_loading_page_whose_work_never_finishes_never_fades() {
+        // The page is a function of the clock and one flag, so a stalled scan
+        // leaves it up rather than dimming it into a shell that has nothing to
+        // show yet.
+        let mut splash = SplashState::starting();
+        let start = splash.started;
+        assert!(!splash.advance(start + Duration::from_secs(30)));
+        assert_eq!(splash.opacity(start + Duration::from_secs(30)), 1.0);
+        assert!(!splash.done());
+    }
+
+    #[test]
+    fn the_page_is_up_until_its_work_lands_and_the_shell_after_it() {
+        let (_dir, paths) = test_paths();
+        // The synchronous constructor loaded before it had a window, so it has
+        // no page to show...
+        let app = PalantirApp::with_paths(paths.clone());
+        assert!(app.splash.done());
+        assert!(!app.loading);
+        // ...whereas the runtime shell is built before its scan comes back, and
+        // that is exactly the state the page is for.
+        let mut pending = PalantirApp::pending_roots(paths.clone(), paths);
+        assert!(pending.loading, "the scan is what the page covers");
+        assert!(!pending.splash.done());
+        // The scan landing is what releases it, and even then not before the
+        // minimum display has run out.
+        pending.apply_loaded(LoadedInstances {
+            cards: Vec::new(),
+            groups: Groups::default(),
+            instances_dir: pending.instances_dir.clone(),
+            selected: None,
+            status: "No instances found yet.".to_string(),
+        });
+        assert!(!pending.loading);
+        assert!(!pending.splash.done(), "the minimum display still has to run");
+        assert!(
+            pending.splash.advance(Instant::now() + SPLASH_MIN_DISPLAY + SPLASH_FADE),
+            "and then the page is over"
+        );
+    }
+
+    #[test]
+    fn the_bar_names_the_discover_page_by_its_type() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths);
+        // Every other page names itself, which is what the bar already did.
+        assert_eq!(app.bar_title(), "Home");
+        let _ = app.update(Message::PageSelected(Page::Browse));
+        // The reference's breadcrumb on this page, lower case and all: the page
+        // draws no heading of its own, so the bar is where its name lives.
+        assert_eq!(app.bar_title(), "Discover modpacks");
+        for (content_type, expected) in [
+            (ContentType::Mods, "Discover mods"),
+            (ContentType::ResourcePacks, "Discover resource packs"),
+            (ContentType::DataPacks, "Discover data packs"),
+            (ContentType::Shaders, "Discover shaders"),
+        ] {
+            let _ = app.update(Message::BrowseTypePicked(content_type));
+            assert_eq!(app.bar_title(), expected);
+        }
+    }
+
+    #[test]
+    fn the_sort_control_offers_the_references_orders_in_its_own_words() {
+        // The label and the query parameter are two names for one thing, and the
+        // API's name is the one that goes on the wire -- so the list is asserted
+        // as a pair rather than as two lists that could drift apart.
+        let orders: Vec<(&str, &str)> =
+            Sort::all().iter().map(|sort| (sort.label(), sort.api_value())).collect();
+        assert_eq!(
+            orders,
+            vec![
+                ("Relevance", "relevance"),
+                ("Downloads", "downloads"),
+                ("Follows", "follows"),
+                ("Newest", "newest"),
+                ("Updated", "updated"),
+            ]
+        );
+        assert_eq!(Sort::default(), Sort::Relevance, "the reference opens on Relevance");
+        assert_eq!(Sort::Downloads.to_string(), "Downloads", "what the closed control reads");
+    }
+
+    #[test]
+    fn picking_a_sort_order_re_asks_modrinth() {
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths);
+        let _ = app.update(Message::PageSelected(Page::Browse));
+        let _ = app.update(Message::BrowseQueryChanged("sodium".to_string()));
+        let before = app.browse.seq;
+        // A new order over results already on screen is exactly the case the
+        // reference re-runs its search for: the list must never be shown under
+        // an order it was not fetched in.
+        let _ = app.update(Message::BrowseSortPicked(Sort::Downloads));
+        assert_eq!(app.browse.sort, Sort::Downloads);
+        assert!(app.browse.loading, "the search runs again");
+        assert!(app.browse.seq > before, "and it is a new request, not the old one");
+        // An empty box has nothing to re-ask, so it must not start a search.
+        let _ = app.update(Message::BrowseQueryChanged(String::new()));
+        let quiet = app.browse.seq;
+        let _ = app.update(Message::BrowseSortPicked(Sort::Newest));
+        assert_eq!(app.browse.seq, quiet, "no query, no request");
     }
 
     #[test]

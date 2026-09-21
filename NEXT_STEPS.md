@@ -1553,3 +1553,56 @@ worth of reasoning about a portable-mode bug that was not in the product at all 
 worth recording, because the same freeze will look like a launcher bug to whoever
 sees it next. `--page` is what makes a capture unattended: a page gate cannot click a
 rail entry on a desk with nobody at the keyboard.
+
+## 14. The loading page, and Discover to the reference's own numbers
+
+Two surfaces in one pass, because the second corrected the first.
+
+**The loading page exists now.** The reference's splash is a Vue component
+(`SplashScreen.vue` plus `ProgressBar.vue`), and it is a stack of four layers, which
+is why it was read from the source rather than photographed: a capture of a stack
+reports the flat result, and the tokens are what say what the layers are. The port
+draws the same centred column -- a 36px wordmark, 16px of gap, a 320x8 bar -- over
+those four layers resolved into one gradient by `theme::splash_sample`, because
+iced 0.12 has no z-order to stack them with. Everything timed in it is a function of
+the clock (`SplashState`), so the 500ms minimum display, the 0.3s ease-in-out fade
+and the bar's +2%-per-5ms ramp are asserted rather than waited for. The cube
+artwork behind it all is Modrinth's and is not in this repo; the layer it sits in is
+drawn as the colour it is laid over, which is recorded in `REFERENCE.md`.
+
+What it means for the user: the window no longer opens onto a half-built shell. It
+opens onto the loading page, says what it is loading under the bar, and fades to the
+shell that is ready behind it -- which is what the reference does and what
+`MIN_DISPLAY_MS` is for on a warm cache.
+
+**Discover was ported to numbers, and then the numbers were corrected.** The first
+pass took its geometry from ink rows measured off a different crop: a strip "33" tall,
+a "42" field, gaps of "17 and 16". `tools/page_gate.py --page discover` measures both
+clients the same way and disagreed with all four. The real page is a **47**-row plate
+holding 35-row pills inset 6px, a **48**-row field 7px below it, and a **36**-row Sort
+row 8px below that. The gate states all four, so the port was re-cut to them and the
+page now matches the reference box for box.
+
+**The strip cost the most, and the reason is worth keeping.** The reference's strip is
+one plate with the tabs inside it, so the port first wrapped the tab row in a
+container. Every label in it vanished. The mechanism (iced resolves a container's
+child against a bound derived from the column's *cross-axis* size, which is 0 for a
+shrink-width column) took two captures at 22px and 40px pills to find, and the fix is
+the reference's own shape rather than a workaround: the plate *is* the row of tabs --
+every pill filled `--surface-3`, the selected one `--color-brand-highlight`, square
+seams between them and a 12px radius only on the two outer ends. A container is the
+one thing this toolkit will not lay out around a row of shrink-width labels, and
+`REFERENCE.md` says so where the next person will look.
+
+Also in this pass: the Sort control is real (`browse::Sort` carries the reference's
+five orders as Modrinth's own `index` values, and picking one re-runs the search), the
+title bar names the page `Discover modpacks` -- the type in the bar, lower case,
+because the page draws no heading of its own -- and `palantir-net` grew
+`search_url_sorted` so the order goes on the wire rather than being applied to a page
+of results after the fact.
+
+Still open, and each for a stated reason: the reference's **View** toggle (this shell
+has one result layout), the API's `total_hits` in the count (the parse keeps the hits
+and drops the total), **project icons** in the cards' 100x100 slots (a fetch per
+card), and Discover's **filter column** (331px wide against the shell's 299, and
+"porting it" means porting facets, which is a search change rather than a page's).
