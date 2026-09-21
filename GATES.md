@@ -548,12 +548,20 @@ really the reference's?*
 
 - [x] G46: every colour claimed to be a token is that token, in all three modes
   CHECK: cargo test -p palantir-desktop --locked every_transcribed_token_is_the_references
-  EXPECT: test result: ok
-  EVIDENCE: **60 transcribed values and 24 declared deviations** across dark,
-      light and OLED, each compared with the token it names; a disagreement
-      prints our value, the reference's, and the file and line the token is
-      declared on. It reports `189 tokens, 26 held, 163 not held` with
-      `--nocapture`, which is the list a page that ports a new token pulls from.
+  EXPECT: test result: ok  EVIDENCE: **72 transcribed values and 24 declared deviations** across dark,
+  light and OLED, each compared with the token it names; a disagreement
+  prints our value, the reference's, and the file and line the token is
+  declared on. The table also holds the **five radius constants**
+  (`R_CARD`/`R_BUTTON`/`R_CHIP`/`R_MODAL` against `--radius-lg`/`-md`/`-sm`),
+  which are modeless and live on the `html` block, so they are read out of the
+  generated copy rather than out of the per-mode maps -- whose line numbers can
+  only ever name one sheet. Two radii are deliberately *not* claims, and the
+  reasons are the record: `R_KEYCAP` is 6 from Tailwind's own `rounded-md`
+  rung, not Omorphia's 12, and `R_BUTTON_LG` is 14 from ButtonFrame.vue's
+  literal `rounded-[14px]` on the `lg` size -- a per-button-size radius, not a
+  rung of the ladder. A radius claim would pin either to the wrong scale. It
+  reports `189 tokens, 29 held, 160 not held` with `--nocapture`, which is the
+  list a page that ports a new token pulls from.
       That first number was 148 until this pass, because the report counted the
       tokens in its own three maps -- `.light-properties` and the two modes that
       override it -- while the reference's light mode is also the `html` block

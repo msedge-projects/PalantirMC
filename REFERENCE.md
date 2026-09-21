@@ -234,7 +234,7 @@ to be written down rather than a silence. And the table cannot omit a value: the
 palette's field names are read out of `theme.rs` itself, so a new colour is
 unclassified until both files change. Running it with `-- --nocapture` prints the
 other half, which is the part that is useful on a *passing* run: **189 tokens in
-the reference's sheets, 26 held, 163 not held** -- the list a page pulls from as
+the reference's sheets, 29 held, 160 not held** -- the list a page pulls from as
 it ports. That first number was 148 before this pass, when the report counted
 only the three maps it built (`.light-properties` and the two modes that override
 it); the reference's light mode is also the `html` block -- gaps, radii, the ad

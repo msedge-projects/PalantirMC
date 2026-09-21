@@ -1741,7 +1741,7 @@ factors, the type scale.
 
 | Test | What it covers |
 |---|---|
-| `every_transcribed_token_is_the_references` | 60 transcribed values and 24 declared deviations, across dark, light and OLED |
+| `every_transcribed_token_is_the_references` | 72 transcribed values and 24 declared deviations, across dark, light and OLED -- colours, gradients, and now the five radius constants against `--radius-*` |
 | `every_palette_field_is_accounted_for` | the palette's field names read out of `theme.rs`, so the table cannot omit a colour |
 | `the_interaction_values_are_the_references` | hover factor per mode, `disabled:opacity-50`, and the two things deliberately not drawn |
 | `every_text_size_is_the_reference_or_a_measured_one` | 197 `.size()` call sites against the ladder (10/12/14/16/18/20/24/32/48) and the sizes the reference writes itself |
@@ -1817,14 +1817,21 @@ thing that needs to know where the tree is.
 
 #### What it does not check, and what its report says
 
-The report (`-- --nocapture`) is the other half of the value: **148 tokens in the
-reference's two sheets, 26 held by this shell, 122 not held** -- the ladder rungs
+The report (`-- --nocapture`) is the other half of the value: **189 tokens in the
+reference's two sheets, 29 held by this shell, 160 not held** -- the ladder rungs
 (`--color-red-100` …), the platform colours, the ad colours, the shadows, the
 gradient fade-out. That list is what a page pulls from as it ports, and it is
 printed rather than asserted because a shell that *doesn't* use a token is not a
-failure. Type gets the same treatment: **197 sizes drawn, 195 on the ladder or
-among the reference's own `text-[Npx]` writes, 2 declared measurements** (15, the
-Settings dialog's section headings, and 28, the device-code panel's code).
+failure. Type gets the same treatment: **197 sizes drawn, all 197 on the ladder
+or among the reference's own `text-[Npx]` writes** -- the two measurements this
+section used to carry (15 for the Settings headings, 28 for the device code)
+retired the day the vendored components were read for the headings they actually
+contain: the reference's Settings section headings are `text-lg` (18) and its
+modal headings `text-xl` (20), so 15 was never a size it states anywhere, and
+the device code now stands in the reference's own big-modal slot, `text-3xl`
+(32). The headings moved 16 (the ladder's `--font-size-nm`) and the code to 32,
+`MEASURED_SIZES` is empty, and the browser-row description that drew 15 draws
+14, which is what the reference's own `project-card-summary` (`text-sm`) is.
 
 Not checked, deliberately: the `--shadow-*` tokens (iced draws no box-shadow from
 a token), `--gap-*` (the shell's spacing is inline per call site, so there is no
@@ -1966,7 +1973,7 @@ held**, and the first number was wrong: it counted the three maps it had built
 (`.light-properties`, `.dark-mode`, `.oled-mode`) while the reference's light mode
 is also the `html` block -- the gaps, the radii, the ad colours, the ring -- and
 `body`'s type ladder. It now counts every name either sheet declares, which is
-**189, 26 held, 163 not held**, and it agrees with the vocabulary walk's count
+**189, 29 held, 160 not held**, and it agrees with the vocabulary walk's count
 because two readers built it. The 41 tokens the report used to omit are exactly
 the kind of thing a porting pass plans against, so the understatement was the
 worst possible kind of error in a list whose only job is to be complete.
@@ -1982,6 +1989,16 @@ by hand, and the gate's failure message *is* the instruction to re-run it. The
 copy is compiled for tests only (`#[cfg(test)]`), because the shell paints from
 `theme.rs`; when a page starts consuming a token at runtime, the token moves into
 `theme.rs` and this row stays as the receipt.
+
+The copy is already doing the second job for two values: the chrome gate
+(`the_chrome_is_the_scoped_copy`) reads `--top-bar-height`, `--left-bar-width`
+and `--right-bar-width` out of `SCOPED` and compares them with
+`TITLE_BAR_HEIGHT`/`RAIL_WIDTH`/`SIDEBAR_WIDTH`, so the constants that were
+taken off a capture are held to the tokens the reference declares; and the
+transcription gate reads the radii out of `LIGHT`'s table, because a radius is
+modeless and the `html` block is where the reference declares it. Both are the
+shape "held" was always meant to take: the shell paints from `theme.rs`/`app.rs`
+and the copy is what proves the number.
 
 ### What the runner confirmed
 
