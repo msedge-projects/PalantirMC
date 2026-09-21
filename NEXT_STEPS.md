@@ -1725,6 +1725,103 @@ the claim: nothing a gate already measures moved. The hover half cannot be
 captured at all -- there is no pointer in an unattended capture -- so it is
 asserted by the four unit tests above and by the vendored source they read.
 
+### The token gate, which is what makes the rest of the copy checkable
+
+The four values above were checked by four string comparisons against the
+reference's files. That is a fact about four tokens, and the port has hundreds: a
+comment saying "this is `--surface-3`" is a claim that nothing reads.
+
+`crates/palantir-desktop/src/reference_tokens.rs` is the answer to that, and it is
+the first thing in this repository that treats the vendored tree as an *oracle*
+rather than as a shelf. It parses `variables.scss` and `defaults.scss` -- the
+`--name: value;` blocks by selector, `var()` chains followed to the end of the
+chain, `linear-gradient()` read as its stops -- and compares the result with what
+the shell actually holds: the palette's three modes, the radii, the interaction
+factors, the type scale.
+
+| Test | What it covers |
+|---|---|
+| `every_transcribed_token_is_the_references` | 60 transcribed values and 24 declared deviations, across dark, light and OLED |
+| `every_palette_field_is_accounted_for` | the palette's field names read out of `theme.rs`, so the table cannot omit a colour |
+| `the_interaction_values_are_the_references` | hover factor per mode, `disabled:opacity-50`, and the two things deliberately not drawn |
+| `every_text_size_is_the_reference_or_a_measured_one` | 197 `.size()` call sites against the ladder (10/12/14/16/18/20/24/32/48) and the sizes the reference writes itself |
+| `every_font_weight_is_the_references` | the five Inter faces against the reference's `--font-weight-*` and Tailwind's weights |
+
+**The second test is the one that makes the other four mean anything.** A table
+can be complete-looking while missing the value that changed; this one reads the
+`pub struct Palette` block out of `theme.rs` and fails if any field is not a
+token, a stop, or a deviation with its reason written down. Adding a colour to
+the palette is therefore a change to two files, which is the correct amount of
+friction for a value that is supposed to be a copy.
+
+**A deviation is a first-class answer, not a hole.** The reference's stylesheet
+and the reference as installed disagree; `REFERENCE.md` records four of those
+from measurement, and the table holds 24 declared deviations (the measured accent
+in three modes, the derived brand highlight, the panel's wash and its surfaces,
+and the light theme's accent, which moves a rung for contrast). An undeclared
+difference fails; a declared one prints in the report with the reason beside it.
+
+#### Two bugs it found in itself, which is the useful part
+
+The first run failed on six OLED tokens it had claimed to be *dark's*. The cause
+was in the loader rather than the table: it merged the sheets as light -> dark ->
+OLED **into dark as well**, so every dark claim was being read out of the OLED
+block. The second was a wrong alias: `--color-divider` is dark's `surface-4` and
+not the `surface-5` a hairline here is, and claiming it for `border_strong` was an
+assumption the gate refused. A third was a genuine code bug in the comparison
+itself -- `find(..).and_then(..)` returns `None` both for a stop that matches and a
+stop that is missing, so every *correct* gradient stop was reported as absent.
+
+All three are worth more than the tests they broke, because they are exactly the
+failures a hand-written checker produces: taking the wrong block, assuming two
+tokens are the same, and writing a comparison whose two failure paths are one.
+
+#### The control
+
+A gate that cannot fail is a checkpoint, so this one was made to fail on purpose:
+`palette.surface` moved by one 8-bit level (`#27292e` -> `#26282d`) answers
+
+```
+2 of 60 claims disagree with the reference:
+
+palette.surface [Dark]: ours #26282d, reference #27292e
+    .../vendor/modrinth-app/assets/styles/variables.scss:237  --surface-3: #27292e
+
+--color-raised-bg [Dark]: ours #26282d, reference #27292e
+    .../vendor/modrinth-app/assets/styles/variables.scss:237  --color-raised-bg: var(--surface-3)
+```
+
+which is both halves of what the harness is for: the token, the line it lives on,
+and the fact that the alias carrying the same value is checked too.
+
+#### The skip path, and how not to check it
+
+`UPSTREAM.md` promises that removing the vendored tree changes no test. Five tests
+are a strange way to keep that promise if the way to check it is to move the tree:
+that was tried, `mv vendor/modrinth-app vendor/.moved-check`, and it left the tree
+moved for the length of a timed-out command -- 1857 files showing as deleted in
+`git status` while the check ran. Every reader in the module therefore takes the
+tree's root as an argument, and `a_tree_that_is_not_checked_out_skips_rather_than_fails`
+asserts the skip against a path that is not there. The harness is now the only
+thing that needs to know where the tree is.
+
+#### What it does not check, and what its report says
+
+The report (`-- --nocapture`) is the other half of the value: **148 tokens in the
+reference's two sheets, 26 held by this shell, 122 not held** -- the ladder rungs
+(`--color-red-100` …), the platform colours, the ad colours, the shadows, the
+gradient fade-out. That list is what a page pulls from as it ports, and it is
+printed rather than asserted because a shell that *doesn't* use a token is not a
+failure. Type gets the same treatment: **197 sizes drawn, 195 on the ladder or
+among the reference's own `text-[Npx]` writes, 2 declared measurements** (15, the
+Settings dialog's section headings, and 28, the device-code panel's code).
+
+Not checked, deliberately: the `--shadow-*` tokens (iced draws no box-shadow from
+a token), `--gap-*` (the shell's spacing is inline per call site, so there is no
+value to compare), the retro mode the reference offers and this shell does not,
+and glyph rendering, where the reference's WebView antialiases in colour and no
+number in either tree is comparable.
+
 ### What this pass did not do, and how "everything" stands
 
 What is **not** carried over, each for a stated reason rather than an oversight:

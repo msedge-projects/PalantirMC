@@ -529,16 +529,90 @@ tests leave alone are still the ones G20--G35 measure.
       *added* a surface behind the ghost so the state would read.
 
 - [x] G45: the numbers above are still the reference's -- read out of
-      `vendor/modrinth-app` rather than restated in a comment
-  CHECK: cargo test -p palantir-desktop the_reference_still_states_the_factor_this_copy_reads
+      `vendor/modrinth-app` rather than restated in a comment, together with every
+      colour this shell paints
+  CHECK: cargo test -p palantir-desktop --locked reference_tokens
   EXPECT: test result: ok
-  EVIDENCE: asserts `--hover-brightness: 1.25` and `: 0.9` in
-      `assets/styles/variables.scss` and `active:scale-[0.97]`,
-      `disabled:opacity-50` and `duration-150` in `ButtonFrame.vue`. It returns
-      early when the vendored tree is absent, which is deliberate: `UPSTREAM.md`
-      promises that removing it changes no test, and a check that fails when the
-      reference is not checked out would break that promise instead of keeping
-      it.
+  EVIDENCE: `crates/palantir-desktop/src/reference_tokens.rs` parses the
+      reference's own `variables.scss` and `defaults.scss` (`--name: value;`
+      blocks, `var()` chains followed, gradients read as stops) and compares the
+      result with the palette, the radii, the interaction factors and the type
+      scale. G46b and G46--G50 are its six tests, each listed below with what it
+      is for.
+
+## The token gate: every transcribed value, against the file it came from
+
+G46--G50 are one module, `crates/palantir-desktop/src/reference_tokens.rs`, and
+are unit tests rather than captures for the same reason G42 is: half of what they
+check -- a hover factor, a press -- is not in any picture. They are the answer to
+a question the port could previously only answer in a comment: *is this value
+really the reference's?*
+
+- [x] G46: every colour claimed to be a token is that token, in all three modes
+  CHECK: cargo test -p palantir-desktop --locked every_transcribed_token_is_the_references
+  EXPECT: test result: ok
+  EVIDENCE: **60 transcribed values and 24 declared deviations** across dark,
+      light and OLED, each compared with the token it names; a disagreement
+      prints our value, the reference's, and the file and line the token is
+      declared on. It reports `148 tokens, 26 held, 122 not held` with
+      `--nocapture`, which is the list a page that ports a new token pulls from.
+      **The control that makes it a gate:**
+      changing one palette value by one 8-bit level (`surface` `#27292e` ->
+      `#26282d`) fails it with
+      `palette.surface [Dark]: ours #26282d, reference #27292e` and
+      `variables.scss:237  --surface-3: #27292e`, plus the alias that carries the
+      same value (`--color-raised-bg`).
+
+- [x] G46b: a tree that is not checked out skips rather than fails
+  CHECK: cargo test -p palantir-desktop --locked a_tree_that_is_not_checked_out_skips_rather_than_fails
+  EXPECT: test result: ok
+  EVIDENCE: `UPSTREAM.md` promises that removing the vendored tree changes no
+      test, and five tests are a strange way to keep that promise if the way to
+      check it is to remove the tree (which is a thing that was tried, and left
+      the tree moved for a while). Every reader here takes the tree's root as an
+      argument for this test's sake, so the skip path is asserted with a path
+      that is not there.
+
+- [x] G47: a colour cannot be added to the palette without being classified
+  CHECK: cargo test -p palantir-desktop --locked every_palette_field_is_accounted_for
+  EXPECT: test result: ok
+  EVIDENCE: the palette's field names are read out of `theme.rs` itself, so the
+      table above cannot go stale: a new field fails this test until it is a
+      token, a stop or a deviation with its reason written down. This is what
+      makes G46 meaningful -- a table that can omit a value proves nothing about
+      the values in it.
+
+- [x] G48: the interaction factors are the reference's
+  CHECK: cargo test -p palantir-desktop --locked the_interaction_values_are_the_references
+  EXPECT: test result: ok
+  EVIDENCE: `theme::hover_brightness()` against `--hover-brightness` in each of
+      the three modes, `theme::DISABLED_OPACITY` against `disabled:opacity-50`,
+      and the two things this shell deliberately does not draw
+      (`active:scale-[0.97]`, `duration-150`) asserted to still be in
+      `ButtonFrame.vue` so the reason recorded for them cannot outlive the
+      reference.
+
+- [x] G49: every text size is a rung of the reference's ladder, a `text-[Npx]` it
+      writes itself, or a declared measurement
+  CHECK: cargo test -p palantir-desktop --locked every_text_size_is_the_reference_or_a_measured_one
+  EXPECT: test result: ok
+  EVIDENCE: the ladder parsed from `defaults.scss` is asserted to still be
+      `10/12/14/16/18/20/24/32/48`, and 197 `.size()` call sites across this
+      crate are read out of the sources: 195 are on that ladder or among the
+      sizes the reference writes itself (`text-[8px]`…`text-[13px]`), and 2 are
+      the declared measurements 15 and 28 with the reason each was chosen. A new
+      size fails the test until it is added to `MEASURED_SIZES` with a reason; a
+      `MEASURED_SIZES` entry nothing draws any more also fails, so the list
+      cannot rot.
+
+- [x] G50: every weight this shell draws is one the reference names
+  CHECK: cargo test -p palantir-desktop --locked every_font_weight_is_the_references
+  EXPECT: test result: ok
+  EVIDENCE: the reference's `--font-weight-*` values plus its Tailwind classes
+      (which is where 600 comes from -- the token ladder has no semibold and
+      `font-semibold` appears 531 times), against the five Inter faces this crate
+      ships: 400, 500, 600, 700, 800. It also pins the two the port claims to
+      follow: `--font-weight-text` is 500 and `--font-weight-heading` is 800.
 
 ## What these gates cannot say
 

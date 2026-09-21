@@ -204,6 +204,39 @@ a `MouseArea`-shaped change this shell has not built yet. The press uses
 `classes.scss`'s `brightness(0.8)` instead, which is the same intent as the 0.97
 and is the value the dark palette had already derived by hand.
 
+## The token gate, or: why these numbers are not just written down
+
+Every value in the tables above started as a comment in the source saying which
+token it came from, and a comment cannot fail. `crates/palantir-desktop/src/reference_tokens.rs`
+is the check: it parses the two sheets below by selector, follows `var()` chains
+to the end, reads a `linear-gradient()` as its stops, and compares the result with
+what this shell actually paints -- the palette in all three modes, the radii, the
+interaction factors and the type scale. A disagreement prints our value, the
+reference's, and the file and line the token is declared on:
+
+```
+palette.surface [Dark]: ours #26282d, reference #27292e
+    vendor/modrinth-app/assets/styles/variables.scss:237  --surface-3: #27292e
+```
+
+It reads `--name: value;` blocks out of:
+
+| File | What it holds |
+| --- | --- |
+| `assets/styles/variables.scss` | `.light-properties` (which `html` extends), `.dark-mode`, `.oled-mode`, `.retro-mode`: every surface, text colour, radius, gap and interaction factor |
+| `assets/styles/defaults.scss` | `body`'s font-size ladder and weight tokens, and the `--font-standard` family the type is set in |
+| `ui/src/components/base/buttons/ButtonFrame.vue` | the interaction a button has, which is not a token: `duration-150`, `active:scale-[0.97]`, `disabled:opacity-50` |
+
+Two things make it a gate rather than a report. A value that differs fails unless
+it is a **declared deviation** with its reason attached, which is where the four
+measured disagreements above live -- so "we deviate here" is a decision that has
+to be written down rather than a silence. And the table cannot omit a value: the
+palette's field names are read out of `theme.rs` itself, so a new colour is
+unclassified until both files change. Running it with `-- --nocapture` prints the
+other half, which is the part that is useful on a *passing* run: **148 tokens in
+the reference's sheets, 26 held, 122 not held** -- the list a page pulls from as
+it ports.
+
 ## The title bar, measured again
 
 The first pass read the bar as three separate 48px headers, one per column. It is

@@ -39,6 +39,10 @@ mod launch;
 mod mods;
 mod native;
 mod prefs;
+/// The token gate: the reference's own source, compared with what this shell
+/// paints. Compiled for tests only -- it reads files, and the shell never does.
+#[cfg(test)]
+mod reference_tokens;
 mod screenshots;
 mod scroll;
 mod settings;

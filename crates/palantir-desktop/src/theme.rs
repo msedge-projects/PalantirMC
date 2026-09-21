@@ -2102,31 +2102,11 @@ mod tests {
         assert!(luminance(fill(pressed)) < luminance(fill(accent_rest)));
     }
 
-    /// The numbers above are a copy of the reference's, so the copy is checked
-    /// against the file it came from when that tree is present.
-    ///
-    /// `vendor/modrinth-app` is reference material rather than a dependency --
-    /// removing it changes no test (`UPSTREAM.md` says so, and this one skips
-    /// rather than fails) -- but while it is here, "the factor is 1.25 and 0.9"
-    /// stops being a claim in a comment.
-    #[test]
-    fn the_reference_still_states_the_factor_this_copy_reads() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/modrinth-app");
-        let Ok(variables) = std::fs::read_to_string(root.join("assets/styles/variables.scss")) else {
-            return;
-        };
-        assert!(variables.contains("--hover-brightness: 1.25;"), "dark `--hover-brightness`");
-        assert!(variables.contains("--hover-brightness: 0.9;"), "light `--hover-brightness`");
-
-        let frame = std::fs::read_to_string(root.join("ui/src/components/base/buttons/ButtonFrame.vue"))
-            .unwrap_or_default();
-        // What a press and a disabled button are, where the code says they are
-        // not a brightness: both are string-matched against the component that
-        // states them, so a pass here means the token is still the reference's.
-        assert!(frame.contains("active:scale-[0.97]"), "the reference's press");
-        assert!(frame.contains("disabled:opacity-50"), "the reference's disabled");
-        assert!(frame.contains("duration-150"), "the transition duration");
-    }
+    // The numbers above are a copy of the reference's, and the copy is checked
+    // against the file it came from by `crate::reference_tokens`, which compares
+    // every one of these -- and every palette colour -- with the token it was
+    // transcribed from. It lives in its own module because reading the
+    // reference's stylesheets is a different job from painting with them.
 
     #[test]
     fn card_and_pill_styles_track_selection() {
