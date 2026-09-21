@@ -1944,8 +1944,18 @@ copy is compiled for tests only (`#[cfg(test)]`), because the shell paints from
 `theme.rs`; when a page starts consuming a token at runtime, the token moves into
 `theme.rs` and this row stays as the receipt.
 
+### What the runner confirmed
+
+Commits `78b69ab` and `3b39f76`, run
+[35623738312](https://github.com/MSedgeMC/PalantirMC/actions/runs/35623738312):
+all five jobs green, `Test workspace` and `Lint` included, and both exe targets
+built. Nothing in this pass draws, so no page gate was re-run: the module reads
+the reference's sheets and this crate's own sources, and the exe the run built
+behaves as the one before it did.
+
 The other half of the directive is where the work is *checked*: a full
-`cargo test --workspace` does not finish inside a working session on this machine,
-so the loop is the targeted test locally, then push and watch the runner --
-`gh run watch` -- which is the record either way. `AGENTS.md` §3 now says so
-instead of implying a local workspace run is the gate.
+`cargo test --workspace` does not finish inside a working session on this machine
+-- it has been killed at the ten-minute mark more than once -- so the loop is the
+targeted test locally, then push and `gh run watch` the run that does all of it.
+`AGENTS.md` §3 now says so instead of implying that a local workspace run is the
+gate.

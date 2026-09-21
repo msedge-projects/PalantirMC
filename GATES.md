@@ -672,6 +672,11 @@ writes `crates/palantir-desktop/src/theme_tokens.rs`.
       the one rule the two can state identically.
       Regenerating is `python tools/gen_tokens.py`; nothing in the file is edited
       by hand, and the gate's failure message is the instruction to re-run it.
+      Result: **3 met, 0 unmet** on commits `3b39f76` and `78b69ab`, whose CI run
+      [35623738312](https://github.com/MSedgeMC/PalantirMC/actions/runs/35623738312)
+      is green in all five jobs, `Test workspace` included. Nothing here draws, so
+      no page gate was re-run: this module reads files and compares strings, and
+      the exe the run built is unchanged in behaviour from the one before it.
 
 ## What these gates cannot say
 
