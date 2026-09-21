@@ -74,6 +74,34 @@ caption buttons, the drag regions, the window commands — is either iced's or
 `crates/palantir-desktop/src/native.rs`'s, and where that code needs to know what
 the Tauri side did, the reason is written at the call site.
 
+## That it is verbatim, as a command rather than a claim
+
+"Byte for byte" is checkable, so it is checked. Every file in this tree has the
+same git blob hash as the same path upstream at the pinned commit:
+
+```
+# in the upstream clone
+#   git ls-tree -r HEAD apps/app-frontend packages/ui packages/assets \
+#     | awk '{print $3, $4}' | sort > up.txt
+# here
+#   git ls-tree -r HEAD vendor/modrinth-app \
+#     | awk '{print $3, $4}' \
+#     | sed 's#vendor/modrinth-app/app-frontend/#apps/app-frontend/#;
+#            s#vendor/modrinth-app/ui/#packages/ui/#;
+#            s#vendor/modrinth-app/assets/#packages/assets/#' \
+#     | grep -v 'LICENSE-GPL-3.0.txt\|UPSTREAM.md' | sort > ours.txt
+#   diff <(cut -f1,2 up.txt) <(cut -f1,2 ours.txt)
+```
+
+The two lists are 1856 lines each and the diff is empty — 1856 and not 1857
+because `LICENSE-GPL-3.0.txt` is a fourth copy of the licence `app-frontend`
+already carries and `UPSTREAM.md` is this file, neither of which exists upstream.
+Matching *blob hashes* rather than file contents also settles the one thing a
+content comparison would leave open on a Windows checkout: whether git rewrote the
+line endings on the way in. It did not, and `.gitattributes` says why — `-text` on
+`vendor/modrinth-app/**`, so no end-of-line conversion on checkout and no
+normalisation on commit.
+
 ## Licence, and what adopting it means for this repository
 
 All three trees are **GPL-3.0**. This repository is already `GPL-3.0-only` — see

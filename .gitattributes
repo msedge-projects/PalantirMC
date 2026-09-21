@@ -1,13 +1,12 @@
-# The crates are built on Windows here and on Windows runners in CI, with
-# `core.autocrlf` set differently on each. `text=auto` means the *index* always
-# holds LF, so a checkout on either side produces the same diff -- without
-# forcing a line ending on anyone's worktree.
-* text=auto
-
-# Assets and build output must never be normalised: a rewritten PNG is a
-# corrupt PNG, and it would show up as a whole-file binary diff.
-*.png binary
-*.ico binary
-*.exe binary
-*.zip binary
-*.jar binary
+# The vendored launcher is a verbatim copy, so git must not touch it.
+#
+# This repository has `core.autocrlf` on, which means every text file it tracks is
+# stored with LF and checked out with CRLF. For our own code that is what we want.
+# For `vendor/modrinth-app` it is not: a copy that has been re-ended is no longer
+# the thing that was verified against, and `UPSTREAM.md` claims byte-for-byte.
+#
+# `-text` says "do not treat these as text": no end-of-line conversion on checkout
+# and no normalisation on commit, so the bytes in the working tree are the bytes in
+# the index are the bytes upstream shipped. It also stops diff from trying to show
+# a line-ending change on 1857 files.
+vendor/modrinth-app/** -text
