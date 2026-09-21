@@ -1863,3 +1863,89 @@ unexplained where they do not (11, 13, 15 and 28 are all drawn here and none is 
 rung); **style** -- this pass, plus the four panel gaps in §12; **motion** -- the
 switch slide is in, the scroll glide is in, the splash fade is in, and the
 accordion in §12.4, the page transitions, the modal in/out and the toast are not.
+
+## 28. The whole vocabulary, copied, and what it says is still missing
+
+§27 ended by saying the cheap way to finish the copy was to turn the vendored
+tree into an oracle instead of a bookshelf, and that only four interaction tokens
+had been done that way. This is the rest of it: **every token either sheet
+declares is now held by the shell**, at the value the reference gives it, with the
+file and the line it came from.
+
+### The copy
+
+`tools/gen_tokens.py` reads `variables.scss` and `defaults.scss` at the commit
+`UPSTREAM.md` pins and writes `crates/palantir-desktop/src/theme_tokens.rs` -- 821
+lines, **189 tokens in each of four modes** (light, dark, OLED, retro), 144 of
+them colours. It builds the reference's own cascade from the `@extend` lines
+rather than from a hard-coded order (`html` extends `.light-properties`;
+`.oled-mode` and `.retro-mode` extend `.dark-mode`), follows `var()` chains to the
+end, resolves `rem` at the reference's 16px root, and classifies each value as a
+colour, a length, a number, a gradient's stops (`#rrggbbaa@position`, comma
+separated) or text. It fails rather than guessing: a block it cannot find, an
+`@extend` that moved, or a mode that resolves to fewer than 150 tokens is a
+`SystemExit`, not a short file.
+
+`Kind::Text` is not a residue. It is where the reference declares something this
+reader cannot answer -- its `hsla()` shadows, its font stacks -- so the shell
+holds the token and a claim that needs the value fails loudly instead of quietly
+matching half of it.
+
+### Why it is a copy and not a transcription
+
+The sheets are read a **second** time, in Rust, by parsers that share no code with
+the generator:
+
+| Test | What it is for |
+|---|---|
+| `the_generated_vocabulary_is_the_sheets` | re-derives the cascade and compares all **756 rows** keyed by mode and token; a disagreement names the file and line the reference states it on |
+| `the_generated_vocabulary_covers_every_declared_token` | collects the declared set by a *line scan* -- a third opinion, so two parsers cannot collide on one blind spot -- and fails on a token the copy is missing or one no sheet declares |
+| `the_generated_vocabulary_holds_the_tokens_the_palette_paints` | the values the palette gate checks are *in* the copy, so the palette cannot stop being transcribed from the reference while both gates stay green |
+
+All three skip when the vendored tree is absent, so `UPSTREAM.md`'s "removing it
+changes no test" stays true -- and is checked, rather than being tested by moving
+1,857 files, which is a thing that was tried once and cost an evening.
+
+The control: changing one byte of one row (`#1bd96a40` -> `#1bd96a41`) fails it
+with six rows, each printed with the reference's own line, plus every alias
+carrying the same value. What the control caught *before* it was trusted was the
+harness's own four bugs, which is the argument for having a second reader at all:
+a `u8` formatted with `{}` instead of `{:02x}`, rendering every `#rrggbb` as
+decimal digits concatenated (`--surface-1` read back `#252523` where the copy says
+`#191917`); chain lookups keyed with the `--` the walk strips, so every `var()`
+hop reported a missing token instead of the value at the end of the chain; a
+gradient with an unencodable stop classified `Gradient` where the generator calls
+it `Text`; and the one real disagreement between the languages --
+`rgba(27, 217, 106, 0.7)` is 178.5, Python's `round` is half-to-even and Rust's is
+half-away, so the two chose 178 and 179 on the same token. Both now add 0.5 and
+truncate.
+
+### The number the coverage report was understating
+
+The older gate's `-- --nocapture` report said **148 tokens, 26 held, 122 not
+held**, and the first number was wrong: it counted the three maps it had built
+(`.light-properties`, `.dark-mode`, `.oled-mode`) while the reference's light mode
+is also the `html` block -- the gaps, the radii, the ad colours, the ring -- and
+`body`'s type ladder. It now counts every name either sheet declares, which is
+**189, 26 held, 163 not held**, and it agrees with the vocabulary walk's count
+because two readers built it. The 41 tokens the report used to omit are exactly
+the kind of thing a porting pass plans against, so the understatement was the
+worst possible kind of error in a list whose only job is to be complete.
+
+Merging those blocks into the *maps* was the obvious fix and is the wrong one: a
+line number cannot say which sheet it came from, so every failure message would
+have named a file the token is not in. Names are merged; lines are not.
+
+### Running it
+
+`python tools/gen_tokens.py` regenerates; nothing in `theme_tokens.rs` is edited
+by hand, and the gate's failure message *is* the instruction to re-run it. The
+copy is compiled for tests only (`#[cfg(test)]`), because the shell paints from
+`theme.rs`; when a page starts consuming a token at runtime, the token moves into
+`theme.rs` and this row stays as the receipt.
+
+The other half of the directive is where the work is *checked*: a full
+`cargo test --workspace` does not finish inside a working session on this machine,
+so the loop is the targeted test locally, then push and watch the runner --
+`gh run watch` -- which is the record either way. `AGENTS.md` §3 now says so
+instead of implying a local workspace run is the gate.

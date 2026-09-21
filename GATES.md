@@ -552,8 +552,17 @@ really the reference's?*
   EVIDENCE: **60 transcribed values and 24 declared deviations** across dark,
       light and OLED, each compared with the token it names; a disagreement
       prints our value, the reference's, and the file and line the token is
-      declared on. It reports `148 tokens, 26 held, 122 not held` with
+      declared on. It reports `189 tokens, 26 held, 163 not held` with
       `--nocapture`, which is the list a page that ports a new token pulls from.
+      That first number was 148 until this pass, because the report counted the
+      tokens in its own three maps -- `.light-properties` and the two modes that
+      override it -- while the reference's light mode is also the `html` block
+      (the gaps, the radii, the ad colours, the ring) and `body` (the whole type
+      ladder). It now counts every name either sheet declares, names only, so no
+      line number has to claim a sheet it did not come from. That it lands on the
+      same **189** the vocabulary walk below reads is two independent readers
+      agreeing on the size of the vocabulary, which is the number a porting pass
+      plans against.
       **The control that makes it a gate:**
       changing one palette value by one 8-bit level (`surface` `#27292e` ->
       `#26282d`) fails it with
@@ -612,11 +621,67 @@ really the reference's?*
       ships: 400, 500, 600, 700, 800. It also pins the two the port claims to
       follow: `--font-weight-text` is 500 and `--font-weight-heading` is 800.
 
+## The vocabulary gate: the whole design system, copied and checked
+
+The token gate above asks whether the values this shell *paints* are the
+reference's. This one asks a larger question: **does the shell hold every token
+the reference declares, at the value the reference declares it?** The two are
+kept apart because they answer different things -- one is about the palette, the
+other about the copy the rest of the port will draw from.
+
+`tools/gen_tokens.py` reads the two sheets at the commit `UPSTREAM.md` pins and
+writes `crates/palantir-desktop/src/theme_tokens.rs`.
+
+- [x] G51: the shell's copy of the reference's vocabulary is the sheets
+  CHECK: cargo test -p palantir-desktop --locked the_generated_vocabulary
+  EXPECT: test result: ok
+  EVIDENCE: **189 tokens in each of four modes** -- 144 colours, 20 lengths, 9
+      numbers, 3 gradients and 13 kept as the reference's own text, in light,
+      dark, OLED and retro -- with the reference's own cascade built from its
+      `@extend` lines (`html` extends `.light-properties`; `.oled-mode` and
+      `.retro-mode` extend `.dark-mode`) rather than assumed, `var()` chains
+      followed to the end, `rem` resolved at the reference's 16px root, and every
+      row carrying the **file and line** it is declared on.
+      What makes it a copy rather than a transcription is that the sheets are read
+      a *second* time, in Rust, by parsers that share no code with the generator:
+      `the_generated_vocabulary_is_the_sheets` re-derives the cascade and compares
+      **756 rows** key by key, naming the file and line of any disagreement;
+      `the_generated_vocabulary_covers_every_declared_token` collects the declared
+      set by a line scan -- a third opinion, so two readers cannot collide on one
+      blind spot -- and fails if the copy is missing a token or holds one no sheet
+      declares; and `the_generated_vocabulary_holds_the_tokens_the_palette_paints`
+      asserts that the values the palette gate checks are *in* the copy, so the
+      palette cannot stop being transcribed from the reference while both gates
+      stay green. All three take the vendored root as an argument and skip if it
+      is absent, which is `UPSTREAM.md`'s promise kept without moving 1,857 files.
+      **The control:** changing one byte of one row (`#1bd96a40` -> `#1bd96a41`)
+      fails it with six rows -- the token itself plus every alias carrying the same
+      value -- each printed as
+      `--color-brand-highlight [DARK]: generated ..., sheets ...` and
+      `vendor/modrinth-app/assets/styles/variables.scss:355  --color-brand-highlight`.
+      **What the control found first was the harness's own bugs**, all four of
+      them: a `u8` written with `{}` instead of `{:02x}`, which rendered every
+      `#rrggbb` in the sheets as decimal digits concatenated (`--surface-1` came
+      back `#252523` where the copy says `#191917`); chain lookups keyed *with* the
+      `--` the walk strips, so every `var()` hop reported a missing token instead
+      of the value the chain ends on; a gradient with a stop it could not encode
+      classified `Gradient` where the generator calls it `Text`; and the one real
+      disagreement between the two languages -- `rgba(27, 217, 106, 0.7)` is
+      178.5, and Python's `round` is half-to-even where Rust's is half-away, so
+      the two readers chose 178 and 179. Both now add 0.5 and truncate, which is
+      the one rule the two can state identically.
+      Regenerating is `python tools/gen_tokens.py`; nothing in the file is edited
+      by hand, and the gate's failure message is the instruction to re-run it.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
   here is about ink rows, ink colour and position rather than about pixels.
+- **No gate says the copy is used.** `theme_tokens.rs` is compiled for tests
+  only (`#[cfg(test)]` in `main.rs`): it is the receipt for the 189 tokens, not
+  the thing the shell paints from. 163 of them are held by nothing yet, and a
+  gate cannot see a page that has not been ported.
 - **No capture of the loading page.** The splash's numbers are asserted as
   functions and its tokens as composited colours; what it *looks like* on screen
   has been reasoned from the reference's own stylesheet rather than photographed

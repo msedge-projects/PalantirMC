@@ -233,9 +233,39 @@ measured disagreements above live -- so "we deviate here" is a decision that has
 to be written down rather than a silence. And the table cannot omit a value: the
 palette's field names are read out of `theme.rs` itself, so a new colour is
 unclassified until both files change. Running it with `-- --nocapture` prints the
-other half, which is the part that is useful on a *passing* run: **148 tokens in
-the reference's sheets, 26 held, 122 not held** -- the list a page pulls from as
-it ports.
+other half, which is the part that is useful on a *passing* run: **189 tokens in
+the reference's sheets, 26 held, 163 not held** -- the list a page pulls from as
+it ports. That first number was 148 before this pass, when the report counted
+only the three maps it built (`.light-properties` and the two modes that override
+it); the reference's light mode is also the `html` block -- gaps, radii, the ad
+colours, the ring -- and `body`'s type ladder, which a page will need just as
+much. It now counts every name either sheet declares, and the fact that the count
+is the same 189 the vocabulary copy below finds is two readers agreeing about the
+size of the thing being ported.
+
+## The whole vocabulary, copied and checked by a second reader
+
+Everything the two sheets declare is now held by the shell, not just the 26
+values the palette paints. `tools/gen_tokens.py` reads them at the commit
+`UPSTREAM.md` pins, builds the reference's own cascade from its `@extend` lines,
+follows every `var()` chain and writes
+`crates/palantir-desktop/src/theme_tokens.rs`: **189 tokens in each of four modes**
+-- light, dark, OLED and retro -- 144 of them colours, with the file and line each
+is declared on.
+
+It is a copy, not a transcription, because the sheets are read a second time
+before it is trusted: `crates/palantir-desktop/src/reference_vocabulary.rs`
+re-derives the same cascade in Rust, with parsers that share no code with the
+generator, and compares all 756 rows key by key. A disagreement prints the file
+and line the reference states the token on, and the fix is `python
+tools/gen_tokens.py`. Two more tests are a third opinion -- the declared set
+collected by a line scan, so neither parser's blind spot can hide a token -- and
+the receipt that the values the palette gate checks are in the copy. All three
+skip when the vendored tree is not checked out, which is `UPSTREAM.md`'s promise
+that removing it changes no test.
+
+The copy is compiled for tests only. It is what states, in the shell's own
+source, which 163 tokens are still waiting for a page.
 
 ## The title bar, measured again
 
