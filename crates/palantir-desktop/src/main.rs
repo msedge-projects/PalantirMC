@@ -31,6 +31,9 @@ mod browse;
 mod catalog;
 mod glyphs;
 mod gpu;
+/// Reporting a pointer crossing as a message: the only place a hover tween
+/// can be started from. See the module for why the view cannot start one.
+mod hover;
 mod icons;
 mod install;
 mod instances;

@@ -734,6 +734,73 @@ writes `crates/palantir-desktop/src/theme_tokens.rs`.
       so no page gate was re-run: this module reads files and compares strings, and
       the exe the run built is unchanged in behaviour from the one before it.
 
+## The tween: how a hover is carried, and what it costs to start one
+
+G42--G45 are about the *numbers* a control's pointer state is worth. This
+section is about the frames between them: the reference draws every interaction
+as a `transition ... duration-150` rather than as a state change, and until this
+work the shell drew the right factors on one frame. Two things had to be built,
+and the second one took reading iced's runtime rather than its widgets.
+
+- [x] G54: a hover, a press and the modal are tweens on a deadline, not frames
+  CHECK: cargo test -p palantir-desktop --locked anim::
+  EXPECT: test result: ok
+  EVIDENCE: `crates/palantir-desktop/src/anim.rs` holds `Interactions` -- one
+      tween per control key, holding the factor the *filter* multiplies by (`1.0`
+      at rest, `hover_brightness()` arrived, `PRESS_BRIGHTNESS` while a press is
+      held) -- and `ModalAnim`, the backdrop's opacity and the dialog's seat,
+      which is 200ms because that is what `NewModal.vue`'s overlay and dialog body
+      both say (`transition: all 0.2s ease-out` / `ease-in-out`, `scale: 0.97`).
+      Both are on the deadline pattern the switch and the page scroll already
+      used: three late frames and thirty early ones finish at the same wall clock
+      time. `hover_progress` inverts the brightness scale into the `0.0..=1.0` a
+      control that *moves* needs, and it is what the switch's knob growth and the
+      structural half of a button's hover both read.
+
+- [x] G55: the pointer's arrival is a message, because a tween started while the
+      view is built never moves
+  CHECK: cargo test -p palantir-desktop --locked hover::tests
+  EXPECT: test result: ok
+  EVIDENCE: `crates/palantir-desktop/src/hover.rs` wraps a control and publishes a
+      message when the pointer crosses its bounds -- twice per visit, never once
+      per move, and never capturing an event, so the control inside keeps its own
+      press, release and click behaviour. The module's doc comment is the
+      measurement behind it: iced re-tracks a program's subscriptions in exactly
+      one place, at the end of `iced_winit-0.12`'s `application::update` -- after
+      a message batch and *before* the view runs -- so a tween started by a
+      stylesheet that has just seen `Status::Hovered` has no frame subscription to
+      carry it and paints its first frame forever. `MouseArea` publishes
+      enter/leave but never hands events to its content, which leaves a `button`
+      inside it inert; hence a wrapper of our own, which delegates first and
+      reports after. The rule itself -- report once per crossing, and treat a
+      cursor that has left the window as a departure -- is three unit tests, and
+      the control for the whole mechanism is one byte of one factor in the copy.
+
+- [x] G56: no control in the shell is built without its interaction key
+  CHECK: cargo test -p palantir-desktop --locked every_control_is_built_with_its_key
+  EXPECT: test result: ok
+  EVIDENCE: a source scan of `crates/palantir-desktop/src/*.rs` -- comments and
+      string bodies blanked first, so a doc comment mentioning a button is not a
+      call -- that requires the innermost call around every `button(...)` to be
+      `hover_button(...)`, which is the one place a control's key, its role's
+      style and its pointer report are built from the same literal. **71 controls**
+      pass it (65 in `app.rs`, 6 in `settings.rs`), and the scan also fails if it
+      finds fewer than 60, so a parser that stopped seeing buttons cannot pass by
+      finding none. **The control:** a probe file holding one bare `button(...)`
+      fails the test with `gate_probe_tmp.rs:5`, and was removed after it did.
+
+- [x] G57: the modal fades in *and out*, and a close draws the dialog that left
+  CHECK: cargo test -p palantir-desktop --locked a_modal_fades
+  EXPECT: test result: ok
+  EVIDENCE: `ModalAnim::open()` is a separate question from the flag, which is why
+      a modal told to close stays on screen while it fades -- and why the app keeps
+      the dialog it just closed (`modal_leaving`) and `view_modal` draws *it* until
+      the tween lands. Before this the arrival was wired and the departure was not:
+      every close was the hard cut the open had stopped being, and the delete
+      confirmation had no arrival at all, because that one site set `self.modal`
+      without telling the tween. All thirteen sites now go through `set_modal`,
+      which is also what makes the two impossible to disagree.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

@@ -90,13 +90,75 @@ pub const DISABLED_OPACITY: f32 = 0.5;
 /// applying the rule to the surface it applies to (`surface-4`, `#34363c`) gives
 /// `#41434b`, which is not a rung of any ladder. The rule is the token here, so
 /// the rule is what is written.
-fn brightness(color: Color, factor: f32) -> Color {
+pub fn brightness(color: Color, factor: f32) -> Color {
     Color::from_rgba(
         (color.r * factor).min(1.0),
         (color.g * factor).min(1.0),
         (color.b * factor).min(1.0),
         color.a,
     )
+}
+
+/// The colour `t` of the way from `from` to `to`, in sRGB.
+///
+/// Straight component interpolation, which is what a CSS colour transition is —
+/// and the reference's controls transition their colours (`bg-surface-4`, a
+/// ring appearing) rather than only their filter. Shared with
+/// [`crate::settings`], whose switch track recolours across its own slide.
+pub fn mix(from: Color, to: Color, t: f32) -> Color {
+    let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
+    Color {
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
+        a: from.a + (to.a - from.a) * t,
+    }
+}
+
+/// Two control appearances, `t` of the way from the first to the second.
+///
+/// `transition-all duration-150` in the reference is not only the filter
+/// [`filtered`] draws: a hover that *adds* a fill, brightens a label's ink or
+/// swaps the surface under a row eases across on the same clock. So the two
+/// ends of a role are blended by the tween's own fraction, and the filter then
+/// multiplies the result — one clock, both halves of the transition.
+///
+/// What is *not* blended: a gradient's stops (nothing in the shell hovers
+/// between two gradients, so the ends snap), the shadow (no role moves it on
+/// hover) and the radius (a radius is not an interaction).
+fn blend(from: button::Appearance, to: button::Appearance, t: f32) -> button::Appearance {
+    // The ends come back as themselves rather than as a blend that happens to
+    // round to them, so a settled control is exactly the look its role states.
+    if !(t > 0.0 && t < 1.0) {
+        return if t >= 1.0 { to } else { from };
+    }
+    button::Appearance {
+        shadow_offset: to.shadow_offset,
+        shadow: to.shadow,
+        background: blend_background(from.background, to.background, t),
+        text_color: mix(from.text_color, to.text_color, t),
+        border: Border {
+            radius: to.border.radius,
+            width: from.border.width + (to.border.width - from.border.width) * t,
+            color: mix(from.border.color, to.border.color, t),
+        },
+    }
+}
+
+/// A fill arriving from nothing, or leaving to it.
+///
+/// The end that is missing contributes a fully transparent version of the
+/// other, so a ghost button's hover fill fades in through its own alpha rather
+/// than appearing at full strength on one frame.
+fn blend_background(from: Option<Background>, to: Option<Background>, t: f32) -> Option<Background> {
+    match (from, to) {
+        (Some(Background::Color(from)), Some(Background::Color(to))) => {
+            Some(Background::Color(mix(from, to, t)))
+        }
+        (None, Some(Background::Color(to))) => Some(Background::Color(alpha(to, to.a * t))),
+        (Some(Background::Color(from)), None) => Some(Background::Color(alpha(from, from.a * (1.0 - t)))),
+        (from, to) => if t >= 0.5 { to } else { from },
+    }
 }
 
 /// A whole appearance through that filter.
@@ -1050,40 +1112,102 @@ pub enum Role {
 
 /// A [`button::StyleSheet`] wrapper so call sites can write
 /// `.style(theme::primary())`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Btn(pub Role);
+///
+/// `anim` is the interaction clock the button's hover and press tween on; it
+/// is a process-wide lock because the stylesheet is handed `&self` and the
+/// clock lives with the app. A `Btn` built without one — there are a few in
+/// tests — is a button whose hover is the reference's *end state* on one frame,
+/// which is still the right factors, only without the tween.
+// `PartialEq` is derived without the clock on purpose: equality of a *style*
+// is equality of what it paints, and two buttons differing only in which clock
+// they read paint identically.
+#[derive(Debug, Clone, Copy)]
+pub struct Btn {
+    pub role: Role,
+    /// `None` until [`Btn::with_clock`] is given one.
+    pub clock: Option<&'static std::sync::Mutex<crate::anim::Interactions>>,
+    /// The key this button tweens under. Two buttons sharing a key share a
+    /// tween, which is why every control in the shell is given a key of its
+    /// own by [`crate::app`]'s `hover_button`.
+    pub key: &'static str,
+}
+
+impl Btn {
+    pub fn new(role: Role) -> Btn {
+        Btn { role, clock: None, key: "" }
+    }
+
+    /// Hand the button its tween clock and key.
+    pub fn with_clock(
+        mut self,
+        clock: &'static std::sync::Mutex<crate::anim::Interactions>,
+        key: &'static str,
+    ) -> Btn {
+        self.clock = Some(clock);
+        self.key = key;
+        self
+    }
+}
+
+/// The factor a control's pointer state is worth with no tween behind it.
+///
+/// The reference's end states, one frame. It is what a `Btn` with no clock
+/// draws, and what a clock that panicked under a tween falls back to: a
+/// stylesheet has to paint something either way, and this is the look the
+/// control settles on.
+fn interaction_end(hovered: bool, pressed: bool) -> f32 {
+    if pressed {
+        PRESS_BRIGHTNESS
+    } else if hovered {
+        hover_brightness()
+    } else {
+        1.0
+    }
+}
+
+/// How far *through* its hover a control is, with no tween behind it.
+///
+/// The structural half of the interaction, and the end state of it: a control
+/// that is hovered is all the way there, and one that is not is at rest.
+fn interaction_progress(hovered: bool) -> f32 {
+    if hovered {
+        1.0
+    } else {
+        0.0
+    }
+}
 
 /// Filled accent button.
 pub fn primary() -> Btn {
-    Btn(Role::Primary)
+    Btn::new(Role::Primary)
 }
 /// Raised grey button.
 pub fn secondary() -> Btn {
-    Btn(Role::Secondary)
+    Btn::new(Role::Secondary)
 }
 /// A `size="lg"` brand button.
 pub fn brand_large() -> Btn {
-    Btn(Role::BrandLarge)
+    Btn::new(Role::BrandLarge)
 }
 /// A `size="lg"` button on the basic surface.
 pub fn base_large() -> Btn {
-    Btn(Role::BaseLarge)
+    Btn::new(Role::BaseLarge)
 }
 /// Borderless button.
 pub fn ghost() -> Btn {
-    Btn(Role::Ghost)
+    Btn::new(Role::Ghost)
 }
 /// Icon-rail entry.
 pub fn rail_button(active: bool) -> Btn {
-    Btn(Role::Rail { active })
+    Btn::new(Role::Rail { active })
 }
 /// One of the head's two history rings.
 pub fn head_ring() -> Btn {
-    Btn(Role::HeadRing)
+    Btn::new(Role::HeadRing)
 }
 /// Selectable pill.
 pub fn chip_button(active: bool) -> Btn {
-    Btn(Role::Chip { active })
+    Btn::new(Role::Chip { active })
 }
 /// One tab in a page's own tab strip.
 ///
@@ -1095,45 +1219,45 @@ pub fn chip_button(active: bool) -> Btn {
 /// around the row hands its child a bound of its own and the labels collapse to
 /// nothing, which was captured twice and is recorded in `REFERENCE.md`.
 pub fn tab_button(active: bool) -> Btn {
-    Btn(Role::Tab { active, first: false, last: false })
+    Btn::new(Role::Tab { active, first: false, last: false })
 }
 
 /// The same, for one of the strip's outer ends.
 pub fn tab_button_at(active: bool, first: bool, last: bool) -> Btn {
-    Btn(Role::Tab { active, first, last })
+    Btn::new(Role::Tab { active, first, last })
 }
 /// The clickable body of an instance card (the card itself is a container).
 pub fn card_area(selected: bool) -> Btn {
-    Btn(Role::CardArea { selected })
+    Btn::new(Role::CardArea { selected })
 }
 /// Destructive tinted button.
 ///
 /// Named `destructive` rather than `danger` because [`danger`] is already the
 /// red itself — one name for the color, one for the button that uses it.
 pub fn destructive() -> Btn {
-    Btn(Role::Danger)
+    Btn::new(Role::Danger)
 }
 /// One color-theme choice in Settings.
 pub fn theme_card(selected: bool) -> Btn {
-    Btn(Role::ThemeCard { selected })
+    Btn::new(Role::ThemeCard { selected })
 }
 
 /// One row of the Settings dialog's section list.
 pub fn nav_item(active: bool) -> Btn {
-    Btn(Role::NavItem { active })
+    Btn::new(Role::NavItem { active })
 }
 /// Title-bar control.
 pub fn window_button() -> Btn {
-    Btn(Role::Window)
+    Btn::new(Role::Window)
 }
 /// Title-bar control drawn from a hover state iced did not observe — see
 /// [`Role::WindowExternallyHovered`].
 pub fn caption_button(hovered: bool) -> Btn {
-    Btn(Role::WindowExternallyHovered { hovered })
+    Btn::new(Role::WindowExternallyHovered { hovered })
 }
 /// Title-bar close control.
 pub fn close_button() -> Btn {
-    Btn(Role::WindowClose)
+    Btn::new(Role::WindowClose)
 }
 
 impl Btn {
@@ -1146,14 +1270,32 @@ impl Btn {
     /// makes the light theme's hover go the other way without a single role
     /// having to know which theme is in force.
     fn appearance(&self, hovered: bool, pressed: bool) -> button::Appearance {
-        let factor = if pressed {
-            PRESS_BRIGHTNESS
-        } else if hovered {
-            hover_brightness()
-        } else {
-            1.0
+        // With a clock, the factor is *tweened*: the stylesheet is asked for
+        // the hovered look the frames after the pointer message ran, and the
+        // clock's progress is what the filter multiplies by. Without one, the
+        // factor is the end state — the right factors, one frame.
+        let (factor, progress) = match self.clock {
+            Some(clock) => {
+                // A poisoned clock is a panic that happened while a tween was
+                // being read; the guard is taken anyway rather than propagating
+                // a panic into the paint, and the end states are what is drawn.
+                match clock.lock() {
+                    Ok(clock) => (
+                        clock.factor(self.key, hovered, pressed),
+                        clock.hover_progress(self.key, hovered, pressed),
+                    ),
+                    Err(_) => (interaction_end(hovered, pressed), interaction_progress(hovered)),
+                }
+            }
+            None => (interaction_end(hovered, pressed), interaction_progress(hovered)),
         };
-        filtered(self.role(hovered), factor)
+        // The role's two ends, blended by how far through the hover the clock
+        // is, and then the filter over the whole of it. `role(false)` and
+        // `role(true)` are the same look for most roles — a press's dimming is
+        // the filter's job — so this only moves where the reference's own
+        // transition moves something.
+        let look = blend(self.role(false), self.role(true), progress);
+        filtered(look, factor)
     }
 
     /// The role's own look, before the interaction above is applied.
@@ -1166,7 +1308,7 @@ impl Btn {
     /// same rule is how this got a light theme that brightened while the
     /// reference's darkened.
     fn role(&self, hovered: bool) -> button::Appearance {
-        let base = match self.0 {
+        let base = match self.role {
             Role::Primary => button::Appearance {
                 background: Some(accent().into()),
                 text_color: on_accent(),
@@ -1746,6 +1888,13 @@ mod tests {
     use super::*;
 
     /// Takes [`THEME_TEST_LOCK`], surviving a panic in another test.
+    ///
+    /// Taken by every test that *reads* the theme in force, not only by the one
+    /// that switches it: the process has one palette, and a reader running
+    /// beside `choosing_a_theme_changes_what_the_styles_paint` can see the light
+    /// or OLED theme it sets on its way through a comparison against the theme
+    /// it asserted about. That is a failure decided by the schedule rather than
+    /// by the code, which is what this lock exists to remove.
     fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
         THEME_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -1788,6 +1937,7 @@ mod tests {
 
     #[test]
     fn palette_matches_the_reference_theme() {
+        let _guard = theme_lock();
         // Asserted against the dark palette directly rather than through the
         // global, so this cannot race a test that switches themes.
         let dark = Palette::dark();
@@ -1898,6 +2048,7 @@ mod tests {
 
     #[test]
     fn theme_is_custom_and_named() {
+        let _guard = theme_lock();
         let theme = app_theme();
         assert!(format!("{theme:?}").contains("PalantirMC"));
         let palette = theme.palette();
@@ -1907,6 +2058,7 @@ mod tests {
 
     #[test]
     fn button_roles_paint_distinct_primary_and_danger() {
+        let _guard = theme_lock();
         let theme = app_theme();
         let resting = button::StyleSheet::active(&primary(), &theme);
         let destructive = button::StyleSheet::active(&destructive(), &theme);
@@ -1926,6 +2078,7 @@ mod tests {
 
     #[test]
     fn rail_and_chip_roles_track_active_state() {
+        let _guard = theme_lock();
         let theme = app_theme();
         let active = button::StyleSheet::active(&rail_button(true), &theme);
         let idle = button::StyleSheet::active(&rail_button(false), &theme);
@@ -1957,6 +2110,7 @@ mod tests {
     /// *structure* cannot see.
     #[test]
     fn the_welcome_buttons_and_key_cap_are_the_measured_ones() {
+        let _guard = theme_lock();
         let theme = app_theme();
 
         let brand = button::StyleSheet::active(&brand_large(), &theme);
@@ -2000,6 +2154,7 @@ mod tests {
     /// measured against.
     #[test]
     fn measured_tokens_keep_their_measured_values() {
+        let _guard = theme_lock();
         let palette = Palette::dark();
         assert_eq!(palette.accent, rgb(0x00, 0xDA, 0x75), "the accent is the app's own paint");
         assert_eq!(
@@ -2031,6 +2186,7 @@ mod tests {
 
     #[test]
     fn disabled_buttons_are_dimmed() {
+        let _guard = theme_lock();
         let theme = app_theme();
         let disabled = button::StyleSheet::disabled(&primary(), &theme);
         // `disabled:opacity-50` on the element, so every part of the button
@@ -2110,6 +2266,7 @@ mod tests {
 
     #[test]
     fn card_and_pill_styles_track_selection() {
+        let _guard = theme_lock();
         let theme = app_theme();
         let idle = button::StyleSheet::active(&card_area(false), &theme);
         let chosen = button::StyleSheet::active(&card_area(true), &theme);
@@ -2122,6 +2279,7 @@ mod tests {
 
     #[test]
     fn field_converts_into_the_input_style() {
+        let _guard = theme_lock();
         let style: iced::theme::TextInput = Field.into();
         assert!(matches!(style, iced::theme::TextInput::Custom(_)));
     }
@@ -2145,6 +2303,7 @@ mod tests {
 
     #[test]
     fn containers_and_fields_are_themed() {
+        let _guard = theme_lock();
         let theme = app_theme();
         assert_eq!(card(&theme).border.radius, R_CARD.into());
         assert_eq!(inset(&theme).background, Some(surface_input().into()));
@@ -2212,6 +2371,7 @@ mod tests {
 
     #[test]
     fn the_loading_pages_fade_thins_every_layer_at_once() {
+        let _guard = theme_lock();
         // A browser's `opacity` thins the layer rather than dimming it towards
         // black, so what is asserted is the alpha and not the colour.
         let half = splash_background_at(0.5);

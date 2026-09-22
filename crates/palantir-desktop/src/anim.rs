@@ -26,6 +26,7 @@
 //! all arrived asks for no frames at all.
 
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How long a switch takes to arrive, wall clock.
@@ -152,6 +153,287 @@ fn ease(progress: f32) -> f32 {
     progress * progress * (3.0 - 2.0 * progress)
 }
 
+// ---- The interaction clock ---------------------------------------------
+//
+// The reference's every control is `transition-[filter,transform] duration-150
+// ease-out` (`ButtonFrame.vue`'s base classes), which means its hover and its
+// press are *tweens*: the brightness lands on 1.25 over 150 ms, not in one
+// frame. This shell had the right factors and the wrong clock — a hover was
+// `filtered(role, 1.25)` on one frame and `filtered(role, 1.0)` on the next,
+// which next to everything else reads as a flicker.
+//
+// The cost analysis that first skipped this conflated two events. A *pointer
+// move* over a window arrives hundreds of times a second; a hover *change*
+// arrives twice — once on enter, once on leave — and the shell already has
+// both as messages (`SwitchHover`/`SwitchLeft` prove the pattern). Animating on
+// enter/leave costs the same messages the snap already paid, plus 150 ms of
+// frames from a subscription that only exists while something is moving.
+
+/// How long a hover or a press takes to arrive, wall clock.
+///
+/// `ButtonFrame.vue`'s `duration-150`. The reference's `ease-out` is drawn as
+/// the smoothstep below, which is what [`ease`] already is; the difference
+/// between the two curves at this length is under a pixel of brightness.
+pub const INTERACTION_DURATION: Duration = Duration::from_millis(150);
+
+/// The shell's one interaction clock.
+///
+/// A process-wide handle rather than a field of the app, because the buttons
+/// that read it carry it inside a stylesheet stored in the widget tree: they
+/// are built from `&self` while `update` mutates everything else, so what a
+/// style holds has to outlive every borrow the view takes. There is one
+/// window, one pointer and one of these, which is also the honest model.
+/// `OnceLock` rather than a `const` because a map cannot be built in a
+/// constant context.
+pub fn clock() -> &'static Mutex<Interactions> {
+    static CLOCK: OnceLock<Mutex<Interactions>> = OnceLock::new();
+    CLOCK.get_or_init(|| Mutex::new(Interactions::default()))
+}
+
+/// One control's hover/press tween, as the stylesheet sees it: the factor the
+/// filter is currently multiplied by, in `1.0..=1.25` (dark) or `0.9..=1.0`
+/// (light).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Tween {
+    /// The factor the tween is heading for: 1.0 resting, `hover_brightness()`
+    /// hovered, `PRESS_BRIGHTNESS` pressed.
+    to: f32,
+    /// The factor the tween started from.
+    from: f32,
+    /// The factor the control is drawn at this frame.
+    progress: f32,
+    /// When the tween began, or `None` once it has arrived.
+    began: Option<Instant>,
+}
+
+impl Tween {
+    fn settled(factor: f32) -> Tween {
+        Tween { to: factor, from: factor, progress: factor, began: None }
+    }
+}
+
+/// Hover and press, eased, for every control that asks.
+///
+/// One clock for the whole shell rather than one per control, because the
+/// controls a pointer can be over number one: the enter/leave messages move a
+/// *single* key, and everything else is at rest and costs a map lookup. Keyed
+/// by a stable string the view supplies, for [`SwitchAnim`]'s reason — a key
+/// derived from tree position would animate whatever lands in the slot.
+#[derive(Debug, Clone, Default)]
+pub struct Interactions {
+    tweens: HashMap<&'static str, Tween>,
+}
+
+impl Interactions {
+    /// The factor the control `id` is drawn at, given its pointer state.
+    ///
+    /// A control that has never been touched is at rest — the first paint must
+    /// not animate — and a control whose state matches its tween is simply at
+    /// its end.
+    pub fn factor(&self, id: &str, hovered: bool, pressed: bool) -> f32 {
+        let target = Self::target(hovered, pressed);
+        match self.tweens.get(id) {
+            Some(tween) if tween.to == target && tween.began.is_none() => tween.progress,
+            Some(tween) if tween.began.is_none() && tween.to != target => {
+                // Stale but settled: the state changed and no one called `set`
+                // yet (a fresh frame arrived before the update ran). Draw the
+                // rest factor rather than the tween's — the *next* `set` will
+                // start from here, so nothing jumps.
+                target
+            }
+            Some(tween) => tween.progress,
+            None => target,
+        }
+    }
+
+    /// The factor a control with this pointer state is *supposed* to be at.
+    fn target(hovered: bool, pressed: bool) -> f32 {
+        if pressed {
+            crate::theme::PRESS_BRIGHTNESS
+        } else if hovered {
+            crate::theme::hover_brightness()
+        } else {
+            1.0
+        }
+    }
+
+    /// Record the pointer's arrival on or departure from `id`, and start the
+    /// tween if the target moved.
+    pub fn set(&mut self, id: &'static str, hovered: bool, pressed: bool, now: Instant) {
+        let target = Self::target(hovered, pressed);
+        let tween = self
+            .tweens
+            .entry(id)
+            .or_insert_with(|| Tween::settled(1.0));
+        if tween.to == target && tween.began.is_none() {
+            return;
+        }
+        // From where the control is *drawn*: a press inside a hover starts
+        // from the hover's brightness, and a fast hover-press-release reverses
+        // from the pixel it is on.
+        tween.from = if tween.began.is_none() { tween.to } else { tween.progress };
+        // A tween whose ends are equal is already there.
+        tween.to = target;
+        tween.progress = tween.from;
+        tween.began = if (target - tween.from).abs() < 0.001 { None } else { Some(now) };
+    }
+
+    /// How far along a hover is, `0.0..=1.0`.
+    ///
+    /// The clock's own number is a *brightness* — rest to
+    /// [`crate::theme::hover_brightness`] — which is the right thing for a
+    /// filter and the wrong thing for a position. A control whose hover moves
+    /// something instead of tinting it (the settings switch's knob swells in
+    /// its track) needs the fraction of the way there, and that is this: the
+    /// same tween, its scale inverted.
+    pub fn hover_progress(&self, id: &str, hovered: bool, pressed: bool) -> f32 {
+        // A press is dimmer than rest and is not a *position*: the reference's
+        // press is a scale and a filter, so the structure a hover moved stays
+        // where it is while the control is held. Reading the factor here would
+        // have reported a press as "no hover" in the dark theme and as a full
+        // hover in the light one, which is the same mistake the interaction
+        // factors were split apart to avoid.
+        if pressed {
+            return if hovered { 1.0 } else { 0.0 };
+        }
+        let end = crate::theme::hover_brightness();
+        // A theme whose hover is its rest state has nothing to invert, and
+        // nothing that moves either: the fraction is the state itself.
+        if (end - 1.0).abs() < f32::EPSILON {
+            return if hovered { 1.0 } else { 0.0 };
+        }
+        ((self.factor(id, hovered, pressed) - 1.0) / (end - 1.0)).clamp(0.0, 1.0)
+    }
+
+    /// Whether any control is mid-tween.
+    pub fn animating(&self) -> bool {
+        self.tweens.values().any(|tween| tween.began.is_some())
+    }
+
+    /// Advance every tween to `now`, returning whether any still moves.
+    pub fn tick(&mut self, now: Instant) -> bool {
+        let deadline = INTERACTION_DURATION.as_secs_f32();
+        let mut moving = false;
+        for tween in self.tweens.values_mut() {
+            let Some(began) = tween.began else {
+                continue;
+            };
+            let elapsed = now.saturating_duration_since(began).as_secs_f32();
+            let progress = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
+            tween.progress = tween.from + (tween.to - tween.from) * ease(progress);
+            if progress >= 1.0 {
+                tween.progress = tween.to;
+                tween.began = None;
+            } else {
+                moving = true;
+            }
+        }
+        moving
+    }
+
+    /// Forget every tween.
+    ///
+    /// Nothing in the shell calls this, and that is worth writing down rather
+    /// than leaving as a gap: a page change used to clear the map, and the
+    /// comment there claimed a stale entry would draw a control hovered with no
+    /// pointer on it. It would not — [`Interactions::factor`] answers a settled
+    /// tween whose end disagrees with the pointer's state with the *state*, so
+    /// what a page change leaves behind is a settled entry that draws exactly
+    /// what the fresh page would. What it would really cost is a flaky test:
+    /// the clock is the process's, and a clear during another test's tween
+    /// pulls the pixels out from under it.
+    pub fn clear(&mut self) {
+        self.tweens.clear();
+    }
+}
+
+// ---- The modal's arrival -----------------------------------------------
+//
+// The reference's modal arrives as an opacity on a backdrop and a transform on
+// the dialog. `ui/src/components/modal/NewModal.vue` states both: the overlay is
+// `opacity: 0` to `1` on `transition: all 0.2s ease-out`, and the dialog body
+// sits at `scale: 0.97` with `opacity: 0` until `.shown` takes it to `scale: 1`
+// on `transition: all 0.2s ease-in-out`. The shell had the backdrop pop from
+// nothing to 64% black in one frame and the dialog appear with it, which is the
+// single most visible way a shell says "I am not the reference". iced cannot
+// transform, so the scale is drawn as the dialog arriving at its seat the way
+// the press is — brightness — and the backdrop is drawn as what it actually is:
+// an opacity.
+
+/// How long the modal takes to arrive and to leave, wall clock.
+///
+/// The reference's own `0.2s` on both the overlay and the dialog body. The two
+/// move together because the dialog's `scale`/`opacity` and the overlay's
+/// `opacity` are started by the same class change.
+pub const MODAL_DURATION: Duration = Duration::from_millis(200);
+
+/// The modal's arrival, on the same deadline pattern as everything above.
+///
+/// `progress` is the backdrop's opacity fraction (`0..=1`) and the dialog's
+/// arrival (`0` = the pressed dimness, `1` = seated). A modal that has never
+/// been open reports settled at *closed*: the first frame of an opening modal
+/// must be the first frame of its tween, not its end.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ModalAnim {
+    open: bool,
+    progress: f32,
+    began: Option<Instant>,
+}
+
+impl ModalAnim {
+    /// The backdrop's opacity fraction right now.
+    pub fn backdrop(&self) -> f32 {
+        self.progress
+    }
+
+    /// The dialog's arrival factor, `0..=1`, for [`crate::theme::filtered`].
+    ///
+    /// The dialog arrives *from* the press's dimness — `0.8` — because that is
+    /// what `scale: 0.97` reads as when the toolkit cannot scale a widget inside
+    /// its own box: close enough to see it land, without a transform.
+    pub fn dialog_factor(&self) -> f32 {
+        crate::theme::PRESS_BRIGHTNESS
+            + (1.0 - crate::theme::PRESS_BRIGHTNESS) * self.progress
+    }
+
+    /// Whether the modal is (still) on screen. `false` is what retires it.
+    pub fn open(&self) -> bool {
+        self.open || self.began.is_some()
+    }
+
+    /// Record that the modal opened or closed, and start its tween.
+    pub fn set(&mut self, open: bool, now: Instant) {
+        if self.open == open {
+            return;
+        }
+        self.open = open;
+        self.began = Some(now);
+    }
+
+    /// Whether the tween is moving.
+    pub fn animating(&self) -> bool {
+        self.began.is_some()
+    }
+
+    /// Advance to `now`, returning whether the tween still moves.
+    pub fn tick(&mut self, now: Instant) -> bool {
+        let Some(began) = self.began else {
+            return false;
+        };
+        let deadline = MODAL_DURATION.as_secs_f32();
+        let elapsed = now.saturating_duration_since(began).as_secs_f32();
+        let linear = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
+        let target = if self.open { 1.0 } else { 0.0 };
+        self.progress = self.progress + (target - self.progress) * ease(linear);
+        if linear >= 1.0 {
+            self.progress = target;
+            self.began = None;
+            return false;
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +558,189 @@ mod tests {
         // transition rather than a jump.
         assert!(ease(0.1) < 0.1, "should leave gently");
         assert!(ease(0.9) > 0.9, "should settle gently");
+    }
+
+    #[test]
+    fn an_untouched_control_is_at_rest() {
+        let clock = Interactions::default();
+        assert_eq!(clock.factor("a", false, false), 1.0);
+        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+        assert!(!clock.animating(), "nothing has been told anything");
+    }
+
+    #[test]
+    fn a_hover_arrives_over_the_deadline_not_in_a_frame() {
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        assert!(clock.animating());
+        assert_eq!(clock.factor("a", true, false), 1.0, "the tween begins at rest");
+
+        // Halfway is strictly between rest and the hover factor.
+        clock.tick(start + INTERACTION_DURATION / 2);
+        let middle = clock.factor("a", true, false);
+        let end = crate::theme::hover_brightness();
+        assert!(middle > 1.0 && middle < end, "got {middle}, rest 1.0, hover {end}");
+
+        // And the deadline ends it, exactly on the factor.
+        assert!(!clock.tick(start + INTERACTION_DURATION));
+        assert_eq!(clock.factor("a", true, false), end);
+        assert!(!clock.animating(), "a settled tween must not hold frames open");
+    }
+
+    #[test]
+    fn a_press_borrowed_from_a_hover_starts_from_the_hover() {
+        // A press while hovered must not fall back to rest brightness first:
+        // the tween starts from the factor the control is *drawn* at.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        clock.tick(start + INTERACTION_DURATION);
+        let hovered = clock.factor("a", true, false);
+
+        clock.set("a", true, true, start);
+        assert_eq!(clock.factor("a", true, true), hovered, "the press starts from the hover");
+        clock.tick(start + INTERACTION_DURATION);
+        assert_eq!(clock.factor("a", true, true), crate::theme::PRESS_BRIGHTNESS);
+    }
+
+    #[test]
+    fn a_leave_turns_around_from_where_it_is() {
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        clock.tick(start + INTERACTION_DURATION / 2);
+        let halfway = clock.factor("a", true, false);
+
+        // The pointer leaves half a tween in: the return trip starts from the
+        // halfway factor, and it is a full tween of its own.
+        clock.set("a", false, false, start + INTERACTION_DURATION / 2);
+        assert_eq!(clock.factor("a", false, false), halfway);
+        assert!(clock.animating());
+        clock.tick(start + INTERACTION_DURATION / 2 + INTERACTION_DURATION);
+        assert_eq!(clock.factor("a", false, false), 1.0);
+        assert!(!clock.animating());
+    }
+
+    #[test]
+    fn controls_do_not_share_a_key() {
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        clock.tick(start + INTERACTION_DURATION);
+        clock.set("b", true, false, start);
+        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+        assert_eq!(clock.factor("b", true, false), 1.0, "b's tween has just begun");
+    }
+
+    #[test]
+    fn the_hover_fraction_runs_from_nothing_to_everything() {
+        // What a control whose hover *moves* reads: the switch's knob grows by
+        // this fraction, so it has to be 0 at rest, 1 when the hover has
+        // arrived, and strictly between while the tween is in the air —
+        // whichever way the theme's hover brightness points.
+        let mut clock = Interactions::default();
+        let start = at(0);
+        assert_eq!(clock.hover_progress("a", false, false), 0.0, "at rest");
+        clock.set("a", true, false, start);
+        assert_eq!(clock.hover_progress("a", true, false), 0.0, "the tween starts at rest");
+        clock.tick(start + INTERACTION_DURATION / 2);
+        let middle = clock.hover_progress("a", true, false);
+        assert!(middle > 0.0 && middle < 1.0, "got {middle}");
+        clock.tick(start + INTERACTION_DURATION);
+        assert_eq!(clock.hover_progress("a", true, false), 1.0);
+        // A press is not a position: a held control keeps the hover's own
+        // structure, whichever theme it is drawn in.
+        clock.set("a", true, true, start);
+        assert_eq!(clock.hover_progress("a", true, true), 1.0);
+        // Leaving is the return trip, and it lands back at nothing.
+        clock.set("a", false, false, start + INTERACTION_DURATION);
+        clock.tick(start + 2 * INTERACTION_DURATION);
+        assert_eq!(clock.hover_progress("a", false, false), 0.0);
+    }
+
+    #[test]
+    fn clear_forgets_every_key() {
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        clock.clear();
+        assert!(!clock.animating());
+        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+    }
+
+    #[test]
+    fn a_settled_tween_draws_the_pointer_state_not_its_own_end() {
+        // The property that makes the map safe to leave alone for the life of
+        // the process: a tween that has arrived is not a memory of where the
+        // pointer was. Asked about a control the pointer is no longer on, it
+        // answers at rest; asked about one it is on, it answers hovered — even
+        // if nothing called `set` for the new state, which is what a page that
+        // redraws a control without a fresh report looks like.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("a", true, false, start);
+        clock.tick(start + INTERACTION_DURATION);
+        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+        assert_eq!(clock.factor("a", false, false), 1.0, "left behind, drawn at rest");
+        assert_eq!(clock.factor("a", false, true), crate::theme::PRESS_BRIGHTNESS);
+        assert_eq!(clock.factor("nobody", true, false), crate::theme::hover_brightness());
+    }
+
+    #[test]
+    fn a_modal_fades_in_over_the_deadline_and_lands_seated() {
+        let mut modal = ModalAnim::default();
+        let start = Instant::now();
+        modal.set(true, start);
+        assert!(modal.open(), "an opening modal is on screen even before its first tick");
+        assert_eq!(modal.backdrop(), 0.0, "the fade begins from nothing");
+
+        modal.tick(start + MODAL_DURATION / 2);
+        let backdrop = modal.backdrop();
+        assert!(backdrop > 0.05 && backdrop < 0.95, "got {backdrop}");
+        let factor = modal.dialog_factor();
+        assert!(factor > crate::theme::PRESS_BRIGHTNESS && factor < 1.0);
+
+        assert!(!modal.tick(start + MODAL_DURATION));
+        assert_eq!(modal.backdrop(), 1.0);
+        assert_eq!(modal.dialog_factor(), 1.0);
+        assert!(!modal.animating());
+    }
+
+    #[test]
+    fn a_modal_fades_out_and_is_gone_only_at_the_end() {
+        // The leave is why `open()` exists as a separate question from the
+        // flag: a modal told to close must stay on screen *while it fades*, or
+        // the fade-out would never be seen.
+        let mut modal = ModalAnim::default();
+        let start = Instant::now();
+        modal.set(true, start);
+        modal.tick(start + MODAL_DURATION);
+        assert_eq!(modal.backdrop(), 1.0);
+
+        modal.set(false, start);
+        assert!(modal.open(), "a fading-out modal is still on screen");
+        assert!(modal.animating());
+        modal.tick(start + MODAL_DURATION);
+        assert_eq!(modal.backdrop(), 0.0, "the backdrop ends at nothing");
+        assert!(!modal.open(), "and the modal is gone");
+        assert!(!modal.animating());
+    }
+
+    #[test]
+    fn reopening_a_closing_modal_turns_it_around() {
+        let mut modal = ModalAnim::default();
+        let start = Instant::now();
+        modal.set(true, start);
+        modal.tick(start + MODAL_DURATION);
+        modal.set(false, start);
+        modal.tick(start + MODAL_DURATION / 2);
+        let halfway = modal.backdrop();
+        assert!(halfway > 0.0 && halfway < 1.0);
+
+        modal.set(true, start + MODAL_DURATION / 2);
+        assert_eq!(modal.backdrop(), halfway, "the turn keeps the position");
+        modal.tick(start + MODAL_DURATION / 2 + MODAL_DURATION);
+        assert_eq!(modal.backdrop(), 1.0);
     }
 }

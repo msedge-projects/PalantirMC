@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::{
     button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list,
-    progress_bar, row, scrollable, text, text_input, tooltip, vertical_rule, Button, Image,
+    progress_bar, row, scrollable, text, text_input, tooltip, vertical_rule, Image,
 };
 use iced::widget::image::Handle;
 use iced::{window, Command, Element, Gradient, Length, Padding, Point, Subscription, Theme};
@@ -59,6 +59,7 @@ use crate::launch::{
 };
 use crate::mods::{list_content_names, list_mods, set_mod_enabled, ModEntry};
 use crate::anim;
+use crate::hover;
 use crate::native::{self, ResizeEdge};
 use crate::prefs::{self, Prefs};
 use crate::screenshots;
@@ -1163,6 +1164,16 @@ pub enum Message {
         /// Height of the visible part.
         view_height: f32,
     },
+    /// The pointer arrived on or left an interactive control, named by the key
+    /// its view gave it.
+    ///
+    /// Published by [`hover::Report`], and the only way a hover tween can
+    /// start: see that module for why the view cannot start one itself.
+    ButtonHover { key: &'static str, over: bool },
+    /// The left button went down on the control under `key`, or came back up
+    /// on it. See [`crate::hover::Report`]: the reference's press is a state,
+    /// not a click, so it is reported from the button's own events.
+    ButtonPress { key: &'static str, down: bool },
     // ---- the Settings dialog ----
     /// Show a different pane of the Settings dialog.
     OpenSettingsTab(settings::Tab),
@@ -1563,7 +1574,9 @@ impl ShotTile {
     pub fn caption(&self) -> String {
         format!("{} · {}", self.entry.name, self.entry.instance)
     }
-}    /// Screenshots page state.
+}
+
+    /// Screenshots page state.
     #[derive(Default)]
     pub struct ShotState {
     /// Whether the background scan is running.
@@ -1789,6 +1802,14 @@ pub struct PalantirApp {
     switch_pointer: settings::Pointer,
     /// Every switch's knob position, and the slides carrying them there.
     switches: anim::SwitchAnim,
+    /// The modal's arrival: the backdrop's fade and the dialog's seat.
+    modal_anim: anim::ModalAnim,
+    /// The dialog a closing modal draws while its fade runs.
+    ///
+    /// `self.modal` is `None` by then, and the fade-out is a property of the
+    /// dialog that *left* — so the leaving one is kept for the length of the
+    /// tween rather than the close being a hard cut out of the shell.
+    modal_leaving: Option<Modal>,
     /// Filter text for the Feature flags pane.
     flag_filter: String,
     /// Clicks on the Settings footer's version, of which the sixth toggles
@@ -1868,6 +1889,8 @@ impl PalantirApp {
             settings_drafts: std::collections::BTreeMap::new(),
             switch_pointer: settings::Pointer::default(),
             switches: anim::SwitchAnim::default(),
+            modal_anim: anim::ModalAnim::default(),
+            modal_leaving: None,
             flag_filter: String::new(),
             footer_presses: 0,
             welcome: None,
@@ -1936,6 +1959,8 @@ impl PalantirApp {
             settings_drafts: std::collections::BTreeMap::new(),
             switch_pointer: settings::Pointer::default(),
             switches: anim::SwitchAnim::default(),
+            modal_anim: anim::ModalAnim::default(),
+            modal_leaving: None,
             flag_filter: String::new(),
             footer_presses: 0,
             welcome: None,
@@ -2417,7 +2442,7 @@ impl PalantirApp {
                 if self.selected.as_deref() == Some(id) {
                     self.selected = None;
                 }
-                self.modal = Modal::None;
+                self.set_modal(Modal::None);
                 self.reload_instances();
                 self.set_status(note);
             }
@@ -2671,14 +2696,14 @@ impl PalantirApp {
             return;
         }
         self.welcome = Some(install);
-        self.modal = Modal::Welcome;
+        self.set_modal(Modal::Welcome);
     }
 
     /// Record that the first-run question was answered.
     fn answer_migration(&mut self) {
         self.prefs.data_root_asked = true;
         self.welcome = None;
-        self.modal = Modal::None;
+        self.set_modal(Modal::None);
     }
 
     /// Apply a typed data root, once it names a directory that is really there.
@@ -2757,8 +2782,30 @@ impl PalantirApp {
     /// Open the dialog and make sure the catalog is on its way.
     fn open_create(&mut self) {
         self.create = CreateForm::default();
-        self.modal = Modal::Create;
+        self.set_modal(Modal::Create);
         self.ensure_catalog();
+    }
+
+    /// Show `modal`, or close whatever is open, and start its arrival.
+    ///
+    /// One method rather than a `modal = …` next to a `modal_anim.set(…)`,
+    /// because the two have to agree — and the close has one more job than the
+    /// open: the dialog that is leaving is kept for the length of the fade (see
+    /// [`PalantirApp::modal_leaving`]), so the fade-out draws *it* rather than
+    /// a blank backdrop.
+    fn set_modal(&mut self, modal: Modal) {
+        if self.modal == modal {
+            return;
+        }
+        if modal == Modal::None {
+            self.modal_leaving = Some(std::mem::replace(&mut self.modal, Modal::None));
+        } else {
+            // Replacing one dialog with another hands over in one frame, as it
+            // always did; only a *close* has something left to fade.
+            self.modal_leaving = None;
+            self.modal = modal;
+        }
+        self.modal_anim.set(self.modal != Modal::None, Instant::now());
     }
 
     fn ensure_catalog(&mut self) {
@@ -2879,7 +2926,7 @@ impl PalantirApp {
                 if let Some((project, title)) = self.create.install_after.clone() {
                     self.start_install(project, title, Some(created.id.clone()));
                 }
-                self.modal = Modal::None;
+                self.set_modal(Modal::None);
                 self.create = CreateForm::default();
                 self.search.clear();
                 self.reload_instances();
@@ -3045,7 +3092,7 @@ impl PalantirApp {
         match instances::import_instance(&self.paths, &candidate.source) {
             Ok(id) => {
                 self.import.candidates.remove(index);
-                self.modal = Modal::None;
+                self.set_modal(Modal::None);
                 self.reload_instances();
                 self.selected = Some(id.clone());
                 self.refresh_selection_caches();
@@ -3075,7 +3122,7 @@ impl PalantirApp {
             // rest "still needs downloading" with nothing in the launcher that
             // could do it.
             (Modal::Create, "mrpack" | "zip") => {
-                self.modal = Modal::None;
+                self.set_modal(Modal::None);
                 self.start_pack_install(path);
             }
             (_, "mrpack" | "zip") => self.start_pack_install(path),
@@ -3262,6 +3309,13 @@ impl PalantirApp {
                 // and the subscription stands down.
                 let now = Instant::now();
                 self.switches.tick(now);
+                self.modal_anim.tick(now);
+                // The interaction clock is the shell's one, behind a mutex
+                // because the view reads it while buttons are being built;
+                // this is where every hover tween in the shell advances.
+                if let Ok(mut clock) = anim::clock().lock() {
+                    clock.tick(now);
+                }
                 self.page_scroll.tick(now);
                 let mut commands = vec![scrollable::scroll_to(
                     page_scroll_id(),
@@ -3317,6 +3371,10 @@ impl PalantirApp {
                 // knob was drawn.
                 self.switches.set(flag.id(), !value, value, Instant::now());
                 self.switch_pointer.pressed = None;
+                // The release ends the press's own factor as well: the pointer
+                // is still on the switch (that is where a release-inside comes
+                // from), so the hover's growth is back in charge.
+                pointer_report(flag.id(), true, false);
                 // A switch can take away the screen it was pressed from: with
                 // the Worlds entry hidden, being *on* Worlds would leave a page
                 // whose rail button no longer exists. Landing on Home is the
@@ -3345,8 +3403,21 @@ impl PalantirApp {
                 self.save_prefs();
                 Command::none()
             }
+            Message::ButtonHover { key, over } => {
+                pointer_report(key, over, false);
+                Command::none()
+            }
+            Message::ButtonPress { key, down } => {
+                // Only ever sent for a control the pointer is on — a press it
+                // did not start and a release after it left are both dropped by
+                // [`crate::hover`] — so the hover is part of the report: the
+                // press is the same tween carried on to the dimmer end.
+                pointer_report(key, true, down);
+                Command::none()
+            }
             Message::SwitchHover(id) => {
                 self.switch_pointer.hovered = settings::Flag::from_id(id);
+                pointer_report(id, true, false);
                 Command::none()
             }
             Message::SwitchLeft(id) => {
@@ -3360,10 +3431,16 @@ impl PalantirApp {
                 if self.switch_pointer.pressed == flag {
                     self.switch_pointer.pressed = None;
                 }
+                pointer_report(id, false, false);
                 Command::none()
             }
             Message::SwitchDown(id) => {
                 self.switch_pointer.pressed = settings::Flag::from_id(id);
+                // The knob's own press is drawn by the switch (it is a size,
+                // not a brightness), but it is what *ends* the hover's growth:
+                // the clock's press factor is below rest, so the knob shrinks
+                // to the pressed size while it is held.
+                pointer_report(id, true, true);
                 Command::none()
             }
             Message::FlagFilterChanged(text) => {
@@ -3475,7 +3552,9 @@ impl PalantirApp {
                 Command::none()
             }
             Message::AskDelete(id) => {
-                self.modal = Modal::ConfirmDelete(id);
+                // Through `set_modal` like every other dialog: this one used to
+                // appear a frame after the click with no arrival at all.
+                self.set_modal(Modal::ConfirmDelete(id));
                 Command::none()
             }
             Message::ConfirmDelete => {
@@ -3588,12 +3667,12 @@ impl PalantirApp {
                 Command::none()
             }
             Message::OpenImport => {
-                self.modal = Modal::Import;
+                self.set_modal(Modal::Import);
                 self.start_import_scan();
                 Command::none()
             }
             Message::OpenSettings => {
-                self.modal = Modal::Settings;
+                self.set_modal(Modal::Settings);
                 // The pane's scroll belongs to the pane, so opening the dialog
                 // starts it at the top rather than wherever it was left.
                 self.settings_scroll.restart();
@@ -3615,7 +3694,7 @@ impl PalantirApp {
                 // again — a dialog that silently chooses for the user is worse
                 // than one that comes back.
                 self.welcome = None;
-                self.modal = Modal::None;
+                self.set_modal(Modal::None);
                 Command::none()
             }
             Message::DataRootUseExisting => {
@@ -3817,7 +3896,7 @@ impl PalantirApp {
             }
             Message::MicrosoftPressed => {
                 self.microsoft.start();
-                self.modal = Modal::Microsoft;
+                self.set_modal(Modal::Microsoft);
                 self.set_status("Signing in to Microsoft…");
                 Command::none()
             }
@@ -3841,7 +3920,7 @@ impl PalantirApp {
                         {
                             Ok(()) => {
                                 self.microsoft = MicrosoftState::default();
-                                self.modal = Modal::None;
+                                self.set_modal(Modal::None);
                                 self.set_status(format!("Signed in as {label}."));
                                 self.push_console(vec![format!(
                                     "Microsoft sign-in succeeded for '{label}'"
@@ -4194,6 +4273,8 @@ impl PalantirApp {
         if self.page_scroll.animating()
             || self.settings_scroll.animating()
             || self.switches.animating()
+            || self.modal_anim.animating()
+            || anim::clock().lock().map(|clock| clock.animating()).unwrap_or(false)
         {
             // Only while something is moving. A page that has settled, a pane
             // that has stopped and a switch that has arrived all ask for no
@@ -4307,6 +4388,7 @@ impl PalantirApp {
         self.bar_armed = None;
         self.bar_origin = None;
     }
+
 
     pub fn view(&self) -> Element<'_, Message> {
         // Keep the window's hit test pointed at the maximize control. The
@@ -4582,24 +4664,27 @@ impl PalantirApp {
                 self.bar_armed == Some(BarArea::RunChip),
                 self.view_run_chip(),
             ),
-            button(glyph("minimize", CAPTION_GLYPH, theme::text_dim()))
-                .on_press(Message::WindowMinimize)
-                .style(theme::window_button())
-                .padding(CAPTION_PAD),
-            button(glyph(
+            hover_button(
+                "window:1",
+                theme::window_button(),
+                button(glyph("minimize", CAPTION_GLYPH, theme::text_dim()))
+                        .on_press(Message::WindowMinimize)
+                        .padding(CAPTION_PAD),
+            ),
+            hover_button("caption:1", theme::caption_button(maximize_hovered), button(glyph(
                 if maximized { "restore" } else { "maximize" },
                 CAPTION_GLYPH,
                 if maximize_hovered { theme::text() } else { theme::text_dim() },
-            ))
-            .on_press(Message::WindowMaximize)
-            .style(theme::caption_button(maximize_hovered))
-            .padding(CAPTION_PAD),
+            )).on_press(Message::WindowMaximize).padding(CAPTION_PAD)),
             // The close glyph stays legible on the red hover fill, where the
             // dimmer idle tint would sink into the background.
-            button(glyph("close", CAPTION_GLYPH, theme::text_muted()))
-                .on_press(Message::WindowClose)
-                .style(theme::close_button())
-                .padding(CAPTION_PAD),
+            hover_button(
+                "close:1",
+                theme::close_button(),
+                button(glyph("close", CAPTION_GLYPH, theme::text_muted()))
+                        .on_press(Message::WindowClose)
+                        .padding(CAPTION_PAD),
+            ),
         ]
         .spacing(TITLE_BAR_SPACING)
         .padding(title_bar_padding())
@@ -4832,13 +4917,10 @@ impl PalantirApp {
                 text("Screenshots").size(24).font(theme::semibold()),
                 text(format!("{}", self.shots.tiles.len())).size(13),
                 horizontal_space(),
-                button(
+                hover_button("secondary:1", theme::secondary(), button(
                     row![glyph("refresh", 14.0, theme::text_muted()), text("Refresh").size(12)]
                         .spacing(6),
-                )
-                .on_press(Message::RefreshScreenshots)
-                .style(theme::secondary())
-                .padding([6, 12]),
+                ).on_press(Message::RefreshScreenshots).padding([6, 12])),
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
@@ -4899,17 +4981,14 @@ impl PalantirApp {
                         .width(Length::Fill),
                 )
                 .width(Length::Fill),
-                button(
+                hover_button("primary:1", theme::primary(), button(
                     row![
                         glyph("plus", 16.0, theme::on_accent()),
                         text("New instance").size(14).font(theme::semibold()),
                     ]
                     .spacing(8)
                     .align_items(iced::Alignment::Center),
-                )
-                .on_press(Message::OpenCreate)
-                .style(theme::primary())
-                .padding([8, 16]),
+                ).on_press(Message::OpenCreate).padding([8, 16])),
             ]
             .spacing(8)
             .align_items(iced::Alignment::Center),
@@ -4921,17 +5000,14 @@ impl PalantirApp {
                 ))
                 .size(13),
                 horizontal_space(),
-                button(
+                hover_button("secondary:2", theme::secondary(), button(
                     row![
                         glyph("refresh", 14.0, theme::text_muted()),
                         text("Refresh").size(12),
                     ]
                     .spacing(6)
                     .align_items(iced::Alignment::Center),
-                )
-                .on_press(Message::Refresh)
-                .style(theme::secondary())
-                .padding([6, 12]),
+                ).on_press(Message::Refresh).padding([6, 12])),
             ]
             .spacing(8)
             .align_items(iced::Alignment::Center),
@@ -5027,7 +5103,7 @@ impl PalantirApp {
 
         // `type="colored" color="brand" size="lg"`: the icon inherits the
         // label's colour, which is `--color-accent-contrast` -- black in dark.
-        let create = button(
+        let create = hover_button("brand_large:1", theme::brand_large(), button(
             row![
                 glyph("plus", HOME_ICON, theme::on_accent()),
                 text("Create an instance")
@@ -5036,13 +5112,10 @@ impl PalantirApp {
             ]
             .spacing(HOME_BUTTON_ICON_GAP)
             .align_items(iced::Alignment::Center),
-        )
-        .on_press(Message::OpenCreate)
-        .style(theme::brand_large())
-        .padding([
+        ).on_press(Message::OpenCreate).padding([
             (HOME_BUTTON_HEIGHT - HOME_ICON) / 2.0,
             HOME_BUTTON_PAD_H,
-        ]);
+        ]));
 
         let hint = row![
             text("Press")
@@ -5077,7 +5150,7 @@ impl PalantirApp {
         // `type="base" size="lg"`, with `!font-medium` over the size's own
         // semibold: the icon takes `[&>svg]:text-primary`, a rung below the
         // label's `text-contrast`.
-        let import = button(
+        let import = hover_button("base_large:1", theme::base_large(), button(
             row![
                 glyph("download", HOME_ICON, theme::text_muted()),
                 text("Import from launcher")
@@ -5086,13 +5159,10 @@ impl PalantirApp {
             ]
             .spacing(HOME_BUTTON_ICON_GAP)
             .align_items(iced::Alignment::Center),
-        )
-        .on_press(Message::OpenImport)
-        .style(theme::base_large())
-        .padding([
+        ).on_press(Message::OpenImport).padding([
             (HOME_BUTTON_HEIGHT - HOME_ICON) / 2.0,
             HOME_BUTTON_PAD_H,
-        ]);
+        ]));
 
         let bottom = container(
             column![
@@ -5258,7 +5328,7 @@ impl PalantirApp {
         // button cannot do anything the ink drops to the dim tint, so the state
         // is visible without the card having to say so in words.
         let ink = if installable && !installing { theme::accent() } else { theme::text_dim() };
-        let install: Button<'static, Message> = {
+        let install: Element<'static, Message> = {
             let label = row![
                 glyph("plus", 14.0, ink),
                 text(install_label).size(14).style(iced::theme::Text::Color(ink)),
@@ -5266,13 +5336,15 @@ impl PalantirApp {
             .spacing(6)
             .align_items(iced::Alignment::Center);
             if installable && !installing {
-                button(label)
-                    .on_press(Message::BrowseInstall(project.clone(), title.clone()))
-                    .style(theme::secondary())
-                    .padding([8, 16])
+                hover_button(
+                    "secondary:3",
+                    theme::secondary(),
+                    button(label)
+                        .on_press(Message::BrowseInstall(project.clone(), title.clone()))
+                        .padding([8, 16]),
+                )
             } else {
-                button(label).style(theme::secondary()).padding([8, 16])
-            }
+                hover_button("secondary:4", theme::secondary(), button(label).padding([8, 16]))}
         };
         // The card, to the reference's own rhythm: a 100px icon box 17px in
         // from the left, the title at 20px and the author at 14px on the same
@@ -5356,14 +5428,20 @@ impl PalantirApp {
                 text("Mods").size(24).font(theme::semibold()),
                 chip(format!("{enabled}/{total} enabled"), theme::chip),
                 horizontal_space(),
-                button(text("Find more mods").size(12))
-                    .on_press(Message::PageSelected(Page::Browse))
-                    .style(theme::secondary())
-                    .padding([6, 12]),
-                button(text("Open folder").size(12))
-                    .on_press(Message::OpenModsFolder)
-                    .style(theme::secondary())
-                    .padding([6, 12]),
+                hover_button(
+                    "secondary:5",
+                    theme::secondary(),
+                    button(text("Find more mods").size(12))
+                            .on_press(Message::PageSelected(Page::Browse))
+                            .padding([6, 12]),
+                ),
+                hover_button(
+                    "secondary:6",
+                    theme::secondary(),
+                    button(text("Open folder").size(12))
+                            .on_press(Message::OpenModsFolder)
+                            .padding([6, 12]),
+                ),
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
@@ -5409,10 +5487,13 @@ impl PalantirApp {
                 text("Worlds").size(24).font(theme::semibold()),
                 chip(format!("{}", self.worlds.len()), theme::chip_neutral),
                 horizontal_space(),
-                button(text("Open saves folder").size(12))
-                    .on_press(Message::OpenWorldsFolder)
-                    .style(theme::secondary())
-                    .padding([6, 12]),
+                hover_button(
+                    "secondary:7",
+                    theme::secondary(),
+                    button(text("Open saves folder").size(12))
+                            .on_press(Message::OpenWorldsFolder)
+                            .padding([6, 12]),
+                ),
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
@@ -5464,18 +5545,21 @@ impl PalantirApp {
                 checkbox("Autoscroll", self.autoscroll)
                     .on_toggle(Message::ConsoleAutoscrollToggled)
                     .style(theme::Tick),
-                button(text("Clear").size(12))
-                    .on_press(Message::ConsoleClear)
-                    .style(theme::secondary())
-                    .padding([6, 12]),
+                hover_button(
+                    "secondary:8",
+                    theme::secondary(),
+                    button(text("Clear").size(12))
+                            .on_press(Message::ConsoleClear)
+                            .padding([6, 12]),
+                ),
                 if self.active_run.is_some() {
-                    button(text("Kill").size(12))
-                        .on_press(Message::KillPressed)
-                        .style(theme::destructive())
-                        .padding([6, 12])
+                    hover_button(
+                        "destructive:1",
+                        theme::destructive(),
+                        button(text("Kill").size(12)).on_press(Message::KillPressed).padding([6, 12]),
+                    )
                 } else {
-                    button(text("Kill").size(12)).style(theme::secondary()).padding([6, 12])
-                },
+                    hover_button("secondary:9", theme::secondary(), button(text("Kill").size(12)).padding([6, 12]))},
             ]
             .spacing(10)
             .align_items(iced::Alignment::Center),
@@ -5607,22 +5691,34 @@ impl PalantirApp {
 
         body = body.push(
             row![
-                button(text("Save").size(13))
-                    .on_press(Message::SettingsSave)
-                    .style(theme::primary())
-                    .padding([9, 20]),
-                button(text("Open folder").size(13))
-                    .on_press(Message::OpenFolder(self.selected.clone().unwrap_or_default()))
-                    .style(theme::secondary())
-                    .padding([9, 16]),
-                button(text("Duplicate").size(13))
-                    .on_press(Message::DuplicateInstance(self.selected.clone().unwrap_or_default()))
-                    .style(theme::secondary())
-                    .padding([9, 16]),
-                button(text("Delete…").size(13))
-                    .on_press(Message::AskDelete(self.selected.clone().unwrap_or_default()))
-                    .style(theme::destructive())
-                    .padding([9, 16]),
+                hover_button(
+                    "primary:2",
+                    theme::primary(),
+                    button(text("Save").size(13))
+                            .on_press(Message::SettingsSave)
+                            .padding([9, 20]),
+                ),
+                hover_button(
+                    "secondary:10",
+                    theme::secondary(),
+                    button(text("Open folder").size(13))
+                            .on_press(Message::OpenFolder(self.selected.clone().unwrap_or_default()))
+                            .padding([9, 16]),
+                ),
+                hover_button(
+                    "secondary:11",
+                    theme::secondary(),
+                    button(text("Duplicate").size(13))
+                            .on_press(Message::DuplicateInstance(self.selected.clone().unwrap_or_default()))
+                            .padding([9, 16]),
+                ),
+                hover_button(
+                    "destructive:2",
+                    theme::destructive(),
+                    button(text("Delete…").size(13))
+                            .on_press(Message::AskDelete(self.selected.clone().unwrap_or_default()))
+                            .padding([9, 16]),
+                ),
             ]
             .spacing(10),
         );
@@ -5651,10 +5747,13 @@ impl PalantirApp {
                     .style(theme::Field)
                     .padding([8, 10])
                     .width(Length::Fill),
-                button(text("Add account").size(13))
-                    .on_press(Message::AccountAdd)
-                    .style(theme::primary())
-                    .padding([8, 18]),
+                hover_button(
+                    "primary:3",
+                    theme::primary(),
+                    button(text("Add account").size(13))
+                            .on_press(Message::AccountAdd)
+                            .padding([8, 18]),
+                ),
             ]
             .spacing(8),
         ]
@@ -5696,18 +5795,24 @@ impl PalantirApp {
                         } else {
                             chip(String::new(), theme::chip_neutral)
                         },
-                        button(text(if stale { "Sign in again" } else { "Use" }).size(12))
-                            .on_press(if stale {
+                        hover_button(
+                            "secondary:12",
+                            theme::secondary(),
+                            button(text(if stale { "Sign in again" } else { "Use" }).size(12))
+                                    .on_press(if stale {
                                 Message::MicrosoftPressed
                             } else {
                                 Message::AccountSelect(account.uuid.clone())
                             })
-                            .style(theme::secondary())
-                            .padding([6, 12]),
-                        button(text("Remove").size(12))
-                            .on_press(Message::AccountRemove(account.uuid.clone()))
-                            .style(theme::destructive())
-                            .padding([6, 12]),
+                                    .padding([6, 12]),
+                        ),
+                        hover_button(
+                            "destructive:3",
+                            theme::destructive(),
+                            button(text("Remove").size(12))
+                                    .on_press(Message::AccountRemove(account.uuid.clone()))
+                                    .padding([6, 12]),
+                        ),
                     ]
                     .spacing(10)
                     .align_items(iced::Alignment::Center),
@@ -5768,10 +5873,13 @@ impl PalantirApp {
         }
         content = content.push(
             row![
-                button(text(if account.is_some() { "Sign in again" } else { "Sign in with Microsoft" }).size(12))
-                    .on_press(Message::MicrosoftPressed)
-                    .style(theme::primary())
-                    .padding([7, 16]),
+                hover_button(
+                    "primary:4",
+                    theme::primary(),
+                    button(text(if account.is_some() { "Sign in again" } else { "Sign in with Microsoft" }).size(12))
+                            .on_press(Message::MicrosoftPressed)
+                            .padding([7, 16]),
+                ),
                 text("An offline account is enough for single-player; servers need a Microsoft account.")
                     .size(11),
             ]
@@ -5810,14 +5918,20 @@ impl PalantirApp {
                 .center_x(),
             text(url.clone()).size(12),
             row![
-                button(text("Copy code").size(12))
-                    .on_press(Message::MicrosoftCopyCode)
-                    .style(theme::secondary())
-                    .padding([7, 14]),
-                button(text("Open browser").size(12))
-                    .on_press(Message::MicrosoftOpenUrl)
-                    .style(theme::primary())
-                    .padding([7, 14]),
+                hover_button(
+                    "secondary:13",
+                    theme::secondary(),
+                    button(text("Copy code").size(12))
+                            .on_press(Message::MicrosoftCopyCode)
+                            .padding([7, 14]),
+                ),
+                hover_button(
+                    "primary:5",
+                    theme::primary(),
+                    button(text("Open browser").size(12))
+                            .on_press(Message::MicrosoftOpenUrl)
+                            .padding([7, 14]),
+                ),
             ]
             .spacing(10),
         ]
@@ -5831,14 +5945,20 @@ impl PalantirApp {
             .size(11));
         let footer: Element<'_, Message> = row![
             horizontal_space(),
-            button(text("Cancel").size(12))
-                .on_press(Message::MicrosoftCancel)
-                .style(theme::secondary())
-                .padding([7, 16]),
-            button(text("Close").size(12))
-                .on_press(Message::CloseModal)
-                .style(theme::secondary())
-                .padding([7, 16]),
+            hover_button(
+                "secondary:14",
+                theme::secondary(),
+                button(text("Cancel").size(12))
+                        .on_press(Message::MicrosoftCancel)
+                        .padding([7, 16]),
+            ),
+            hover_button(
+                "secondary:15",
+                theme::secondary(),
+                button(text("Close").size(12))
+                        .on_press(Message::CloseModal)
+                        .padding([7, 16]),
+            ),
         ]
         .spacing(10)
         .into();
@@ -5884,15 +6004,21 @@ impl PalantirApp {
         .spacing(10)
         .into();
         let footer: Element<'_, Message> = row![
-            button(text("Start fresh").size(12))
-                .on_press(Message::DataRootStartFresh)
-                .style(theme::secondary())
-                .padding([7, 16]),
+            hover_button(
+                "secondary:16",
+                theme::secondary(),
+                button(text("Start fresh").size(12))
+                        .on_press(Message::DataRootStartFresh)
+                        .padding([7, 16]),
+            ),
             horizontal_space(),
-            button(text(format!("Use the {}", install.instances_label())).size(12))
-                .on_press(Message::DataRootUseExisting)
-                .style(theme::primary())
-                .padding([7, 16]),
+            hover_button(
+                "primary:6",
+                theme::primary(),
+                button(text(format!("Use the {}", install.instances_label())).size(12))
+                        .on_press(Message::DataRootUseExisting)
+                        .padding([7, 16]),
+            ),
         ]
         .spacing(10)
         .into();
@@ -5994,8 +6120,33 @@ impl PalantirApp {
     }
 
     /// The dialog that replaced the content area.
+    ///
+    /// The arrival is animated, on [`anim::ModalAnim`]: the backdrop's opacity
+    /// is a tween rather than a pop, and the dialog itself arrives at its seat
+    /// the way a press reads — brightness — because iced cannot scale a widget
+    /// inside the box it was laid out in. `update` starts the tween when the
+    /// modal opens or closes; the frame subscription runs it; and while it
+    /// moves, the modal is drawn with its *progress* rather than its end
+    /// state.
     fn view_modal(&self) -> Element<'_, Message> {
-        let dialog: Element<'_, Message> = match &self.modal {
+        // Which dialog is on screen: the open one, or — while a close tween is
+        // still running — the one that just left. `self.modal` is `None` the
+        // instant a dialog closes, and the fade-out is a property of the dialog
+        // that left, so it is drawn from `modal_leaving` until the tween lands.
+        // Without this the close is the hard cut the arrival stopped being.
+        let shown = if self.modal != Modal::None {
+            &self.modal
+        } else if self.modal_anim.open() {
+            match &self.modal_leaving {
+                Some(leaving) => leaving,
+                // A close with nothing kept (a modal retired by a page change)
+                // still has to draw the page underneath.
+                None => return self.view_page(),
+            }
+        } else {
+            return self.view_page();
+        };
+        let dialog: Element<'_, Message> = match shown {
             Modal::None => return self.view_page(),
             Modal::Create => self.view_create_dialog(),
             Modal::Import => self.view_import_dialog(),
@@ -6004,11 +6155,41 @@ impl PalantirApp {
             Modal::Welcome => self.view_welcome_dialog(),
             Modal::ConfirmDelete(id) => view_confirm_delete(id),
         };
+        // The arrival factor, tweened on the clock. A container style is a
+        // function of the theme, so the tweened factor is closed over here
+        // rather than smuggled through the theme.
+        let factor = self.modal_anim.dialog_factor();
+        let arriving = move |theme: &iced::Theme| -> container::Appearance {
+            let mut appearance = theme::modal(theme);
+            appearance.background = appearance
+                .background
+                .map(|background| match background {
+                    iced::Background::Color(color) => {
+                        iced::Background::Color(theme::brightness(color, factor))
+                    }
+                    gradient => gradient,
+                });
+            appearance.text_color = appearance.text_color.map(|color| theme::brightness(color, factor));
+            appearance
+        };
+        // The backdrop's alpha is the tween's own fraction, which is what CSS
+        // `opacity` on the overlay is.
+        let backdrop_fraction = self.modal_anim.backdrop();
+        let fading = move |theme: &iced::Theme| -> container::Appearance {
+            let mut appearance = theme::backdrop(theme);
+            appearance.background = appearance.background.map(|background| match background {
+                iced::Background::Color(color) => {
+                    iced::Background::Color(theme::alpha(color, color.a * backdrop_fraction))
+                }
+                gradient => gradient,
+            });
+            appearance
+        };
         // One container, centred on both axes. (A wrapper around the dialog
         // cannot centre it: a shrink-wrapped container has nothing to centre
         // *within*, so the dialog used to land in the pane's top-left corner.)
-        container(dialog)
-            .style(theme::backdrop)
+        container(container(dialog).style(arriving))
+            .style(fading)
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x()
@@ -6040,7 +6221,7 @@ impl PalantirApp {
                 let project = hit.project_ref().to_string();
                     let title = hit.title.clone();
                     body = body.push(
-                        button(
+                        hover_button("secondary:17", theme::secondary(), button(
                             row![
                                 column![
                                     text(hit.title.clone()).size(13).font(theme::bold()),
@@ -6052,11 +6233,7 @@ impl PalantirApp {
                             ]
                             .spacing(10)
                             .align_items(iced::Alignment::Center),
-                        )
-                        .on_press(Message::CreateProjectPicked(project, title))
-                        .style(theme::secondary())
-                        .padding(10)
-                        .width(Length::Fill),
+                        ).on_press(Message::CreateProjectPicked(project, title)).padding(10).width(Length::Fill)),
                     );
                 }
                 body = body.push(divider_label("or"));
@@ -6087,10 +6264,7 @@ impl PalantirApp {
                 ));
                 let footer = row![
                     horizontal_space(),
-                    button(text("Cancel").size(13))
-                        .on_press(Message::CloseModal)
-                        .style(theme::ghost())
-                        .padding([9, 16]),
+                    hover_button("ghost:1", theme::ghost(), button(text("Cancel").size(13)).on_press(Message::CloseModal).padding([9, 16])),
                 ]
                 .spacing(8);
                 (body, footer)
@@ -6106,21 +6280,30 @@ impl PalantirApp {
                     row![
                         self.view_icon_preview(),
                         column![
-                            button(text("Upload").size(12))
-                                .on_press(Message::CreateIconUpload)
-                                .style(theme::secondary())
-                                .padding([7, 14])
-                                .width(Length::Fill),
-                            button(text("Randomize").size(12))
-                                .on_press(Message::CreateIconRandomize)
-                                .style(theme::secondary())
-                                .padding([7, 14])
-                                .width(Length::Fill),
-                            button(text("Customize").size(12))
-                                .on_press(Message::CreateIconCustomize)
-                                .style(if self.create.customize_open { theme::primary() } else { theme::secondary() })
-                                .padding([7, 14])
-                                .width(Length::Fill),
+                            hover_button(
+                                "secondary:18",
+                                theme::secondary(),
+                                button(text("Upload").size(12))
+                                        .on_press(Message::CreateIconUpload)
+                                        .padding([7, 14])
+                                        .width(Length::Fill),
+                            ),
+                            hover_button(
+                                "secondary:19",
+                                theme::secondary(),
+                                button(text("Randomize").size(12))
+                                        .on_press(Message::CreateIconRandomize)
+                                        .padding([7, 14])
+                                        .width(Length::Fill),
+                            ),
+                            hover_button(
+                                "create_customize:1",
+                                if self.create.customize_open { theme::primary() } else { theme::secondary() },
+                                button(text("Customize").size(12))
+                                        .on_press(Message::CreateIconCustomize)
+                                        .padding([7, 14])
+                                        .width(Length::Fill),
+                            ),
                         ]
                         .spacing(6)
                         .width(Length::Fill),
@@ -6141,10 +6324,13 @@ impl PalantirApp {
                     for key in ICON_CHOICES {
                         let active = self.create.icon_key == key;
                         icons = icons.push(
-                            button(icon_tile(key, 34.0, active))
-                                .on_press(Message::CreateIconPicked(key.to_string()))
-                                .style(theme::ghost())
-                                .padding(2),
+                            hover_button(
+                                "ghost:2",
+                                theme::ghost(),
+                                button(icon_tile(key, 34.0, active))
+                                        .on_press(Message::CreateIconPicked(key.to_string()))
+                                        .padding(2),
+                            ),
                         );
                     }
                     body = body.push(icons);
@@ -6160,10 +6346,13 @@ impl PalantirApp {
                 let mut chips = row![].spacing(6);
                 for loader in LoaderKind::all() {
                     chips = chips.push(
-                        button(text(loader.label()).size(12))
-                            .on_press(Message::CreateLoaderPicked(loader))
-                            .style(theme::chip_button(self.create.loader == loader))
-                            .padding([7, 13]),
+                        hover_button(
+                            "chip:1",
+                            theme::chip_button(self.create.loader == loader),
+                            button(text(loader.label()).size(12))
+                                    .on_press(Message::CreateLoaderPicked(loader))
+                                    .padding([7, 13]),
+                        ),
                     );
                 }
                 body = body.push(chips);
@@ -6201,10 +6390,13 @@ impl PalantirApp {
                     .align_items(iced::Alignment::Center);
                     if !self.catalog.loading {
                         hint = hint.push(
-                            button(text("Retry").size(12))
-                                .on_press(Message::ReloadCatalog)
-                                .style(theme::secondary())
-                                .padding([6, 12]),
+                            hover_button(
+                                "secondary:20",
+                                theme::secondary(),
+                                button(text("Retry").size(12))
+                                        .on_press(Message::ReloadCatalog)
+                                        .padding([6, 12]),
+                            ),
                         );
                     }
                     body = body.push(hint);
@@ -6215,10 +6407,13 @@ impl PalantirApp {
                     let mut choices = row![].spacing(6);
                     for choice in [BuildChoice::Stable, BuildChoice::Latest, BuildChoice::Other] {
                         choices = choices.push(
-                            button(text(choice.label()).size(12))
-                                .on_press(Message::CreateBuildChoicePicked(choice))
-                                .style(theme::chip_button(self.create.build_choice == choice))
-                                .padding([7, 13]),
+                            hover_button(
+                                "chip:2",
+                                theme::chip_button(self.create.build_choice == choice),
+                                button(text(choice.label()).size(12))
+                                        .on_press(Message::CreateBuildChoicePicked(choice))
+                                        .padding([7, 13]),
+                            ),
                         );
                     }
                     body = body.push(choices);
@@ -6267,21 +6462,22 @@ impl PalantirApp {
                     && !self.create.game.trim().is_empty()
                     && (!self.create.loader.loads_mods()
                         || (!self.create.build.is_empty() && !builds.is_empty()));
-                let create_button: Button<'_, Message> = if can_submit {
-                    button(text("+ Create instance").size(13))
-                        .on_press(Message::CreateSubmit)
-                        .style(theme::primary())
-                        .padding([9, 18])
+                let create_button: Element<'_, Message> = if can_submit {
+                    hover_button(
+                        "primary:7",
+                        theme::primary(),
+                        button(text("+ Create instance").size(13)).on_press(Message::CreateSubmit).padding([9, 18]),
+                    )
                 } else {
-                    button(text("+ Create instance").size(13))
-                        .style(theme::primary())
-                        .padding([9, 18])
-                };
+                    hover_button("primary:8", theme::primary(), button(text("+ Create instance").size(13)).padding([9, 18]))};
                 let footer = row![
-                    button(text("← Back").size(13))
-                        .on_press(Message::CreateBack)
-                        .style(theme::secondary())
-                        .padding([9, 16]),
+                    hover_button(
+                        "secondary:21",
+                        theme::secondary(),
+                        button(text("← Back").size(13))
+                                .on_press(Message::CreateBack)
+                                .padding([9, 16]),
+                    ),
                     horizontal_space(),
                     create_button,
                 ]
@@ -6361,10 +6557,13 @@ impl PalantirApp {
                         .spacing(2)
                         .width(Length::Fill),
                         chip(candidate.origin.to_string(), theme::chip_neutral),
-                        button(text("Import").size(12))
-                            .on_press(Message::ImportPicked(index))
-                            .style(theme::primary())
-                            .padding([7, 14]),
+                        hover_button(
+                            "primary:9",
+                            theme::primary(),
+                            button(text("Import").size(12))
+                                    .on_press(Message::ImportPicked(index))
+                                    .padding([7, 14]),
+                        ),
                     ]
                     .spacing(10)
                     .align_items(iced::Alignment::Center),
@@ -6385,10 +6584,13 @@ impl PalantirApp {
             container(
                 row![
                     horizontal_space(),
-                    button(text("Close").size(13))
-                        .on_press(Message::CloseModal)
-                        .style(theme::secondary())
-                        .padding([9, 16]),
+                    hover_button(
+                        "secondary:22",
+                        theme::secondary(),
+                        button(text("Close").size(13))
+                                .on_press(Message::CloseModal)
+                                .padding([9, 16]),
+                    ),
                 ]
                 .spacing(8),
             )
@@ -6484,11 +6686,14 @@ impl PalantirApp {
                 .spacing(8)
                 .align_items(iced::Alignment::Center),
                 rows,
-                button(text("+ Create an instance").size(12))
-                    .on_press(Message::OpenCreate)
-                    .style(theme::primary())
-                    .padding([8, 14])
-                    .width(Length::Fill),
+                hover_button(
+                    "primary:10",
+                    theme::primary(),
+                    button(text("+ Create an instance").size(12))
+                            .on_press(Message::OpenCreate)
+                            .padding([8, 14])
+                            .width(Length::Fill),
+                ),
             ]
             .spacing(12),
         )
@@ -6515,18 +6720,23 @@ impl PalantirApp {
                 .spacing(10)
                 .align_items(iced::Alignment::Center),
                 if signed_in {
-                    button(text("Manage accounts").size(12))
-                        .on_press(Message::PageSelected(Page::Accounts))
-                        .style(theme::secondary())
-                        .padding([7, 12])
-                        .width(Length::Fill)
+                    hover_button(
+                        "secondary:23",
+                        theme::secondary(),
+                        button(text("Manage accounts").size(12))
+                            .on_press(Message::PageSelected(Page::Accounts))
+                            .padding([7, 12])
+                            .width(Length::Fill),
+                    )
                 } else {
-                    button(text("Add an account").size(12))
-                        .on_press(Message::PageSelected(Page::Accounts))
-                        .style(theme::primary())
-                        .padding([7, 12])
-                        .width(Length::Fill)
-                },
+                    hover_button(
+                        "primary:11",
+                        theme::primary(),
+                        button(text("Add an account").size(12))
+                                .on_press(Message::PageSelected(Page::Accounts))
+                                .padding([7, 12])
+                                .width(Length::Fill),
+                    )},
             ]
             .spacing(10),
         )
@@ -6571,45 +6781,58 @@ impl PalantirApp {
             body = body.push(text(problem.clone()).size(11).style(iced::theme::Text::Color(theme::danger())));
         }
         let play: Element<'_, Message> = if running {
-            button(text("Kill").size(13))
-                .on_press(Message::KillPressed)
-                .style(theme::destructive())
-                .padding([9, 16])
-                .width(Length::Fill)
-                .into()
-        } else {
-            button(
-                row![
-                    glyph("play", 14.0, theme::on_accent()),
-                    text("Play").size(13),
-                ]
-                .spacing(8)
-                .align_items(iced::Alignment::Center),
+            hover_button(
+                "destructive:4",
+                theme::destructive(),
+                button(text("Kill").size(13))
+                    .on_press(Message::KillPressed)
+                    .padding([9, 16])
+                    .width(Length::Fill),
             )
-            .on_press(Message::PlayInstance(card.id.clone()))
-            .style(theme::primary())
-            .padding([9, 16])
-            .width(Length::Fill)
-            .into()
+        } else {
+            hover_button(
+                "primary:12",
+                theme::primary(),
+                button(
+                    row![
+                        glyph("play", 14.0, theme::on_accent()),
+                        text("Play").size(13),
+                    ]
+                    .spacing(8)
+                    .align_items(iced::Alignment::Center),
+                )
+                .on_press(Message::PlayInstance(card.id.clone()))
+                .padding([9, 16])
+                .width(Length::Fill),
+            )
         };
         body = body.push(play);
         body = body.push(
             row![
-                button(text("Edit").size(12))
-                    .on_press(Message::EditInstance(card.id.clone()))
-                    .style(theme::secondary())
-                    .padding([6, 10])
-                    .width(Length::Fill),
-                button(text("Folder").size(12))
-                    .on_press(Message::OpenFolder(card.id.clone()))
-                    .style(theme::secondary())
-                    .padding([6, 10])
-                    .width(Length::Fill),
-                button(text("Copy").size(12))
-                    .on_press(Message::DuplicateInstance(card.id.clone()))
-                    .style(theme::secondary())
-                    .padding([6, 10])
-                    .width(Length::Fill),
+                hover_button(
+                    "secondary:24",
+                    theme::secondary(),
+                    button(text("Edit").size(12))
+                            .on_press(Message::EditInstance(card.id.clone()))
+                            .padding([6, 10])
+                            .width(Length::Fill),
+                ),
+                hover_button(
+                    "secondary:25",
+                    theme::secondary(),
+                    button(text("Folder").size(12))
+                            .on_press(Message::OpenFolder(card.id.clone()))
+                            .padding([6, 10])
+                            .width(Length::Fill),
+                ),
+                hover_button(
+                    "secondary:26",
+                    theme::secondary(),
+                    button(text("Copy").size(12))
+                            .on_press(Message::DuplicateInstance(card.id.clone()))
+                            .padding([6, 10])
+                            .width(Length::Fill),
+                ),
             ]
             .spacing(6),
         );
@@ -6629,11 +6852,14 @@ impl PalantirApp {
             .align_items(iced::Alignment::Center),
         );
         body = body.push(
-            button(text("Delete…").size(12))
-                .on_press(Message::AskDelete(card.id.clone()))
-                .style(theme::destructive())
-                .padding([6, 10])
-                .width(Length::Fill),
+            hover_button(
+                "destructive:5",
+                theme::destructive(),
+                button(text("Delete…").size(12))
+                        .on_press(Message::AskDelete(card.id.clone()))
+                        .padding([6, 10])
+                        .width(Length::Fill),
+            ),
         );
         container(body)
             .style(theme::sidebar_card)
@@ -6644,7 +6870,8 @@ impl PalantirApp {
 
     fn card_running(&self, id: &str) -> Element<'_, Message> {
         container(
-            column![                    row![
+            column![
+                row![
                     container(text("")).style(theme::pill(theme::accent())).width(Length::Fixed(8.0)).height(Length::Fixed(8.0)),
                     text("Running").size(16).font(theme::semibold()),
                 ]
@@ -6652,11 +6879,14 @@ impl PalantirApp {
                 .align_items(iced::Alignment::Center),
                 text(id.to_string()).size(13),
                 text("Open the Logs page to watch the output.").size(11),
-                button(text("Kill process").size(12))
-                    .on_press(Message::KillPressed)
-                    .style(theme::destructive())
-                    .padding([7, 12])
-                    .width(Length::Fill),
+                hover_button(
+                    "destructive:6",
+                    theme::destructive(),
+                    button(text("Kill process").size(12))
+                            .on_press(Message::KillPressed)
+                            .padding([7, 12])
+                            .width(Length::Fill),
+                ),
             ]
             .spacing(8),
         )
@@ -6674,16 +6904,22 @@ impl PalantirApp {
                     .font(theme::semibold()),
                 text(format!("Data root: {}", self.paths.root.display())).size(10),
                 row![
-                    button(text("About").size(12))
-                        .on_press(Message::PageSelected(Page::About))
-                        .style(theme::secondary())
-                        .padding([6, 12])
-                        .width(Length::Fill),
-                    button(text("Instances folder").size(12))
-                        .on_press(Message::OpenInstancesFolder)
-                        .style(theme::secondary())
-                        .padding([6, 12])
-                        .width(Length::Fill),
+                    hover_button(
+                        "secondary:27",
+                        theme::secondary(),
+                        button(text("About").size(12))
+                                .on_press(Message::PageSelected(Page::About))
+                                .padding([6, 12])
+                                .width(Length::Fill),
+                    ),
+                    hover_button(
+                        "secondary:28",
+                        theme::secondary(),
+                        button(text("Instances folder").size(12))
+                                .on_press(Message::OpenInstancesFolder)
+                                .padding([6, 12])
+                                .width(Length::Fill),
+                    ),
                 ]
                 .spacing(6),
             ]
@@ -6904,6 +7140,44 @@ impl PalantirApp {
 
 // ---- free widget helpers ------------------------------------------------
 
+/// An interactive button, wired to the interaction clock under `key`.
+///
+/// One call builds the whole control: the role's look, the tween its hover and
+/// press are drawn from — both ends, because a click that dims in one frame is
+/// as much a snap as a hover that lights in one — and the [`hover::Report`]
+/// that starts that tween from a message. It is deliberately one place rather than two — a key that reached
+/// only the style would be a control whose hover is a hard cut again, and
+/// nothing in the compiler would say so. Free rather than a method because the
+/// dialogs' bodies are free functions, and every interactive control in the
+/// shell is built through this (which `every_control_carries_its_key` checks by
+/// reading this file back).
+pub(crate) fn hover_button<'a>(
+    key: &'static str,
+    style: theme::Btn,
+    inner: iced::widget::button::Button<'a, Message>,
+) -> Element<'a, Message> {
+    hover::Report::new(
+        inner.style(style.with_clock(anim::clock(), key)),
+        move |over| Message::ButtonHover { key, over },
+        move |down| Message::ButtonPress { key, down },
+    )
+    .into()
+}
+
+/// Tell the interaction clock where the pointer is on one control.
+///
+/// Called from `update`, never from the view: `set` is what starts a tween, and
+/// a tween started while the view is being built is one beat too late for the
+/// frame subscription that has to carry it — iced re-tracks subscriptions right
+/// after a message batch, and *before* the view runs. The messages
+/// [`hover::Report`] publishes are what put that subscription in place before
+/// the first tweened frame is painted.
+fn pointer_report(key: &'static str, over: bool, down: bool) {
+    if let Ok(mut clock) = anim::clock().lock() {
+        clock.set(key, over, down, Instant::now());
+    }
+}
+
 /// A rail entry: a drawn glyph that takes the rail's ink colour.
 ///
 /// The colour is why the icons are vectors — a bitmap cannot be recoloured, so
@@ -6920,15 +7194,11 @@ impl PalantirApp {
 /// rather than a label, because the reference names them the same way: an
 /// `aria-label` plus a v-tooltip on the ring itself.
 fn head_ring(icon: &str, label: &str) -> Element<'static, Message> {
-    let ring = button(
+    let ring = hover_button("head_ring:1", theme::head_ring(), button(
         container(glyph(icon, theme::HEAD_CHEVRON_GLYPH, theme::HEAD_CHEVRON))
             .center_x()
             .center_y(),
-    )
-    .style(theme::head_ring())
-    .padding([0, 0])
-    .width(Length::Fixed(theme::HEAD_RING_BUTTON))
-    .height(Length::Fixed(theme::HEAD_RING_BUTTON));
+    ).padding([0, 0]).width(Length::Fixed(theme::HEAD_RING_BUTTON)).height(Length::Fixed(theme::HEAD_RING_BUTTON)));
     tooltip(
         ring,
         container(text(label.to_string()).size(12))
@@ -6948,12 +7218,15 @@ fn head_ring(icon: &str, label: &str) -> Element<'static, Message> {
 /// clearance on each side is what keeps a 48px circle from reading as full.
 fn rail_icon(icon: &str, label: &str, active: bool, message: Message) -> Element<'static, Message> {
     let color = if active { theme::accent() } else { theme::text_muted() };
-    let tile = button(container(glyph(icon, 22.0, color)).center_x().center_y())
-        .on_press(message)
-        .style(theme::rail_button(active))
-        .padding([0, 0])
-        .width(Length::Fixed(RAIL_BUTTON))
-        .height(Length::Fixed(RAIL_BUTTON));
+    let tile = hover_button(
+    "rail:1",
+    theme::rail_button(active),
+    button(container(glyph(icon, 22.0, color)).center_x().center_y())
+            .on_press(message)
+            .padding([0, 0])
+            .width(Length::Fixed(RAIL_BUTTON))
+            .height(Length::Fixed(RAIL_BUTTON)),
+);
     tooltip(
         tile,
         container(text(label.to_string()).size(12))
@@ -7125,20 +7398,19 @@ fn instance_card(
     }
 
     let icon = if chrome.compact { COMPACT_CARD_ICON } else { CARD_ICON };
-    let body = button(
+    let body = hover_button("card:1", theme::card_area(selected), button(
         row![icon_tile(&body_card.icon, icon, selected), info]
             .spacing(if chrome.compact { 9 } else { 12 })
             .align_items(iced::Alignment::Center),
-    )
-    .on_press(Message::SelectInstance(id))
-    .style(theme::card_area(selected))
-    .padding(if chrome.compact { 7 } else { 10 })
-    .width(Length::Fill);
+    ).on_press(Message::SelectInstance(id)).padding(if chrome.compact { 7 } else { 10 }).width(Length::Fill));
 
-    let play = button(glyph("play", 16.0, theme::on_accent()))
-        .on_press(Message::PlayInstance(play_id))
-        .style(theme::primary())
-        .padding(if chrome.compact { 9 } else { 12 });
+    let play = hover_button(
+    "primary:13",
+    theme::primary(),
+    button(glyph("play", 16.0, theme::on_accent()))
+            .on_press(Message::PlayInstance(play_id))
+            .padding(if chrome.compact { 9 } else { 12 }),
+);
 
     container(row![body, play].spacing(8).align_items(iced::Alignment::Center))
         .style(if selected { theme::card_selected } else { theme::card })
@@ -7181,7 +7453,7 @@ fn divider_label(label: &str) -> Element<'static, Message> {
 /// One of the four Create-dialog type rows.
 fn option_row(icon: &str, title: &str, description: &str, message: Message) -> Element<'static, Message> {
     container(
-        button(
+        hover_button("ghost:3", theme::ghost(), button(
             row![
                 container(glyph(icon, 18.0, theme::text_muted()))
                     .style(theme::chip_neutral)
@@ -7196,11 +7468,7 @@ fn option_row(icon: &str, title: &str, description: &str, message: Message) -> E
             ]
             .spacing(12)
             .align_items(iced::Alignment::Center),
-        )
-        .on_press(message)
-        .style(theme::ghost())
-        .padding(10)
-        .width(Length::Fill),
+        ).on_press(message).padding(10).width(Length::Fill)),
     )
     .style(theme::option_row)
     .padding(4)
@@ -7308,18 +7576,17 @@ fn browse_type_tabs(active: ContentType) -> Element<'static, Message> {
     let mut tabs = row![].spacing(0);
     for (index, content_type) in all.into_iter().enumerate() {
         tabs = tabs.push(
-            button(text(content_type.label()).size(14))
-                .on_press(Message::BrowseTypePicked(content_type))
-                .style(theme::tab_button_at(
+            hover_button(
+                "tab_button:1",
+                theme::tab_button_at(
                     content_type == active,
                     index == 0,
                     index == all.len() - 1,
-                ))
-                // The vertical padding is what is left of the plate's 47px once
-                // the 14px label's 17px line box is in it -- 15 top and bottom,
-                // against the reference's 9 plus its plate's own 6px inset. The
-                // label lands on the same row either way.
-                .padding([(BROWSE_STRIP_HEIGHT - LABEL_LINE_BOX) / 2.0, BROWSE_PILL_PAD]),
+                ),
+                button(text(content_type.label()).size(14))
+                        .on_press(Message::BrowseTypePicked(content_type))
+                        .padding([(BROWSE_STRIP_HEIGHT - LABEL_LINE_BOX) / 2.0, BROWSE_PILL_PAD]),
+            ),
         );
     }
     tabs.into()
@@ -7343,14 +7610,20 @@ fn view_confirm_delete(id: &str) -> Element<'static, Message> {
     .into();
     let footer: Element<'static, Message> = row![
         horizontal_space(),
-        button(text("Cancel").size(13))
-            .on_press(Message::CloseModal)
-            .style(theme::secondary())
-            .padding([9, 16]),
-        button(text("Delete").size(13))
-            .on_press(Message::ConfirmDelete)
-            .style(theme::destructive())
-            .padding([9, 18]),
+        hover_button(
+            "secondary:29",
+            theme::secondary(),
+            button(text("Cancel").size(13))
+                    .on_press(Message::CloseModal)
+                    .padding([9, 16]),
+        ),
+        hover_button(
+            "destructive:7",
+            theme::destructive(),
+            button(text("Delete").size(13))
+                    .on_press(Message::ConfirmDelete)
+                    .padding([9, 18]),
+        ),
     ]
     .spacing(8)
     .into();
@@ -7383,10 +7656,13 @@ fn modal_header(title: &str) -> Element<'static, Message> {
         row![
             text(title.to_string()).size(20).font(theme::bold()),
             horizontal_space(),
-            button(glyph("close", 13.0, theme::text_muted()))
-                .on_press(Message::CloseModal)
-                .style(theme::ghost())
-                .padding([5, 9]),
+            hover_button(
+                "ghost:4",
+                theme::ghost(),
+                button(glyph("close", 13.0, theme::text_muted()))
+                        .on_press(Message::CloseModal)
+                        .padding([5, 9]),
+            ),
         ]
         .spacing(10)
         .align_items(iced::Alignment::Center),
@@ -8264,6 +8540,58 @@ mod tests {
         // preference rather than a temporary lie.
         let reopened = PalantirApp::with_paths(paths);
         assert!(!reopened.prefs.show_files_tab);
+    }
+
+    #[test]
+    fn a_hover_and_a_press_are_tweens_the_shell_advances() {
+        // The whole path a pointer takes over a control: the widget's report,
+        // the message, the clock the stylesheet reads, and the frames that
+        // carry the tween to its end. Every other test in here would pass with
+        // a clock that nothing ticks — this is the one that says the shell's
+        // own frames reach it, which is the difference between a tween and a
+        // snap.
+        let _guard = theme_lock();
+        let (_dir, paths) = test_paths();
+        let mut app = PalantirApp::with_paths(paths);
+        let key: &'static str = "probe:hover";
+        // A key of this test's own, cleared first: the clock is the process's,
+        // not the app's.
+        anim::clock().lock().expect("the clock").clear();
+        let factor = |key: &str, over: bool, down: bool| {
+            anim::clock().lock().expect("the clock").factor(key, over, down)
+        };
+
+        let _ = app.update(Message::ButtonHover { key, over: true });
+        assert_eq!(factor(key, true, false), 1.0, "a tween begins at rest");
+        assert!(
+            anim::clock().lock().expect("the clock").animating(),
+            "a hover must ask for the frames that carry it"
+        );
+
+        // A frame or two later it is on its way and not yet arrived.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let _ = app.update(Message::PageScrollTick);
+        let middle = factor(key, true, false);
+        assert!(
+            middle > 1.0 && middle < theme::hover_brightness(),
+            "got {middle}, rest 1.0, hover {}",
+            theme::hover_brightness()
+        );
+
+        // A press continues from where the hover is rather than restarting.
+        let _ = app.update(Message::ButtonPress { key, down: true });
+        assert_eq!(factor(key, true, true), middle, "the press picks up the hover");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = app.update(Message::PageScrollTick);
+        assert_eq!(factor(key, true, true), theme::PRESS_BRIGHTNESS);
+
+        // And leaving puts it back. The clock is the process's, so this asks
+        // about *this* key rather than about the whole map: another test's
+        // tween is none of this one's business.
+        let _ = app.update(Message::ButtonHover { key, over: false });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = app.update(Message::PageScrollTick);
+        assert_eq!(factor(key, false, false), 1.0, "a control at rest is at rest");
     }
 
     #[test]
@@ -9869,5 +10197,161 @@ mod tests {
         assert_eq!(browse::human_bytes(2048), "2 KiB");
         assert_eq!(browse::human_bytes(3 * 1024 * 1024), "3.0 MiB");
         assert_eq!(browse::human_bytes(2 * 1024 * 1024 * 1024), "2.0 GiB");
+    }
+
+    /// Every interactive control in the shell is built through [`hover_button`].
+    ///
+    /// That is the rule [`crate::hover`] exists for: an unwrapped `button` is a
+    /// control whose hover snaps, and nothing else in the build would say so —
+    /// iced draws it happily, and its style looks right until someone points at
+    /// it. The check is a source scan because the rule is structural: it has to
+    /// catch the *next* button on the day it is written, and no test can hover a
+    /// window.
+    ///
+    /// "Wrapped" means the innermost call around the `button(…)` is
+    /// `hover_button(…)`, which is also what keeps a control's key and its style
+    /// from drifting into two literals that agree only today.
+    #[test]
+    fn every_control_is_built_with_its_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return;
+        };
+        let (mut wrapped, mut bare) = (0, Vec::new());
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let text = blanked(&source);
+            for (line, at) in button_calls(&text) {
+                if enclosing_call(&text, at) == Some("hover_button") {
+                    wrapped += 1;
+                } else {
+                    bare.push(format!("{}:{line}", path.display()));
+                }
+            }
+        }
+        assert!(
+            bare.is_empty(),
+            "these controls would snap on hover — build them through `hover_button`: {bare:#?}"
+        );
+        // A scan that stopped seeing buttons would pass the check above by
+        // finding nothing at all.
+        assert!(
+            wrapped > 60,
+            "the scan found only {wrapped} controls; it has stopped seeing them"
+        );
+    }
+
+    /// The source with comment bodies and string contents blanked out.
+    ///
+    /// Both can hold a parenthesis or the word `button`, and neither is code:
+    /// a doc comment that mentions `button(…)` must not count as a call.
+    fn blanked(source: &str) -> String {
+        let bytes = source.as_bytes();
+        let mut out = bytes.to_vec();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        out[i] = b' ';
+                        i += 1;
+                    }
+                }
+                b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                    while i < bytes.len()
+                        && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/'))
+                    {
+                        if bytes[i] != b'\n' {
+                            out[i] = b' ';
+                        }
+                        i += 1;
+                    }
+                    for _ in 0..2 {
+                        if i < bytes.len() {
+                            out[i] = b' ';
+                            i += 1;
+                        }
+                    }
+                }
+                b'"' => {
+                    // The quotes stay, so the parentheses around a blanked
+                    // string still balance.
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'"' {
+                        if bytes[i] == b'\\' {
+                            out[i] = b' ';
+                            i += 1;
+                        }
+                        if i < bytes.len() {
+                            if bytes[i] != b'\n' {
+                                out[i] = b' ';
+                            }
+                            i += 1;
+                        }
+                    }
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+        }
+        String::from_utf8(out).unwrap_or_default()
+    }
+
+    /// Every `button(…)` call in `text`, as `(line, index)`.
+    ///
+    /// `button(` is looked for with a word boundary in front of it, so that the
+    /// `button` in `hover_button(` or `rail_button(` is not a call of its own.
+    fn button_calls(text: &str) -> Vec<(usize, usize)> {
+        let bytes = text.as_bytes();
+        let needle = "button(";
+        let (mut from, mut found) = (0, Vec::new());
+        while let Some(offset) = text[from..].find(needle) {
+            let at = from + offset;
+            let before = if at == 0 { b' ' } else { bytes[at - 1] };
+            if !(before.is_ascii_alphanumeric() || before == b'_' || before == b':') {
+                found.push((text[..at].matches('\n').count() + 1, at));
+            }
+            from = at + needle.len();
+        }
+        found
+    }
+
+    /// The name of the innermost call whose arguments contain `at`.
+    ///
+    /// Walked backwards rather than forwards: an opening parenthesis with no
+    /// mate between it and the call is the call that encloses it, whatever the
+    /// nesting around them.
+    fn enclosing_call(text: &str, at: usize) -> Option<&str> {
+        let bytes = text.as_bytes();
+        let mut depth = 0usize;
+        let mut i = at;
+        while i > 0 {
+            i -= 1;
+            match bytes[i] {
+                b')' => depth += 1,
+                b'(' if depth == 0 => {
+                    let end = i;
+                    let mut start = i;
+                    while start > 0 {
+                        let c = bytes[start - 1];
+                        if c.is_ascii_alphanumeric() || c == b'_' {
+                            start -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    return Some(&text[start..end]);
+                }
+                b'(' => depth -= 1,
+                _ => {}
+            }
+        }
+        None
     }
 }

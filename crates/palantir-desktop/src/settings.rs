@@ -33,7 +33,7 @@ use iced::{Alignment, Border, Color, Element, Length, Padding, Theme};
 
 use crate::accounts::AccountEntry;
 use crate::anim::SwitchAnim;
-use crate::app::Message;
+use crate::app::{hover_button, Message};
 use crate::brand;
 use crate::glyphs::glyph;
 use crate::native;
@@ -558,19 +558,21 @@ pub fn nav<'a>(open: Tab, developer_mode: bool) -> Element<'a, Message> {
 /// One row of the section list. A real button, unlike the labels it replaced.
 fn nav_item<'a>(tab: Tab, active: bool) -> Element<'a, Message> {
     let ink = if active { theme::accent() } else { theme::text_muted() };
-    button(
-        row![
-            glyph(tab.icon(), 16.0, ink),
-            text(tab.label()).size(14).font(theme::semibold()),
-        ]
-        .spacing(8)
-        .align_items(Alignment::Center),
+    hover_button(
+        "nav_item:1",
+        theme::nav_item(active),
+        button(
+            row![
+                glyph(tab.icon(), 16.0, ink),
+                text(tab.label()).size(14).font(theme::semibold()),
+            ]
+            .spacing(8)
+            .align_items(Alignment::Center),
+        )
+        .on_press(Message::OpenSettingsTab(tab))
+        .padding([8, 16])
+        .width(Length::Fill),
     )
-    .on_press(Message::OpenSettingsTab(tab))
-    .style(theme::nav_item(active))
-    .padding([8, 16])
-    .width(Length::Fill)
-    .into()
 }
 
 /// The version and platform line along the bottom of the dialog.
@@ -596,10 +598,13 @@ pub fn footer<'a>(developer_mode: bool) -> Element<'a, Message> {
     block
         .push(
             row![
-                button(glyph("gear", 24.0, mark))
-                    .on_press(Message::SettingsFooterPressed)
-                    .style(theme::ghost())
-                    .padding([4, 6]),
+                hover_button(
+                    "ghost:5",
+                    theme::ghost(),
+                    button(glyph("gear", 24.0, mark))
+                            .on_press(Message::SettingsFooterPressed)
+                            .padding([4, 6]),
+                ),
                 column![
                     text(format!("{} {}", brand::APP_NAME, brand::version()))
                         .size(13)
@@ -711,7 +716,7 @@ fn unavailable<'a>(
         ]
         .spacing(4)
         .width(Length::Fill),
-        switch_parts(0.0, false, false, true),
+        switch_parts(0.0, 0.0, false, true),
     ]
     .spacing(16)
     .align_items(Alignment::Center)
@@ -811,56 +816,57 @@ pub fn switch_geometry(progress: f32, diameter: f32) -> (f32, f32) {
 /// that only moved its knob would be a different component.
 pub fn switch_colors(progress: f32) -> (Color, Color) {
     let progress = if progress.is_nan() { 0.0 } else { progress.clamp(0.0, 1.0) };
-    let track = mix(theme::surface_input(), theme::accent(), progress);
+    let track = theme::mix(theme::surface_input(), theme::accent(), progress);
     // `bg-secondary` off, `bg-black/90` on. The on colour is opaque here on
     // purpose: the track beneath it is already the brand green, so compositing
     // 90% black over it would give a dark green rather than the near-black the
     // reference shows.
-    let knob = mix(theme::text_dim(), Color::from_rgba(0.0, 0.0, 0.0, 1.0), progress);
+    let knob = theme::mix(theme::text_dim(), Color::from_rgba(0.0, 0.0, 0.0, 1.0), progress);
     (track, knob)
-}
-
-/// Linear blend in sRGB. `t` is clamped, so an overshooting easing cannot
-/// produce a colour outside the two it was handed.
-fn mix(from: Color, to: Color, t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    Color {
-        r: from.r + (to.r - from.r) * t,
-        g: from.g + (to.g - from.g) * t,
-        b: from.b + (to.b - from.b) * t,
-        a: from.a + (to.a - from.a) * t,
-    }
 }
 
 /// The switch for `flag`, drawn at whatever point its slide has reached.
 fn switch<'a>(view: &View<'a>, flag: Flag) -> Element<'a, Message> {
     let on = flag.get(view.prefs);
     let progress = view.anim.progress(flag.id(), on);
-    let track = switch_parts(
-        progress,
-        view.pointer.hovered == Some(flag),
-        view.pointer.pressed == Some(flag),
-        false,
-    );
+    let hovered = view.pointer.hovered == Some(flag);
+    let pressed = view.pointer.pressed == Some(flag);
+    // The knob's growth is a tween like every other interaction in the shell:
+    // the fraction comes from the interaction clock that `SwitchHover` and
+    // `SwitchLeft` start, so the knob swells over 150 ms instead of appearing
+    // two pixels wider on the frame the pointer arrives. A clock that cannot be
+    // read is the end state, which is what this control showed before the
+    // growth was tweened at all.
+    let grow = match crate::anim::clock().lock() {
+        Ok(clock) => clock.hover_progress(flag.id(), hovered, pressed),
+        Err(_) => {
+            if hovered {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    };
+    let track = switch_parts(progress, grow, pressed, false);
     with_pointer(track, flag)
 }
 
 /// The track and knob of a switch, at a given progress and pointer state.
 fn switch_parts<'a>(
     progress: f32,
-    hovered: bool,
+    grow: f32,
     pressed: bool,
     disabled: bool,
 ) -> Element<'a, Message> {
     // Hover grows the knob and a press shrinks it — `group-hover` and
     // `group-active` in the reference, which is most of what makes the control
-    // feel alive under the hand.
+    // feel alive under the hand. `grow` is the *tweened* fraction of that
+    // growth rather than the pointer state, so the knob swells into its hover
+    // size instead of jumping to it.
     let diameter = if pressed {
         KNOB_PRESSED
-    } else if hovered {
-        KNOB_HOVER
     } else {
-        KNOB
+        KNOB + (KNOB_HOVER - KNOB) * grow.clamp(0.0, 1.0)
     };
     let (leading, diameter) = switch_geometry(progress, diameter);
     let trailing = TRACK_WIDTH - leading - diameter;
@@ -1236,10 +1242,13 @@ fn profile<'a>(view: &View<'a>) -> Element<'a, Message> {
             .push(
                 row![
                     Space::with_width(Length::Fill),
-                    button(text("Sign in to Microsoft").size(14).font(theme::semibold()))
-                        .on_press(Message::MicrosoftPressed)
-                        .style(theme::primary())
-                        .padding([10, 18]),
+                    hover_button(
+                        "primary:14",
+                        theme::primary(),
+                        button(text("Sign in to Microsoft").size(14).font(theme::semibold()))
+                                .on_press(Message::MicrosoftPressed)
+                                .padding([10, 18]),
+                    ),
                 ]
                 .width(Length::Fill),
             ),
@@ -1434,10 +1443,13 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
                 ]
         .spacing(4)
         .width(Length::Fill),
-        button(text("Open folder").size(13).font(theme::semibold()))
-            .on_press(Message::OpenDataRoot)
-            .style(theme::secondary())
-            .padding([10, 14]),
+        hover_button(
+            "secondary:30",
+            theme::secondary(),
+            button(text("Open folder").size(13).font(theme::semibold()))
+                    .on_press(Message::OpenDataRoot)
+                    .padding([10, 14]),
+        ),
             ]
             .spacing(16)
             .align_items(Alignment::Center),
@@ -1492,12 +1504,13 @@ fn resource<'a>(view: &View<'a>) -> Element<'a, Message> {
             "Cached component metadata, re-fetched on demand. Cleaning it cannot lose an \
              instance: the files it holds are all downloadable again.",
             Element::from(
-                button(text("Purge cache").size(13).font(theme::semibold()))
-                    .on_press(Message::PurgeCache)
-                    // `destructive`, not `danger`: the latter is the palette's
-                    // red, and a button's style is the role, not the colour.
-                    .style(theme::destructive())
-                    .padding([10, 14]),
+                hover_button(
+                    "destructive:8",
+                    theme::destructive(),
+                    button(text("Purge cache").size(13).font(theme::semibold()))
+                            .on_press(Message::PurgeCache)
+                            .padding([10, 14]),
+                ),
             ),
         ),
     ]
@@ -1576,13 +1589,14 @@ fn theme_choice<'a>(choice: ColorTheme, selected: bool) -> Element<'a, Message> 
     .spacing(8)
     .align_items(Alignment::Center);
 
-    button(column![preview, label].spacing(10).width(Length::Fill))
-        .on_press(Message::SetColorTheme(choice))
-        .style(theme::theme_card(selected))
-        .padding(10)
-        .width(Length::Fixed(THEME_CARD_WIDTH))
-        .into()
-}
+    hover_button(
+        "theme_card:1",
+        theme::theme_card(selected),
+        button(column![preview, label].spacing(10).width(Length::Fill))
+                .on_press(Message::SetColorTheme(choice))
+                .padding(10)
+                .width(Length::Fixed(THEME_CARD_WIDTH)),
+    )}
 
 /// One line of fake text in a theme miniature.
 fn bar<'a>(width: f32, height: f32, color: Color) -> Element<'a, Message> {

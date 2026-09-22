@@ -2030,6 +2030,101 @@ is deliberately *not* copied, unchanged from §27 and worth keeping in one place
 * **The Servers tab**: the page is in the tree and cannot return results here.
 * **What a structural change would cost**: per-card hover (`brightness-110`) needs
   an iced hover state; `duration-150` transitions need the `anim.rs` pattern on
-  hover, i.e. a message per pointer move over every control, which §8 measured and
-  rejected. Those are recorded in §27 and are quoted above rather than silently
-  skipped.
+  hover. §8 measured a message per pointer *move* over every control and rejected
+  it, correctly — but a transition does not need one: it needs a message per
+  *crossing*, two per visit, which is what §29 builds. The per-card factor itself
+  is still not applied (the cards paint the two global `--hover-brightness`
+  values), and is recorded in §27.
+
+## 29. The tween: the interaction rule read from the other end
+
+§27 applied the reference's interaction rule — the factors, the direction the
+light theme goes, the `opacity-50` — and §28 copied the tokens those are stated
+in. What every control still did was *land* on the rule in one frame. The
+reference draws all of it as `transition-[background-color,color,box-shadow,
+filter,opacity,transform] duration-150 ease-out` (`ButtonFrame.vue`'s base
+classes), and this pass is that transition.
+
+### The claim this corrects
+
+§8 measured the cost of driving a hover from messages and rejected it, and §28
+quoted that rejection as a decision about `duration-150` transitions: "a message
+per pointer move over every control". Half of that is right and half of it is the
+wrong question. A pointer *move* arrives hundreds of times a second, so a message
+per move is a view rebuild per move — that measurement stands. A pointer
+*crossing* arrives twice per visit: once on the way in, once on the way out. The
+transition needs the crossing, and the crossing is what this pass added.
+
+### Where a tween can start
+
+The reason this took reading iced's runtime rather than its widgets:
+**`iced_winit-0.12`'s `application::update` is the only place a program's
+subscriptions are re-tracked, and it runs after a message batch and before the
+view.** The frame subscription that advances a tween is gated on
+`Interactions::animating()`, so a tween started *by the view* — which is the only
+place iced volunteers the pointer's position, as `button::Status::Hovered` — is
+started one beat after the subscription that would have carried it. The hover
+would paint its first frame and then sit there: no frames requested, no message,
+no re-evaluation. A tween started in the view is a tween that never moves.
+
+`MouseArea` publishes enter/leave, and cannot be used around a `button`: it never
+hands events to its content, so the button inside goes inert the moment it is
+wrapped. Hence `hover::Report`: a wrapper of our own, modelled on `scroll.rs`'s
+`WheelGuard` (the delegate-first shape this tree already had), which hands every
+event to the control first and returns the control's own status untouched — and
+then checks one rectangle, once per crossing, and publishes the change. It also
+covers two cases a move-only report misses: a cursor that has *left the window*
+(the cursor is unavailable, so a lit control goes out) and a control that appears
+or moves under a stationary pointer.
+
+### What is tweened now
+
+* **Every button in the shell — 71 of them.** All of them are built through one
+  function, `app::hover_button(key, style, button(...))`, which is where the key,
+  the role's style and the pointer report come from the same literal. The call
+  sites were rewritten by a script (`65` in `app.rs`, `6` in `settings.rs`) and
+  G56 is the check that no new button skips it.
+* **The modal's arrival, both ways.** 200ms, which is what `NewModal.vue`
+  actually says (`transition: all 0.2s ease-out` on the overlay; `scale: 0.97`
+  with `opacity: 0` to `scale: 1` on the dialog body) — the earlier 150 was a
+  `duration-150` read off the wrong component. The dialog's scale is drawn as a
+  brightness ramp, because iced lays a widget out and then paints it.
+* **The switch's knob growth.** `Toggle.vue`'s `group-hover:w-[18px]
+  group-hover:h-[18px] group-hover:m-[-1px]` and `group-active:w-[14px]
+  group-active:h-[14px] group-active:m-[1px]`: the knob's 16px resting size now
+  swells to 18 and shrinks to 14 across the tween instead of appearing there.
+* **The structural half of a hover, not only the filter.** A transition in the
+  reference moves a control's colours — a fill appearing under a ghost button, a
+  rail label going from `text-dim` to `text`, a card picking the raised surface.
+  `theme::blend` interpolates the role's two ends on the same clock fraction the
+  filter rides, so both halves of the transition arrive together.
+
+### What is still not drawn
+
+* **The press's `scale-[0.97]`.** iced cannot paint a widget 3% smaller inside
+  the box it was laid out in; the press stays `classes.scss`'s
+  `brightness(0.8)`, unchanged by this pass.
+* **The per-card hover factors** (`--hover-brightness: 1.1` on an instance card,
+  `brightness-110` on a checklist row): still held in the vocabulary (G51) and
+  still not applied — the cards paint the two global factors.
+* **The maximize control's hover.** Windows answers that button as non-client, so
+  no widget ever sees the pointer; its hover comes from the window procedure and
+  its structure changes, but there is nothing to tween against.
+
+### A test that was racing, found while this ran
+
+`theme::tests::button_roles_paint_distinct_primary_and_danger` and
+`containers_and_fields_are_themed` compare values read from the theme in force
+against the palette read moments later. `choosing_a_theme_changes_what_the_styles
+_paint` sets and restores the process-wide theme while holding `THEME_TEST_LOCK`,
+but eleven reading tests never took it — so a reader could observe the light or
+OLED theme it sets on the way through, and fail on the schedule rather than on
+the code. With more tests running beside them, two of them did. Every test that
+reads the theme now takes the lock, and the helper's doc says why.
+
+### What the runner confirmed
+
+Local, before this pass was pushed: 408 tests green (the eleven locking tests
+are among them), clippy `-D clippy::correctness` clean, and `tools/gen_tokens.py`
+still rewrites `theme_tokens.rs` byte-identical. The run that carries this to
+`master` is the gate — `package` depends on `test`, so a red there is the record.

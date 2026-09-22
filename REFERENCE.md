@@ -195,14 +195,36 @@ light theme that hovered the wrong way.
 The shell applies the two `--hover-brightness` values and the `opacity-50`
 (`theme::hover_brightness`, `theme::DISABLED_OPACITY`) as one filter over a
 control's whole appearance — fill, label and ring — because that is what a CSS
-filter on an element does. Three things in the table are **not** drawn, and the
-reason is the toolkit rather than the reference: the 150ms transition (iced has
-no transitions; a state change lands in one frame), the `scale-[0.97]` press
-(a widget is laid out and then painted, and cannot paint itself 3% smaller), and
-the per-component factors on the right-hand rows of the table — a card's hover is
-a `MouseArea`-shaped change this shell has not built yet. The press uses
-`classes.scss`'s `brightness(0.8)` instead, which is the same intent as the 0.97
-and is the value the dark palette had already derived by hand.
+filter on an element does.
+
+The `duration-150` is drawn as of §29 of `NEXT_STEPS.md`: `ButtonFrame.vue`'s
+`transition-[background-color,color,box-shadow,filter,opacity,transform]` is one
+clock (`anim::Interactions`) that eases both halves of what a hover changes — the
+filter over the whole appearance, and the role's own colours, since a transition
+is not only a brightness. Three notes on how it is drawn rather than what:
+
+* The transition has to be *started* by a message, because iced re-tracks a
+  program's subscriptions right after a message batch and before the view runs,
+  so a tween begun by the view that has just seen `Status::Hovered` has no frame
+  subscription to carry it. `hover::Report` publishes the crossing; see G55.
+* The same clock drives the modal's arrival and the settings switch's knob
+  growth. `ui/src/components/modal/NewModal.vue` states the modal: the overlay
+  fades on `transition: all 0.2s ease-out`, and the dialog body goes from
+  `scale: 0.97` with `opacity: 0` to `scale: 1` on `transition: all 0.2s
+  ease-in-out` — drawn here as a brightness ramp from the press's dimness, which
+  is what a 3% scale reads as when a widget is laid out and then painted.
+  `ui/src/components/base/Toggle.vue` states the switch: `group-hover:w-[18px]
+  group-hover:h-[18px] group-hover:m-[-1px]`, `group-active:w-[14px]
+  group-active:h-[14px] group-active:m-[1px]` — so the knob's 16px resting size
+  swells to 18 and shrinks to 14 on the same clock, rather than appearing two
+  pixels wider on the frame the pointer arrives.
+* Two things in the table are still **not** drawn, and the reason is the toolkit
+  rather than the reference: the `scale-[0.97]` press (a widget is laid out and
+  then painted, and cannot paint itself 3% smaller; the press is
+  `classes.scss`'s `brightness(0.8)`, which is the same intent and is the value
+  the dark palette had already derived by hand), and the per-component factors
+  on the right-hand rows of the table — those are *held* in the vocabulary copy
+  (G51), but the cards still paint the two global ones.
 
 ## The token gate, or: why these numbers are not just written down
 
