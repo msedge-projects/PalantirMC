@@ -231,13 +231,28 @@ impl Interactions {
     /// not animate — and a control whose state matches its tween is simply at
     /// its end.
     pub fn factor(&self, id: &str, hovered: bool, pressed: bool) -> f32 {
-        let target = Self::target(hovered, pressed);
+        self.factor_with_hover(id, hovered, pressed, crate::theme::hover_brightness())
+    }
+
+    /// The factor the control is drawn at with a locally scoped hover end.
+    ///
+    /// Instance cards and checklist rows override the reference global
+    /// hover brightness, so their scoped value travels with the style rather
+    /// than leaking into every other control.
+    pub fn factor_with_hover(
+        &self,
+        id: &str,
+        hovered: bool,
+        pressed: bool,
+        hover_factor: f32,
+    ) -> f32 {
+        let target = Self::target(hovered, pressed, hover_factor);
         match self.tweens.get(id) {
             Some(tween) if tween.to == target && tween.began.is_none() => tween.progress,
             Some(tween) if tween.began.is_none() && tween.to != target => {
-                // Stale but settled: the state changed and no one called `set`
+                // Stale but settled: the state changed and no one called set
                 // yet (a fresh frame arrived before the update ran). Draw the
-                // rest factor rather than the tween's — the *next* `set` will
+                // rest factor rather than the tween's — the next set will
                 // start from here, so nothing jumps.
                 target
             }
@@ -247,11 +262,11 @@ impl Interactions {
     }
 
     /// The factor a control with this pointer state is *supposed* to be at.
-    fn target(hovered: bool, pressed: bool) -> f32 {
+    fn target(hovered: bool, pressed: bool, hover_factor: f32) -> f32 {
         if pressed {
             crate::theme::PRESS_BRIGHTNESS
         } else if hovered {
-            crate::theme::hover_brightness()
+            hover_factor
         } else {
             1.0
         }
@@ -260,7 +275,19 @@ impl Interactions {
     /// Record the pointer's arrival on or departure from `id`, and start the
     /// tween if the target moved.
     pub fn set(&mut self, id: &'static str, hovered: bool, pressed: bool, now: Instant) {
-        let target = Self::target(hovered, pressed);
+        self.set_with_hover(id, hovered, pressed, now, crate::theme::hover_brightness());
+    }
+
+    /// Record pointer state with a locally scoped hover end.
+    pub fn set_with_hover(
+        &mut self,
+        id: &'static str,
+        hovered: bool,
+        pressed: bool,
+        now: Instant,
+        hover_factor: f32,
+    ) {
+        let target = Self::target(hovered, pressed, hover_factor);
         let tween = self
             .tweens
             .entry(id)
@@ -268,8 +295,8 @@ impl Interactions {
         if tween.to == target && tween.began.is_none() {
             return;
         }
-        // From where the control is *drawn*: a press inside a hover starts
-        // from the hover's brightness, and a fast hover-press-release reverses
+        // From where the control is drawn: a press inside a hover starts
+        // from the hover brightness, and a fast hover-press-release reverses
         // from the pixel it is on.
         tween.from = if tween.began.is_none() { tween.to } else { tween.progress };
         // A tween whose ends are equal is already there.
@@ -287,22 +314,31 @@ impl Interactions {
     /// its track) needs the fraction of the way there, and that is this: the
     /// same tween, its scale inverted.
     pub fn hover_progress(&self, id: &str, hovered: bool, pressed: bool) -> f32 {
-        // A press is dimmer than rest and is not a *position*: the reference's
+        self.hover_progress_with_hover(id, hovered, pressed, crate::theme::hover_brightness())
+    }
+
+    /// How far along a hover is when its end factor is scoped to one control.
+    pub fn hover_progress_with_hover(
+        &self,
+        id: &str,
+        hovered: bool,
+        pressed: bool,
+        hover_factor: f32,
+    ) -> f32 {
+        // A press is dimmer than rest and is not a position: the reference
         // press is a scale and a filter, so the structure a hover moved stays
-        // where it is while the control is held. Reading the factor here would
-        // have reported a press as "no hover" in the dark theme and as a full
-        // hover in the light one, which is the same mistake the interaction
-        // factors were split apart to avoid.
+        // where it is while the control is held.
         if pressed {
             return if hovered { 1.0 } else { 0.0 };
         }
-        let end = crate::theme::hover_brightness();
         // A theme whose hover is its rest state has nothing to invert, and
         // nothing that moves either: the fraction is the state itself.
-        if (end - 1.0).abs() < f32::EPSILON {
+        if (hover_factor - 1.0).abs() < f32::EPSILON {
             return if hovered { 1.0 } else { 0.0 };
         }
-        ((self.factor(id, hovered, pressed) - 1.0) / (end - 1.0)).clamp(0.0, 1.0)
+        ((self.factor_with_hover(id, hovered, pressed, hover_factor) - 1.0)
+            / (hover_factor - 1.0))
+            .clamp(0.0, 1.0)
     }
 
     /// Whether any control is mid-tween.
@@ -568,6 +604,19 @@ mod tests {
         assert!(!clock.animating(), "nothing has been told anything");
     }
 
+    #[test]
+    fn finish_scoped_hover_factors_do_not_share_card_targets() {
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set_with_hover("card-a", true, false, start, 1.1);
+        clock.set_with_hover("card-b", true, false, start, 1.25);
+        assert_eq!(clock.factor_with_hover("card-a", true, false, 1.1), 1.0);
+        assert_eq!(clock.factor_with_hover("card-b", true, false, 1.25), 1.0);
+
+        clock.tick(start + INTERACTION_DURATION);
+        assert_eq!(clock.factor_with_hover("card-a", true, false, 1.1), 1.1);
+        assert_eq!(clock.factor_with_hover("card-b", true, false, 1.25), 1.25);
+    }
     #[test]
     fn a_hover_arrives_over_the_deadline_not_in_a_frame() {
         let mut clock = Interactions::default();

@@ -79,6 +79,9 @@ pub fn hover_brightness() -> f32 {
 /// `accent_dim` was exactly `accent x 0.8` -- which is why nothing in dark moves.
 pub const PRESS_BRIGHTNESS: f32 = 0.8;
 
+/// The scoped hover factor on instance cards in the reference client.
+pub const INSTANCE_CARD_HOVER_BRIGHTNESS: f32 = 1.1;
+
 /// How much of a control survives being disabled: `disabled:opacity-50` in
 /// `ButtonFrame.vue`'s base classes, which is one opacity on the whole element.
 pub const DISABLED_OPACITY: f32 = 0.5;
@@ -1130,11 +1133,13 @@ pub struct Btn {
     /// tween, which is why every control in the shell is given a key of its
     /// own by [`crate::app`]'s `hover_button`.
     pub key: &'static str,
+    /// A scoped hover brightness override for surfaces such as instance cards.
+    pub hover_factor: Option<f32>,
 }
 
 impl Btn {
     pub fn new(role: Role) -> Btn {
-        Btn { role, clock: None, key: "" }
+        Btn { role, clock: None, key: "", hover_factor: None }
     }
 
     /// Hand the button its tween clock and key.
@@ -1147,6 +1152,12 @@ impl Btn {
         self.key = key;
         self
     }
+
+    /// Set the scoped hover factor declared by the reference for this surface.
+    pub fn with_hover_factor(mut self, hover_factor: f32) -> Btn {
+        self.hover_factor = Some(hover_factor);
+        self
+    }
 }
 
 /// The factor a control's pointer state is worth with no tween behind it.
@@ -1154,12 +1165,12 @@ impl Btn {
 /// The reference's end states, one frame. It is what a `Btn` with no clock
 /// draws, and what a clock that panicked under a tween falls back to: a
 /// stylesheet has to paint something either way, and this is the look the
-/// control settles on.
-fn interaction_end(hovered: bool, pressed: bool) -> f32 {
+/// control settles on
+fn interaction_end_with_hover(hovered: bool, pressed: bool, hover_factor: f32) -> f32 {
     if pressed {
         PRESS_BRIGHTNESS
     } else if hovered {
-        hover_brightness()
+        hover_factor
     } else {
         1.0
     }
@@ -1270,24 +1281,34 @@ impl Btn {
     /// makes the light theme's hover go the other way without a single role
     /// having to know which theme is in force.
     fn appearance(&self, hovered: bool, pressed: bool) -> button::Appearance {
-        // With a clock, the factor is *tweened*: the stylesheet is asked for
+        // With a clock, the factor is tweened: the stylesheet is asked for
         // the hovered look the frames after the pointer message ran, and the
-        // clock's progress is what the filter multiplies by. Without one, the
-        // factor is the end state — the right factors, one frame.
+        // clock progress is what the filter multiplies by.
+        let hover_factor = self.hover_factor.unwrap_or_else(hover_brightness);
         let (factor, progress) = match self.clock {
             Some(clock) => {
                 // A poisoned clock is a panic that happened while a tween was
-                // being read; the guard is taken anyway rather than propagating
-                // a panic into the paint, and the end states are what is drawn.
+                // being read; draw the end state rather than propagating it.
                 match clock.lock() {
                     Ok(clock) => (
-                        clock.factor(self.key, hovered, pressed),
-                        clock.hover_progress(self.key, hovered, pressed),
+                        clock.factor_with_hover(self.key, hovered, pressed, hover_factor),
+                        clock.hover_progress_with_hover(
+                            self.key,
+                            hovered,
+                            pressed,
+                            hover_factor,
+                        ),
                     ),
-                    Err(_) => (interaction_end(hovered, pressed), interaction_progress(hovered)),
+                    Err(_) => (
+                        interaction_end_with_hover(hovered, pressed, hover_factor),
+                        interaction_progress(hovered),
+                    ),
                 }
             }
-            None => (interaction_end(hovered, pressed), interaction_progress(hovered)),
+            None => (
+                interaction_end_with_hover(hovered, pressed, hover_factor),
+                interaction_progress(hovered),
+            ),
         };
         // The role's two ends, blended by how far through the hover the clock
         // is, and then the filter over the whole of it. `role(false)` and

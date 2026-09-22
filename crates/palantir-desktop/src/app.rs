@@ -30,9 +30,9 @@
 //! dropped). The GUI thread therefore never touches the network or a slow
 //! disk.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use iced::widget::{
@@ -1169,11 +1169,19 @@ pub enum Message {
     ///
     /// Published by [`hover::Report`], and the only way a hover tween can
     /// start: see that module for why the view cannot start one itself.
-    ButtonHover { key: &'static str, over: bool },
+    ButtonHover {
+        key: &'static str,
+        over: bool,
+        hover_factor: f32,
+    },
     /// The left button went down on the control under `key`, or came back up
     /// on it. See [`crate::hover::Report`]: the reference's press is a state,
     /// not a click, so it is reported from the button's own events.
-    ButtonPress { key: &'static str, down: bool },
+    ButtonPress {
+        key: &'static str,
+        down: bool,
+        hover_factor: f32,
+    },
     // ---- the Settings dialog ----
     /// Show a different pane of the Settings dialog.
     OpenSettingsTab(settings::Tab),
@@ -3403,16 +3411,16 @@ impl PalantirApp {
                 self.save_prefs();
                 Command::none()
             }
-            Message::ButtonHover { key, over } => {
-                pointer_report(key, over, false);
+            Message::ButtonHover { key, over, hover_factor } => {
+                pointer_report_with_hover(key, over, false, hover_factor);
                 Command::none()
             }
-            Message::ButtonPress { key, down } => {
+            Message::ButtonPress { key, down, hover_factor } => {
                 // Only ever sent for a control the pointer is on — a press it
                 // did not start and a release after it left are both dropped by
-                // [`crate::hover`] — so the hover is part of the report: the
+                // [crate::hover] — so the hover is part of the report: the
                 // press is the same tween carried on to the dimmer end.
-                pointer_report(key, true, down);
+                pointer_report_with_hover(key, true, down, hover_factor);
                 Command::none()
             }
             Message::SwitchHover(id) => {
@@ -7156,10 +7164,11 @@ pub(crate) fn hover_button<'a>(
     style: theme::Btn,
     inner: iced::widget::button::Button<'a, Message>,
 ) -> Element<'a, Message> {
+    let hover_factor = style.hover_factor.unwrap_or_else(theme::hover_brightness);
     hover::Report::new(
         inner.style(style.with_clock(anim::clock(), key)),
-        move |over| Message::ButtonHover { key, over },
-        move |down| Message::ButtonPress { key, down },
+        move |over| Message::ButtonHover { key, over, hover_factor },
+        move |down| Message::ButtonPress { key, down, hover_factor },
     )
     .into()
 }
@@ -7173,9 +7182,38 @@ pub(crate) fn hover_button<'a>(
 /// [`hover::Report`] publishes are what put that subscription in place before
 /// the first tweened frame is painted.
 fn pointer_report(key: &'static str, over: bool, down: bool) {
+    pointer_report_with_hover(key, over, down, theme::hover_brightness());
+}
+
+fn pointer_report_with_hover(
+    key: &'static str,
+    over: bool,
+    down: bool,
+    hover_factor: f32,
+) {
     if let Ok(mut clock) = anim::clock().lock() {
-        clock.set(key, over, down, Instant::now());
+        clock.set_with_hover(key, over, down, Instant::now(), hover_factor);
     }
+}
+
+/// Return a stable process-lifetime key for a repeated control.
+///
+/// The view is rebuilt often, while the interaction clock must recognize the
+/// same card across those rebuilds. Leaking each unique label is intentional:
+/// these are bounded UI identities, not per-frame values.
+fn scoped_hover_key(namespace: &str, id: &str) -> &'static str {
+    static KEYS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let name = format!("{namespace}:{id}");
+    let mut keys = KEYS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(key) = keys.get(&name) {
+        return key;
+    }
+    let key: &'static str = Box::leak(name.clone().into_boxed_str());
+    keys.insert(name, key);
+    key
 }
 
 /// A rail entry: a drawn glyph that takes the rail's ink colour.
@@ -7194,7 +7232,8 @@ fn pointer_report(key: &'static str, over: bool, down: bool) {
 /// rather than a label, because the reference names them the same way: an
 /// `aria-label` plus a v-tooltip on the ring itself.
 fn head_ring(icon: &str, label: &str) -> Element<'static, Message> {
-    let ring = hover_button("head_ring:1", theme::head_ring(), button(
+    let ring_key = scoped_hover_key("head-ring", label);
+    let ring = hover_button(ring_key, theme::head_ring(), button(
         container(glyph(icon, theme::HEAD_CHEVRON_GLYPH, theme::HEAD_CHEVRON))
             .center_x()
             .center_y(),
@@ -7218,8 +7257,9 @@ fn head_ring(icon: &str, label: &str) -> Element<'static, Message> {
 /// clearance on each side is what keeps a 48px circle from reading as full.
 fn rail_icon(icon: &str, label: &str, active: bool, message: Message) -> Element<'static, Message> {
     let color = if active { theme::accent() } else { theme::text_muted() };
+    let tile_key = scoped_hover_key("rail", label);
     let tile = hover_button(
-    "rail:1",
+    tile_key,
     theme::rail_button(active),
     button(container(glyph(icon, 22.0, color)).center_x().center_y())
             .on_press(message)
@@ -7398,14 +7438,16 @@ fn instance_card(
     }
 
     let icon = if chrome.compact { COMPACT_CARD_ICON } else { CARD_ICON };
-    let body = hover_button("card:1", theme::card_area(selected), button(
+    let body_key = scoped_hover_key("instance-card", &body_card.id);
+    let play_key = scoped_hover_key("instance-card-play", &body_card.id);
+    let body = hover_button(body_key, theme::card_area(selected).with_hover_factor(theme::INSTANCE_CARD_HOVER_BRIGHTNESS), button(
         row![icon_tile(&body_card.icon, icon, selected), info]
             .spacing(if chrome.compact { 9 } else { 12 })
             .align_items(iced::Alignment::Center),
     ).on_press(Message::SelectInstance(id)).padding(if chrome.compact { 7 } else { 10 }).width(Length::Fill));
 
     let play = hover_button(
-    "primary:13",
+    play_key,
     theme::primary(),
     button(glyph("play", 16.0, theme::on_accent()))
             .on_press(Message::PlayInstance(play_id))
@@ -8543,6 +8585,14 @@ mod tests {
     }
 
     #[test]
+    fn finish_scoped_keys_are_stable_and_distinct() {
+        let first = scoped_hover_key("finish-card", "alpha");
+        let same = scoped_hover_key("finish-card", "alpha");
+        let other = scoped_hover_key("finish-card", "beta");
+        assert_eq!(first, same);
+        assert_ne!(first, other);
+    }
+    #[test]
     fn a_hover_and_a_press_are_tweens_the_shell_advances() {
         // The whole path a pointer takes over a control: the widget's report,
         // the message, the clock the stylesheet reads, and the frames that
@@ -8561,7 +8611,7 @@ mod tests {
             anim::clock().lock().expect("the clock").factor(key, over, down)
         };
 
-        let _ = app.update(Message::ButtonHover { key, over: true });
+        let _ = app.update(Message::ButtonHover { key, over: true, hover_factor: theme::hover_brightness() });
         assert_eq!(factor(key, true, false), 1.0, "a tween begins at rest");
         assert!(
             anim::clock().lock().expect("the clock").animating(),
@@ -8579,7 +8629,7 @@ mod tests {
         );
 
         // A press continues from where the hover is rather than restarting.
-        let _ = app.update(Message::ButtonPress { key, down: true });
+        let _ = app.update(Message::ButtonPress { key, down: true, hover_factor: theme::hover_brightness() });
         assert_eq!(factor(key, true, true), middle, "the press picks up the hover");
         std::thread::sleep(std::time::Duration::from_millis(200));
         let _ = app.update(Message::PageScrollTick);
@@ -8588,7 +8638,7 @@ mod tests {
         // And leaving puts it back. The clock is the process's, so this asks
         // about *this* key rather than about the whole map: another test's
         // tween is none of this one's business.
-        let _ = app.update(Message::ButtonHover { key, over: false });
+        let _ = app.update(Message::ButtonHover { key, over: false, hover_factor: theme::hover_brightness() });
         std::thread::sleep(std::time::Duration::from_millis(200));
         let _ = app.update(Message::PageScrollTick);
         assert_eq!(factor(key, false, false), 1.0, "a control at rest is at rest");
@@ -8961,6 +9011,18 @@ mod tests {
         catalog
     }
 
+    #[test]
+    fn finish_routes_are_named_iconed_and_round_trip() {
+        for page in Page::all() {
+            assert!(!page.title().is_empty());
+            assert!(!page.tooltip().is_empty());
+            assert!(!page.icon().is_empty());
+            assert_eq!(Page::from_name(&page.title().to_ascii_lowercase()), Some(page));
+        }
+        for page in Page::rail() {
+            assert!(Page::all().contains(&page));
+        }
+    }
     #[test]
     fn pages_cover_the_rail_and_titles() {
         // Nine pages: the six on the rail, plus the two reached from an
