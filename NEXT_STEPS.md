@@ -2128,3 +2128,97 @@ Local, before this pass was pushed: 408 tests green (the eleven locking tests
 are among them), clippy `-D clippy::correctness` clean, and `tools/gen_tokens.py`
 still rewrites `theme_tokens.rs` byte-identical. The run that carries this to
 `master` is the gate — `package` depends on `test`, so a red there is the record.
+
+## 30. The dead code the compiler was already listing, and what came out
+
+This pass began as a tidiness request and ended by taking the compiler's own list
+rather than guessing at one. `cargo check --workspace --all-targets` had been
+emitting **eight `dead_code` warnings** in `palantir-desktop`, and the tree
+carried six `#[allow(dead_code)]`s — one in the CLI, three in the desktop
+crate's `launch.rs`/`accounts.rs`, one each in `reference_tokens.rs` and
+`reference_vocabulary.rs`. A warning nobody reads is how a tree grows a second,
+worse copy of itself; all of it is gone, and the workspace now typechecks with no
+warnings in any target.
+
+The distinction that decided every case is **who calls it**. An item whose only
+caller is a test is not dead — it is a test-only item, and the honest fix is
+`#[cfg(test)]` (the attribute the compiler's own help suggests) rather than
+deleting the fixture or shipping the helper in the binary.
+
+| Item | Only caller | What was done |
+|---|---|---|
+| `java_major_for` (CLI) | none | deleted, with its `#[allow(dead_code)]`, its comment ("kept here so the CLI surfaces them in future versions") and the `java::JavaVersion` import it was the only user of |
+| `MicrosoftState::has_code` | none | deleted |
+| `theme::nav_active`, `theme::nav_idle` | none | deleted — superseded by `theme::nav_item(active)`, which is what `settings.rs`'s section list actually calls |
+| `theme::tab_button(active)` | `theme.rs`'s style test | deleted; the test now passes `tab_button_at(active, false, false)`, which is what every tab inside a strip passes |
+| `AccountsStore::account`, `AccountsStore::load` | `accounts.rs` tests | `#[cfg(test)]` |
+| `PalantirApp::shot_path` | `app.rs` test | `#[cfg(test)]` |
+| `install::Reporter::lines_only` | `install.rs`, `java_runtime.rs` tests | `#[cfg(test)]` |
+| `theme::heading()` | the type-scale gate | `#[cfg(test)]`, and its doc corrected — see below |
+| `launch::offline_backend` | the `Sandbox` shell | the `#[allow(dead_code)]` was **stale** — the sandbox shell does reach it — so the attribute went and the function stayed |
+
+Two findings are worth more than the tidying they came with:
+
+1. **`theme::heading()` was a promise written as a description.** Its doc said
+   pages draw titles in it; nothing does. The type-scale gate asserts this shell
+   holds `--font-weight-heading` (800, the reference's `--font-weight-extrabold`)
+   and the assertion is kept, so the helper is now `#[cfg(test)]` with a doc
+   saying exactly that: the weight is declared for the gap §28 already names. It
+   retires the day the page titles — today `theme::semibold()` (600), every one
+   of them — move onto the weight the reference draws them in.
+2. **`modal`'s doc comment had been left on `nav_active`.** The paragraph
+   explaining why the dialog is a hairline border and not a blurred shadow (the
+   tiny-skia cost, the near-black composite) sat above a function about the
+   Settings section list. Deleting the pair put it back on the function it
+   describes.
+
+Also removed: `serde` from `palantir-loader`'s dependencies. No file in that
+crate names it — `serde_json`, which does the real work there, pulls serde
+itself — and the lock file lost the one edge with it. The scan that finds these
+is three lines and worth re-running after a refactor: the package name, its
+hyphen-stripped form and its lib name against the crate's own sources. (`md-5` is
+the false positive it always produces, because that package's lib is `md5`.)
+
+**Not removed, deliberately: the `Sandbox` shell.** `main.rs`'s `State` and
+`PalantirApp::sandbox_drain_launch` are unreachable from `main()`, which runs
+`App` and the subscriptions. They are kept because §7's original API is a working
+synchronous entry point that the tests exercise, and deleting it would take the
+honest dry-run path with it. It is *unreachable*, not forgotten; if the next pass
+wants it gone, it is one entry point, one drain function and `offline_backend`,
+and the tests that call `<State as Sandbox>::update` are the ones to move.
+
+### The naming audit, because the request was "rename everything still saying Prism"
+
+Nothing in the tree names *this* launcher "Prism" any more — §15 is that pass,
+and it landed: crates, types, the public client id, the test-data directories,
+`windowTitle` and the `launcherBrand` string are all PalantirMC. What is left is
+a short list, and every entry is a fact about the world rather than branding, so
+renaming one breaks something real:
+
+* `LEGACY_DATA_DIR_NAME = "PrismLauncher"` and `GLOBAL_CONFIG_FILE =
+  "prismlauncher.cfg"` (`palantir-core::paths`) — the folder and file this
+  launcher reads to find an install that already exists. `§15` records why the
+  data root itself did not move: it needs a migration story first.
+* `DEFAULT_META_BASE_URL = "https://meta.prismlauncher.org/v1"` — the metadata
+  service the catalog, libraries and assets come from. It is their endpoint.
+* `"Prism Launcher"` as the **origin** of an imported copy (`instances.rs`,
+  `app.rs`'s import dialog) — the label says where the instance came from, which
+  is the one thing it must not be vague about.
+* The instance icons and the About page's line about them: the art is carved from
+  `prismlauncher.exe` (GPL-3.0-only, Prism Launcher contributors) and attribution
+  is a condition of shipping it, not a brand.
+* Doc comments and compatibility test names (`instance_cfg_reproduces_prism_bytes
+  _from_the_same_settings` and friends): they record the launcher whose format
+  is being reproduced, which is what makes the claim checkable.
+
+The name that *is* ours now reaches the places that credit someone: `brand::STUDIO`
+("Palantir Studios") is drawn in the About hero, the README names the studio and
+its copyright, and `[workspace.package] authors` carries it into the crates'
+metadata.
+
+### What the runner confirmed
+
+Local, before this pass was pushed: 411 tests green in `palantir-desktop` (the
+crate's suite is now warning-free in every target), `cli`/`core`/`gui`/`loader`
+green, clippy `--workspace --all-targets -D clippy::correctness` clean, and
+`tools/gen_tokens.py` still rewrites `theme_tokens.rs` byte for byte.

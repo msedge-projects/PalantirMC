@@ -1068,10 +1068,6 @@ impl MicrosoftState {
         };
     }
 
-    /// Whether a code has arrived and is waiting to be typed.
-    pub fn has_code(&self) -> bool {
-        self.user_code.is_some()
-    }
 }
 
 /// Result of a background job, delivered as [`Message::TaskDone`].
@@ -2143,6 +2139,11 @@ impl PalantirApp {
     }
 
     /// Where this run's capture is going, if it is a capture.
+    ///
+    /// Test-only: the capture path is written by [`Self::set_shot`] and read by
+    /// the timer that fires it, and the assertion that an ordinary run captures
+    /// nothing is what asks the question from outside.
+    #[cfg(test)]
     pub fn shot_path(&self) -> Option<&std::path::Path> {
         self.shot.as_ref().map(|shot| shot.path.as_path())
     }
@@ -6057,6 +6058,7 @@ impl PalantirApp {
                 column![
                     text(brand::APP_NAME).size(24).font(theme::bold()),
                     text("A Minecraft launcher with a Modrinth-style shell.").size(12),
+                    text(format!("by {}", brand::STUDIO)).size(12),
                 ]
                 .spacing(4),
             ]

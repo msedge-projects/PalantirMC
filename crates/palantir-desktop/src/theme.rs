@@ -679,8 +679,14 @@ pub const fn bold() -> Font {
     inter(iced::font::Weight::Bold)
 }
 
-/// Extrabold (800): `--font-weight-heading` and `--font-weight-title`, so this
-/// is what a page title is drawn in.
+/// Extrabold (800): `--font-weight-heading` and `--font-weight-title`.
+///
+/// Declared for the type-scale gate, which asserts this shell holds the
+/// reference's heading weight -- and test-only because **no page draws it yet**:
+/// every page title in `app.rs` is drawn at `semibold` (600), so this is a
+/// promise about the ladder rather than a description of the shell. When the
+/// titles move onto it, the attribute comes off with the first caller.
+#[cfg(test)]
 pub const fn heading() -> Font {
     inter(iced::font::Weight::ExtraBold)
 }
@@ -851,22 +857,6 @@ pub fn backdrop(_: &Theme) -> container::Appearance {
 /// and on this backend a large opaque one composites over the dialog's own
 /// contents and paints the whole card near-black. The border plus the darker
 /// backdrop already separate the dialog from the launcher behind it.
-/// The selected row in the Settings section list: a tinted pill, so the current
-/// pane is obvious without its label having to shout.
-pub fn nav_active(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(alpha(accent(), 0.14).into()),
-        border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(accent(), 0.32) },
-        ..Default::default()
-    }
-}
-
-/// A section row that is listed but not yet editable: no surface at all, so it
-/// reads as a label rather than as a button that does nothing.
-pub fn nav_idle(_: &Theme) -> container::Appearance {
-    container::Appearance::default()
-}
-
 pub fn modal(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(palette().modal.into()),
@@ -1229,11 +1219,11 @@ pub fn chip_button(active: bool) -> Btn {
 /// also the only shape this toolkit measures correctly -- a container wrapped
 /// around the row hands its child a bound of its own and the labels collapse to
 /// nothing, which was captured twice and is recorded in `REFERENCE.md`.
-pub fn tab_button(active: bool) -> Btn {
-    Btn::new(Role::Tab { active, first: false, last: false })
-}
-
-/// The same, for one of the strip's outer ends.
+///
+/// One entry point rather than two: a middle tab is `first: false, last:
+/// false`, which is what every call site inside a strip passes, and the pair of
+/// wrappers that used to exist only to make the test read nicely left a helper
+/// nothing else called.
 pub fn tab_button_at(active: bool, first: bool, last: bool) -> Btn {
     Btn::new(Role::Tab { active, first, last })
 }
@@ -2114,8 +2104,8 @@ mod tests {
 
         // A tab is not a chip: the selected one is a solid fill with no border,
         // and its label stays the page's own text colour in both states.
-        let tab_on = button::StyleSheet::active(&tab_button(true), &theme);
-        let tab_off = button::StyleSheet::active(&tab_button(false), &theme);
+        let tab_on = button::StyleSheet::active(&tab_button_at(true, false, false), &theme);
+        let tab_off = button::StyleSheet::active(&tab_button_at(false, false, false), &theme);
         assert_ne!(tab_on.background, tab_off.background);
         assert_eq!(tab_on.border.width, 0.0);
         assert_eq!(tab_on.text_color, tab_off.text_color);

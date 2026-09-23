@@ -198,7 +198,8 @@ fn main() -> iced::Result {
         .collect();
     // Modrinth sets its entire interface at weight 500 (`--font-weight-text`),
     // so the shell's default is the medium face rather than the regular one.
-    // Headings then ask for `theme::heading()` and everything else inherits.
+    // Headings then ask for a heavier face of the same family (`theme::semibold()`
+    // for a page title, `theme::bold()` for emphasis) and everything else inherits.
     settings.default_font = theme::medium();
     // `--page`, `--modal`, `--shot` and `--size` describe *this run*; nothing may
     // remember them once it is over.

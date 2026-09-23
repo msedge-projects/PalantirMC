@@ -489,15 +489,12 @@ impl AccountsStore {
     }
 
     /// Load from `path`, discarding any warning.
-    #[allow(dead_code)]
+    ///
+    /// Test-only: every caller in the shell needs the warning, because a file
+    /// it could not parse is a thing the user has to be told about.
+    #[cfg(test)]
     pub fn load(path: &Path) -> Self {
         Self::load_with_report(path).0
-    }
-
-    /// File this store is bound to.
-    #[allow(dead_code)]
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// All accounts in file order.
@@ -519,6 +516,11 @@ impl AccountsStore {
     }
 
     /// The account with `uuid`, if it exists.
+    ///
+    /// Test-only: the shell reaches an account through
+    /// [`Self::selected_account`], because the file's own selection is the one
+    /// that decides which account a launch signs in as.
+    #[cfg(test)]
     pub fn account(&self, uuid: &str) -> Option<&AccountEntry> {
         self.list.iter().find(|a| a.uuid == uuid)
     }

@@ -561,13 +561,11 @@ fn length(ours: &'static str, value: f32, token: &'static str) -> Claim {
 }
 
 /// The fields a radius claim reads out of the generated copy, flattened over
-/// `Row` and `Scoped` so one match can take either. `file` is carried and never
-/// read today: the failure message prints the token's name rather than its
-/// location, because the location is whatever the copy says, and a stale copy is
-/// the vocabulary gate's failure to raise, not this one's.
-#[allow(dead_code)]
+/// `Row` and `Scoped` so one match can take either. The row's file is left
+/// behind deliberately: the failure message prints the token's name rather than
+/// its location, because the location is whatever the copy says, and a stale
+/// copy is the vocabulary gate's failure to raise, not this one's.
 struct RowRef<'a> {
-    file: &'a str,
     line: u32,
     kind: crate::theme_tokens::Kind,
     value: &'a str,
@@ -952,9 +950,9 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
         // different claim, and this is not that yet.
         let from_light = theme_tokens::LIGHT.iter().find(|row| row.token == bare);
         let row = match from_light {
-            Some(row) => RowRef { file: row.file, line: row.line, kind: row.kind, value: row.value },
+            Some(row) => RowRef { line: row.line, kind: row.kind, value: row.value },
             None => match crate::theme_tokens::SCOPED.iter().find(|row| row.token == bare) {
-                Some(row) => RowRef { file: row.file, line: row.line, kind: row.kind, value: row.value },
+                Some(row) => RowRef { line: row.line, kind: row.kind, value: row.value },
                 None => {
                     return Some(format!(
                         "{}: --{token} is not in the copy; run `python tools/gen_tokens.py`",

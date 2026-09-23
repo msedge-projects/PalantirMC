@@ -1318,7 +1318,6 @@ pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, 
 
 /// The offline counterpart, for the sandbox shell and for tests: everything
 /// must already be cached and installed.
-#[allow(dead_code)]
 pub fn offline_backend(paths: &PalantirPaths) -> (OfflineMetaStore, palantir_net::MapFetcher) {
     (OfflineMetaStore::new(paths.meta_dir()), palantir_net::MapFetcher::new())
 }

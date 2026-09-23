@@ -25,7 +25,6 @@
 use anyhow::{bail, Context, Result};
 use palantir_core::{
     instance::{groups::Groups, Instance},
-    java::JavaVersion,
     launch,
     pack::PackProfile,
     paths::PalantirPaths,
@@ -219,13 +218,6 @@ fn print_diff(original: &str, rewritten: &str) {
     if o_lines != r_lines {
         println!("  line count: {o_lines} -> {r_lines}");
     }
-}
-
-/// Unused-but-documented helper showing how a resolved profile reports its
-/// Java requirements (kept here so the CLI surfaces them in future versions).
-#[allow(dead_code)]
-fn java_major_for(resolved_java_version: &str) -> i64 {
-    JavaVersion::parse(resolved_java_version).major()
 }
 
 // ---- resolve-online -------------------------------------------------------

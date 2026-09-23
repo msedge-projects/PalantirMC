@@ -569,6 +569,10 @@ impl<'a> Reporter<'a> {
 
     /// A reporter for a caller with nowhere to draw: lines still go somewhere,
     /// levels are dropped.
+    ///
+    /// Test-only: every caller in the shell has a bar to fill, so only the
+    /// tests that collect lines need a reporter with no progress channel.
+    #[cfg(test)]
     pub fn lines_only(line: &'a mut dyn FnMut(String)) -> Reporter<'a> {
         Reporter { line, progress: None }
     }

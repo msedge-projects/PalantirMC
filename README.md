@@ -1,6 +1,7 @@
 # PalantirMC
 
-A Minecraft launcher for Windows, written in Rust with [iced](https://iced.rs).
+A Minecraft launcher for Windows by **Palantir Studios**, written in Rust with
+[iced](https://iced.rs).
 Its shell is ported element-by-element from the Modrinth App's own running
 window — every colour, length, weight and radius in `crates/palantir-desktop`
 is a measured value, and every claim about it is checked by a gate that the
@@ -107,7 +108,7 @@ gates are environment-dependent and what a green run means for each.
 
 ## Licence and attribution
 
-PalantirMC is `GPL-3.0-only` (`Cargo.toml`). It incorporates code from
+PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. It incorporates code from
 PandoraLauncher (MIT, Copyright (c) 2025 Moulberry) under
 `licenses/PandoraLauncher-LICENSE.txt`, and vendors the Modrinth App source
 (GPL-3.0, pinned in `vendor/modrinth-app/UPSTREAM.md`) as a read-only

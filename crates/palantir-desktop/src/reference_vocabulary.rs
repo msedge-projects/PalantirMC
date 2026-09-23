@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::reference_tokens::vendored_tree;
-use crate::theme_tokens::{self, Kind, Row};
+use crate::theme_tokens::{self, Kind};
 
 /// One reading of the sheets: every mode's every token, as
 /// `(mode, token) -> file|line|kind|value`.
@@ -916,7 +916,3 @@ fn the_chrome_is_the_scoped_copy() {
         );
     }
 }
-
-/// The row type the two tables above hold, named so the signature reads.
-#[allow(dead_code)]
-fn row_type_witness(_row: &Row) {}
