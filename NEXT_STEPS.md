@@ -2222,3 +2222,7 @@ Local, before this pass was pushed: 411 tests green in `palantir-desktop` (the
 crate's suite is now warning-free in every target), `cli`/`core`/`gui`/`loader`
 green, clippy `--workspace --all-targets -D clippy::correctness` clean, and
 `tools/gen_tokens.py` still rewrites `theme_tokens.rs` byte for byte.
+
+[35891316483](https://github.com/MSedgeMC/PalantirMC/actions/runs/35891316483)
+then carried it to `master` green in all five jobs: test workspace, lint, live
+services, and both Windows exes.
