@@ -2174,10 +2174,13 @@ Two findings are worth more than the tidying they came with:
 
 Also removed: `serde` from `palantir-loader`'s dependencies. No file in that
 crate names it — `serde_json`, which does the real work there, pulls serde
-itself — and the lock file lost the one edge with it. The scan that finds these
-is three lines and worth re-running after a refactor: the package name, its
-hyphen-stripped form and its lib name against the crate's own sources. (`md-5` is
-the false positive it always produces, because that package's lib is `md5`.)
+itself — and the lock file lost the one edge with it. `tools/unused_deps.py` is
+that scan, kept in the tree so the next refactor can re-run it: the package
+name, its hyphen-stripped form and the same with a trailing `-rs` removed,
+against the crate's own `src/`, `tests/`, `benches/`, `examples/` and
+`build.rs`. It decides nothing — a package's lib name is not always its package
+name (`md-5` is used as `md5::`), so a hit is a question to answer — and it is
+not wired into CI for that reason: `tools/**` does not start a run at all.
 
 **Not removed, deliberately: the `Sandbox` shell.** `main.rs`'s `State` and
 `PalantirApp::sandbox_drain_launch` are unreachable from `main()`, which runs

@@ -91,6 +91,10 @@ Modrinth App, and each was written so the build it replaced fails it.
 - `tools/gen_tokens.py` — regenerates `crates/palantir-desktop/src/
   theme_tokens.rs` from the reference's stylesheets; nothing in that file is
   hand-edited, and the regeneration must be byte-identical.
+- `tools/unused_deps.py` — the unused-dependency check `cargo` does not have:
+  a manifest that declares what no source in its crate names. A hit is a
+  question to read, not a verdict (a package's lib name is not always its
+  package name). Not wired into CI: `tools/**` deliberately starts no run.
 
 Captures live in `.scratch/` and are never committed. `GATES.md` records which
 gates are environment-dependent and what a green run means for each.
