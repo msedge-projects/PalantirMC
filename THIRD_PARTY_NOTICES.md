@@ -17,11 +17,19 @@ in binary distributions alike. Adding an entry is part of taking the code.
   untouched. None of it is compiled or shipped: the launcher in `crates/` is
   independent Rust that draws the same window, and this tree is the specification
   it is ported against and checked against.
-* **Read at generation time, not at build time**: `tools/gen_theme.py` compiles the
-  palette, the lengths, the curves and the motion out of that tree into
-  `crates/palantir-desktop/src/theme_gen.rs`. The generated file is this project's
-  own work — a different language, a different shape, resolved rather than
-  transcribed — but every value in it came from theirs, so it is named here and the
+* **Read at generation time, not at build time**: two tools compile parts of that
+  tree into Rust, and neither is part of the build.
+  * `tools/gen_theme.py` reads the palette, the lengths, the curves and the motion
+    out of the stylesheets into `crates/palantir-desktop/src/theme_gen.rs`.
+  * `tools/gen_icons.py` reads the 313 SVGs in `assets/icons` into
+    `crates/palantir-desktop/src/icons_gen.rs` — path geometry, stroke widths and
+    opacities, as data the toolkit strokes. The icons themselves descend from
+    Lucide, which is ISC-licensed; they are taken here from the Modrinth App's
+    copy, which is what the vendored tree and its `LICENSE` cover.
+
+  Both generated files are this project's own work — a different language, a
+  different shape, arcs and smooth curves resolved to cubics rather than copied —
+  but every value in them came from theirs, so both are named here and each
   generator names its sources at the top of what it writes.
 * **From**: <https://github.com/modrinth/code> at commit
   `8966b5e2e7951e83651fbebbf2fb6d7608a94a33` (2026-09-20), retrieved with

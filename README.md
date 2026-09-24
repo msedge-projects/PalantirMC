@@ -92,6 +92,11 @@ tag is one of the few actions that needs a human's go-ahead first (see
 - `tools/gen_theme.py` — compiles the design system out of the reference's own
   stylesheets into `theme_gen.rs`. Nothing it emits is hand-edited, and
   `--check` regenerates and compares byte for byte.
+- `tools/gen_icons.py` — compiles the reference's 313 SVG icons into strokeable
+  geometry in `icons_gen.rs`: paths, stroke widths and opacities as data, with
+  arcs and smooth curves resolved to cubics. `--check` as above. The icons are
+  outlines stroked in `currentColor` upstream, which is why they are geometry and
+  not a bitmap — a bitmap cannot take the colour of the button it sits in.
 - `tools/gen_tokens.py` — the retiring half of the same job: it regenerates
   `theme_tokens.rs`, the test-only receipt for 189 values that the shell paints
   beside rather than from. It stays until the last page paints from `theme_gen`,

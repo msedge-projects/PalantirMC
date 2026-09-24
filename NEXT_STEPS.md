@@ -55,7 +55,7 @@ the full workspace run.
 | Stage | What it is | State |
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
-| 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table and an icon set | **Generator done; icons next** |
+| 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | Not started |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | Not started |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
@@ -98,26 +98,47 @@ background-color 125ms ease-in-out` is *two* transitions with different timings,
 so the 64 shorthands like it are emitted verbatim with their source file rather
 than parsed into a plausible-looking wrong number.
 
-Still open in stage 1: the icon set. 313 SVGs are vendored and nothing renders
-them yet — the shell's icons are still PNGs carved from another launcher's binary,
-which the rewrite removes. Measured before it is written, so the next session
-starts from the problem itself rather than from an estimate:
+### The icon set, and the four mistakes it caught
 
-| | |
-| --- | --- |
-| Icons | 313 files; 6 viewBoxes among them, 305 at the same `0 0 24 24` |
-| Elements | 797 `<path>`, 106 `<circle>`, 114 `<line>`, 55 `<rect>`, 25 `<polyline>`, 5 `<polygon>`, 2 `<ellipse>`, 15 `<g>` |
-| Path commands | 82 `A` and 589 `a` — **arcs are not optional**, plus C/S/Q/T and their relative forms |
-| Rendering | 310 declare `stroke`, 302 a `stroke-width`, 300 each a linecap and linejoin |
+`tools/gen_icons.py` compiles all 313 SVGs into `icons_gen.rs`: 1105 elements,
+5177 commands, as `Cmd` data with one small interpreter rather than 313 closures.
+Arcs (82 absolute and 589 relative), quadratics and the smooth-curve forms are
+resolved to cubics; `<g transform>` and inline `style` are applied; the whole set
+is refused rather than guessed at when something is not understood. Nine tests in
+the generated file pass, and the whole desktop suite is 430.
 
-The plan is to parse the geometry in Python and emit iced `canvas` builder calls
-stroked at the reference's own width, caps and joins — the icons are outlines, so
-this reproduces them rather than approximating a filled bitmap, and it keeps them
-tintable from a token the way the current vector chrome is. The risk is stated
-rather than deferred: a subtly wrong arc conversion is exactly the kind of
-plausible-but-wrong value this whole change exists to stop, so the gate for it has
-to compare rendered output against the reference rather than assert that every
-number is finite.
+Writing it found four things that a plausible-looking generator would have got
+wrong silently, each of which is now an assertion:
+
+1. **The stroke width is scaled by the transform.** `loader.svg` declares
+   `stroke-width="23"` inside `matrix(.08671 0 0 .0867 -49.8 -56)` — that is how a
+   24-unit icon is stroked at 2. Transforming the geometry but not the width draws
+   the shape correctly eleven times too heavy, which renders, and looks like an
+   icon.
+2. **`fill`, `stroke` and `stroke-width` are inherited from `<svg>`.** The
+   reference declares them on the root element, where CSS inherits them into every
+   shape. A reader that looks only at the shapes sees `x.svg` as an unremarkable
+   path and strokes it — drawing the outline of an outline. Nine icons are filled,
+   not five, and the list is asserted.
+3. **`opacity` is part of the drawing.** The spinner's ring is a quarter opaque,
+   and a generator that accepted the attribute without applying it would draw a
+   solid ring, which reads as a finished circle.
+4. **A shape can be filled *and* stroked.** `images.svg` draws its circle both
+   ways, so it becomes two elements with one geometry; a boolean flag meaning
+   "both" would have made the painter guess.
+
+The winding rule was the open question and it is now closed rather than hedged:
+the reference fills with even-odd, the toolkit fills with non-zero, and the two
+differ only for a filled path whose subpaths wind the same way. Six filled
+subpaths have more than one contour, four wind oppositely (so the rules agree) and
+two do not declare even-odd at all (so non-zero is what draws them upstream).
+`winding risk 0` is therefore a computed answer, and the generated test fails if
+a future icon makes it false.
+
+What is still unproven is that they *look* right: the gate is structural, and no
+number here says an arc came out on the correct side. Comparing rendered icons
+against the reference's own window is part of stage 2's visual gate, and it is the
+one thing this stage cannot do on its own.
 
 ## Where the old sections went
 

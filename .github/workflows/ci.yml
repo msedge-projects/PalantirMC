@@ -111,6 +111,12 @@ jobs:
       - name: Design system regeneration
         run: python tools/gen_theme.py --check
 
+      # Same argument, for the icon set: 313 SVGs are compiled into 20k lines of
+      # geometry, and the way that file stops matching its source is an edit to
+      # one of them. Regeneration is the check that cannot be forgotten.
+      - name: Icon set regeneration
+        run: python tools/gen_icons.py --check
+
       # This tree has never been run through rustfmt, so formatting reports
       # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
       # has been committed and reviewed.

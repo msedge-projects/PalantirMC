@@ -35,6 +35,13 @@ mod gpu;
 /// can be started from. See the module for why the view cannot start one.
 mod hover;
 mod icons;
+/// The reference client's icon set, compiled from its vendored SVGs by
+/// `tools/gen_icons.py` into geometry the toolkit strokes.
+///
+/// Not `cfg(test)`, for the same reason [`theme_gen`] is not: this is the
+/// intended runtime source. [`icons`] -- the carved bitmaps it replaces -- is
+/// still what the shell draws from, and goes with it in stage 2.
+mod icons_gen;
 mod install;
 mod instances;
 mod java_runtime;
