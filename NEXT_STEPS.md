@@ -22,6 +22,13 @@ its page layout, not its icons.
 
 ## Where it stands
 
+The run that carried stages 0 and 1 is **36022495155** on `28d9d4d`: all five
+jobs green, including the design-system regeneration step added in the same
+commit, whose log line is `theme generation is byte-identical`. The commit before
+it, `99fe67f`, had its own run cancelled by the next push rather than failed --
+`concurrency: cancel-in-progress` is on, so a verdict only survives for the
+newest commit, which is worth remembering when reading the run list.
+
 Stage 0 is done. Three workspace members left because nothing reaches them
 (`crates/nbt`, `crates/schema`, `crates/palantir-cli`), and with them the
 PandoraLauncher notice they were the only reason for: `Cargo.lock` went from 553
