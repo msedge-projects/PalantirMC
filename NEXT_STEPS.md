@@ -22,12 +22,18 @@ its page layout, not its icons.
 
 ## Where it stands
 
-The run that carried stages 0 and 1 is **36022495155** on `28d9d4d`: all five
-jobs green, including the design-system regeneration step added in the same
-commit, whose log line is `theme generation is byte-identical`. The commit before
-it, `99fe67f`, had its own run cancelled by the next push rather than failed --
-`concurrency: cancel-in-progress` is on, so a verdict only survives for the
-newest commit, which is worth remembering when reading the run list.
+Two runs carry stages 0 and 1, both all five jobs green:
+
+| Run | Commit | What it proved |
+| --- | --- | --- |
+| 36020421890 | `2361cc3` | The prune builds and tests where it matters, with three workspace members gone |
+| 36022495155 | `28d9d4d` | The design system regenerates byte-identically, quoted from the log: `theme generation is byte-identical` |
+| 36027116004 | `f8c77e8` | Same for the icon set: `icon generation is byte-identical` |
+
+Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
+than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
+push superseded it. A cancelled run is not a passing one, and it is not a failing
+one either.
 
 Stage 0 is done. Three workspace members left because nothing reaches them
 (`crates/nbt`, `crates/schema`, `crates/palantir-cli`), and with them the
