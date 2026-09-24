@@ -47,6 +47,15 @@ mod instances;
 mod java_runtime;
 mod launch;
 mod mods;
+/// The reference's motion: its own durations and curves, and the cubic Bézier
+/// solver a native toolkit does not have.
+///
+/// Every number comes from [`theme_gen`], so a duration is a citation rather
+/// than a choice; the solver is checked against Chromium's own answers, which
+/// `tools/curve_samples.html` measures. Stage 2 of the rewrite spec is what
+/// draws with it.
+#[allow(dead_code)]
+mod motion;
 mod native;
 mod prefs;
 /// The token gate: the reference's own source, compared with what this shell
@@ -58,6 +67,16 @@ mod reference_tokens;
 /// two readings compared row by row.
 #[cfg(test)]
 mod reference_vocabulary;
+/// Where the shell can be: the reference's navigation, mirroring its
+/// `routes.js` route for route and name for name.
+///
+/// Not the old shell's page list. That one put Mods, Worlds, Logs, Settings,
+/// Accounts and About on the rail; the reference keeps the first four inside
+/// an instance and Settings in a modal, and this is the module that says so.
+/// The shell that draws from it is stage 2 of the rewrite spec -- until then
+/// nothing references this, which is what the `allow(dead_code)` below is for.
+#[allow(dead_code)]
+mod route;
 mod screenshots;
 mod scroll;
 mod settings;

@@ -53,7 +53,7 @@ The workspace is now four crates plus the shell:
 
 Backend suites as run in this session: `palantir-core` 168, `palantir-gui` 8,
 `palantir-loader` 6, `palantir-net` 31 plus 104, with 7 live tests ignored by
-design. The desktop crate's own 411 are re-run by CI, which is the authority for
+design. The desktop crate's own 461 are re-run by CI, which is the authority for
 the full workspace run.
 
 ## The plan, and where each stage stands
@@ -62,7 +62,7 @@ the full workspace run.
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
-| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | Not started |
+| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **In progress**: the `Route` tree and the tween engine are in; the shell that draws from them is next |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | Not started |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
@@ -76,7 +76,7 @@ used.
 
 `tools/gen_theme.py` reads the reference's own stylesheets and writes
 `crates/palantir-desktop/src/theme_gen.rs` — 172 tokens (144 colours, 11 lengths,
-2 bare numbers, 1 curve, 14 raw), 39 parsed transitions, 64 that are written as a
+2 bare numbers, 1 curve, 14 raw), 37 parsed transitions, 64 that are written as a
 shorthand this tool will not guess at, and 24 `@keyframes` names. `--check`
 regenerates and compares byte for byte, and it was proved to fail on a one-byte
 edit before it was trusted. The ten tests in the generated file assert the values
@@ -111,7 +111,7 @@ than parsed into a plausible-looking wrong number.
 Arcs (82 absolute and 589 relative), quadratics and the smooth-curve forms are
 resolved to cubics; `<g transform>` and inline `style` are applied; the whole set
 is refused rather than guessed at when something is not understood. Nine tests in
-the generated file pass, and the whole desktop suite is 430.
+the generated file pass, and the whole desktop suite is 461.
 
 Writing it found four things that a plausible-looking generator would have got
 wrong silently, each of which is now an assertion:
@@ -145,6 +145,74 @@ What is still unproven is that they *look* right: the gate is structural, and no
 number here says an arc came out on the correct side. Comparing rendered icons
 against the reference's own window is part of stage 2's visual gate, and it is the
 one thing this stage cannot do on its own.
+
+## What stage 2 has landed so far
+
+On `rewrite-modrinth-native`. The two pieces below are logic rather than chrome,
+which is why they go first: each is testable without a window, and each is a
+thing the shell would otherwise invent. Neither is wired to anything yet, so both
+carry an `allow(dead_code)` with the spec as its reason.
+
+**`route.rs`** is the reference's navigation, from
+`app-frontend/src/routes.js`, route for route and name for name -- including the
+names with spaces in them (`Discover content`, `Skin selector`), because
+the reference's own code navigates by those strings and a rename makes every
+later port harder to line up with upstream. It carries what the old shell did not
+have at all: instance and project nesting, the six Discover tabs, the legacy
+`/mod/:id/:rest*` redirect, and the `?i=`/`?sid=` context that turns Discover into
+an install-into-this-instance flow. Three absences are decisions with reasons in
+the module: no `Settings` route (it is a modal), no `Accounts` route (Modrinth
+accounts are the rail's profile menu, Minecraft accounts are in that modal), and
+no top-level Mods or Logs (both are instance tabs).
+
+The rail's own highlight rules came out of it, and two of them are worth knowing
+before the shell is drawn. `/browse` is Discover -- unless the address carries
+`?i=`, in which case the reference marks *Home* as a subpage, because the page
+being browsed for an instance belongs to that instance. And `/instance/:id` marks
+nothing at all: exactly three of the rail's eight slots get an `is-primary` or
+`is-subpage` predicate in `App.vue`, and none of the three tests for `/instance`.
+That looks like an oversight upstream and is reproduced anyway, with a test that
+says so; the moment the shell looks wrong is the moment to decide.
+
+**`motion.rs`** is the reference's timing, and it needed a solver a native
+toolkit does not have: iced has no `cubic-bezier()`, and a CSS timing function is
+not sampled at progress, it is *inverted* for it, because the two control points
+are given in x and y while the input is x alone. The algorithm is WebKit's
+`UnitBezier` -- eight Newton-Raphson steps with a bisection fallback -- and it is
+checked against Chromium's own answers: `tools/curve_samples.html` runs each of
+the reference's five curves as a real CSS animation in the engine the reference
+ships inside, pauses it at each tenth and reads the computed style back, and the
+test asserts the same nine values per curve to 1e-5. A Python cross-check of the
+same algorithm over the same samples agreed to 1.3e-6, which is why the tolerance
+is where it is.
+
+Durations are citations, not numbers chosen here: `Timing::declared("opacity",
+125)` looks the pair up in the generated table and returns `None` if the reference
+does not declare it, which is the useful answer. The rail's signature animation is
+pinned as `Timing::NAV_PLATE` -- 250ms on `--ease-out-expo`, with the `scale: 0.4`
+the plate grows from -- quoting `NavButton.vue`'s
+`opacity 0.25s var(--ease-out-expo), scale 0.25s var(--ease-out-expo)`, one of the
+64 shorthands the generator keeps verbatim. `Tween` follows one value, retargets
+mid-flight the way a browser does (the new leg starts from the value on screen,
+not from where the first leg began), and lands *exactly* on its target, because
+two controls that should line up are drawn from the same number.
+
+### The fifth mistake, this one in stage 1's own generator
+
+`tools/gen_theme.py` multiplied by 1000 on both branches of its duration parse,
+so every transition the reference writes in milliseconds came out a thousand
+times too long: `transition: outline-color 150ms ease` was in the table as 150000.
+Seven rows were wrong, and because `--check` compares the tool's output with the
+tool's output, they agreed with themselves and passed. Two of the seven collided
+with rows the table already had once corrected, which is why the parsed count went
+39 to 37 rather than 39 to 32.
+
+The fix is the millisecond branch, plus a bound: the reference's longest
+transition is 2s (`transform` in `TextLogo.vue`), anything past 2000ms is a
+mistake in the tool rather than a fact about the reference, and the tool now keeps
+such a row verbatim instead of emitting it. Three assertions hold that line -- in
+the tool, in the generated test, and in `motion.rs`'s own table check -- because a
+wrong number both files agree on is invisible to a byte comparison.
 
 ## Where the old sections went
 

@@ -833,6 +833,49 @@ and the second one took reading iced's runtime rather than its widgets.
       without telling the tween. All thirteen sites now go through `set_modal`,
       which is also what makes the two impossible to disagree.
 
+## Gates added with the rewrite, in the order they were written
+
+G58 and G59 are the first two gates of the shell that replaces the one above.
+They are unit tests rather than capture comparisons because there is no window to
+capture yet: both judge a table, and both are written so the build they replace
+fails them.
+
+- [x] G58: the navigation is the reference's own, and every page the replaced
+      shell put on its rail resolves to nothing at all
+  CHECK: cargo test -p palantir-desktop --locked route::tests
+  EXPECT: test result: ok
+  EVIDENCE: 18 tests over `crates/palantir-desktop/src/route.rs`, which is
+      `app-frontend/src/routes.js` route for route. The discrimination is
+      explicit: `/mods`, `/worlds`, `/logs`, `/settings`, `/accounts`, `/about`
+      and `/nonsense` are all asserted *not* to resolve, and those first six are
+      the replaced shell's rail. The nesting is asserted too -- instance and
+      project pages with their children, the six Discover tabs in the order
+      `Browse.vue` draws them, the legacy `/mod/:id/:rest*` redirect, and the
+      `?i=`/`?sid=` context that makes Discover an install-into-an-instance flow.
+      The rail's own highlight rules are transcribed from `App.vue`'s
+      `is-primary`/`is-subpage` predicates and include the two awkward ones: a
+      browse page carrying `?i=` is marked on *Home*, and `/instance/:id` is
+      marked nowhere, because none of the three buttons with a predicate tests
+      for it.
+
+- [x] G59: the shell's easing is the reference's easing, measured in the engine
+      the reference ships inside
+  CHECK: cargo test -p palantir-desktop --locked motion::tests
+  EXPECT: test result: ok
+  EVIDENCE: 13 tests over `crates/palantir-desktop/src/motion.rs`. The oracle is
+      Chromium's: `tools/curve_samples.html` runs each of the reference's five
+      curves as a real CSS animation, pauses it at each tenth of the way through
+      and reads the computed style back, and the test asserts the same nine
+      values per curve to 1e-5 (a Python cross-check of the same algorithm agreed
+      to 1.3e-6, so the tolerance is f32 arithmetic rather than slack). Every
+      duration is a lookup in the generated motion table and the lookup *fails*
+      on a pair the reference does not declare, which is what catches the
+      generator's own unit error: `tools/gen_theme.py` multiplied by 1000 on the
+      millisecond branch too, so `transition: outline-color 150ms ease` was in
+      the table as 150000ms across seven rows, and `--check` could not see it
+      because both files agreed. Three assertions now hold the 2s bound -- in the
+      tool, in the generated test, and here.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
