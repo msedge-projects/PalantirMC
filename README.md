@@ -1,52 +1,50 @@
 # PalantirMC
 
 A Minecraft launcher for Windows by **Palantir Studios**, written in Rust with
-[iced](https://iced.rs).
-Its shell is ported element-by-element from the Modrinth App's own running
-window — every colour, length, weight and radius in `crates/palantir-desktop`
-is a measured value, and every claim about it is checked by a gate that the
-build it replaced fails.
+[iced](https://iced.rs). It is a **native implementation of the Modrinth App**:
+its design system, information architecture, motion and icons are ported from the
+Modrinth App's own source, vendored read-only at `vendor/modrinth-app/`, and its
+backend is our own Rust.
+
+The design is not "close to the reference", it is *asserted*: every colour,
+length, weight and radius in `crates/palantir-desktop` is a measured value, and
+each claim about it is checked by a command that the build it replaced fails
+(`GATES.md`).
 
 **Read `AGENTS.md` before changing anything.** It is the working contract for
-this tree, not a suggestion file: every change is committed to `master` and
-pushed, GitHub Actions *is* the release build, and the commands that must pass
-before a push are listed there.
+this tree, not a suggestion file: every change is committed and pushed, GitHub
+Actions *is* the release build, and the commands that must pass before a push are
+listed there.
 
-## The four documents that run this project
+## The documents that run this project
 
 | Document | What it is |
 | --- | --- |
 | `AGENTS.md` | How to work here: commit/push rules, the commands CI runs, conventions the code already holds. Start here. |
-| `NEXT_STEPS.md` | The project's memory: 30 numbered sections of deferred work, measurements, decisions made and decisions deliberately not taken. When a choice looks odd in the code, the reasoning is in here. |
-| `GATES.md` | The recorded gate results: what each gate asserts, the command that runs it, and the capture it was judged from (G1–G57). |
+| `NEXT_STEPS.md` | Where the project stands and what is being done to it: the stage table, and where the old sections went. |
+| `NOTES.md` | The engineering record — what was measured and what it cost. Sections keep their old `NEXT_STEPS.md` numbers because source comments cite them. |
+| `GATES.md` | The recorded gate results: what each gate asserts, the command that runs it, and the capture it was judged from. |
 | `REFERENCE.md` | The design reference: what was measured off the Modrinth App, token by token, and how the shell draws it. |
-
-A new contributor — human or AI — should read `AGENTS.md` fully, then skim
-`NEXT_STEPS.md`'s section headings and `GATES.md`'s gate list before writing
-code.
+| `docs/superpowers/specs/` | Dated working specs. The active one is `2026-09-24-modrinth-native-rewrite.md`. |
 
 ## Layout
 
 ```
 crates/
-  palantir-desktop/   The Windows launcher itself (iced): shell, pages, theme,
-                      animation, the gate-checked design port. This is where
-                      almost all current work happens.
-  palantir-core/      Shared domain types and product constants.
-  palantir-net/       Network: Modrinth/CurseForge API clients, downloads.
-  palantir-loader/    Instance loading and launch pipeline.
-  palantir-gui/       Headless GUI model logic shared by the frontends.
-  palantir-cli/       Command-line interface and round-trip checks.
-  nbt/, schema/       Adopted wholesale from PandoraLauncher (MIT, Copyright
-                      (c) 2025 Moulberry). Kept byte-identical to upstream so
-                      they can be merged with it later — do not restyle them;
-                      every edit is recorded in THIRD_PARTY_NOTICES.md.
+  palantir-desktop/   The Windows launcher itself (iced): shell, pages,
+                      platform code and the engine glue. This is where almost
+                      all current work happens.
+  palantir-core/      Minecraft's own formats — version JSON, libraries, rules,
+                      asset index, launch arguments — and the data-root layout.
+  palantir-net/       Auth, downloads, metadata and the Modrinth API client.
+  palantir-loader/    Forge, Fabric, NeoForge, Quilt and modpack archives.
+  palantir-gui/       The view-model the shell reads; goes with `app.rs`.
 tools/               The measurement and gate harnesses (Python).
 vendor/modrinth-app/ The reference client's source, vendored as the design
-                     oracle. It is read and measured, never built or shipped.
-docs/superpowers/    Working specs (dated), e.g. the finish-design pass.
-licenses/            Third-party licence texts.
-dist/, target/, .scratch/, *.log   Build output, CI artifacts, captures —
+                     oracle and pinned in its `UPSTREAM.md`. Read and measured,
+                     never built or shipped.
+docs/superpowers/    Working specs (dated).
+target/, dist/, .scratch/, *.log   Build output, CI artifacts, captures —
                      git-ignored, never committed.
 ```
 
@@ -62,7 +60,10 @@ cargo build --release --locked -p palantir-desktop   # -> target/release/Palanti
 ```
 
 `--locked` is deliberate everywhere: a drifted manifest must fail here, not on
-the runner.
+the runner. On a machine where the full workspace run does not fit in a session,
+iterate with `cargo test -p <the crate you changed> --locked` and let the runner
+run all of it — and do not pipe a long `cargo` command into `tail`, because the
+progress lines are buffered and a working build looks like a hung one.
 
 **Where the exe comes from:** a push to `master` runs `.github/workflows/ci.yml`
 (test → lint → live services → both Windows release builds), and the run's
@@ -73,28 +74,28 @@ download the artifact:
 gh run download <run-id> -n palantirmc-x86_64-pc-windows-msvc -D dist/
 ```
 
-A tag `v*` publishes a Release (`.github/workflows/release.yml`); pushing such
-a tag is one of the few actions that needs a human's go-ahead first (see
+A tag `v*` publishes a Release (`.github/workflows/release.yml`); pushing such a
+tag is one of the few actions that needs a human's go-ahead first (see
 `AGENTS.md` §1).
 
 ## The gates
 
-The design is not "close to the reference", it is *asserted*: each gate is a
-command comparing a capture of this launcher against numbers measured off the
-Modrinth App, and each was written so the build it replaced fails it.
-
 - `tools/panel_gate.py` — the shell chrome (title bar, rail, gutter).
 - `tools/page_gate.py` — page content, element by element.
+- `tools/shellcmp.py` — two windows measured against *each other*, for the class
+  of mistake neither single-window gate can see: a part drawn to a plausible
+  number in both clients but offset in one.
 - `tools/appshot.py` — captures this launcher's own frame unattended
-  (`--page home`, `--page discover`, …) at an exact client size; the page
-  gates run against its output.
-- `tools/gen_tokens.py` — regenerates `crates/palantir-desktop/src/
-  theme_tokens.rs` from the reference's stylesheets; nothing in that file is
-  hand-edited, and the regeneration must be byte-identical.
-- `tools/unused_deps.py` — the unused-dependency check `cargo` does not have:
-  a manifest that declares what no source in its crate names. A hit is a
-  question to read, not a verdict (a package's lib name is not always its
-  package name). Not wired into CI: `tools/**` deliberately starts no run.
+  (`--page home`, `--page discover`, …) at an exact client size; the page gates
+  run against its output. The reference's own captures come from `winshot.py`,
+  driven by `refwalk.py`.
+- `tools/gen_theme.py` — regenerates the design system from the reference's
+  stylesheets. Nothing it emits is hand-edited, and regeneration must be
+  byte-identical.
+- `tools/unused_deps.py` — the unused-dependency check `cargo` does not have: a
+  manifest that declares what no source in its crate names. A hit is a question
+  to read, not a verdict (a package's lib name is not always its package name).
+  Not wired into CI: `tools/**` deliberately starts no run.
 
 Captures live in `.scratch/` and are never committed. `GATES.md` records which
 gates are environment-dependent and what a green run means for each.
@@ -103,18 +104,18 @@ gates are environment-dependent and what a green run means for each.
 
 - No `unwrap`/`expect` outside tests; several crates deny them crate-wide.
 - Comments explain *why*, especially where a decision looks odd; long-form
-  reasoning goes into `NEXT_STEPS.md` and `GATES.md`.
+  reasoning goes into `NOTES.md`, `GATES.md` and the specs.
 - Commit subjects are one imperative sentence, sentence case, no prefix.
-- Adopted third-party code keeps its own formatting and is merged with
-  upstream later, not re-derived.
+- Adopted third-party code keeps its own formatting and is merged with upstream
+  later, not re-derived.
 - Attribution is a shipping condition: third-party art and code carry their
   notice in source and in the binary's About page.
 
 ## Licence and attribution
 
-PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. It incorporates code from
-PandoraLauncher (MIT, Copyright (c) 2025 Moulberry) under
-`licenses/PandoraLauncher-LICENSE.txt`, and vendors the Modrinth App source
-(GPL-3.0, pinned in `vendor/modrinth-app/UPSTREAM.md`) as a read-only
-measurement reference — it is never compiled or shipped. Full notices:
-`THIRD_PARTY_NOTICES.md`.
+PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. It vendors the
+Modrinth App source (GPL-3.0, pinned in `vendor/modrinth-app/UPSTREAM.md`) as a
+read-only measurement reference — never compiled, never shipped. Full notices:
+`THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
+GPL-3.0 grants rights in the code and not in the identity: this launcher draws
+its own mark in the same slots.

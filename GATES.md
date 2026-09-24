@@ -1,7 +1,7 @@
 # Gates: PalantirMC's shell matches the reference client
 
 OWNS: crates/palantir-desktop/src/**, tools/panel_gate.py, tools/page_gate.py,
-tools/appshot.py, tools/shellcmp.py, NEXT_STEPS.md
+tools/appshot.py, tools/shellcmp.py, NOTES.md
 
 Scope: the shell's chrome, surfaces, shape and type match the Modrinth App as
 measured off its own running window rather than estimated from screenshots, and
@@ -29,6 +29,38 @@ are deliberately *not* committed -- the first is a screenshot of another product
 the second is a superseded build. G7 is therefore environment-dependent: it is
 runnable here and stands as a recorded manual result elsewhere. The reference numbers G1--G6 assert against are baked into
 the checker, so those gates need nothing but the capture under test.
+
+## State of this file: the shell it judged is being replaced
+
+The gates below were written against a shell that matched the reference's
+*geometry* while keeping a different information architecture -- a flat rail with
+Mods, Worlds, Logs, Settings, Accounts and About as top-level pages, and Settings
+as a page rather than the reference's modal. `REFERENCE.md` records that decision
+in its "Still to port" section, and it is the main reason that shell did not read
+as the Modrinth App. The rewrite in
+`docs/superpowers/specs/2026-09-24-modrinth-native-rewrite.md` replaces it.
+
+What that does to this file, stated rather than implied:
+
+* **The measurements survive.** Every number in `REFERENCE.md` and every sampled
+  value here came off the reference client's own window, and they are the head
+  start the rewrite is built on. The shell's rail pitch, its circular plate, the
+  head rule, the page inset and the right panel's wash are re-asserted as they
+  are.
+* **The gate scripts survive**, because they judge a capture against recorded
+  numbers rather than against a particular build.
+* **The page gates are replaced, one per page**, as each page is rebuilt -- each
+  new one written so the build it replaces fails it, which is the only thing that
+  makes a passing run mean anything.
+* **The token gates are replaced outright.** `theme_tokens.rs` was a test-only
+  receipt for 189 transcribed values while the shell painted from a hand-written
+  palette; the gate that replaces it is the generated module the shell actually
+  paints from, with regeneration required to be byte-identical.
+
+Everything below is the record of these gates as they were run against that shell.
+It is kept because the runs are evidence, and a retired gate that keeps its ID keeps
+the source comments that cite it honest. Gates are not renumbered: a retired one
+gains a note in the ledger rather than a gap in the sequence.
 
 Result: **9 met, 0 unmet, 0 abandoned** for the build at `bbebaaa`, captured into
 `.scratch/pal-bbebaaa.png` (1257x707) from the exe CI built for that commit.
