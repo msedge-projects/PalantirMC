@@ -122,14 +122,22 @@ pub fn ease(control: [f32; 4], progress: f32) -> f32 {
     bezier(solve_for_t(control, progress), y1, y2)
 }
 
-/// A transition the reference declares: how long it takes and what it moves
-/// on.
+/// A transition: how long it takes, and the timing function it moves on.
+///
+/// The curve is held as its four control-point coordinates rather than as a
+/// [`Curve`] because a *timing function* is the numbers and the enum is only a
+/// name for five of them. That distinction has teeth here: the reference's
+/// controls are animated by Tailwind's `transition-all`, whose curve
+/// (`cubic-bezier(0.4, 0, 0.2, 1)`) is Tailwind's own and not one of the five
+/// CSS-named easings, so a shell that could only name a curve could not cite
+/// the timing its own rail buttons use. [`Timing::raw`] is that door, and the
+/// tests keep [`Timing::curve`] honest about which named curves they are.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Timing {
     /// Milliseconds, as the reference writes them.
     pub millis: u32,
-    /// The curve, resolved through the generated table.
-    pub curve: Curve,
+    /// `(x1, y1, x2, y2)`, in the order a CSS `cubic-bezier()` names them.
+    pub control: [f32; 4],
 }
 
 impl Timing {
@@ -142,7 +150,8 @@ impl Timing {
     /// `cubic-bezier(0.16, 1, 0.3, 1)`. The row is one of the ones
     /// `tools/gen_theme.py` keeps verbatim rather than splitting -- see
     /// `theme_gen::MOTION_VERBATIM`, which holds this exact string.
-    pub const NAV_PLATE: Timing = Timing { millis: 250, curve: Curve::EaseOutExpo };
+    pub const NAV_PLATE: Timing =
+        Timing { millis: 250, control: [0.16, 1.0, 0.3, 1.0] };
 
     /// The circle the plate grows *from*: `scale: 0.4` in the same rule, which
     /// is why pressing a rail button reads as a pop rather than a fade.
@@ -164,12 +173,8 @@ impl Timing {
         // rules. So a lookup by property and duration alone takes the first row
         // in table order, and `declared_rows` is there for a caller that needs
         // to see every row that pair owns.
-        Some(Timing {
-            millis,
-            curve: theme_gen::MOTION
-                .get(index)
-                .map_or(Curve::EaseInOut, |motion| motion.curve),
-        })
+        let curve = theme_gen::MOTION.get(index).map_or(Curve::EaseInOut, |motion| motion.curve);
+        Some(Timing { millis, control: theme_gen::curve(curve) })
     }
 
     /// Every row the reference declares for a property, as `(millis, curve,
@@ -182,19 +187,44 @@ impl Timing {
             .collect()
     }
 
-    /// A timing the caller names outright, for a transition the generator kept
-    /// verbatim.
+    /// A timing the caller names outright, by one of the curves the generated
+    /// table has a name for.
     ///
     /// Not a licence to pick a duration: the value belongs in the comment
     /// beside the call, as a quote from the reference, and the constant above
     /// is the example.
     pub fn cited(millis: u32, curve: Curve) -> Timing {
-        Timing { millis, curve }
+        Timing { millis, control: theme_gen::curve(curve) }
     }
 
-    /// The curve's four control-point coordinates, from the generated table.
+    /// A timing whose curve the generated tables do not name, for a transition
+    /// the reference declares through a class rather than a declaration.
+    ///
+    /// `tools/gen_theme.py` reads CSS `transition:` declarations, so a control
+    /// animated by Tailwind's `transition-all` is invisible to it: the duration
+    /// and the curve live in Tailwind's theme, and what the source file says is
+    /// the word `transition-all`. A caller that needs one of those cites the
+    /// numbers here, with the source in its own comment -- and this is the only
+    /// way to do so, which is what keeps the exception countable.
+    pub const fn raw(millis: u32, control: [f32; 4]) -> Timing {
+        Timing { millis, control }
+    }
+
+    /// The curve's four control-point coordinates.
     pub fn control(self) -> [f32; 4] {
-        theme_gen::curve(self.curve)
+        self.control
+    }
+
+    /// Which named curve this timing is, if it is one.
+    ///
+    /// `None` means the curve came from [`Timing::raw`]. A gate, not a
+    /// convenience: it is how a test can say which of the two kinds of timing a
+    /// row is without comparing floats by hand.
+    pub fn curve(self) -> Option<Curve> {
+        theme_gen::ALL_CURVE
+            .iter()
+            .copied()
+            .find(|curve| theme_gen::curve(*curve) == self.control)
     }
 
     /// How long the transition runs.
@@ -219,8 +249,15 @@ pub struct Tween {
 
 impl Tween {
     /// A value that is already at `value` and not moving.
-    pub fn at(value: f32) -> Tween {
-        Tween { from: value, to: value, timing: Timing { millis: 0, curve: Curve::Linear }, elapsed: Duration::ZERO }
+    ///
+    /// The timing is asked for rather than assumed, and that is the point of
+    /// the signature: a tween at rest has not chosen a leg to run, and a
+    /// zero-length placeholder here would make the first [`Tween::retarget`]
+    /// jump instead of animate -- a bug that looks like a missing animation
+    /// rather than like a wrong duration. There is no sensible default, because
+    /// the reference's durations are per-property.
+    pub fn at(value: f32, timing: Timing) -> Tween {
+        Tween { from: value, to: value, timing, elapsed: timing.duration() }
     }
 
     /// A value starting at `from` and heading for `to`.
@@ -448,12 +485,12 @@ mod tests {
                 .filter(|(millis, _, _)| *millis == motion.millis)
                 .map(|(_, curve, _)| curve)
                 .collect();
+            let resolved = timing.curve().expect("a declared row is one of the named curves");
             assert!(
-                curves.contains(&timing.curve),
-                "{} at {}ms resolved to {:?}, which no row declares",
+                curves.contains(&resolved),
+                "{} at {}ms resolved to {resolved:?}, which no row declares",
                 motion.property,
-                motion.millis,
-                timing.curve
+                motion.millis
             );
             assert!(
                 motion.millis <= 2000,
@@ -498,8 +535,8 @@ mod tests {
         // `transition: opacity 0.25s var(--ease-out-expo), scale 0.25s ...`.
         let plate = Timing::NAV_PLATE;
         assert_eq!(plate.millis, 250);
-        assert_eq!(plate.curve, Curve::EaseOutExpo);
-        assert_eq!(plate.control(), [0.16, 1.0, 0.3, 1.0]);
+        assert_eq!(plate.curve(), Some(Curve::EaseOutExpo));
+        assert_eq!(plate.control(), theme_gen::curve(Curve::EaseOutExpo));
         assert!(
             theme_gen::MOTION_VERBATIM
                 .iter()
@@ -510,7 +547,7 @@ mod tests {
         // single duration, so it survives as a structured row: 125ms ease-out,
         // and that is what the plate's opacity uses on the way in.
         assert_eq!(
-            Timing::declared("opacity", 125).map(|timing| timing.curve),
+            Timing::declared("opacity", 125).and_then(|timing| timing.curve()),
             Some(Curve::EaseOut)
         );
     }
@@ -599,9 +636,15 @@ mod tests {
 
     #[test]
     fn a_tween_is_either_moving_or_at_rest() {
-        let resting = Tween::at(0.5);
+        let resting = Tween::at(0.5, Timing::NAV_PLATE);
         assert!(!resting.is_running());
         assert_eq!(resting.value(), 0.5);
+        // A value that is at rest still carries the timing its next leg will
+        // run on, so aiming it somewhere animates rather than jumps.
+        let mut woken = resting;
+        woken.retarget(1.0);
+        assert!(woken.is_running());
+        assert_eq!(woken.value(), 0.5, "a retarget starts from where it was");
         let mut tween = Tween::new(0.0, 1.0, Timing::NAV_PLATE);
         assert!(tween.is_running());
         tween.finish();

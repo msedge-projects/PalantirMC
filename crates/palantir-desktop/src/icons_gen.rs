@@ -1710,6 +1710,13 @@ fn build(commands: &[Cmd]) -> Path {
 ///
 /// No `PartialEq`: the toolkit's `Stroke` does not carry one, and nothing
 /// needs to compare two painted elements.
+///
+/// The variant-size allowance: a stroke carries its own dash pattern, cap
+/// and join, which is most of a hundred bytes against a fill's sixteen. A
+/// `Box` would move that off the stack and buy nothing -- one of these is
+/// built per element and handed straight to the frame -- so the size is
+/// left where it is and said out loud.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Paint {
     /// Stroke the path, at the width the reference declares for it.

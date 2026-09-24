@@ -62,7 +62,7 @@ the full workspace run.
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
-| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **In progress**: the `Route` tree and the tween engine are in; the shell that draws from them is next |
+| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **In progress**: the `Route` tree, the tween engine, the icon widget and the shell itself are in and run under `--shell`; the pages are stage 3, so the old chrome is still what runs by default |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | Not started |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
@@ -213,6 +213,58 @@ mistake in the tool rather than a fact about the reference, and the tool now kee
 such a row verbatim instead of emitting it. Three assertions hold that line -- in
 the tool, in the generated test, and in `motion.rs`'s own table check -- because a
 wrong number both files agree on is invisible to a byte comparison.
+
+**`icon.rs` and `shell.rs`** are the chrome those two feed. `icon.rs` is the one
+place an icon becomes a canvas: the generated elements carry geometry in the
+SVG's own 24-unit box, and something has to scale that box to the pixel size
+asked for and centre what is left over -- `fit()` is that arithmetic, and it has
+to be handed to the painter as well as to the frame, because iced tessellates a
+stroke at the width it was given and does not scale it by the frame's transform.
+Getting that wrong draws every 16px icon in the head at two thirds weight, which
+renders and looks deliberate.
+
+`shell.rs` is the whole interface: a 64px rail of 48px circular plates at a 52px
+pitch, a 48px top bar carrying the logo, history, breadcrumb, the panel toggle
+and the three window controls, the page pane at a 20px top-left radius, the 300px
+right panel with the reference's two-stop wash behind its content, and Settings as
+a modal layer -- the panel is the one place iced 0.12's missing z-order shows,
+because a modal has to replace the window's content rather than stack over it.
+It is a whole `iced::Application`, so `--shell` runs it today; the pane says in as
+many words that its pages are stage 3, which is what keeps it from being mistaken
+for a finished launcher.
+
+### The sixth, seventh and eighth mistakes, all caught by the shell's gates
+
+Three of them, and the first two are the kind a plausible-looking shell would
+have shipped:
+
+1. **`--color-button-bg-selected` is not a wash of the accent in light mode.**
+   The test asserted every theme's selected rail plate was translucent, which is
+   true in dark and OLED (the accent at 25%) and false in the other two: light
+   uses opaque `green-600` -- the same value as its own `--color-brand`, so a
+   selected button there is a *solid* plate -- and retro uses an opaque `#25421e`
+   that is neither the accent nor a dilution of it. The assertion now states the
+   value per theme instead of one claim for all four.
+2. **A gradient stop's colour can contain spaces.** `rgba(68, 182, 138, 0.175) 0%`
+   split on whitespace yields `rgba(68,` as the colour, and the reader returned
+   `None` for every wash in the reference -- which looked like "the reference has
+   no gradient here" rather than like a parser bug. The split now tracks
+   parenthesis depth, and the test asserts all four themes' two stops.
+3. **`Tween::at` handed out a zero-length timing.** A tween created at rest
+   carried the placeholder `0ms linear`, so the first `retarget` on it saw a
+   duration of nothing and *jumped* to its target: the rail's plate never grew,
+   and a missing animation is much harder to notice than a wrong one. The
+   resting timing is now named by the caller, and the rail passes
+   `Timing::NAV_PLATE`, which is the reference's own 250ms.
+
+One more thing settled by reading iced rather than guessing: iced's `Background`
+gradients do render on the wgpu backend, and its angle convention matches CSS's
+exactly -- `Radians::to_distance` subtracts a quarter turn before taking the
+direction vector and measures y downwards, so iced's 0 faces up, which is CSS's
+`0deg`. The reference's wash is `0deg` in all four themes, so it needs no
+conversion; anything not axis-aligned would not, because iced measures the
+gradient line as `max(|x|·w, |y|·h)` where CSS projects onto both axes, and the
+comment in `parse_gradient` says so rather than leaving it to be rediscovered.
 
 ## Where the old sections went
 

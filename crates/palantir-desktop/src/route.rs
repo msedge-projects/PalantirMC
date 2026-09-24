@@ -492,7 +492,11 @@ impl Context {
     /// Whether this page was opened from the worlds flow, which is what makes
     /// Discover show servers instead of projects (`Browse.vue`'s
     /// `isFromWorlds`).
-    pub fn from_worlds(&self) -> bool {
+    ///
+    /// Named `opened_from_` rather than `from_`, which is the reference's own
+    /// name: a method called `from_*` that takes `self` is the one shape clippy
+    /// reads as a constructor, and an allowance would hide the next real one.
+    pub fn opened_from_worlds(&self) -> bool {
         self.from.as_deref() == Some("worlds")
     }
 
@@ -943,7 +947,7 @@ mod tests {
         assert_eq!(address.route, Route::Discover { project_type: ProjectType::Mod });
         assert_eq!(address.context.instance.as_deref(), Some("All the Mods 10"));
         assert!(address.context.in_instance());
-        assert!(address.context.from_worlds());
+        assert!(address.context.opened_from_worlds());
         assert!(!address.context.in_server());
         // `Browse.vue` carries these five onto every tab link it builds, in
         // this order.

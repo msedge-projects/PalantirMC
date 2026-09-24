@@ -34,6 +34,10 @@ mod gpu;
 /// Reporting a pointer crossing as a message: the only place a hover tween
 /// can be started from. See the module for why the view cannot start one.
 mod hover;
+/// Drawing one of the reference's icons: the scale and the centring, which are
+/// the two things a caller cannot guess. Used by the rewrite's shell and by the
+/// shell that replaces it.
+mod icon;
 mod icons;
 /// The reference client's icon set, compiled from its vendored SVGs by
 /// `tools/gen_icons.py` into geometry the toolkit strokes.
@@ -79,6 +83,17 @@ mod reference_vocabulary;
 mod route;
 mod screenshots;
 mod scroll;
+/// The shell the rewrite is building: the rail, the head, the page pane, the
+/// right panel and Settings as a modal, on the reference's own information
+/// architecture. Stage 2 of the rewrite spec.
+///
+/// Not the default yet, and deliberately: it draws the chrome and knows which
+/// page it is on, but the pages themselves are stage 3, so running it today
+/// would replace a launcher that launches instances with a shell whose pane
+/// says so in as many words. `--shell` runs it, which is how its captures and
+/// its own gates are taken without pretending it is finished.
+#[allow(dead_code)]
+mod shell;
 mod settings;
 mod theme;
 /// The reference client's own design system, compiled from its vendored
@@ -207,6 +222,13 @@ fn main() -> iced::Result {
     // Decide the renderer from what this machine can actually provide, before
     // iced builds its compositor. See `gpu` for why this is a probe.
     let _ = gpu::select_renderer();
+    // The command line is read twice, from one vector: once for `--shell`,
+    // which decides which of the two shells this process is, and once as the
+    // flags of whichever one that is.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.iter().any(|argument| argument == "--shell") {
+        return run_shell(arguments.iter().cloned());
+    }
     // The OS appearance feeds the "Sync with system" theme, so it is read once
     // here rather than in a paint path, and the saved theme is put in force
     // before the first frame. Both belong to the process rather than to
@@ -222,7 +244,7 @@ fn main() -> iced::Result {
     // decides two of them: a capture names its own size and is born off the
     // desktop. The flags are still handed to `App::run` as well, which is what
     // turns `--page` into a message once the runtime is up.
-    let start = app::Start::from_args(std::env::args().skip(1));
+    let start = app::Start::from_args(arguments.iter().cloned());
     theme::set_os_prefers_light(native::system_prefers_light());
     theme::set_color_theme(prefs::load(&home).theme());
     let mut settings = Settings::default();
@@ -241,6 +263,49 @@ fn main() -> iced::Result {
     // remember them once it is over.
     settings.flags = start;
     App::run(settings)
+}
+
+/// Run the rewrite's shell.
+///
+/// The same window and the same five fonts as the launcher, because the two are
+/// one product and only the shell around the pages is being replaced. What
+/// differs is the size flag: the shell's `--page` takes a path the route table
+/// knows rather than one of the old shell's page names, so a capture addresses a
+/// page the way the reference's own router does.
+///
+/// There is no capture flag here yet. `--shot` belongs to the old shell and its
+/// machinery is wound through that shell's frame handling; stage 3 is where the
+/// new shell needs one, because that is where the first per-page gate does.
+fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
+    let flags = shell::Flags::from_args(args);
+    let mut settings = Settings::default();
+    settings.window = shell_window_settings(flags.size);
+    settings.antialiasing = false;
+    settings.fonts = FONTS
+        .iter()
+        .map(|bytes| std::borrow::Cow::Borrowed(*bytes))
+        .collect();
+    // The same family and weight the launcher defaults to; `shell`'s own
+    // `medium()` is the same face, named there so the shell does not depend on
+    // the module this rewrite replaces.
+    settings.default_font = theme::medium();
+    settings.flags = flags;
+    shell::Shell::run(settings)
+}
+
+/// Window settings for the rewrite's shell: the same window, its own size flag.
+fn shell_window_settings(size: Option<(u32, u32)>) -> window::Settings {
+    let (width, height) = size
+        .map(|(width, height)| (width as f32, height as f32))
+        .unwrap_or_else(opening_size);
+    window::Settings {
+        size: iced::Size::new(width, height),
+        position: window::Position::Centered,
+        min_size: Some(iced::Size::new(MINIMUM_SIZE.0, MINIMUM_SIZE.1)),
+        decorations: false,
+        icon: brand::window_icon(),
+        ..Default::default()
+    }
 }
 
 /// Original `Sandbox` shell: fully interactive for everything synchronous.
