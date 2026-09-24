@@ -5,14 +5,7 @@ members = [
     "crates/palantir-net",
     "crates/palantir-loader",
     "crates/palantir-gui",
-    "crates/palantir-cli",
     "crates/palantir-desktop",
-    # PandoraLauncher's crates, adopted wholesale (MIT, Copyright (c) 2025
-    # Moulberry). They are members like any other. Attribution lives in
-    # THIRD_PARTY_NOTICES.md, licenses/PandoraLauncher-LICENSE.txt and a doc
-    # comment at the top of each crate's lib.rs.
-    "crates/nbt",
-    "crates/schema",
 ]
 
 [workspace.package]
