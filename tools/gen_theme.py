@@ -539,8 +539,14 @@ def scan_motion() -> tuple[list[tuple[str, int, tuple[float, float, float, float
                 verbatim.append((rel, "transition", body))
                 continue
             duration_text = durations[0]
-            millis = round(float(duration_text[:-2]) * 1000) if duration_text.endswith("ms") \
+            # Milliseconds are already milliseconds: only the seconds branch
+            # has a factor to apply. Multiplying both is what made `200ms`
+            # 200000 above, the bug the bound below now catches.
+            millis = round(float(duration_text[:-2])) if duration_text.endswith("ms") \
                 else round(float(duration_text[:-1]) * 1000)
+            if not 0 < millis <= LONGEST_TRANSITION_MS:
+                verbatim.append((rel, "transition", body))
+                continue
             key = (properties[0], millis, curve)
             if key in seen:
                 continue
@@ -551,6 +557,16 @@ def scan_motion() -> tuple[list[tuple[str, int, tuple[float, float, float, float
     verbatim = sorted(set(verbatim))
     keyframes.sort()
     return unambiguous, verbatim, keyframes
+
+
+# The longest `transition` duration anywhere in the reference is 2s, on
+# `transform` in `ui/src/components/brand/TextLogo.vue`. Nothing legitimately
+# reaches this bound, so a parsed duration above it is a mistake in this file
+# rather than a fact about the reference -- which is exactly how the first
+# version's `ms` branch shipped twelve transitions a thousand times too long
+# (200ms read as 200000ms). The row stays verbatim instead of being emitted
+# wrong, and the generated test asserts the same bound.
+LONGEST_TRANSITION_MS = 2000
 
 
 # Filled in by `main` before the motion scan, because a transition written as
@@ -1099,6 +1115,16 @@ def emit(themes: dict[str, dict[str, str]]) -> tuple[str, list[str]]:
     add("        assert!(!MOTION.is_empty());")
     add("        for motion in MOTION {")
     add("            assert!(motion.millis > 0, \"{} has no duration\", motion.property);")
+    add("            // The reference's longest transition is 2s. Every row past this")
+    add("            // bound written so far was the generator's own unit error, not a")
+    add("            // slow animation: `--check` compares bytes, so only a bound in the")
+    add("            // tool catches a wrong number both files agree on.")
+    add("            assert!(")
+    add("                motion.millis <= 2000,")
+    add("                \"{} declares {}ms, longer than any transition in the reference\",")
+    add("                motion.property,")
+    add("                motion.millis")
+    add("            );")
     add("            assert!(motion.source.ends_with(\".css\") || motion.source.ends_with(\".scss\")")
     add("                || motion.source.ends_with(\".vue\"));")
     add("        }")
