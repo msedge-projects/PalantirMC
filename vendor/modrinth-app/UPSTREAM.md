@@ -40,7 +40,22 @@ branch moves and every number in `REFERENCE.md` is a statement about one revisio
 | `app-frontend/` | `apps/app-frontend` | 462 | 12.3 MB | GPL-3.0 |
 | `ui/` | `packages/ui` | 833 | 12.4 MB | GPL-3.0 |
 | `assets/` | `packages/assets` | 561 | 5.3 MB | GPL-3.0 |
-| | | **1857** | **30.0 MB** | |
+| `tooling-config/` | `packages/tooling-config/tailwind` | 1 | 8.0 KB | GPL-3.0 |
+| | | **1858** | **30.0 MB** | |
+
+The one file in `tooling-config/` is `tailwind-preset.ts`, the Tailwind theme the
+other two trees are written against. It is here because it is the *map* rather
+than the values: every colour entry in it is `var(--...)`, so it says which
+semantic name (`text-primary`, `bg-raised`) names which custom property
+(`--color-text-primary`, `--surface-3`), while the values themselves are in
+`assets/styles/variables.scss`, which was already here. Taking the file rather
+than transcribing its aliases is the same rule the rest of this tree is under --
+nothing about the reference is written down twice.
+
+Its blob hash upstream at the pinned commit is
+`91c3d520b1afa23bc8e5ea256282cfd25e792a0c`, and
+`git hash-object vendor/modrinth-app/tooling-config/tailwind-preset.ts` answers
+the same string.
 
 Each directory carries its own upstream `LICENSE`, untouched; they are the
 verbatim GPL-3.0 and differ from each other only in whitespace and line wrapping,
@@ -48,7 +63,7 @@ which is why the copies are byte-different and hash-different. `LICENSE-GPL-3.0.
 is a fourth copy of the same text, put at this directory's root so that the licence
 governing the whole tree is visible without walking into the three.
 
-Contents, by extension: 551 `.svg`, 533 `.vue`, 516 `.ts`, 109 `.json`, 70 `.png`,
+Contents, by extension: 551 `.svg`, 533 `.vue`, 517 `.ts`, 109 `.json`, 70 `.png`,
 23 `.js`, 15 `.webp`, 11 `.scss`, 7 `.md`, 5 `.css`, 2 `.gltf`, 2 `.fbx` — plus the
 four licences. `node_modules`, `dist` and `.turbo` are not present: they are build
 output, they are git-ignored upstream, and `AGENTS.md` forbids committing build
@@ -66,6 +81,7 @@ most of it is not the launcher. What was left out, with the size it would have c
 | `apps/app` | — | the Tauri shell: window creation, updater, the Rust side |
 | `packages/moderation`, `packages/utils` | 1.2 MB | server-side and shared helpers this port does not draw |
 | `apps/labrinth`, `apps/daedalus`, `apps/theseus` | — | the API, the docs and the auth service |
+| `packages/app-lib` (`theseus`) | — | the launcher backend: tokio, sqlx and about sixty dependencies, plus seven sibling path-crates. This launcher has its own backend, and the rewrite's decision was the lightest one that works rather than the most complete one that exists, so the reference is read for *what* the backend must do and not copied for *how*. `docs/superpowers/specs/2026-09-24-modrinth-native-rewrite.md` records that as a decision with its cost. |
 
 `apps/app` *is* worth naming separately, because it is the one omission that a
 reader of this port might expect to find: it is the Tauri host, and this launcher
@@ -82,18 +98,20 @@ same git blob hash as the same path upstream at the pinned commit:
 ```
 # in the upstream clone
 #   git ls-tree -r HEAD apps/app-frontend packages/ui packages/assets \
+#     packages/tooling-config/tailwind \
 #     | awk '{print $3, $4}' | sort > up.txt
 # here
 #   git ls-tree -r HEAD vendor/modrinth-app \
 #     | awk '{print $3, $4}' \
 #     | sed 's#vendor/modrinth-app/app-frontend/#apps/app-frontend/#;
 #            s#vendor/modrinth-app/ui/#packages/ui/#;
-#            s#vendor/modrinth-app/assets/#packages/assets/#' \
+#            s#vendor/modrinth-app/assets/#packages/assets/#;
+#            s#vendor/modrinth-app/tooling-config/#packages/tooling-config/tailwind/#' \
 #     | grep -v 'LICENSE-GPL-3.0.txt\|UPSTREAM.md' | sort > ours.txt
 #   diff <(cut -f1,2 up.txt) <(cut -f1,2 ours.txt)
 ```
 
-The two lists are 1856 lines each and the diff is empty — 1856 and not 1857
+The two lists are 1857 lines each and the diff is empty — 1857 and not 1858
 because `LICENSE-GPL-3.0.txt` is a fourth copy of the licence `app-frontend`
 already carries and `UPSTREAM.md` is this file, neither of which exists upstream.
 Matching *blob hashes* rather than file contents also settles the one thing a

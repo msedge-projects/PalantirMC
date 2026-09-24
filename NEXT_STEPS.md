@@ -48,7 +48,7 @@ the full workspace run.
 | Stage | What it is | State |
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
-| 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table and an icon atlas | Next |
+| 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table and an icon set | **Generator done; icons next** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | Not started |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | Not started |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
@@ -58,6 +58,43 @@ Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
 sees every commit while `master` keeps building a launcher that runs. Only
 stage 0 goes to `master` directly, because it removes nothing that is still
 used.
+
+## What stage 1 found, and what it leaves open
+
+`tools/gen_theme.py` reads the reference's own stylesheets and writes
+`crates/palantir-desktop/src/theme_gen.rs` — 172 tokens (144 colours, 11 lengths,
+2 bare numbers, 1 curve, 14 raw), 39 parsed transitions, 64 that are written as a
+shorthand this tool will not guess at, and 24 `@keyframes` names. `--check`
+regenerates and compares byte for byte, and it was proved to fail on a one-byte
+edit before it was trusted. The ten tests in the generated file assert the values
+that matter: the surfaces per theme, the accent followed through `var()`
+indirection to a different rung in each theme, the two hover directions, the
+radii at a 16px root, and `--ease-out-expo`.
+
+Two things it found on its first run, which are decisions for stage 2 rather than
+bugs:
+
+1. **The stylesheet and the running app disagree about the dark accent.** The
+   sheet says `--color-brand` is `green-500`, `#1bd96a`; the app as installed
+   measures `#00da75` on the call-to-action, the logo and the active rail icon
+   (`theme.rs` recorded the measurement, `REFERENCE.md` has the samples). One of
+   the two is right and the reference's own window is the arbiter — so this is a
+   page-gate question once a page draws that colour, not a transcription question.
+2. **The light accent is a rung below `--color-brand` on purpose.** Light
+   `--color-brand` is `green-600`, which is 2.71:1 on the light card and misses the
+   3:1 floor for a UI component; the shell took `green-700`. That is a deliberate
+   departure from the sheet with its arithmetic written down, and the rewrite has
+   to keep or replace it knowingly.
+
+The generator also settled a third thing by refusing to guess: `transition: color,
+background-color 125ms ease-in-out` is *two* transitions with different timings,
+so the 64 shorthands like it are emitted verbatim with their source file rather
+than parsed into a plausible-looking wrong number.
+
+Still open in stage 1: the icon set. 315 SVGs are vendored and nothing renders
+them yet — the shell's icons are still PNGs carved from another launcher's binary,
+which the rewrite removes. The generator for those is next, and it has to solve
+stroking (Lucide's icons are outlines, not fills) before it can emit anything.
 
 ## Where the old sections went
 

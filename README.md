@@ -89,9 +89,13 @@ tag is one of the few actions that needs a human's go-ahead first (see
   (`--page home`, `--page discover`, …) at an exact client size; the page gates
   run against its output. The reference's own captures come from `winshot.py`,
   driven by `refwalk.py`.
-- `tools/gen_theme.py` — regenerates the design system from the reference's
-  stylesheets. Nothing it emits is hand-edited, and regeneration must be
-  byte-identical.
+- `tools/gen_theme.py` — compiles the design system out of the reference's own
+  stylesheets into `theme_gen.rs`. Nothing it emits is hand-edited, and
+  `--check` regenerates and compares byte for byte.
+- `tools/gen_tokens.py` — the retiring half of the same job: it regenerates
+  `theme_tokens.rs`, the test-only receipt for 189 values that the shell paints
+  beside rather than from. It stays until the last page paints from `theme_gen`,
+  because until then it is the only token gate the tree has.
 - `tools/unused_deps.py` — the unused-dependency check `cargo` does not have: a
   manifest that declares what no source in its crate names. A hit is a question
   to read, not a verdict (a package's lib name is not always its package name).

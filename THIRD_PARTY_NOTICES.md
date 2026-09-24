@@ -11,11 +11,18 @@ in binary distributions alike. Adding an entry is part of taking the code.
 ## The Modrinth App
 
 * **What**: the parts of the Modrinth App that draw its window, copied verbatim
-  into `vendor/modrinth-app/` — `apps/app-frontend` (462 files), `packages/ui` (833)
-  and `packages/assets` (561), 1857 files and 30.0 MB in total, each with its own
-  upstream `LICENSE` untouched. None of it is compiled or shipped: the launcher in
-  `crates/` is independent Rust that draws the same window, and this tree is the
-  specification it is ported against and checked against.
+  into `vendor/modrinth-app/` — `apps/app-frontend` (462 files), `packages/ui` (833),
+  `packages/assets` (561) and `packages/tooling-config/tailwind/tailwind-preset.ts`
+  (1 file), 1858 files and 30.0 MB in total, each with its own upstream `LICENSE`
+  untouched. None of it is compiled or shipped: the launcher in `crates/` is
+  independent Rust that draws the same window, and this tree is the specification
+  it is ported against and checked against.
+* **Read at generation time, not at build time**: `tools/gen_theme.py` compiles the
+  palette, the lengths, the curves and the motion out of that tree into
+  `crates/palantir-desktop/src/theme_gen.rs`. The generated file is this project's
+  own work — a different language, a different shape, resolved rather than
+  transcribed — but every value in it came from theirs, so it is named here and the
+  generator names its sources at the top of what it writes.
 * **From**: <https://github.com/modrinth/code> at commit
   `8966b5e2e7951e83651fbebbf2fb6d7608a94a33` (2026-09-20), retrieved with
   `git clone --depth 1`. `vendor/modrinth-app/UPSTREAM.md` is the provenance: the
