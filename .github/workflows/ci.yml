@@ -100,6 +100,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
 
+      # The design system is generated, and hand-edited generated code is the
+      # exact failure this repository already had once: a token table transcribed
+      # by hand that drifted from the palette actually painting, which is why
+      # headings were drawn at one weight and the reference's at another. The
+      # gate for generated code is regeneration, so it is a step here rather
+      # than something a session is asked to remember. It needs the vendored
+      # reference tree, which is in the repository, and Python, which the runner
+      # has -- `check_exe.py` already relies on it.
+      - name: Design system regeneration
+        run: python tools/gen_theme.py --check
+
       # This tree has never been run through rustfmt, so formatting reports
       # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
       # has been committed and reviewed.

@@ -91,10 +91,26 @@ background-color 125ms ease-in-out` is *two* transitions with different timings,
 so the 64 shorthands like it are emitted verbatim with their source file rather
 than parsed into a plausible-looking wrong number.
 
-Still open in stage 1: the icon set. 315 SVGs are vendored and nothing renders
+Still open in stage 1: the icon set. 313 SVGs are vendored and nothing renders
 them yet — the shell's icons are still PNGs carved from another launcher's binary,
-which the rewrite removes. The generator for those is next, and it has to solve
-stroking (Lucide's icons are outlines, not fills) before it can emit anything.
+which the rewrite removes. Measured before it is written, so the next session
+starts from the problem itself rather than from an estimate:
+
+| | |
+| --- | --- |
+| Icons | 313 files; 6 viewBoxes among them, 305 at the same `0 0 24 24` |
+| Elements | 797 `<path>`, 106 `<circle>`, 114 `<line>`, 55 `<rect>`, 25 `<polyline>`, 5 `<polygon>`, 2 `<ellipse>`, 15 `<g>` |
+| Path commands | 82 `A` and 589 `a` — **arcs are not optional**, plus C/S/Q/T and their relative forms |
+| Rendering | 310 declare `stroke`, 302 a `stroke-width`, 300 each a linecap and linejoin |
+
+The plan is to parse the geometry in Python and emit iced `canvas` builder calls
+stroked at the reference's own width, caps and joins — the icons are outlines, so
+this reproduces them rather than approximating a filled bitmap, and it keeps them
+tintable from a token the way the current vector chrome is. The risk is stated
+rather than deferred: a subtly wrong arc conversion is exactly the kind of
+plausible-but-wrong value this whole change exists to stop, so the gate for it has
+to compare rendered output against the reference rather than assert that every
+number is finite.
 
 ## Where the old sections went
 
