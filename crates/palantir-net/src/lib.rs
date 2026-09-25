@@ -14,6 +14,11 @@
 //!   device-code login (device code → Xbox Live → XSTS → game token →
 //!   entitlements → profile), with every HTTP call behind a trait so the chain
 //!   is testable offline.
+//! * [`engine`] is where every new request goes: one shared client, one
+//!   process-wide concurrency ceiling, transfers that can be cancelled between
+//!   chunks, downloads that resume from the part file they left behind, and one
+//!   retry policy with a spread. Additive -- [`download`] and [`meta`] still
+//!   serve the interface that exists, and the engine is what it moves onto.
 //! * [`modrinth`] provides the minimal Modrinth API v2 client types and URL
 //!   builders.
 //! * [`java`] provides the Java runtime metadata the service publishes
@@ -30,6 +35,14 @@
 
 pub mod auth;
 pub mod download;
+/// The engine every request goes through: one client, one concurrency ceiling,
+/// cancellable transfers, resumable downloads and one retry policy.
+///
+/// Stage 4 of the rewrite spec. Additive rather than a replacement: the older
+/// `download` and `meta` modules still serve the interface that exists, and the
+/// engine is what the pages and the install path move onto. See the module for
+/// why the rules live there rather than at the call sites.
+pub mod engine;
 pub mod java;
 pub mod meta;
 pub mod modrinth;
@@ -42,6 +55,10 @@ pub use auth::{
 pub use download::{
     download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,
     verify_sha256,
+};
+pub use engine::{
+    fetch_to_file, is_retryable, Backoff, Cancel, Download, Downloaded, Fetch, HttpPool, Limit,
+    Outcome, Request, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT,
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
@@ -59,13 +76,30 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// HTTP transport failure (connection, timeout, non-2xx status, ...).
+    ///
+    /// `status` is the HTTP status when the server gave one, and `None` for a
+    /// transport problem that never got an answer. The retry policy needs to
+    /// tell those apart -- a 503 is the server asking for a second attempt and
+    /// a 404 is the server meaning it -- and a string like "http status 503" is
+    /// not something a decision should be parsed back out of.
     #[error("http error for {url}: {detail}")]
     Http {
         /// The request URL that failed.
         url: String,
         /// Human-readable reason (status code, timeout, transport message).
         detail: String,
+        /// The HTTP status, when the server answered at all.
+        status: Option<u16>,
     },
+
+    /// Work stopped because the caller asked it to.
+    ///
+    /// Not a failure of anything: it is the answer to "please stop", and it is
+    /// a variant of its own rather than a flavour of HTTP error so that a retry
+    /// policy can refuse to retry it and a progress line can say "cancelled"
+    /// rather than "failed".
+    #[error("cancelled")]
+    Cancelled,
 
     /// Filesystem failure, with the path that caused it.
     #[error("io error for {path}: {source}")]
@@ -113,8 +147,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     /// Build an HTTP error for `url` with a human-readable `detail`.
+    ///
+    /// For a transport problem, where no status arrived. Use [`Error::status`]
+    /// when the server answered.
     pub fn http(url: impl Into<String>, detail: impl Into<String>) -> Self {
-        Error::Http { url: url.into(), detail: detail.into() }
+        Error::Http { url: url.into(), detail: detail.into(), status: None }
+    }
+
+    /// Build an HTTP error from a status code the server sent.
+    ///
+    /// The detail is derived from the code so that the message and the field
+    /// cannot disagree, and so that every non-2xx in the engine reads the same
+    /// way in a log.
+    pub fn status(url: impl Into<String>, status: u16) -> Self {
+        Error::Http {
+            url: url.into(),
+            detail: format!("http status {status}"),
+            status: Some(status),
+        }
     }
 
     /// Wrap an [`std::io::Error`] with path context.
@@ -152,9 +202,13 @@ impl Error {
             Error::Io { path, source } => palantir_core::error::Error::io(path, source),
             Error::Json { path, detail } => palantir_core::error::Error::json(path, detail),
             Error::Format { path, detail } => palantir_core::error::Error::format(path, detail),
-            Error::Http { url, detail } => {
+            Error::Http { url, detail, .. } => {
                 palantir_core::error::Error::format(PathBuf::from(url), detail)
             }
+            Error::Cancelled => palantir_core::error::Error::format(
+                PathBuf::from("<cancelled>"),
+                "the transfer was cancelled",
+            ),
             Error::HashMismatch { path, expected, actual } => {
                 palantir_core::error::Error::format(path, format!("sha256 mismatch: expected {expected}, got {actual}"))
             }
@@ -178,9 +232,20 @@ mod tests {
     fn http_constructor_roundtrips_fields() {
         let e = Error::http("https://example.invalid/x.json", "timeout");
         match e {
-            Error::Http { url, detail } => {
+            Error::Http { url, detail, status } => {
                 assert_eq!(url, "https://example.invalid/x.json");
                 assert_eq!(detail, "timeout");
+                // A transport problem never got an answer, so it has no status.
+                // That distinction is what the retry policy reads.
+                assert_eq!(status, None);
+            }
+            _ => panic!("expected Http"),
+        }
+        // And the other constructor keeps the code it was given.
+        match Error::status("https://example.invalid/x.json", 503) {
+            Error::Http { status, detail, .. } => {
+                assert_eq!(status, Some(503));
+                assert_eq!(detail, "http status 503");
             }
             _ => panic!("expected Http"),
         }

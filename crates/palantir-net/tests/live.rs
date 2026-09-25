@@ -586,3 +586,64 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
          can go"
     );
 }
+
+/// The one assumption in the engine that a double cannot hold.
+///
+/// `MapFetch` proves the *engine's* rules: that an offset is only continued when
+/// the server says it continued, that an ignored offset writes nothing, that a
+/// cancellation lands between chunks. What it cannot say is that `reqwest` and
+/// the service agree with it -- that a `Range: bytes=N-` request really comes
+/// back `206 Partial Content`, that `read` really ends at zero, and that the
+/// bytes around the seam are the bytes of the file rather than of two files.
+///
+/// That last one is the reason this test exists rather than a shape check: a
+/// resume that is off by a byte produces a jar that is the right length and the
+/// wrong file, and only comparing the stitched result with the whole download
+/// notices. The body is a metadata version list, so nothing here depends on a
+/// version that moves.
+#[test]
+#[ignore = "live: needs meta.prismlauncher.org"]
+fn a_ranged_request_really_continues_from_the_offset_it_asked_for() {
+    use palantir_net::engine::{Cancel, Fetch, HttpPool, Outcome, Request};
+
+    let url = format!("{DEFAULT_META_BASE_URL}/net.minecraft/index.json");
+    let pool = HttpPool::default();
+    let cancel = Cancel::new();
+
+    let whole = pool
+        .get(&Request::get(&url), &cancel)
+        .unwrap_or_else(|e| panic!("{url}: {e}"));
+    assert!(
+        whole.len() > 1000,
+        "a version list of {} bytes is not one",
+        whole.len()
+    );
+
+    // Ask to continue from 100 bytes in, with those bytes already in hand.
+    const SEAM: u64 = 100;
+    let mut stitched = whole[..SEAM as usize].to_vec();
+    let outcome = pool
+        .get_to(&Request::from(&url, SEAM), &mut stitched, &cancel)
+        .unwrap_or_else(|e| panic!("{url} at {SEAM}: {e}"));
+    match outcome {
+        Outcome::Resumed(bytes) => assert_eq!(
+            bytes,
+            whole.len() as u64 - SEAM,
+            "the continuation was not the rest of the body"
+        ),
+        Outcome::Ignored => panic!(
+            "{url} answered a Range request with the whole body. Resume is a \
+             no-op here, and `Outcome::Ignored` is the engine correctly \
+             restarting -- worth knowing, because every interrupted download \
+             against this host starts again from zero"
+        ),
+        Outcome::Whole(bytes) => panic!(
+            "{url} sent {bytes} bytes from zero for a ranged request, which the \
+             offset contract does not allow"
+        ),
+    }
+    assert_eq!(
+        stitched, whole,
+        "the bytes around the seam are not the bytes of the body"
+    );
+}
