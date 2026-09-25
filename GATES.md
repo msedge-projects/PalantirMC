@@ -876,6 +876,139 @@ fails them.
       because both files agreed. Three assertions now hold the 2s bound -- in the
       tool, in the generated test, and here.
 
+### The chrome's own gates, and the pages that replaced its placeholder
+
+G60 to G65 are stages 2 and 3. Unlike G58 and G59 they are not one table each:
+the copy is a 3846-message compilation of the reference's locale, "native" is a
+claim about the dependency graph, and the pages are nineteen route shapes that
+all have to draw in four themes and in every state they can be in.
+
+- [x] G60: the interface's copy is the reference's own, compiled from its locale
+  CHECK: python tools/gen_text.py --check
+  EXPECT: text generation is byte-identical
+  EVIDENCE: `tools/gen_text.py` compiles both of the reference's English locales
+      -- `app-frontend/src/locales/en-US/index.json` (1516 leaves) and
+      `ui/src/locales/en-US/index.json` (2330), which share no key -- into
+      `crates/palantir-desktop/src/text_gen.rs`: 3846 messages, a `Key` enum, and
+      one function per message that needs ICU. The four constructs the reference
+      actually uses are compiled (a bare `{name}`, `{name, number}`,
+      `{name, plural, …}`, `{name, select, …}`), and the five it does not
+      (`date`, `time`, `list`, `selectordinal`, an apostrophe-quoted literal) are
+      *refused with the key named* rather than approximated. 353 messages carry
+      ICU: 80 plural nodes, 10 selects, 32 number nodes, 56 `#` markers. The
+      generated file carries 15 tests of its own, including the one that counts
+      the `#` markers in the source and in the emitted arms and fails if they
+      disagree. The regeneration step is in `ci.yml`'s lint job beside the other
+      two generators.
+
+- [x] G61: this is a native program, and that is a measurement rather than a
+      promise
+  CHECK: cargo test -p palantir-desktop --locked --test native
+  EXPECT: test result: ok. 4 passed
+  EVIDENCE: `crates/palantir-desktop/tests/native.rs` fails the build on a
+      browser or a JavaScript engine in the dependency graph (twelve crate names,
+      checked against `Cargo.lock`), on anything in the tree declaring `js-sys`,
+      `web-sys`, `wasm-bindgen`, `tauri`, `wry` or `webview2`, on a `.js`,
+      `.ts`, `.vue`, `.svelte` or `.html` file under `crates/`, and on a
+      `package.json` outside `vendor/`. The receipt for the resolved graph is
+      `cargo tree -p palantir-desktop --locked --target x86_64-pc-windows-msvc -e
+      normal`: it contains neither `js-sys` nor `web-sys`/`wasm-bindgen`. The
+      gate was proved to bite before it was trusted -- an `assets/probe.html` in
+      the desktop crate fails it with the path named, and removing the file makes
+      it pass. `tools/curve_samples.html` is the one HTML file in the repository
+      and is named in the gate as a deliberate exemption: it is the oracle for
+      G59, runs in a browser, and ships in nothing.
+
+- [x] G62: every route the table knows builds a page, and that page draws
+  CHECK: cargo test -p palantir-desktop --locked pages::tests
+  EXPECT: test result: ok
+  EVIDENCE: 24 tests over `crates/palantir-desktop/src/pages/`, one module per
+      page. `every_route_builds_a_page_and_that_page_draws` walks an address of
+      every shape `route.rs` has -- 22 of them, including an instance id with a
+      slash in it and a filtered content tab -- builds the page, draws it in all
+      four themes, and then re-points the same page at its own address to prove
+      the tab-change path keeps a page rather than rebuilding it. The gate the
+      shell needs is the other direction: a route with no page would be a blank
+      pane, and this is the test that would say so.
+
+- [x] G63: a page that has not been answered says so, in all four of its states
+  CHECK: cargo test -p palantir-desktop --locked page::tests
+  EXPECT: test result: ok
+  EVIDENCE: `page::Load` has five arms and `page::draw` turns four of them into
+      pixels; the fifth, `Ready`, into the page's own body. The distinction the
+      module exists for is that `Empty` and `Ready(vec![])` are different
+      answers, and the test asserts all five arms draw in every theme. What the
+      pages do with it is G64's evidence, not this one's.
+
+- [x] G64: a page that cannot answer from disk names the stage that answers it
+  instead of drawing an empty list
+  CHECK: cargo test -p palantir-desktop --locked store::tests
+  EXPECT: test result: ok
+  EVIDENCE: 7 tests over `crates/palantir-desktop/src/store.rs`. The sentence is
+      asserted in the negative as well as the positive: it names stage 4, it
+      begins with the thing that is missing, and it does not contain the word
+      "error". `a_store_with_no_instances_says_empty_rather_than_nothing_happened`
+      is the other half -- an instance list that is genuinely empty is `Empty`
+      and an id that is not there is `Empty` too, because "you have none yet" and
+      "something broke" are the two answers a reader has to be able to tell
+      apart. The readers underneath are exercised on a scratch directory: worlds
+      are folders in `saves/` and a world only counts as *played* once there is a
+      `level.dat`, screenshots are images and newest-name-first, a log is read
+      from its end, and a byte count uses the reference's own `KiB`/`MiB` labels.
+
+- [x] G65: the widgets the pages are made of are the reference's own rules
+  CHECK: cargo test -p palantir-desktop --locked ui::tests
+  EXPECT: test result: ok
+  EVIDENCE: 3 tests over `crates/palantir-desktop/src/ui.rs`. Every control is
+      built in all four themes, because a widget that read a token the theme does
+      not declare would come back as the table's fallback and a widget that builds
+      nowhere is a page that panics on someone else's machine. Two assertions are
+      about the reference's values rather than a shape this file chose: a
+      `colored` button's label is legible on its accent in every theme, and -- the
+      one that was wrong first -- `--surface-3` is `--color-bg-raised` in *all
+      four* themes, so a card is told apart from the page it sits on and not from
+      the bar above it. The gate that found that is `the_card_is_the_reference_s_own_rule`,
+      which had asserted the two were different because that reads like a
+      difference. The reference does not make one.
+
+### The transcript, and why it is standing in for a run
+
+CI could not schedule these two stages: runs `36038333030` and `36033443993`
+both died in five seconds with zero steps — `recent account payments have
+failed` — so no job ran and there is no `test result` line from a runner to quote.
+The three commands `ci.yml` runs were run here instead, with the same flags, on
+the tree that was pushed:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core)
+      8 passed; 0 failed  (palantir-gui)
+    554 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+      6 passed; 0 failed  (palantir-loader)
+     31 passed; 0 failed  (palantir-net)
+    104 passed; 0 failed  (palantir-net)
+      0 passed; 0 failed; 7 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 29.14s
+    (84 warnings, every one warn-by-default; none of them in the files stages 2
+     and 3 added, and most of them in the shell this rewrite deletes)
+
+$ python tools/gen_theme.py --check && python tools/gen_icons.py --check && python tools/gen_text.py --check
+theme generation is byte-identical
+icon generation is byte-identical
+text generation is byte-identical
+```
+
+A local run is not a clean checkout and this document is not going to pretend
+otherwise: the same compiler and the same flags on a machine that has built the
+tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
+makes the runner the authority. What it does say is that all 875 tests pass, that
+nothing in the correctness-deny set is failing, and that all three generated
+files match their sources. Re-running the push when the account can schedule jobs
+is the first thing to do with this tree.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

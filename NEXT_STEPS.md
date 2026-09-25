@@ -35,6 +35,19 @@ than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
 push superseded it. A cancelled run is not a passing one, and it is not a failing
 one either.
 
+**Stages 2 and 3 were pushed to a runner that could not start.** Runs
+`36038333030` and `36033443993` died in five seconds with zero steps and the same
+message -- `recent account payments have failed` -- which is a billing state and
+not a verdict on the tree; neither job was scheduled, so neither could report
+the expected `test result: ok`. The tree was therefore measured on the machine it
+was written on, with the same three commands CI runs, and the transcripts are in
+[`GATES.md`](GATES.md) beside the gates they evidence. **This is a weaker receipt
+than a green run and it is recorded as one**: the local run is the same compiler
+and the same flags, but it is not a clean checkout and it is not the authority
+`AGENTS.md` names. The moment billing is restored the same push should be re-run
+with `workflow_dispatch` and watched to green, and until then nothing here should
+be read as "CI passed".
+
 Stage 0 is done. Three workspace members left because nothing reaches them
 (`crates/nbt`, `crates/schema`, `crates/palantir-cli`), and with them the
 PandoraLauncher notice they were the only reason for: `Cargo.lock` went from 553
@@ -62,8 +75,8 @@ the full workspace run.
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
-| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **In progress**: the `Route` tree, the tween engine, the icon widget and the shell itself are in and run under `--shell`; the pages are stage 3, so the old chrome is still what runs by default |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | Not started |
+| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
@@ -146,12 +159,11 @@ number here says an arc came out on the correct side. Comparing rendered icons
 against the reference's own window is part of stage 2's visual gate, and it is the
 one thing this stage cannot do on its own.
 
-## What stage 2 has landed so far
+## What stage 2 landed
 
 On `rewrite-modrinth-native`. The two pieces below are logic rather than chrome,
 which is why they go first: each is testable without a window, and each is a
-thing the shell would otherwise invent. Neither is wired to anything yet, so both
-carry an `allow(dead_code)` with the spec as its reason.
+thing the shell would otherwise invent.
 
 **`route.rs`** is the reference's navigation, from
 `app-frontend/src/routes.js`, route for route and name for name -- including the
@@ -229,9 +241,20 @@ and the three window controls, the page pane at a 20px top-left radius, the 300p
 right panel with the reference's two-stop wash behind its content, and Settings as
 a modal layer -- the panel is the one place iced 0.12's missing z-order shows,
 because a modal has to replace the window's content rather than stack over it.
-It is a whole `iced::Application`, so `--shell` runs it today; the pane says in as
-many words that its pages are stage 3, which is what keeps it from being mistaken
-for a finished launcher.
+It is a whole `iced::Application`, so `--shell` runs it today, with the pages of
+stage 3 inside it.
+
+**The copy, the colour theme and the native gate** came with the same stage.
+`tools/gen_text.py` compiles both of the reference's English locales -- 3846
+messages, in `app-frontend` and `ui`, which share no key -- into `text_gen.rs`,
+refusing the five ICU constructs the reference does not use rather than
+guessing at them, and `text.rs` is the small runtime behind the four it does.
+`color_theme.rs` is the reference's own theme list from `use-theme.ts`, with the
+dev-mode rule for retro quoted from `AppearanceSettings.vue`, and
+`theme.rs` now keeps *which* theme is in force as an index into that list, so a
+fifth variant cannot silently mean Dark. `tests/native.rs` is the gate for the
+whole rewrite's premise: it fails on a browser or a JavaScript engine anywhere in
+the resolved graph. All three are in `GATES.md` as G60 and G61.
 
 ### The sixth, seventh and eighth mistakes, all caught by the shell's gates
 
@@ -265,6 +288,73 @@ direction vector and measures y downwards, so iced's 0 faces up, which is CSS's
 conversion; anything not axis-aligned would not, because iced measures the
 gradient line as `max(|x|·w, |y|·h)` where CSS projects onto both axes, and the
 comment in `parse_gradient` says so rather than leaving it to be rediscovered.
+
+## What stage 3 has landed so far
+
+All eight page modules are in and the pane draws them: `pages/home.rs` (the
+welcome screen and the library), `discover.rs` (the six project-type tabs, the
+search field, the controls row), `project.rs` (the header and its three tabs),
+`instance.rs` (six tabs), `skins.rs` (thirteen sections as disclosures),
+`screenshots.rs` (every instance's, searchable), `servers.rs` and `user.rs`.
+Two modules hold what they are made of rather than repeating it: `page.rs` is the
+scaffold every page is built from -- the five states of a request, the four
+blocks that answer four of them, and the dismissible notice -- and `ui.rs` is the
+widget kit, where every value quotes a class or a rule from the reference
+(`.base-card`, `NavTabs`, `Input.vue`'s icon, `Combobox`, `Admonition`, the
+reference's button types) with the two readings that are not quotations marked at
+the point they are used.
+
+`store.rs` is the seam that makes the pages honest rather than finished. It
+answers what the launcher can already answer -- the instance list and each
+instance's own folders, from the same readers the old interface uses -- and for
+everything that has to come from a service it returns `Load::Failed` carrying a
+sentence that *names stage 4*. The reason is that the alternative was to draw an
+empty list, and a page that shows "no results" when the request never happened is
+the failure mode the whole scaffold exists to prevent.
+
+Three things about the pages are decisions worth keeping:
+
+1. **A page reports navigation, it does not perform it.** Pressing an instance
+   card returns `pages::Open::Instance(id)` out of `Screen::update`, and the shell
+   is the only caller that acts on it. Without that, a page would have to know
+   what else changes when the pane does -- the history, the rail's selection, the
+   breadcrumb -- and every page would grow its own copy of that knowledge.
+2. **`mouse_area` does not forward events.** iced's own `update` for it never
+   visits its content, so a button drawn *inside* one is dead. The instance card
+   is therefore pressable in the part of it that is not a control, which draws the
+   same picture as the reference's clickable div with stopPropagation inside it
+   and is a region a user can actually hit. The same reading is why the old shell
+   wraps its controls in `hover::Report` -- that widget returns the content's own
+   status untouched, so the control inside keeps its press and its click.
+3. **`--surface-3` is `--color-bg-raised` in all four themes.** A card is told
+   apart from the page it sits on, not from the bar above it. The gate had
+   asserted the opposite, because that reads like a difference; the reference
+   does not make one.
+
+What stage 3 does **not** have yet, named rather than implied:
+
+* **The controls do not tween their hover.** The rail's plate does (stage 2's
+  clock), and the pages' buttons, tabs and cards change colour on a frame
+  boundary rather than over the reference's 150ms. The machinery is already here
+  and generic over the message type -- `motion::Tween` for the value,
+  `hover::Report` for the crossing, `anim::Interactions` for the clock -- and the
+  work is a key per control plus a `Hover { key, over }` message in each page's
+  own family. The old shell's gate for this cannot see it: it reads source text
+  for iced's `button(…)` and holds every one of them to `hover_button`, and the
+  new kit's builder is a different function with the same name. That is the first
+  thing the next session should close, because "the buttons snap" is the kind of
+  difference a person notices immediately and a test does not.
+* **No page's data comes from the network.** Discover's search, project pages,
+  Skins, Servers and the hosting half of an instance all say so out loud. The
+  control *states* they will be asked with are live, which is the part that makes
+  the request a one-line change rather than a page rewrite.
+* **The right panel is still the reference's wash and nothing else.** Discover,
+  a project and a profile force it on (`App.vue`'s `forceSidebar`), and what it
+  draws when it is there is stage 4's, because everything in it is a service's
+  answer.
+* **Settings is still a placeholder modal.** The colour theme it will offer is
+  already the reference's own list, with retro behind dev mode, in
+  `color_theme.rs`.
 
 ## Where the old sections went
 

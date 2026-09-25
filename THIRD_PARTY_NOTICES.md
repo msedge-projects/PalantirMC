@@ -26,10 +26,24 @@ in binary distributions alike. Adding an entry is part of taking the code.
     opacities, as data the toolkit strokes. The icons themselves descend from
     Lucide, which is ISC-licensed; they are taken here from the Modrinth App's
     copy, which is what the vendored tree and its `LICENSE` cover.
+  * `tools/gen_text.py` reads the two English locales —
+    `apps/app-frontend/src/locales/en-US/index.json` and
+    `packages/ui/src/locales/en-US/index.json` — into
+    `crates/palantir-desktop/src/text_gen.rs`, 3846 messages of the interface's
+    copy, compiled out of ICU MessageFormat. These are the reference's sentences
+    and not ours: what that file emits is the same words, and the keys it names
+    (`app.skins.section.modrinth-pride`, `browse.no-results`, …) are the
+    reference's own. The five ICU constructs the reference does not use —
+    `date`, `time`, `list`, `selectordinal` and apostrophe-quoted literals — are
+    refused with the key that used one rather than approximated into something
+    plausible. The strings that are *not* in a locale (`ui/src/utils/search.ts`'s
+    five sort names) are recorded in the page that draws them, with the file they
+    came from, rather than being invented here.
 
-  Both generated files are this project's own work — a different language, a
-  different shape, arcs and smooth curves resolved to cubics rather than copied —
-  but every value in them came from theirs, so both are named here and each
+  All three generated files are this project's own work — a different language, a
+  different shape, arcs and smooth curves resolved to cubics rather than copied,
+  3846 sentences compiled into a Rust enum rather than shipped as JSON — but
+  every value in them came from theirs, so all three are named here and each
   generator names its sources at the top of what it writes.
 * **From**: <https://github.com/modrinth/code> at commit
   `8966b5e2e7951e83651fbebbf2fb6d7608a94a33` (2026-09-20), retrieved with
