@@ -36,9 +36,10 @@ push superseded it. A cancelled run is not a passing one, and it is not a failin
 one either.
 
 **Stages 2, 3 and the engine's slices were pushed to a runner that could not
-start.** Seven runs at the time of writing -- `36038333030`, `36033443993`,
-`36143868395`, `36152873678`, `36158909795`, `36159099493` and `36162312983` --
-died in three to six seconds with zero steps and the same message
+start.** Nine runs at the time of writing, one per commit from `82232f9` onwards
+-- `36038333030`, `36033443993`, `36143868395`, `36152873678`, `36156018946`,
+`36158909795`, `36159099493`, `36162312983` and `36162426595` -- died in three to
+six seconds with zero steps and the same message
 -- `recent account payments have failed or your spending limit needs to be
 increased` -- which is a billing state and not a verdict on the tree; none of the
 jobs was scheduled, so none could report the expected `test result: ok`. The tree
@@ -68,8 +69,8 @@ The workspace is now four crates plus the shell:
 | `palantir-desktop` | The window: shell, pages, engine glue, platform code. |
 
 Backend suites as run in this session: `palantir-core` 168 plus 8, `palantir-gui`
-6, `palantir-loader` 31, `palantir-net` 190, with 10 live tests ignored by design --
-961 in the workspace, and the desktop crate's 554 are in it. Which binary each
+6, `palantir-loader` 31, `palantir-net` 197, with 11 live tests ignored by design --
+968 in the workspace, and the desktop crate's 554 are in it. Which binary each
 number belongs to is written out in [`GATES.md`](GATES.md), because a bare list of
 numbers is how the earlier version of this paragraph managed to mislabel three of
 them.
@@ -82,7 +83,7 @@ them.
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, and a content store where a file that is already here is never fetched twice are all in and gated (G66-G70). What is not in is the Modrinth and piston metadata layers and the seam that lets a page use any of it -- see "What stage 4 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, and Mojang's piston metadata read directly and checked against its own digests are all in and gated (G66-G72). What is not in is the Modrinth API as a source and the seam that lets a page use any of it -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -378,6 +379,7 @@ alternative:
 | `schedule` | A bulk downloader that could not be stopped. Now: submitted jobs with ids, one event per job, cancel one or all, and an `Idle` a caller can wait for instead of polling |
 | `cache` | A metadata "cache" whose only rule was "if the file is on disk, use it" -- which is a write-once archive, and how a launcher comes to offer a loader build that was published last year |
 | `content` | Three trees holding the same jar three times: `libraries/`, `assets/` and a `.minecraft/versions/` copy of what a version asks for. Now every file is named by its own digest, so what is already here is never fetched again |
+| `piston` | `meta.prismlauncher.org`, which is Prism's mirror of Mojang's own metadata rewritten into Prism's shape. Now the launcher reads piston directly, and checks every version file against the `sha1` the manifest published for it |
 
 The cache is the one worth reading twice, because it is the only part of this
 that changes what a user sees. An entry has an age; inside its TTL the bytes on
@@ -402,16 +404,25 @@ download is cached forever, and it is also what makes an interrupted transfer
 resumable: the `.part` sits under the digest's own name, so the next run finds it
 without being told what it was doing.
 
-**The live measurements, which are the part of this that is not local.**
-`meta.prismlauncher.org` sends an `ETag` on
-`/v1/net.minecraft/index.json` and answers `304 Not Modified` to it -- the
-recorded line from the test that ran it is
-`revalidated with "6ab45c1a-6bc5e", no body sent`. And a real asset object, read
-out of the live asset index by the `sha1` Mojang names it with, is fetched,
-verified, filed, and answered from the disk on the second look. Both are
-`tests/live.rs` tests, `#[ignore]`d by design and run here with `--ignored`, and
-they are the only receipts in this document that came from outside this machine.
-A fixture would have agreed with the code on both; the services are the only
+**The live measurements, which are the part of this that is not local.** Three,
+all of them `tests/live.rs` tests, `#[ignore]`d by design and run here with
+`--ignored`:
+
+1. `meta.prismlauncher.org` sends an `ETag` on
+   `/v1/net.minecraft/index.json` and answers `304 Not Modified` to it -- the
+   recorded line is `revalidated with "6ab45c1a-6bc5e", no body sent`, so the
+   revalidation path is the service's behaviour rather than the double's.
+2. A real asset object, read out of the live asset index by the `sha1` Mojang
+   names it with, is fetched, verified against that digest, filed in the content
+   store, and answered from the disk on the second look with no request.
+3. The live piston manifest names a latest release, the `sha1` it publishes for
+   that release is the digest of the version file that arrives, and the file
+   parses into `net.minecraft.client.main.Main`, more than twenty libraries, a
+   downloadable asset index, and no `order` key -- the last of which is the
+   difference between Mojang's file and Prism's mirror of it.
+
+They are the only receipts in this document that came from outside this machine.
+A fixture would have agreed with the code on all three; the services are the only
 things that can disagree.
 
 Three mistakes the engine's own tests caught, all of them invisible by
@@ -453,9 +464,10 @@ work nobody stopped.
 
 What stage 4 does **not** have yet, named rather than implied:
 
-* **Mojang's piston meta and the Modrinth API as metadata sources.** The cache
-  is transport-agnostic on purpose and nothing above it exists yet, so the only
-  metadata path in use is still `meta.rs`'s write-once one.
+* **The Modrinth API as a metadata source.** Mojang's side is in (`engine::piston`,
+  gated by G71 and G72); Modrinth's is still the desktop crate's `browse.rs`
+  with its own `reqwest` client, which is the one thing in the tree that makes
+  "one pooled client" not yet true.
 * **The seam that lets a page use any of this.** No `Command` or `Subscription`
   in `store.rs` is wired to the engine, so the pages still answer with the
   sentence that names stage 4 -- which is why this section can be this long

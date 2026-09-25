@@ -124,6 +124,25 @@ impl Digest {
         Digest::Sha512(format!("{:x}", sha2::Sha512::digest(bytes)))
     }
 
+    /// The same digest of `bytes`, computed with *this* digest's algorithm.
+    ///
+    /// What a caller holding "the digest the service published" needs in order
+    /// to check bytes it holds: which of the three to compute is the published
+    /// digest's business, and a caller that had to switch on the kind itself
+    /// would be a caller that could switch wrongly.
+    pub fn of(&self, bytes: &[u8]) -> Digest {
+        match self {
+            Digest::Sha1(_) => Digest::sha1(bytes),
+            Digest::Sha256(_) => Digest::sha256(bytes),
+            Digest::Sha512(_) => Digest::sha512(bytes),
+        }
+    }
+
+    /// Whether `bytes` are what this digest names.
+    pub fn matches(&self, bytes: &[u8]) -> bool {
+        self.of(bytes).hex() == self.hex()
+    }
+
     /// Check that the file at `path` really is these bytes.
     ///
     /// The file is read in chunks and never held whole. A missing file is an
@@ -425,19 +444,10 @@ impl ContentStore {
 
     /// Refuse bytes that are not what their digest says.
     fn check(&self, digest: &Digest, bytes: &[u8]) -> Result<(), Error> {
-        let actual = match digest {
-            Digest::Sha1(_) => Digest::sha1(bytes),
-            Digest::Sha256(_) => Digest::sha256(bytes),
-            Digest::Sha512(_) => Digest::sha512(bytes),
-        };
-        if actual.hex() != digest.hex() {
-            return Err(Error::hash_mismatch(
-                self.path(digest),
-                digest.hex(),
-                actual.hex(),
-            ));
+        if digest.matches(bytes) {
+            return Ok(());
         }
-        Ok(())
+        Err(Error::hash_mismatch(self.path(digest), digest.hex(), digest.of(bytes).hex()))
     }
 }
 
@@ -523,6 +533,15 @@ mod tests {
         assert_eq!(Digest::sha1(b"abc").hex(), ABC_SHA1);
         assert_eq!(Digest::sha256(b"abc").hex(), ABC_SHA256);
         assert_eq!(Digest::sha512(b"abc").hex(), ABC_SHA512);
+        // And computing one *from* a digest that was read from somewhere uses
+        // that digest's algorithm rather than a favourite of this file's.
+        for text in [ABC_SHA1, ABC_SHA256, ABC_SHA512] {
+            let published = Digest::parse(text).expect("a digest");
+            assert_eq!(published.of(b"abc").hex(), published.hex());
+            assert!(published.matches(b"abc"));
+            assert!(!published.matches(b"abd"));
+            assert_eq!(published.of(b"abc").kind(), published.kind());
+        }
     }
 
     #[test]

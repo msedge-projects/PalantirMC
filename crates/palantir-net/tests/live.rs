@@ -587,6 +587,90 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
     );
 }
 
+/// Mojang's own metadata, which is the source this launcher has never used.
+///
+/// The shell this rewrite replaces reads `meta.prismlauncher.org`, a mirror:
+/// Prism fetches piston, rewrites it into its own shape and serves that. A
+/// mirror is the wrong answer here for a reason a fixture cannot show -- every
+/// field it drops is a field the launcher has to guess at -- and for a reason
+/// this test is written to catch: the shape this launcher parses has to be the
+/// shape Mojang actually publishes, not the shape a fixture and the code agreed
+/// on between themselves.
+///
+/// What is asserted is the chain a launch depends on, end to end: the manifest
+/// names a latest release, the release's `sha1` in that manifest is the digest
+/// of the version file that arrives, and that file parses into the main class,
+/// the library list and the asset index a launch is built from. Three real
+/// requests, and the third one is the document that decides what a classpath is.
+#[test]
+#[ignore = "live: reaches piston-meta.mojang.com"]
+fn the_live_piston_manifest_names_a_release_whose_version_file_parses() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, MetadataCache, PistonMeta, DEFAULT_TTL};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let pool = std::sync::Arc::new(HttpPool::default());
+    let meta = PistonMeta::new(MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL), pool);
+    let cancel = Cancel::new();
+    let backoff = Backoff::with_attempts(2);
+
+    let manifest = meta.manifest(&cancel, &backoff).expect("Mojang's version manifest");
+    assert!(
+        manifest.versions.len() > 500,
+        "a manifest of {} version(s) is not Minecraft's",
+        manifest.versions.len()
+    );
+    assert!(
+        manifest.releases().count() > 100,
+        "only {} release(s) in the list",
+        manifest.releases().count()
+    );
+    let release = manifest
+        .newest_release()
+        .expect("the manifest names a latest release that is not in its own list");
+    assert_eq!(release.id, manifest.latest_release);
+    assert!(
+        release.sha1.is_some(),
+        "the manifest publishes no digest for {}, so the version file cannot be checked",
+        release.id
+    );
+
+    assert!(
+        manifest.find(&manifest.latest_release).is_some(),
+        "the manifest names '{}' as latest and does not list it",
+        manifest.latest_release
+    );
+    let id = manifest.latest_release.clone();
+    let (id, file) = meta
+        .latest_release(&cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{id}: {e}"));
+    assert_eq!(id, manifest.latest_release);
+    assert_eq!(
+        file.main_class, "net.minecraft.client.main.Main",
+        "{id} launches through {}",
+        file.main_class
+    );
+    assert!(
+        file.libraries.len() > 20,
+        "{id} lists {} librar(ies), which is not a Minecraft version",
+        file.libraries.len()
+    );
+    assert!(
+        !file.has_order,
+        "{id} carries an 'order' key, which is Prism's addition rather than Mojang's"
+    );
+    assert_eq!(file.type_, "release");
+    let index = file
+        .asset_index
+        .as_ref()
+        .filter(|index| index.known)
+        .unwrap_or_else(|| panic!("{id} publishes no downloadable asset index"));
+    assert!(index.url.starts_with("https://"), "the asset index is at {}", index.url);
+    assert!(
+        !index.sha1.is_empty(),
+        "{id}'s asset index comes with no digest to check it against"
+    );
+}
+
 /// The content store against the CDN, which is where "never download the same
 /// jar twice" has to be true to be worth anything.
 ///

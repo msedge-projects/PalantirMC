@@ -1072,12 +1072,48 @@ two chunks into a body.
       request. A fixture would have agreed with the code on all of it; the CDN is
       the only thing that can disagree.
 
-### The engine's transcript, and the two runs that could not start
+- [x] G71: the launcher reads Mojang's own metadata, and checks every version
+      file against the digest the manifest published
+  CHECK: cargo test -p palantir-net --locked --lib engine::piston
+  EXPECT: test result: ok. 7 passed
+  EVIDENCE: 7 tests over `crates/palantir-net/src/engine/piston.rs`. This is the
+      source the launcher has never used: the shell it replaces reads
+      `meta.prismlauncher.org`, which is Prism's *mirror* of piston, rewritten
+      into Prism's shape. A mirror is wrong here for two reasons and both are
+      gated -- every field it drops is a field this launcher would have to guess
+      at, and a mirror that is a day behind is a launcher that does not know a
+      version was released. The manifest is parsed tolerantly in the two places
+      that tolerance is honest (an entry with no id or no URL is skipped; an
+      unreadable `sha1` leaves the version without a check rather than dropping
+      it) and strictly in the one place it is not: a manifest with no `latest`
+      pair cannot answer the first question it is asked, so it is refused. The
+      check is the part worth naming: the manifest publishes a `sha1` per version
+      file, `version()` verifies the body against it, and a mismatch *forgets the
+      cache entry* as well as reporting it -- a bad body left in the cache would
+      be served again on the next call, and this is a file that decides the
+      classpath. Both TTLs are shown working: three calls cost one request for
+      the list and one for the file.
+
+- [x] G72: the shape the launcher parses is the shape Mojang publishes
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_live_piston_manifest
+  EXPECT: test result: ok. 1 passed
+  EVIDENCE: the third live test to pass in this session, and the one that says
+      the source is real rather than agreed with: the live manifest is fetched,
+      it names a latest release and lists it, the release's published `sha1` is
+      the digest of the version file that arrives, and that file parses into a
+      main class of `net.minecraft.client.main.Main`, more than twenty libraries,
+      a downloadable asset index with a digest, and *no* `order` key -- which is
+      the field Prism adds and the reason a mirror and the thing it mirrors are
+      not interchangeable. Three real requests, and the last one is the document
+      a classpath comes from.
+
+### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
-Seven runs at the time of writing — `36033443993`, `36038333030`, `36143868395`,
-`36152873678`, `36158909795`, `36159099493` and `36162312983`, which every push
-since `3fb4ac5` adds to — each died in three to six seconds with zero steps and
+Nine runs at the time of writing, one per commit from `82232f9` onwards —
+`36033443993`, `36038333030`, `36143868395`, `36152873678`, `36156018946`,
+`36158909795`, `36159099493`, `36162312983` and `36162426595` — each died in three
+to six seconds with zero steps and
 the same annotation: `recent account payments have failed or your spending limit
 needs to be increased`. So no job ran, in either workflow, and there is no
 `test result` line from a runner to quote for any of them. The ids are written
@@ -1094,8 +1130,8 @@ $ cargo test --workspace --all-targets --locked
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
-    190 passed; 0 failed  (palantir-net, lib)
-      0 passed; 0 failed; 10 ignored  (palantir-net, tests/live.rs)
+    197 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 11 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
@@ -1109,10 +1145,11 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-961 tests pass, nothing in the correctness-deny set is failing, and all four
+968 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
-**two live tests have run against the real world and passed** (G68 and G70),
+**three live tests have run against the real world and passed** (G68, G70 and
+G72),
 which is a stronger kind of receipt than a local unit run. The services answering
 is the only part of this document that comes from outside this machine, and both
 of those tests were run here rather than by the runner, which cannot start.
