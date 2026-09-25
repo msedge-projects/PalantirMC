@@ -50,6 +50,7 @@ use iced::{
 };
 
 use crate::brand;
+use crate::color_theme::ColorTheme;
 use crate::icon;
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
@@ -1146,14 +1147,17 @@ impl Flags {
 
 /// The theme in force, as the generated tables index it.
 ///
-/// `Retro` is in the generated tables and is not reachable from here, which is a
-/// fact about the reference rather than a gap: its settings offer dark, light,
-/// OLED and system, and `.retro-mode` is not one of them.
-pub fn generated_theme(setting: crate::theme::ColorTheme, system_prefers_light: bool) -> Gen {
+/// All four of the reference's painted themes are here, retro included: it is a
+/// real look rather than a label for one of the others, and the settings pane that
+/// can offer it is [`crate::color_theme::ColorTheme::options`], which the new
+/// Settings modal uses. What this function does *not* do is decide whether retro
+/// should be offered -- that is the pane's rule, quoted in `color_theme`.
+pub fn generated_theme(setting: ColorTheme, system_prefers_light: bool) -> Gen {
     match setting.resolve(system_prefers_light) {
-        crate::theme::ColorTheme::Light => Gen::Light,
-        crate::theme::ColorTheme::Oled => Gen::Oled,
-        _ => Gen::Dark,
+        ColorTheme::Light => Gen::Light,
+        ColorTheme::Oled => Gen::Oled,
+        ColorTheme::Retro => Gen::Retro,
+        ColorTheme::Dark | ColorTheme::System => Gen::Dark,
     }
 }
 
@@ -1638,17 +1642,25 @@ mod tests {
 
     #[test]
     fn the_color_theme_setting_picks_a_generated_theme() {
-        use crate::theme::ColorTheme;
         assert_eq!(generated_theme(ColorTheme::Dark, false), Gen::Dark);
         assert_eq!(generated_theme(ColorTheme::Light, false), Gen::Light);
         assert_eq!(generated_theme(ColorTheme::Oled, false), Gen::Oled);
+        // Retro is a look of its own, not a dark synonym: the generated tables
+        // resolve it separately, and this is the line that used to fall through to
+        // `Gen::Dark` because the setting could not name it.
+        assert_eq!(generated_theme(ColorTheme::Retro, false), Gen::Retro);
+        assert_eq!(generated_theme(ColorTheme::Retro, true), Gen::Retro);
         // `System` follows the machine, and resolves to the ordinary dark look
         // rather than to OLED -- an OLED choice is the display's, not the OS's.
         assert_eq!(generated_theme(ColorTheme::System, false), Gen::Dark);
         assert_eq!(generated_theme(ColorTheme::System, true), Gen::Light);
-        // Retro is in the generated tables and is not offered by the reference's
-        // settings, so nothing reachable produces it.
+        // Every theme the reference paints is reachable from the setting, which is
+        // what makes `ColorTheme::options` the only place the dev-mode rule lives.
         assert_eq!(Gen::ALL.len(), 4);
+        for theme in ColorTheme::ALL {
+            let generated = generated_theme(theme, false);
+            assert!(Gen::ALL.contains(&generated), "{theme:?} resolves nowhere");
+        }
     }
 
     #[test]

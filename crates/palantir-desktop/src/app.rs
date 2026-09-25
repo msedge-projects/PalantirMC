@@ -64,8 +64,9 @@ use crate::native::{self, ResizeEdge};
 use crate::prefs::{self, Prefs};
 use crate::screenshots;
 use crate::scroll;
+use crate::color_theme::ColorTheme;
 use crate::settings;
-use crate::theme::{self, ColorTheme};
+use crate::theme;
 
 /// Maximum console lines kept in memory.
 pub const CONSOLE_LINE_CAP: usize = 20_000;
@@ -8522,7 +8523,7 @@ mod tests {
         // a theme whose colors were never resolved would fail to construct.
         // The card's own geometry is checked in `settings`, where the pane now
         // lives; this is the app-level check that the dialog reaches it.
-        for theme in ColorTheme::ALL {
+        for theme in ColorTheme::PAINTED {
             theme::set_color_theme(theme);
             let (_dir, paths) = test_paths();
             let mut app = PalantirApp::with_paths(paths);

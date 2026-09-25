@@ -117,6 +117,14 @@ jobs:
       - name: Icon set regeneration
         run: python tools/gen_icons.py --check
 
+      # And the same for the strings. The reference's English locale is the only
+      # authority on what its interface says, so the table the pages read from is
+      # compiled from it -- including the ICU plurals and choices, which a
+      # generator that silently got one arm wrong would hide. Regeneration is the
+      # check: byte-identical output, or this step fails.
+      - name: String table regeneration
+        run: python tools/gen_text.py --check
+
       # This tree has never been run through rustfmt, so formatting reports
       # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
       # has been committed and reviewed.

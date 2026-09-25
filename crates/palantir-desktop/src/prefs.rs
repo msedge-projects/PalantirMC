@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use palantir_core::paths::PalantirPaths;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::ColorTheme;
+use crate::color_theme::ColorTheme;
 
 /// The preferences file, under this product's own directory.
 ///

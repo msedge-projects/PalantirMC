@@ -28,6 +28,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+use crate::color_theme::ColorTheme;
+
 use iced::gradient::Linear;
 use iced::overlay::menu;
 use iced::theme::Palette as IcedPalette;
@@ -402,71 +404,19 @@ impl Palette {
 
 // ---- Color theme -------------------------------------------------------
 
-/// A color theme, as offered in Settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ColorTheme {
-    /// The dark look, and the default.
-    #[default]
-    Dark,
-    /// The light look.
-    Light,
-    /// Black surfaces, for OLED displays.
-    Oled,
-    /// Follow the operating system's app appearance.
-    System,
-}
+// The setting itself now lives in [`crate::color_theme`], which is where the
+// reference's own option list is written down; what stays here is the one thing
+// this module owns: which hand-written palette a choice paints with.
 
 impl ColorTheme {
-    /// Every theme, in the order Settings shows them: the two the reference
-    /// client offers first, then OLED, then the OS-following one.
-    pub const ALL: [ColorTheme; 4] =
-        [ColorTheme::Dark, ColorTheme::Light, ColorTheme::Oled, ColorTheme::System];
-
-    /// The label on the card.
-    pub const fn label(self) -> &'static str {
-        match self {
-            ColorTheme::Dark => "Dark",
-            ColorTheme::Light => "Light",
-            ColorTheme::Oled => "OLED",
-            ColorTheme::System => "Sync with system",
-        }
-    }
-
-    /// Stable id, for the settings file. Never localized and never reordered;
-    /// renaming one silently resets the theme of anyone who picked it.
-    pub const fn id(self) -> &'static str {
-        match self {
-            ColorTheme::Dark => "dark",
-            ColorTheme::Light => "light",
-            ColorTheme::Oled => "oled",
-            ColorTheme::System => "system",
-        }
-    }
-
-    /// Parse a stored id. Anything unrecognized is the default rather than an
-    /// error: a hand-edited or future settings file must still open.
-    pub fn from_id(id: &str) -> ColorTheme {
-        Self::ALL
-            .into_iter()
-            .find(|theme| theme.id() == id.trim().to_ascii_lowercase())
-            .unwrap_or_default()
-    }
-
-    /// The concrete look this theme means.
-    ///
-    /// `System` is the only theme that depends on the machine, and it resolves
-    /// to OLED when the OS is dark — an explicit OLED choice is the display's
-    /// business, not the OS's, so "system dark" means the ordinary dark look
-    /// and OLED stays something you ask for.
-    pub const fn resolve(self, system_prefers_light: bool) -> ColorTheme {
-        match self {
-            ColorTheme::System if system_prefers_light => ColorTheme::Light,
-            ColorTheme::System => ColorTheme::Dark,
-            other => other,
-        }
-    }
-
     /// The colors this theme paints with, following the OS for [`ColorTheme::System`].
+    ///
+    /// Retro falls to dark, and that is a deliberate gap rather than an oversight:
+    /// this palette has no retro colours -- the reference's retro is resolved by
+    /// [`crate::theme_gen`], which is what the rewrite paints from -- and the
+    /// appearance pane that used to iterate every theme now iterates
+    /// [`ColorTheme::PAINTED`], which leaves retro out. Nothing reachable from here
+    /// can ask for it.
     pub fn palette(self) -> Palette {
         match self.resolve(os_prefers_light()) {
             ColorTheme::Light => Palette::light(),
@@ -493,24 +443,21 @@ static OS_PREFERS_LIGHT: AtomicBool = AtomicBool::new(false);
 pub(crate) static THEME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The theme in force.
+///
+/// The stored number is an index into [`ColorTheme::ALL`] rather than a hand-written
+/// table of one, so adding a theme to the reference's list cannot leave these two
+/// functions out of step -- which is exactly what happened when retro arrived: a
+/// `match` on the old four variants stopped compiling, and a `match` written here
+/// would have silently answered Dark for it instead.
 pub fn color_theme() -> ColorTheme {
-    match COLOR_THEME.load(Ordering::Relaxed) {
-        1 => ColorTheme::Light,
-        2 => ColorTheme::Oled,
-        3 => ColorTheme::System,
-        _ => ColorTheme::Dark,
-    }
+    let index = usize::from(COLOR_THEME.load(Ordering::Relaxed));
+    ColorTheme::ALL.get(index).copied().unwrap_or_default()
 }
 
 /// Put a theme in force. The next `view()` paints with it.
 pub fn set_color_theme(theme: ColorTheme) {
-    let raw = match theme {
-        ColorTheme::Dark => 0,
-        ColorTheme::Light => 1,
-        ColorTheme::Oled => 2,
-        ColorTheme::System => 3,
-    };
-    COLOR_THEME.store(raw, Ordering::Relaxed);
+    let index = ColorTheme::ALL.iter().position(|candidate| *candidate == theme).unwrap_or(0);
+    COLOR_THEME.store(index as u8, Ordering::Relaxed);
 }
 
 /// Record the OS appearance, so [`ColorTheme::System`] can resolve to it.

@@ -29,6 +29,13 @@ mod app;
 mod brand;
 mod browse;
 mod catalog;
+/// The colour theme setting: the reference's own option list, its dev-mode rule
+/// for retro, and labels read from the generated string table.
+///
+/// Its own module rather than a corner of [`theme`]: the setting outlives the
+/// hand-written palette that the last stage of the rewrite deletes, and the list
+/// of themes is the reference's, not a palette's.
+mod color_theme;
 mod glyphs;
 mod gpu;
 /// Reporting a pointer crossing as a message: the only place a hover tween
@@ -95,6 +102,18 @@ mod scroll;
 #[allow(dead_code)]
 mod shell;
 mod settings;
+/// The runtime behind [`text_gen`]: the plural value, the English plural rule and
+/// the number formatting the reference's strings are filled in by.
+mod text;
+/// The reference client's own strings, compiled from its vendored English locale
+/// by `tools/gen_text.py`.
+///
+/// Not `cfg(test)`, for the same reason [`theme_gen`] and [`icons_gen`] are not:
+/// this is where the interface's copy comes from, so a page has nothing of its
+/// own to invent and every sentence can be traced back to the reference's key.
+/// The gate is a command -- `python tools/gen_text.py --check` -- rather than a
+/// test, because what it compares is this file against the locale it came from.
+mod text_gen;
 mod theme;
 /// The reference client's own design system, compiled from its vendored
 /// stylesheets by `tools/gen_theme.py`.

@@ -37,9 +37,10 @@ use crate::app::{hover_button, Message};
 use crate::brand;
 use crate::glyphs::glyph;
 use crate::native;
+use crate::color_theme::ColorTheme;
 use crate::prefs::Prefs;
 use crate::scroll;
-use crate::theme::{self, ColorTheme};
+use crate::theme;
 
 // ---- The vocabulary ------------------------------------------------------
 
@@ -921,7 +922,11 @@ fn with_pointer<'a>(widget: Element<'a, Message>, flag: Flag) -> Element<'a, Mes
 fn appearance<'a>(view: &View<'a>) -> Element<'a, Message> {
     let current = theme::color_theme();
     let mut cards: Column<'a, Message> = column![].spacing(12);
-    for couple in ColorTheme::ALL.chunks(2) {
+    // [`ColorTheme::PAINTED`] and not [`ColorTheme::ALL`]: this pane paints each
+    // card from the hand-written palette, which has no retro, so offering retro
+    // here would offer a card that looked like Dark. The five-theme list, with the
+    // reference's own dev-mode rule for retro, is the Settings modal's.
+    for couple in ColorTheme::PAINTED.chunks(2) {
         let mut line = row![].spacing(12);
         for choice in couple {
             line = line.push(theme_choice(*choice, *choice == current));
