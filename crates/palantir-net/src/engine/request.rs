@@ -78,6 +78,18 @@ impl Request {
     pub fn range(&self) -> Option<String> {
         self.offset.map(|offset| format!("bytes={offset}-"))
     }
+
+    /// The value of a header this request carries, matched case-insensitively.
+    ///
+    /// HTTP header names are case-insensitive, and a `Fetch` that compared them
+    /// as strings would fail to recognise a conditional request whenever a
+    /// caller spelled `if-none-match` the way the service does.
+    pub fn header_value(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(have, _)| have.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 /// What a fetch did.
@@ -106,12 +118,46 @@ impl Outcome {
     }
 }
 
+/// A whole body, and what the service said about it.
+///
+/// [`Outcome`] is about a *transfer*: how it continued, or that it could not.
+/// This is about a `GET` whose answer a caller is going to keep -- a metadata
+/// file, a version list -- where the two facts that decide whether it has to be
+/// asked for again are the validator the service gave ("is this still
+/// current?") and the answer to that question when it is asked. Neither is on
+/// the `get` path, because `bytes()` consumes the response and its headers with
+/// it; carrying them up here is what lets a cache revalidate rather than
+/// re-download.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Response {
+    /// The body. Empty when the service withheld one because the copy the
+    /// caller holds is still current.
+    pub body: Vec<u8>,
+    /// The validator to send back as `If-None-Match`, when the service gave one.
+    ///
+    /// `None` means this response cannot be revalidated and has to be fetched
+    /// again in full once it goes stale, which is the honest reading of a
+    /// service that sends no `ETag`.
+    pub etag: Option<String>,
+    /// Whether the body was withheld because the caller's copy is current.
+    pub not_modified: bool,
+}
+
+impl Response {
+    /// A body with no validator and nothing withheld.
+    pub fn whole(body: impl Into<Vec<u8>>) -> Response {
+        Response { body: body.into(), etag: None, not_modified: false }
+    }
+}
+
 /// Somewhere bytes come from.
 ///
-/// `Sync` because a pool of workers shares one: the engine's whole point is that
-/// several transfers run at once, and the thing they share must be usable from
-/// all of them.
-pub trait Fetch: Sync {
+/// `Send + Sync` because a pool of workers shares one *across threads*: the
+/// engine's whole point is that several transfers run at once, and the thing
+/// they share has to be usable from all of them -- which is a stronger claim than
+/// `Sync` alone, and one the scheduler needs in order to move its `Arc` onto a
+/// worker.
+pub trait Fetch: Send + Sync {
     /// Fetch the whole body.
     ///
     /// Used for what the engine parses rather than stores: a metadata file, a
@@ -130,6 +176,17 @@ pub trait Fetch: Sync {
         sink: &mut dyn Write,
         cancel: &Cancel,
     ) -> Result<Outcome, Error>;
+
+    /// Fetch a whole body and keep what the service said about it.
+    ///
+    /// The default is [`Fetch::get`] with no validator, which is what a fetch
+    /// that cannot see headers can honestly offer: a cache over it re-fetches
+    /// after its TTL instead of asking whether it has to. [`crate::engine::http::HttpPool`]
+    /// overrides this with the real thing, and that override is what makes a
+    /// stale metadata file cost a 304 rather than a download.
+    fn get_with(&self, request: &Request, cancel: &Cancel) -> Result<Response, Error> {
+        Ok(Response::whole(self.get(request, cancel)?))
+    }
 }
 
 // ---- A server that can be told what to do ---------------------------------
@@ -157,6 +214,19 @@ pub struct Route {
     pub chunk: usize,
     /// A token to cancel, and after how many chunks to do it.
     pub stop_after: Option<(usize, Cancel)>,
+    /// How long the server takes before it starts answering.
+    ///
+    /// The one knob that makes a scheduler test deterministic rather than
+    /// lucky: with one worker held by a slow job, a second job is *provably*
+    /// still in the queue when the test cancels it.
+    pub delay: Option<std::time::Duration>,
+    /// The validator this route announces as `ETag`, when it has one.
+    ///
+    /// A route with a validator answers `304` to a request carrying a matching
+    /// `If-None-Match`, which is the whole behaviour a TTL'd cache is built on.
+    /// A route without one never does, which is what a service that sends no
+    /// `ETag` looks like from here.
+    pub etag: Option<String>,
 }
 
 impl Default for Route {
@@ -168,6 +238,8 @@ impl Default for Route {
             status: 503,
             chunk: CHUNK,
             stop_after: None,
+            delay: None,
+            etag: None,
         }
     }
 }
@@ -199,6 +271,18 @@ impl Route {
     /// Write the body in `chunk`-sized pieces.
     pub fn chunked(mut self, chunk: usize) -> Route {
         self.chunk = chunk.max(1);
+        self
+    }
+
+    /// Take `delay` before answering, as a slow host does.
+    pub fn pausing(mut self, delay: std::time::Duration) -> Route {
+        self.delay = Some(delay);
+        self
+    }
+
+    /// Announce a validator, so a matching `If-None-Match` is answered `304`.
+    pub fn tagged(mut self, etag: &str) -> Route {
+        self.etag = Some(etag.to_string());
         self
     }
 
@@ -250,6 +334,18 @@ impl MapFetch {
         }
     }
 
+    /// Replace a whole route, which is how a test models a service that
+    /// *republishes* something: different bytes **and** a different validator,
+    /// where `set_body` alone would leave a validator that says the old bytes
+    /// are still current.
+    pub fn set_route(&self, url: &str, route: Route) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .routes
+            .insert(url.to_string(), route);
+    }
+
     /// Every request made, in order, failures included.
     ///
     /// The failures matter: "three attempts" is a claim about this list, and a
@@ -272,6 +368,20 @@ impl MapFetch {
         sink: &mut dyn Write,
         cancel: &Cancel,
     ) -> Result<Outcome, Error> {
+        let route = self.scripted(request)?;
+        write_route(request, &route, sink, cancel)
+    }
+
+    /// Record that a request arrived, apply the failure script to it, and
+    /// return what is left to serve.
+    ///
+    /// Split out of `serve` so that the conditional path applies the *same*
+    /// script: "two 503s and then the body" is a claim about every request to
+    /// that URL, and it has to hold whichever method made it. The lock is
+    /// released before the caller answers, because the caller is a server and a
+    /// server that holds a map's mutex while it writes a body is a server that
+    /// cannot serve two things at once.
+    fn scripted(&self, request: &Request) -> Result<Route, Error> {
         let mut inner = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         inner.calls.push(request.clone());
         let Some(route) = inner.routes.get_mut(&request.url) else {
@@ -281,37 +391,53 @@ impl MapFetch {
             route.failures -= 1;
             return Err(Error::status(&request.url, route.status));
         }
-        let route = route.clone();
-        drop(inner);
+        Ok(route.clone())
+    }
+}
 
-        let (start, outcome) = match request.offset {
-            // A server that will not continue, and one that cannot because the
-            // part file is longer than the body: both mean "start again from
-            // zero", and neither may write a byte first.
-            Some(_) if !route.honours_range => return Ok(Outcome::Ignored),
-            Some(offset) if offset > route.body.len() as u64 => return Ok(Outcome::Ignored),
-            Some(offset) => (offset as usize, Outcome::Resumed(0)),
-            None => (0, Outcome::Whole(0)),
-        };
-        let mut written = 0u64;
-        let mut chunks = 0usize;
-        for piece in route.body[start..].chunks(route.chunk) {
-            cancel.check()?;
-            sink.write_all(piece)
-                .map_err(|error| Error::http(&request.url, error.to_string()))?;
-            written += piece.len() as u64;
-            chunks += 1;
-            if let Some((after, token)) = &route.stop_after {
-                if chunks >= *after {
-                    token.cancel();
-                }
+/// Write a scripted route's body into `sink`, following the offset contract.
+///
+/// A free function rather than a method because it needs nothing from the map:
+/// what it writes is decided entirely by the request and the route, which is
+/// also why a test can call it directly to state the contract.
+fn write_route(
+    request: &Request,
+    route: &Route,
+    sink: &mut dyn Write,
+    cancel: &Cancel,
+) -> Result<Outcome, Error> {
+    if let Some(delay) = route.delay {
+        std::thread::sleep(delay);
+    }
+    let (start, outcome) = match request.offset {
+        // A server that will not continue, and one that cannot because the
+        // part file is longer than the body: both mean "start again from
+        // zero", and neither may write a byte first.
+        Some(_) if !route.honours_range => return Ok(Outcome::Ignored),
+        Some(offset) if offset > route.body.len() as u64 => return Ok(Outcome::Ignored),
+        Some(offset) => (offset as usize, Outcome::Resumed(0)),
+        None => (0, Outcome::Whole(0)),
+    };
+    let mut written = 0u64;
+    let mut chunks = 0usize;
+    // `chunk` is a public field, and `chunks(0)` panics: a route built by hand
+    // with a zero there is a test being sloppy, not a reason to abort a run.
+    for piece in route.body[start..].chunks(route.chunk.max(1)) {
+        cancel.check()?;
+        sink.write_all(piece)
+            .map_err(|error| Error::http(&request.url, error.to_string()))?;
+        written += piece.len() as u64;
+        chunks += 1;
+        if let Some((after, token)) = &route.stop_after {
+            if chunks >= *after {
+                token.cancel();
             }
         }
-        Ok(match outcome {
-            Outcome::Resumed(_) => Outcome::Resumed(written),
-            _ => Outcome::Whole(written),
-        })
     }
+    Ok(match outcome {
+        Outcome::Resumed(_) => Outcome::Resumed(written),
+        _ => Outcome::Whole(written),
+    })
 }
 
 impl Fetch for MapFetch {
@@ -330,6 +456,32 @@ impl Fetch for MapFetch {
         cancel: &Cancel,
     ) -> Result<Outcome, Error> {
         self.serve(request, sink, cancel)
+    }
+
+    /// The conditional path: answer `304` when the caller sent back the
+    /// validator this route announces.
+    ///
+    /// A whole-body read, like `get`, so an offset is refused rather than
+    /// half-served. A route with no validator can never answer `304`, which is
+    /// the behaviour of a service that sends no `ETag` -- and the reason a
+    /// cache in front of one has to re-download.
+    fn get_with(&self, request: &Request, cancel: &Cancel) -> Result<Response, Error> {
+        if request.offset.is_some() {
+            return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
+        }
+        let route = self.scripted(request)?;
+        if let Some(etag) = &route.etag {
+            if request.header_value("If-None-Match") == Some(etag.as_str()) {
+                return Ok(Response {
+                    body: Vec::new(),
+                    etag: Some(etag.clone()),
+                    not_modified: true,
+                });
+            }
+        }
+        let mut body = Vec::new();
+        write_route(request, &route, &mut body, cancel)?;
+        Ok(Response { body, etag: route.etag.clone(), not_modified: false })
     }
 }
 
@@ -453,5 +605,106 @@ mod tests {
         // The request was still made: the cancellation is noticed between
         // chunks, and there is no chunk before the response arrives.
         assert_eq!(fetch.count(), 1);
+    }
+
+    #[test]
+    fn a_header_is_found_whatever_case_the_caller_spelled_it_in() {
+        let request = Request::get(URL).header("if-none-match", "\"v1\"");
+        assert_eq!(request.header_value("If-None-Match"), Some("\"v1\""));
+        assert_eq!(request.header_value("IF-NONE-MATCH"), Some("\"v1\""));
+        assert_eq!(request.header_value("Accept"), None);
+    }
+
+    #[test]
+    fn a_validator_the_route_announced_comes_back_as_not_modified() {
+        let fetch = MapFetch::new().with_route(URL, Route::text("the body").tagged("\"v1\""));
+        let cancel = Cancel::new();
+        let first = fetch.get_with(&Request::get(URL), &cancel).expect("an answer");
+        assert_eq!(first.body, b"the body");
+        assert_eq!(first.etag.as_deref(), Some("\"v1\""));
+        assert!(!first.not_modified);
+
+        // The same route, asked with the validator it gave: no body at all, and
+        // the request still counted, because "still current" is an answer and
+        // not an absence of one.
+        let again = fetch
+            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &cancel)
+            .expect("an answer");
+        assert!(again.not_modified);
+        assert!(again.body.is_empty());
+        assert_eq!(again.etag.as_deref(), Some("\"v1\""));
+        assert_eq!(fetch.count(), 2);
+    }
+
+    #[test]
+    fn a_validator_that_does_not_match_is_answered_with_the_body() {
+        let fetch = MapFetch::new().with_route(URL, Route::text("changed").tagged("\"v2\""));
+        let answer = fetch
+            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .expect("an answer");
+        assert!(!answer.not_modified);
+        assert_eq!(answer.body, b"changed");
+        assert_eq!(answer.etag.as_deref(), Some("\"v2\""), "the new validator is kept");
+    }
+
+    #[test]
+    fn a_route_without_a_validator_always_sends_the_body() {
+        // What a service with no `ETag` looks like from here, and the reason a
+        // cache in front of one has to re-download rather than ask.
+        let fetch = MapFetch::new().with_route(URL, Route::text("body"));
+        let answer = fetch
+            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .expect("an answer");
+        assert!(!answer.not_modified);
+        assert_eq!(answer.body, b"body");
+        assert_eq!(answer.etag, None);
+    }
+
+    #[test]
+    fn the_scripted_failures_apply_to_a_conditional_read_too() {
+        let fetch = MapFetch::new().with_route(URL, Route::text("late").tagged("\"v1\"").failing(2, 503));
+        let cancel = Cancel::new();
+        for _ in 0..2 {
+            assert!(matches!(
+                fetch.get_with(&Request::get(URL), &cancel),
+                Err(Error::Http { status: Some(503), .. })
+            ));
+        }
+        let answer = fetch.get_with(&Request::get(URL), &cancel).expect("the third");
+        assert_eq!(answer.body, b"late");
+    }
+
+    /// A fetch that only offers `get`/`get_to`, as an implementation that
+    /// cannot see headers would.
+    struct Plain(MapFetch);
+
+    impl Fetch for Plain {
+        fn get(&self, request: &Request, cancel: &Cancel) -> Result<Vec<u8>, Error> {
+            self.0.get(request, cancel)
+        }
+
+        fn get_to(
+            &self,
+            request: &Request,
+            sink: &mut dyn Write,
+            cancel: &Cancel,
+        ) -> Result<Outcome, Error> {
+            self.0.get_to(request, sink, cancel)
+        }
+    }
+
+    #[test]
+    fn the_default_conditional_read_is_a_plain_get_with_nothing_kept() {
+        // The trait's default, and the honest one: a fetch that cannot see
+        // headers has no validator to offer, so the caller is told it has to
+        // re-fetch rather than being promised a `304` that can never come.
+        let plain = Plain(MapFetch::new().with_route(URL, Route::text("body").tagged("\"v1\"")));
+        let answer = plain
+            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .expect("an answer");
+        assert_eq!(answer.body, b"body");
+        assert_eq!(answer.etag, None);
+        assert!(!answer.not_modified);
+        assert_eq!(Response::whole("x"), Response { body: b"x".to_vec(), etag: None, not_modified: false });
     }
 }

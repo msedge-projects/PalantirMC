@@ -16,8 +16,10 @@
 //! | [`retry`] | Which failures get another attempt, and how long before it |
 //! | [`cancel`] | How a running transfer is stopped, mid-body, in milliseconds |
 //! | [`request`] | What a request is, and the seam every rule above is tested through |
+//! | [`cache`] | A TTL on every metadata answer, and a revalidation instead of a re-download |
 //! | [`http`] | The one `reqwest` client, the `Range` header, and the honest answer when a range is ignored |
 //! | [`download`] | One file: resumed if it can be, restarted if it must be, verified before it is done |
+//! | [`schedule`] | A queue of files over a few workers, where every job reports and any one can be stopped |
 //!
 //! ## Why the rules are here and not at the call sites
 //!
@@ -43,16 +45,20 @@
 //! returns zero at the end. That is `tests/live.rs`'s job, and it is a
 //! `#[ignore]`d test by design: a network that is down is not a passing test.
 
+pub mod cache;
 pub mod cancel;
 pub mod download;
 pub mod http;
 pub mod limit;
 pub mod request;
 pub mod retry;
+pub mod schedule;
 
+pub use cache::{Cached, MetadataCache, DEFAULT_TTL, IMMUTABLE_TTL};
 pub use cancel::Cancel;
 pub use download::{fetch_to_file, Download, Downloaded};
 pub use http::{HttpPool, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT};
 pub use limit::{Limit, Permit};
-pub use request::{Fetch, Outcome, Request};
+pub use request::{Fetch, Outcome, Request, Response};
 pub use retry::{is_retryable, Backoff};
+pub use schedule::{next_event, Event, Job, JobId, Scheduler, DEFAULT_WORKERS};

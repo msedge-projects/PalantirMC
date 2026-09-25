@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use crate::engine::cancel::Cancel;
 use crate::engine::limit::{Limit, Permit};
-use crate::engine::request::{Fetch, Outcome, Request, CHUNK};
+use crate::engine::request::{Fetch, Outcome, Request, Response, CHUNK};
 use crate::Error;
 
 /// The name this launcher gives itself, as a `User-Agent`.
@@ -84,12 +84,20 @@ impl HttpPool {
         self.timeout
     }
 
-    /// Send `request`, having taken a slot in the ceiling.
+    /// Send `request` and take a slot in the ceiling, without judging the
+    /// status.
     ///
     /// The permit lives as long as the response is being read, which is the
     /// point: the ceiling is about *connections open*, not about requests sent,
-    /// and a slow body holds its connection for a long time.
-    fn send(&self, request: &Request) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
+    /// and a slow body holds its connection for a long time. The status check
+    /// is not here because one answer is not a failure: a `304` on a
+    /// conditional request is the service saying "your copy is current", and a
+    /// caller that went through [`HttpPool::send`] would read it as an error and
+    /// re-download the body it already has.
+    fn send_any(
+        &self,
+        request: &Request,
+    ) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
         let permit = self.limit.acquire();
         let mut builder = self.client.get(&request.url).timeout(self.timeout);
         if let Some(range) = request.range() {
@@ -101,6 +109,13 @@ impl HttpPool {
         let response = builder
             .send()
             .map_err(|error| Error::http(&request.url, error.to_string()))?;
+        Ok((response, permit))
+    }
+
+    /// Send `request`, having taken a slot in the ceiling, and treat a non-2xx
+    /// answer as the failure it is.
+    fn send(&self, request: &Request) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
+        let (response, permit) = self.send_any(request)?;
         let status = response.status();
         if !status.is_success() {
             return Err(Error::status(&request.url, status.as_u16()));
@@ -177,6 +192,38 @@ impl Fetch for HttpPool {
         let written = self.drain(request, response, sink, cancel)?;
         Ok(if resumed { Outcome::Resumed(written) } else { Outcome::Whole(written) })
     }
+
+    /// The conditional `GET`: keep the validator, and accept `304` as an answer.
+    ///
+    /// This is the only place a non-2xx status is not an error, and it is
+    /// deliberate: `304 Not Modified` means the caller's copy is still current,
+    /// which is the whole point of a TTL that expires. The `ETag` is read from
+    /// the response before the body is, because `reqwest`'s response owns its
+    /// headers and consuming the body first loses them.
+    fn get_with(&self, request: &Request, cancel: &Cancel) -> Result<Response, Error> {
+        if request.offset.is_some() {
+            // Same refusal as `get`: a conditional request is about a document
+            // the caller holds whole.
+            return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
+        }
+        cancel.check()?;
+        let (response, _permit) = self.send_any(request)?;
+        let status = response.status();
+        let etag = response
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        if status == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(Response { body: Vec::new(), etag, not_modified: true });
+        }
+        if !status.is_success() {
+            return Err(Error::status(&request.url, status.as_u16()));
+        }
+        let mut body = Vec::new();
+        self.drain(request, response, &mut body, cancel)?;
+        Ok(Response { body, etag, not_modified: false })
+    }
 }
 
 #[cfg(test)]
@@ -205,6 +252,19 @@ mod tests {
         // And a zero setting is clamped rather than deadlocking a download.
         assert_eq!(HttpPool::new(0, Duration::from_secs(1)).limit().capacity(), 1);
         assert_eq!(HttpPool::default().limit().capacity(), DEFAULT_LIMIT);
+    }
+
+    #[test]
+    fn a_conditional_read_of_a_partial_file_is_refused_before_it_is_sent() {
+        // A conditional request is about a document the caller holds whole, so
+        // the offset is refused the same way `get` refuses one. 192.0.2.0/24 is
+        // unroutable, so a request that was actually sent would hang.
+        let pool = HttpPool::new(1, Duration::from_millis(50));
+        let error = pool
+            .get_with(&Request::from("http://192.0.2.1/x.json", 10), &Cancel::new())
+            .expect_err("an offset on a conditional read");
+        assert!(matches!(error, Error::Format { .. }), "{error:?}");
+        assert_eq!(pool.limit().available(), 1, "no slot was taken");
     }
 
     #[test]

@@ -971,9 +971,118 @@ all have to draw in four themes and in every state they can be in.
       which had asserted the two were different because that reads like a
       difference. The reference does not make one.
 
-### The transcript, and why it is standing in for a run
+### The engine, and what a cache is for
 
-CI could not schedule these two stages: runs `36038333030` and `36033443993`
+G66 to G68 are the first half of stage 4. Unlike the page gates they are not
+about what a person sees: the engine is the layer whose whole job is to be
+*right* about things nobody can watch — how many requests are in flight, what
+happens to a half-written file when a window closes, whether "still current" was
+the service's answer or the cache's assumption. So the gates are statements about
+behaviour under conditions a test can produce and a user cannot: a server that
+fails twice and then answers, a server that ignores a `Range`, a token cancelled
+two chunks into a body.
+
+- [x] G66: every download reports exactly once, and the queue can be stopped one
+      job at a time or all at once
+  CHECK: cargo test -p palantir-net --locked --lib engine::schedule
+  EXPECT: test result: ok. 7 passed
+  EVIDENCE: 7 tests over `crates/palantir-net/src/engine/schedule.rs`. The
+      promise a progress list is a fold over: one `Started` and exactly one of
+      `Finished`/`Failed`/`Cancelled` per job, asserted per id rather than by
+      counting, and `Idle` once per quiet moment — including a second batch
+      submitted after the first `Idle`, which is how a modpack installs its own
+      dependencies. `Scheduler::cancel` on a job that is still *in the queue* is
+      the case that decides whether cancelling a thousand files takes as long as
+      the one in flight, and it is asserted against a queue made provable by a
+      slow route: one worker, held, so the second job is certainly not started.
+      `Scheduler::shutdown` cancels first and joins after, so the eight jobs in
+      that test report as cancelled without a request — one of them is what a
+      page folding events into a list depends on, because an entry that never
+      ends is a window that will not close.
+
+- [x] G67: a metadata answer is believed for a TTL, then revalidated rather than
+      downloaded again
+  CHECK: cargo test -p palantir-net --locked --lib engine::cache
+  EXPECT: test result: ok. 13 passed
+  EVIDENCE: 13 tests over `crates/palantir-net/src/engine/cache.rs`. The three
+      paths are each held: inside the TTL the answer comes off the disk and the
+      `Fetch` is never called (a second lookup with an empty map would be a 404
+      if a request were made), past the TTL the validator goes back as
+      `If-None-Match` and a `304` moves the stamp without moving a byte — which is
+      asserted by a request count of 2 and the header on the second one — and past
+      the TTL with *no* validator the body comes down again, which is the honest
+      failure of a service that sends no `ETag` rather than a cache that would
+      serve last week's list forever. Four rules that only bite under a condition
+      are tested as such: a `500` leaves yesterday's copy and its age exactly where
+      they were, a `503` twice is waited out (the waits are recorded, not slept:
+      250 ms then 500 ms, which is `Backoff`'s own arithmetic and not a second
+      policy), a cancelled lookup stores nothing and is not retried, and a `304`
+      with nothing stored is a failure rather than an empty file nobody can ever
+      correct. The body file is asserted to be the bytes the service sent — no
+      envelope — because the metadata layers above this one read the cache
+      directory directly.
+
+- [x] G68: the revalidation is the service's behaviour, not the double's
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_metadata_cache_revalidates
+  EXPECT: test result: ok. 1 passed
+  EVIDENCE: the one live test that has run in this session, and it passed
+      against the real host: `revalidated with "6ab45c1a-6bc5e", no body sent`.
+      `meta.prismlauncher.org` sends an `ETag` on
+      `/v1/net.minecraft/index.json` and answers `304 Not Modified` to it, so the
+      expensive half of the cache is real rather than hoped for — a version list
+      that has not moved costs a header exchange instead of the document. The
+      test does not *demand* a `304`, because whether a host sends a validator is
+      not something the engine may assume, and it says which of the two happened;
+      what it insists on is the same document either way, and that a second cache
+      over the same directory — a launcher restart — can read the entry the first
+      one wrote. That is the round trip the unit tests can only simulate.
+
+### The engine's transcript, and the two runs that could not start
+
+The four pushes of stages 2 and 3, and of the engine's first two slices, went to
+a runner that could not schedule a job: runs `36033443993`, `36038333030`,
+`36143868395` and `36152873678` each died in four to five seconds with zero steps
+— `recent account payments have failed or your spending limit needs to be
+increased` — so no job ran, in either workflow, and there is no `test result` line
+from a runner to quote for any of them. The commands `ci.yml` runs were run here
+instead, with the same flags, on the tree that was pushed:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    554 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+      6 passed; 0 failed  (palantir-gui, lib)
+     31 passed; 0 failed  (palantir-loader, lib)
+    178 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 9 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
+    (84 warnings, every one warn-by-default; none of them in the files stages 2,
+     3 or 4 added, and most of them in the shell this rewrite deletes)
+
+$ python tools/gen_theme.py --check && python tools/gen_icons.py --check && python tools/gen_text.py --check && python tools/gen_tokens.py --check
+theme generation is byte-identical
+icon generation is byte-identical
+text generation is byte-identical
+token generation is byte-identical
+```
+
+949 tests pass, nothing in the correctness-deny set is failing, and all four
+generated files match their sources. The caveat in the transcript below -- that a
+local run is not a clean checkout -- applies here too, with one thing added: **one live test has run against the real world and
+passed** (G68), which is a stronger kind of receipt than a local unit run — it is
+the actual service answering, and it is the only part of this document that comes
+from outside this machine. Re-running the push when the account can schedule jobs
+is still the first thing to do with this tree.
+
+### The transcript of the earlier pushes, for comparison
+
+That is what the run looks like now; this is what it looked like before the
+engine's slices, quoted so the two can be read against each other. CI could not
+schedule stages 2 and 3 either: runs `36038333030` and `36033443993`
 both died in five seconds with zero steps — `recent account payments have
 failed` — so no job ran and there is no `test result` line from a runner to quote.
 The three commands `ci.yml` runs were run here instead, with the same flags, on
@@ -1006,7 +1115,8 @@ otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
 makes the runner the authority. What it does say is that all 875 tests pass, that
 nothing in the correctness-deny set is failing, and that all three generated
-files match their sources. Re-running the push when the account can schedule jobs
+files match their sources; the run above, at 949, is the same set after the
+engine's slices landed. Re-running the push when the account can schedule jobs
 is the first thing to do with this tree.
 
 ## What these gates cannot say
@@ -1023,3 +1133,18 @@ is the first thing to do with this tree.
   has been reasoned from the reference's own stylesheet rather than photographed
   on both clients side by side, which is the one thing `G8` above asks for and
   this page does not yet have.
+- **No gate measures the engine's ceiling under load.** `Limit` is tested
+  directly, including the peak it reached under contention, but nothing asserts
+  that eleven simultaneous downloads draw eight permits from `HttpPool`: that
+  needs a server to be slow on purpose, and there is no such server here. The
+  claim currently rests on the code path -- one `acquire` per request, held for
+  the body's life -- and on the two live tests that do make real requests.
+- **No gate says a service tells the truth about a validator.** The cache is
+  tested against a service that republishes (new body, new `ETag`) and one that
+  sends no `ETag` at all, but a service that changes a body and keeps the same
+  `ETag` would be believed, and no test can produce that from outside the
+  engine: the only defence is the digest inside the document, which is the
+  caller's to check.
+- **No page has been switched onto the engine yet.** The pages still name stage
+  4 when they have no answer, so nothing in this document says the interface is
+  served by any of the code above; the seam is the next two slices' work.

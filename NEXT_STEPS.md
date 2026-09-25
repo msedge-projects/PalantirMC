@@ -35,11 +35,12 @@ than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
 push superseded it. A cancelled run is not a passing one, and it is not a failing
 one either.
 
-**Stages 2 and 3 were pushed to a runner that could not start.** Runs
-`36038333030` and `36033443993` died in five seconds with zero steps and the same
-message -- `recent account payments have failed` -- which is a billing state and
-not a verdict on the tree; neither job was scheduled, so neither could report
-the expected `test result: ok`. The tree was therefore measured on the machine it
+**Stages 2, 3 and the engine's slices were pushed to a runner that could not
+start.** Runs `36038333030`, `36033443993`, `36143868395` and `36152873678` died
+in four to five seconds with zero steps and the same message -- `recent account
+payments have failed or your spending limit needs to be increased` -- which is a
+billing state and not a verdict on the tree; none of the jobs was scheduled, so
+none could report the expected `test result: ok`. The tree was therefore measured on the machine it
 was written on, with the same three commands CI runs, and the transcripts are in
 [`GATES.md`](GATES.md) beside the gates they evidence. **This is a weaker receipt
 than a green run and it is recorded as one**: the local run is the same compiler
@@ -64,10 +65,12 @@ The workspace is now four crates plus the shell:
 | `palantir-gui` | The view-model the shell reads. Goes with `app.rs`. |
 | `palantir-desktop` | The window: shell, pages, engine glue, platform code. |
 
-Backend suites as run in this session: `palantir-core` 168, `palantir-gui` 8,
-`palantir-loader` 6, `palantir-net` 31 plus 104, with 7 live tests ignored by
-design. The desktop crate's own 461 are re-run by CI, which is the authority for
-the full workspace run.
+Backend suites as run in this session: `palantir-core` 168 plus 8, `palantir-gui`
+6, `palantir-loader` 31, `palantir-net` 178, with 9 live tests ignored by design --
+949 in the workspace, and the desktop crate's 554 are in it. Which binary each
+number belongs to is written out in [`GATES.md`](GATES.md), because a bare list of
+numbers is how the earlier version of this paragraph managed to mislabel three of
+them.
 
 ## The plan, and where each stage stands
 
@@ -77,7 +80,7 @@ the full workspace run.
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | Not started |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, and a metadata cache that revalidates instead of re-downloading are all in and gated (G66-G68). What is not in is the content store, the Modrinth and piston metadata layers, and the seam that lets a page use any of it -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -355,6 +358,82 @@ What stage 3 does **not** have yet, named rather than implied:
 * **Settings is still a placeholder modal.** The colour theme it will offer is
   already the reference's own list, with retro behind dev mode, in
   `color_theme.rs`.
+
+## What stage 4 has landed so far
+
+`crates/palantir-net/src/engine/` is the backend the pages will be served by. It
+is eight modules, and each one exists because the launcher has had the
+alternative:
+
+| Module | The thing it replaces |
+| --- | --- |
+| `http` | One `reqwest` client per call, which throws away the connection and both caches every time; one `User-Agent`, one timeout, one process-wide ceiling |
+| `limit` | Two different thread counts that meant two different things, and no cap at all on metadata requests made beside them |
+| `retry` | A policy per call site, which is a different policy per call site: 408/425/429 and 5xx are worth another attempt, a 4xx is the server saying the client is wrong |
+| `cancel` | Nothing: a phase of 1200 files ran to completion, on the calling thread's terms |
+| `request` | The seam. `reqwest` cannot be reached from a unit test, so every rule above is stated against a `Fetch` and exercised with a server that can be told what to do |
+| `download` | A transfer that always started from zero. Now: resume from the `.part` file's length, verify the digest before the rename, and delete a part file that fails it |
+| `schedule` | A bulk downloader that could not be stopped. Now: submitted jobs with ids, one event per job, cancel one or all, and an `Idle` a caller can wait for instead of polling |
+| `cache` | A metadata "cache" whose only rule was "if the file is on disk, use it" -- which is a write-once archive, and how a launcher comes to offer a loader build that was published last year |
+
+The cache is the one worth reading twice, because it is the only part of this
+that changes what a user sees. An entry has an age; inside its TTL the bytes on
+disk are the answer and no request is made, past it the validator the service
+gave goes back as `If-None-Match`, and a `304` moves the stamp without moving a
+byte. Two TTLs, because the two things are not alike: a version *list* changes whenever
+somebody publishes a build, so it is believed for half an hour, and a version
+*file* describes something already released, so it is believed for a year. The body is stored as the
+service sent it, with the age and the validator in a stamp beside it, so the
+Mojang and Modrinth layers that come next can read the same directory.
+
+**The live measurement, which is the part of this that is not local.**
+`meta.prismlauncher.org` sends an `ETag` on
+`/v1/net.minecraft/index.json` and answers `304 Not Modified` to it -- the
+recorded line from the test that ran it is
+`revalidated with "6ab45c1a-6bc5e", no body sent` (`tests/live.rs`,
+`#[ignore]`d by design, run here with `--ignored`). So the expensive half of the
+cache is a measurement rather than an assumption: a version list that has not
+moved costs a header exchange instead of the document. It is also the only
+receipt in this document that came from outside this machine.
+
+Three mistakes the engine's own tests caught, all of them invisible by
+inspection and all of them the kind that only shows up in front of a user:
+
+1. **The wait before an attempt was one step off.** `delay(n)` means "the wait
+   *before* attempt n", so the first retry was immediate and a policy that said
+   three attempts made four. Now the call is `delay(tries + 1)` and the test
+   counts the requests rather than the successes -- a retry and a single
+   successful request are the same thing to a test that only counts bodies.
+2. **A resumed download reported itself as a fresh one.** `finish` derived the
+   state from the byte count, and a resumed transfer's byte count is the whole
+   file. The state is passed in now, because it is something the transfer knows
+   and the file does not.
+3. **The backoff's arithmetic went through `as_secs_f32() * factor`.** In f32,
+   `0.1 * 2.0` is not `0.2`: a "200 ms" wait came out 200000003 ns. It is
+   integer nanoseconds now, which is the fix that makes the policy testable at
+   all -- a wait that cannot be stated cannot be asserted.
+
+Two more the tests caught in the scheduler slice, both about ordering rather
+than arithmetic: `submit` has to raise the outstanding count *before* the job is
+queued, or a burst of submits can race the `Idle` that says the queue is
+finished; and `Scheduler::shutdown` must cancel before it drops the queue, so the
+jobs still in flight see a cancelled token and report instead of being counted as
+work nobody stopped.
+
+What stage 4 does **not** have yet, named rather than implied:
+
+* **The hash-keyed content store.** The spec's "compute a digest, look it up
+  locally, download only what is missing" is not written; `fetch_to_file`
+  verifies a digest it is handed, which is the half that has to be right before
+the store can be built on top.
+* **Mojang's piston meta and the Modrinth API as metadata sources.** The cache
+  is transport-agnostic on purpose and nothing above it exists yet, so the only
+  metadata path in use is still `meta.rs`'s write-once one.
+* **The seam that lets a page use any of this.** No `Command` or `Subscription`
+  in `store.rs` is wired to the engine, so the pages still answer with the
+  sentence that names stage 4 -- which is why this section can be this long
+  without a single page changing. It is the next slice, and it is the one that
+  turns all of the above into something a person can see.
 
 ## Where the old sections went
 

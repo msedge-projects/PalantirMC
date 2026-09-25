@@ -647,3 +647,70 @@ fn a_ranged_request_really_continues_from_the_offset_it_asked_for() {
         "the bytes around the seam are not the bytes of the body"
     );
 }
+
+/// The metadata cache against the service it will actually be pointed at.
+///
+/// The unit tests hold the cache's rules against a scripted server; what they
+/// cannot say is whether this host speaks the same protocol. Three things are
+/// checked here that only a real answer can settle:
+///
+/// * a first lookup fetches, stores both halves and reports that it was not
+///   free, and the entry it wrote is readable by a second cache over the same
+///   directory -- which is what a launcher restart does;
+/// * a lookup inside the TTL is answerable from the disk alone, which is
+///   structural: `fresh` takes no `Fetch` at all;
+/// * a lookup past the TTL either revalidates or re-downloads, and the answer is
+///   the same document either way.
+///
+/// The TTL is zero -- the one value that means "always ask" -- so the second
+/// request exercises the expired path every run instead of on a lucky clock.
+/// Whether this host sends an `ETag` is not something the engine may assume, so
+/// the test says which of the two happened rather than failing over the one this
+/// service chose; what it does insist on is that a conditional request is never
+/// an error and never a different document.
+#[test]
+#[ignore = "live: needs meta.prismlauncher.org"]
+fn the_metadata_cache_revalidates_but_answers_the_same_document() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, MetadataCache, IMMUTABLE_TTL};
+
+    let dir = std::env::temp_dir().join("palantirmc-live-metadata-cache");
+    let _ = std::fs::remove_dir_all(&dir);
+    let url = format!("{DEFAULT_META_BASE_URL}/net.minecraft/index.json");
+    let pool = HttpPool::default();
+    let cancel = Cancel::new();
+    let cache = MetadataCache::new(&dir, Duration::ZERO);
+
+    let first = cache
+        .get(&url, &pool, &cancel, &Backoff::with_attempts(2))
+        .unwrap_or_else(|e| panic!("{url}: {e}"));
+    assert!(
+        first.body.len() > 1000,
+        "a version list of {} bytes is not one",
+        first.body.len()
+    );
+    assert!(!first.from_disk, "the first lookup had nowhere to read from");
+    assert_eq!(cache.len(), 1, "the entry was written to disk");
+    assert!(cache.cached(&url).is_some(), "and it has an age on it");
+
+    // A second cache over the same directory is a second launcher run: the
+    // entry has to be readable by the layout alone.
+    let restart = MetadataCache::new(&dir, IMMUTABLE_TTL);
+    let held = restart
+        .fresh(&url)
+        .unwrap_or_else(|| panic!("a restart cannot read the entry it just wrote"));
+    assert_eq!(held.body, first.body, "the bytes survived the round trip");
+    assert!(held.from_disk);
+
+    let second = cache
+        .get(&url, &pool, &cancel, &Backoff::with_attempts(2))
+        .unwrap_or_else(|e| panic!("{url} again: {e}"));
+    assert_eq!(second.body, first.body, "the same document either way");
+    match (&first.etag, second.from_disk) {
+        (Some(etag), true) => println!("revalidated with {etag}, no body sent"),
+        (Some(etag), false) => {
+            println!("sent {etag} back and the host answered with the body anyway")
+        }
+        (None, false) => println!("this host sends no ETag, so the body came down again"),
+        (None, true) => panic!("a 304 without a validator is not a protocol this host speaks"),
+    }
+}
