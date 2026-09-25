@@ -1074,12 +1074,16 @@ two chunks into a body.
 
 ### The engine's transcript, and the two runs that could not start
 
-The five pushes of stages 2 and 3, and of the engine's slices, went to a runner
-that could not schedule a job: runs `36033443993`, `36038333030`, `36143868395`,
-`36152873678` and `36158909795` each died in four to five seconds with zero steps
-— `recent account payments have failed or your spending limit needs to be
-increased` — so no job ran, in either workflow, and there is no `test result` line
-from a runner to quote for any of them. The commands `ci.yml` runs were run here
+Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
+Seven runs at the time of writing — `36033443993`, `36038333030`, `36143868395`,
+`36152873678`, `36158909795`, `36159099493` and `36162312983`, which every push
+since `3fb4ac5` adds to — each died in three to six seconds with zero steps and
+the same annotation: `recent account payments have failed or your spending limit
+needs to be increased`. So no job ran, in either workflow, and there is no
+`test result` line from a runner to quote for any of them. The ids are written
+out because a blocked run is a fact about the account and not a verdict on the
+tree, and the only way a later reader can tell the two apart is if both are named
+the same way. The commands `ci.yml` runs were run here
 instead, with the same flags, on the tree that was pushed:
 
 ```

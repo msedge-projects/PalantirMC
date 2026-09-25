@@ -36,8 +36,9 @@ push superseded it. A cancelled run is not a passing one, and it is not a failin
 one either.
 
 **Stages 2, 3 and the engine's slices were pushed to a runner that could not
-start.** Runs `36038333030`, `36033443993`, `36143868395`, `36152873678` and
-`36158909795` died in four to five seconds with zero steps and the same message
+start.** Seven runs at the time of writing -- `36038333030`, `36033443993`,
+`36143868395`, `36152873678`, `36158909795`, `36159099493` and `36162312983` --
+died in three to six seconds with zero steps and the same message
 -- `recent account payments have failed or your spending limit needs to be
 increased` -- which is a billing state and not a verdict on the tree; none of the
 jobs was scheduled, so none could report the expected `test result: ok`. The tree
