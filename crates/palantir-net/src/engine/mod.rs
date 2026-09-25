@@ -22,6 +22,7 @@
 //! | [`download`] | One file: resumed if it can be, restarted if it must be, verified before it is done |
 //! | [`schedule`] | A queue of files over a few workers, where every job reports and any one can be stopped |
 //! | [`piston`] | Mojang's own version manifest and version files, checked against the digests it publishes |
+//! | [`modrinth`] | Modrinth's API over the same cache, with a TTL short enough for a search |
 //!
 //! ## Why the rules are here and not at the call sites
 //!
@@ -53,6 +54,7 @@ pub mod content;
 pub mod download;
 pub mod http;
 pub mod limit;
+pub mod modrinth;
 pub mod piston;
 pub mod request;
 pub mod retry;
@@ -64,6 +66,7 @@ pub use content::{ContentStore, Digest, Stored};
 pub use download::{fetch_to_file, Download, Downloaded};
 pub use http::{HttpPool, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT};
 pub use limit::{Limit, Permit};
+pub use modrinth::{ModrinthApi, Search, SEARCH_TTL};
 pub use piston::{Manifest, ManifestVersion, PistonMeta, PISTON_MANIFEST_URL};
 pub use request::{Fetch, Outcome, Request, Response};
 pub use retry::{is_retryable, Backoff};

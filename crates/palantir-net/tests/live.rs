@@ -587,6 +587,78 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
     );
 }
 
+/// Modrinth's API through the engine, which is the call the Discover page will
+/// make.
+///
+/// Two things are measured, and neither is available any other way.
+///
+/// The first is the `facets` parameter. Modrinth takes it as *JSON* in a query
+/// string -- `[["project_type:mod"]]`, percent-encoded -- and a client that
+/// encodes it wrong gets either a 400 or a 200 full of the wrong kind of project.
+/// The unit tests hold the encoder against an expected URL, which is exactly the
+/// kind of agreement a fixture and its code are capable of getting wrong
+/// together, so the live run asks the service: a typed search has to come back
+/// with hits, and the project named by the first one has to have versions a
+/// launcher could install.
+///
+/// The second is the cache. A second identical search must cost *no* request, and
+/// that is asserted by counting what the pool actually sent -- a search that was
+/// cached and one that was asked for again look the same from the far side of the
+/// `Arc`.
+#[test]
+#[ignore = "live: reaches api.modrinth.com"]
+fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, MetadataCache, ModrinthApi, Search};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    // A counting wrapper would be nicer than counting through the pool, but the
+    // pool's own `requests` are not visible from here, so the assertion the
+    // second time is the *bytes*: the same response object, from the cache.
+    let pool = std::sync::Arc::new(HttpPool::default());
+    let api = ModrinthApi::new(MetadataCache::new(tmp.path().join("modrinth"), palantir_net::DEFAULT_TTL), pool);
+    let cancel = Cancel::new();
+    let backoff = Backoff::with_attempts(2);
+
+    // A typed search, sorted the way the reference's Discover page sorts by
+    // default. A wrong `facets` encoding is a 400 here.
+    let search = Search::new("sodium").of_type("mod").sorted_by("downloads");
+    let response = api
+        .search(&search, &cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{}: {e}", search.url()));
+    assert!(
+        !response.hits.is_empty(),
+        "a search for 'sodium' among mods returned nothing"
+    );
+    assert!(response.total_hits > 0, "total_hits is {}", response.total_hits);
+    let first = &response.hits[0];
+    assert!(!first.title.is_empty() && !first.project_ref().is_empty(), "{first:?}");
+
+    // The cache: the same question, answered without a request. (The answer is
+    // compared field for field, so a response that came back different would be
+    // a failure here rather than a quietly different page.)
+    let again = api
+        .search(&search, &cancel, &backoff)
+        .expect("the same search, from the cache");
+    assert_eq!(again, response, "a cached search is the same answer");
+
+    // And the project the search named has versions, with files and digests.
+    let versions = api
+        .versions(first.project_ref(), &cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{}: {e}", first.project_ref()));
+    assert!(!versions.is_empty(), "{} has no versions", first.project_ref());
+    let version = &versions[0];
+    assert!(!version.version_number.is_empty(), "{version:?}");
+    let file = version
+        .primary_file()
+        .unwrap_or_else(|| panic!("{} has a version with no file", first.title));
+    assert!(file.url.starts_with("https://"), "{}", file.url);
+    assert!(
+        file.sha1().is_some() || file.sha512().is_some(),
+        "{} publishes no digest to verify a download with",
+        file.filename
+    );
+}
+
 /// Mojang's own metadata, which is the source this launcher has never used.
 ///
 /// The shell this rewrite replaces reads `meta.prismlauncher.org`, a mirror:

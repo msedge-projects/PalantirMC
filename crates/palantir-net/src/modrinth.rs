@@ -20,7 +20,46 @@ pub const MODRINTH_BASE_URL: &str = "https://api.modrinth.com/v2";
 /// Prism's browsing page size. Use [`search_url_with_project_type`] when the
 /// caller is browsing one of Modrinth's content tabs.
 pub fn search_url(query: &str) -> String {
-    format!("{}/search?query={}&limit=50", MODRINTH_BASE_URL, percent_encode(query))
+    search_url_parts(query, None, None, 50, 0)
+}
+
+/// Build a search URL from the parts a browsing interface actually has, each of
+/// them optional except the query.
+///
+/// This is the one place the parameters are spelled out, and the builders around
+/// it are this function with a field filled in: a caller that knows it wants a
+/// project type should not have to write `None` for a sort order, and two
+/// encoders for the same query string is how two pages come to send subtly
+/// different ones.
+///
+/// The parts that are present are emitted in the order the API documents, and an
+/// absent one is left out rather than sent empty: `facets=` with nothing after it
+/// asks Modrinth to match a project type called `""`, which returns nothing and
+/// looks like a broken search rather than a missing filter.
+pub fn search_url_parts(
+    query: &str,
+    project_type: Option<&str>,
+    index: Option<&str>,
+    limit: u32,
+    offset: u32,
+) -> String {
+    let mut url = format!(
+        "{}/search?query={}&limit={}",
+        MODRINTH_BASE_URL,
+        percent_encode(query),
+        limit.max(1)
+    );
+    if offset > 0 {
+        url.push_str(&format!("&offset={offset}"));
+    }
+    if let Some(project_type) = project_type.filter(|kind| !kind.is_empty()) {
+        let facets = format!(r#"[["project_type:{project_type}"]]"#);
+        url.push_str(&format!("&facets={}", percent_encode(&facets)));
+    }
+    if let Some(index) = index.filter(|order| !order.is_empty()) {
+        url.push_str(&format!("&index={}", percent_encode(index)));
+    }
+    url
 }
 
 /// Build a Modrinth search URL constrained to one project type.
@@ -30,12 +69,7 @@ pub fn search_url(query: &str) -> String {
 /// from hand-rolling subtly different filters and means resource-pack searches
 /// never return mods that the install path cannot handle.
 pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
-    let facets = format!(r#"[["project_type:{project_type}"]]"#);
-    format!(
-        "{}&facets={}",
-        search_url(query),
-        percent_encode(&facets)
-    )
+    search_url_parts(query, Some(project_type), None, 50, 0)
 }
 
 /// Build a Modrinth search URL constrained to one project type *and* sorted by
@@ -47,13 +81,7 @@ pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
 /// Discover page offers the same list, in the same order, behind its Sort
 /// control.
 pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String {
-    let facets = format!(r#"[["project_type:{project_type}"]]"#);
-    format!(
-        "{}&facets={}&index={}",
-        search_url(query),
-        percent_encode(&facets),
-        percent_encode(index)
-    )
+    search_url_parts(query, Some(project_type), Some(index), 50, 0)
 }
 
 /// Build the version-list URL for a project id or slug.
@@ -313,6 +341,35 @@ mod tests {
         assert_eq!(
             search_url_with_project_type("faithful", "resourcepack"),
             "https://api.modrinth.com/v2/search?query=faithful&limit=50&facets=%5B%5B%22project_type%3Aresourcepack%22%5D%5D"
+        );
+    }
+
+    #[test]
+    fn a_search_url_leaves_out_the_parts_it_does_not_have() {
+        // The three builders above are this one with fields filled in, and the
+        // two rules that matter are here: an absent part is *omitted* rather than
+        // sent empty (`facets=` with nothing after it asks for a project type
+        // called `""` and returns nothing, which reads as a broken search), and
+        // the two optional parts keep the order the API documents.
+        assert_eq!(
+            search_url_parts("sodium", None, None, 20, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20"
+        );
+        assert_eq!(
+            search_url_parts("sodium", Some("mod"), None, 20, 40),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20&offset=40\
+             &facets=%5B%5B%22project_type%3Amod%22%5D%5D"
+        );
+        // An empty string for a filter is an absent filter, not a filter that
+        // matches nothing.
+        assert_eq!(
+            search_url_parts("sodium", Some(""), Some(""), 20, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20"
+        );
+        // And a limit of zero would be a page with no rows in it.
+        assert_eq!(
+            search_url_parts("sodium", None, Some("newest"), 0, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=1&index=newest"
         );
     }
 

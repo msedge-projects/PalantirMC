@@ -1107,13 +1107,51 @@ two chunks into a body.
       not interchangeable. Three real requests, and the last one is the document
       a classpath comes from.
 
+- [x] G73: Modrinth's API is read through the engine's own cache and ceiling
+  CHECK: cargo test -p palantir-net --locked --lib engine::modrinth
+  EXPECT: test result: ok. 7 passed
+  EVIDENCE: 7 tests over `crates/palantir-net/src/engine/modrinth.rs`, plus a
+      new test over the URL builders it calls. The split it finishes is the one
+      the crate had half of: `modrinth.rs` is the vocabulary (URL shapes and the
+      types a response deserializes into) and this is the part that asks, with
+      the engine's cache, pool and retry policy instead of a `reqwest` client of
+      its own. Two TTLs, because a search and a project age differently -- five
+      minutes for a search, which is a question about what people are using
+      *now* rather than a document, and the metadata default for a version list,
+      which changes when an author publishes -- and both are asserted, including
+      that the two handles are over one directory. The cache key is the URL and
+      the tests treat it that way: the same search twice costs one request, a
+      different query costs two, and *the same query sorted differently* costs
+      three, because a cache that ignored the sort would answer "most downloads"
+      for "newest". The search URL builders became one function with the optional
+      parts spelled out and three thin wrappers over it, so the facet JSON is
+      encoded in one place; the wrappers' URLs are asserted byte for byte
+      against what they produced before, which is what makes the refactor
+      checkable rather than hopeful.
+
+- [x] G74: the facets parameter is the JSON Modrinth documents, and the cache is
+      invisible from the far side
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_live_modrinth_api
+  EXPECT: test result: ok. 1 passed
+  EVIDENCE: the fourth live test to pass in this session. Modrinth takes `facets`
+      as *JSON in a query string* (`[["project_type:mod"]]`, percent-encoded) and
+      a client that gets it wrong receives either a 400 or a 200 full of the
+      wrong kind of project; the unit tests hold the encoder against an expected
+      URL, which is exactly the agreement a fixture and its code are capable of
+      getting wrong together, so the live test asks the service and requires hits
+      back. The same run then fetches the project the first hit names and
+      requires versions with a primary file that publishes a digest -- the two
+      calls the Discover page will make, against the real API, with the real
+      `User-Agent`. And it asserts the cache the way a cache has to be asserted:
+      the second identical search returns the same response, field for field.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
-Nine runs at the time of writing, one per commit from `82232f9` onwards —
+Ten runs at the time of writing, one per commit from `82232f9` onwards —
 `36033443993`, `36038333030`, `36143868395`, `36152873678`, `36156018946`,
-`36158909795`, `36159099493`, `36162312983` and `36162426595` — each died in three
-to six seconds with zero steps and
+`36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`, and
+every push adds one — each died in three to six seconds with zero steps and
 the same annotation: `recent account payments have failed or your spending limit
 needs to be increased`. So no job ran, in either workflow, and there is no
 `test result` line from a runner to quote for any of them. The ids are written
@@ -1130,8 +1168,8 @@ $ cargo test --workspace --all-targets --locked
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
-    197 passed; 0 failed  (palantir-net, lib)
-      0 passed; 0 failed; 11 ignored  (palantir-net, tests/live.rs)
+    205 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 12 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
@@ -1145,11 +1183,11 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-968 tests pass, nothing in the correctness-deny set is failing, and all four
+976 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
-**three live tests have run against the real world and passed** (G68, G70 and
-G72),
+**four live tests have run against the real world and passed** (G68, G70, G72
+and G74),
 which is a stronger kind of receipt than a local unit run. The services answering
 is the only part of this document that comes from outside this machine, and both
 of those tests were run here rather than by the runner, which cannot start.
