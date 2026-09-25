@@ -68,6 +68,20 @@ mod mods;
 #[allow(dead_code)]
 mod motion;
 mod native;
+/// The scaffold every page is built from: the state of what a page asked for, and
+/// the blocks it draws when the answer is not ready yet.
+///
+/// Stage 3's pages are what use it; it is here, before them, because "every page
+/// has a loading, an empty and a failed state" is a property of the scaffold or it
+/// is a promise about nineteen files.
+mod page;
+/// The pages themselves: one module per route, and the `Screen` that is which of
+/// them the shell is showing.
+///
+/// Stage 3 of the rewrite spec. A page owns its own state and its own messages
+/// and reports the things only the shell can do (opening an instance, opening a
+/// project) rather than performing them -- see `pages::Open`.
+mod pages;
 mod prefs;
 /// The token gate: the reference's own source, compared with what this shell
 /// paints. Compiled for tests only -- it reads files, and the shell never does.
@@ -102,9 +116,28 @@ mod scroll;
 #[allow(dead_code)]
 mod shell;
 mod settings;
+/// Where a page's data comes from: the launcher's own filesystem, and an honest
+/// sentence for everything that has to come from a service instead.
+///
+/// Stage 3's pages draw from this and stage 4 fills in the parts that need a
+/// service -- see the module for why it says so out loud rather than drawing an
+/// empty list.
+mod store;
+/// The vocabulary the interface paints with: which token an ink is, and which
+/// face a piece of text is set in.
+///
+/// Shared by the shell and the pages, so "the token behind `text-primary`" has one
+/// answer rather than two.
+mod style;
 /// The runtime behind [`text_gen`]: the plural value, the English plural rule and
 /// the number formatting the reference's strings are filled in by.
 mod text;
+/// The widgets the pages are drawn from, each quoting the reference's own class or
+/// rule rather than inventing a look.
+///
+/// Stage 3's pages are what use it; keeping them here rather than inside a page is
+/// what makes two pages share a card instead of each drawing one.
+mod ui;
 /// The reference client's own strings, compiled from its vendored English locale
 /// by `tools/gen_text.py`.
 ///

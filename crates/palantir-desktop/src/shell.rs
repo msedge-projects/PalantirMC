@@ -46,15 +46,21 @@ use iced::widget::{column, container, image, mouse_area, row, text, Space};
 use iced::window;
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
-    Element, Font, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
+    Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
 };
 
 use crate::brand;
 use crate::color_theme::ColorTheme;
 use crate::icon;
+use crate::style::{
+    disabled, heading, medium, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
+    INK_PLATE_TEXT,
+};
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
+use crate::pages::{self, Screen};
 use crate::route::{self, Address, Mark, Rail};
+use crate::store::Store;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -111,22 +117,6 @@ const CONTROL_RADIUS: f32 = 12.0;
 /// `rounded-lg` on the head's `!h-7` buttons.
 const HEAD_RADIUS: f32 = 8.0;
 
-// ---- Ink, by the class the reference writes ----------------------------
-
-/// The token behind the reference's `text-primary` class.
-///
-/// Not `--color-text-primary`: the preset maps `primary` to
-/// `--color-text-default`. See the module docs.
-const INK_DEFAULT: Ink = Ink::TextDefault;
-/// The token behind `text-contrast`, which is `--color-text-primary`.
-const INK_CONTRAST: Ink = Ink::TextPrimary;
-/// The token behind the rail button's hover background, `hover:bg-button-bg`.
-const INK_HOVER_BG: Ink = Ink::ButtonBg;
-/// The rail's selection plate, `--color-button-bg-selected`.
-const INK_PLATE: Ink = Ink::ButtonBgSelected;
-/// The rail's selected icon, `--color-button-text-selected`.
-const INK_PLATE_TEXT: Ink = Ink::ButtonTextSelected;
-
 // ---- Timing ------------------------------------------------------------
 
 /// The rail button's hover.
@@ -142,10 +132,6 @@ const INK_PLATE_TEXT: Ink = Ink::ButtonTextSelected;
 /// survives in the generated verbatim table, so it is
 /// [`Timing::NAV_PLATE`] instead.
 const HOVER: Timing = Timing::raw(150, [0.4, 0.0, 0.2, 1.0]);
-
-/// How much darker the ink of a disabled control is, from the reference's
-/// `opacity-20` on a disabled history chevron.
-const DISABLED_OPACITY: f32 = 0.2;
 
 /// One frame of the shell's clock.
 ///
@@ -190,6 +176,11 @@ pub struct Shell {
     modal: Option<Modal>,
     /// Whether the window is maximized, which the window controls' icon needs.
     maximized: bool,
+    /// The page in the pane, with its own state.
+    screen: Screen,
+    /// What the pages can be answered with. Stage 4 fills the parts that need a
+    /// service; what it holds now is the launcher's own filesystem.
+    store: Store,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -235,6 +226,8 @@ pub enum Modal {
 pub enum Message {
     /// Navigate, from a path.
     Go(String),
+    /// A page was told something.
+    Screen(pages::Message),
     /// The history, as the head's two buttons drive it.
     Back,
     Forward,
@@ -256,6 +249,9 @@ pub enum Message {
 impl Shell {
     /// A shell at `address`, in `theme`, with the settings' own panel state.
     pub fn new(address: Address, theme: Gen, settings: &RailSettings) -> Shell {
+        // Built before the address is moved into the shell, which is what the
+        // screen an address draws from is.
+        let screen = Screen::at(&address);
         let mut shell = Shell {
             address,
             back: Vec::new(),
@@ -268,9 +264,17 @@ impl Shell {
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             modal: None,
             maximized: false,
+            screen,
+            store: Store::default(),
         };
         shell.settle();
         shell
+    }
+
+    /// A shell with a store behind it, which is how the application builds one.
+    pub fn with_store(mut self, store: Store) -> Shell {
+        self.store = store;
+        self
     }
 
     /// Where the shell is.
@@ -278,13 +282,19 @@ impl Shell {
         &self.address
     }
 
-    /// Whether the page may be drawn at all yet.
+    /// Whether the pane is drawing a page rather than a placeholder.
     ///
-    /// False for every page today: stage 3 is what fills them. The shell's own
-    /// gate uses this to say "the chrome is drawn, the page is not" rather than
-    /// letting a placeholder pass for a page.
+    /// True now that the panes are the pages: every route the address table knows
+    /// builds one (`pages::Screen::at`), and each page's own gate covers its
+    /// states. The flag stays because it is what the shell's gate asserts, and a
+    /// future route without a page would make it false again by construction.
     pub fn pages_are_drawn(&self) -> bool {
-        false
+        true
+    }
+
+    /// The page in the pane, for the shell's own gates.
+    pub fn screen(&self) -> &Screen {
+        &self.screen
     }
 
     /// The mark a rail slot carries for the address on screen.
@@ -321,11 +331,10 @@ impl Shell {
 
     /// Whether an icon for a control that cannot be used is greyed out.
     fn icon_ink(&self, enabled: bool) -> Color {
-        let ink = theme_gen::ink(self.theme, INK_DEFAULT);
         if enabled {
-            ink
+            theme_gen::ink(self.theme, INK_DEFAULT)
         } else {
-            Color { a: ink.a * DISABLED_OPACITY, ..ink }
+            disabled(self.theme, INK_DEFAULT)
         }
     }
 
@@ -351,6 +360,7 @@ impl Shell {
         self.forward.clear();
         self.back.push(std::mem::replace(&mut self.address, address));
         self.settle();
+        self.screen.retarget(&self.address);
     }
 
     /// Go back one page, if there is one.
@@ -360,6 +370,11 @@ impl Shell {
         };
         self.forward.push(std::mem::replace(&mut self.address, previous));
         self.settle();
+        // Back and forward move between pages the same way a link does: the page
+        // that is already built keeps what it can (a tab change is not a new page)
+        // and anything else is built fresh, which is what a browser does when it
+        // returns to a document it no longer holds.
+        self.screen.retarget(&self.address);
     }
 
     /// Go forward one page, if the user has not navigated since.
@@ -369,6 +384,7 @@ impl Shell {
         };
         self.back.push(std::mem::replace(&mut self.address, next));
         self.settle();
+        self.screen.retarget(&self.address);
     }
 
     /// Advance every moving tween by `delta`.
@@ -423,6 +439,22 @@ impl Shell {
                 }
                 if slot == Rail::Settings {
                     self.modal = Some(Modal::Settings);
+                }
+                iced::Command::none()
+            }
+            Message::Screen(message) => {
+                // A page that opens a thing is navigating, not changing its own
+                // mind: which page is in the pane, and what the history records,
+                // are the shell's. A page reports it and this is where the report
+                // is acted on.
+                if let Some(open) = self.screen.update(message, &self.store) {
+                    let path = match open {
+                        pages::Open::Instance(id) => format!("/instance/{id}"),
+                        pages::Open::Project(id) => format!("/project/{id}"),
+                    };
+                    if let Some(address) = Address::parse(&path) {
+                        self.go(address);
+                    }
                 }
                 iced::Command::none()
             }
@@ -689,14 +721,15 @@ impl Shell {
             .into()
     }
 
-    /// The page pane: the page's container, and the pages that will fill it.
+    /// The page pane: the page's container, and the page in it.
     fn pane(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let body = container(self.placeholder())
+        // The page speaks `pages::Message` and the shell speaks its own, so the
+        // one that holds the page is the one that wraps it -- which is also what
+        // keeps a page from being able to navigate on its own.
+        let body = container(self.screen.view(theme, &self.address, &self.store).map(Message::Screen))
             .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y();
+            .height(Length::Fill);
         let elements: Vec<Element<Message>> = if self.panel_shown() {
             vec![body.into(), self.panel()]
         } else {
@@ -713,37 +746,6 @@ impl Shell {
                 },
                 ..container::Appearance::default()
             })
-            .into()
-    }
-
-    /// What a page body says until there is a page to draw.
-    ///
-    /// Deliberately unlovely, and it says which stage fills it: a placeholder
-    /// that looked like a page would make "the shell is done" and "the pages are
-    /// done" the same claim, and they are three stages apart.
-    fn placeholder(&self) -> Element<'_, Message> {
-        let theme = self.theme;
-        column![]
-            .align_items(Alignment::Center)
-            .spacing(8.0)
-            .push(
-                text(self.address.name())
-                    .size(24.0)
-                    .font(heading())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            .push(
-                text(self.address.to_path())
-                    .size(14.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::TextTertiary))),
-            )
-            .push(
-                text("the page itself is stage 3 of the rewrite")
-                    .size(12.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::TextTertiary))),
-            )
             .into()
     }
 
@@ -1078,31 +1080,6 @@ fn parse_color(value: &str) -> Option<Color> {
     }
 }
 
-// ---- Text ---------------------------------------------------------------
-
-/// The family the entry point loads: five weights of Inter, from
-/// `crates/palantir-desktop/assets/fonts`, which is the family the reference's
-/// stylesheet pins.
-const FAMILY: &str = "Inter";
-
-/// A face of the shell's one family.
-const fn inter(weight: iced::font::Weight) -> Font {
-    Font { family: iced::font::Family::Name(FAMILY), weight, ..Font::DEFAULT }
-}
-
-/// `--font-weight-text: 500`, which is what every label in the reference
-/// inherits: the shell's body text is medium, not regular.
-const fn medium() -> Font {
-    inter(iced::font::Weight::Medium)
-}
-
-/// A heading. The reference draws its headings at 800 (`font-extrabold` on a
-/// button's label, `--font-weight-heading` on a title), which is heavier than
-/// the 600 the old shell used.
-const fn heading() -> Font {
-    inter(iced::font::Weight::ExtraBold)
-}
-
 // ---- As an application --------------------------------------------------
 
 /// What a run of the shell was asked for on the command line.
@@ -1188,6 +1165,11 @@ impl iced::Application for Shell {
 
     fn new(flags: Flags) -> (Self, iced::Command<Message>) {
         let home = palantir_core::paths::PalantirPaths::home();
+        // Two different directories on purpose: the settings are this product's
+        // own, and the instances are wherever the launcher has found them, which
+        // `detect` is the one thing that knows -- `home` is the launcher's own
+        // folder and holds no instances.
+        let paths = palantir_core::paths::PalantirPaths::detect();
         let prefs = crate::prefs::load(&home);
         let theme = generated_theme(prefs.theme(), crate::native::system_prefers_light());
         let settings = RailSettings {
@@ -1195,7 +1177,8 @@ impl iced::Application for Shell {
             show_skins: prefs.show_skin_selector_in_sidebar,
             show_screenshots: prefs.show_all_screenshots_in_sidebar,
         };
-        (Shell::new(flags.opening(), theme, &settings), iced::Command::none())
+        let store = Store::load(&paths);
+        (Shell::new(flags.opening(), theme, &settings).with_store(store), iced::Command::none())
     }
 
     fn title(&self) -> String {
@@ -1702,7 +1685,7 @@ mod tests {
     }
 
     #[test]
-    fn every_page_shape_builds_and_the_placeholder_says_so() {
+    fn every_page_shape_builds_and_the_pane_draws_a_page() {
         // A `render()` pass over one address of every shape the route table has,
         // with and without the panel and with the modal open: catches a layout
         // builder that panics, a style closure that borrows, a canvas handed a
@@ -1737,8 +1720,12 @@ mod tests {
                 drop(shell.render());
             }
         }
-        // The pane's body is a placeholder, and says so, until stage 3 fills it.
-        assert!(!shell_at("/").pages_are_drawn());
+        // The pane's body is a page rather than a placeholder, on every shape the
+        // route table has -- which is the claim the name of this test makes.
+        for path in ["/", "/browse/modpack", "/skins", "/screenshots", "/hosting/manage/", "/user/jelly", "/project/sodium", "/instance/ATM10/logs"] {
+            let shell = shell_at(path);
+            assert!(shell.pages_are_drawn(), "{path} draws a page");
+        }
     }
 }
 
