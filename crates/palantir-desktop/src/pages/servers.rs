@@ -43,9 +43,9 @@ impl State {
     /// Apply a message.
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::NewServer => self.notice = Some(store::unavailable("Creating a server")),
-            Message::ManageBilling => self.notice = Some(store::unavailable("Billing")),
-            Message::Refresh => self.notice = Some(store::unavailable("The server listing")),
+            Message::NewServer => self.notice = Some(store::not_implemented("Creating a server")),
+            Message::ManageBilling => self.notice = Some(store::not_implemented("Billing")),
+            Message::Refresh => self.notice = Some(store::not_implemented("The server listing")),
         }
     }
 }
@@ -98,7 +98,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
                         crate::style::INK_CONTRAST,
                     ))),
             )
-            .push(ui::paragraph(theme, &store::unavailable("The server listing"))),
+            .push(ui::paragraph(theme, &store::not_implemented("The server listing"))),
     ));
     blocks.push(ui::button(
         theme,
@@ -119,7 +119,7 @@ mod tests {
         for message in [Message::NewServer, Message::ManageBilling, Message::Refresh] {
             state.update(message);
             let notice = state.notice.clone().expect("a notice");
-            assert!(notice.contains("stage 4"), "{notice}");
+            assert!(notice.contains("is not implemented yet"), "{notice}");
         }
     }
 

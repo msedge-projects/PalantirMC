@@ -71,7 +71,7 @@ impl State {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::Tab(tab) => self.tab = tab,
-            Message::Refresh => self.notice = Some(store::unavailable("This profile")),
+            Message::Refresh => self.notice = Some(store::not_implemented("This profile")),
         }
     }
 
@@ -93,7 +93,7 @@ impl State {
 /// Draw the page for one user.
 ///
 /// The store is not read yet, and is taken rather than dropped so that the page's
-/// signature is the one every page has: stage 4's followers, projects and
+/// signature is the one every page has: this profile's followers, projects and
 /// organizations all come from it, and a page that had to change shape to start
 /// answering from a service would change [`crate::pages::Screen::view`] with it.
 pub fn view<'a>(
@@ -149,7 +149,7 @@ pub fn view<'a>(
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
             )
             .push(
-                iced::widget::text(store::unavailable("This profile's projects and collections"))
+                iced::widget::text(store::not_implemented("This profile's projects and collections"))
                     .size(14.0)
                     .font(medium())
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
@@ -192,7 +192,7 @@ mod tests {
         let mut state = State::default();
         assert!(state.notice.is_none());
         state.update(Message::Refresh);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Tab(Tab::Collections));
         assert_eq!(state.tab, Tab::Collections);
     }

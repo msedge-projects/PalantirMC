@@ -143,9 +143,9 @@ impl Screen {
 
     /// Apply a message, and report anything only the shell can do.
     ///
-    /// The store is handed in because two pages act on the machine rather than on
-    /// themselves: the Content tab toggles a mod file, and stage 4's requests will
-    /// all go through it.
+    /// The store is handed in because the pages act on the machine through it
+    /// rather than on themselves: the Content tab toggles a mod file, and a search
+    /// or a listing is a request the store makes.
     pub fn update(&mut self, message: Message, store: &Store) -> Option<Open> {
         match (self, message) {
             // A card press is navigation, and is reported rather than applied: the

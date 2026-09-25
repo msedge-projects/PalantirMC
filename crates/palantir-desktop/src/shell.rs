@@ -1,11 +1,10 @@
 //! The shell: the chrome every page is drawn inside.
 //!
-//! This is stage 2 of `docs/superpowers/specs/2026-09-24-modrinth-native-rewrite.md`:
-//! the rail, the head, the page pane, the right panel, the window controls and
-//! Settings as a modal, all painted from [`crate::theme_gen`] and paced by
-//! [`crate::motion`], on the information architecture [`crate::route`] describes.
-//! The pages themselves are stage 3 -- what is here draws their *containers*, and
-//! the pane's body says so rather than pretending to be a page.
+//! This shell is the reference's own: the rail, the head, the page pane, the right
+//! panel, the window controls and Settings as a modal, all painted from
+//! [`crate::theme_gen`] and paced by [`crate::motion`], on the information
+//! architecture [`crate::route`] describes. Every page [`crate::route`] can address
+//! is drawn, from [`crate::pages`].
 //!
 //! Every number below is quoted from the reference's own `App.vue`, with the
 //! declaration it came from:

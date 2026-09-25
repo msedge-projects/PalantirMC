@@ -124,10 +124,10 @@ impl State {
                 self.open = if self.open == index { None } else { index };
             }
             Message::AddSkin => {
-                self.notice = Some(crate::store::unavailable("Adding a skin"));
+                self.notice = Some(crate::store::not_implemented("Adding a skin"));
             }
             Message::Apply => {
-                self.notice = Some(crate::store::unavailable("Applying a skin"));
+                self.notice = Some(crate::store::not_implemented("Applying a skin"));
             }
         }
     }
@@ -161,7 +161,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         theme,
         ui::Severity::Info,
         Key::AppSkinsPreviewingBadge.message(),
-        &crate::store::unavailable("The skin previews"),
+        &crate::store::not_implemented("The skin previews"),
     ));
     let mut sections = column![].spacing(GAP).width(Length::Fill);
     for (index, section) in Section::ALL.iter().enumerate() {
@@ -170,7 +170,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             row![]
                 .spacing(ROW_GAP)
                 .push(
-                    iced::widget::text(crate::store::unavailable("This section's skins"))
+                    iced::widget::text(crate::store::not_implemented("This section's skins"))
                         .size(13.0)
                         .font(crate::style::medium())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
@@ -244,9 +244,9 @@ mod tests {
     fn the_two_things_this_page_cannot_do_yet_say_so() {
         let mut state = State::default();
         state.update(Message::AddSkin);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Apply);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
     }
 
     #[test]

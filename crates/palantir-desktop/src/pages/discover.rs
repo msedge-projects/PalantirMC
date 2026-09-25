@@ -18,17 +18,17 @@
 //! a string the reference does not translate would be inventing a difference
 //! rather than removing one.
 //!
-//! The results themselves come from Modrinth's search API, which is stage 4. Until
-//! then the page draws the control row it will keep and says where the list is
-//! ([`crate::store::unavailable`]) -- and it draws the *input* controls live, so
-//! the state the user sets is the state the request will be made with.
+//! The results themselves come from Modrinth's search API. The request goes through
+//! the store (`Store::search`), which hands it to the engine on a thread of its own
+//! and answers here as a [`Load`]; a store with no engine to ask still draws the
+//! control row and says where the list is ([`crate::store::not_implemented`]), and
+//! the *input* controls are live either way, so the state the user sets is the state
+//! the request is made with.
 //!
-//! The three controls in that row show the state they hold; the comboboxes that
-//! open to change it, the pagination and the request itself are stage 4's. Their
-//! vocabulary -- the five orders, the six view sizes, the three messages -- is
-//! declared here rather than then, because the strings the controls show are the
-//! reference's own literals and a label invented in stage 4 is a label nobody can
-//! trace. The attribute below permits what nothing constructs yet.
+//! The vocabulary -- the five orders, the six view sizes, the three messages -- is
+//! declared here rather than in the search code, because the strings the controls
+//! show are the reference's own literals and a label invented elsewhere is a label
+//! nobody can trace. The attribute below permits what nothing constructs yet.
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
@@ -46,8 +46,8 @@ use crate::ui;
 /// One project in the results.
 ///
 /// The fields are the ones the reference's card draws, in the order its API
-/// returns them, so the store that fills this in stage 4 has one shape to fill
-/// rather than a page to restructure.
+/// returns them, so the store that fills this in has one shape to fill rather than
+/// a page to restructure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
     /// Project id, as the route and the API use it.
@@ -160,7 +160,7 @@ pub struct State {
     pub view: usize,
     /// The current page, one-based.
     pub page: usize,
-    /// The results, which arrive from the search API in stage 4.
+    /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
 }
 
@@ -175,7 +175,7 @@ impl State {
             page: 1,
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
             // and an unmade *request* are different sentences on the screen.
-            results: Load::Failed(store::unavailable("Discover's search")),
+            results: Load::Failed(store::not_implemented("Discover's search")),
         }
     }
 
@@ -202,7 +202,7 @@ impl State {
             Message::View(view) => self.view = view,
             Message::Page(page) => self.page = page.max(1),
             Message::Search => {
-                self.results = Load::Failed(store::unavailable("Discover's search"));
+                self.results = Load::Failed(store::not_implemented("Discover's search"));
             }
             // The shell's to do, and not this page's: see the enum.
             Message::Open(_) => {}
@@ -438,7 +438,7 @@ mod tests {
     fn the_results_say_where_they_will_come_from_until_they_can() {
         let state = State::new(ProjectType::Modpack);
         let reason = state.results.failure().expect("a reason");
-        assert!(reason.contains("stage 4"), "{reason}");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
         // And they are not an empty *answer*: the page must not say "no results"
         // about a request that has not been made.
         assert_ne!(state.results, Load::Empty);

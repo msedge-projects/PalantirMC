@@ -4,8 +4,8 @@
 //! every screenshot in every instance, which is a directory read per instance and
 //! needs no service at all. So it is real here -- the images themselves, their
 //! instance and their order are read from disk by [`crate::store`] -- and the one
-//! part that is not real is the thumbnails, which are the engine's image cache
-//! (stage 4) and are named as such rather than decoded on every frame.
+//! part that is not real is the thumbnails, which are the engine's image cache and
+//! are named as such rather than decoded on every frame.
 //!
 //! The reference's own `screenshots::scan` and its thumbnail generator are in
 //! `crate::screenshots`; what this page adds is the page around them.
@@ -63,7 +63,7 @@ impl State {
         match message {
             Message::Search(text) => self.search = text,
             Message::Open => {
-                self.notice = Some(store::unavailable("Opening a screenshot in a viewer"));
+                self.notice = Some(store::not_implemented("Opening a screenshot in a viewer"));
             }
             Message::DismissNotice => self.notice = None,
         }
@@ -147,7 +147,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             column![]
                 .spacing(4.0)
                 .push(heading_line(theme, Key::AppScreenshotsNoResultsHeading))
-                .push(body_line(theme, &store::unavailable("Thumbnails"))),
+                .push(body_line(theme, &store::not_implemented("Thumbnails"))),
         ));
         return page::body(blocks, GAP);
     }
@@ -187,7 +187,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
         theme,
         ui::Severity::Info,
         Key::AppScreenshotsGroupBy.message(),
-        &store::unavailable("Screenshot thumbnails"),
+        &store::not_implemented("Screenshot thumbnails"),
     ));
     page::body(blocks, GAP)
 }
@@ -262,7 +262,7 @@ mod tests {
     fn opening_a_screenshot_says_what_arrives_later() {
         let mut state = State::default();
         state.update(Message::Open);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::DismissNotice);
         assert!(state.notice.is_none());
     }

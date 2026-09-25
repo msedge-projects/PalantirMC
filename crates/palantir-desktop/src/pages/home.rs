@@ -14,14 +14,15 @@
 //! What is real here is the library itself: the instance list, each instance's
 //! loader, game version, playtime and mod count come from disk by way of
 //! [`Store`], which is the same reader the old interface used. What is *not* real
-//! yet is anything from the network, and the page says which stage brings it
-//! rather than drawing an empty list ([`crate::store::unavailable`]).
+//! yet is anything from the network, and the page says what is missing rather than
+//! drawing an empty list ([`crate::store::not_implemented`]).
 //!
 //! The search field filters for real. The sort control shows the chosen order and
 //! the seven orders it offers are declared, labelled from the locale and asserted
-//! by this module's own gate -- the combobox that opens to pick one is stage 4's,
-//! and declaring its vocabulary now is what keeps the labels from being invented
-//! later. That forward declaration is what the attribute below permits.
+//! by this module's own gate -- the combobox that opens to pick one is the last
+//! piece of the control, and declaring its vocabulary now is what keeps the labels
+//! from being invented later. That forward declaration is what the attribute below
+//! permits.
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
@@ -171,10 +172,10 @@ impl State {
             Message::Search(text) => self.search = text,
             Message::Sort(sort) => self.sort = sort,
             Message::CreateInstance => {
-                self.notice = Some(crate::store::unavailable("Creating an instance"))
+                self.notice = Some(crate::store::not_implemented("Creating an instance"))
             }
             Message::ImportFromLauncher => {
-                self.notice = Some(crate::store::unavailable("Importing from another launcher"))
+                self.notice = Some(crate::store::not_implemented("Importing from another launcher"))
             }
             // Opening is the shell's to do -- see the enum -- so the page has
             // nothing to do with it, and a variant the page acts on would be the
@@ -482,15 +483,15 @@ mod tests {
 
     #[test]
     fn a_first_run_gets_the_welcome_screen_and_nothing_else() {
-        // The welcome screen's two actions are the reference's, and neither can be
-        // done before stage 4/5: what the page must not do is look like it worked.
+        // The welcome screen's two actions are the reference's, and neither is built
+        // yet: what the page must not do is look like it worked.
         let mut state = State::default();
         assert!(state.notice.is_none());
         state.update(Message::CreateInstance);
         let notice = state.notice.clone().expect("a notice");
-        assert!(notice.contains("stage 4"), "{notice}");
+        assert!(notice.contains("is not implemented yet"), "{notice}");
         state.update(Message::ImportFromLauncher);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Search("x".to_string()));
         assert_eq!(state.search, "x");
         // Opening an instance is the shell's, and a page that acted on it would be

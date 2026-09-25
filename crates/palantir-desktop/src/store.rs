@@ -1,10 +1,10 @@
 //! Where a page's data comes from.
 //!
-//! Stage 3 draws the pages; stage 4 builds the engine that answers them from the
-//! network. In between there is a choice of two dishonesties -- pages that draw
-//! invented data, or pages that spin forever -- and this module is the way out of
-//! both: **the store answers what the launcher can already answer, and says out
-//! loud what it cannot.**
+//! The pages want data; the engine in `palantir-net` can fetch it; this module is
+//! where the two meet. Until a page has a request behind it there is a choice of
+//! two dishonesties -- pages that draw invented data, or pages that spin forever --
+//! and this module is the way out of both: **the store answers what the launcher
+//! can already answer, and says out loud what it cannot.**
 //!
 //! What it can answer is the launcher's own filesystem, which is ours rather than
 //! the reference's:
@@ -17,10 +17,10 @@
 //!
 //! What it cannot answer is everything that comes from a service: project pages,
 //! Discover's search, Skins, Servers and the hosting half of an instance. Those
-//! come back as [`page::Load::Failed`] carrying [`unavailable`]'s sentence, which
-//! names the stage that brings them rather than pretending to be an empty list. A
-//! page that shows "no results" when the request never happened is the failure mode
-//! this module exists to prevent.
+//! come back as [`page::Load::Failed`] carrying [`not_implemented`]'s sentence,
+//! which says what is missing rather than pretending to be an empty list. A page
+//! that shows "no results" when the request never happened is the failure mode this
+//! module exists to prevent.
 
 #![allow(dead_code)]
 
@@ -46,8 +46,7 @@ impl Store {
     ///
     /// A synchronous scan at startup, which is what the old interface does too
     /// (`main.rs` says so): it is a directory walk and a handful of small files per
-    /// instance, and making it asynchronous before the engine exists would be work
-    /// that stage 4 removes.
+    /// instance, and a scan that small is not worth moving off the UI thread.
     pub fn load(paths: &PalantirPaths) -> Store {
         let loaded = instances::load(paths);
         Store {
@@ -91,19 +90,26 @@ impl Store {
         &self.instances_dir
     }
 
-    /// The reason a page's data is not here yet, naming the stage that brings it.
-    pub fn unavailable(&self, what: &str) -> String {
-        unavailable(what)
+    /// The reason a page's data is not here yet.
+    pub fn not_implemented(&self, what: &str) -> String {
+        not_implemented(what)
     }
 }
 
-/// The sentence a page shows when its data has to come from a service.
+/// The sentence a page shows when it cannot answer from disk yet.
 ///
-/// Deliberately plain about where the data is, and deliberately not shaped like an
-/// error: it is the truth about a stage boundary, and the moment stage 4 lands it
-/// disappears on its own.
-pub fn unavailable(what: &str) -> String {
-    format!("{what} arrives with the metadata engine (stage 4 of the rewrite).")
+/// Deliberately plain about what is missing, and deliberately not shaped like an
+/// error: a feature this launcher has not built is not a failure of anything.
+///
+/// It used to name a stage -- *"arrives with the metadata engine (stage 4 of the
+/// rewrite)"* -- and that sentence was retired on purpose once the engine
+/// actually existed. A stage number is a developer's word; it goes stale the
+/// moment the stage lands, which is exactly what happened to this one; and a
+/// reader told *when* something is coming instead of *what* is missing has been
+/// told nothing they can act on. What is left is the shape that stays true
+/// whatever lands next.
+pub fn not_implemented(what: &str) -> String {
+    format!("{what} is not implemented yet.")
 }
 
 // ---- The instance's own folders -----------------------------------------
@@ -190,9 +196,9 @@ pub fn files(directory: &Path) -> Vec<Entry> {
 
 /// The screenshots in `screenshots/`, newest name first.
 ///
-/// Names rather than pixels: decoding is the engine's image cache (stage 4), and a
-/// page that decoded a directory of 1080p PNGs on every frame would be worse than
-/// one that lists them.
+/// Names rather than pixels: decoding is the engine's image cache, and a page that
+/// decoded a directory of 1080p PNGs on every frame would be worse than one that
+/// lists them.
 pub fn screenshots(instance_dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = files(&instance_dir.join("screenshots"))
         .into_iter()
@@ -252,11 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn an_unanswered_page_says_which_stage_answers_it() {
-        // The sentence a reader sees has to be true: it names stage 4, and it does
-        // not read like a failure of their machine.
-        let reason = unavailable("Discover's search");
-        assert!(reason.contains("stage 4"), "{reason}");
+    fn an_unanswered_page_names_what_is_missing_without_naming_a_stage() {
+        // The sentence a reader sees has to be true about what is missing, and it
+        // must not read like a failure of their machine.
+        let reason = not_implemented("Discover's search");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
+        assert!(!reason.contains("stage"), "a stage number is a word for developers: {reason}");
         assert!(reason.starts_with("Discover's search"), "{reason}");
         assert!(!reason.to_lowercase().contains("error"), "{reason}");
     }

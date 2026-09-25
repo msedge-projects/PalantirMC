@@ -106,22 +106,22 @@ mod screenshots;
 mod scroll;
 /// The shell the rewrite is building: the rail, the head, the page pane, the
 /// right panel and Settings as a modal, on the reference's own information
-/// architecture. Stage 2 of the rewrite spec.
+/// architecture.
 ///
-/// Not the default yet, and deliberately: it draws the chrome and knows which
-/// page it is on, but the pages themselves are stage 3, so running it today
-/// would replace a launcher that launches instances with a shell whose pane
-/// says so in as many words. `--shell` runs it, which is how its captures and
-/// its own gates are taken without pretending it is finished.
+/// Not the default yet, and deliberately: it draws the chrome and every page it
+/// routes to, but it cannot launch an instance yet, so running it today would
+/// replace a launcher that launches instances with a shell that says so in as
+/// many words. `--shell` runs it, which is how its captures and its own gates are
+/// taken without pretending it is finished.
 #[allow(dead_code)]
 mod shell;
 mod settings;
 /// Where a page's data comes from: the launcher's own filesystem, and an honest
 /// sentence for everything that has to come from a service instead.
 ///
-/// Stage 3's pages draw from this and stage 4 fills in the parts that need a
-/// service -- see the module for why it says so out loud rather than drawing an
-/// empty list.
+/// The pages draw from this, and the parts that need a service are answered here
+/// through the engine -- see the module for why a part that is not built yet says
+/// so out loud rather than drawing an empty list.
 mod store;
 /// The vocabulary the interface paints with: which token an ink is, and which
 /// face a piece of text is set in.
@@ -326,8 +326,8 @@ fn main() -> iced::Result {
 /// page the way the reference's own router does.
 ///
 /// There is no capture flag here yet. `--shot` belongs to the old shell and its
-/// machinery is wound through that shell's frame handling; stage 3 is where the
-/// new shell needs one, because that is where the first per-page gate does.
+/// machinery is wound through that shell's frame handling; this shell needs one of
+/// its own, because that is where the first per-page gate does.
 fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
     let flags = shell::Flags::from_args(args);
     let mut settings = Settings::default();

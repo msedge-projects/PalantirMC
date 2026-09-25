@@ -6,10 +6,9 @@
 //! -- plus the two the router reaches without a tab of their own (a single version
 //! and the changelog).
 //!
-//! Everything here comes from Modrinth's API, which is stage 4. What this page
-//! therefore does today is draw the *shape*: the header with its facts filled in
-//! when they arrive, the tab strip live (a tab is navigation, not data), and each
-//! tab's four states.
+//! Everything here comes from Modrinth's API. What this page therefore does today
+//! is draw the *shape*: the header with its facts filled in when they arrive, the
+//! tab strip live (a tab is navigation, not data), and each tab's four states.
 //!
 //! The description is markdown in the reference -- it renders `project.body`
 //! through the same `markdown-body` stylesheet the web app uses. Drawing raw
@@ -104,7 +103,7 @@ impl State {
         State {
             id,
             tab,
-            project: Load::Failed(store::unavailable("This project")),
+            project: Load::Failed(store::not_implemented("This project")),
             notice: None,
         }
     }
@@ -113,8 +112,8 @@ impl State {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::Tab(tab) => self.tab = tab,
-            Message::Refresh => self.project = Load::Failed(store::unavailable("This project")),
-            Message::Install => self.notice = Some(store::unavailable("Installing a project")),
+            Message::Refresh => self.project = Load::Failed(store::not_implemented("This project")),
+            Message::Install => self.notice = Some(store::not_implemented("Installing a project")),
         }
     }
 
@@ -345,7 +344,7 @@ mod tests {
     fn a_project_that_cannot_be_read_says_so_rather_than_showing_an_empty_one() {
         let state = State::new("sodium".to_string(), ProjectTab::Description);
         let reason = state.project.failure().expect("a reason");
-        assert!(reason.contains("stage 4"), "{reason}");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
         assert_ne!(state.project, Load::Empty, "an unmade request is not an empty project");
     }
 
@@ -380,7 +379,7 @@ mod tests {
     fn installing_says_what_arrives_later_and_refreshing_asks_again() {
         let mut state = State::new("sodium".to_string(), ProjectTab::Description);
         state.update(Message::Install);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Tab(ProjectTab::Versions));
         assert_eq!(state.tab, ProjectTab::Versions);
         state.update(Message::Refresh);

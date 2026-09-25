@@ -17,8 +17,8 @@
 //! the filesystem when they are drawn, so a mod that was toggled shows its new
 //! state immediately without a cache to invalidate. That is a directory read per
 //! frame, which is fine for the tens of files an instance has and would not be for
-//! a folder of screenshots -- which is one of the things stage 4's store exists to
-//! fix, and why the screenshots tab lists names rather than decoding images.
+//! a folder of screenshots -- which is one of the things the store exists to fix,
+//! and why the screenshots tab lists names rather than decoding images.
 
 use iced::widget::{column, row, text, Space};
 use iced::{Alignment, Element, Font, Length};
@@ -131,7 +131,7 @@ impl State {
         match message {
             Message::Tab(tab) => self.tab = tab,
             Message::Play => {
-                self.notice = Some(store::unavailable("Launching an instance"));
+                self.notice = Some(store::not_implemented("Launching an instance"));
             }
             Message::ToggleContent { file_name, enabled } => {
                 let directory = store.instance_dir(&self.id).join("mods");
@@ -187,7 +187,7 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
     } else {
         details = details.push(ui::paragraph(
             theme,
-            &store::unavailable("This instance's details"),
+            &store::not_implemented("This instance's details"),
         ));
     }
     ui::card(
@@ -222,7 +222,7 @@ fn body<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Messa
                         )
                         .push(ui::paragraph(
                             theme,
-                            &store::unavailable("Browsing for content to install"),
+                            &store::not_implemented("Browsing for content to install"),
                         )),
                 );
             }
@@ -351,7 +351,7 @@ fn body<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Messa
                         .font(semibold())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
                 )
-                .push(ui::paragraph(theme, &store::unavailable("Sharing an instance"))),
+                .push(ui::paragraph(theme, &store::not_implemented("Sharing an instance"))),
         ),
     }
 }
@@ -427,7 +427,7 @@ mod tests {
         let store = store_at("play");
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
         state.update(Message::Play, &store);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("stage 4"));
+        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Tab(InstanceTab::Logs), &store);
         assert_eq!(state.tab, InstanceTab::Logs);
     }
