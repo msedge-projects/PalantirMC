@@ -67,8 +67,8 @@ The workspace is now four crates plus the shell:
 | `palantir-desktop` | The window: shell, pages, engine glue, platform code. |
 
 Backend suites as run in this session: `palantir-core` 168 plus 8, `palantir-gui`
-6, `palantir-loader` 31, `palantir-net` 178, with 9 live tests ignored by design --
-949 in the workspace, and the desktop crate's 554 are in it. Which binary each
+6, `palantir-loader` 31, `palantir-net` 190, with 10 live tests ignored by design --
+961 in the workspace, and the desktop crate's 554 are in it. Which binary each
 number belongs to is written out in [`GATES.md`](GATES.md), because a bare list of
 numbers is how the earlier version of this paragraph managed to mislabel three of
 them.
@@ -81,7 +81,7 @@ them.
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, and a metadata cache that revalidates instead of re-downloading are all in and gated (G66-G68). What is not in is the content store, the Modrinth and piston metadata layers, and the seam that lets a page use any of it -- see "What stage 4 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, and a content store where a file that is already here is never fetched twice are all in and gated (G66-G70). What is not in is the Modrinth and piston metadata layers and the seam that lets a page use any of it -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -376,6 +376,7 @@ alternative:
 | `download` | A transfer that always started from zero. Now: resume from the `.part` file's length, verify the digest before the rename, and delete a part file that fails it |
 | `schedule` | A bulk downloader that could not be stopped. Now: submitted jobs with ids, one event per job, cancel one or all, and an `Idle` a caller can wait for instead of polling |
 | `cache` | A metadata "cache" whose only rule was "if the file is on disk, use it" -- which is a write-once archive, and how a launcher comes to offer a loader build that was published last year |
+| `content` | Three trees holding the same jar three times: `libraries/`, `assets/` and a `.minecraft/versions/` copy of what a version asks for. Now every file is named by its own digest, so what is already here is never fetched again |
 
 The cache is the one worth reading twice, because it is the only part of this
 that changes what a user sees. An entry has an age; inside its TTL the bytes on
@@ -387,15 +388,30 @@ somebody publishes a build, so it is believed for half an hour, and a version
 service sent it, with the age and the validator in a stamp beside it, so the
 Mojang and Modrinth layers that come next can read the same directory.
 
-**The live measurement, which is the part of this that is not local.**
+`content` is the other half of the same idea, applied to files rather than
+answers: every jar, asset object and mod is stored under its own digest, so a
+file that is already here is already here under every name that asks for it. The
+launcher has had three trees holding the same jar (`libraries/`, `assets/`, and a
+per-version copy), and a modpack that ships a mod the user already installed had
+it twice. Three digests are carried because the services publish three -- Mojang a
+`sha1` per library and asset, Modrinth a `sha1` and a `sha512` per file, Prism a
+`sha256` -- and all three are computed rather than trusted. Nothing is filed until
+it verifies, which is what keeps the store from becoming a place where a corrupt
+download is cached forever, and it is also what makes an interrupted transfer
+resumable: the `.part` sits under the digest's own name, so the next run finds it
+without being told what it was doing.
+
+**The live measurements, which are the part of this that is not local.**
 `meta.prismlauncher.org` sends an `ETag` on
 `/v1/net.minecraft/index.json` and answers `304 Not Modified` to it -- the
 recorded line from the test that ran it is
-`revalidated with "6ab45c1a-6bc5e", no body sent` (`tests/live.rs`,
-`#[ignore]`d by design, run here with `--ignored`). So the expensive half of the
-cache is a measurement rather than an assumption: a version list that has not
-moved costs a header exchange instead of the document. It is also the only
-receipt in this document that came from outside this machine.
+`revalidated with "6ab45c1a-6bc5e", no body sent`. And a real asset object, read
+out of the live asset index by the `sha1` Mojang names it with, is fetched,
+verified, filed, and answered from the disk on the second look. Both are
+`tests/live.rs` tests, `#[ignore]`d by design and run here with `--ignored`, and
+they are the only receipts in this document that came from outside this machine.
+A fixture would have agreed with the code on both; the services are the only
+things that can disagree.
 
 Three mistakes the engine's own tests caught, all of them invisible by
 inspection and all of them the kind that only shows up in front of a user:
@@ -413,6 +429,19 @@ inspection and all of them the kind that only shows up in front of a user:
    `0.1 * 2.0` is not `0.2`: a "200 ms" wait came out 200000003 ns. It is
    integer nanoseconds now, which is the fix that makes the policy testable at
    all -- a wait that cannot be stated cannot be asserted.
+4. **The cache's age had two sources of truth.** A stamp file holds whole
+   milliseconds, and `put` returned the full-precision `SystemTime::now()` it had
+   just written -- so the age in the caller's hand and the age on disk differed by
+   up to a millisecond. Nothing in the launcher cares about that much time; what
+   it costs is a test that can compare the two values at all, and "the stamp
+   moved" is exactly the assertion the revalidation path needs. One function,
+   `confirmed_at`, truncates now and both write it. How it was found matters more
+   than the fix: a test written around a 40 ms TTL and an 80 ms sleep failed about
+   one run in ten under load, because the assertion before the sleep was about the
+   *machine's* scheduling as much as the cache's behaviour. Widening the margin
+   would have hidden it. Making the staleness structural, with a TTL of zero,
+   turned a flake into a failure that reproduced every time -- and the failure was
+the two-sources-of-truth bug underneath.
 
 Two more the tests caught in the scheduler slice, both about ordering rather
 than arithmetic: `submit` has to raise the outstanding count *before* the job is
@@ -423,10 +452,6 @@ work nobody stopped.
 
 What stage 4 does **not** have yet, named rather than implied:
 
-* **The hash-keyed content store.** The spec's "compute a digest, look it up
-  locally, download only what is missing" is not written; `fetch_to_file`
-  verifies a digest it is handed, which is the half that has to be right before
-the store can be built on top.
 * **Mojang's piston meta and the Modrinth API as metadata sources.** The cache
   is transport-agnostic on purpose and nothing above it exists yet, so the only
   metadata path in use is still `meta.rs`'s write-once one.

@@ -1025,8 +1025,8 @@ two chunks into a body.
 - [x] G68: the revalidation is the service's behaviour, not the double's
   CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_metadata_cache_revalidates
   EXPECT: test result: ok. 1 passed
-  EVIDENCE: the one live test that has run in this session, and it passed
-      against the real host: `revalidated with "6ab45c1a-6bc5e", no body sent`.
+  EVIDENCE: the first of the two live tests that have run in this session, and it
+      passed against the real host: `revalidated with "6ab45c1a-6bc5e", no body sent`.
       `meta.prismlauncher.org` sends an `ETag` on
       `/v1/net.minecraft/index.json` and answers `304 Not Modified` to it, so the
       expensive half of the cache is real rather than hoped for — a version list
@@ -1036,6 +1036,41 @@ two chunks into a body.
       what it insists on is the same document either way, and that a second cache
       over the same directory — a launcher restart — can read the entry the first
       one wrote. That is the round trip the unit tests can only simulate.
+
+- [x] G69: a file is named by its own digest, and a download only asks for what
+      is missing
+  CHECK: cargo test -p palantir-net --locked --lib engine::content
+  EXPECT: test result: ok. 12 passed
+  EVIDENCE: 12 tests over `crates/palantir-net/src/engine/content.rs`. The three
+      digests the services actually publish are all carried and all computed --
+      Mojang's `sha1` per asset and library, Modrinth's `sha1`/`sha512` per file,
+      Prism's `sha256` -- and their hashes are asserted against published vectors
+      (the empty string's `sha1`, `abc`'s `sha1`/`sha256`/`sha512`) rather than
+      against themselves. A 32-character digest is *refused* rather than guessed
+      at, because 32 characters is MD5 and a store that guessed would hide a
+      caller's bug behind a file that verifies as something else. The two rules
+      the store's name rests on are asserted: `put` refuses bytes that are not
+      what they are called (and writes nothing), and `adopt` refuses a file that
+      does not verify while leaving it where it was, so a caller can still resume
+      it. The join with the downloader is the part that makes it a feature rather
+      than a directory: `fetch` asks for nothing when the digest is already
+      stored (a second call is `AlreadyThere` with a request count that did not
+      move), a transfer that fails its digest is deleted rather than filed, and
+      an interrupted one leaves a `.part` under the digest's own name which the
+      next call resumes from -- 1024 bytes on disk after a cancellation, and
+      3072 bytes over the wire when the run after it finishes the file.
+
+- [x] G70: the publish this store believes is the publish Mojang serves
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 an_asset_object_is_fetched_once
+  EXPECT: test result: ok. 1 passed
+  EVIDENCE: the second live test to pass in this session, and the one that says
+      the store is not merely self-consistent. A real object from the live asset
+      index is read out of the index by its published name, `Digest::parse` reads
+      that name as a `sha1` because that is what it is, `ContentStore::fetch`
+      brings the bytes through the real client, verifies them against Mojang's
+      own digest, files them, and answers a second call from the disk without a
+      request. A fixture would have agreed with the code on all of it; the CDN is
+      the only thing that can disagree.
 
 ### The engine's transcript, and the two runs that could not start
 
@@ -1055,8 +1090,8 @@ $ cargo test --workspace --all-targets --locked
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
-    178 passed; 0 failed  (palantir-net, lib)
-      0 passed; 0 failed; 9 ignored  (palantir-net, tests/live.rs)
+    190 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 10 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
@@ -1070,13 +1105,14 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-949 tests pass, nothing in the correctness-deny set is failing, and all four
+961 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The caveat in the transcript below -- that a
-local run is not a clean checkout -- applies here too, with one thing added: **one live test has run against the real world and
-passed** (G68), which is a stronger kind of receipt than a local unit run — it is
-the actual service answering, and it is the only part of this document that comes
-from outside this machine. Re-running the push when the account can schedule jobs
-is still the first thing to do with this tree.
+local run is not a clean checkout -- applies here too, with one thing added:
+**two live tests have run against the real world and passed** (G68 and G70),
+which is a stronger kind of receipt than a local unit run. The services answering
+is the only part of this document that comes from outside this machine, and both
+of those tests were run here rather than by the runner, which cannot start.
+Re-running the push when it can is still the first thing to do with this tree.
 
 ### The transcript of the earlier pushes, for comparison
 

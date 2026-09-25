@@ -57,9 +57,10 @@ pub use download::{
     verify_sha256,
 };
 pub use engine::{
-    fetch_to_file, is_retryable, next_event, Backoff, Cancel, Cached, Download, Downloaded, Event,
-    Fetch, HttpPool, Job, JobId, Limit, MetadataCache, Outcome, Request, Response, Scheduler,
-    DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL, DEFAULT_WORKERS, IMMUTABLE_TTL, USER_AGENT,
+    fetch_to_file, is_retryable, next_event, Backoff, Cancel, Cached, ContentStore, Digest,
+    Download, Downloaded, Event, Fetch, HttpPool, Job, JobId, Limit, MetadataCache, Outcome,
+    Request, Response, Scheduler, Stored, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
+    DEFAULT_WORKERS, IMMUTABLE_TTL, USER_AGENT,
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{

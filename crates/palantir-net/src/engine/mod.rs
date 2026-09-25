@@ -17,6 +17,7 @@
 //! | [`cancel`] | How a running transfer is stopped, mid-body, in milliseconds |
 //! | [`request`] | What a request is, and the seam every rule above is tested through |
 //! | [`cache`] | A TTL on every metadata answer, and a revalidation instead of a re-download |
+//! | [`content`] | Files named by their own digest: what is already here is never fetched twice |
 //! | [`http`] | The one `reqwest` client, the `Range` header, and the honest answer when a range is ignored |
 //! | [`download`] | One file: resumed if it can be, restarted if it must be, verified before it is done |
 //! | [`schedule`] | A queue of files over a few workers, where every job reports and any one can be stopped |
@@ -47,6 +48,7 @@
 
 pub mod cache;
 pub mod cancel;
+pub mod content;
 pub mod download;
 pub mod http;
 pub mod limit;
@@ -56,6 +58,7 @@ pub mod schedule;
 
 pub use cache::{Cached, MetadataCache, DEFAULT_TTL, IMMUTABLE_TTL};
 pub use cancel::Cancel;
+pub use content::{ContentStore, Digest, Stored};
 pub use download::{fetch_to_file, Download, Downloaded};
 pub use http::{HttpPool, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT};
 pub use limit::{Limit, Permit};

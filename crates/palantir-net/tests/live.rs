@@ -587,6 +587,73 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
     );
 }
 
+/// The content store against the CDN, which is where "never download the same
+/// jar twice" has to be true to be worth anything.
+///
+/// The unit tests prove the store's rules with a double. What they cannot say is
+/// that the digest a service publishes is the digest this store computes: Mojang
+/// names each asset object with a 40-character `sha1` and nothing else, so
+/// `Digest::parse` has to read it as a sha1 and `verify_file` has to agree with
+/// it. If they disagreed, every asset would be refused as tampered with -- and a
+/// fixture would have agreed with the code, because the fixture would have been
+/// written from the same assumption.
+///
+/// The second half is the claim that makes the store a feature rather than a
+/// detail: the same object asked for twice costs one request. The real CDN is
+/// what makes that worth measuring -- a double answers the same way twice no
+/// matter what the store does with the file.
+#[test]
+#[ignore = "live: reaches Mojang's asset CDN"]
+fn an_asset_object_is_fetched_once_and_then_answered_from_the_store() {
+    use palantir_core::assets::{object_cdn_path, AssetIndex};
+    use palantir_net::engine::{Backoff, Cancel, ContentStore, Digest, HttpPool, Stored};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let mut meta = live_store(&tmp.path().join("meta"));
+    let game = meta
+        .version_file("net.minecraft", GAME)
+        .expect("fetching the game version file");
+    let index_ref = game
+        .asset_index
+        .filter(|index| index.known)
+        .unwrap_or_else(|| panic!("{GAME} no longer publishes a downloadable asset index"));
+    let fetcher = palantir_net::BlockingHttpFetcher::new(Duration::from_secs(120));
+    let index_bytes = fetcher
+        .fetch(&index_ref.url)
+        .unwrap_or_else(|e| panic!("{}: {e}", index_ref.url));
+    let parsed = AssetIndex::parse(&String::from_utf8_lossy(&index_bytes))
+        .expect("parsing the live asset index");
+    let (name, object) = parsed.objects.iter().next().expect("the index is empty");
+
+    // The published name, read the way the launcher reads it: by its shape.
+    let digest = Digest::parse(&object.hash).unwrap_or_else(|e| {
+        panic!("the asset index names '{name}' as '{}', which is not a digest: {e}", object.hash)
+    });
+    assert_eq!(digest.kind(), "sha1", "Mojang names asset objects with a sha1");
+    let url = format!("{ASSET_OBJECT_BASE_URL}/{}", object_cdn_path(&object.hash));
+
+    let pool = HttpPool::default();
+    let cancel = Cancel::new();
+    let store = ContentStore::new(tmp.path().join("content"));
+    let first = store
+        .fetch_blocking(&pool, &url, &digest, &cancel, &Backoff::with_attempts(2))
+        .unwrap_or_else(|e| panic!("{url}: {e}"));
+    match first {
+        Stored::Fetched(bytes) => assert!(bytes > 0, "{url} served nothing"),
+        Stored::AlreadyThere => panic!("nothing was stored yet"),
+    }
+    assert!(store.verified(&digest), "the bytes in the store are the object the index names");
+
+    let second = store
+        .fetch_blocking(&pool, &url, &digest, &cancel, &Backoff::with_attempts(2))
+        .expect("the second look");
+    assert_eq!(second, Stored::AlreadyThere, "{url} was fetched twice");
+    assert!(!store.staging_path(&digest).exists(), "a staging file was left behind");
+    let (files, bytes) = store.stats();
+    assert_eq!(files, 1);
+    assert_eq!(bytes, std::fs::metadata(store.path(&digest)).map(|m| m.len()).unwrap_or(0));
+}
+
 /// The one assumption in the engine that a double cannot hold.
 ///
 /// `MapFetch` proves the *engine's* rules: that an offset is only continued when
