@@ -253,14 +253,14 @@ impl MetadataCache {
         }
         // The bytes stay where they are; only the age resets. This is the whole
         // point of keeping the validator.
-        let now = SystemTime::now();
+        let now = confirmed_at();
         self.write_stamp(url, held.etag.as_deref(), now)?;
         Ok(Cached { fetched: now, from_disk: true, ..held })
     }
 
     /// Store `body` for `url`, with `etag` if the service gave one.
     pub fn put(&self, url: &str, body: &[u8], etag: Option<&str>) -> Result<Cached, Error> {
-        let now = SystemTime::now();
+        let now = confirmed_at();
         write_atomic(&self.body_path(url), body)?;
         // Second, and never first: a body with no stamp is re-fetched, and a
         // stamp with no body is an entry that is believed and cannot be read.
@@ -331,14 +331,31 @@ impl MetadataCache {
 
     /// Write the age and validator of the body beside it.
     fn write_stamp(&self, url: &str, etag: Option<&str>, fetched: SystemTime) -> Result<(), Error> {
-        let millis = fetched.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-        let millis = u64::try_from(millis).unwrap_or(u64::MAX);
+        let millis = u64::try_from(fetched.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis())
+            .unwrap_or(u64::MAX);
         // Three lines, and no escaping: a header value cannot contain a line
         // break, and the URL is the last line so a newline in it -- which no URL
         // we build has -- could only ever affect the line that is not read back.
         let text = format!("{}\n{}\n{}\n", etag.unwrap_or_default(), millis, url);
         write_atomic(&self.stamp_path(url), text.as_bytes())
     }
+}
+
+/// Now, truncated to the millisecond a stamp file can hold.
+///
+/// The stamp records whole milliseconds, so this is the value that will be read
+/// back. Returning it from the two places that write a stamp means the age in a
+/// caller's hand is the age on disk -- and that is not tidiness: the two values
+/// differing by a fraction of a millisecond is a difference nobody can explain,
+/// and the test that compares them ends up asserting the difference rather than
+/// the fact. (That test is how this was found: it read back a stamp and asserted
+/// it equalled the value it had just been handed, and the two were 484,800 ns
+/// apart.)
+fn confirmed_at() -> SystemTime {
+    let millis =
+        u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis())
+            .unwrap_or(u64::MAX);
+    UNIX_EPOCH + Duration::from_millis(millis)
 }
 
 /// The cache key for a URL.
@@ -477,19 +494,24 @@ mod tests {
 
     #[test]
     fn an_expired_entry_is_revalidated_and_the_stamp_moves() {
+        // A TTL of zero -- "always ask" -- rather than a short one crossed by
+        // sleeping. This test was written the other way first, with a 40 ms TTL
+        // and an 80 ms sleep, and it failed about one run in ten under load
+        // because the assertion before the sleep was `fresh()`, which is a
+        // claim about the machine's scheduling as much as the cache's
+        // behaviour: 40 ms is not much time to write two files in. What the test
+        // is actually about is the stamp moving, and that is a comparison of two
+        // `SystemTime`s, which needs no margin at all.
         let root = dir_of("revalidate");
-        // Short enough that a test can cross it by sleeping, long enough not to
-        // be crossed by accident.
-        let cache = cache_in(&root, Duration::from_millis(40));
+        let cache = cache_in(&root, Duration::ZERO);
         let fetch = MapFetch::new().with_route(URL, Route::text("index").tagged("\"v7\""));
-        get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
-        assert!(cache.fresh(URL).is_some());
+        let first = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        assert!(cache.fresh(URL).is_none(), "a zero TTL is never fresh");
+        assert!(cache.cached(URL).is_some(), "but the copy is readable");
+        // Long enough that the two stamps cannot be the same instant, short
+        // enough not to be worth measuring.
+        std::thread::sleep(Duration::from_millis(2));
 
-        std::thread::sleep(Duration::from_millis(80));
-        assert!(cache.fresh(URL).is_none(), "the TTL has passed");
-        assert!(cache.cached(URL).is_some(), "but the copy is still there");
-
-        let before = SystemTime::now();
         let second = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the second");
         assert_eq!(second.body, b"index");
         assert!(second.from_disk, "the bytes were already here");
@@ -501,10 +523,12 @@ mod tests {
             "the validator went back exactly as it came"
         );
         assert!(
-            cache.fresh(URL).is_some(),
+            second.fetched > first.fetched,
             "a 304 refreshes the age, which is the whole point of keeping the validator"
         );
-        assert!(second.fetched >= before);
+        // And the stamp on disk is the one that moved, not only the value in
+        // hand: the next run reads this file.
+        assert_eq!(cache.cached(URL).expect("the stored copy").fetched, second.fetched);
     }
 
     #[test]
