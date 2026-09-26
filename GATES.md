@@ -1230,6 +1230,34 @@ made and the interface had not taken up yet.
       options are built by `crate::ui`, so the modal's buttons tween like the
       pages' do -- which is what the same clock is for.
 
+### The first write, and where a created instance goes
+
+G78 is stage 5's first slice and the first thing the interface makes rather than
+asks for. Everything before it answered a question; a create makes a folder, a
+config and a version profile, which is why the gate is about what happens when it
+*cannot* as much as when it can.
+
+- [x] G78: an instance can be created from the library, for the version Mojang
+      says is current, and the reader lands in it
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 577 passed
+  EVIDENCE: 577 tests over the desktop binary, five of them new. The write side of
+      `store.rs` is asserted where it can be wrong: `create_instance` with no
+      version asks Mojang for one -- the store's own fetch seam answers with a
+      manifest, and the test asserts exactly one request and that the instance
+      exists in the launcher's own format afterwards -- then `reload` reads the
+      list again, because an instance that was just written is on disk and not on
+      a page drawn from a list read at startup. A store with no launcher behind it
+      answers with the sentence rather than creating somewhere invented. The
+      shell's half is three claims: the rail's `+` and the library's own button
+      both open the dialog (the button by *reporting* `Ask::Create` out of
+      `Screen::update`, so a page never learns where instances live), a failed
+      create keeps the dialog and puts the reason in it rather than closing on a
+      button that did nothing, and a successful one reads the list again and
+      navigates to the instance it made. `ui::button_or` is the control the dialog
+      needs while its request is in flight: the same button with its press removed
+      and its ink faded, rather than a second click that counts twice.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
