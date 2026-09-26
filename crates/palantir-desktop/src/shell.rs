@@ -48,6 +48,7 @@ use iced::{
     Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
 };
 
+use crate::anim;
 use crate::brand;
 use crate::color_theme::ColorTheme;
 use crate::icon;
@@ -360,6 +361,19 @@ impl Shell {
         self.back.push(std::mem::replace(&mut self.address, address));
         self.settle();
         self.screen.retarget(&self.address);
+        self.forget_pointer();
+    }
+
+    /// Forget where the pointer was on the page that is being left.
+    ///
+    /// A control the pointer was on is not drawn on the page that arrives, and
+    /// the page's controls draw from the clock rather than keeping a pointer
+    /// state of their own -- so without this a control the new page happens to
+    /// name the same way would arrive lit.
+    fn forget_pointer(&self) {
+        if let Ok(mut clock) = anim::clock().lock() {
+            clock.forget_pointer();
+        }
     }
 
     /// Go back one page, if there is one.
@@ -374,6 +388,7 @@ impl Shell {
         // and anything else is built fresh, which is what a browser does when it
         // returns to a document it no longer holds.
         self.screen.retarget(&self.address);
+        self.forget_pointer();
     }
 
     /// Go forward one page, if the user has not navigated since.
@@ -384,6 +399,7 @@ impl Shell {
         self.back.push(std::mem::replace(&mut self.address, next));
         self.settle();
         self.screen.retarget(&self.address);
+        self.forget_pointer();
     }
 
     /// Advance every moving tween by `delta`.
@@ -394,8 +410,17 @@ impl Shell {
     }
 
     /// Whether anything is still moving, which is what keeps the clock awake.
+    ///
+    /// Two clocks now, and both have to be asked. The rail's plates are the
+    /// shell's own, and the pages' controls are [`crate::anim`]'s process-wide
+    /// interaction clock -- a hover that started on a control is a frame
+    /// subscription the shell owes it, or the tween would paint its first frame
+    /// and sit there (see [`crate::hover`]).
     pub fn animating(&self) -> bool {
-        self.plates.iter().any(Tween::is_running)
+        if self.plates.iter().any(Tween::is_running) {
+            return true;
+        }
+        anim::clock().lock().map(|clock| clock.animating()).unwrap_or(false)
     }
 
     /// Whether the right panel belongs on screen.
@@ -500,6 +525,11 @@ impl Shell {
             }
             Message::Tick => {
                 self.advance(FRAME);
+                // The pages' controls advance on the same frame as the rail's
+                // plates: one clock in the window, whichever page is drawing.
+                if let Ok(mut clock) = anim::clock().lock() {
+                    clock.tick(std::time::Instant::now());
+                }
                 None
             }
             // Handled before this, in `handle`: they are the messages whose
@@ -1796,6 +1826,76 @@ mod tests {
             let shell = shell_at(path);
             assert!(shell.pages_are_drawn(), "{path} draws a page");
         }
+    }
+
+    #[test]
+    fn a_page_control_s_hover_is_a_frame_subscription_the_shell_owes() {
+        // The join between the two clocks: the pages' controls tween on the
+        // process-wide interaction clock, and the shell is what asks for the
+        // frames -- so a crossing has to show up in `animating()` or the tween
+        // would paint one frame and sit there (see `crate::hover`).
+        let _guard = anim::lock_for_test();
+        // The key is this test's own, so what is asserted below is about this
+        // page's control rather than about a clock the other tests share.
+        let key = "shell:test:hover";
+        anim::clock().lock().expect("the clock").clear();
+        let mut shell = shell_at("/browse/modpack");
+        // The rail's plate is the shell's own tween and a fresh shell starts one;
+        // let it arrive, so what is asked below is about the page's control.
+        shell.advance(Duration::from_secs(1));
+        let drawn = |key: &str| anim::clock().lock().expect("the clock").drawn(key);
+        assert_eq!(drawn(key), (1.0, 0.0), "nothing has crossed this control");
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Discover(discover::Message::Hover {
+                key,
+                over: true,
+                hover: None,
+            })),
+        );
+        assert!(
+            shell.animating(),
+            "a hover in the air is the shell's frames to ask for"
+        );
+        // The deadline ends it, and the window goes quiet without another
+        // message: a tween that settles must not hold the frames open.
+        anim::clock()
+            .lock()
+            .expect("the clock")
+            .tick(std::time::Instant::now() + crate::anim::INTERACTION_DURATION);
+        assert_eq!(drawn(key), (crate::theme::hover_brightness(), 1.0));
+        assert!(!shell.animating(), "the rail settled too, so nothing is moving");
+    }
+
+    #[test]
+    fn a_navigation_forgets_where_the_pointer_was() {
+        // The page that is being left does not draw its controls on the one that
+        // arrives, so the crossing that lit one goes with it. Without this a
+        // control the new page happens to name the same way would arrive lit.
+        let _guard = anim::lock_for_test();
+        let key = "shell:test:left";
+        anim::clock().lock().expect("the clock").clear();
+        let mut shell = shell_at("/browse/modpack");
+        shell.advance(Duration::from_secs(1));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Discover(discover::Message::Hover {
+                key,
+                over: true,
+                hover: None,
+            })),
+        );
+        assert!(shell.animating(), "the hover is what is moving now");
+        press(&mut shell, Message::Go("/skins".to_string()));
+        // The control is not drawn any more, so it is not hovered any more --
+        // asserted on the key rather than on the clock's quiet, which belongs to
+        // every test in this binary.
+        let drawn = anim::clock().lock().expect("the clock").drawn(key);
+        assert_eq!(
+            drawn,
+            (1.0, 0.0),
+            "the crossing belonged to the page that is gone"
+        );
     }
 }
 

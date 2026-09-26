@@ -82,7 +82,26 @@ pub enum Message {
     Refresh,
     /// The project's main action was pressed.
     Install,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// One stable name per tab, in `State::TABS`' order.
+const TAB_KEYS: [&str; 3] = ["project:tab:description", "project:tab:gallery", "project:tab:versions"];
+
+/// The page's two actions.
+const INSTALL_KEY: &str = "project:install";
+const REFRESH_KEY: &str = "project:refresh";
 
 /// The page's own state.
 #[derive(Debug, Clone)]
@@ -114,6 +133,11 @@ impl State {
             Message::Tab(tab) => self.tab = tab,
             Message::Refresh => self.project = Load::Failed(store::not_implemented("This project")),
             Message::Install => self.notice = Some(store::not_implemented("Installing a project")),
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 
@@ -155,7 +179,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         blocks.push(ui::admonition(theme, ui::Severity::Info, &state.id, notice));
     }
     blocks.push(page::draw(theme, project, "this project", |project| header(theme, project)));
-    blocks.push(ui::tabs(theme, &state.labels(), |index| {
+    blocks.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
         Message::Tab(State::TABS.get(index).cloned().unwrap_or(ProjectTab::Description))
     }));
     blocks.push(match project {
@@ -211,12 +235,14 @@ fn header<'a>(theme: Gen, project: &'a Project) -> Element<'a, Message> {
                     .spacing(ROW_GAP)
                     .push(ui::button(
                         theme,
+                        INSTALL_KEY,
                         Key::AppLibraryContextMenuCreateInstance,
                         ui::Kind::Colored,
                         Message::Install,
                     ))
                     .push(ui::button(
                         theme,
+                        REFRESH_KEY,
                         Key::AppLibrarySortLabel,
                         ui::Kind::Quiet,
                         Message::Refresh,

@@ -200,7 +200,7 @@ pub fn empty<'a, Message: 'a>(theme: Gen, key: Key) -> Element<'a, Message> {
 /// is here rather than in [`crate::ui::admonition`] because dismissing is page
 /// state and the widget kit has none -- a page passes the message that means
 /// "this is read now".
-pub fn notice<'a, Message: Clone + 'a>(
+pub fn notice<'a, Message: Clone + crate::ui::Hovered + 'a>(
     theme: Gen,
     header: Key,
     body: &str,
@@ -211,7 +211,9 @@ pub fn notice<'a, Message: Clone + 'a>(
         .align_items(Alignment::Start)
         .push(crate::ui::admonition(theme, crate::ui::Severity::Info, header.message(), body))
         .push(Space::with_width(Length::Fill))
-        .push(crate::ui::icon_button(theme, Glyph::X, 16.0, dismiss))
+        // One dismiss control on the page, and every page's notice names it the
+        // same way: the tween it gets is the crossing this page's family routes.
+        .push(crate::ui::icon_button(theme, "page:notice:dismiss", Glyph::X, 16.0, dismiss))
         .into()
 }
 

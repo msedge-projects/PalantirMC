@@ -46,7 +46,33 @@ pub enum Message {
         /// What it should become.
         enabled: bool,
     },
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// One stable name per tab, in `State::TABS`' order.
+const TAB_KEYS: [&str; 6] = [
+    "instance:tab:content",
+    "instance:tab:files",
+    "instance:tab:worlds",
+    "instance:tab:screenshots",
+    "instance:tab:logs",
+    "instance:tab:share",
+];
+
+/// The page's two actions and the per-file toggle.
+const PLAY_KEY: &str = "instance:play";
+const TOGGLE_KEY: &str = "instance:content:toggle";
 
 /// The page's own state.
 #[derive(Debug, Clone)]
@@ -139,6 +165,11 @@ impl State {
                     .err()
                     .map(|error| format!("Could not change {file_name}: {error}"));
             }
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 }
@@ -150,7 +181,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     if let Some(notice) = &state.notice {
         blocks.push(ui::admonition(theme, ui::Severity::Warning, &state.id, notice));
     }
-    blocks.push(ui::tabs(theme, &state.labels(), |index| {
+    blocks.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
         Message::Tab(State::tab_at(index))
     }));
     blocks.push(body(theme, state, store));
@@ -196,7 +227,13 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             .spacing(GAP)
             .align_items(Alignment::Center)
             .push(details.width(Length::Fill))
-            .push(ui::button(theme, Key::AppInstanceActionPlay, ui::Kind::Colored, Message::Play)),
+            .push(ui::button(
+                theme,
+                PLAY_KEY,
+                Key::AppInstanceActionPlay,
+                ui::Kind::Colored,
+                Message::Play,
+            )),
     )
 }
 
@@ -230,6 +267,7 @@ fn body<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Messa
             for entry in mods {
                 let toggle = ui::button(
                     theme,
+                    TOGGLE_KEY,
                     if entry.enabled {
                         Key::AppScreenshotsDeselect
                     } else {

@@ -95,7 +95,30 @@ impl Hit {
     }
 }
 
-/// The orders the search can be asked in.
+// The pointer's crossings, recorded into the clock every control draws from.
+// One impl per page, and the macro is what keeps them all the same shape: a page
+// whose `update` records `Hover { key, over }` is a page whose controls can be
+// built by `crate::ui`.
+crate::hovered!(Message);
+
+/// One stable name per project-type tab, in `ProjectType::TABS`' order.
+///
+/// Not derived from the label: the label is the locale's and may be retranslated,
+/// and a tab that changed its key on a language change would be a tab whose hover
+/// tween is forgotten mid-flight.
+const TAB_KEYS: [&str; 6] = [
+    "discover:tab:modpack",
+    "discover:tab:mod",
+    "discover:tab:resourcepack",
+    "discover:tab:datapack",
+    "discover:tab:shader",
+    "discover:tab:server",
+];
+
+/// The sorting control's own name, and the one its results are filtered by.
+const FILTER_KEY: &str = "discover:filter";
+
+/// The five orders the search can be asked in.
 ///
 /// `ui/src/utils/search.ts`'s own list, literals and all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -183,6 +206,20 @@ pub enum Message {
         round: u64,
         /// The hits, or the reason there are none.
         result: Result<Vec<Hit>, String>,
+    },
+    /// The pointer entered or left one of the page's controls.
+    ///
+    /// A hover is a message rather than something a stylesheet reads off the
+    /// pointer, because the tween it starts has to begin *before* the frame that
+    /// draws it (see [`crate::ui`]). The page records the crossing and draws
+    /// from the clock, so nothing here holds the pointer's state itself.
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
     },
 }
 
@@ -281,6 +318,13 @@ impl State {
                     };
                 }
             }
+            // The crossing, recorded where the clock lives: the page draws the
+            // tween from the clock and keeps no pointer state of its own.
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
             // The shell's to do, and not this page's: see the enum.
             Message::Open(_) => {}
         }
@@ -366,7 +410,7 @@ fn tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .iter()
         .map(|kind| (kind.label().to_string(), *kind == state.project_type))
         .collect();
-    ui::tabs(theme, &labels, move |index| {
+    ui::tabs(theme, &TAB_KEYS, &labels, move |index| {
         Message::ProjectType(ProjectType::TABS.get(index).copied().unwrap_or(ProjectType::Modpack))
     })
 }
@@ -380,6 +424,7 @@ fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .push(ui::select(theme, Key::BrowseViewPrefix, &state.view_label(), 144.0))
         .push(ui::button(
             theme,
+            FILTER_KEY,
             Key::BrowseFilterResults,
             ui::Kind::Standard,
             Message::Search,

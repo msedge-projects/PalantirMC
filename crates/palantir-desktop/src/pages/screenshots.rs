@@ -46,7 +46,22 @@ pub enum Message {
     Open,
     /// The last notice was dismissed.
     DismissNotice,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]). This page has no
+    /// control of that kind yet -- a screenshot tile is a picture, not a button
+    /// -- and the variant is here because the crossing is the page's to route
+    /// whichever control grows it first.
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
 
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
@@ -66,6 +81,11 @@ impl State {
                 self.notice = Some(store::not_implemented("Opening a screenshot in a viewer"));
             }
             Message::DismissNotice => self.notice = None,
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 

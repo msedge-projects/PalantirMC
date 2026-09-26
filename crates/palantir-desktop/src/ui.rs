@@ -16,6 +16,21 @@
 //! rather than from a rule. Both are marked at the point they are used, so the next
 //! session can measure them against a running reference instead of trusting this
 //! file.
+//!
+//! ## The interaction
+//!
+//! The reference's every control is `transition-[filter,transform] duration-150
+//! ease-out`, so a hover arrives over 150 ms rather than on a frame boundary. The
+//! clock that carries it is [`crate::anim`]'s, and this module is where a page
+//! reaches it: a hoverable control is a `mouse_area` that publishes the crossing
+//! as a message, and it draws from [`interaction`], which asks the clock.
+//!
+//! Why the crossing has to be a message rather than a read of the pointer during
+//! the view is [`crate::hover`]'s subject, and it is not a stylistic choice: iced
+//! re-tracks subscriptions *before* the view runs, so a tween started while the
+//! view is being built is one frame too late for the frames that would carry it.
+//! The page's own `update` records the crossing, the subscription is enabled by
+//! what that recording made true, and the view then draws the frame.
 
 #![allow(dead_code)]
 
@@ -23,12 +38,113 @@ use iced::widget::{column, container, mouse_area, row, text, text_input, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
 use iced::{Theme, mouse::Interaction};
 
+use crate::anim;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::ROW_GAP;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
+
+/// A page's message type, as far as this kit needs it.
+///
+/// The controls here are `mouse_area`s, and a crossing is a message more often
+/// than it is a state: `Report` in the shell this rewrite replaces could publish
+/// a pair of callbacks into any message type, but every page has settled on one
+/// constructor for the crossing, which is this. A page implements it once and
+/// every control in this file can ask for it.
+pub trait Hovered: Sized {
+    /// The pointer entered (`true`) or left (`false`) the control `key`.
+    fn hover(key: &'static str, over: bool) -> Self;
+
+    /// The same crossing for a control whose hover end is its own.
+    ///
+    /// The reference scopes `--hover-brightness` on some surfaces -- an instance
+    /// card brightens to `1.1` rather than the global `1.25` -- and a control
+    /// whose tween ends somewhere else has to say so where the crossing is made,
+    /// or the clock would animate to one factor while the view filters by another.
+    fn hover_with(key: &'static str, over: bool, hover: f32) -> Self;
+}
+
+/// A stable name for a control that repeats, from the data it names.
+///
+/// A card's identity is the project it draws, and the clock needs a
+/// `&'static str`. The names are leaked on purpose: they are bounded UI
+/// identities -- one per card the user has ever seen -- rather than per-frame
+/// values.
+pub fn scoped(namespace: &str, id: &str) -> &'static str {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, &'static str>>> =
+        std::sync::OnceLock::new();
+    let name = format!("{namespace}:{id}");
+    let mut table = match NAMES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())).lock() {
+        Ok(table) => table,
+        // A poisoned table is a panic that happened while a name was being
+        // looked up. Recover rather than refusing to draw the control.
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    match table.get(&name) {
+        Some(key) => key,
+        None => {
+            let key: &'static str = Box::leak(name.clone().into_boxed_str());
+            table.insert(name, key);
+            key
+        }
+    }
+}
+
+/// Implement [`Hovered`] for a page whose message carries the crossing itself.
+///
+/// Every page settled on the same variant -- a `Hover { key, over }` its own
+/// `update` records into the clock -- so the impl is one line per page and the
+/// name of the variant is the convention the macro encodes.
+#[macro_export]
+macro_rules! hovered {
+    ($message:ty) => {
+        impl $crate::ui::Hovered for $message {
+            fn hover(key: &'static str, over: bool) -> Self {
+                Self::Hover { key, over, hover: None }
+            }
+
+            fn hover_with(key: &'static str, over: bool, hover: f32) -> Self {
+                Self::Hover { key, over, hover: Some(hover) }
+            }
+        }
+    };
+}
+
+/// The factor and hover fraction the control `key` draws at.
+///
+/// A control nobody has reported is at rest, and one whose tween is in the air
+/// is drawn where the clock is. The second number is how far *through* its hover
+/// the control is, for the controls whose hover moves something rather than
+/// tinting it (a tab's plate appears, a card's label lifts).
+pub fn interaction(key: &str) -> (f32, f32) {
+    match anim::clock().lock() {
+        Ok(clock) => clock.drawn(key),
+        // A poisoned clock is a panic that happened while a tween was being
+        // read. Draw the rest state rather than propagating it.
+        Err(_) => (1.0, 0.0),
+    }
+}
+
+/// Record that the pointer entered or left the control `key`.
+///
+/// Called from a page's `update`, never from its view -- [`Hovered`] says why.
+/// A page's controls report a crossing and no press, because that is what the
+/// widget under them reports: a `mouse_area` has an enter, an exit and a press
+/// *action*, and the reference's press is `active:scale-[0.97]`, which is a
+/// transform this toolkit cannot draw at all. A dimmed press without a scale is
+/// what the old shell does and is not worth inventing twice.
+pub fn pointer(key: &'static str, over: bool) {
+    pointer_with(key, over, crate::theme::hover_brightness());
+}
+
+/// The same crossing, for a control whose hover end is scoped to itself.
+pub fn pointer_with(key: &'static str, over: bool, hover: f32) {
+    if let Ok(mut clock) = anim::clock().lock() {
+        clock.set_with_hover(key, over, false, std::time::Instant::now(), hover);
+    }
+}
 
 /// `.base-card`'s `padding: 1rem`.
 pub const CARD_PAD: f32 = 16.0;
@@ -260,12 +376,21 @@ pub enum Kind {
 }
 
 /// A button: `text-sm font-bold`, a radius from the control size.
-pub fn button<'a, Message: Clone + 'a>(
+///
+/// `key` is the control's stable identity for the interaction clock -- one per
+/// button, not one per label, because two buttons that happen to share a word
+/// must not light together. The filter is applied to the fill, the ring *and*
+/// the label, which is what a CSS filter on the element does; brightening the
+/// fill alone would leave an `Outlined` button's only visible change on the
+/// hairline.
+pub fn button<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
-    key: Key,
+    key: &'static str,
+    label: Key,
     kind: Kind,
     on_press: Message,
 ) -> Element<'a, Message> {
+    let (factor, _) = interaction(key);
     let (background, border, ink) = match kind {
         Kind::Standard => (
             Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
@@ -284,11 +409,15 @@ pub fn button<'a, Message: Clone + 'a>(
         ),
         Kind::Quiet => (None, None, theme_gen::ink(theme, INK_CONTRAST)),
     };
+    let background = background.map(|background| match background {
+        Background::Color(color) => Background::Color(crate::theme::brightness(color, factor)),
+        gradient => gradient,
+    });
     let face = container(
-        text(key.message())
+        text(label.message())
             .size(14.0)
             .font(heading())
-            .style(iced::theme::Text::Color(ink)),
+            .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
     )
     .height(Length::Fixed(CONTROL))
     .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
@@ -296,13 +425,20 @@ pub fn button<'a, Message: Clone + 'a>(
     .style(move |_theme: &Theme| container::Appearance {
         background,
         border: Border {
-            color: border.unwrap_or(Color::TRANSPARENT),
+            color: border
+                .map(|border| crate::theme::brightness(border, factor))
+                .unwrap_or(Color::TRANSPARENT),
             width: if border.is_some() { 1.0 } else { 0.0 },
             radius: CONTROL_RADIUS.into(),
         },
         ..container::Appearance::default()
     });
-    mouse_area(face).interaction(Interaction::Pointer).on_press(on_press).into()
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(on_press)
+        .into()
 }
 
 /// A quiet icon button, the square one the reference uses in a bar.
@@ -310,22 +446,40 @@ pub fn button<'a, Message: Clone + 'a>(
 /// `Message: Clone` because [`mouse_area`]'s press handler holds its message and
 /// the element is rebuilt on every paint: iced requires the clone to do that, and
 /// every one of this crate's message types is a clone.
-pub fn icon_button<'a, Message: Clone + 'a>(
+pub fn icon_button<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
+    key: &'static str,
     glyph: Glyph,
     size: f32,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let face = container(icon::icon(glyph, size, theme_gen::ink(theme, INK_DEFAULT)))
-        .width(Length::Fixed(size + 16.0))
-        .height(Length::Fixed(size + 16.0))
-        .center_x()
-        .center_y()
-        .style(move |_theme: &Theme| container::Appearance {
-            border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
-            ..container::Appearance::default()
-        });
-    mouse_area(face).interaction(Interaction::Pointer).on_press(on_press).into()
+    let (factor, _) = interaction(key);
+    // The whole control is the glyph, so the hover's own structure is the raised
+    // surface appearing behind it -- `hover:bg-button-bg` in the reference's own
+    // terms -- and the filter moves the glyph with it.
+    let hovered = factor != 1.0;
+    let plate = hovered.then(|| theme_gen::ink(theme, Ink::ButtonBg));
+    let plate = plate.map(|plate| crate::theme::brightness(plate, factor));
+    let face = container(icon::icon(
+        glyph,
+        size,
+        crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor),
+    ))
+    .width(Length::Fixed(size + 16.0))
+    .height(Length::Fixed(size + 16.0))
+    .center_x()
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: plate.map(Background::Color),
+        border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
+        ..container::Appearance::default()
+    });
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(on_press)
+        .into()
 }
 
 /// The tabs a page switches between: a pill of buttons, the selected one plated.
@@ -334,22 +488,31 @@ pub fn icon_button<'a, Message: Clone + 'a>(
 /// `px-4 py-2` tabs inside it. The labels are strings because a page's tabs are
 /// not always locale keys of their own: an instance's are, and Discover's are the
 /// project-type names `route.rs` already asserts against the reference.
-pub fn tabs<'a, Message: Clone + 'a>(
+pub fn tabs<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
+    keys: &[&'static str],
     labels: &[(String, bool)],
     on_select: impl Fn(usize) -> Message,
 ) -> Element<'a, Message> {
     let mut track = row![].align_items(Alignment::Center).spacing(2.0);
-    for (index, (label, selected)) in labels.iter().enumerate() {
+    for (index, ((label, selected), key)) in labels.iter().zip(keys.iter().copied()).enumerate() {
         let selected = *selected;
         let ink = if selected {
             theme_gen::ink(theme, INK_CONTRAST)
         } else {
             theme_gen::ink(theme, INK_SECONDARY)
         };
+        // A selected tab is plated and an unselected one is not, and the
+        // reference does not change that on hover: what a hover moves is the
+        // *label* -- `text-secondary` to `text-primary` -- so the plate is left
+        // alone and the ink is filtered.
+        let (factor, _) = interaction(key);
         let plate = selected.then(|| theme_gen::ink(theme, Ink::ButtonBg));
         let tab = container(
-            text(label.clone()).size(14.0).font(heading()).style(iced::theme::Text::Color(ink)),
+            text(label.clone())
+                .size(14.0)
+                .font(heading())
+                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
         )
         .height(Length::Fixed(32.0))
         .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
@@ -359,7 +522,13 @@ pub fn tabs<'a, Message: Clone + 'a>(
             border: Border { radius: 999.0.into(), ..Border::default() },
             ..container::Appearance::default()
         });
-        track = track.push(mouse_area(tab).interaction(Interaction::Pointer).on_press(on_select(index)));
+        track = track.push(
+            mouse_area(tab)
+                .interaction(Interaction::Pointer)
+                .on_enter(Message::hover(key, true))
+                .on_exit(Message::hover(key, false))
+                .on_press(on_select(index)),
+        );
     }
     container(track)
         .padding(4.0)
@@ -507,6 +676,104 @@ pub fn paragraph<'a, Message: 'a>(theme: Gen, body: &str) -> Element<'a, Message
 mod tests {
     use super::*;
 
+    /// A message type with nothing in it but the crossing a control publishes.
+    ///
+    /// The kit is generic over the page's own message, so the tests need one of
+    /// their own -- and it is deliberately *not* a page's, because what these
+    /// tests are about is the kit rather than any page's routing.
+    #[derive(Debug, Clone, PartialEq)]
+    enum Probe {
+        Crossed { key: &'static str, over: bool },
+    }
+
+    impl Hovered for Probe {
+        fn hover(key: &'static str, over: bool) -> Probe {
+            Probe::Crossed { key, over }
+        }
+
+        fn hover_with(key: &'static str, over: bool, _hover: f32) -> Probe {
+            Probe::Crossed { key, over }
+        }
+    }
+
+    /// Every page's source, embedded so the gate below reads the tree that was
+    /// compiled rather than a path that may not exist in some other checkout.
+    fn page_sources() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("discover", include_str!("pages/discover.rs")),
+            ("home", include_str!("pages/home.rs")),
+            ("instance", include_str!("pages/instance.rs")),
+            ("project", include_str!("pages/project.rs")),
+            ("screenshots", include_str!("pages/screenshots.rs")),
+            ("servers", include_str!("pages/servers.rs")),
+            ("skins", include_str!("pages/skins.rs")),
+            ("user", include_str!("pages/user.rs")),
+        ]
+    }
+
+    #[test]
+    fn every_control_a_page_draws_carries_its_own_key() {
+        // The gate the old shell has and this kit needs: a control built without
+        // a key is a control that snaps while the rest of the window tweens, and
+        // nothing about the widget would say so. Read as text because that is
+        // what the mistake is -- a call site whose second argument is still the
+        // label, which is exactly the shape this test refuses.
+        for (page, source) in page_sources() {
+            for call in ["ui::button(", "ui::tabs(", "ui::icon_button("] {
+                for call_site in source.split(call).skip(1) {
+                    let head: String = call_site
+                        .chars()
+                        .take(80)
+                        .filter(|character| !character.is_whitespace())
+                        .collect();
+                    assert!(
+                        !head.starts_with("theme,Key::") && !head.starts_with("theme,&labels"),
+                        "{page}: a `{call}` without its own key would never tween: {head}"
+                    );
+                }
+            }
+            // And the page routes the crossing it asks for: a control wired to a
+            // message nothing handles is a tween that never starts.
+            assert!(
+                source.contains("crate::hovered!(Message)"),
+                "{page}: the page does not implement the crossing its controls publish"
+            );
+        }
+    }
+
+    #[test]
+    fn a_control_tweens_its_hover_on_the_clock_it_was_given() {
+        // The property the pages are wired for: a crossing recorded from
+        // `update` moves the control over the reference's own 150 ms, and an
+        // untouched control is at rest rather than mid-hover.
+        let _guard = anim::lock_for_test();
+        let key = "ui:test:probe";
+        anim::clock().lock().expect("the clock").clear();
+        assert_eq!(interaction(key), (1.0, 0.0), "nothing has been reported yet");
+
+        // The crossing is a message, and handling it is what starts the tween.
+        let Probe::Crossed { key: reported, over } = Probe::hover(key, true);
+        assert_eq!(reported, key);
+        assert!(over);
+        pointer(reported, over);
+        assert!(anim::clock().lock().expect("the clock").animating());
+
+        // The deadline ends it, and the control is drawn at the hover factor.
+        let now = std::time::Instant::now() + crate::anim::INTERACTION_DURATION;
+        anim::clock().lock().expect("the clock").tick(now);
+        let (factor, progress) = interaction(key);
+        assert_eq!(factor, crate::theme::hover_brightness());
+        assert_eq!(progress, 1.0);
+
+        // And the leave is the return trip. Asserted on *this* key rather than on
+        // the clock's quiet: the clock is the window's, and a test binary runs
+        // tests side by side, so another one's tween may be in the air.
+        pointer(key, false);
+        let now = now + crate::anim::INTERACTION_DURATION;
+        anim::clock().lock().expect("the clock").tick(now);
+        assert_eq!(interaction(key), (1.0, 0.0));
+    }
+
     #[test]
     fn the_card_is_the_reference_s_own_rule() {
         // `.base-card { padding: 1rem; background-color: var(--surface-3);
@@ -543,7 +810,8 @@ mod tests {
         // panics on someone else's machine. Building them all is the test.
         for theme in Gen::ALL {
             let labels = [("Home".to_string(), true), ("Discover".to_string(), false)];
-            drop(tabs(*theme, &labels, |_: usize| ()));
+            let keys = ["ui:test:tab:home", "ui:test:tab:discover"];
+            drop(tabs(*theme, &keys, &labels, |_: usize| Probe::Crossed { key: keys[0], over: true }));
             drop(search(*theme, "Search mods", "sodium", |_: String| ()));
             drop(select::<()>(*theme, Key::LabelSortBy, "Relevance", 256.0));
             for kind in [Kind::Standard, Kind::Colored, Kind::Outlined, Kind::Quiet] {
@@ -552,10 +820,17 @@ mod tests {
                 // iced's own `button(…)` and holds every one of them to
                 // `hover_button`. A bare call here is not iced's button -- it is
                 // this module's -- and the path is how the text says so.
-                let face: Element<'_, ()> = crate::ui::button(*theme, Key::AppNavigationHome, kind, ());
+                let face: Element<'_, Probe> =
+                    crate::ui::button(*theme, "ui:test:button", Key::AppNavigationHome, kind, Probe::Crossed { key: "ui:test:button", over: false });
                 drop(face);
             }
-            drop(icon_button(*theme, Glyph::Play, 20.0, ()));
+            drop(icon_button(
+                *theme,
+                "ui:test:icon",
+                Glyph::Play,
+                20.0,
+                Probe::Crossed { key: "ui:test:icon", over: false },
+            ));
             drop(admonition::<()>(*theme, Severity::Info, "header", "body"));
             drop(admonition::<()>(*theme, Severity::Warning, "header", "body"));
             drop(admonition::<()>(*theme, Severity::Critical, "header", "body"));

@@ -8604,6 +8604,9 @@ mod tests {
         // own frames reach it, which is the difference between a tween and a
         // snap.
         let _guard = theme_lock();
+        // The interaction clock is the process's, so a test that asserts what it
+        // is doing takes the lock the other clock tests take as well.
+        let _clock_guard = anim::lock_for_test();
         let (_dir, paths) = test_paths();
         let mut app = PalantirApp::with_paths(paths);
         let key: &'static str = "probe:hover";

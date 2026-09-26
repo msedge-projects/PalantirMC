@@ -104,7 +104,23 @@ pub enum Message {
     AddSkin,
     /// The selected skin was asked to be applied to the account.
     Apply,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// The page's two actions.
+const ADD_KEY: &str = "skins:add";
+const APPLY_KEY: &str = "skins:apply";
 
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
@@ -129,6 +145,11 @@ impl State {
             Message::Apply => {
                 self.notice = Some(crate::store::not_implemented("Applying a skin"));
             }
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 }
@@ -150,8 +171,8 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             .align_items(Alignment::Center)
             .push(page::title(theme, Key::AppSkinsTitle))
             .push(Space::with_width(Length::Fill))
-            .push(ui::button(theme, Key::AppSkinsAddButton, ui::Kind::Standard, Message::AddSkin))
-            .push(ui::button(theme, Key::AppSkinsApplyButton, ui::Kind::Colored, Message::Apply))
+            .push(ui::button(theme, ADD_KEY, Key::AppSkinsAddButton, ui::Kind::Standard, Message::AddSkin))
+            .push(ui::button(theme, APPLY_KEY, Key::AppSkinsApplyButton, ui::Kind::Colored, Message::Apply))
             .into(),
     );
     // The sections, each a card that opens and closes. The skins inside them come

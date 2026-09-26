@@ -204,12 +204,64 @@ struct Tween {
     progress: f32,
     /// When the tween began, or `None` once it has arrived.
     began: Option<Instant>,
+    /// What the pointer last reported about this control.
+    pointed: Pointed,
 }
 
 impl Tween {
     fn settled(factor: f32) -> Tween {
-        Tween { to: factor, from: factor, progress: factor, began: None }
+        Tween {
+            to: factor,
+            from: factor,
+            progress: factor,
+            began: None,
+            pointed: Pointed::rest(),
+        }
     }
+}
+
+/// The pointer's last report about one control, as the clock remembers it.
+///
+/// [`Interactions::factor`] does not need this: the shell it was written for
+/// hands the pointer's state in from iced's own `Status`, which survives a
+/// rebuild. A page's controls are `mouse_area`s that report a crossing as a
+/// *message*, so the clock is the only thing that saw it — and it has to keep
+/// it, because the view that draws the control is rebuilt from scratch every
+/// frame and cannot be asked what the pointer is doing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Pointed {
+    /// The pointer is inside the control's bounds.
+    hovered: bool,
+    /// The left button went down on it and has not come back up.
+    pressed: bool,
+    /// The hover end this control was told, which is the `--hover-brightness`
+    /// a card's scoped style may override.
+    hover: f32,
+}
+
+impl Pointed {
+    /// Nothing on this control.
+    fn rest() -> Pointed {
+        Pointed { hovered: false, pressed: false, hover: crate::theme::hover_brightness() }
+    }
+}
+
+/// How far *through* its hover a factor is, for a control the clock remembers.
+///
+/// The same inversion [`Interactions::hover_progress_with_hover`] performs, on
+/// the remembered state rather than on one handed in.
+fn hover_fraction(factor: f32, pointed: Pointed) -> f32 {
+    // A press is dimmer than rest and is not a position: the structure a hover
+    // moved stays where it is while the control is held.
+    if pointed.pressed {
+        return if pointed.hovered { 1.0 } else { 0.0 };
+    }
+    // A theme whose hover is its rest state has nothing to invert, and nothing
+    // that moves either: the fraction is the state itself.
+    if (pointed.hover - 1.0).abs() < f32::EPSILON {
+        return if pointed.hovered { 1.0 } else { 0.0 };
+    }
+    ((factor - 1.0) / (pointed.hover - 1.0)).clamp(0.0, 1.0)
 }
 
 /// Hover and press, eased, for every control that asks.
@@ -292,6 +344,10 @@ impl Interactions {
             .tweens
             .entry(id)
             .or_insert_with(|| Tween::settled(1.0));
+        // The remembered state is the pointer's report, which is new even when
+        // the factor it implies is the one already drawn: a control the pointer
+        // is on and one it has just left both sit at `1.0` in a light theme.
+        tween.pointed = Pointed { hovered, pressed, hover: hover_factor };
         if tween.to == target && tween.began.is_none() {
             return;
         }
@@ -325,20 +381,51 @@ impl Interactions {
         pressed: bool,
         hover_factor: f32,
     ) -> f32 {
-        // A press is dimmer than rest and is not a position: the reference
-        // press is a scale and a filter, so the structure a hover moved stays
-        // where it is while the control is held.
-        if pressed {
-            return if hovered { 1.0 } else { 0.0 };
+        hover_fraction(
+            self.factor_with_hover(id, hovered, pressed, hover_factor),
+            Pointed { hovered, pressed, hover: hover_factor },
+        )
+    }
+
+    /// The factor and hover fraction a control is drawn at, from what the
+    /// pointer last reported about it and nothing else.
+    ///
+    /// This is the reading a *page* makes, and the difference from
+    /// [`Interactions::factor`] is where the pointer's state comes from: the
+    /// shell this clock was written for hands it in from iced's own `Status`,
+    /// which survives a rebuild, and a page's controls are `mouse_area`s whose
+    /// crossing is a message. The messages came here, so here is where the
+    /// answer is; a control nobody has reported is simply at rest.
+    pub fn drawn(&self, id: &str) -> (f32, f32) {
+        let Some(tween) = self.tweens.get(id) else {
+            return (1.0, 0.0);
+        };
+        if tween.began.is_some() {
+            return (tween.progress, hover_fraction(tween.progress, tween.pointed));
         }
-        // A theme whose hover is its rest state has nothing to invert, and
-        // nothing that moves either: the fraction is the state itself.
-        if (hover_factor - 1.0).abs() < f32::EPSILON {
-            return if hovered { 1.0 } else { 0.0 };
+        // Settled: what to draw is the state the pointer last reported, not the
+        // factor the tween happened to end on. A control drawn from a stale
+        // report is the failure this avoids, and it is why a page can be
+        // rebuilt every frame without carrying a map of its own.
+        let factor =
+            Self::target(tween.pointed.hovered, tween.pointed.pressed, tween.pointed.hover);
+        (factor, hover_fraction(factor, tween.pointed))
+    }
+
+    /// Forget what the pointer was doing with every control.
+    ///
+    /// Called when the pane changes: a control that was lit when the page left
+    /// is not drawn on the new one, and a tween in the air belonged to the page
+    /// that is gone. This is the safe half of [`Interactions::clear`] -- there
+    /// is no other page's test to pull the pixels out from under.
+    pub fn forget_pointer(&mut self) {
+        for tween in self.tweens.values_mut() {
+            tween.pointed = Pointed::rest();
+            tween.to = 1.0;
+            tween.from = 1.0;
+            tween.progress = 1.0;
+            tween.began = None;
         }
-        ((self.factor_with_hover(id, hovered, pressed, hover_factor) - 1.0)
-            / (hover_factor - 1.0))
-            .clamp(0.0, 1.0)
     }
 
     /// Whether any control is mid-tween.
@@ -468,6 +555,26 @@ impl ModalAnim {
         }
         true
     }
+}
+
+/// The lock every test that asserts anything about the *process-wide* clock
+/// takes.
+///
+/// The clock is the window's, and a test binary runs its tests side by side: one
+/// test asserting that a tween has settled while another has one in the air would
+/// fail about as often as the machine is fast. [`Interactions::clear`]'s own note
+/// records the same hazard; this is the lock that retires it for the global uses.
+#[cfg(test)]
+pub fn test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// [`test_lock`], taken, with a panic under it treated as a panic rather than as
+/// a lock every later test refuses to take.
+#[cfg(test)]
+pub fn lock_for_test() -> std::sync::MutexGuard<'static, ()> {
+    test_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -706,6 +813,52 @@ mod tests {
         clock.set("a", false, false, start + INTERACTION_DURATION);
         clock.tick(start + 2 * INTERACTION_DURATION);
         assert_eq!(clock.hover_progress("a", false, false), 0.0);
+    }
+
+    #[test]
+    fn a_control_nobody_reported_is_at_rest() {
+        // What a page reads for a control before any crossing: rest, not a
+        // hover the clock cannot know about.
+        let clock = Interactions::default();
+        assert_eq!(clock.drawn("nowhere"), (1.0, 0.0));
+    }
+
+    #[test]
+    fn a_page_reads_the_hover_off_its_own_reports() {
+        // The pages' whole reading, end to end: a crossing message arrives, the
+        // tween is in the air, and the view asks the clock rather than holding
+        // the state itself.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        let hover = crate::theme::hover_brightness();
+        clock.set("page:save", true, false, start);
+        assert_eq!(clock.drawn("page:save"), (1.0, 0.0), "the tween begins at rest");
+
+        clock.tick(start + INTERACTION_DURATION / 2);
+        let (factor, progress) = clock.drawn("page:save");
+        assert!(factor > 1.0 && factor < hover, "got {factor}");
+        assert!(progress > 0.0 && progress < 1.0, "got {progress}");
+
+        assert!(!clock.tick(start + INTERACTION_DURATION));
+        assert_eq!(clock.drawn("page:save"), (hover, 1.0), "arrived, and hovered");
+        // The pointer leaves: the return trip, and it lands at rest.
+        clock.set("page:save", false, false, start + INTERACTION_DURATION);
+        clock.tick(start + 2 * INTERACTION_DURATION);
+        assert_eq!(clock.drawn("page:save"), (1.0, 0.0));
+        assert!(!clock.animating(), "a settled page control holds no frames");
+    }
+
+    #[test]
+    fn forgetting_the_pointer_puts_every_control_back_at_rest() {
+        // What a page change does: the control that was lit belonged to the page
+        // that is gone, and a tween in the air goes with it.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        clock.set("page:save", true, false, start);
+        assert!(clock.animating());
+        clock.forget_pointer();
+        assert_eq!(clock.drawn("page:save"), (1.0, 0.0));
+        assert!(!clock.animating());
     }
 
     #[test]

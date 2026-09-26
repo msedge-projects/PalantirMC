@@ -110,7 +110,27 @@ pub enum Message {
     Open(String),
     /// The last notice was dismissed.
     DismissNotice,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// The library toolbar's create button, and the welcome screen's two.
+const CREATE_KEY: &str = "home:create";
+const IMPORT_KEY: &str = "home:import";
+const WELCOME_CREATE_KEY: &str = "home:welcome:create";
+const WELCOME_IMPORT_KEY: &str = "home:welcome:import";
+/// The button inside an instance card, which is the same control on every card.
+const INSTANCE_OPEN_KEY: &str = "home:card:open";
 
 /// Home's own state: what the user has typed and chosen, and what could not be
 /// done.
@@ -182,6 +202,11 @@ impl State {
             // page claiming to know where it goes.
             Message::Open(_) => {}
             Message::DismissNotice => self.notice = None,
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 }
@@ -238,6 +263,7 @@ fn header<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .push(ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0))
         .push(ui::button(
             theme,
+            CREATE_KEY,
             Key::AppLibraryContextMenuCreateInstance,
             ui::Kind::Colored,
             Message::CreateInstance,
@@ -269,8 +295,8 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
             .push(
                 row![]
                     .spacing(ROW_GAP)
-                    .push(ui::button(theme, Key::AppWelcomeScreenCreateInstance, ui::Kind::Colored, Message::CreateInstance))
-                    .push(ui::button(theme, Key::AppWelcomeScreenImportFromLauncher, ui::Kind::Standard, Message::ImportFromLauncher)),
+                    .push(ui::button(theme, WELCOME_CREATE_KEY, Key::AppWelcomeScreenCreateInstance, ui::Kind::Colored, Message::CreateInstance))
+                    .push(ui::button(theme, WELCOME_IMPORT_KEY, Key::AppWelcomeScreenImportFromLauncher, ui::Kind::Standard, Message::ImportFromLauncher)),
             )
             .push(
                 text(Key::AppWelcomeScreenQuickCreateHint.message())
@@ -339,6 +365,7 @@ fn instance_card<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message>
     // the reference's own words.
     let open_button = ui::button(
         theme,
+        INSTANCE_OPEN_KEY,
         Key::AppHomeJumpBackInViewInstance,
         ui::Kind::Standard,
         open.clone(),

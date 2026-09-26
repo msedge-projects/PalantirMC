@@ -30,7 +30,24 @@ pub enum Message {
     Refresh,
     /// Billing was asked for.
     ManageBilling,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// The listing's actions.
+const MANAGE_BILLING_KEY: &str = "servers:manage-billing";
+const NEW_SERVER_KEY: &str = "servers:new";
+const REFRESH_KEY: &str = "servers:refresh";
 
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
@@ -46,6 +63,11 @@ impl State {
             Message::NewServer => self.notice = Some(store::not_implemented("Creating a server")),
             Message::ManageBilling => self.notice = Some(store::not_implemented("Billing")),
             Message::Refresh => self.notice = Some(store::not_implemented("The server listing")),
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 }
@@ -69,12 +91,14 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             .push(Space::with_width(Length::Fill))
             .push(ui::button(
                 theme,
+                MANAGE_BILLING_KEY,
                 Key::ServersListingManageBillingLabel,
                 ui::Kind::Standard,
                 Message::ManageBilling,
             ))
             .push(ui::button(
                 theme,
+                NEW_SERVER_KEY,
                 Key::ServersListingNewLabel,
                 ui::Kind::Colored,
                 Message::NewServer,
@@ -102,6 +126,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     ));
     blocks.push(ui::button(
         theme,
+        REFRESH_KEY,
         Key::AppLibraryContextMenuCreateInstance,
         ui::Kind::Quiet,
         Message::Refresh,

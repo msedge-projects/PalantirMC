@@ -55,7 +55,25 @@ pub enum Message {
     Tab(Tab),
     /// The profile was asked for again.
     Refresh,
+    /// The pointer entered or left one of the page's controls, for the clock
+    /// that carries a hover's 150 ms (see [`crate::ui`]).
+    Hover {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
 }
+
+crate::hovered!(Message);
+
+/// One stable name per tab, in `Tab::ALL`' order.
+const TAB_KEYS: [&str; 3] = ["user:tab:projects", "user:tab:collections", "user:tab:organizations"];
+
+/// The profile's own action.
+const REFRESH_KEY: &str = "user:refresh";
 
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
@@ -72,6 +90,11 @@ impl State {
         match message {
             Message::Tab(tab) => self.tab = tab,
             Message::Refresh => self.notice = Some(store::not_implemented("This profile")),
+            Message::Hover { key, over, hover } => crate::ui::pointer_with(
+                key,
+                over,
+                hover.unwrap_or_else(crate::theme::hover_brightness),
+            ),
         }
     }
 
@@ -120,6 +143,7 @@ pub fn view<'a>(
             .push(Space::with_width(Length::Fill))
             .push(ui::button(
                 theme,
+                REFRESH_KEY,
                 Key::AppLibrarySortLabel,
                 ui::Kind::Quiet,
                 Message::Refresh,
@@ -133,7 +157,7 @@ pub fn view<'a>(
         .iter()
         .map(|tab| (tab.key().message().to_string(), *tab == state.tab))
         .collect();
-    blocks.push(ui::tabs(theme, &labels, |index| {
+    blocks.push(ui::tabs(theme, &TAB_KEYS, &labels, |index| {
         Message::Tab(Tab::ALL.get(index).copied().unwrap_or_default())
     }));
     // The tab's own states: the sentence above, and the reason there is nothing
