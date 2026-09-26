@@ -161,13 +161,31 @@ pub const TAG_HEIGHT: f32 = 24.0;
 
 /// A card: `--surface-3`, `--radius-lg`, a `--surface-4` hairline.
 pub fn card<'a, Message: 'a>(theme: Gen, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    card_at(theme, 1.0, content)
+}
+
+/// The same card, through the interaction filter.
+///
+/// A card that is *pressed* is a card that hovers, and the reference scopes the
+/// brightness on the ones that are clickable: a project's card dims to `0.9`
+/// (`LegacyProjectCard.vue`'s `hover:brightness-90`), an instance's in the
+/// library brightens to `1.1` (`instance-card.vue`'s `hover:brightness-110`,
+/// which [`crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS`] names). A card drawn
+/// at rest passes `1.0` and the multiplication is skipped.
+pub fn card_at<'a, Message: 'a>(
+    theme: Gen,
+    factor: f32,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    // `move` because the closure is handed to a widget that outlives this call.
+    let ink = move |color: Color| crate::theme::brightness(color, factor);
     container(content)
         .width(Length::Fill)
         .padding(CARD_PAD)
         .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface3))),
+            background: Some(Background::Color(ink(theme_gen::ink(theme, Ink::Surface3)))),
             border: Border {
-                color: theme_gen::ink(theme, Ink::Surface4),
+                color: ink(theme_gen::ink(theme, Ink::Surface4)),
                 width: 1.0,
                 radius: theme_gen::span(Span::RadiusLg).into(),
             },
@@ -739,6 +757,23 @@ mod tests {
                 "{page}: the page does not implement the crossing its controls publish"
             );
         }
+    }
+
+    #[test]
+    fn a_repeated_control_is_named_by_the_thing_it_names() {
+        // What a card needs: the same card is the same name across every frame,
+        // two cards are not the same name, and two kinds of control naming the
+        // same thing do not collide -- which is what the namespace is for.
+        let first = scoped("ui:test:card", "sodium");
+        let again = scoped("ui:test:card", "sodium");
+        let other = scoped("ui:test:card", "lithium");
+        assert_eq!(first.as_ptr(), again.as_ptr(), "the same card, the same name");
+        assert_ne!(first, other);
+        assert_ne!(
+            first,
+            scoped("ui:test:toggle", "sodium"),
+            "a toggle and a card naming the same file are two controls"
+        );
     }
 
     #[test]

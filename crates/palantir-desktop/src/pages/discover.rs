@@ -44,7 +44,9 @@ use crate::store::Store;
 use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+// `Hovered` is in scope for the result cards below: a card names its own crossing
+// rather than going through one of the kit's controls.
+use crate::ui::{self, Hovered};
 
 /// One project in the results.
 ///
@@ -117,6 +119,14 @@ const TAB_KEYS: [&str; 6] = [
 
 /// The sorting control's own name, and the one its results are filtered by.
 const FILTER_KEY: &str = "discover:filter";
+
+/// What a project's card brightens by when the pointer is on it.
+///
+/// `LegacyProjectCard.vue`'s `hover:brightness-90`, which is a *fixed* 0.9 rather
+/// than the theme's `--hover-brightness`: in the dark theme the global hover
+/// brightens and this card dims, and a port that used the global value would
+/// draw the one card in the list that goes the wrong way.
+const CARD_HOVER: f32 = 0.9;
 
 /// The five orders the search can be asked in.
 ///
@@ -468,6 +478,11 @@ fn results<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// absence of controls inside it makes safe: iced's `mouse_area` does not forward
 /// a press to its content, so nothing interactive may be drawn inside one.
 pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
+    // A card's identity is the project it names, so its key is derived from that
+    // rather than from its position in the list: reordering the results must not
+    // move a tween from one card to another.
+    let key = ui::scoped("discover:card", &hit.id);
+    let (factor, _) = ui::interaction(key);
     let mut tags = row![].spacing(6.0);
     for loader in hit.loaders.iter().take(3) {
         tags = tags.push(ui::tag(theme, loader));
@@ -475,8 +490,9 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
     for version in hit.game_versions.iter().take(2) {
         tags = tags.push(ui::tag(theme, version));
     }
-    mouse_area(ui::card(
+    mouse_area(ui::card_at(
         theme,
+        factor,
         column![]
             .spacing(6.0)
             .push(
@@ -509,6 +525,8 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
             ),
     ))
     .interaction(Interaction::Pointer)
+    .on_enter(Message::hover_with(key, true, CARD_HOVER))
+    .on_exit(Message::hover_with(key, false, CARD_HOVER))
     .on_press(Message::Open(hit.id.clone()))
     .into()
 }

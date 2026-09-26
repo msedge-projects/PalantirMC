@@ -70,9 +70,9 @@ const TAB_KEYS: [&str; 6] = [
     "instance:tab:share",
 ];
 
-/// The page's two actions and the per-file toggle.
+/// The page's own action. The per-file toggle is one control per row, so it names
+/// itself from the file it acts on -- see [`crate::ui::scoped`].
 const PLAY_KEY: &str = "instance:play";
-const TOGGLE_KEY: &str = "instance:content:toggle";
 
 /// The page's own state.
 #[derive(Debug, Clone)]
@@ -267,7 +267,7 @@ fn body<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Messa
             for entry in mods {
                 let toggle = ui::button(
                     theme,
-                    TOGGLE_KEY,
+                    crate::ui::scoped("instance:content:toggle", &entry.file_name),
                     if entry.enabled {
                         Key::AppScreenshotsDeselect
                     } else {

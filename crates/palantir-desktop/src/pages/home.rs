@@ -37,7 +37,9 @@ use crate::store::Store;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+// `Hovered` is in scope for the instance cards below: a card names its own
+// crossing rather than going through one of the kit's controls.
+use crate::ui::{self, Hovered};
 
 /// Which way the library is ordered.
 ///
@@ -318,6 +320,11 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
 /// the same picture and is a region a user can actually hit.
 fn instance_card<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
     let open = Message::Open(card.id.clone());
+    // The pressable region is the card's body, so that is what names itself and
+    // what tweens; the button beside it has a key of its own and does not move
+    // when the body is hovered.
+    let key = crate::ui::scoped("home:card", &card.id);
+    let (factor, _) = crate::ui::interaction(key);
     let plate = crate::ui::framed(
         theme,
         column![]
@@ -370,13 +377,26 @@ fn instance_card<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message>
         ui::Kind::Standard,
         open.clone(),
     );
-    ui::card(
+    ui::card_at(
         theme,
+        factor,
         row![]
             .spacing(GRID_GAP)
             .align_items(Alignment::Center)
             .push(
-                mouse_area(body).interaction(Interaction::Pointer).on_press(open),
+                mouse_area(body)
+                    .interaction(Interaction::Pointer)
+                    .on_enter(Message::hover_with(
+                        key,
+                        true,
+                        crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                    ))
+                    .on_exit(Message::hover_with(
+                        key,
+                        false,
+                        crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                    ))
+                    .on_press(open),
             )
             .push(open_button),
     )
