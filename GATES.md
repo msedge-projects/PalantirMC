@@ -940,14 +940,15 @@ all have to draw in four themes and in every state they can be in.
       answers, and the test asserts all five arms draw in every theme. What the
       pages do with it is G64's evidence, not this one's.
 
-- [x] G64: a page that cannot answer from disk names the stage that answers it
-  instead of drawing an empty list
+- [x] G64: a page that cannot answer from disk says what is missing instead of
+  drawing an empty list
   CHECK: cargo test -p palantir-desktop --locked store::tests
   EXPECT: test result: ok
-  EVIDENCE: 7 tests over `crates/palantir-desktop/src/store.rs`. The sentence is
-      asserted in the negative as well as the positive: it names stage 4, it
-      begins with the thing that is missing, and it does not contain the word
-      "error". `a_store_with_no_instances_says_empty_rather_than_nothing_happened`
+  EVIDENCE: 11 tests over `crates/palantir-desktop/src/store.rs`. The sentence is
+      asserted in the negative as well as the positive: it begins with the thing
+      that is missing, it ends "is not implemented yet.", and it contains
+      neither the word "stage" nor the word "error" -- a stage number is a word
+      for developers and the reader of this sentence is not one. `a_store_with_no_instances_says_empty_rather_than_nothing_happened`
       is the other half -- an instance list that is genuinely empty is `Empty`
       and an id that is not there is `Empty` too, because "you have none yet" and
       "something broke" are the two answers a reader has to be able to tell
@@ -1145,6 +1146,37 @@ two chunks into a body.
       `User-Agent`. And it asserts the cache the way a cache has to be asserted:
       the second identical search returns the same response, field for field.
 
+### The seam, and the page that is now a client of the engine
+
+G75 is the one gate of the wire between stage 4 and stage 3. The engine above is
+right about requests and knows nothing about pages; the pages draw and ask nobody.
+A seam can be wrong in three places -- the question, the answer, and the round the
+answer belongs to -- so it is asserted at all three rather than at the join.
+
+- [x] G75: the pages can ask the engine, and the answer comes back as a message
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 563 passed
+  EVIDENCE: 563 tests over the desktop binary, nine of them new with this seam.
+      In `store.rs` (11 tests) a search through a `MapFetch` comes back as the
+      hit's own fields -- the stable id rather than the slug, the title, the
+      author, the counts -- a second identical search costs no request, a failing
+      answer is a reason rather than an empty list, and a store with no engine
+      answers with the not-implemented sentence instead of `Ok(vec![])`.
+      `a_request_runs_off_the_thread_that_draws_and_comes_back_through_a_channel`
+      asserts the thread that answers is not the thread that asked, and that a
+      dropped sender is an error rather than a hang. In `pages/discover.rs` (11
+      tests) the controls and the request are the same thing read twice, an
+      answer lands only on the round that asked for it, and a tab change puts the
+      page back to *unasked* rather than to `Empty`, which is the difference
+      between "not asked yet" and "the index has nothing". In `pages/mod.rs` (6
+      tests) a message addressed to a page that is not on screen is dropped,
+      opening a card is reported upward rather than applied by the page, and a
+      search goes up to the shell and comes back down as an ordinary message.
+      `palantir-net` grew the two fields a card needs and cannot invent --
+      `versions` and `categories` -- and both are asserted in the API shape (24
+      tests over `modrinth.rs`) and through the engine's own search (7), because
+      a field dropped at the deserializer is a fact no page can recover from.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1260,6 +1292,8 @@ is the first thing to do with this tree.
   `ETag` would be believed, and no test can produce that from outside the
   engine: the only defence is the digest inside the document, which is the
   caller's to check.
-- **No page has been switched onto the engine yet.** The pages still name stage
-  4 when they have no answer, so nothing in this document says the interface is
-  served by any of the code above; the seam is the next two slices' work.
+- **One page is switched onto the engine.** Discover's search is the only request
+  that goes through the seam; the right panel, the settings modal and every
+  instance-facing list still answer from disk or from the copy, so this document
+  says nothing yet about them being served by the code above. That is stage 5's
+  work: instances in our own format, the importers and the launch.

@@ -83,7 +83,7 @@ them.
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). What is not in is the seam that lets a page use any of it, and the desktop call sites that still hold their own client -- see "What stage 4 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -312,11 +312,20 @@ the point they are used.
 
 `store.rs` is the seam that makes the pages honest rather than finished. It
 answers what the launcher can already answer -- the instance list and each
-instance's own folders, from the same readers the old interface uses -- and for
-everything that has to come from a service it returns `Load::Failed` carrying a
-sentence that *names stage 4*. The reason is that the alternative was to draw an
+instance's own folders, from the same readers the old interface uses -- and what
+it cannot answer it says so about, in a sentence that names the thing that is
+missing without naming a stage. The reason is that the alternative was to draw an
 empty list, and a page that shows "no results" when the request never happened is
 the failure mode the whole scaffold exists to prevent.
+
+It is also, now, where a page reaches the engine. The store owns an optional
+`Engine` built over the cache directory the rest of the launcher already uses,
+and `Store::search` asks Modrinth through it. The call is *blocking on purpose*
+-- one `std::thread` and a oneshot channel, so no page has to hold a runtime or
+know what async is -- and what comes back down is an ordinary message, which is
+the shape everything else in the interface already has. Discover asks by round
+and applies an answer only if it is still the round it asked for, because two
+keystrokes are in flight over a channel that does not keep their order.
 
 Three things about the pages are decisions worth keeping:
 
@@ -350,10 +359,10 @@ What stage 3 does **not** have yet, named rather than implied:
   new kit's builder is a different function with the same name. That is the first
   thing the next session should close, because "the buttons snap" is the kind of
   difference a person notices immediately and a test does not.
-* **No page's data comes from the network.** Discover's search, project pages,
-  Skins, Servers and the hosting half of an instance all say so out loud. The
-  control *states* they will be asked with are live, which is the part that makes
-  the request a one-line change rather than a page rewrite.
+* **Only Discover's data is real.** Its search is answered by the engine (G75).
+  Project pages, Skins, Servers and the hosting half of an instance still say so
+  out loud. The control *states* they will be asked with are live, which is the
+  part that makes the request a one-line change rather than a page rewrite.
 * **The right panel is still the reference's wash and nothing else.** Discover,
   a project and a profile force it on (`App.vue`'s `forceSidebar`), and what it
   draws when it is there is stage 4's, because everything in it is a service's
@@ -380,7 +389,7 @@ alternative:
 | `cache` | A metadata "cache" whose only rule was "if the file is on disk, use it" -- which is a write-once archive, and how a launcher comes to offer a loader build that was published last year |
 | `content` | Three trees holding the same jar three times: `libraries/`, `assets/` and a `.minecraft/versions/` copy of what a version asks for. Now every file is named by its own digest, so what is already here is never fetched again |
 | `piston` | `meta.prismlauncher.org`, which is Prism's mirror of Mojang's own metadata rewritten into Prism's shape. Now the launcher reads piston directly, and checks every version file against the `sha1` the manifest published for it |
-| `modrinth` | The desktop crate's `browse.rs`, which reaches `api.modrinth.com` with a `reqwest` client of its own -- a second connection pool and a second answer to "how many requests is this launcher making". The engine-side client is in and gated (G73-G74); the desktop's call sites still use theirs |
+| `modrinth` | The desktop crate's `browse.rs`, which reaches `api.modrinth.com` with a `reqwest` client of its own -- a second connection pool and a second answer to "how many requests is this launcher making". Discover's search now goes through this module on the engine's cache and ceiling (G73-G75); the desktop's other call sites still use theirs |
 
 The cache is the one worth reading twice, because it is the only part of this
 that changes what a user sees. An entry has an age; inside its TTL the bytes on
@@ -469,18 +478,13 @@ work nobody stopped.
 
 What stage 4 does **not** have yet, named rather than implied:
 
-* **The desktop's call sites on the engine.** Both metadata sources now exist
-  (`engine::piston` and `engine::modrinth`, gated by G71-G74) and nothing calls
-  them: `browse.rs` still reaches Modrinth with its own `reqwest` client and
-  `launch.rs` still reads Prism's mirror. That is the one thing in the tree which
-  makes "one pooled client" not yet literally true, and it moves when the pages
-  do -- the install paths beside it want the scheduler and the content store too,
-  which is the slice after next rather than a rename.
-* **The seam that lets a page use any of this.** No `Command` or `Subscription`
-  in `store.rs` is wired to the engine, so the pages still answer with the
-  sentence that names stage 4 -- which is why this section can be this long
-  without a single page changing. It is the next slice, and it is the one that
-  turns all of the above into something a person can see.
+* **The desktop's other call sites on the engine.** Both metadata sources exist
+  (`engine::piston` and `engine::modrinth`, gated by G71-G74) and one page asks
+  through one of them now (G75); `browse.rs` still reaches Modrinth with its own
+  `reqwest` client and `launch.rs` still reads Prism's mirror. That is the one
+  thing in the tree which makes "one pooled client" not yet literally true, and
+  it moves when the pages do -- the install paths beside it want the scheduler
+  and the content store too, which is stage 5's slice rather than a rename.
 
 ## Where the old sections went
 
