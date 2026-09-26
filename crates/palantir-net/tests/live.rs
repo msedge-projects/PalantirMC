@@ -937,3 +937,48 @@ fn the_metadata_cache_revalidates_but_answers_the_same_document() {
         (None, true) => panic!("a 304 without a validator is not a protocol this host speaks"),
     }
 }
+
+#[test]
+#[ignore]
+fn every_loader_publishes_its_builds_where_this_code_says_it_does() {
+    use palantir_net::engine::{
+        default_build, Backoff, Cancel, HttpPool, Loader, LoaderMeta, MetadataCache, DEFAULT_TTL,
+    };
+
+    let dir = std::env::temp_dir().join("palantirmc-live-loaders");
+    let _ = std::fs::remove_dir_all(&dir);
+    let meta = LoaderMeta::new(
+        MetadataCache::new(&dir, DEFAULT_TTL),
+        std::sync::Arc::new(HttpPool::default()),
+    );
+    let cancel = Cancel::new();
+
+    // All four, because the four are four different services and the whole point
+    // of reading them directly is that each one's shape is its own: a URL that
+    // moved, or a field that was renamed, is the failure fixtures cannot show.
+    for loader in Loader::all() {
+        let builds = meta
+            .builds(loader, GAME, &cancel, &Backoff::with_attempts(2))
+            .unwrap_or_else(|error| panic!("{}: {error}", loader.name()));
+        assert!(
+            !builds.is_empty(),
+            "{} published no build for {GAME} -- the URL or the filter is wrong",
+            loader.name()
+        );
+        assert!(
+            builds.iter().all(|build| !build.version.trim().is_empty()),
+            "{}: a build with no version in it",
+            loader.name()
+        );
+        let chosen = default_build(&builds)
+            .unwrap_or_else(|| panic!("{}: no build to open on", loader.name()));
+        println!(
+            "{:<9} {} builds for {GAME}, newest {}, a create flow would open on {}",
+            loader.name(),
+            builds.len(),
+            builds[0].version,
+            chosen.version
+        );
+    }
+    assert!(meta.cache_dir().exists(), "the bodies were written where a second run reads them");
+}

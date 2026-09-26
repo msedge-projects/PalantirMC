@@ -57,11 +57,11 @@ pub use download::{
     verify_sha256,
 };
 pub use engine::{
-    fetch_to_file, is_retryable, next_event, Backoff, Cancel, Cached, ContentStore, Digest,
-    Download, Downloaded, Event, Fetch, HttpPool, Job, JobId, Limit, Manifest, ManifestVersion,
-    MetadataCache, ModrinthApi, Outcome, PistonMeta, Request, Response, Scheduler, Search, Stored,
-    DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL, DEFAULT_WORKERS, IMMUTABLE_TTL,
-    PISTON_MANIFEST_URL, SEARCH_TTL, USER_AGENT,
+    fetch_to_file, is_retryable, next_event, Backoff, Build, Cancel, Cached, ContentStore, Digest,
+    Download, Downloaded, Event, Fetch, HttpPool, Job, JobId, Limit, Loader, LoaderMeta, Manifest,
+    ManifestVersion, MetadataCache, ModrinthApi, Outcome, PistonMeta, Request, Response, Scheduler,
+    Search, Stored, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL, DEFAULT_WORKERS, IMMUTABLE_TTL,
+    MAX_BUILDS, PISTON_MANIFEST_URL, SEARCH_TTL, USER_AGENT,
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
