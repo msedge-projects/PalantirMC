@@ -65,6 +65,53 @@ pub struct Store {
     /// test over a scratch cache is -- and then creating an instance answers with
     /// the not-implemented sentence rather than writing somewhere invented.
     paths: Option<PalantirPaths>,
+    /// The launch the shell is running, if any.
+    ///
+    /// The one thing here that is not read from disk, and it is here for the same
+    /// reason the rest is: a page cannot ask the shell, and "an instance is
+    /// running" is a fact a page's own controls are drawn from. The reference
+    /// delivers it the same way -- its process list is a query keyed by instance
+    /// (`instanceKeys.processes(id)`), not a property of the page component.
+    launch: Launch,
+}
+
+/// What a launch is doing, as a page sees it.
+///
+/// Four states rather than a flag, because the header's control is not a boolean:
+/// the reference draws *Play* when nothing is running, *Starting…* while the
+/// launcher is preparing, *Stop* once the game is up and *Stopping…* while it is
+/// being taken down (`page-header/index.vue`'s four arms). An instance that was
+/// only "running or not" could not draw three of those.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LaunchState {
+    /// Nothing is running.
+    #[default]
+    Idle,
+    /// The launcher is preparing: signing in, resolving a version, fetching what
+    /// is missing, extracting natives.
+    Starting,
+    /// The game is up.
+    Running,
+    /// The game is being taken down.
+    Stopping,
+}
+
+/// The launch this launcher is running, as the pages are drawn from it.
+///
+/// `instance` names the instance it is about, and it keeps naming it after the run
+/// has ended: the last thing a run said is worth exactly as much as the run, and
+/// a page that lost it the moment the process exited would show a user who
+/// navigated away and back that nothing had happened.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Launch {
+    /// Which instance the launcher is running, or was last running. `None` until
+    /// the first launch of this session.
+    pub instance: Option<String>,
+    /// What it is doing.
+    pub state: LaunchState,
+    /// The launch's own last word: the progress line while it works, the note it
+    /// ended with. `None` until it has said anything.
+    pub line: Option<String>,
 }
 
 /// The network behind a store: one pool, one cache, one policy.
@@ -150,6 +197,7 @@ impl Store {
             // for why the absence is a state a page can be told about.
             engine: None,
             paths: Some(paths.clone()),
+            launch: Launch::default(),
         }
     }
 
@@ -262,6 +310,39 @@ impl Store {
             return Err(not_implemented("Importing from another launcher"));
         };
         instances::import_instance(paths, source)
+    }
+
+    /// The launch this launcher is running.
+    pub fn launch(&self) -> &Launch {
+        &self.launch
+    }
+
+    /// Record what a launch is doing.
+    ///
+    /// Called by the shell and by nothing else: it is the one object that knows
+    /// which instance was asked to run, and the pages read the answer rather than
+    /// deciding it.
+    pub fn set_launch(&mut self, launch: Launch) {
+        self.launch = launch;
+    }
+
+    /// What `id`'s launch is doing.
+    ///
+    /// [`LaunchState::Idle`] for every instance that is not the one running, so a
+    /// page asks this with its own id and never has to compare anything itself.
+    pub fn launch_state(&self, id: &str) -> LaunchState {
+        match self.launch.instance.as_deref() {
+            Some(running) if running == id => self.launch.state,
+            _ => LaunchState::Idle,
+        }
+    }
+
+    /// The launch's own last word, when it is about `id`.
+    pub fn launch_line(&self, id: &str) -> Option<&str> {
+        match self.launch.instance.as_deref() {
+            Some(running) if running == id => self.launch.line.as_deref(),
+            _ => None,
+        }
     }
 
     /// The instance list, in whatever state it is in.
@@ -519,8 +600,17 @@ pub fn screenshots(instance_dir: &Path) -> Vec<String> {
 /// file the reference's Logs tab reads. The tail rather than the whole file: a log
 /// that has been appended to for a year is megabytes, and a console shows the end
 /// of it.
+///
+/// The second file is this launcher's own account of the run
+/// (`logs/launcher.log`, written by `launch::LaunchLogFile`), read when the game
+/// never wrote one: a launch that failed before Minecraft started is exactly the
+/// case where a reader wants the log most, and the game's file is the one thing a
+/// failed launch does not leave behind.
 pub fn log_tail(instance_dir: &Path, lines: usize) -> Option<String> {
-    let text = std::fs::read_to_string(instance_dir.join("logs").join("latest.log")).ok()?;
+    let logs = instance_dir.join("logs");
+    let text = std::fs::read_to_string(logs.join("latest.log"))
+        .or_else(|_| std::fs::read_to_string(logs.join("launcher.log")))
+        .ok()?;
     let all: Vec<&str> = text.lines().collect();
     let start = all.len().saturating_sub(lines);
     Some(all[start..].join("\n"))
@@ -834,6 +924,45 @@ mod tests {
         let short = log_tail(&dir, 500).expect("a tail");
         assert!(short.starts_with("line 0"));
         assert_eq!(log_tail(&dir.join("nowhere"), 10), None);
+        // The game's own output wins, and the launcher's account of the run is
+        // what there is when the game never wrote one -- the case a failed launch
+        // leaves behind.
+        std::fs::write(dir.join("logs").join("launcher.log"), "preparing\nnot launching")
+            .expect("a launcher log");
+        let with_both = log_tail(&dir, 10).expect("a tail");
+        assert!(
+            with_both.ends_with("line 99") && !with_both.contains("preparing"),
+            "the game's own log wins while there is one: {with_both}"
+        );
+        std::fs::remove_file(dir.join("logs").join("latest.log")).expect("remove the game log");
+        assert_eq!(log_tail(&dir, 10).as_deref(), Some("preparing\nnot launching"));
+    }
+
+    #[test]
+    fn the_launch_state_is_only_about_the_instance_it_names() {
+        // The pages ask this with their own id, so the answer for every other
+        // instance has to be `Idle` without the page comparing anything -- and the
+        // line keeps naming the instance after the run ended, because the last
+        // thing a run said is still about it.
+        let mut store = Store::default();
+        assert_eq!(store.launch_state("atm10"), LaunchState::Idle);
+        assert_eq!(store.launch_line("atm10"), None);
+        store.set_launch(Launch {
+            instance: Some("atm10".to_string()),
+            state: LaunchState::Running,
+            line: Some("process started, streaming output…".to_string()),
+        });
+        assert_eq!(store.launch_state("atm10"), LaunchState::Running);
+        assert_eq!(store.launch_state("sodium"), LaunchState::Idle);
+        assert_eq!(store.launch_line("sodium"), None);
+        assert_eq!(store.launch_line("atm10"), Some("process started, streaming output…"));
+        store.set_launch(Launch {
+            instance: Some("atm10".to_string()),
+            state: LaunchState::Idle,
+            line: Some("process exited (exit status: 0)".to_string()),
+        });
+        assert_eq!(store.launch_state("atm10"), LaunchState::Idle);
+        assert!(store.launch_line("atm10").is_some(), "the last word outlives the run");
     }
 
     #[test]

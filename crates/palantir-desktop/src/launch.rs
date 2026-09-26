@@ -22,11 +22,13 @@
 //! `MinecraftInstance::getNativePath` points, so both launchers run the same
 //! extracted libraries.
 //!
-//! Three things travel back to the GUI through the `iced::subscription::channel`
-//! sender owned by the worker thread: `Vec<String>` batches of log lines, the
+//! What travels back to a shell through the `iced::subscription::channel` sender
+//! owned by the worker thread is a [`LaunchEvent`]: a batch of log lines, the
 //! running progress of whatever phase is fetching (a level, deliberately
-//! droppable — see `send_progress`), and the final outcome as a done message.
-//! See `app.rs` for the subscription.
+//! droppable — see `send_progress`), the game coming up, the run ending, and a
+//! renewed session. It is an enum of facts rather than one shell's messages
+//! because there are two shells while this rewrite is: see [`LaunchEvent`],
+//! and `app.rs` and `shell.rs` for the two subscriptions that map it.
 
 use futures::channel::mpsc::Sender;
 use palantir_core::{
@@ -49,7 +51,6 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::accounts::{needs_refresh, AccountKind};
-use crate::app::Message;
 use crate::install;
 use crate::java_runtime::{self, JavaPrefs};
 
@@ -253,6 +254,52 @@ pub enum LaunchReadiness {
     Ready(LaunchPlan),
     /// Launch refused; see the log lines.
     Blocked,
+}
+
+/// What a launch reports while it runs, as *facts* rather than as one shell's
+/// messages.
+///
+/// Two shells are alive while this rewrite is -- the one that runs by default
+/// and the one being built -- and their message types are not the same, so the
+/// worker speaks in this instead and each shell decides what to do with it. The
+/// five are exactly what the old shell has carried all along, one per variant of
+/// its own enum: a batch of lines that happened, a level that keeps changing, the
+/// end of the indeterminate wait, the end of the run, and a session that was
+/// renewed and has to be written down. A launch is never *silent* about any of
+/// them on purpose: a run whose only sign of life is the window disappearing is
+/// the failure this enum exists to make impossible.
+#[derive(Debug, Clone)]
+pub enum LaunchEvent {
+    /// A batch of lines the launcher or the game produced.
+    Log {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// The lines, already redacted and already written to the run log.
+        lines: Vec<String>,
+    },
+    /// How far the phase that is fetching has got.
+    Progress {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// What the phase has finished so far.
+        progress: install::Progress,
+    },
+    /// The game's own output says its window is up, so there is nothing left to
+    /// wait for.
+    Started {
+        /// Run id this belongs to.
+        run_id: u64,
+    },
+    /// The run finished, with its last word.
+    Done {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// The outcome, as the run log carries it too.
+        note: String,
+    },
+    /// A Microsoft session the run renewed, to be written back to the account
+    /// store so the next launch reuses the token this one paid for.
+    Tokens(RefreshedTokens),
 }
 
 // ---- pure helpers ---------------------------------------------------------
@@ -1327,7 +1374,7 @@ pub fn offline_backend(paths: &PalantirPaths) -> (OfflineMetaStore, palantir_net
 /// Run one launch in a background thread: sign in, resolve, install, spawn the
 /// child with piped output, stream batches + a final done message through the
 /// subscription sender. Never reports success it did not observe.
-pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<Message>) {
+pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<LaunchEvent>) {
     let paths = PalantirPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;
@@ -1346,7 +1393,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     }
     // Sent after the preparation block: the log closure below owns the sender
     // for the duration of that block.
-    let mut tokens_message: Option<Message> = None;
+    let mut tokens_message: Option<LaunchEvent> = None;
 
     // The launch has a bar of its own, and this is its first half. Everything
     // before the game's own output is indeterminate work — signing in, resolving
@@ -1390,13 +1437,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             }
         };
         if let Some(refreshed) = prepared.as_ref().and_then(|prepared| prepared.refreshed.clone()) {
-            tokens_message = Some(Message::AccountTokens {
-                uuid: refreshed.uuid,
-                name: refreshed.name,
-                access_token: refreshed.access_token,
-                refresh_token: refreshed.refresh_token,
-                expires_at_ms: refreshed.expires_at_ms,
-            });
+            tokens_message = Some(LaunchEvent::Tokens(refreshed));
         }
         match prepared {
             Some(prepared) => {
@@ -1517,7 +1558,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             Ok((is_stderr, line)) => {
                 if !game_up && !is_stderr && startup_line(&line) {
                     game_up = true;
-                    if !send_message(&mut sender, Message::LaunchStarted { run_id }) {
+                    if !send_message(&mut sender, LaunchEvent::Started { run_id }) {
                         kill_slot(&slot);
                         return;
                     }
@@ -1730,7 +1771,7 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
 
 /// Send one message, waiting while the channel is full; `false` means the GUI is
 /// gone.
-fn send_message(sender: &mut Sender<Message>, message: Message) -> bool {
+fn send_message(sender: &mut Sender<LaunchEvent>, message: LaunchEvent) -> bool {
     let mut pending = Some(message);
     loop {
         let message = match pending.take() {
@@ -1879,8 +1920,8 @@ impl LaunchLogFile {
 /// behind would be the wrong trade twice over. Nothing here touches the journal:
 /// a level is not a line, and a log that grows by a line per 2% of a download is
 /// a log nobody reads.
-fn send_progress(sender: &mut Sender<Message>, run_id: u64, progress: install::Progress) {
-    let _ = sender.try_send(Message::LaunchProgress { run_id, progress });
+fn send_progress(sender: &mut Sender<LaunchEvent>, run_id: u64, progress: install::Progress) {
+    let _ = sender.try_send(LaunchEvent::Progress { run_id, progress });
 }
 
 /// Forward one batch; `false` means the GUI is gone and the worker should stop.
@@ -1889,7 +1930,7 @@ fn send_progress(sender: &mut Sender<Message>, run_id: u64, progress: install::P
 /// the game's output alike — so this is the one place that has to redact, and the
 /// one place that writes the log to disk.
 fn send_batch(
-    sender: &mut Sender<Message>,
+    sender: &mut Sender<LaunchEvent>,
     run_id: u64,
     lines: Vec<String>,
     journal: &LaunchLogFile,
@@ -1905,12 +1946,12 @@ fn send_batch(
             Some(batch) => batch,
             None => return true,
         };
-        match sender.try_send(Message::LaunchLog { run_id, lines: batch }) {
+        match sender.try_send(LaunchEvent::Log { run_id, lines: batch }) {
             Ok(()) => return true,
             Err(e) => {
                 if e.is_full() {
                     match e.into_inner() {
-                        Message::LaunchLog { lines, .. } => {
+                        LaunchEvent::Log { lines, .. } => {
                             pending = Some(lines);
                             std::thread::sleep(Duration::from_millis(10));
                         }
@@ -1925,19 +1966,19 @@ fn send_batch(
 }
 
 /// Deliver the final outcome (retries while the channel is full).
-fn send_done(sender: &mut Sender<Message>, run_id: u64, note: String) {
+fn send_done(sender: &mut Sender<LaunchEvent>, run_id: u64, note: String) {
     let mut pending: Option<String> = Some(note);
     loop {
         let note = match pending.take() {
             Some(note) => note,
             None => return,
         };
-        match sender.try_send(Message::LaunchDone { run_id, note }) {
+        match sender.try_send(LaunchEvent::Done { run_id, note }) {
             Ok(()) => return,
             Err(e) => {
                 if e.is_full() {
                     match e.into_inner() {
-                        Message::LaunchDone { note, .. } => {
+                        LaunchEvent::Done { note, .. } => {
                             pending = Some(note);
                             std::thread::sleep(Duration::from_millis(10));
                         }
@@ -2923,7 +2964,7 @@ mod tests {
         let instance = Instance::create(&paths.instances_dir(), "Streamed", "1.21.1").unwrap();
         let journal = LaunchLogFile::open(&paths, &instance.id());
 
-        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(4);
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<LaunchEvent>(4);
         assert!(send_batch(
             &mut tx,
             7,
@@ -2933,7 +2974,7 @@ mod tests {
             ],
             &journal,
         ));
-        let Ok(Message::LaunchLog { run_id, lines }) = rx.try_recv() else {
+        let Ok(LaunchEvent::Log { run_id, lines }) = rx.try_recv() else {
             panic!("expected a log batch");
         };
         assert_eq!(run_id, 7);
@@ -2965,7 +3006,7 @@ mod tests {
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Busy", "1.21.1").unwrap();
         let journal = LaunchLogFile::open(&paths, &instance.id());
-        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(1);
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<LaunchEvent>(1);
 
         const SENT: usize = 16;
         for done in 1..=SENT {
@@ -2979,7 +3020,7 @@ mod tests {
         let mut arrived: Vec<usize> = Vec::new();
         while let Ok(message) = rx.try_recv() {
             match message {
-                Message::LaunchProgress { run_id, progress } => {
+                LaunchEvent::Progress { run_id, progress } => {
                     assert_eq!(run_id, 7);
                     arrived.push(progress.done);
                 }

@@ -395,6 +395,11 @@ pub enum Kind {
     Standard,
     /// `colored`: the accent, with the text it is legible on.
     Colored,
+    /// `danger`: the `red` preset, which the reference gives the one button that
+    /// takes something away -- an instance's *Stop* (`page-header/index.vue`'s
+    /// `color="red"`), where a brand-coloured Stop would be the same picture as
+    /// the Play it replaced.
+    Danger,
     /// `outlined`: a hairline and no fill.
     Outlined,
     /// `quiet`: no frame at all.
@@ -443,6 +448,15 @@ pub fn button_or<'a, Message: Clone + Hovered + 'a>(
         ),
         Kind::Colored => (
             Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
+            None,
+            theme_gen::ink(theme, Ink::AccentContrast),
+        ),
+        Kind::Danger => (
+            // `ButtonFrame.vue`'s own table: `red: 'var(--color-red)'`, painted by
+            // the same `bg-[--button-color] text-[var(--color-accent-contrast)]`
+            // rule as the accent -- so a red button's label is the *accent*
+            // contrast rather than a red one of its own.
+            Some(Background::Color(theme_gen::ink(theme, Ink::Red))),
             None,
             theme_gen::ink(theme, Ink::AccentContrast),
         ),

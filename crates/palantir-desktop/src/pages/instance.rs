@@ -25,8 +25,9 @@ use iced::{Alignment, Element, Font, Length};
 
 use crate::icons_gen::Glyph;
 use crate::page::{self, GAP, ROW_GAP};
+use crate::pages::Ask;
 use crate::route::InstanceTab;
-use crate::store::{self, Store};
+use crate::store::{self, LaunchState, Store};
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Theme as Gen};
@@ -39,6 +40,8 @@ pub enum Message {
     Tab(InstanceTab),
     /// The instance was asked to be launched.
     Play,
+    /// The running instance was asked to stop.
+    Stop,
     /// An instance's mod was enabled or disabled.
     ToggleContent {
         /// The file on disk, which is what the toggle acts on.
@@ -73,6 +76,10 @@ const TAB_KEYS: [&str; 6] = [
 /// The page's own action. The per-file toggle is one control per row, so it names
 /// itself from the file it acts on -- see [`crate::ui::scoped`].
 const PLAY_KEY: &str = "instance:play";
+/// The same control once the game is up: the reference's red Stop, which is the
+/// same button in a different state and therefore a control of its own on the
+/// clock.
+const STOP_KEY: &str = "instance:stop";
 
 /// The page's own state.
 #[derive(Debug, Clone)]
@@ -147,18 +154,22 @@ impl State {
         }
     }
 
-    /// Apply a message.
+    /// Apply a message, and report anything only the shell can do.
     ///
     /// The toggle is the one place this page changes the disk, and it is
     /// deliberate: a Content tab that lists mods but cannot switch one off is a
     /// list, not a control. The call is [`crate::mods::set_mod_enabled`], the same
     /// one the old interface uses, and a failure is shown rather than dropped.
-    pub fn update(&mut self, message: Message, store: &Store) {
+    ///
+    /// Running the game is *not* one of those: the page reports it
+    /// ([`Ask::Play`]) for [`Ask`]'s own reason -- the process, the account, the
+    /// memory and the Java are the shell's and the store's, and a page that could
+    /// start one would have to know all four.
+    pub fn update(&mut self, message: Message, store: &Store) -> Option<Ask> {
         match message {
             Message::Tab(tab) => self.tab = tab,
-            Message::Play => {
-                self.notice = Some(store::not_implemented("Launching an instance"));
-            }
+            Message::Play => return Some(Ask::Play(self.id.clone())),
+            Message::Stop => return Some(Ask::Stop(self.id.clone())),
             Message::ToggleContent { file_name, enabled } => {
                 let directory = store.instance_dir(&self.id).join("mods");
                 self.notice = crate::mods::set_mod_enabled(&directory, &file_name, enabled)
@@ -171,6 +182,7 @@ impl State {
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
         }
+        None
     }
 }
 
@@ -221,20 +233,69 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             &store::not_implemented("This instance's details"),
         ));
     }
+    // The launch's own last word, in the header rather than in a bar along the
+    // bottom of the window: the reference puts it in its action bar, which is a
+    // surface this shell does not have yet, and the fact is the same one either
+    // way. It stays after the run has ended, which is why it is looked up by
+    // instance id rather than by "is it running".
+    if let Some(line) = store.launch_line(&state.id) {
+        details = details.push(
+            text(line.to_string())
+                .size(12.0)
+                .font(crate::style::medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        );
+    }
     ui::card(
         theme,
         row![]
             .spacing(GAP)
             .align_items(Alignment::Center)
             .push(details.width(Length::Fill))
-            .push(ui::button(
-                theme,
-                PLAY_KEY,
-                Key::AppInstanceActionPlay,
-                ui::Kind::Colored,
-                Message::Play,
-            )),
+            .push(launch_control(theme, store.launch_state(&state.id))),
     )
+}
+
+/// The header's launch control, in whichever of the reference's four states the
+/// launch is in.
+///
+/// `page-header/index.vue` draws one of four things in this one place: *Play*
+/// while nothing is running, *Starting…* while the launcher is preparing (disabled
+/// -- there is nothing to stop yet), a red *Stop* once the game is up, and
+/// *Stopping…* while it is being taken down. Two of those are buttons that do
+/// something and the other two are the same button with its press removed, which
+/// is what [`crate::ui::button_or`] is for.
+fn launch_control(theme: Gen, state: LaunchState) -> Element<'static, Message> {
+    match state {
+        LaunchState::Idle => ui::button(
+            theme,
+            PLAY_KEY,
+            Key::AppInstanceActionPlay,
+            ui::Kind::Colored,
+            Message::Play,
+        ),
+        LaunchState::Starting => ui::button_or(
+            theme,
+            PLAY_KEY,
+            Key::InstanceActionStarting,
+            ui::Kind::Colored,
+            None,
+        ),
+        LaunchState::Running => ui::button(
+            theme,
+            STOP_KEY,
+            Key::ButtonStop,
+            ui::Kind::Danger,
+            Message::Stop,
+        ),
+        LaunchState::Stopping => ui::button_or(
+            theme,
+            STOP_KEY,
+            Key::InstanceActionStopping,
+            ui::Kind::Danger,
+            None,
+        ),
+    }
 }
 
 /// The chosen tab's own body.
@@ -461,12 +522,91 @@ mod tests {
     }
 
     #[test]
-    fn playing_says_what_arrives_later() {
+    fn playing_and_stopping_are_reported_rather_than_performed() {
+        // The page does not run the game, for the same reason it does not create
+        // an instance: the process, the account, the memory and the Java are not
+        // its, and the shell is the one that has them.
         let store = store_at("play");
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
-        state.update(Message::Play, &store);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
-        state.update(Message::Tab(InstanceTab::Logs), &store);
+        assert_eq!(state.update(Message::Play, &store), Some(Ask::Play("atm".to_string())));
+        assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
+        assert_eq!(state.update(Message::Tab(InstanceTab::Logs), &store), None);
         assert_eq!(state.tab, InstanceTab::Logs);
+    }
+
+    #[test]
+    fn the_header_s_control_is_the_state_the_launch_is_in() {
+        // Four states, four controls, and the four labels are the reference's own
+        // (`page-header/index.vue`): *Play*, *Starting...* while the launcher is
+        // preparing, *Stop* once the game is up, and *Stopping...* while it is
+        // being taken down.
+        for (state_of_run, label) in [
+            (LaunchState::Idle, "Play"),
+            (LaunchState::Starting, "Starting..."),
+            (LaunchState::Running, "Stop"),
+            (LaunchState::Stopping, "Stopping..."),
+        ] {
+            assert_eq!(launch_state_label(state_of_run), label, "{state_of_run:?}");
+        }
+        let mut store = store_at("launch-control");
+        let mut state = State::new("atm".to_string(), InstanceTab::Content);
+        store.set_launch(store::Launch {
+            instance: Some("atm".to_string()),
+            state: LaunchState::Running,
+            line: Some("process started, streaming output…".to_string()),
+        });
+        assert_eq!(store.launch_state("atm"), LaunchState::Running);
+        assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
+        // And every state draws in every theme: the control is one of four
+        // shapes in a card, and a shape the page cannot draw is a panic in front
+        // of a user rather than a gate.
+        for state_of_run in [
+            LaunchState::Idle,
+            LaunchState::Starting,
+            LaunchState::Running,
+            LaunchState::Stopping,
+        ] {
+            store.set_launch(store::Launch {
+                instance: Some("atm".to_string()),
+                state: state_of_run,
+                line: None,
+            });
+            for theme in Gen::ALL {
+                drop(view(*theme, &state, &store));
+            }
+        }
+    }
+
+    /// The label a launch state draws: the same four keys the control draws from,
+    /// named here so a drift in the copy is a failure rather than a look.
+    fn launch_state_label(state: LaunchState) -> &'static str {
+        match state {
+            LaunchState::Idle => Key::AppInstanceActionPlay.message(),
+            LaunchState::Starting => Key::InstanceActionStarting.message(),
+            LaunchState::Running => Key::ButtonStop.message(),
+            LaunchState::Stopping => Key::InstanceActionStopping.message(),
+        }
+    }
+
+    #[test]
+    fn the_launch_s_own_line_is_shown_for_its_instance_and_no_other() {
+        // The line is the launch's last word, and it outlives the run: a user who
+        // navigates away and back sees what happened rather than a page that looks
+        // as if nothing had.
+        let store = store_at("launch-line");
+        let mut store = store;
+        store.set_launch(store::Launch {
+            instance: Some("atm".to_string()),
+            state: LaunchState::Idle,
+            line: Some("process exited (exit status: 0)".to_string()),
+        });
+        assert_eq!(
+            store.launch_line("atm"),
+            Some("process exited (exit status: 0)"),
+            "the page draws this under the facts"
+        );
+        assert_eq!(store.launch_line("other"), None);
+        let state = State::new("other".to_string(), InstanceTab::Content);
+        drop(view(Gen::Dark, &state, &store));
     }
 }

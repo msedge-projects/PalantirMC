@@ -1482,6 +1482,32 @@ pub enum Message {
     FileDropped(PathBuf),
 }
 
+impl From<launch::LaunchEvent> for Message {
+    /// One launch's report, in this shell's own words.
+    ///
+    /// The worker speaks [`launch::LaunchEvent`] rather than this enum because
+    /// two shells watch a launch while this rewrite is, and their messages are
+    /// not the same type; this conversion is the whole of what a shell has to
+    /// write, and the other one is in `shell.rs`.
+    fn from(event: launch::LaunchEvent) -> Message {
+        match event {
+            launch::LaunchEvent::Log { run_id, lines } => Message::LaunchLog { run_id, lines },
+            launch::LaunchEvent::Progress { run_id, progress } => {
+                Message::LaunchProgress { run_id, progress }
+            }
+            launch::LaunchEvent::Started { run_id } => Message::LaunchStarted { run_id },
+            launch::LaunchEvent::Done { run_id, note } => Message::LaunchDone { run_id, note },
+            launch::LaunchEvent::Tokens(tokens) => Message::AccountTokens {
+                uuid: tokens.uuid,
+                name: tokens.name,
+                access_token: tokens.access_token,
+                refresh_token: tokens.refresh_token,
+                expires_at_ms: tokens.expires_at_ms,
+            },
+        }
+    }
+}
+
 /// Editable snapshot of the per-instance settings form.
 #[derive(Debug, Clone, Default)]
 pub struct SettingsForm {
@@ -4321,9 +4347,38 @@ impl PalantirApp {
                     run_id: run.run_id,
                     defaults: run.defaults.clone(),
                 };
+                // The worker speaks `LaunchEvent` and this subscription delivers
+                // `Message`, so the channel it is handed is the events' and the
+                // pump below is the translation. A full window is waited for
+                // rather than dropped: a line the launcher wrote is not a level,
+                // and a shell that never hears a run ended would go on drawing
+                // the running state for a game that is gone.
+                let (events, mut stream) = futures::channel::mpsc::channel::<launch::LaunchEvent>(128);
                 let _ = std::thread::spawn(move || {
-                    launch::run_launch_worker(params, slot, sender);
+                    launch::run_launch_worker(params, slot, events);
                 });
+                let mut sender = sender;
+                while let Some(event) = futures::StreamExt::next(&mut stream).await {
+                    let mut pending = Some(Message::from(event));
+                    while let Some(message) = pending.take() {
+                        match sender.try_send(message) {
+                            // Delivered, and the next event is fetched.
+                            Ok(()) => {}
+                            // Full: a line the launcher wrote is not a frame, so the
+                            // send waits for room rather than dropping it.
+                            Err(error) if error.is_full() => {
+                                pending = Some(error.into_inner());
+                                let had_room =
+                                    futures::future::poll_fn(|cx| sender.poll_ready(cx)).await;
+                                if had_room.is_err() {
+                                    break;
+                                }
+                            }
+                            // The window is gone: there is nobody left to tell.
+                            Err(_) => break,
+                        }
+                    }
+                }
                 loop {
                     futures::future::pending::<()>().await;
                 }

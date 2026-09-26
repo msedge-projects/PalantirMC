@@ -48,9 +48,12 @@ use iced::{
     Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
 };
 
+use crate::accounts::AccountsStore;
 use crate::anim;
 use crate::brand;
 use crate::color_theme::ColorTheme;
+use crate::launch::{self, ActiveRunData, ChildSlot};
+
 use crate::icon;
 use crate::style::{
     disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
@@ -231,6 +234,28 @@ pub struct Shell {
     /// `handle` for [`Shell::create_requested`]'s reason: the dialog's own
     /// requests are not a page's, so they do not travel as an `Asked`.
     versions_requested: bool,
+    /// The launch in flight: what the subscription streams under, and what the
+    /// worker needs to start one. `None` is "nothing is running".
+    run: Option<ActiveRunData>,
+    /// How many runs this shell has asked for.
+    ///
+    /// It is what tells one run's messages from another's: a done for a run the
+    /// shell has already replaced must not clear the one that is going.
+    runs: u64,
+    /// The game process, for the Stop button. Shared with the worker, which is
+    /// the only other thing that touches it.
+    child: ChildSlot,
+    /// The launcher's accounts, read when a launch needs one and written when a
+    /// launch renews a session. `None` in a test, which is what keeps a test from
+    /// reading -- or writing -- a real `accounts.json`.
+    accounts: Option<AccountsStore>,
+    /// What reading the accounts file could not do, shown in Settings.
+    ///
+    /// [`crate::accounts::AccountsStore::load_with_report`] answers a corrupt file
+    /// with an empty store and a warning, and the warning is deliberately not
+    /// dropped: a launcher that silently forgot which account was signed in is the
+    /// failure that reporting it exists to prevent.
+    accounts_warning: Option<String>,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -363,6 +388,12 @@ pub enum Message {
     VersionSnapshots(bool),
     /// A version was picked in the dialog.
     VersionChoice(String),
+    /// One thing a launch reported: a batch of lines, a level, the game coming
+    /// up, the run ending, or a session it renewed.
+    ///
+    /// The worker speaks [`launch::LaunchEvent`] rather than this enum because
+    /// two shells watch a launch, and this variant is the whole of the crossing.
+    Launched(launch::LaunchEvent),
     /// One frame of the clock.
     Tick,
     Minimize,
@@ -401,6 +432,11 @@ impl Shell {
             version_snapshots: false,
             version_choice: None,
             versions_requested: false,
+            run: None,
+            runs: 0,
+            child: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            accounts: None,
+            accounts_warning: None,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -425,6 +461,14 @@ impl Shell {
     ) -> Shell {
         self.prefs = prefs;
         self.home = Some(home);
+        self
+    }
+
+    /// The launcher's accounts, which a launch signs in with, and what reading
+    /// them could not do.
+    pub fn with_accounts(mut self, accounts: AccountsStore, warning: Option<String>) -> Shell {
+        self.accounts = Some(accounts);
+        self.accounts_warning = warning;
         self
     }
 
@@ -690,6 +734,10 @@ impl Shell {
                 }
                 None
             }
+            Message::Launched(event) => {
+                self.launched(event);
+                None
+            }
             Message::Versions(result) => {
                 // A list with nothing in it is `Empty` rather than a list: the
                 // picker draws "no versions available" for one and a scrollable
@@ -800,6 +848,17 @@ impl Shell {
                     }
                     Some(pages::Ask::Import) => {
                         self.open_import();
+                        None
+                    }
+                    // The two that start and stop a game rather than a request:
+                    // neither answers with one, so `None` -- what the shell owes
+                    // the page afterwards travels as a launch event instead.
+                    Some(pages::Ask::Play(id)) => {
+                        self.play(id);
+                        None
+                    }
+                    Some(pages::Ask::Stop(id)) => {
+                        self.stop(&id);
                         None
                     }
                     None => None,
@@ -914,11 +973,18 @@ impl Shell {
     fn opening_command(&mut self) -> iced::Command<Message> {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
-            // A navigation and a creation are not owed: nothing is waiting for
-            // one, and the page that owes nothing says nothing.
-            Some(pages::Ask::Open(_) | pages::Ask::Create | pages::Ask::Import) => {
-                iced::Command::none()
-            }
+            // A navigation, a creation and a launch are not *owed*: nothing is
+            // waiting for one, and the page that owes nothing says nothing. A
+            // launch in particular is a button's doing rather than a page's
+            // arrival, and starting a game because a window opened on its page
+            // would be a launcher that plays by itself.
+            Some(
+                pages::Ask::Open(_)
+                | pages::Ask::Create
+                | pages::Ask::Import
+                | pages::Ask::Play(_)
+                | pages::Ask::Stop(_),
+            ) => iced::Command::none(),
             None => iced::Command::none(),
         }
     }
@@ -941,6 +1007,248 @@ impl Shell {
         let query = asked.query.clone();
         iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
             Message::Screen(pages::Message::search_result(&asked, result))
+        })
+    }
+
+    // ---- Launching ------------------------------------------------------
+
+    /// The account this launcher is signed in as, or an anonymous one.
+    ///
+    /// The whole entry travels rather than just the name, for the old shell's
+    /// reason: a Microsoft account launches with its tokens, and renewing them is
+    /// the worker's first step.
+    fn account(&self) -> launch::AccountRef {
+        match self.accounts.as_ref().and_then(AccountsStore::selected_account) {
+            Some(account) => launch::AccountRef::from_entry(account),
+            // No account file, or no account chosen: the offline session the
+            // launcher has always been able to play with.
+            None => launch::AccountRef::anonymous(),
+        }
+    }
+
+    /// Start the instance `id`, and remember the run.
+    ///
+    /// The run is what the subscription reads, so this is the whole of starting
+    /// a game: everything the worker needs was read here, at the moment the user
+    /// asked, because a worker has no business going back to a preferences file
+    /// to find out what it was told to use.
+    ///
+    /// A second press while a run is going is ignored rather than queued: the
+    /// reference's Play button is the Stop button by then, so the only way to
+    /// send this is a stale frame.
+    fn play(&mut self, id: String) {
+        if self.run.is_some() || id.trim().is_empty() {
+            return;
+        }
+        let Some(home) = &self.home else {
+            // A shell with no data root is a test's shell: there is nowhere for an
+            // instance to be, so there is nothing to launch.
+            self.store.set_launch(store::Launch {
+                instance: Some(id),
+                state: store::LaunchState::Idle,
+                line: Some(store::not_implemented("Launching an instance")),
+            });
+            return;
+        };
+        // A child left over from a previous run is dropped rather than killed:
+        // the run is over, and a process that is still there is not one this
+        // launcher is tracking any more.
+        if let Ok(mut slot) = self.child.lock() {
+            *slot = None;
+        }
+        self.runs += 1;
+        self.run = Some(ActiveRunData {
+            run_id: self.runs,
+            instance_id: id.clone(),
+            data_root: home.root.clone(),
+            account: self.account(),
+            defaults: launch::LaunchDefaults::from_prefs(&self.prefs),
+        });
+        self.store.set_launch(store::Launch {
+            // The same sentence the worker's own first line uses, because it is
+            // the same fact: the run is being prepared and nothing has happened
+            // yet.
+            line: Some(format!("preparing '{id}'")),
+            instance: Some(id),
+            state: store::LaunchState::Starting,
+        });
+    }
+
+    /// Stop the instance that is running.
+    ///
+    /// The kill is on the child the worker put in the slot, which is the only
+    /// handle to the game this process has. What comes back is the worker's own
+    /// `Done`: killing a process is not the same as reaping it, and the note the
+    /// run ends with is the worker's to write.
+    fn stop(&mut self, id: &str) {
+        if self.run.as_ref().map(|run| run.instance_id.as_str()) != Some(id) {
+            return;
+        }
+        self.store.set_launch(store::Launch {
+            instance: Some(id.to_string()),
+            state: store::LaunchState::Stopping,
+            line: Some(Key::InstanceActionStopping.message().to_string()),
+        });
+        if let Ok(mut slot) = self.child.lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+
+    /// What a launch reported, applied to the run it belongs to.
+    ///
+    /// Every arm checks the run id first: a done for a run this shell has already
+    /// replaced must not clear the one that is going, and a line from the run
+    /// before must not appear in the header of the run that replaced it.
+    fn launched(&mut self, event: launch::LaunchEvent) {
+        let current = self.run.as_ref().map(|run| run.run_id);
+        match event {
+            launch::LaunchEvent::Log { run_id, lines } => {
+                if current != Some(run_id) {
+                    return;
+                }
+                if let Some(line) = lines.last() {
+                    self.say(line.clone());
+                }
+            }
+            launch::LaunchEvent::Progress { run_id, progress } => {
+                if current != Some(run_id) {
+                    return;
+                }
+                self.say(progress.status_line());
+            }
+            launch::LaunchEvent::Started { run_id } => {
+                if current != Some(run_id) {
+                    return;
+                }
+                // What changes here is the control and not the line: the fact is
+                // about the game's window being up, and the run's own last line
+                // is still the last thing the launcher said.
+                self.set_run_state(store::LaunchState::Running);
+            }
+            launch::LaunchEvent::Done { run_id, note } => {
+                if current != Some(run_id) {
+                    return;
+                }
+                let instance = self.run.take().map(|run| run.instance_id);
+                if let Ok(mut slot) = self.child.lock() {
+                    *slot = None;
+                }
+                self.store.set_launch(store::Launch {
+                    instance,
+                    state: store::LaunchState::Idle,
+                    line: Some(note),
+                });
+                // The run wrote the play time and the last-played stamp into the
+                // instance's own files, so the library the pages are drawn from is
+                // stale until it is read again.
+                self.store.reload();
+            }
+            launch::LaunchEvent::Tokens(tokens) => self.renewed(tokens),
+        }
+    }
+
+    /// Record what the launch is doing, for the pages to draw.
+    fn say(&mut self, line: String) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let id = run.instance_id.clone();
+        let state = self.store.launch_state(&id);
+        self.store.set_launch(store::Launch { instance: Some(id), state, line: Some(line) });
+    }
+
+    /// Put the running instance in another state, keeping the line it is on.
+    ///
+    /// The state and the line are two facts rather than one: the game coming up
+    /// changes what the button is, and the line is still the last thing the
+    /// launcher said.
+    fn set_run_state(&mut self, state: store::LaunchState) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let id = run.instance_id.clone();
+        let line = self.store.launch_line(&id).map(str::to_string);
+        self.store.set_launch(store::Launch { instance: Some(id), state, line });
+    }
+
+    /// Write a session a launch renewed back to the account store.
+    ///
+    /// A renewal happens inside the worker because the launch cannot wait for the
+    /// window to notice; storing it is the window's, because the file is the
+    /// window's. A write that fails is left for the next launch to renew again
+    /// rather than drawn in front of the user: it is the same account, still
+    /// signed in, and the failure is about a file.
+    fn renewed(&mut self, tokens: launch::RefreshedTokens) {
+        let Some(accounts) = self.accounts.as_mut() else {
+            return;
+        };
+        if accounts
+            .update_tokens(
+                &tokens.uuid,
+                &tokens.access_token,
+                tokens.refresh_token.as_deref(),
+                tokens.expires_at_ms,
+            )
+            .is_ok()
+        {
+            let _ = accounts.save();
+        }
+    }
+
+    /// The launch subscription: nothing while nothing is running, and the run
+    /// itself while there is one.
+    ///
+    /// The worker is blocking and lives on a thread of its own; what crosses back
+    /// is a channel of [`launch::LaunchEvent`]s, pumped into this shell's own
+    /// messages. A full window is waited for rather than dropped -- a line the
+    /// launcher wrote is not a level, and a shell that never hears a run ended
+    /// would go on drawing Stop for a game that is gone.
+    fn launching(&self) -> Subscription<Message> {
+        let Some(run) = self.run.clone() else {
+            return Subscription::none();
+        };
+        let slot = self.child.clone();
+        let id = run.run_id;
+        iced::subscription::channel(id, 128, move |sender| async move {
+            let params = launch::LaunchParams {
+                data_root: run.data_root.clone(),
+                instance_id: run.instance_id.clone(),
+                account: run.account.clone(),
+                run_id: run.run_id,
+                defaults: run.defaults.clone(),
+            };
+            let (events, mut stream) =
+                futures::channel::mpsc::channel::<launch::LaunchEvent>(128);
+            let _ = std::thread::spawn(move || {
+                launch::run_launch_worker(params, slot, events);
+            });
+            let mut sender = sender;
+            while let Some(event) = futures::StreamExt::next(&mut stream).await {
+                let mut pending = Some(Message::Launched(event));
+                while let Some(message) = pending.take() {
+                    match sender.try_send(message) {
+                        // Delivered, and the next event is fetched.
+                        Ok(()) => {}
+                        // Full: the window is a frame behind. A fact is not a
+                        // frame, so the send waits for room rather than dropping
+                        // it.
+                        Err(error) if error.is_full() => {
+                            pending = Some(error.into_inner());
+                            let had_room = futures::future::poll_fn(|cx| sender.poll_ready(cx)).await;
+                            if had_room.is_err() {
+                                break;
+                            }
+                        }
+                        // The window is gone: there is nobody left to tell.
+                        Err(_) => break,
+                    }
+                }
+            }
+            loop {
+                futures::future::pending::<()>().await;
+            }
         })
     }
 
@@ -1287,22 +1595,31 @@ impl Shell {
         .into()
     }
 
-    /// Settings: the appearance pane, which is the themes.
+    /// Settings: the appearance pane, which is the themes, and whatever reading
+    /// this launcher's own files could not do.
     fn settings_dialog(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        self.dialog(
-            Key::SettingsAppearanceTitle,
-            column![]
-                .spacing(12.0)
-                .push(
-                    text(Key::SettingsDisplayThemeDescription.message())
-                        .size(14.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-                )
-                .push(self.theme_options())
-                .into(),
-        )
+        let mut body = column![]
+            .spacing(12.0)
+            .push(
+                text(Key::SettingsDisplayThemeDescription.message())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            )
+            .push(self.theme_options());
+        if let Some(warning) = &self.accounts_warning {
+            // A warning rather than a failure: the launcher works, and what the
+            // reader needs to know is that it does not know which account was
+            // signed in.
+            body = body.push(crate::ui::admonition(
+                theme,
+                crate::ui::Severity::Warning,
+                "accounts",
+                warning,
+            ));
+        }
+        self.dialog(Key::SettingsAppearanceTitle, body.into())
     }
 
     /// The creation dialog: a name, the version the instance is for, and the
@@ -2063,9 +2380,15 @@ impl iced::Application for Shell {
         // where the launcher already keeps metadata it has fetched: a second cache
         // directory would be a second set of stale answers nobody knows about.
         let store = Store::load(&paths).with_engine(Engine::new(&paths));
+        // The accounts are the launcher's own file in its data root, read once
+        // per window: a launch signs in with whatever is selected, and a launch
+        // that renews a session writes it back here.
+        let (accounts, accounts_warning) =
+            crate::accounts::AccountsStore::load_with_report(&paths.root.join("accounts.json"));
         let mut shell = Shell::new(flags.opening(), theme, &settings)
             .with_store(store)
-            .with_prefs(paths.clone(), prefs);
+            .with_prefs(paths.clone(), prefs)
+            .with_accounts(accounts, accounts_warning);
         // The page a window opens on may owe a request before any message has
         // arrived -- `/browse/modpack` owes a search -- and the first frame is the
         // first moment there is anywhere to put the answer, so it is asked for
@@ -2091,6 +2414,18 @@ impl iced::Application for Shell {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        // Two subscriptions and neither is owed: the frame clock while something
+        // is moving, and the launch while a game is being started or is up. Both
+        // say `none` when they are not needed, which is what keeps an idle window
+        // -- and a launcher with nothing running -- from waking anything up.
+        let frames = if self.animating() { self.frames() } else { Subscription::none() };
+        Subscription::batch([frames, self.launching()])
+    }
+}
+
+impl Shell {
+    /// One frame of the clock, while anything is moving.
+    fn frames(&self) -> Subscription<Message> {
         if !self.animating() {
             return Subscription::none();
         }
@@ -2429,6 +2764,230 @@ mod tests {
         assert!(!shell.creating);
         assert_eq!(shell.address().to_path(), "/instance/ATM10");
         assert!(matches!(shell.screen, Screen::Instance(_)), "on the new page");
+    }
+
+    /// A shell with a launcher behind it: a data root, so a launch has somewhere
+    /// to run, and no account file, which is the offline session a fresh install
+    /// starts with.
+    fn shell_with_home(name: &str) -> Shell {
+        let root = std::env::temp_dir().join("palantirmc-shell-launch").join(name);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch root");
+        let paths = palantir_core::paths::PalantirPaths::at(root);
+        Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
+            .with_store(Store::load(&paths))
+            .with_prefs(paths, crate::prefs::Prefs::default())
+    }
+
+    /// Ask the instance page on screen to run its instance.
+    fn play(shell: &mut Shell) {
+        press(
+            shell,
+            Message::Screen(pages::Message::Instance(pages::instance::Message::Play)),
+        );
+    }
+
+    #[test]
+    fn playing_an_instance_starts_a_run_the_pages_can_see() {
+        // The whole of what the Play button does: the page reports it, the shell
+        // remembers the run -- which is what the subscription reads -- and the
+        // store says so, which is what the header's control is drawn from.
+        //
+        // Navigating clears the interaction clock's pointer (`Shell::forget_pointer`),
+        // which is process-wide, so this test takes the same lock every test that
+        // touches a crossing does.
+        let _guard = anim::lock_for_test();
+        let mut shell = shell_with_home("play");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        let run = shell.run.as_ref().expect("a run");
+        assert_eq!(run.instance_id, "atm10");
+        assert_eq!(run.run_id, 1);
+        assert_eq!(run.data_root, shell.home.as_ref().expect("a home").root);
+        assert!(
+            !run.account.kind.is_online(),
+            "no account chosen is the offline session, not a refusal to launch"
+        );
+        assert_eq!(run.account.username, "Player", "which is the same player every time");
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Starting);
+        assert_eq!(shell.store.launch_line("atm10"), Some("preparing 'atm10'"));
+        // The same message from another instance's page is not this instance's
+        // run: the address is what the page is drawn from, so the page on screen
+        // is the one that asked.
+        press(&mut shell, Message::Go("/instance/other".into()));
+        play(&mut shell);
+        assert_eq!(shell.run.as_ref().map(|run| run.instance_id.clone()), Some("atm10".to_string()));
+        assert_eq!(shell.runs, 1, "a launch is not started twice behind one game");
+    }
+
+    #[test]
+    fn a_run_reports_what_it_is_doing_and_the_header_follows() {
+        // Every fact a launch sends has exactly one place to land, and the run id
+        // is checked first: a `Done` from the run before must not clear the run
+        // that is going, which is a stale frame the shell has to survive.
+        let _guard = anim::lock_for_test();
+        let mut shell = shell_with_home("events");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Progress {
+                run_id: 1,
+                progress: crate::install::Progress::new("libraries", 3, 12, 0),
+            }),
+        );
+        assert_eq!(shell.store.launch_line("atm10"), Some("libraries 3/12 (25%)"));
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Log {
+                run_id: 1,
+                lines: vec!["resolving version 1.21.4".to_string()],
+            }),
+        );
+        assert_eq!(shell.store.launch_line("atm10"), Some("resolving version 1.21.4"));
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some("resolving version 1.21.4"),
+            "the game coming up changes the control and not the run's own line"
+        );
+        // And the stale frame: a done from a run this shell has already replaced.
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
+            run_id: 1,
+            note: "process exited (exit status: 0)".to_string(),
+        }));
+        assert!(shell.run.is_none(), "the run is over");
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Idle);
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some("process exited (exit status: 0)"),
+            "and the last thing it said is still what the header shows"
+        );
+        play(&mut shell);
+        assert_eq!(shell.run.as_ref().map(|run| run.run_id), Some(2));
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
+            run_id: 1,
+            note: "stale".to_string(),
+        }));
+        assert!(shell.run.is_some(), "a stale done must not clear the run that is going");
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Progress {
+                run_id: 1,
+                progress: crate::install::Progress::new("assets", 1, 2, 0),
+            }),
+        );
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some("preparing 'atm10'"),
+            "and a stale line must not reach the run that replaced it"
+        );
+    }
+
+    #[test]
+    fn stopping_is_a_state_the_header_can_draw_and_a_kill_the_shell_can_send() {
+        // Stop is two things at once, and the test asserts both: the store says
+        // the run is stopping, which is what the button is drawn from, and the
+        // shell has asked the child to die. There is no child in a test -- the
+        // slot is empty -- so what is asserted is that the request is harmless
+        // and that the state is set before the answer comes back.
+        let _guard = anim::lock_for_test();
+        let mut shell = shell_with_home("stop");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
+        );
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        assert!(shell.run.is_some(), "the run is not over until the worker says so");
+        // A stop for an instance that is not the one running is ignored rather
+        // than killing the wrong game.
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
+        );
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+    }
+
+    #[test]
+    fn a_renewed_session_is_written_back_to_the_accounts_file() {
+        // A launch renews the Microsoft session inside the worker, because it
+        // cannot wait for the window to notice; storing it is the window's,
+        // because the file is. The test asserts the file, not the struct: a
+        // store that was updated and never saved is the same as one that was
+        // never updated.
+        let root = std::env::temp_dir().join("palantirmc-shell-launch").join("accounts");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch root");
+        let path = root.join("accounts.json");
+        let mut accounts = crate::accounts::AccountsStore::load_with_report(&path).0;
+        accounts
+            .upsert_microsoft(crate::accounts::AccountEntry::microsoft(
+                "Notch",
+                "069a79f444e94726a5befca90e38aaf5",
+                "old-token",
+                "old-refresh",
+                0,
+                Some(true),
+            ))
+            .expect("an account");
+        accounts.select("069a79f444e94726a5befca90e38aaf5").expect("selected");
+        accounts.save().expect("written");
+        let paths = palantir_core::paths::PalantirPaths::at(root.clone());
+        let _guard = anim::lock_for_test();
+        let mut shell = Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
+            .with_store(Store::load(&paths))
+            .with_prefs(paths, crate::prefs::Prefs::default())
+            .with_accounts(accounts, None);
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        assert!(
+            shell.run.as_ref().expect("a run").account.kind.is_online(),
+            "a Microsoft account launches with its own session"
+        );
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Tokens(launch::RefreshedTokens {
+                uuid: "069a79f444e94726a5befca90e38aaf5".to_string(),
+                name: "Notch".to_string(),
+                access_token: "new-token".to_string(),
+                refresh_token: Some("new-refresh".to_string()),
+                expires_at_ms: 42,
+            })),
+        );
+        let written = std::fs::read_to_string(&path).expect("the file");
+        assert!(written.contains("new-token"), "the renewal did not reach the disk: {written}");
+        assert!(written.contains("new-refresh"), "{written}");
+        // And a renewal for an account this launcher does not know is dropped
+        // rather than invented.
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Tokens(launch::RefreshedTokens {
+                uuid: "nobody".to_string(),
+                name: "Nobody".to_string(),
+                access_token: "x".to_string(),
+                refresh_token: None,
+                expires_at_ms: 1,
+            })),
+        );
+        let written = std::fs::read_to_string(&path).expect("the file");
+        assert!(!written.contains("\"x\""), "{written}");
+    }
+
+    #[test]
+    fn a_shell_with_nowhere_to_launch_says_so_rather_than_starting_nothing() {
+        // A test's shell has no data root, so there is nowhere for an instance to
+        // be: the honest answer is the sentence every other unwired control in
+        // this rewrite gives, and the run is not started.
+        let mut shell = shell_at("/instance/atm10");
+        play(&mut shell);
+        assert!(shell.run.is_none());
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some(store::not_implemented("Launching an instance").as_str())
+        );
     }
 
     /// A version list in the shape Mojang publishes: two releases, a snapshot and

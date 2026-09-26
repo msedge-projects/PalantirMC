@@ -116,6 +116,19 @@ pub enum Ask {
     /// Open the creation flow's import step, for the same reasons and off the same
     /// button on the welcome screen.
     Import,
+    /// Run this instance.
+    ///
+    /// The fourth kind, and the one with the most behind it: the process, the
+    /// account to sign in with, the memory and Java the launch is for, and the
+    /// subscription that streams it are all the shell's, and a page that could
+    /// start a game would have to know every one of them.
+    Play(String),
+    /// Stop the instance that is running.
+    ///
+    /// Deliberately the twin of [`Ask::Play`] rather than the same message with a
+    /// flag: the reference's header emits `play` and `stop` as two events, and a
+    /// page that cannot tell them apart cannot draw two buttons.
+    Stop(String),
 }
 
 impl Message {
@@ -169,7 +182,10 @@ impl Screen {
                 if state.id != *id {
                     *state = instance::State::new(id.clone(), tab.clone());
                 } else {
-                    state.update(instance::Message::Tab(tab.clone()), &Store::default());
+                    // A tab is not something only the shell can do, so there is
+                    // nothing to report -- and the store is not read: a tab
+                    // press does not touch the machine.
+                    let _ = state.update(instance::Message::Tab(tab.clone()), &Store::default());
                 }
             }
             // Any other kind is another page, and the one on screen had its
@@ -213,7 +229,14 @@ impl Screen {
                 }
             }
             (Screen::Project(state), Message::Project(message)) => state.update(message),
-            (Screen::Instance(state), Message::Instance(message)) => state.update(message, store),
+            (Screen::Instance(state), Message::Instance(message)) => {
+                // The one page that can ask for something other than a
+                // navigation yet: an instance's Play and Stop are the shell's to
+                // perform, for the same reason a search is.
+                if let Some(asked) = state.update(message, store) {
+                    return Some(asked);
+                }
+            }
             (Screen::Skins(state), Message::Skins(message)) => state.update(message),
             (Screen::Screenshots(state), Message::Screenshots(message)) => state.update(message),
             (Screen::Servers(state), Message::Servers(message)) => state.update(message),

@@ -1331,6 +1331,76 @@ way: a flag out of `act`, a thread, and a message back.
       field it belongs to -- and the chosen version is printed in the picker's own
       heading, which is where the reference's trigger mirrors it.
 
+### The launch
+
+G81 is the thing the plan named as the gate for retiring the old shell. `launch.rs`
+is the oldest finished part of this launcher -- the worker resolves the version
+through the engine, installs what is missing, extracts the natives, signs in as
+the selected account (renewing a Microsoft session when it has to), spawns Java
+with the argument vector from `palantir-core`, streams the game's output back and
+records the play time -- and nothing in the new shell called it: the instance
+page's Play answered with the not-implemented sentence while the code behind it
+sat finished. Two things had to move for the new shell to be able to call it, and
+both are the kind of change that is only worth making once:
+
+* **The worker speaks facts rather than one shell's messages.** It used to send
+  `crate::app::Message` values, which is the *old* shell's enum; it now sends
+  [`launch::LaunchEvent`] -- a batch of lines, a level, the game coming up, the
+  run ending, a session renewed -- and each shell translates. `app.rs`'s
+  translation is one `From` impl and a pump; `shell.rs`'s is a variant and the
+  same pump. That is what let the second shell watch a launch without the first
+  one's message type leaking into it.
+* **A page cannot start a process.** The instance page reports `Ask::Play(id)`
+  and `Ask::Stop(id)` the way it reports a navigation, and the shell is the one
+  that has the data root, the account file and the settings a launch is for. The
+  pages learn what is happening through the store, which is the shape the
+  reference uses too: its process list is a query keyed by instance
+  (`instanceKeys.processes(id)`), not a property of the page component.
+
+- [x] G81: the instance page's Play starts a launch in the new shell, its header
+      follows the run, and Stop takes it down
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 592 passed
+  EVIDENCE: 592 tests over the desktop binary, eight of them new, and the claims
+      are about the seams rather than about a game having run on this machine
+      (which no test here can do: a launch needs a JVM, an account and a real
+      version to install). The store's half is four states and one line:
+      `LaunchState` is `Idle`/`Starting`/`Running`/`Stopping` because the
+      reference's header draws four different things in one place
+      (`page-header/index.vue`: *Play*, *Starting...*, a red *Stop*, *Stopping...*),
+      and `launch_state(id)` answers `Idle` for every instance that is not the one
+      running, so a page never compares anything itself. The line keeps naming its
+      instance after the run ended, which is what makes a reader who navigated away
+      and back see what happened. The page's half is that Play and Stop are
+      *reported* (`Some(Ask::Play("atm10"))`) rather than performed, that the four
+      labels are the reference's own four, and that every state draws in every
+      theme. The shell's half is the whole mechanism: `act` on an `Ask::Play`
+      builds an `ActiveRunData` from the launcher's own files (data root, selected
+      account -- the offline session when there is none -- and the memory and Java
+      the settings name), the store says `Starting`, and the subscription that
+      spawns the worker reads it. A `Progress` gives the header its level
+      (`libraries 3/12 (25%)`), a `Log` gives it the last line, `Started` changes
+      the *control* and deliberately not the line, and `Done` clears the run,
+      records the note and reads the instance list again -- the worker writes play
+      time into the instance's own files, so the library the pages are drawn from
+      is stale until it is read again. Every arm checks the run id first, which is
+      asserted the only way it can be: a `Done` and a `Progress` from run 1 arrive
+      while run 2 is going, and the run, its state and its line are all untouched.
+      A renewal is written back to `accounts.json` and the test asserts the file
+      rather than the struct, because a store that was updated and never saved is
+      the same as one that was never updated. Two smaller things came with it: the
+      Settings modal now shows a warning when the accounts file could not be read
+      (`AccountsStore::load_with_report`'s sentence, which the old shell had
+      nowhere to put), and the Logs tab reads the launcher's own `logs/launcher.log`
+      when the game never wrote `latest.log` -- which is exactly the log a failed
+      launch leaves behind. Three deviations are deliberate and worth naming: the
+      run's own line is drawn in the instance header rather than in the
+      reference's bottom action bar (that surface is not built yet, and the fact is
+      the same one), the *Stop* button has no stop-circle glyph (this kit's buttons
+      are label-only), and the launch is not exercised end to end by any gate here
+      -- a real run needs a JVM and a version to install, which is what
+      `tools/launch_check.py` and the live tests exist for.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1350,7 +1420,7 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    584 passed; 0 failed  (palantir-desktop, bin)
+    592 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
@@ -1369,11 +1439,11 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1006 tests pass, nothing in the correctness-deny set is failing, and all four
+1014 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 584 now: the seam (G75), the interaction (G76), the
-settings pane (G77), stage 5's first two flows (G78, G79) and the version picker
-(G80) added thirty between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
+engine's slices landed and is 592 now: the seam (G75), the interaction (G76), the
+settings pane (G77), stage 5's three flows (G78-G80) and the launch (G81) added
+thirty-eight between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),
@@ -1419,7 +1489,7 @@ otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
 makes the runner the authority. What it does say is that all 875 tests pass, that
 nothing in the correctness-deny set is failing, and that all three generated
-files match their sources; the run under "The engine's transcript" above, at 1006,
+files match their sources; the run under "The engine's transcript" above, at 1014,
 is the same set after the seam, the interaction, the settings pane and stage 5's
 flows so far landed.
 Re-running the push when the account can schedule jobs is the first thing to do
