@@ -108,11 +108,12 @@ mod scroll;
 /// right panel and Settings as a modal, on the reference's own information
 /// architecture.
 ///
-/// Not the default yet, and deliberately: it draws the chrome and every page it
-/// routes to, but it cannot launch an instance yet, so running it today would
-/// replace a launcher that launches instances with a shell that says so in as
-/// many words. `--shell` runs it, which is how its captures and its own gates are
-/// taken without pretending it is finished.
+/// **This is the shell a plain run gets.** The plan's own condition for the switch
+/// was that it can launch an instance, and it can (G81); the shell it replaces is
+/// behind `--classic` for as long as it takes to delete, which is where its
+/// capture flag (`--shot`) and its own page names still live. `--shell` is still
+/// accepted and is now the default, so a shortcut written before the switch keeps
+/// opening what it opened.
 #[allow(dead_code)]
 mod shell;
 mod settings;
@@ -274,11 +275,11 @@ fn main() -> iced::Result {
     // Decide the renderer from what this machine can actually provide, before
     // iced builds its compositor. See `gpu` for why this is a probe.
     let _ = gpu::select_renderer();
-    // The command line is read twice, from one vector: once for `--shell`,
-    // which decides which of the two shells this process is, and once as the
+    // The command line is read twice, from one vector: once for the one decision
+    // it makes about which of the two shells this process is, and once as the
     // flags of whichever one that is.
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if arguments.iter().any(|argument| argument == "--shell") {
+    if !classic_shell(&arguments) {
         return run_shell(arguments.iter().cloned());
     }
     // The OS appearance feeds the "Sync with system" theme, so it is read once
@@ -317,6 +318,17 @@ fn main() -> iced::Result {
     App::run(settings)
 }
 
+/// Which of the two shells this process is.
+///
+/// The rewrite's shell is what a run gets, and the shell it replaces is behind
+/// `--classic` for as long as it takes to delete. The flag is named for what it
+/// asks for rather than for what used to be the default: `--shell` would read, a
+/// year from now, like a flag that does nothing -- and it is still accepted, which
+/// is what keeps a shortcut written before the switch working.
+fn classic_shell(arguments: &[String]) -> bool {
+    arguments.iter().any(|argument| argument == "--classic")
+}
+
 /// Run the rewrite's shell.
 ///
 /// The same window and the same five fonts as the launcher, because the two are
@@ -327,7 +339,8 @@ fn main() -> iced::Result {
 ///
 /// There is no capture flag here yet. `--shot` belongs to the old shell and its
 /// machinery is wound through that shell's frame handling; this shell needs one of
-/// its own, because that is where the first per-page gate does.
+/// its own, because that is where the first per-page gate does -- and until it has
+/// one, a capture is taken by running the old shell with `--classic`.
 fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
     let flags = shell::Flags::from_args(args);
     let mut settings = Settings::default();
@@ -464,6 +477,19 @@ mod tests {
     // Only the tests build an app against an explicit directory; a real run
     // gets both roots from `PalantirApp::roots`.
     use palantir_core::paths::PalantirPaths;
+
+    #[test]
+    fn a_plain_run_is_the_rewrite_s_shell_and_the_old_one_asks_for_itself() {
+        // The switch the plan gated on "the new shell can launch an instance",
+        // asserted where it is made: no arguments is the new shell, and only the
+        // flag that names the old one runs it. `--shell` is accepted and changes
+        // nothing, because it is the default now.
+        assert!(!classic_shell(&[]));
+        assert!(!classic_shell(&["--shell".to_string()]));
+        assert!(!classic_shell(&["--page".to_string(), "/instance/atm10".to_string()]));
+        assert!(classic_shell(&["--classic".to_string()]));
+        assert!(classic_shell(&["--shot".to_string(), "out.png".to_string(), "--classic".to_string()]));
+    }
 
     #[test]
     fn shells_share_title_and_theme() {

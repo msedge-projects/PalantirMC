@@ -1401,6 +1401,32 @@ both are the kind of change that is only worth making once:
       -- a real run needs a JVM and a version to install, which is what
       `tools/launch_check.py` and the live tests exist for.
 
+### The switch
+
+G82 is the decision the whole rewrite was arranged around, and it is one line of
+`main.rs`. The plan has said from stage 2 that the old chrome stays what runs
+until the new shell can launch an instance; it can now (G81), so a plain run gets
+the new shell and the old one asks for itself with `--classic`. What the flag is
+*named* matters as much as what it does: `--shell` would read, a year from now,
+like a flag that does nothing, and it is still accepted (and ignored) so that a
+shortcut written before the switch keeps opening what it opened.
+
+- [x] G82: a plain run is the new shell, and the shell this rewrite replaces runs
+      only when it is asked for by name
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 593 passed
+  EVIDENCE: one new test, over the function that makes the decision rather than
+      over `main`, which cannot be called from a test at all: no arguments is the
+      new shell, `--shell` alone changes nothing (it is the default now), a
+      `--page` path does not select the old shell, and only `--classic` -- alone or
+      beside another flag -- runs the old one. The reason this is worth a gate is
+      not the line: it is that the line is the plan's own condition, and a
+      condition nobody asserts is a condition that gets forgotten. What is
+      deliberately *not* done here is the other half -- deleting `app.rs` and the
+      Prism-shaped `palantir-core` modules only it calls. That is a slice of its
+      own, and doing it in the same commit as the switch would make a regression
+      in either one impossible to tell from the other.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1420,7 +1446,7 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    592 passed; 0 failed  (palantir-desktop, bin)
+    593 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
@@ -1439,11 +1465,12 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1014 tests pass, nothing in the correctness-deny set is failing, and all four
+1015 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 592 now: the seam (G75), the interaction (G76), the
-settings pane (G77), stage 5's three flows (G78-G80) and the launch (G81) added
-thirty-eight between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
+engine's slices landed and is 593 now: the seam (G75), the interaction (G76), the
+settings pane (G77), stage 5's three flows (G78-G80), the launch (G81) and the
+switch (G82) added thirty-nine between them, and the run above was taken after all
+of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),
@@ -1489,7 +1516,7 @@ otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
 makes the runner the authority. What it does say is that all 875 tests pass, that
 nothing in the correctness-deny set is failing, and that all three generated
-files match their sources; the run under "The engine's transcript" above, at 1014,
+files match their sources; the run under "The engine's transcript" above, at 1015,
 is the same set after the seam, the interaction, the settings pane and stage 5's
 flows so far landed.
 Re-running the push when the account can schedule jobs is the first thing to do

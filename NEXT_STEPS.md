@@ -81,7 +81,7 @@ them.
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
-| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`, and it can now launch an instance (G81), which was the plan's own condition for switching over. The old chrome is still what runs by default until that switch is made and the old one deleted -- see "What stage 5 has landed so far" |
+| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). What is left of stage 2's own work is the right panel's body -- see "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76) and Settings offers the reference's colour themes (G77). What is not real yet is anything a service answers, and the right panel -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81). What is not in is the retire of the shell this one replaces, and the loader chips the reference's flow draws beside the game version |
@@ -531,11 +531,12 @@ built:
 
 What stage 5 still owes, in the order it is worth doing:
 
-1. **The switch, and the delete.** `--shell` is a flag; the plan's condition for
-   making it the default was that the new shell can launch an instance, and it
-   can. The old chrome (`app.rs`, 10k lines and most of the correctness warnings)
-   is what goes next, along with the Prism-shaped modules in `palantir-core` that
-   only it calls.
+1. **The delete.** The switch is made: a plain run is the new shell and the old
+   chrome is behind `--classic`. What is left is deleting it -- `app.rs`, 10k
+   lines and most of the correctness warnings, and the Prism-shaped modules in
+   `palantir-core` that only it calls -- which is a slice of its own so that a
+   regression in the switch and one in the delete cannot be confused for each
+   other.
 2. **The loaders.** The picker offers Mojang's versions and the reference's
    loader chips are not drawn at all; an instance is vanilla-only, and the
    reference's flow would offer Fabric, Forge, NeoForge, Quilt and the loader
