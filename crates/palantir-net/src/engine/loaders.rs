@@ -82,6 +82,16 @@ impl Loader {
         }
     }
 
+    /// The loader [`Loader::name`] names, if it names one.
+    ///
+    /// A caller that has a loader's *name* -- the interface's own list is keyed by
+    /// one, because it also carries Vanilla, which has no service to ask -- gets
+    /// the answer `None` for anything that is not a loader, which is how vanilla
+    /// falls out without a special case at the call site.
+    pub fn from_name(name: &str) -> Option<Loader> {
+        Loader::all().into_iter().find(|loader| loader.name().eq_ignore_ascii_case(name))
+    }
+
     /// Where this loader's build list for `game` is.
     ///
     /// `game` is unused for Forge, and that is not a bug: Forge promotes its
@@ -140,6 +150,14 @@ pub struct LoaderMeta {
     /// The way bytes arrive. The engine's own pool in production, a scripted
     /// server in a test.
     fetch: Arc<dyn Fetch>,
+}
+
+/// The directory and nothing else: the fetch seam has no `Debug` of its own, and
+/// a handle that printed it would be printing a connection pool.
+impl std::fmt::Debug for LoaderMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoaderMeta").field("dir", &self.builds.dir()).finish_non_exhaustive()
+    }
 }
 
 impl LoaderMeta {
@@ -543,6 +561,18 @@ mod tests {
         let message = failure.to_string();
         assert!(message.contains(&url), "{message}");
         assert!(message.contains("a build list is an array"), "{message}");
+    }
+
+    #[test]
+    fn a_loader_is_found_by_the_name_it_is_published_under_and_vanilla_is_not_one() {
+        // What the interface's own list needs: it carries Vanilla, which has no
+        // service and no build list, so "not a loader" has to be an answer rather
+        // than a panic or a special case at every call site.
+        assert_eq!(Loader::from_name("fabric"), Some(Loader::Fabric));
+        assert_eq!(Loader::from_name("NeoForge"), Some(Loader::NeoForge));
+        assert_eq!(Loader::from_name("vanilla"), None);
+        assert_eq!(Loader::from_name(""), None);
+        assert_eq!(Loader::from_name("prism"), None);
     }
 
     #[test]

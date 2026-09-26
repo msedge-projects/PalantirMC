@@ -277,6 +277,37 @@ pub struct Shell {
     /// `handle` for [`Shell::create_requested`]'s reason: the dialog's own
     /// requests are not a page's, so they do not travel as an `Asked`.
     versions_requested: bool,
+    /// Which modloader the dialog's chips are on.
+    ///
+    /// Fabric rather than Vanilla, because that is what the reference's flow
+    /// opens on: vanilla is offered first -- the list is the same five chips in
+    /// both -- and the choice the flow *makes* for a user who has not chosen is
+    /// the loader most of the library is published for.
+    create_loader: crate::catalog::LoaderKind,
+    /// Which of the loader-version chips the dialog is on.
+    build_choice: BuildChoice,
+    /// The build the user picked when the chips are on [`BuildChoice::Other`].
+    ///
+    /// A version string rather than an index, because the list it came from is a
+    /// service's answer that can be read again: an index would name a different
+    /// build after a reload, and the row the user pressed is the version itself.
+    build: Option<String>,
+    /// What the dialog's build search field holds.
+    build_query: String,
+    /// The loader's own builds for the game version in force, as the dialog asked
+    /// for them: read once per loader and game version rather than per frame, for
+    /// [`Shell::versions`]'s reason.
+    loader_builds: Load<Vec<store::LoaderBuild>>,
+    /// The loader and game version the list above was asked for.
+    ///
+    /// Written down so a slow answer about a choice the user has moved off can be
+    /// dropped rather than drawn: without it, a Fabric list that arrived after
+    /// the Quilt chip was pressed would be drawn under the Quilt chip, which is a
+    /// dialog that lies about what it will install.
+    loader_builds_for: Option<(crate::catalog::LoaderKind, String)>,
+    /// A chip was pressed and the loader-build request has not left yet. Taken by
+    /// `handle` for [`Shell::versions_requested`]'s reason.
+    loader_builds_requested: bool,
     /// The launch in flight: what the subscription streams under, and what the
     /// worker needs to start one. `None` is "nothing is running".
     run: Option<ActiveRunData>,
@@ -345,6 +376,66 @@ const CREATE_BUTTON: &str = "shell:create";
 /// says one thing when the snapshots are hidden and the other when they are not.
 const VERSION_SHOW_ALL: &str = "shell:version-show-all";
 const VERSION_HIDE_SNAPSHOTS: &str = "shell:version-hide-snapshots";
+
+/// Which loader build the creation dialog should install.
+///
+/// The reference's own three chips on its *Loader version* row, and the rule
+/// each one names. `Stable` is the default arm in both shells -- it is what a
+/// user almost always wants, and it is the one build per loader that has been
+/// published as tested -- and `Other` is the only one that carries a version of
+/// its own rather than deriving one from the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildChoice {
+    /// The newest build the loader itself calls stable, or the newest of all
+    /// when it has published nothing stable for this game version.
+    #[default]
+    Stable,
+    /// The newest build there is, stable or not.
+    Latest,
+    /// A build the user picks out of the list.
+    Other,
+}
+
+impl BuildChoice {
+    /// The three chips, in the reference's own order.
+    pub const ALL: [BuildChoice; 3] = [BuildChoice::Stable, BuildChoice::Latest, BuildChoice::Other];
+
+    /// The chip's label, which is the reference's own message for it.
+    pub fn label(self) -> Key {
+        match self {
+            BuildChoice::Stable => Key::CreationFlowModalCustomSetupLoaderVersionTypeStable,
+            BuildChoice::Latest => Key::CreationFlowModalCustomSetupLoaderVersionTypeLatest,
+            BuildChoice::Other => Key::CreationFlowModalCustomSetupLoaderVersionTypeOther,
+        }
+    }
+
+    /// The chip's stable identity for the interaction clock: one per chip, not
+    /// one per label, because two chips that happen to share a word must not
+    /// light together.
+    fn key(self) -> &'static str {
+        match self {
+            BuildChoice::Stable => "shell:create-build:stable",
+            BuildChoice::Latest => "shell:create-build:latest",
+            BuildChoice::Other => "shell:create-build:other",
+        }
+    }
+}
+
+/// The modloader chips' identities, one per chip.
+///
+/// Written out rather than derived from the label, for [`BuildChoice::key`]'s
+/// reason -- and because five names a chip can be is five names worth being able
+/// to read in one place.
+fn loader_chip_key(loader: crate::catalog::LoaderKind) -> &'static str {
+    use crate::catalog::LoaderKind;
+    match loader {
+        LoaderKind::Vanilla => "shell:create-loader:vanilla",
+        LoaderKind::Fabric => "shell:create-loader:fabric",
+        LoaderKind::NeoForge => "shell:create-loader:neoforge",
+        LoaderKind::Forge => "shell:create-loader:forge",
+        LoaderKind::Quilt => "shell:create-loader:quilt",
+    }
+}
 
 /// `Combobox.vue`'s `DEFAULT_MAX_HEIGHT`: its options stop growing at 300px and
 /// scroll past that. The footers of the dropdown are not part of it -- they are
@@ -457,6 +548,29 @@ pub enum Message {
     VersionSnapshots(bool),
     /// A version was picked in the dialog.
     VersionChoice(String),
+    /// A modloader chip was pressed: make the instance with this loader.
+    LoaderChoice(crate::catalog::LoaderKind),
+    /// One of the loader-version chips was pressed.
+    BuildChoice(BuildChoice),
+    /// The dialog's build search field changed.
+    BuildQuery(String),
+    /// A build was picked in the dialog's list.
+    BuildPicked(String),
+    /// The answer to the dialog's loader-build request: the loader's own builds
+    /// for one game version, or why there are none.
+    ///
+    /// The question travels with the answer rather than being read from the
+    /// dialog when it arrives, because the dialog may have moved on: `loader` and
+    /// `game` are what tell an answer about the choice in force from one about a
+    /// choice the user has replaced.
+    LoaderBuilds {
+        /// The loader the request was made for.
+        loader: crate::catalog::LoaderKind,
+        /// The game version it was made for.
+        game: String,
+        /// The builds, newest first, or the reason there are none.
+        builds: Result<Vec<store::LoaderBuild>, String>,
+    },
     /// One thing a launch reported: a batch of lines, a level, the game coming
     /// up, the run ending, or a session it renewed.
     ///
@@ -501,6 +615,13 @@ impl Shell {
             version_snapshots: false,
             version_choice: None,
             versions_requested: false,
+            create_loader: crate::catalog::LoaderKind::Fabric,
+            build_choice: BuildChoice::default(),
+            build: None,
+            build_query: String::new(),
+            loader_builds: Load::Idle,
+            loader_builds_for: None,
+            loader_builds_requested: false,
             run: None,
             runs: 0,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -746,6 +867,9 @@ impl Shell {
         if std::mem::take(&mut self.versions_requested) {
             return self.versions_command();
         }
+        if std::mem::take(&mut self.loader_builds_requested) {
+            return self.loader_builds_command();
+        }
         // Nothing was asked for, but a page may be on screen that has never
         // been asked anything -- a tab that was just switched, or the page a
         // window opened on. Both are the same answer: ask on its behalf.
@@ -818,6 +942,13 @@ impl Shell {
                     Ok(list) => Load::Ready(list),
                     Err(reason) => Load::Failed(reason),
                 };
+                // The loader's build list is asked for by game version, and the
+                // version list is what tells the dialog which one is in force:
+                // a dialog opened a moment ago has its answer here and nowhere
+                // earlier, so this is where its own request is raised.
+                if self.create_loader.loads_mods() && self.loader_builds_for.is_none() {
+                    self.ask_loader_builds();
+                }
                 None
             }
             Message::VersionQuery(query) => {
@@ -830,6 +961,49 @@ impl Shell {
             }
             Message::VersionChoice(id) => {
                 self.version_choice = Some(id);
+                // A different game version is a different set of loader builds,
+                // so the list the dialog is holding is no longer the answer to
+                // anything.
+                self.ask_loader_builds();
+                None
+            }
+            Message::LoaderChoice(loader) => {
+                self.choose_loader(loader);
+                self.ask_loader_builds();
+                None
+            }
+            Message::BuildChoice(choice) => {
+                self.build_choice = choice;
+                // The list is only read under this chip, and a user who pressed
+                // it has been told nothing yet if the request for it was never
+                // made -- which is the arm a loader chip pressed before the
+                // version list arrived lands in.
+                if self.loader_builds_for.is_none() {
+                    self.ask_loader_builds();
+                }
+                None
+            }
+            Message::BuildQuery(query) => {
+                self.build_query = query;
+                None
+            }
+            Message::BuildPicked(build) => {
+                self.build = Some(build);
+                None
+            }
+            Message::LoaderBuilds { loader, game, builds } => {
+                // The answer is dropped unless it is the answer to the question
+                // in force: see [`Shell::loader_builds_for`].
+                if self.loader_builds_for.as_ref() == Some(&(loader, game)) {
+                    // A list with nothing in it is `Empty` rather than a list,
+                    // for [`Shell::versions`]'s reason: one draws "no builds for
+                    // this game version" and the other a scrollable of nothing.
+                    self.loader_builds = match builds {
+                        Ok(builds) if builds.is_empty() => Load::Empty,
+                        Ok(builds) => Load::Ready(builds),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
                 None
             }
             Message::Imported(result) => {
@@ -999,7 +1173,134 @@ impl Shell {
         self.version_query.clear();
         self.version_snapshots = false;
         self.version_choice = None;
+        // The reference's own opening choice, and no build: which builds exist
+        // is a question for the game version, and the version list has not
+        // arrived yet. The answer's arm raises the request.
+        self.create_loader = crate::catalog::LoaderKind::Fabric;
+        self.build_choice = BuildChoice::default();
+        self.build = None;
+        self.build_query.clear();
+        self.loader_builds = Load::Idle;
+        self.loader_builds_for = None;
+        self.loader_builds_requested = false;
         self.modal = Some(Modal::Create);
+    }
+
+    /// Take the dialog's loader to `loader`.
+    ///
+    /// A build is a version of one *specific* loader, so the choices in force
+    /// are not answers to anything once the loader changes -- which is why the
+    /// reference resets its own build choice too. Pressing the chip that is
+    /// already chosen changes nothing: the row always has one chip chosen, and
+    /// `never-empty: false` on the reference's row is what lets its own selection
+    /// go missing, which is a dialog with no loader in it that this one does not
+    /// have an arm for.
+    fn choose_loader(&mut self, loader: crate::catalog::LoaderKind) {
+        if self.create_loader == loader {
+            return;
+        }
+        self.create_loader = loader;
+        self.build_choice = BuildChoice::default();
+        self.build = None;
+        self.build_query.clear();
+        self.create_error = None;
+    }
+
+    /// Ask the loader's own service which builds it published for the game
+    /// version in force.
+    ///
+    /// The request travels as a flag for [`Shell::versions_requested`]'s reason,
+    /// and the pair it was asked for is written down here so that a slow answer
+    /// about a choice the user has moved off can be dropped rather than drawn.
+    ///
+    /// A loader that does not load mods asks nothing: vanilla has no service and
+    /// no build, so its arm clears the list rather than leaving the previous
+    /// loader's on screen.
+    fn ask_loader_builds(&mut self) {
+        self.loader_builds_for = None;
+        self.loader_builds_requested = false;
+        if !self.create_loader.loads_mods() {
+            self.loader_builds = Load::Idle;
+            return;
+        }
+        let Some(game) = self.chosen_version() else {
+            // Nothing to ask about yet: the version list is what names the game
+            // version, and its own arm is where this request is raised.
+            self.loader_builds = Load::Loading;
+            return;
+        };
+        self.loader_builds = Load::Loading;
+        self.loader_builds_for = Some((self.create_loader, game));
+        self.loader_builds_requested = true;
+    }
+
+    /// The loader build the dialog's chips come to.
+    ///
+    /// The reference's own rule, read off the list in force: *Stable* is the
+    /// newest build the loader calls stable -- or the newest of all when it has
+    /// published nothing stable for this game version, which is
+    /// `palantir_net::engine::default_build`'s rule and the reason Quilt's list
+    /// still opens on something -- *Latest* is simply the newest, and *Other* is
+    /// the build the user picked.
+    ///
+    /// `None` while the list is still coming, or when it failed, or when it came
+    /// back with nothing in it: all three are "there is no build to install",
+    /// and the dialog draws the button unusable rather than making an instance
+    /// other than the one it named.
+    fn chosen_build(&self) -> Option<String> {
+        let builds = self.loader_builds.ready()?;
+        match self.build_choice {
+            BuildChoice::Stable => builds
+                .iter()
+                .find(|build| build.stable)
+                .or_else(|| builds.first())
+                .map(|build| build.version.clone()),
+            BuildChoice::Latest => builds.first().map(|build| build.version.clone()),
+            // A build the list no longer carries is not a build: the list is the
+            // answer to what exists, and a version chosen against a list that has
+            // since been read again is one this dialog cannot install.
+            BuildChoice::Other => self
+                .build
+                .clone()
+                .filter(|version| builds.iter().any(|build| &build.version == version)),
+        }
+    }
+
+    /// Whether the dialog's own button can make the instance the dialog names.
+    ///
+    /// Unusable while a create is in flight, because a second press before the
+    /// answer arrives would create the instance twice.
+    ///
+    /// Unusable while a loader is chosen whose build list has not answered, and
+    /// *usable* once it has -- including when the answer is "none" or "it
+    /// failed". That last part is deliberate: the list's own sentence is drawn on
+    /// the loader-version row, so a reader who can see *no versions available for
+    /// this game version* has been told what choosing this loader comes to, and a
+    /// button that stayed dark would leave them with a dialog they cannot leave.
+    /// The one arm this does not cover is the store's own: a create with a loader
+    /// and no resolved build writes a vanilla instance and returns a warning, and
+    /// that warning is dropped by [`crate::store::Store::create_instance`] today.
+    /// It is the honest thing to fix next, and it is not this button's doing.
+    fn create_usable(&self) -> bool {
+        if self.creating {
+            return false;
+        }
+        !self.create_loader.loads_mods() || self.loader_builds.settled()
+    }
+
+    /// Whether the *Stable* chip can be pressed at all.
+    ///
+    /// The reference disables it when the loader has published nothing stable
+    /// for this game version (`disabledItems` on its own row, with *No such
+    /// versions available* as the tooltip), so the chip stays in its place and
+    /// goes dim rather than disappearing from the row.
+    fn stable_offered(&self) -> bool {
+        match self.loader_builds.ready() {
+            Some(builds) => builds.iter().any(|build| build.stable),
+            // While the list is coming, nothing is known to be missing: the chip
+            // is left pressable rather than dimmed and then undimmed.
+            None => true,
+        }
     }
 
     /// Open the import step of the creation flow, on what this machine holds.
@@ -1036,8 +1337,15 @@ impl Shell {
         let store = self.store.clone();
         let name = self.create_name.clone();
         let game = self.chosen_version();
+        // Read here rather than inside the worker, because the build is chosen
+        // against the list in the dialog: a worker that read it again would be
+        // resolving the chips against a second answer to the same question.
+        let loader = self.create_loader;
+        let build = self.chosen_build();
         iced::Command::perform(
-            crate::store::off_thread(move || store.create_instance(&name, game.as_deref())),
+            crate::store::off_thread(move || {
+                store.create_instance(&name, game.as_deref(), loader, build.as_deref())
+            }),
             Message::Created,
         )
     }
@@ -1050,6 +1358,25 @@ impl Shell {
     fn versions_command(&self) -> iced::Command<Message> {
         let store = self.store.clone();
         iced::Command::perform(crate::store::off_thread(move || store.versions()), Message::Versions)
+    }
+
+    /// Ask the loader's own service which builds it published for the game
+    /// version in force, off the frame thread.
+    ///
+    /// The question travels back with the answer, because the dialog can move on
+    /// while it is out: without it, a Fabric list that arrived after the Quilt
+    /// chip was pressed would be drawn under the Quilt chip.
+    fn loader_builds_command(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let loader = self.create_loader;
+        let Some(game) = self.chosen_version() else {
+            return iced::Command::none();
+        };
+        let asked = game.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.loader_builds(loader, &game)),
+            move |builds| Message::LoaderBuilds { loader, game: asked.clone(), builds },
+        )
     }
 
     /// The version the picker is on: what the user chose, or Mojang's own latest
@@ -2014,18 +2341,22 @@ impl Shell {
         self.dialog(Key::SettingsAppearanceTitle, body.into())
     }
 
-    /// The creation dialog: a name, the version the instance is for, and the
-    /// button that makes it.
+    /// The creation dialog: a name, the modloader, the version the instance is
+    /// for, which build of that loader, and the button that makes it.
     ///
-    /// The picker is the reference's own control (`CustomSetupStage.vue`): a
-    /// searchable field over Mojang's version list, and under it the dropdown the
-    /// field belongs to -- the options, then the footer that adds the snapshots
-    /// and old builds to them. What the reference *teleports* to the window's
-    /// edge is drawn here in place, which is the same wall the modal layer hit:
-    /// iced 0.12 composites a tree in order and has no z-order.
+    /// The step is the reference's own (`CustomSetupStage.vue`), field for field:
+    /// the name, its loader chips, the searchable game-version combobox with its
+    /// snapshots footer, and then -- for a loader that has builds at all -- the
+    /// loader-version chips over the list the *Other* one opens. The combobox is
+    /// the picker: a searchable field over Mojang's version list, and under it the
+    /// dropdown the field belongs to, which is the options and then the footer
+    /// that adds the snapshots and old builds to them. What the reference
+    /// *teleports* to the window's edge is drawn here in place, which is the same
+    /// wall the modal layer hit: iced 0.12 composites a tree in order and has no
+    /// z-order.
     fn create_dialog(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let busy = self.creating;
+        let usable = self.create_usable();
         let mut body = column![]
             .spacing(12.0)
             .push(
@@ -2045,6 +2376,10 @@ impl Shell {
                 .font(medium())
                 .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme)))),
             )
+            // The reference's own order on this step: the loader first, then the
+            // game version it has to have been published for, then which build of
+            // it.
+            .push(self.loader_chips())
             .push(self.version_heading())
             .push(crate::ui::search(
                 theme,
@@ -2053,6 +2388,11 @@ impl Shell {
                 Message::VersionQuery,
             ))
             .push(self.version_picker());
+        // A loader with no build list is a vanilla instance, and the dialog says
+        // so rather than drawing a row of chips that would change nothing.
+        if self.create_loader.loads_mods() {
+            body = body.push(self.loader_version());
+        }
         if let Some(reason) = &self.create_error {
             body = body.push(
                 text(reason.clone())
@@ -2070,37 +2410,46 @@ impl Shell {
                     CREATE_BUTTON,
                     Key::CreationFlowButtonCreateInstance,
                     crate::ui::Kind::Colored,
-                    (!busy).then_some(Message::Create),
+                    usable.then_some(Message::Create),
                 )),
         );
         self.dialog(Key::CreationFlowTitleCreateInstance, body.into())
     }
 
-    /// The picker's heading: the reference's own label for the version, with the
-    /// version in force beside it.
+    /// One field's heading: the reference's own label, with the value in force
+    /// beside it.
     ///
     /// The reference shows the same value *in* its trigger -- a searchable
     /// combobox mirrors the selection over its own search field -- and a toolkit
     /// with no overlay has to say it somewhere, which is here rather than
     /// nowhere: a field showing a search term and a picker with a highlighted row
     /// are not enough on their own when the list is scrolled past the choice.
-    fn version_heading(&self) -> Element<'_, Message> {
+    ///
+    /// It matters most on the loader-version row, where the chips name a *rule*
+    /// rather than a version: without this, the build the rule comes to is one
+    /// the user cannot see until the instance exists.
+    fn field_heading(&self, label: Key, value: Option<String>) -> Element<'_, Message> {
         let theme = self.theme;
         let mut heading = row![].align_items(Alignment::Center).push(
-            text(Key::LabelGameVersion.message())
+            text(label.message())
                 .size(14.0)
                 .font(semibold())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         );
-        if let Some(chosen) = self.chosen_version() {
+        if let Some(value) = value {
             heading = heading.push(Space::with_width(Length::Fill)).push(
-                text(chosen)
+                text(value)
                     .size(14.0)
                     .font(medium())
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
             );
         }
         heading.into()
+    }
+
+    /// The version picker's own heading.
+    fn version_heading(&self) -> Element<'_, Message> {
+        self.field_heading(Key::LabelGameVersion, self.chosen_version())
     }
 
     /// The versions the picker's list is drawn from: Mojang's own order, with the
@@ -2136,13 +2485,13 @@ impl Shell {
             // Asked, not answered. The reference shows its own loading label in
             // place of the options while that is true.
             Load::Idle | Load::Loading => {
-                self.version_note(Key::LabelLoading.message(), INK_SECONDARY)
+                self.list_note(Key::LabelLoading.message(), INK_SECONDARY)
             }
             // A failure is a sentence and not an empty list -- and it is the
             // reader's own machine that will be fine, so it is not drawn as an
             // error either.
-            Load::Failed(reason) => self.version_note(reason, Ink::Red),
-            Load::Empty => self.version_note(
+            Load::Failed(reason) => self.list_note(reason, Ink::Red),
+            Load::Empty => self.list_note(
                 Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
                 INK_SECONDARY,
             ),
@@ -2151,7 +2500,7 @@ impl Shell {
                 if matches.is_empty() {
                     // The reference's own arm: a search that found nothing gets
                     // the same sentence as a list that has nothing in it.
-                    self.version_note(
+                    self.list_note(
                         Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
                         INK_SECONDARY,
                     )
@@ -2191,6 +2540,161 @@ impl Shell {
             .into()
     }
 
+    /// The creation dialog's modloader row: the reference's five chips, with
+    /// Vanilla offered first.
+    ///
+    /// The label is the reference's own *Modloader* for an instance flow, and the
+    /// chips are `LoaderKind::all()` -- which is also what the store keys its
+    /// loader requests by, so a chip and the request it makes cannot drift.
+    fn loader_chips(&self) -> Element<'_, Message> {
+        let labels: Vec<(String, bool)> = crate::catalog::LoaderKind::all()
+            .iter()
+            .map(|loader| (loader.label().to_string(), self.create_loader == *loader))
+            .collect();
+        let keys: Vec<&'static str> = crate::catalog::LoaderKind::all()
+            .iter()
+            .map(|loader| loader_chip_key(*loader))
+            .collect();
+        let chips = crate::ui::chips(self.theme, &keys, &labels, |index| {
+            Some(Message::LoaderChoice(crate::catalog::LoaderKind::all()[index]))
+        });
+        column![]
+            .spacing(8.0)
+            .push(self.field_heading(Key::CreationFlowModalCustomSetupLoaderLabel, None))
+            .push(chips)
+            .into()
+    }
+
+    /// The creation dialog's loader-version row: which *kind* of build to
+    /// install, and -- under *Other* -- the builds to choose between.
+    ///
+    /// Only drawn for a loader that loads mods: vanilla has no builds, and the
+    /// reference's own row is inside a `v-if` on the same condition.
+    fn loader_version(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let labels: Vec<(String, bool)> = BuildChoice::ALL
+            .iter()
+            .map(|choice| (choice.label().message().to_string(), self.build_choice == *choice))
+            .collect();
+        let keys: Vec<&'static str> = BuildChoice::ALL.iter().map(|choice| choice.key()).collect();
+        let stable = self.stable_offered();
+        let chips = crate::ui::chips(self.theme, &keys, &labels, |index| {
+            let choice = BuildChoice::ALL[index];
+            // The reference's `disabledItems`: a loader that published nothing
+            // stable for this game version leaves the chip where it is and dim.
+            (stable || choice != BuildChoice::Stable).then_some(Message::BuildChoice(choice))
+        });
+        let mut body = column![]
+            .spacing(8.0)
+            .push(self.field_heading(
+                Key::CreationFlowModalCustomSetupLoaderVersionLabel,
+                self.chosen_build(),
+            ))
+            .push(chips);
+        match &self.loader_builds {
+            Load::Ready(_) if self.build_choice == BuildChoice::Other => {
+                // The reference's own search field, over its own dropdown: the
+                // build a user is after is usually one they were told the
+                // number of.
+                body = body
+                    .push(crate::ui::search(
+                        theme,
+                        Key::CreationFlowModalCustomSetupLoaderVersionSearchPlaceholder.message(),
+                        &self.build_query,
+                        Message::BuildQuery,
+                    ))
+                    .push(self.build_picker());
+            }
+            // Under *Stable* and *Latest* there is no list to draw, but the
+            // three other states of the request still have to be said: the chips
+            // name a rule, and *loading*, *it failed* and *this loader published
+            // nothing for this game version* are what happened to it. Without
+            // this the row would be a heading, three chips and a dark button.
+            Load::Ready(_) => {}
+            Load::Idle | Load::Loading => {
+                body = body.push(self.list_note(Key::LabelLoading.message(), INK_SECONDARY));
+            }
+            Load::Empty => {
+                body = body.push(self.list_note(
+                    Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+                    INK_SECONDARY,
+                ));
+            }
+            Load::Failed(reason) => body = body.push(self.list_note(reason, Ink::Red)),
+        }
+        body.into()
+    }
+
+    /// The builds the *Other* chip's list is drawn from: the loader's own order,
+    /// with the search applied.
+    ///
+    /// The same `contains` rule as the version picker's, for the same reason: a
+    /// build is remembered by its end as often as its beginning, and `21.4`
+    /// finds `21.4.100`.
+    fn build_matches(&self) -> Vec<&store::LoaderBuild> {
+        let Some(builds) = self.loader_builds.ready() else {
+            return Vec::new();
+        };
+        let needle = self.build_query.trim().to_ascii_lowercase();
+        builds
+            .iter()
+            .filter(|build| {
+                needle.is_empty() || build.version.to_ascii_lowercase().contains(&needle)
+            })
+            // The dialog's own bound rather than the service's: it is the same
+            // sixty the old shell's dropdown offered, and it is applied here so
+            // that the list is scrollable rather than endless.
+            .take(crate::catalog::MAX_OTHER_BUILDS)
+            .collect()
+    }
+
+    /// The *Other* chip's list of builds, drawn in the picker's own box.
+    fn build_picker(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let body: Element<'_, Message> = match &self.loader_builds {
+            Load::Idle | Load::Loading => {
+                self.list_note(Key::LabelLoading.message(), INK_SECONDARY)
+            }
+            Load::Failed(reason) => self.list_note(reason, Ink::Red),
+            Load::Empty => self.list_note(
+                Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+                INK_SECONDARY,
+            ),
+            Load::Ready(_) => {
+                let matches = self.build_matches();
+                if matches.is_empty() {
+                    self.list_note(
+                        Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+                        INK_SECONDARY,
+                    )
+                } else {
+                    let rows: Vec<Element<'_, Message>> = matches
+                        .into_iter()
+                        .map(|build| self.build_row(build))
+                        .collect();
+                    container(scrollable(column(rows).width(Length::Fill)))
+                        .width(Length::Fill)
+                        .max_height(VERSION_LIST_HEIGHT)
+                        .into()
+                }
+            }
+        };
+        container(body)
+            .width(Length::Fill)
+            .style(move |_theme: &Theme| container::Appearance {
+                // The same box the version picker draws its options in: one list
+                // of options in this dialog, drawn one way.
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 14.0.into(),
+                },
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
     /// One row of the picker's list: the reference's option, lit green when it is
     /// the version in force.
     ///
@@ -2199,10 +2703,33 @@ impl Shell {
     /// text-contrast hover:brightness-[115%]`. The brightness is this option's own
     /// hover end, which is why the crossing carries it.
     fn version_row(&self, version: &store::GameVersion) -> Element<'_, Message> {
-        let theme = self.theme;
         let id = version.id.clone();
         let selected = self.chosen_version().as_deref() == Some(id.as_str());
         let key = crate::ui::scoped("shell:version", &id);
+        self.option_row(key, id.clone(), selected, Message::VersionChoice(id))
+    }
+
+    /// One row of the build picker's list, which is the same option again.
+    ///
+    /// The version in force here is the *picked* build rather than the resolved
+    /// one: the row that is lit is the row the user pressed, and under the two
+    /// other chips there is no list to light anything in.
+    fn build_row(&self, build: &store::LoaderBuild) -> Element<'_, Message> {
+        let version = build.version.clone();
+        let selected = self.build.as_deref() == Some(version.as_str());
+        let key = crate::ui::scoped("shell:build", &version);
+        self.option_row(key, version.clone(), selected, Message::BuildPicked(version))
+    }
+
+    /// One option of a picker's list, drawn identically wherever it is offered.
+    fn option_row(
+        &self,
+        key: &'static str,
+        label: String,
+        selected: bool,
+        on_press: Message,
+    ) -> Element<'_, Message> {
+        let theme = self.theme;
         let (factor, _) = crate::ui::interaction(key);
         let (background, ink) = if selected {
             (theme_gen::ink(theme, Ink::GreenHighlight), theme_gen::ink(theme, Ink::Green))
@@ -2213,7 +2740,7 @@ impl Shell {
             )
         };
         let option = container(
-            text(id.clone())
+            text(label)
                 .size(14.0)
                 .font(semibold())
                 .style(iced::theme::Text::Color(ink)),
@@ -2232,13 +2759,17 @@ impl Shell {
         mouse_area(option)
             .on_enter(Message::hover_with(key, true, VERSION_ROW_HOVER))
             .on_exit(Message::hover_with(key, false, VERSION_ROW_HOVER))
-            .on_press(Message::VersionChoice(id))
+            .on_press(on_press)
             .into()
     }
 
-    /// One sentence of the picker's own body, in the box its options are drawn
-    /// in.
-    fn version_note(&self, sentence: &str, ink: Ink) -> Element<'_, Message> {
+    /// One sentence of a picker's own body, in the box its options are drawn in.
+    ///
+    /// Shared by both of the creation dialog's lists -- the game versions and the
+    /// loader builds -- because the four states they can be in are the same four
+    /// states, and a picker that said *nothing here* for one of them and drew an
+    /// empty box for the other would be two answers to one question.
+    fn list_note(&self, sentence: &str, ink: Ink) -> Element<'_, Message> {
         let theme = self.theme;
         container(
             text(sentence.to_string())
@@ -3481,6 +4012,185 @@ mod tests {
         // And the picker opens on Mojang's own answer rather than on the first row
         // of the list, which is a snapshot.
         assert_eq!(shell.chosen_version().as_deref(), Some("1.21.4"));
+        drop(shell.render());
+    }
+
+    /// A loader's builds as a service answers them: two stable builds, a
+    /// pre-release, then an older one -- newest first, which is the order every
+    /// one of these services publishes in.
+    fn loader_build_list() -> Vec<store::LoaderBuild> {
+        [("0.19.5", true), ("0.19.3-beta.1", false), ("0.19.2", true)]
+            .into_iter()
+            .map(|(version, stable)| store::LoaderBuild { version: version.to_string(), stable })
+            .collect()
+    }
+
+    /// The loader and game version a request was made for, as `act` records it.
+    fn asked_for(shell: &Shell) -> Option<(crate::catalog::LoaderKind, String)> {
+        shell.loader_builds_for.clone()
+    }
+
+    #[test]
+    fn the_creation_dialog_asks_the_loader_it_opens_on_which_builds_it_has() {
+        // The chips are wired to the store's own request, and the order matters:
+        // the dialog opens on Fabric, but the game version is what a loader's
+        // builds are listed *for*, so the request waits for Mojang's answer rather
+        // than being made against a version list that has not arrived.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        assert_eq!(shell.create_loader, crate::catalog::LoaderKind::Fabric);
+        assert_eq!(asked_for(&shell), None, "nothing to ask about yet");
+        // Through `act` rather than `press`, for the flag's own reason: `handle`
+        // spends it on the way to building the command, and what is being checked
+        // here is that `act` raised it.
+        let _ = shell.act(Message::Versions(Ok(version_list())));
+        assert!(matches!(shell.loader_builds, Load::Loading));
+        assert!(shell.loader_builds_requested, "and the request has not left `act` yet");
+        assert_eq!(
+            asked_for(&shell),
+            Some((crate::catalog::LoaderKind::Fabric, "1.21.4".to_string())),
+            "asked for the version the picker opened on"
+        );
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Fabric,
+                game: "1.21.4".to_string(),
+                builds: Ok(loader_build_list()),
+            },
+        );
+        assert!(shell.loader_builds.ready().is_some(), "the list arrived");
+        assert!(
+            !shell.loader_builds_requested,
+            "the flag is what `handle` takes to build the command, so it is already spent"
+        );
+        // *Stable* is the newest build the loader itself calls stable, which is not
+        // the newest build: that is what *Latest* is for.
+        assert_eq!(shell.chosen_build().as_deref(), Some("0.19.5"));
+        assert!(shell.create_usable());
+        drop(shell.render());
+    }
+
+    #[test]
+    fn a_build_list_about_a_choice_the_dialog_has_left_is_dropped() {
+        // The answer carries the question it answers, which is the whole reason
+        // `LoaderBuilds` is not a bare `Result`: a Fabric list that arrived after
+        // the Quilt chip was pressed would otherwise be drawn under the Quilt chip.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        press(&mut shell, Message::Versions(Ok(version_list())));
+        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Quilt));
+        assert_eq!(asked_for(&shell).map(|(loader, _)| loader), Some(crate::catalog::LoaderKind::Quilt));
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Fabric,
+                game: "1.21.4".to_string(),
+                builds: Ok(loader_build_list()),
+            },
+        );
+        assert!(
+            matches!(shell.loader_builds, Load::Loading),
+            "the Fabric list is not an answer to the Quilt question"
+        );
+        // And the loader's own answer, once it is the one in force, is what the
+        // chips read.
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Quilt,
+                game: "1.21.4".to_string(),
+                builds: Ok(vec![store::LoaderBuild {
+                    version: "0.30.1".to_string(),
+                    stable: true,
+                }]),
+            },
+        );
+        assert_eq!(shell.chosen_build().as_deref(), Some("0.30.1"));
+        // *Latest* is the newest of all, which is what a pre-release is when it is
+        // the newest -- and `Other` is a build the user picks, or nothing at all.
+        press(&mut shell, Message::BuildChoice(BuildChoice::Latest));
+        assert_eq!(shell.chosen_build().as_deref(), Some("0.30.1"));
+        press(&mut shell, Message::BuildChoice(BuildChoice::Other));
+        assert_eq!(shell.chosen_build(), None, "nothing has been picked yet");
+        press(&mut shell, Message::BuildPicked("0.29.0".to_string()));
+        assert_eq!(
+            shell.chosen_build(),
+            None,
+            "a build the list does not carry is not one this dialog can install"
+        );
+        press(&mut shell, Message::BuildPicked("0.30.1".to_string()));
+        assert_eq!(shell.chosen_build().as_deref(), Some("0.30.1"));
+        drop(shell.render());
+    }
+
+    #[test]
+    fn the_create_button_waits_for_the_loader_s_own_answer() {
+        // What the button's own rule is: a create is in flight, or a loader is
+        // chosen whose list has not answered. Both are states the dialog can be
+        // left from rather than a dead end -- the chips go back to Vanilla, which
+        // has no list to wait for.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        assert!(!shell.create_usable(), "the list has not even been asked for");
+        press(&mut shell, Message::Versions(Ok(version_list())));
+        assert!(!shell.create_usable(), "and it is still coming");
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Fabric,
+                game: "1.21.4".to_string(),
+                builds: Ok(loader_build_list()),
+            },
+        );
+        assert!(shell.create_usable());
+        // Vanilla is not a service: its chips drop the build row and the list with
+        // it, and there is nothing to wait for.
+        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Vanilla));
+        assert!(matches!(shell.loader_builds, Load::Idle), "the Fabric list is gone");
+        assert_eq!(shell.chosen_build(), None, "vanilla installs no build");
+        assert!(shell.create_usable());
+        drop(shell.render());
+        // A loader whose list *failed* is a sentence on the row and a button the
+        // reader can still press: the alternative is a dialog with no way out of
+        // it, and the failure is already said where it happened.
+        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Forge));
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Forge,
+                game: "1.21.4".to_string(),
+                builds: Err("Forge's build list could not be read: no route".to_string()),
+            },
+        );
+        assert!(matches!(shell.loader_builds, Load::Failed(_)));
+        assert!(shell.chosen_build().is_none());
+        assert!(shell.create_usable());
+        drop(shell.render());
+        // The *Stable* chip's own rule: a loader that published nothing stable for
+        // this game version leaves the chip in place and dim, which is the
+        // reference's `disabledItems` -- and while the list is still coming,
+        // nothing is known to be missing.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        assert!(shell.stable_offered(), "not asked yet");
+        press(&mut shell, Message::Versions(Ok(version_list())));
+        press(
+            &mut shell,
+            Message::LoaderBuilds {
+                loader: crate::catalog::LoaderKind::Fabric,
+                game: "1.21.4".to_string(),
+                builds: Ok(vec![store::LoaderBuild {
+                    version: "0.19.3-beta.1".to_string(),
+                    stable: false,
+                }]),
+            },
+        );
+        assert!(!shell.stable_offered(), "nothing stable to offer");
+        // And the rule that chip stands for falls back to the newest build there
+        // is, which is the one build this loader published: a row that offered
+        // *Stable* and nothing to press would be a dead end of its own.
+        assert_eq!(shell.chosen_build().as_deref(), Some("0.19.3-beta.1"));
         drop(shell.render());
     }
 

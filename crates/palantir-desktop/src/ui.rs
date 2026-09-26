@@ -701,6 +701,86 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
         .into()
 }
 
+/// A row of chips: `Chips.vue`, which is the reference's selectable pill.
+///
+/// The creation flow's custom step makes both of its choices this way -- the
+/// modloader and which kind of loader build -- and both are the same picture: a
+/// standard button at rest, and `bg-brand-highlight text-brand` with a brand
+/// hairline and a check glyph while chosen. The row does not keep itself to one
+/// choice; that is the caller's rule, because the reference's own `never-empty`
+/// prop leaves it to the flow whether pressing the chosen chip takes it away.
+///
+/// A chip whose press is `None` is one the reference disables rather than hides,
+/// which is how its loader-version row says *this loader published nothing
+/// stable*: the chip keeps its place and goes dim, so the row does not reflow
+/// when the answer arrives.
+pub fn chips<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    keys: &[&'static str],
+    labels: &[(String, bool)],
+    on_select: impl Fn(usize) -> Option<Message>,
+) -> Element<'a, Message> {
+    let mut row = row![].spacing(8.0).align_items(Alignment::Center);
+    for (index, ((label, selected), key)) in labels.iter().zip(keys.iter().copied()).enumerate() {
+        let selected = *selected;
+        let press = on_select(index);
+        let usable = press.is_some();
+        let (factor, _) = if usable { interaction(key) } else { (1.0, 0.0) };
+        let (background, border, ink) = if selected {
+            (
+                theme_gen::ink(theme, Ink::ColorBrandHighlight),
+                theme_gen::ink(theme, Ink::Brand),
+                theme_gen::ink(theme, Ink::Brand),
+            )
+        } else {
+            (
+                theme_gen::ink(theme, Ink::ButtonBg),
+                Color::TRANSPARENT,
+                theme_gen::ink(theme, INK_CONTRAST),
+            )
+        };
+        let ink = if usable { ink } else { crate::style::faded(ink) };
+        // The check is the selected chip's own, and it is the reference's: a
+        // colour alone would leave a choice that only reads as a choice to
+        // somebody who can see it.
+        let mut face = row![].spacing(6.0).align_items(Alignment::Center).width(Length::Shrink);
+        if selected {
+            face = face.push(icon::icon(Glyph::Check, 16.0, crate::theme::brightness(ink, factor)));
+        }
+        face = face.push(
+            text(label.clone())
+                .size(14.0)
+                .font(heading())
+                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
+        );
+        let chip = container(face)
+            .height(Length::Fixed(CONTROL))
+            // 10px rather than the button's 16: the reference's own chips are
+            // `!px-2.5`, which is the padding that keeps a row of five inside
+            // the dialog it is drawn in.
+            .padding(Padding { top: 0.0, bottom: 0.0, left: 10.0, right: 10.0 })
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(crate::theme::brightness(background, factor))),
+                border: Border {
+                    color: if usable { border } else { crate::style::faded(border) },
+                    width: 1.0,
+                    radius: CONTROL_RADIUS.into(),
+                },
+                ..container::Appearance::default()
+            });
+        let area = mouse_area(chip)
+            .interaction(if usable { Interaction::Pointer } else { Interaction::Idle })
+            .on_enter(Message::hover(key, true))
+            .on_exit(Message::hover(key, false));
+        row = row.push(match press {
+            Some(press) => area.on_press(press),
+            None => area,
+        });
+    }
+    row.into()
+}
+
 // ---- Blocks --------------------------------------------------------------
 
 /// Which severity an admonition carries, which is its icon and its colour.

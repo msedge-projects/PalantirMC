@@ -41,11 +41,13 @@ use std::sync::Arc;
 
 use palantir_core::paths::PalantirPaths;
 use palantir_net::engine::{
-    Backoff, Cancel, Fetch, HttpPool, Manifest, MetadataCache, ModrinthApi, PistonMeta,
+    Backoff, Build as LoaderBuildSource, Cancel, Fetch, HttpPool, Loader, LoaderMeta, Manifest,
+    MetadataCache, ModrinthApi, PistonMeta,
 };
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
+use crate::catalog::LoaderKind;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
@@ -129,6 +131,13 @@ pub struct Engine {
     /// Modrinth over the engine's cache. An `Arc` because it is handed to a
     /// worker thread per request rather than borrowed across one.
     api: Arc<ModrinthApi>,
+    /// The four mod loaders' own build lists, over the same cache.
+    ///
+    /// The same directory again, for [`Engine::piston`]'s reason: a service's
+    /// answer is a service's answer, and the entry is told apart by its URL. This
+    /// is the source the create flow's loader picker reads -- *not* Prism's mirror
+    /// of it, which is what the retirement of the old shell takes away.
+    loaders: Arc<LoaderMeta>,
     /// Mojang's own metadata over the *same* cache and pool as Modrinth's.
     ///
     /// One directory rather than two, because the launcher asks both services the
@@ -160,7 +169,8 @@ impl Engine {
         let cache = MetadataCache::new(dir.clone(), DEFAULT_TTL);
         Engine {
             api: Arc::new(ModrinthApi::new(cache, fetch.clone())),
-            piston: Arc::new(PistonMeta::new(MetadataCache::new(dir, DEFAULT_TTL), fetch)),
+            piston: Arc::new(PistonMeta::new(MetadataCache::new(dir.clone(), DEFAULT_TTL), fetch.clone())),
+            loaders: Arc::new(LoaderMeta::new(MetadataCache::new(dir, DEFAULT_TTL), fetch)),
         }
     }
 
@@ -172,6 +182,11 @@ impl Engine {
     /// Mojang's metadata over the same cache and pool.
     pub fn piston(&self) -> &PistonMeta {
         &self.piston
+    }
+
+    /// The loaders' own build lists over the same cache and pool.
+    pub fn loaders(&self) -> &LoaderMeta {
+        &self.loaders
     }
 }
 
@@ -277,9 +292,21 @@ impl Store {
     /// on. `game` is the version the instance is for; `None` asks Mojang which one
     /// is current, which is what the create flow does when nothing was chosen.
     ///
+    /// `loader` and `build` are what the dialog's chips chose. A loader with no
+    /// build is a create that writes a vanilla instance with a warning rather than
+    /// a component with no version in it -- `instances::create` says so in the
+    /// warning it returns -- because a component with nothing to resolve is an
+    /// instance that cannot launch at all.
+    ///
     /// The answer is the new instance's id -- what the address to open it with is
     /// made of -- and the shell reloads the list it draws from.
-    pub fn create_instance(&self, name: &str, game: Option<&str>) -> Result<String, String> {
+    pub fn create_instance(
+        &self,
+        name: &str,
+        game: Option<&str>,
+        loader: LoaderKind,
+        build: Option<&str>,
+    ) -> Result<String, String> {
         let Some(paths) = &self.paths else {
             return Err(not_implemented("Creating an instance"));
         };
@@ -287,7 +314,35 @@ impl Store {
             Some(game) => game.to_string(),
             None => self.current_release()?,
         };
-        instances::create(paths, &NewInstance::vanilla(name, &game)).map(|created| created.id)
+        let spec = NewInstance {
+            loader,
+            loader_build: build.map(str::to_string),
+            ..NewInstance::vanilla(name, &game)
+        };
+        instances::create(paths, &spec).map(|created| created.id)
+    }
+
+    /// Every build of `loader` that can run `game`, newest first.
+    ///
+    /// **Blocking**, and the other request the creation dialog makes: the list is
+    /// a service's answer rather than a field read, and the eight loader chips a
+    /// dialog draws do not each cost a request -- only the one that was chosen
+    /// does.
+    ///
+    /// Vanilla asks nothing and answers with nothing, because there is no such
+    /// service and no such build: the picker draws no build list for it.
+    pub fn loader_builds(&self, loader: LoaderKind, game: &str) -> Result<Vec<LoaderBuild>, String> {
+        let Some(loader) = Loader::from_name(loader.modrinth_name()) else {
+            return Ok(Vec::new());
+        };
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("The loader's build list"));
+        };
+        engine
+            .loaders()
+            .builds(loader, game, &Cancel::new(), &Backoff::default())
+            .map(|builds| builds.into_iter().map(LoaderBuild::from).collect())
+            .map_err(|error| format!("{}'s build list could not be read: {error}", loader.name()))
     }
 
     /// What is already on this machine and could be imported.
@@ -432,6 +487,26 @@ pub struct GameVersion {
     pub id: String,
     /// Whether this is a full release rather than a snapshot or an old build.
     pub release: bool,
+}
+
+/// One build of a mod loader, as the picker draws it.
+///
+/// The store's own copy of `palantir_net::engine::Build`, because the shell paints
+/// from this module and a page has no business knowing which crate a service is
+/// reached through -- the same reason `GameVersion` is not Mojang's own type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoaderBuild {
+    /// The build's version string: `0.19.5`, `21.4.5`, `54.1.0`.
+    pub version: String,
+    /// Whether the loader itself calls this build stable. What the picker opens
+    /// on is the newest one of these, not the newest of all.
+    pub stable: bool,
+}
+
+impl From<LoaderBuildSource> for LoaderBuild {
+    fn from(build: LoaderBuildSource) -> LoaderBuild {
+        LoaderBuild { version: build.version, stable: build.stable }
+    }
 }
 
 /// Mojang's whole version list, with the answer a picker opens on.
@@ -754,7 +829,9 @@ mod tests {
             .with_engine(Engine::over(scratch("create-cache"), fetch.clone()));
         assert!(matches!(store.instances(), Load::Empty), "a home with nothing in it");
 
-        let id = store.create_instance("Scratch instance", None).expect("an instance");
+        let id = store
+            .create_instance("Scratch instance", None, LoaderKind::Vanilla, None)
+            .expect("an instance");
         assert!(
             store.instance_dir(&id).join("instance.cfg").exists(),
             "the instance is written where the launcher keeps them"
@@ -773,13 +850,86 @@ mod tests {
         // A store with no launcher and no engine is a test's store, and it answers
         // with the sentence rather than writing an instance somewhere invented.
         let reason = Store::default()
-            .create_instance("Nowhere", None)
+            .create_instance("Nowhere", None, LoaderKind::Vanilla, None)
             .expect_err("nothing to create it with");
         assert!(reason.contains("is not implemented yet"), "{reason}");
         let named = Store::default()
-            .create_instance("Nowhere", Some("1.21.4"))
+            .create_instance("Nowhere", Some("1.21.4"), LoaderKind::Vanilla, None)
             .expect_err("nothing to create it with");
         assert!(named.contains("Creating an instance"), "{named}");
+    }
+
+    /// A trimmed Fabric build list: two builds, one of each kind.
+    const FABRIC_BUILDS: &str = r#"[
+      { "loader": { "version": "0.19.5", "stable": true } },
+      { "loader": { "version": "0.19.4", "stable": false } }
+    ]"#;
+
+    #[test]
+    fn the_loader_picker_reads_the_loader_s_own_service_and_vanilla_asks_nothing() {
+        use palantir_net::engine::Loader;
+
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&Loader::Fabric.list_url("1.21.4"), Route::text(FABRIC_BUILDS));
+        let store = store_over("loader-builds", fetch.clone());
+
+        let builds = store.loader_builds(LoaderKind::Fabric, "1.21.4").expect("a build list");
+        assert_eq!(
+            builds.iter().map(|build| build.version.as_str()).collect::<Vec<_>>(),
+            vec!["0.19.5", "0.19.4"]
+        );
+        assert!(builds[0].stable, "Fabric's own flag, carried through");
+        assert_eq!(fetch.count(), 1);
+
+        // Vanilla is not a service, so it is not a request: a dialog that opened
+        // on it must not send eight chips' worth of traffic to draw one list.
+        assert!(store
+            .loader_builds(LoaderKind::Vanilla, "1.21.4")
+            .expect("vanilla")
+            .is_empty());
+        assert_eq!(fetch.count(), 1, "vanilla asked nothing");
+
+        // And a store with no way out says so rather than drawing an empty list,
+        // which is the same distinction the version picker makes.
+        let reason = Store::default()
+            .loader_builds(LoaderKind::Quilt, "1.21.4")
+            .expect_err("no engine");
+        assert_eq!(reason, not_implemented("The loader's build list"));
+    }
+
+    #[test]
+    fn a_create_writes_the_loader_and_the_build_the_dialog_chose() {
+        use palantir_core::pack::PackProfile;
+
+        let home = scratch("create-loader");
+        let paths = PalantirPaths::at(&home);
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(PISTON_MANIFEST_URL, Route::text(MANIFEST_BODY));
+        let store = Store::load(&paths)
+            .with_engine(Engine::over(scratch("create-loader-cache"), fetch.clone()));
+
+        let id = store
+            .create_instance("Fabric instance", Some("1.21.4"), LoaderKind::Fabric, Some("0.19.5"))
+            .expect("an instance");
+        // The loader is a *component with a version* in the pack profile, which is
+        // what the launch resolves: a chip that changed nothing on disk would be a
+        // dialog that lied about what it made.
+        let profile = PackProfile::load(&store.instance_dir(&id).join("mmc-pack.json"))
+            .expect("the instance's pack profile");
+        let component = profile
+            .get("net.fabricmc.fabric-loader")
+            .expect("the loader the dialog chose");
+        assert_eq!(component.version, "0.19.5");
+
+        // A loader with no build chosen is a vanilla instance rather than a
+        // component with an empty version, which is an instance nothing can
+        // resolve.
+        let plain = store
+            .create_instance("No build", Some("1.21.4"), LoaderKind::Fabric, None)
+            .expect("an instance");
+        let profile = PackProfile::load(&store.instance_dir(&plain).join("mmc-pack.json"))
+            .expect("the second instance's pack profile");
+        assert!(profile.get("net.fabricmc.fabric-loader").is_none());
     }
 
     #[test]
