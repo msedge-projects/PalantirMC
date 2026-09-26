@@ -1240,8 +1240,8 @@ config and a version profile, which is why the gate is about what happens when i
 - [x] G78: an instance can be created from the library, for the version Mojang
       says is current, and the reader lands in it
   CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
-  EXPECT: test result: ok. 577 passed
-  EVIDENCE: 577 tests over the desktop binary, five of them new. The write side of
+  EXPECT: test result: ok. 579 passed
+  EVIDENCE: 579 tests over the desktop binary, five of them new. The write side of
       `store.rs` is asserted where it can be wrong: `create_instance` with no
       version asks Mojang for one -- the store's own fetch seam answers with a
       manifest, and the test asserts exactly one request and that the instance
@@ -1257,6 +1257,30 @@ config and a version profile, which is why the gate is about what happens when i
       navigates to the instance it made. `ui::button_or` is the control the dialog
       needs while its request is in flight: the same button with its press removed
       and its ink faded, rather than a second click that counts twice.
+
+### What the other launchers are holding
+
+G79 is the second half of the same flow. The importers have been in
+`instances.rs` since before the rewrite -- the roots of every launcher this one
+can read, a scan of each, and a copy that makes the id unique -- and nothing in
+the shell called them: the button that imports answered with the sentence while
+the code behind it sat finished.
+
+- [x] G79: the import step lists what this machine holds, brings one in, and says
+      when it holds nothing
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC -- shell::
+  EXPECT: test result: ok
+  EVIDENCE: two tests, and both are about the shapes the dialog would otherwise
+      get wrong. A shell with no launcher behind it -- which is what a test has --
+      opens the step on an empty scan, and what it draws is the reference's own
+      "no instances found" copy rather than a blank box: a dialog with a title and
+      nothing under it reads as broken, which is the same failure the whole
+      `page::Load` scaffold exists to prevent. The other test drives the answer the
+      way the runtime would: an import that fails keeps the dialog up with the
+      reason in it, and one that succeeds closes it, reads the list again and leaves
+      the reader in the instance that was brought in. The scan runs when the step
+      opens rather than when it is drawn, which is why the list is a field of the
+      shell: it walks every launcher root, and a walk per frame is a walk per frame.
 
 ### The engine's transcript, and the pushes that could not start
 
