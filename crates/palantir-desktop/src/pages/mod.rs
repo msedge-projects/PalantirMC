@@ -113,6 +113,9 @@ pub enum Ask {
     /// could create an instance would have to know where instances live, which
     /// is what [`crate::store`] is for.
     Create,
+    /// Open the creation flow's import step, for the same reasons and off the same
+    /// button on the welcome screen.
+    Import,
 }
 
 impl Message {
@@ -195,6 +198,9 @@ impl Screen {
             // is the shell's.
             (Screen::Home(_), Message::Home(home::Message::CreateInstance)) => {
                 return Some(Ask::Create)
+            }
+            (Screen::Home(_), Message::Home(home::Message::ImportFromLauncher)) => {
+                return Some(Ask::Import)
             }
             (Screen::Home(state), Message::Home(message)) => state.update(message),
             (Screen::Discover(state), Message::Discover(message)) => {

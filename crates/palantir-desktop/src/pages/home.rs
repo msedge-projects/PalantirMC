@@ -197,9 +197,9 @@ impl State {
             // the store and where the flow goes is the shell, so this comes back
             // out of `Screen::update` as `Ask::Create`.
             Message::CreateInstance => {}
-            Message::ImportFromLauncher => {
-                self.notice = Some(crate::store::not_implemented("Importing from another launcher"))
-            }
+            // Reported as well: what to import, and what to copy, is the shell's
+            // and the store's -- see `pages::Ask::Import`.
+            Message::ImportFromLauncher => {}
             // Opening is the shell's to do -- see the enum -- so the page has
             // nothing to do with it, and a variant the page acts on would be the
             // page claiming to know where it goes.
@@ -542,13 +542,19 @@ mod tests {
             "creating is the shell's to do now, so the page says nothing about it"
         );
         state.update(Message::ImportFromLauncher);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
+        assert!(
+            state.notice.is_none(),
+            "importing is reported to the shell too, and the page keeps its own state"
+        );
         state.update(Message::Search("x".to_string()));
         assert_eq!(state.search, "x");
         // Opening an instance is the shell's, and a page that acted on it would be
-        // a page that thought it could change which page is on screen.
+        // a page that thought it could change which page is on screen: it neither
+        // sets a notice nor clears one.
+        state.update(Message::Search("atm".to_string()));
+        state.notice = Some("something the page was told".to_string());
         state.update(Message::Open("atm".to_string()));
-        assert!(state.notice.is_some());
+        assert_eq!(state.notice.as_deref(), Some("something the page was told"));
         state.update(Message::DismissNotice);
         assert!(state.notice.is_none(), "dismissing clears what it was told");
     }

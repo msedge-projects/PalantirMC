@@ -54,7 +54,7 @@ use crate::color_theme::ColorTheme;
 use crate::icon;
 use crate::style::{
     disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
-    INK_PLATE_TEXT,
+    INK_PLATE_TEXT, INK_SECONDARY,
 };
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
@@ -205,6 +205,15 @@ pub struct Shell {
     /// [`discover::Asked`]: a create is not a page's request, and widening that
     /// return type would make every arm of its match say so.
     create_requested: bool,
+    /// What the last import scan found, read once when the dialog opens rather
+    /// than on every frame it is drawn: the scan walks other launchers' roots.
+    import_found: Vec<crate::instances::ImportCandidate>,
+    /// What the last import could not do, shown in the dialog it was asked from.
+    import_error: Option<String>,
+    /// An import is in flight.
+    importing: bool,
+    /// The row whose button was pressed, taken by `handle` to build the command.
+    import_requested: Option<std::path::PathBuf>,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -264,6 +273,9 @@ pub enum Modal {
     /// The creation flow (`CreationFlowModal`): a name, and the button that
     /// makes the instance.
     Create,
+    /// The same flow's import step: what the other launchers on this machine are
+    /// holding, and a button per instance.
+    Import,
 }
 
 /// Everything the shell can be told.
@@ -304,6 +316,10 @@ pub enum Message {
     Create,
     /// The answer to a create: the new instance's id, or why there is none.
     Created(Result<String, String>),
+    /// One of the import dialog's rows: bring this instance in.
+    Import(std::path::PathBuf),
+    /// The answer to an import: the instance's new id, or why there is none.
+    Imported(Result<String, String>),
     /// One frame of the clock.
     Tick,
     Minimize,
@@ -333,6 +349,10 @@ impl Shell {
             create_error: None,
             creating: false,
             create_requested: false,
+            import_found: Vec::new(),
+            import_error: None,
+            importing: false,
+            import_requested: None,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -551,10 +571,14 @@ impl Shell {
         if let Some(asked) = self.act(message) {
             return self.search(asked);
         }
-        // A create is not a page's request and does not go through `Asked`, so it
-        // is raised as a flag by `act` and taken here: one press, one command.
+        // A create and an import are not a page's requests and do not go through
+        // `Asked`, so they are raised as flags by `act` and taken here: one press,
+        // one command.
         if std::mem::take(&mut self.create_requested) {
             return self.create();
+        }
+        if let Some(source) = self.import_requested.take() {
+            return self.import(source);
         }
         // Nothing was asked for, but a page may be on screen that has never
         // been asked anything -- a tab that was just switched, or the page a
@@ -605,6 +629,32 @@ impl Shell {
                     // the instance twice.
                     self.creating = true;
                     self.create_requested = true;
+                }
+                None
+            }
+            Message::Import(source) => {
+                if !self.importing {
+                    self.importing = true;
+                    self.import_requested = Some(source);
+                }
+                None
+            }
+            Message::Imported(result) => {
+                self.importing = false;
+                match result {
+                    Ok(id) => {
+                        // The same two things a create does, for the same reasons:
+                        // the list is read again, and the reader ends up in the
+                        // instance that was brought in.
+                        self.store.reload();
+                        self.import_error = None;
+                        self.modal = None;
+                        self.go(Address::at(route::Route::Instance {
+                            id,
+                            tab: route::InstanceTab::Content,
+                        }));
+                    }
+                    Err(reason) => self.import_error = Some(reason),
                 }
                 None
             }
@@ -674,6 +724,10 @@ impl Shell {
                         self.open_create();
                         None
                     }
+                    Some(pages::Ask::Import) => {
+                        self.open_import();
+                        None
+                    }
                     None => None,
                 }
             }
@@ -708,6 +762,29 @@ impl Shell {
         self.modal = Some(Modal::Create);
     }
 
+    /// Open the import step of the creation flow, on what this machine holds.
+    ///
+    /// The scan runs here rather than in the view: it walks every launcher root
+    /// the launcher knows how to read, and a walk per frame is a walk per frame.
+    fn open_import(&mut self) {
+        self.import_found = self.store.importable();
+        self.import_error = None;
+        self.importing = false;
+        self.modal = Some(Modal::Import);
+    }
+
+    /// Bring one instance in, off the frame thread.
+    ///
+    /// An import copies a whole instance tree -- mods, worlds, configs and all --
+    /// which is why it goes where a create goes: a thread, and back as a message.
+    fn import(&self, source: std::path::PathBuf) -> iced::Command<Message> {
+        let store = self.store.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.import_instance(&source)),
+            Message::Imported,
+        )
+    }
+
     /// Create the instance the dialog names, off the frame thread.
     ///
     /// A create writes a folder, a config and a version profile, so it goes where
@@ -729,7 +806,9 @@ impl Shell {
             Some(pages::Ask::Search(asked)) => self.search(asked),
             // A navigation and a creation are not owed: nothing is waiting for
             // one, and the page that owes nothing says nothing.
-            Some(pages::Ask::Open(_) | pages::Ask::Create) => iced::Command::none(),
+            Some(pages::Ask::Open(_) | pages::Ask::Create | pages::Ask::Import) => {
+                iced::Command::none()
+            }
             None => iced::Command::none(),
         }
     }
@@ -1169,11 +1248,90 @@ impl Shell {
         self.dialog(Key::CreationFlowTitleCreateInstance, body.into())
     }
 
+    /// The import step: what the other launchers on this machine hold, one row
+    /// and one button each.
+    ///
+    /// The list was read when the dialog opened, which is why it is a field: the
+    /// scan walks every root this launcher knows how to read, and a walk per frame
+    /// would be a walk per frame. What it found is what the reference's own import
+    /// step lists -- the launcher each instance came from is `ImportCandidate`'s
+    /// own `origin`, not a guess made here.
+    fn import_dialog(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let mut body = column![].spacing(12.0);
+        if let Some(reason) = &self.import_error {
+            body = body.push(
+                text(reason.clone())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Red))),
+            );
+        }
+        if self.import_found.is_empty() {
+            body = body.push(
+                text(Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundTitle.message())
+                    .size(16.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            );
+            body = body.push(
+                text(Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundText.message())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            );
+        } else {
+            for candidate in &self.import_found {
+                let key = crate::ui::scoped("shell:import", &candidate.source.to_string_lossy());
+                body = body.push(
+                    row![]
+                        .spacing(ROW_GAP)
+                        .align_items(Alignment::Center)
+                        .push(
+                            column![]
+                                .spacing(2.0)
+                                .push(
+                                    text(candidate.name.clone())
+                                        .size(14.0)
+                                        .font(semibold())
+                                        .style(iced::theme::Text::Color(theme_gen::ink(
+                                            theme,
+                                            INK_CONTRAST,
+                                        ))),
+                                )
+                                .push(
+                                    text(candidate.origin)
+                                        .size(13.0)
+                                        .font(medium())
+                                        .style(iced::theme::Text::Color(theme_gen::ink(
+                                            theme,
+                                            INK_SECONDARY,
+                                        ))),
+                                ),
+                        )
+                        .push(Space::with_width(Length::Fill))
+                        .push(crate::ui::button_or(
+                            theme,
+                            key,
+                            Key::CreationFlowModalImportInstanceActionAdd,
+                            crate::ui::Kind::Standard,
+                            (!self.importing).then_some(Message::Import(candidate.source.clone())),
+                        )),
+                );
+            }
+        }
+        self.dialog(
+            Key::CreationFlowModalImportInstanceLauncherInstancesTitle,
+            body.into(),
+        )
+    }
+
     /// The scrim and the dialog, over whatever the shell was drawing.
     fn modal_layer(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let dialog = match self.modal {
             Some(Modal::Create) => self.create_dialog(),
+            Some(Modal::Import) => self.import_dialog(),
             // The layer is only drawn while a modal is up, and Settings is the one
             // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
@@ -1875,6 +2033,46 @@ mod tests {
         // Typing again clears it: the sentence was about the name that changed.
         press(&mut shell, Message::CreateName("Sodium".to_string()));
         assert_eq!(shell.create_error, None);
+    }
+
+    #[test]
+    fn the_import_step_says_when_this_machine_holds_nothing() {
+        // A test's shell has no launcher behind it, so the scan finds nothing and
+        // the dialog has to say so: an empty list with a title is the shape that
+        // reads as "there is nothing here" rather than as a broken dialog.
+        let mut shell = shell_at("/");
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Home(pages::home::Message::ImportFromLauncher)),
+        );
+        assert_eq!(shell.modal, Some(Modal::Import));
+        assert!(shell.import_found.is_empty());
+        drop(shell.render());
+    }
+
+    #[test]
+    fn an_import_leaves_the_reader_in_the_instance_it_brought_in() {
+        // The same two things a create does -- read the list again, land on what
+        // was made -- and the failure half the same way round: the dialog stays up
+        // with the reason in it.
+        let mut shell = shell_at("/");
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Home(pages::home::Message::ImportFromLauncher)),
+        );
+        press(&mut shell, Message::Import(std::path::PathBuf::from("/tmp/atm10")));
+        assert!(shell.importing, "one import at a time");
+        press(
+            &mut shell,
+            Message::Imported(Err("the instance has no config".to_string())),
+        );
+        assert_eq!(shell.modal, Some(Modal::Import), "the dialog stays up");
+        assert_eq!(shell.import_error.as_deref(), Some("the instance has no config"));
+
+        press(&mut shell, Message::Import(std::path::PathBuf::from("/tmp/atm10")));
+        press(&mut shell, Message::Imported(Ok("atm10".to_string())));
+        assert_eq!(shell.modal, None);
+        assert_eq!(shell.address().to_path(), "/instance/atm10");
     }
 
     #[test]
