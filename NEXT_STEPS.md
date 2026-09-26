@@ -82,7 +82,7 @@ them.
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder. What is not real yet is anything a service answers -- see "What stage 3 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76) and Settings offers the reference's colour themes (G77). What is not real yet is anything a service answers, and the right panel -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | Not started |
 
@@ -348,17 +348,6 @@ Three things about the pages are decisions worth keeping:
 
 What stage 3 does **not** have yet, named rather than implied:
 
-* **The controls do not tween their hover.** The rail's plate does (stage 2's
-  clock), and the pages' buttons, tabs and cards change colour on a frame
-  boundary rather than over the reference's 150ms. The machinery is already here
-  and generic over the message type -- `motion::Tween` for the value,
-  `hover::Report` for the crossing, `anim::Interactions` for the clock -- and the
-  work is a key per control plus a `Hover { key, over }` message in each page's
-  own family. The old shell's gate for this cannot see it: it reads source text
-  for iced's `button(…)` and holds every one of them to `hover_button`, and the
-  new kit's builder is a different function with the same name. That is the first
-  thing the next session should close, because "the buttons snap" is the kind of
-  difference a person notices immediately and a test does not.
 * **Only Discover's data is real.** Its search is answered by the engine (G75).
   Project pages, Skins, Servers and the hosting half of an instance still say so
   out loud. The control *states* they will be asked with are live, which is the
@@ -366,10 +355,12 @@ What stage 3 does **not** have yet, named rather than implied:
 * **The right panel is still the reference's wash and nothing else.** Discover,
   a project and a profile force it on (`App.vue`'s `forceSidebar`), and what it
   draws when it is there is stage 4's, because everything in it is a service's
-  answer.
-* **Settings is still a placeholder modal.** The colour theme it will offer is
-  already the reference's own list, with retro behind dev mode, in
-  `color_theme.rs`.
+  answer. The panel's own body is the last of the three gaps this stage opened.
+
+Two gaps that were on this list are closed and stay named here so the next reader
+knows when: the controls tween their hover off the same clock the rail's plate
+uses (G76), and Settings offers the reference's colour themes and keeps the one
+taken (G77).
 
 ## What stage 4 has landed so far
 

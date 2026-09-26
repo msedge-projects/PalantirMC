@@ -1177,6 +1177,59 @@ answer belongs to -- so it is asserted at all three rather than at the join.
       tests over `modrinth.rs`) and through the engine's own search (7), because
       a field dropped at the deserializer is a fact no page can recover from.
 
+### The interaction, on the pages' own controls, and the pane that takes a theme
+
+G76 and G77 are the two stage-3 gaps that were named as gaps: the pages' controls
+changed colour on a frame boundary while the rail's plate tweened, and Settings was
+a modal with a sentence in it. Both are about a decision the toolkit had already
+made and the interface had not taken up yet.
+
+- [x] G76: the pages' controls arrive at their hover over the reference's own
+      150 ms, on the frames the shell asks for
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 572 passed
+  EVIDENCE: 572 tests over the desktop binary, eight of them new. The crossing
+      has to *be* a message rather than a read of the pointer during the view:
+      iced re-tracks subscriptions after a message batch and before the view
+      runs, so a tween started from the view is one frame too late for the frames
+      that would carry it -- `hover.rs` has said so since the old shell needed it,
+      and this is the pages taking it up. Each page's message family carries a
+      `Hover { key, over, hover }`, its `update` records the crossing into the
+      process-wide interaction clock, and `ui::interaction` reads the factor back
+      at draw time. The clock now keeps what the pointer last reported about a
+      key (`Interactions::drawn`), which is what lets a page be rebuilt every
+      frame without carrying a map of its own, and `forget_pointer` is what a
+      navigation calls so a control the page being left had lit is not drawn on
+      the one that arrives. `Shell::animating` asks the interaction clock as well
+      as the rail's plates and `Tick` advances both, which is the join asserted
+      by `a_page_control_s_hover_is_a_frame_subscription_the_shell_owes`. Cards
+      are the same mechanism with a name derived from what they draw
+      (`ui::scoped`) and the reference's scoped brightnesses -- 0.9 for a
+      project's card in every theme, 1.1 for an instance's -- because a card that
+      used the theme's global hover would be the one card in the list that goes
+      the wrong way. The gate that keeps the whole thing from being half-wired is
+      `every_control_a_page_draws_carries_its_own_key`: it reads the eight page
+      modules back (`include_str!`, so it judges the tree that was compiled) and
+      refuses a call site whose second argument is still the label, which is
+      exactly the shape a control without a tween has.
+
+- [x] G77: Settings offers the reference's own colour themes, and the one that is
+      taken is the one the window and the next launch use
+  CHECK: cargo test -p palantir-desktop --locked shell::tests
+  EXPECT: test result: ok
+  EVIDENCE: the modal that has been a placeholder since stage 2 now draws
+      `AppearanceSettings.vue`'s list. The shell keeps the setting rather than
+      being handed a resolved theme, because the choice is made inside the window
+      it changes: taking one rewrites the theme it paints from, the preferences it
+      is drawn from, and the file -- and a test has no home, which is asserted, so
+      a test cannot write to anyone's real settings. The list is
+      `ColorTheme::options(false, current)`, which is the only owner of the
+      reference's rule that retro is behind dev mode until it is the theme already
+      in force; this launcher has no dev mode, so the rule is read with `false`
+      and said so where it is read rather than copied as a second filter. The
+      options are built by `crate::ui`, so the modal's buttons tween like the
+      pages' do -- which is what the same clock is for.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
