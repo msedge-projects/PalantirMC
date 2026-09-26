@@ -110,3 +110,24 @@ Co-Authored-By: Codebuff <noreply@codebuff.com>
 - **Attribution is a shipping condition**, not a nicety: art taken from another
   launcher and code taken under MIT both carry their notice in the source and
   in the binary's About page.
+
+## 6. Report progress as you go
+
+The user watches a live transcript and has asked for the state of the work
+without having to ask for it. Report at these points, in two or three lines:
+
+- **At every slice boundary** — a commit, a pushed run, a gate added: what
+  landed, what the checks said in numbers, and what is next by the plan's own
+  name.
+- **At every parallel switch** — before starting each part of a multi-part
+  task, and again when it finishes: what is running, what is being written
+  meanwhile.
+- **At least every ~15 minutes of wall-clock work** even when nothing has
+  landed: what is compiling or testing, what is being read or written in
+  parallel, and whether the estimate moved.
+
+Keep it quantitative and terse: stages and slices from `NEXT_STEPS.md`, the
+test counts from the run in hand, and a rough percentage against the stage
+table -- with a one-line note when a number is an estimate rather than a
+measurement. Update `NEXT_STEPS.md`'s stage table in the same commit as the
+slice that moved it, so the percentage has one source of truth.
