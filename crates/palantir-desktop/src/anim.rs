@@ -26,7 +26,7 @@
 //! all arrived asks for no frames at all.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// How long a switch takes to arrive, wall clock.
@@ -185,9 +185,32 @@ pub const INTERACTION_DURATION: Duration = Duration::from_millis(150);
 /// window, one pointer and one of these, which is also the honest model.
 /// `OnceLock` rather than a `const` because a map cannot be built in a
 /// constant context.
+#[cfg(not(test))]
 pub fn clock() -> &'static Mutex<Interactions> {
-    static CLOCK: OnceLock<Mutex<Interactions>> = OnceLock::new();
+    static CLOCK: std::sync::OnceLock<Mutex<Interactions>> = std::sync::OnceLock::new();
     CLOCK.get_or_init(|| Mutex::new(Interactions::default()))
+}
+
+/// The same clock for a test: this thread's, which is this test's.
+///
+/// The window's clock is the process's, and a test binary runs its tests side
+/// by side. That made it every test's clock too: a test that navigated -- which
+/// forgets every crossing in the clock, the whole of `Shell::forget_pointer` --
+/// could settle a crossing a test beside it was in the middle of asserting, and
+/// the assertion failed about as often as the machine was fast. A test *is* its
+/// own window, so this is the model made literal rather than a lock every test
+/// has to remember to take.
+///
+/// The cell is leaked because callers hold a `&'static Mutex`: the stylesheets
+/// do, on purpose, so the clock outlives every borrow a view takes. One mutex
+/// per test thread is bounded by the number of tests the runner has in flight.
+#[cfg(test)]
+pub fn clock() -> &'static Mutex<Interactions> {
+    thread_local! {
+        static CLOCK: &'static Mutex<Interactions> =
+            Box::leak(Box::new(Mutex::new(Interactions::default())));
+    }
+    CLOCK.with(|clock| *clock)
 }
 
 /// One control's hover/press tween, as the stylesheet sees it: the factor the
@@ -416,8 +439,9 @@ impl Interactions {
     ///
     /// Called when the pane changes: a control that was lit when the page left
     /// is not drawn on the new one, and a tween in the air belonged to the page
-    /// that is gone. This is the safe half of [`Interactions::clear`] -- there
-    /// is no other page's test to pull the pixels out from under.
+    /// that is gone. This is the gentler half of [`Interactions::clear`]: the
+    /// names stay, settled at rest, rather than ceasing to exist under a reader
+    /// that is holding them.
     pub fn forget_pointer(&mut self) {
         for tween in self.tweens.values_mut() {
             tween.pointed = Pointed::rest();
@@ -462,9 +486,9 @@ impl Interactions {
     /// pointer on it. It would not — [`Interactions::factor`] answers a settled
     /// tween whose end disagrees with the pointer's state with the *state*, so
     /// what a page change leaves behind is a settled entry that draws exactly
-    /// what the fresh page would. What it would really cost is a flaky test:
-    /// the clock is the process's, and a clear during another test's tween
-    /// pulls the pixels out from under it.
+    /// what the fresh page would. The only caller is a test starting from a map
+    /// it knows, and [`clock`] hands every test its own, so there is nobody
+    /// else's tween here to pull the pixels out from under.
     pub fn clear(&mut self) {
         self.tweens.clear();
     }
@@ -555,26 +579,6 @@ impl ModalAnim {
         }
         true
     }
-}
-
-/// The lock every test that asserts anything about the *process-wide* clock
-/// takes.
-///
-/// The clock is the window's, and a test binary runs its tests side by side: one
-/// test asserting that a tween has settled while another has one in the air would
-/// fail about as often as the machine is fast. [`Interactions::clear`]'s own note
-/// records the same hazard; this is the lock that retires it for the global uses.
-#[cfg(test)]
-pub fn test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-/// [`test_lock`], taken, with a panic under it treated as a panic rather than as
-/// a lock every later test refuses to take.
-#[cfg(test)]
-pub fn lock_for_test() -> std::sync::MutexGuard<'static, ()> {
-    test_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -869,6 +873,29 @@ mod tests {
         clock.clear();
         assert!(!clock.animating());
         assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+    }
+
+    #[test]
+    fn a_clock_belongs_to_the_test_that_reads_it() {
+        // The isolation the suite relies on. A test binary runs its tests side
+        // by side, and one of them navigating forgets every pointer in the
+        // clock it reads -- so a thread that has crossed nothing must not see
+        // the crossing another test is in the middle of asserting. The clock a
+        // test reads is the thread's own, which is that test's own window.
+        let mine = clock();
+        {
+            let mut clock = mine.lock().expect("the clock");
+            clock.clear();
+            clock.set("probe", true, false, Instant::now());
+        }
+        assert!(mine.lock().expect("the clock").animating());
+
+        let elsewhere = std::thread::spawn(|| clock().lock().expect("the clock").animating())
+            .join()
+            .expect("the thread");
+        assert!(!elsewhere, "a thread that crossed nothing starts at rest");
+        // And the tween this test started is still the one it was reading.
+        assert!(mine.lock().expect("the clock").animating());
     }
 
     #[test]

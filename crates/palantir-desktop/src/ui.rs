@@ -438,6 +438,63 @@ pub fn button_or<'a, Message: Clone + Hovered + 'a>(
     kind: Kind,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    button_face(theme, key, kind, Length::Shrink, on_press, move |ink| {
+        text(label.message())
+            .size(14.0)
+            .font(heading())
+            .style(iced::theme::Text::Color(ink))
+            .into()
+    })
+}
+
+/// A button with an icon in front of its label, which is what the reference's
+/// own `Button` slot carries.
+///
+/// `ButtonFrame.vue` sizes a slot's icons from the button's size -- `md` is
+/// `[&>svg]:size-5` at `gap-1.5`, so 20px in a 14px label's row -- and paints
+/// them the label's own colour, which is why the kit builds the row rather than
+/// leaving a caller to place an icon beside a button that would then tween
+/// without it. `width` is the caller's because one of the two reference buttons
+/// this exists for is `w-full` and the other is not.
+pub fn button_with_icon<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    label: Key,
+    kind: Kind,
+    width: Length,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    button_face(theme, key, kind, width, on_press, move |ink| {
+        row![]
+            .spacing(6.0)
+            .align_items(Alignment::Center)
+            .push(icon::icon(glyph, 20.0, ink))
+            .push(
+                text(label.message())
+                    .size(14.0)
+                    .font(heading())
+                    .style(iced::theme::Text::Color(ink)),
+            )
+            .into()
+    })
+}
+
+/// The body of a button: its frame, its fill, and the crossing it publishes.
+///
+/// `face` is handed the ink the inside paints in -- already faded if the button
+/// is unusable, already filtered if the pointer is over it -- because a button's
+/// label and the icon beside it are one ink. The two builders above differ in
+/// what is inside that face and not in how it is painted, so the colour table
+/// lives here once.
+fn button_face<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    kind: Kind,
+    width: Length,
+    on_press: Option<Message>,
+    face: impl FnOnce(Color) -> Element<'a, Message>,
+) -> Element<'a, Message> {
     let usable = on_press.is_some();
     let (factor, _) = if usable { interaction(key) } else { (1.0, 0.0) };
     let (background, border, ink) = match kind {
@@ -479,26 +536,26 @@ pub fn button_or<'a, Message: Clone + Hovered + 'a>(
             Background::Color(color) if !usable => Background::Color(crate::style::faded(color)),
             other => other,
         });
-    let face = container(
-        text(label.message())
-            .size(14.0)
-            .font(heading())
-            .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
-    )
-    .height(Length::Fixed(CONTROL))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
-    .center_y()
-    .style(move |_theme: &Theme| container::Appearance {
-        background,
-        border: Border {
-            color: border
-                .map(|border| crate::theme::brightness(border, factor))
-                .unwrap_or(Color::TRANSPARENT),
-            width: if border.is_some() { 1.0 } else { 0.0 },
-            radius: CONTROL_RADIUS.into(),
-        },
-        ..container::Appearance::default()
-    });
+    let face = container(face(crate::theme::brightness(ink, factor)))
+        .width(width)
+        .height(Length::Fixed(CONTROL))
+        .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
+        // Centred on both axes because a button's face is `justify-center` in the
+        // reference whatever the slot holds; `center_x` is the one the full-width
+        // buttons need, and on a shrinking one it changes nothing.
+        .center_x()
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background,
+            border: Border {
+                color: border
+                    .map(|border| crate::theme::brightness(border, factor))
+                    .unwrap_or(Color::TRANSPARENT),
+                width: if border.is_some() { 1.0 } else { 0.0 },
+                radius: CONTROL_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        });
     let area = mouse_area(face)
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
@@ -521,27 +578,63 @@ pub fn icon_button<'a, Message: Clone + Hovered + 'a>(
     size: f32,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let (factor, _) = interaction(key);
-    // The whole control is the glyph, so the hover's own structure is the raised
-    // surface appearing behind it -- `hover:bg-button-bg` in the reference's own
-    // terms -- and the filter moves the glyph with it.
-    let hovered = factor != 1.0;
-    let plate = hovered.then(|| theme_gen::ink(theme, Ink::ButtonBg));
-    let plate = plate.map(|plate| crate::theme::brightness(plate, factor));
-    let face = container(icon::icon(
-        glyph,
-        size,
-        crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor),
-    ))
-    .width(Length::Fixed(size + 16.0))
-    .height(Length::Fixed(size + 16.0))
-    .center_x()
-    .center_y()
-    .style(move |_theme: &Theme| container::Appearance {
-        background: plate.map(Background::Color),
-        border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
-        ..container::Appearance::default()
-    });
+    icon_button_kind(theme, key, glyph, size, Kind::Quiet, on_press)
+}
+
+/// The same control in one of the reference's colour presets.
+///
+/// `IconButton.vue` takes a `color`, and its hover is `ButtonFrame.vue`'s
+/// `filled` interaction: the plate becomes the preset's colour *and* the glyph
+/// becomes the accent contrast, which is what the accounts card's remove button
+/// is built for -- `!bg-button-bg !text-primary` at rest, `hover:!bg-red
+/// hover:!text-[var(--color-accent-contrast)]` under the pointer. Both ends are
+/// mixed rather than filtered: the two ends of a `filled` hover are two colours,
+/// not one colour at two brightnesses, and the reference's own transition list
+/// fades one into the other over the same 150ms the clock runs.
+pub fn icon_button_kind<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    size: f32,
+    kind: Kind,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let (factor, fraction) = interaction(key);
+    let (ink, plate) = match kind {
+        Kind::Danger => (
+            crate::theme::mix(
+                theme_gen::ink(theme, INK_DEFAULT),
+                crate::theme::brightness(theme_gen::ink(theme, Ink::AccentContrast), factor),
+                fraction,
+            ),
+            Some(crate::theme::mix(
+                theme_gen::ink(theme, Ink::ButtonBg),
+                crate::theme::brightness(theme_gen::ink(theme, Ink::Red), factor),
+                fraction,
+            )),
+        ),
+        // The whole control is the glyph, so the hover's own structure is the
+        // raised surface appearing behind it -- `hover:bg-button-bg` in the
+        // reference's own terms -- and the filter moves the glyph with it.
+        _ => {
+            let hovered = factor != 1.0;
+            let plate = hovered.then(|| theme_gen::ink(theme, Ink::ButtonBg));
+            (
+                crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor),
+                plate.map(|plate| crate::theme::brightness(plate, factor)),
+            )
+        }
+    };
+    let face = container(icon::icon(glyph, size, ink))
+        .width(Length::Fixed(size + 16.0))
+        .height(Length::Fixed(size + 16.0))
+        .center_x()
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: plate.map(Background::Color),
+            border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
+            ..container::Appearance::default()
+        });
     mouse_area(face)
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
@@ -787,7 +880,13 @@ mod tests {
         // what the mistake is -- a call site whose second argument is still the
         // label, which is exactly the shape this test refuses.
         for (page, source) in page_sources() {
-            for call in ["ui::button(", "ui::tabs(", "ui::icon_button("] {
+            for call in [
+                "ui::button(",
+                "ui::button_with_icon(",
+                "ui::tabs(",
+                "ui::icon_button(",
+                "ui::icon_button_kind(",
+            ] {
                 for call_site in source.split(call).skip(1) {
                     let head: String = call_site
                         .chars()
@@ -831,7 +930,6 @@ mod tests {
         // The property the pages are wired for: a crossing recorded from
         // `update` moves the control over the reference's own 150 ms, and an
         // untouched control is at rest rather than mid-hover.
-        let _guard = anim::lock_for_test();
         let key = "ui:test:probe";
         anim::clock().lock().expect("the clock").clear();
         assert_eq!(interaction(key), (1.0, 0.0), "nothing has been reported yet");

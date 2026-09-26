@@ -1427,6 +1427,83 @@ shortcut written before the switch keeps opening what it opened.
       own, and doing it in the same commit as the switch would make a regression
       in either one impossible to tell from the other.
 
+### The panel's first section
+
+The right panel was the last piece of stage 2's own work still missing, and G83
+is its first section. `App.vue`'s `app-sidebar` is what is drawn: a
+`--right-bar-width` column under the reference's own two-stop wash, a hairline
+down its page edge (`border-l border-[--brand-gradient-border]`), and one scroll
+region inside it (`app-sidebar-scrollable`) that the sections stack in. The
+reference's sections are the onboarding checklist, *Playing as*, the friends
+list, the fundraiser banner and the news feed; the second is the only one this
+launcher can draw anything in yet, so it is the one that is there and the others
+are absent rather than drawn empty -- which is the same rule the pages follow.
+
+*Playing as* is `app.sidebar.playing-as` with `AccountsCard.vue` under it, in
+the reference's own two branches. With no account: the sentence and the sign-in
+button in a `rounded-xl` card at `p-3`. With accounts: an accordion -- closed by
+default, which is the reference's own `open-by-default: false` -- whose header
+names the account a launch would sign in as, or the reference's own *Select
+account* when nothing is chosen or the chosen account is gone, and whose body is
+one row per account, each with the radio mark that says which account is in
+force and its own quiet red remove control (`!bg-button-bg !text-primary`,
+filling red under the pointer), then the add button at the foot. The card's controls write the same `accounts.json` the other launcher
+reads, which is why the file -- not the window -- is the record: an account
+chosen in the panel is the account that launcher signs in as too.
+
+Three things the reference draws that this does not, each for a reason:
+
+1. **The player heads.** A 36px head in the header and a 24px one on every row,
+   from the skin service or from the reference's own Steve asset for an offline
+   account. There is no head renderer in this launcher yet -- the Skins page is
+   a placeholder for the same reason -- so a row is its radio mark and its name.
+2. **The sign-in flow.** The card's two Microsoft controls open a flow that is a
+   later stage's; they say so in the panel instead of doing nothing, which is
+   the rule the rest of this shell already holds itself to.
+3. **The section's own condition.** The reference draws the section only when
+   `hasLoggedIntoMinecraft` is set, and that flag belongs to the onboarding
+   checklist, which is not built. The section is drawn always here, one step
+   early; and since the reference's empty card *is* its picture of a launcher
+   with no account, what is drawn early is the reference's own shape either way.
+
+- [x] G83: the right panel draws the reference's first section, the accounts
+      card, in both of its branches, with its own controls and notes
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 599 passed
+  EVIDENCE: six new tests, five about the panel and one about the clock the
+      tests themselves read. The card's rules are asserted where they are made:
+      the header names the chosen uuid, the reference's *Select account*
+      sentence when nothing is chosen or the choice is gone, and the offline
+      account's uuid is the name's derivation (which is what makes the card name
+      the same player the other launcher does). The panel test draws the
+      section, both branches of the card and the note in all four themes --
+      the tokens are generated per theme, and one of the four missing a value is
+      exactly the failure a single-theme test cannot see -- that the accordion
+      starts closed and that its header opens and closes it. A shell with no
+      accounts store draws the same card and its controls are harmless, which is
+      the shape the tests build. The write side is asserted on the file rather
+      than on the struct: choosing an account and removing one are both re-read
+      through `AccountsStore::load_with_report`, which is the other launcher's
+      own view, and a uuid that is not in the file is a sentence in the panel
+      rather than a silent nothing. The sign-in control's whole behaviour is
+      that it says the flow is not built and the note's dismiss clears it.
+      Two kit additions came with the card and are covered by the kit's own
+      gate: `button_with_icon` (the reference's `Button` slot, a 20px icon at
+      `gap-1.5` painted the label's ink) and `icon_button_kind`'s `Danger`
+      preset, whose hover is `ButtonFrame.vue`'s `filled` interaction -- two
+      colours mixed over the 150ms clock, not one colour at two brightnesses --
+      and `every_control_a_page_draws_carries_its_own_key` now covers both call
+      names. The sixth test is the one thing here that is not about the card:
+      drawing it made an old race between tests reproduce, because the
+      interaction clock was the process's and a test that navigated could
+      forget a crossing another test was in the middle of asserting (the
+      navigation test failed every run of the shell-and-ui suite that made it
+      reproducible, and passed when run alone). The clock a test reads is now
+      the test thread's own
+      (`cfg(test)`), which is the honest model -- a test is its own window --
+      and `a_clock_belongs_to_the_test_that_reads_it` asserts the isolation
+      rather than the lock the suite used to have to remember to take.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1446,7 +1523,7 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    593 passed; 0 failed  (palantir-desktop, bin)
+    599 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
@@ -1454,7 +1531,9 @@ $ cargo test --workspace --all-targets --locked
       0 passed; 0 failed; 12 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.75s
+    (incremental, on a tree this machine had already built; the same command
+     cold takes minutes, which is what the runner pays)
     (84 warnings, every one warn-by-default; none of them in the files stages 2,
      3 or 4 added, and most of them in the shell this rewrite deletes)
 
@@ -1465,12 +1544,12 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1015 tests pass, nothing in the correctness-deny set is failing, and all four
+1021 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 593 now: the seam (G75), the interaction (G76), the
-settings pane (G77), stage 5's three flows (G78-G80), the launch (G81) and the
-switch (G82) added thirty-nine between them, and the run above was taken after all
-of them. The caveat in the transcript below -- that a
+engine's slices landed and is 599 now: the seam (G75), the interaction (G76), the
+settings pane (G77), stage 5's three flows (G78-G80), the launch (G81), the
+switch (G82) and stage 3's panel (G83) added forty-five between them, and the run
+above was taken after all of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),

@@ -48,7 +48,7 @@ use iced::{
     Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
 };
 
-use crate::accounts::AccountsStore;
+use crate::accounts::{AccountEntry, AccountsStore};
 use crate::anim;
 use crate::brand;
 use crate::color_theme::ColorTheme;
@@ -117,6 +117,49 @@ pub const CONTROLS_GAP: f32 = 8.0;
 /// the result, because a browser can lay the row out and this shell cannot. The
 /// arithmetic is the same either way: two paddings, three buttons, two gaps.
 pub const CONTROLS_WIDTH: f32 = 2.0 * CONTROLS_PAD + 3.0 * CONTROLS_BUTTON + 2.0 * CONTROLS_GAP;
+
+// ---- The panel's first section -----------------------------------------
+
+/// `p-4` on each of the sidebar's sections, and `text-base` on the heading
+/// inside one.
+const PANEL_SECTION_PAD: f32 = 16.0;
+const PANEL_HEADING: f32 = 16.0;
+/// The accounts card's frame: `rounded-xl`, `p-3`, and the `mt-2` that holds it
+/// off the heading.
+///
+/// `p-3` is the empty state's -- it is written on that branch of the card -- and
+/// the accordion draws its own padding instead, which is why the frame's padding
+/// is an argument rather than a constant of the frame.
+const CARD_FRAME_PAD: f32 = 12.0;
+const CARD_FRAME_RADIUS: f32 = 12.0;
+const CARD_TOP: f32 = 8.0;
+/// `gap-3` between what the empty card stacks, and `gap-2` between the parts of
+/// the accordion's header and of an account row.
+const CARD_STACK_GAP: f32 = 12.0;
+const CARD_ROW_GAP: f32 = 8.0;
+/// The accordion's header: `px-3 py-2`.
+const CARD_HEAD_SIDE: f32 = 12.0;
+const CARD_HEAD_PAD: f32 = 8.0;
+/// `p-2` on an account row's own button.
+const CARD_ROW_PAD: f32 = 8.0;
+/// `w-5 h-5` on the radio marks and the header's chevron.
+const CARD_MARK: f32 = 20.0;
+/// `text-xs` on the card's own "Minecraft account" line.
+const CARD_LABEL: f32 = 12.0;
+/// `.button-base`'s `filter: brightness(0.85)` under the pointer, which is what
+/// the card's two pressable surfaces declare: the accordion's header and an
+/// account row.
+///
+/// Not [`crate::theme::hover_brightness`], which is the global brightening the
+/// kit's controls use: `button-base` overrides it, so the card's own controls
+/// dim rather than brighten, and they are dimmed by their own key so the two
+/// ends are read from the same clock as everything else.
+const CARD_PRESS_HOVER: f32 = 0.85;
+/// The card's controls, each with its own name for the interaction clock.
+const ACCOUNTS_HEADER: &str = "shell:accounts:header";
+const ACCOUNTS_SIGN_IN: &str = "shell:accounts:sign-in";
+const ACCOUNTS_ADD: &str = "shell:accounts:add";
+const ACCOUNTS_NOTE_DISMISS: &str = "shell:accounts:note";
 
 /// The `md` `IconButton`'s corner radius, `rounded-xl`.
 const CONTROL_RADIUS: f32 = 12.0;
@@ -256,6 +299,17 @@ pub struct Shell {
     /// dropped: a launcher that silently forgot which account was signed in is the
     /// failure that reporting it exists to prevent.
     accounts_warning: Option<String>,
+    /// Whether the accounts card's body is open. The reference's accordion is
+    /// `open-by-default: false`, so the panel shows a header until it is pressed.
+    accounts_open: bool,
+    /// What one of the card's own controls could not do, drawn in the panel under
+    /// it.
+    ///
+    /// The card's sign-in and add-account buttons open the Microsoft flow, which
+    /// is a later stage's; the sentence is kept here rather than dropped because a
+    /// control that does nothing at all is the failure mode this rewrite reports
+    /// instead of hiding.
+    accounts_note: Option<String>,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -367,6 +421,21 @@ pub enum Message {
     },
     /// The right panel was shown or hidden.
     Sidebar(bool),
+    /// The accounts card's header: open its body or close it.
+    ToggleAccounts,
+    /// One of the card's rows: sign a launch in as this account.
+    ///
+    /// The uuid rather than the row's index, because the file is what the
+    /// selection means -- the profile id is the account, and a list that was read
+    /// again between the press and the frame cannot renumber it.
+    SelectAccount(String),
+    /// One of the card's rows: take this account away.
+    RemoveAccount(String),
+    /// The card's sign-in and add-account controls, which open the Microsoft
+    /// flow this stage does not have yet.
+    SignIn,
+    /// The sentence under the card was read.
+    DismissAccountsNote,
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
     /// The name in the creation dialog changed.
@@ -437,6 +506,8 @@ impl Shell {
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             accounts: None,
             accounts_warning: None,
+            accounts_open: false,
+            accounts_note: None,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -868,6 +939,30 @@ impl Shell {
                 self.sidebar = shown;
                 None
             }
+            Message::ToggleAccounts => {
+                self.accounts_open = !self.accounts_open;
+                None
+            }
+            Message::SelectAccount(uuid) => {
+                self.select_account(&uuid);
+                None
+            }
+            Message::RemoveAccount(uuid) => {
+                self.remove_account(&uuid);
+                None
+            }
+            Message::SignIn => {
+                // `AccountsCard.vue`'s `login()` opens the reference's sign-in
+                // modal. The flow it starts is a later stage's here, and the
+                // card is where the press was made, so this is where the sentence
+                // goes rather than nowhere.
+                self.accounts_note = Some(store::not_implemented("Signing in to Minecraft"));
+                None
+            }
+            Message::DismissAccountsNote => {
+                self.accounts_note = None;
+                None
+            }
             Message::CloseModal => {
                 self.modal = None;
                 None
@@ -1024,6 +1119,44 @@ impl Shell {
             // launcher has always been able to play with.
             None => launch::AccountRef::anonymous(),
         }
+    }
+
+    /// Sign this launcher's next launch in as `uuid`, and write the file.
+    ///
+    /// The file is the record rather than this window: the other launcher reads
+    /// the same one, so an account chosen here is the account it signs in as too.
+    /// A write that fails is said in the panel, because the alternative is a
+    /// selection that looks made and is not.
+    fn select_account(&mut self, uuid: &str) {
+        let Some(accounts) = self.accounts.as_mut() else {
+            return;
+        };
+        match accounts.select(uuid) {
+            Ok(()) => self.save_accounts(),
+            Err(problem) => self.accounts_note = Some(problem),
+        }
+    }
+
+    /// Take this account away, and write the file.
+    ///
+    /// Removing the account a launch would have signed in as leaves no selection,
+    /// which is the anonymous session rather than an error: the store clears it and
+    /// the card's header falls back to the reference's own "Select account".
+    fn remove_account(&mut self, uuid: &str) {
+        let Some(accounts) = self.accounts.as_mut() else {
+            return;
+        };
+        if accounts.remove(uuid) {
+            self.save_accounts();
+        }
+    }
+
+    /// Write the accounts file, leaving in the panel whatever a write could not do.
+    fn save_accounts(&mut self) {
+        let Some(accounts) = self.accounts.as_ref() else {
+            return;
+        };
+        self.accounts_note = accounts.save().err();
     }
 
     /// Start the instance `id`, and remember the run.
@@ -1522,17 +1655,276 @@ impl Shell {
             .into()
     }
 
-    /// The right panel, over the reference's own two-stop wash.
+    /// The right panel: the reference's own column, with its first section in it.
+    ///
+    /// `App.vue`'s `app-sidebar`: a `--right-bar-width` column under the wash,
+    /// a hairline down its page edge (`border-l border-[--brand-gradient-border]`),
+    /// and one scroll region inside it (`app-sidebar-scrollable`) that the
+    /// sections stack in. The sections are the onboarding checklist, this card
+    /// ("Playing as", `app.sidebar.playing-as`), the friends list, the fundraiser
+    /// banner and the news feed; the second of those is the only one this launcher
+    /// can draw anything in, and the others are absent rather than drawn empty.
     fn panel(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        container(Space::with_height(Length::Fill))
-            .width(Length::Fixed(PANEL))
-            .height(Length::Fill)
-            .style(move |_theme: &Theme| container::Appearance {
-                background: Some(wash(theme)),
-                ..container::Appearance::default()
-            })
+        let mut sections = column![].width(Length::Fill).push(self.playing_as());
+        if let Some(note) = &self.accounts_note {
+            sections = sections.push(
+                container(self.accounts_note_block(note))
+                    .width(Length::Fill)
+                    .padding(PANEL_SECTION_PAD),
+            );
+        }
+        // `border-l` over the wash: iced paints a `Border` on all four sides, so
+        // the panel's own edge is a one-pixel column rather than a border width.
+        container(
+            row![hairline(theme, true), scrollable(sections).width(Length::Fill).height(Length::Fill)]
+                .height(Length::Fill),
+        )
+        .width(Length::Fixed(PANEL))
+        .height(Length::Fill)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(wash(theme)),
+            ..container::Appearance::default()
+        })
+        .into()
+    }
+
+    /// The panel's first section: what a launch would sign in as.
+    ///
+    /// `App.vue` draws it `p-4` under a `border-b`, and only when
+    /// `hasLoggedIntoMinecraft`. That flag is the onboarding checklist's own -- the
+    /// checklist is what this launcher has not built -- so the section is drawn
+    /// always here, one step early. The alternative is a panel that stays the wash
+    /// until an unbuilt flag is set, which is the gap this stage closes; and the
+    /// empty card below is the reference's own picture of a launcher with no
+    /// account, so what is drawn early is the reference's shape either way.
+    /// `GATES.md` G83 records the difference.
+    fn playing_as(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let section = column![]
+            .width(Length::Fill)
+            .push(
+                container(
+                    column![]
+                        .width(Length::Fill)
+                        .push(
+                            text(Key::AppSidebarPlayingAs.message())
+                                .size(PANEL_HEADING)
+                                .font(medium())
+                                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                        )
+                        // `mt-2` is the card's own, and the card carries it.
+                        .push(container(self.accounts_card()).padding(Padding {
+                            top: CARD_TOP,
+                            bottom: 0.0,
+                            left: 0.0,
+                            right: 0.0,
+                        })),
+                )
+                .width(Length::Fill)
+                .padding(PANEL_SECTION_PAD),
+            )
+            .push(hairline(theme, false));
+        section.into()
+    }
+
+    /// What one of the card's controls could not do, with the control that reads
+    /// it -- [`crate::page::notice`]'s shape, drawn where the press was made.
+    fn accounts_note_block(&self, note: &str) -> Element<'_, Message> {
+        let theme = self.theme;
+        row![]
+            .spacing(ROW_GAP)
+            .align_items(Alignment::Start)
+            .push(crate::ui::admonition(
+                theme,
+                crate::ui::Severity::Info,
+                Key::MinecraftAccountSignIn.message(),
+                note,
+            ))
+            .push(Space::with_width(Length::Fill))
+            .push(crate::ui::icon_button(
+                theme,
+                ACCOUNTS_NOTE_DISMISS,
+                Glyph::X,
+                16.0,
+                Message::DismissAccountsNote,
+            ))
             .into()
+    }
+
+    /// `AccountsCard.vue`: the launcher's accounts, as the panel shows them.
+    ///
+    /// Two states, which are the reference's own two branches: with no accounts,
+    /// a sentence and the sign-in button; with accounts, an accordion whose header
+    /// names the account a launch would sign in as and whose body lists them.
+    ///
+    /// The card's player heads are not drawn. The reference puts a 36px head in
+    /// the header and a 24px one on every row, from the skin service or from its
+    /// own Steve asset for an offline account, and this launcher has no head
+    /// renderer yet -- the Skins page is a placeholder for the same reason -- so a
+    /// row is its radio mark and its name. `GATES.md` G83 records it.
+    fn accounts_card(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let accounts: &[AccountEntry] = match &self.accounts {
+            Some(store) => store.list(),
+            None => &[],
+        };
+        if accounts.is_empty() {
+            let body = column![]
+                .width(Length::Fill)
+                .spacing(CARD_STACK_GAP)
+                .push(
+                    text(Key::MinecraftAccountNotSignedIn.message())
+                        .size(14.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                )
+                .push(crate::ui::button_with_icon(
+                    theme,
+                    ACCOUNTS_SIGN_IN,
+                    Glyph::LogIn,
+                    Key::MinecraftAccountSignIn,
+                    crate::ui::Kind::Colored,
+                    Length::Shrink,
+                    Some(Message::SignIn),
+                ));
+            return card_frame(theme, CARD_FRAME_PAD, body);
+        }
+        let selected = self.accounts.as_ref().and_then(AccountsStore::selected_uuid);
+        let title = card_title(accounts, selected);
+        let (factor, _) = crate::ui::interaction(ACCOUNTS_HEADER);
+        let header = container(
+            row![]
+                .width(Length::Fill)
+                .spacing(CARD_ROW_GAP)
+                .align_items(Alignment::Center)
+                .push(
+                    column![]
+                        .width(Length::Fill)
+                        .push(
+                            text(title)
+                                .size(14.0)
+                                .font(medium())
+                                .style(iced::theme::Text::Color(crate::theme::brightness(
+                                    theme_gen::ink(theme, INK_CONTRAST),
+                                    factor,
+                                ))),
+                        )
+                        .push(
+                            text(Key::MinecraftAccountLabel.message())
+                                .size(CARD_LABEL)
+                                .font(medium())
+                                .style(iced::theme::Text::Color(crate::theme::brightness(
+                                    theme_gen::ink(theme, INK_SECONDARY),
+                                    factor,
+                                ))),
+                        ),
+                )
+                // The Accordion rotates its `DropdownIcon` a half turn when it
+                // opens (`class="rotate-180"`). iced cannot rotate a glyph, and
+                // the two chevrons are the same picture drawn twice.
+                .push(icon::icon(
+                    if self.accounts_open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                    CARD_MARK,
+                    crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor),
+                )),
+        )
+        .width(Length::Fill)
+        .padding(Padding {
+            top: CARD_HEAD_PAD,
+            bottom: CARD_HEAD_PAD,
+            left: CARD_HEAD_SIDE,
+            right: CARD_HEAD_SIDE,
+        });
+        let header = mouse_area(header)
+            .interaction(Interaction::Pointer)
+            .on_enter(card_crossing(ACCOUNTS_HEADER, true))
+            .on_exit(card_crossing(ACCOUNTS_HEADER, false))
+            .on_press(Message::ToggleAccounts);
+        let mut card = column![].width(Length::Fill).push(header);
+        if self.accounts_open {
+            card = card.push(self.accounts_body(accounts, selected));
+        }
+        card_frame(theme, 0.0, card)
+    }
+
+    /// The card's body, open: one row per account, then the add-account button.
+    ///
+    /// `AccountsCard.vue`'s own arrangement -- a `border-t border-surface-5`
+    /// hairline under the header, `pt-1 pb-2` on the body, and the reference's
+    /// `flex flex-col gap-2 px-2 pt-2` around the button at its foot.
+    fn accounts_body<'a>(
+        &'a self,
+        accounts: &'a [AccountEntry],
+        selected: Option<&'a str>,
+    ) -> Element<'a, Message> {
+        let theme = self.theme;
+        let mut rows = column![]
+            .width(Length::Fill)
+            .padding(Padding { top: 4.0, bottom: 8.0, left: 0.0, right: 0.0 })
+            .push(hairline(theme, false));
+        for account in accounts {
+            let chosen = selected == Some(account.uuid.as_str());
+            let key = crate::ui::scoped("shell:accounts:row", &account.uuid);
+            let (factor, _) = crate::ui::interaction(key);
+            let name = row![]
+                .width(Length::Fill)
+                .spacing(CARD_ROW_GAP)
+                .align_items(Alignment::Center)
+                .push(icon::icon(
+                    if chosen { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+                    CARD_MARK,
+                    crate::theme::brightness(
+                        theme_gen::ink(theme, if chosen { Ink::Brand } else { INK_SECONDARY }),
+                        factor,
+                    ),
+                ))
+                .push(
+                    text(account.username.clone())
+                        .size(14.0)
+                        .font(if chosen { semibold() } else { medium() })
+                        .style(iced::theme::Text::Color(crate::theme::brightness(
+                            theme_gen::ink(theme, if chosen { INK_CONTRAST } else { INK_DEFAULT }),
+                            factor,
+                        ))),
+                );
+            let name = mouse_area(
+                container(name).width(Length::Fill).padding(CARD_ROW_PAD),
+            )
+            .interaction(Interaction::Pointer)
+            .on_enter(card_crossing(key, true))
+            .on_exit(card_crossing(key, false))
+            .on_press(Message::SelectAccount(account.uuid.clone()));
+            rows = rows.push(
+                row![]
+                    .width(Length::Fill)
+                    .spacing(4.0)
+                    .align_items(Alignment::Center)
+                    .push(name)
+                    .push(crate::ui::icon_button_kind(
+                        theme,
+                        crate::ui::scoped("shell:accounts:remove", &account.uuid),
+                        Glyph::Trash,
+                        16.0,
+                        crate::ui::Kind::Danger,
+                        Message::RemoveAccount(account.uuid.clone()),
+                    )),
+            );
+        }
+        rows = rows.push(
+            container(crate::ui::button_with_icon(
+                theme,
+                ACCOUNTS_ADD,
+                Glyph::Plus,
+                Key::MinecraftAccountAddAccount,
+                crate::ui::Kind::Standard,
+                Length::Fill,
+                Some(Message::SignIn),
+            ))
+            .width(Length::Fill)
+            .padding(CARD_ROW_PAD),
+        );
+        rows.into()
     }
 
     /// The themes Settings offers, by the reference's own rule.
@@ -2103,6 +2495,76 @@ fn breadcrumb(address: &Address) -> String {
             format!("{id} / {page}")
         }
     }
+}
+
+/// A hairline in `--brand-gradient-border`, the reference's `border-l` on the
+/// panel and `border-b` under each of its sections.
+///
+/// iced paints a `Border` on all four sides of a box, so the one edge the
+/// reference asks for is a widget: a one-pixel box, down the panel's page edge or
+/// across a section's foot.
+fn hairline(theme: Gen, vertical: bool) -> Element<'static, Message> {
+    let (width, height) = if vertical {
+        (Length::Fixed(1.0), Length::Fill)
+    } else {
+        (Length::Fill, Length::Fixed(1.0))
+    };
+    container(Space::with_width(Length::Fill))
+        .width(width)
+        .height(height)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::BrandGradientBorder))),
+            ..container::Appearance::default()
+        })
+        .into()
+}
+
+/// The account the card's header names: the one in force, or the reference's own
+/// sentence for a file whose selection is gone.
+///
+/// `AccountsCard.vue`'s title slot: `selectedAccount ? selectedAccount.profile.name
+/// : messages.selectAccount`. A selection that names an account the file no longer
+/// holds is the same case as none at all rather than the wrong name.
+fn card_title(accounts: &[AccountEntry], selected: Option<&str>) -> String {
+    match selected.and_then(|uuid| accounts.iter().find(|account| account.uuid == uuid)) {
+        Some(account) => account.username.clone(),
+        None => Key::MinecraftAccountSelectAccount.message().to_string(),
+    }
+}
+
+/// The accounts card's own frame: `bg-button-bg border-surface-5 rounded-xl`.
+///
+/// `pad` is the caller's because the card's two states differ: the empty one is
+/// `p-3` around its own stack, and the accordion has none of its own -- its header
+/// and its body each carry theirs.
+fn card_frame<'a, Message: 'a>(
+    theme: Gen,
+    pad: f32,
+    body: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    container(body)
+        .width(Length::Fill)
+        .padding(pad)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+            border: Border {
+                color: theme_gen::ink(theme, Ink::Surface5),
+                width: 1.0,
+                radius: CARD_FRAME_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into()
+}
+
+/// A crossing published by one of the card's own surfaces.
+///
+/// The kit's controls publish [`Message::Control`] with no hover end, and the
+/// shell answers those with the global brightening. The card's header and its rows
+/// are `button-base`, whose own rule is `filter: brightness(0.85)`, so the two
+/// surfaces that dim name the factor they end at where the crossing is made.
+fn card_crossing(key: &'static str, over: bool) -> Message {
+    Message::Control { key, over, hover: Some(CARD_PRESS_HOVER) }
 }
 
 /// The right panel's background: `--brand-gradient-bg`, over the page's own
@@ -2792,11 +3254,6 @@ mod tests {
         // The whole of what the Play button does: the page reports it, the shell
         // remembers the run -- which is what the subscription reads -- and the
         // store says so, which is what the header's control is drawn from.
-        //
-        // Navigating clears the interaction clock's pointer (`Shell::forget_pointer`),
-        // which is process-wide, so this test takes the same lock every test that
-        // touches a crossing does.
-        let _guard = anim::lock_for_test();
         let mut shell = shell_with_home("play");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
@@ -2825,7 +3282,6 @@ mod tests {
         // Every fact a launch sends has exactly one place to land, and the run id
         // is checked first: a `Done` from the run before must not clear the run
         // that is going, which is a stale frame the shell has to survive.
-        let _guard = anim::lock_for_test();
         let mut shell = shell_with_home("events");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
@@ -2892,7 +3348,6 @@ mod tests {
         // shell has asked the child to die. There is no child in a test -- the
         // slot is empty -- so what is asserted is that the request is harmless
         // and that the state is set before the answer comes back.
-        let _guard = anim::lock_for_test();
         let mut shell = shell_with_home("stop");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
@@ -2936,7 +3391,6 @@ mod tests {
         accounts.select("069a79f444e94726a5befca90e38aaf5").expect("selected");
         accounts.save().expect("written");
         let paths = palantir_core::paths::PalantirPaths::at(root.clone());
-        let _guard = anim::lock_for_test();
         let mut shell = Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
             .with_store(Store::load(&paths))
             .with_prefs(paths, crate::prefs::Prefs::default())
@@ -3153,6 +3607,149 @@ mod tests {
             &settings(true, false, true),
         );
         assert!(!instance.panel_shown(), "an instance page does not force it");
+    }
+
+    /// A shell whose accounts come from a file of its own, which is what the
+    /// panel draws from.
+    fn shell_with_accounts(path: &std::path::Path) -> Shell {
+        let (accounts, warning) = AccountsStore::load_with_report(path);
+        shell_at("/").with_accounts(accounts, warning)
+    }
+
+    #[test]
+    fn the_card_names_the_account_a_launch_would_sign_in_as() {
+        let steve = AccountEntry::offline("Steve");
+        let uuid = steve.uuid.clone();
+        // The account in force is the one the file says.
+        assert_eq!(card_title(std::slice::from_ref(&steve), Some(&uuid)), "Steve");
+        // Nothing selected, or a selection for an account that is gone: the
+        // reference's own sentence rather than the wrong account.
+        assert_eq!(
+            card_title(std::slice::from_ref(&steve), None),
+            Key::MinecraftAccountSelectAccount.message()
+        );
+        assert_eq!(
+            card_title(&[steve], Some("99999999999999999999999999999999")),
+            Key::MinecraftAccountSelectAccount.message()
+        );
+        assert_eq!(card_title(&[], None), Key::MinecraftAccountSelectAccount.message());
+        // The uuid is the profile id and an offline account's is derived, so the
+        // card names the same player Prism does.
+        assert_eq!(uuid, crate::accounts::offline_uuid("Steve"));
+    }
+
+    #[test]
+    fn the_panel_draws_its_section_and_its_card_in_every_theme() {
+        // The panel is not a wash any more: the section, the card's two branches
+        // and the note all draw. In every theme, because the inks and the frame
+        // come from the generated tables and one of the four could be missing a
+        // token the others have.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("accounts.json");
+        let mut shell = shell_with_accounts(&path);
+        assert!(!shell.accounts_open, "the reference's accordion starts closed");
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        // With accounts, the card draws the accordion instead, open and closed.
+        {
+            let accounts = shell.accounts.as_mut().expect("a store");
+            accounts.add("Steve").expect("a name");
+            accounts.save().expect("a written file");
+        }
+        press(&mut shell, Message::ToggleAccounts);
+        assert!(shell.accounts_open);
+        press(&mut shell, Message::SignIn);
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        press(&mut shell, Message::ToggleAccounts);
+        assert!(!shell.accounts_open);
+    }
+
+    #[test]
+    fn a_shell_with_no_accounts_file_is_the_card_s_own_empty_state() {
+        // The shell the application builds always has a store; a shell with none
+        // is what the tests build, and it draws the same card a store with no
+        // accounts does.
+        let mut shell = shell_at("/");
+        assert!(shell.accounts.is_none());
+        let _ = shell.panel();
+        assert!(shell.accounts_note.is_none());
+        // Nothing is written and nothing panics: there is no file to write to.
+        press(&mut shell, Message::SelectAccount("nobody".into()));
+        press(&mut shell, Message::RemoveAccount("nobody".into()));
+        assert!(shell.accounts_note.is_none());
+    }
+
+    #[test]
+    fn choosing_an_account_writes_the_file_the_other_launcher_reads() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("accounts.json");
+        let mut shell = shell_with_accounts(&path);
+        let (steve, alex) = {
+            let accounts = shell.accounts.as_mut().expect("a store");
+            accounts.add("Steve").expect("a name");
+            accounts.add("Alex").expect("a name");
+            accounts.save().expect("a written file");
+            let list = accounts.list();
+            (list[0].uuid.clone(), list[1].uuid.clone())
+        };
+        assert_eq!(
+            shell.accounts.as_ref().expect("a store").selected_uuid(),
+            Some(steve.as_str()),
+            "the first account added is the one in force"
+        );
+
+        press(&mut shell, Message::SelectAccount(alex.clone()));
+        assert!(shell.accounts_note.is_none(), "{:?}", shell.accounts_note);
+        let (back, warning) = AccountsStore::load_with_report(&path);
+        assert!(warning.is_none(), "{warning:?}");
+        assert_eq!(back.selected_uuid(), Some(alex.as_str()));
+
+        // Taking one away is written the same way, and the file the other
+        // launcher reads is the one without it.
+        press(&mut shell, Message::RemoveAccount(alex));
+        let (back, _) = AccountsStore::load_with_report(&path);
+        assert_eq!(back.list().len(), 1);
+        assert_eq!(back.list()[0].username, "Steve");
+        assert!(back.selected_uuid().is_none(), "the removed account was in force");
+
+        // A uuid that is not in the file is the store's own sentence rather than
+        // a silent nothing.
+        press(&mut shell, Message::SelectAccount("nope".into()));
+        let note = shell.accounts_note.clone().expect("a sentence");
+        assert!(note.contains("no account with id"), "{note}");
+    }
+
+    #[test]
+    fn a_press_that_needs_the_sign_in_flow_says_so_in_the_panel() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("accounts.json");
+        let mut shell = shell_with_accounts(&path);
+        assert!(shell.accounts_note.is_none());
+        press(&mut shell, Message::SignIn);
+        assert_eq!(
+            shell.accounts_note.as_deref(),
+            Some(store::not_implemented("Signing in to Minecraft").as_str())
+        );
+        // The control that reads it is the one that clears it, and a change to
+        // the accounts file clears it too: what it said is no longer the news.
+        press(&mut shell, Message::DismissAccountsNote);
+        assert!(shell.accounts_note.is_none());
+        press(&mut shell, Message::SignIn);
+        assert!(shell.accounts_note.is_some());
+        // One that does write the file clears it: what the sentence said is no
+        // longer the news.
+        let uuid = {
+            let accounts = shell.accounts.as_mut().expect("a store");
+            accounts.add("Steve").expect("a name");
+            accounts.list()[0].uuid.clone()
+        };
+        press(&mut shell, Message::SelectAccount(uuid));
+        assert!(shell.accounts_note.is_none());
     }
 
     #[test]
@@ -3408,10 +4005,9 @@ mod tests {
     #[test]
     fn a_page_control_s_hover_is_a_frame_subscription_the_shell_owes() {
         // The join between the two clocks: the pages' controls tween on the
-        // process-wide interaction clock, and the shell is what asks for the
-        // frames -- so a crossing has to show up in `animating()` or the tween
-        // would paint one frame and sit there (see `crate::hover`).
-        let _guard = anim::lock_for_test();
+        // interaction clock, and the shell is what asks for the frames -- so a
+        // crossing has to show up in `animating()` or the tween would paint one
+        // frame and sit there (see `crate::hover`).
         // The key is this test's own, so what is asserted below is about this
         // page's control rather than about a clock the other tests share.
         let key = "shell:test:hover";
@@ -3449,7 +4045,6 @@ mod tests {
         // The page that is being left does not draw its controls on the one that
         // arrives, so the crossing that lit one goes with it. Without this a
         // control the new page happens to name the same way would arrive lit.
-        let _guard = anim::lock_for_test();
         let key = "shell:test:left";
         anim::clock().lock().expect("the clock").clear();
         let mut shell = shell_at("/browse/modpack");
@@ -3465,8 +4060,8 @@ mod tests {
         assert!(shell.animating(), "the hover is what is moving now");
         press(&mut shell, Message::Go("/skins".to_string()));
         // The control is not drawn any more, so it is not hovered any more --
-        // asserted on the key rather than on the clock's quiet, which belongs to
-        // every test in this binary.
+        // asserted on the key rather than on the clock's quiet, which every test
+        // sharing a process would have a say in.
         let drawn = anim::clock().lock().expect("the clock").drawn(key);
         assert_eq!(
             drawn,

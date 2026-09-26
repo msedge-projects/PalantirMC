@@ -81,8 +81,8 @@ them.
 | --- | --- | --- |
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
-| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). What is left of stage 2's own work is the right panel's body -- see "What stage 3 has landed so far" |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76) and Settings offers the reference's colour themes (G77). What is not real yet is anything a service answers, and the right panel -- see "What stage 3 has landed so far" |
+| 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). What is not real yet is anything a service answers, and the panel's remaining sections, which all are -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81). What is not in is the retire of the shell this one replaces, and the loader chips the reference's flow draws beside the game version |
 
@@ -327,6 +327,20 @@ the shape everything else in the interface already has. Discover asks by round
 and applies an answer only if it is still the round it asked for, because two
 keystrokes are in flight over a channel that does not keep their order.
 
+The right panel is drawn now (G83). `App.vue`'s `app-sidebar` is the reference's
+own column under its two-stop wash, with the hairline down its page edge and the
+one scroll region the sections stack in; the first section is *Playing as* with
+`AccountsCard.vue` under it -- the reference's empty card when this launcher
+holds no account, and its accordion when it holds one, naming the account a
+launch would sign in as. The card's controls write the same `accounts.json` the
+other launcher reads, so an account chosen here is the account that launcher
+signs in as too. What the reference draws and this does not is the player heads
+(there is no head renderer yet -- the Skins page is a placeholder for the same
+reason) and the Microsoft sign-in flow, which the card's two controls say is not
+built rather than doing nothing. The section is drawn one step early: the
+reference gates it on the onboarding checklist's own `hasLoggedIntoMinecraft`,
+and that checklist is one of the sections that are not built.
+
 Three things about the pages are decisions worth keeping:
 
 1. **A page reports navigation, it does not perform it.** Pressing an instance
@@ -352,10 +366,13 @@ What stage 3 does **not** have yet, named rather than implied:
   Project pages, Skins, Servers and the hosting half of an instance still say so
   out loud. The control *states* they will be asked with are live, which is the
   part that makes the request a one-line change rather than a page rewrite.
-* **The right panel is still the reference's wash and nothing else.** Discover,
-  a project and a profile force it on (`App.vue`'s `forceSidebar`), and what it
-  draws when it is there is stage 4's, because everything in it is a service's
-  answer. The panel's own body is the last of the three gaps this stage opened.
+* **The panel's other sections are not built.** The panel is no longer a wash
+  (G83): Discover, a project and a profile force it on (`App.vue`'s
+  `forceSidebar`), and it draws `app-sidebar`'s scroll region with its first
+  section, *Playing as* and the accounts card. What the reference stacks beside
+  that one -- the onboarding checklist, the friends list, the fundraiser banner
+  and the news feed -- are absent rather than drawn empty, because each is a
+  service's answer.
 
 Two gaps that were on this list are closed and stay named here so the next reader
 knows when: the controls tween their hover off the same clock the rail's plate
