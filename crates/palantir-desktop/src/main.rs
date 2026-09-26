@@ -57,6 +57,18 @@ mod install;
 mod instances;
 mod java_runtime;
 mod launch;
+/// The view-model the old shell read, and the two readers that are left: the
+/// instance list `instances.rs` is built from, and the override-gated settings
+/// `launch.rs` resolves a run with.
+///
+/// It arrived as a crate of its own -- `palantir-gui`, whose only dependant was
+/// this one and whose reason to exist was a CLI that is gone -- and it lives here
+/// now so that the crate can go. What is deliberately *not* done in the same
+/// move is renaming or reshaping it: the model is Prism-shaped because
+/// `palantir_core::settings` is, and both go when the flattening importer
+/// replaces the last of them. Moving it and redesigning it in one step would make
+/// a broken launch impossible to tell from a changed one.
+mod model;
 mod mods;
 /// The reference's motion: its own durations and curves, and the cubic Bézier
 /// solver a native toolkit does not have.

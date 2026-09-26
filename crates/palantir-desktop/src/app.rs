@@ -8075,8 +8075,8 @@ fn splash_ticks() -> Subscription<Message> {
 
 /// The instance-list entry for an open instance (used when a freshly created
 /// instance is not in the cached card list yet).
-pub fn entry_for(instance: &Instance) -> palantir_gui::InstanceEntry {
-    palantir_gui::InstanceEntry {
+pub fn entry_for(instance: &Instance) -> crate::model::InstanceEntry {
+    crate::model::InstanceEntry {
         id: instance.id(),
         name: instance.name(),
         icon: instance.icon_key(),

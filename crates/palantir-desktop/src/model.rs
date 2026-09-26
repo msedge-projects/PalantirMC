@@ -1,13 +1,53 @@
-//! GUI view-model: the instance list and override-gated settings.
+//! The view-model the shell reads: the instance list, and override-gated settings.
 //!
-//! No windowing code lives here, so the whole model stays testable offline;
-//! `palantir-desktop`'s shell is the only thing that paints it.
+//! No windowing code lives here, so the whole model stays testable offline; the
+//! shell is the only thing that paints it. It was `palantir-gui` -- a crate whose
+//! only dependant was this one and whose reason to exist was a CLI that is gone --
+//! and it moved in whole rather than being reshaped on the way: what it models is
+//! Prism-shaped because `palantir_core::settings` is, and both go together when
+//! the flattening importer replaces the last of them.
+//!
+//! Two of its readers are not the old shell, and they are why it could not simply
+//! be deleted with it: `instances.rs` loads [`InstanceListModel`] to build the
+//! cards the library draws, and `launch.rs` resolves a run through
+//! [`SettingsModel`]'s override gates.
 
 use palantir_core::{
     instance::{groups::Groups, Instance},
     paths::PalantirPaths,
     settings::{defaults, Settings},
 };
+
+/// What a model operation could not do.
+///
+/// Hand-written rather than derived: this module is the only place in the crate
+/// that raises one, the trait is three methods, and a `thiserror` dependency
+/// added for one `Display` arm is a dependency the whole crate carries from then
+/// on.
+///
+/// It was an enum of two, and the second arm -- *an instance-bound operation was
+/// requested without a bound instance* -- went with the write side above: nothing
+/// that runs could raise it any more, and an error variant nothing constructs is
+/// a sentence kept for a reader who will never see it.
+#[derive(Debug)]
+pub struct Error(pub palantir_core::Error);
+
+impl From<palantir_core::Error> for Error {
+    fn from(error: palantir_core::Error) -> Error {
+        Error(error)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The old crate's own words, kept: they are what the reader above shows a
+        // user, and a message changed in a move is a message nobody chose.
+        write!(formatter, "core error: {}", self.0)
+    }
+}
+
+impl std::error::Error for Error {}
+
 
 /// One row of the instance list view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +79,7 @@ impl InstanceListModel {
     /// Folders that fail to open (for example an unsupported
     /// `InstanceType`) are skipped, mirroring Prism's discovery which
     /// silently ignores such folders.
-    pub fn load(paths: &PalantirPaths) -> Result<Self, crate::Error> {
+    pub fn load(paths: &PalantirPaths) -> Result<Self, Error> {
         let groups = Groups::load(paths);
         let mut entries = Vec::new();
         for root in Instance::discover(&paths.instances_dir())? {
@@ -77,39 +117,16 @@ impl InstanceListModel {
         &self.entries
     }
 
-    /// Number of entries.
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Whether the list is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Entries whose name or id contains `query` (case-insensitive
-    /// substring). An empty query matches everything.
-    pub fn filter(&self, query: &str) -> Vec<&InstanceEntry> {
-        let needle = query.to_lowercase();
-        if needle.is_empty() {
-            return self.entries.iter().collect();
-        }
-        self.entries
-            .iter()
-            .filter(|e| {
-                e.name.to_lowercase().contains(&needle) || e.id.to_lowercase().contains(&needle)
-            })
-            .collect()
-    }
-
-    /// Group of an instance id, if it belongs to one.
-    pub fn group_of(&self, id: &str) -> Option<&str> {
-        self.entries
-            .iter()
-            .find(|e| e.id == id)
-            .and_then(|e| e.group.as_deref())
-    }
 }
+
+// Four methods went with the move -- `len`, `is_empty`, `filter` and `group_of`
+// -- and they went for a reason that is not "nothing calls them yet": the
+// library's own page supersedes them. `pages/home.rs` holds one list, filters it
+// in place from its search field and sorts it by its own control, which is what
+// the reference's `Library.vue` does; a second filter in a model the page never
+// reads would be a second answer to the same question, and the answer the user
+// sees would be the page's. What is left is what the two readers need: the list,
+// in order, for `instances.rs` to summarize.
 
 /// Settings view with Prism's override-gate semantics.
 ///
@@ -125,50 +142,9 @@ pub struct SettingsModel {
 }
 
 impl SettingsModel {
-    /// Model bound to the global settings only.
-    pub fn new(global: Settings) -> Self {
-        SettingsModel { global, instance: None }
-    }
-
     /// Model with both global settings and per-instance overrides.
     pub fn with_instance(global: Settings, instance: Settings) -> Self {
         SettingsModel { global, instance: Some(instance) }
-    }
-
-    /// The global settings.
-    pub fn global(&self) -> &Settings {
-        &self.global
-    }
-
-    /// Mutable access to the global settings.
-    pub fn global_mut(&mut self) -> &mut Settings {
-        &mut self.global
-    }
-
-    /// The bound instance settings, if any.
-    pub fn instance(&self) -> Option<&Settings> {
-        self.instance.as_ref()
-    }
-
-    /// Whether the override gate `override_key` is enabled on the bound
-    /// instance. Always `false` when no instance is bound.
-    pub fn is_overridden(&self, override_key: &str) -> bool {
-        self.instance
-            .as_ref()
-            .map(|s| s.get_bool(override_key, false))
-            .unwrap_or(false)
-    }
-
-    /// Enable or disable the override gate `override_key` on the bound
-    /// instance. Fails when no instance is bound.
-    pub fn set_override(&mut self, override_key: &str, enabled: bool) -> Result<(), crate::Error> {
-        match self.instance.as_mut() {
-            Some(settings) => {
-                settings.set_bool(override_key, enabled);
-                Ok(())
-            }
-            None => Err(crate::Error::NoInstanceBound),
-        }
     }
 
     /// Effective string value: the instance value while `override_key`
@@ -206,56 +182,6 @@ impl SettingsModel {
         }
     }
 
-    /// Set a global value.
-    pub fn set_global_str(&mut self, key: &str, value: impl Into<String>) {
-        self.global.set_str(key, value);
-    }
-
-    /// Set a global boolean value.
-    pub fn set_global_bool(&mut self, key: &str, value: bool) {
-        self.global.set_bool(key, value);
-    }
-
-    /// Set a global integer value.
-    pub fn set_global_i64(&mut self, key: &str, value: i64) {
-        self.global.set_i64(key, value);
-    }
-
-    /// Set an instance value. Fails when no instance is bound. Note this
-    /// only takes effect while the corresponding override gate is enabled
-    /// (see [`SettingsModel::set_override`]).
-    pub fn set_instance_str(&mut self, key: &str, value: impl Into<String>) -> Result<(), crate::Error> {
-        match self.instance.as_mut() {
-            Some(settings) => {
-                settings.set_str(key, value);
-                Ok(())
-            }
-            None => Err(crate::Error::NoInstanceBound),
-        }
-    }
-
-    /// Set an instance boolean value (see [`SettingsModel::set_instance_str`]).
-    pub fn set_instance_bool(&mut self, key: &str, value: bool) -> Result<(), crate::Error> {
-        match self.instance.as_mut() {
-            Some(settings) => {
-                settings.set_bool(key, value);
-                Ok(())
-            }
-            None => Err(crate::Error::NoInstanceBound),
-        }
-    }
-
-    /// Set an instance integer value (see [`SettingsModel::set_instance_str`]).
-    pub fn set_instance_i64(&mut self, key: &str, value: i64) -> Result<(), crate::Error> {
-        match self.instance.as_mut() {
-            Some(settings) => {
-                settings.set_i64(key, value);
-                Ok(())
-            }
-            None => Err(crate::Error::NoInstanceBound),
-        }
-    }
-
     /// Effective `(MinMemAlloc, MaxMemAlloc)` pair behind the
     /// `OverrideMemory` gate.
     pub fn effective_memory(&self) -> (i64, i64) {
@@ -266,15 +192,19 @@ impl SettingsModel {
         )
     }
 
-    /// Persist the global settings and, when bound, the instance settings.
-    pub fn save(&self) -> Result<(), crate::Error> {
-        self.global.save()?;
-        if let Some(instance) = self.instance.as_ref() {
-            instance.save()?;
-        }
-        Ok(())
-    }
 }
+
+// The write side went with the move: `new`, `global`, `global_mut`, `instance`,
+// `is_overridden`, `set_override`, the three `set_global_*`, the three
+// `set_instance_*` and `save`. What that leaves is a *reader* -- read the value
+// in force, with the instance's own override gate deciding whether the instance
+// or the launcher's file wins -- which is exactly what `launch.rs` does with it.
+// The write side belongs to the instance-settings page stage 3 still owes, and it
+// is four lines through `palantir_core::settings::Settings` when that page
+// arrives; what it is not is a hundred and twenty lines of API kept here in the
+// meantime for a page that has not been written. `preserve the old shell's
+// model` was the move's whole job, and the compiler's dead-code pass is what says
+// where that job ends.
 
 #[cfg(test)]
 mod tests {
@@ -324,10 +254,11 @@ mod tests {
         groups.save(&paths).unwrap();
 
         let model = InstanceListModel::load(&paths).unwrap();
-        assert_eq!(model.len(), 2);
-        assert_eq!(model.group_of("grouped"), Some("Packs"));
-        assert_eq!(model.group_of("solo"), None);
-        assert_eq!(model.group_of("missing"), None);
+        let entries = model.entries();
+        assert_eq!(entries.len(), 2, "the folder that is not an instance is not an entry");
+        assert_eq!(entries[0].name, "grouped");
+        assert_eq!(entries[0].group.as_deref(), Some("Packs"));
+        assert_eq!(entries[1].group, None);
     }
 
     #[test]
@@ -338,23 +269,13 @@ mod tests {
     }
 
     #[test]
-    fn filter_matches_name_or_id_case_insensitively() {
-        let (_dir, paths) = test_paths();
-        create_named(&paths.instances_dir(), "Fabric Dreams", "default", 0);
-        create_named(&paths.instances_dir(), "Vanilla", "default", 0);
-
-        let model = InstanceListModel::load(&paths).unwrap();
-        assert_eq!(model.filter("").len(), 2);
-        assert_eq!(model.filter("fabric").len(), 1);
-        assert_eq!(model.filter("DREAMS").len(), 1);
-        assert_eq!(model.filter("vanilla").len(), 1);
-        assert_eq!(model.filter("zzz").len(), 0);
-        // id match (folder name == display name here)
-        assert_eq!(model.filter("Fabric Dreams").len(), 1);
-    }
-
-    #[test]
-    fn settings_override_gate_selects_global_vs_instance() {
+    fn the_override_gate_selects_the_global_value_or_the_instance_s_own() {
+        // The gate is the whole of this type's behaviour, and it is what
+        // `launch.rs` resolves a run through: the instance's value counts only
+        // while the instance's own flag is set, and a key without a gate always
+        // reads the launcher's file. Both directions are asserted, because a
+        // model that ignored the flag and always read the instance would pass the
+        // first half of this test on its own.
         let dir = tempfile::tempdir().unwrap();
         let mut global = Settings::empty(dir.path().join("prismlauncher.cfg"));
         global.set_i64("MaxMemAlloc", 4096);
@@ -363,40 +284,23 @@ mod tests {
         instance.set_i64("MaxMemAlloc", 8192);
         instance.set_str("JavaPath", "/opt/java/bin/java");
 
-        let mut model = SettingsModel::with_instance(global, instance);
-        // Gate off: global wins even though instance values exist.
+        let model = SettingsModel::with_instance(global, instance);
+        // Gate off: the launcher's own value wins even though the instance has
+        // one of its own.
         assert_eq!(model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 4096);
-        assert!(!model.is_overridden("OverrideMemory"));
-
-        model.set_override("OverrideMemory", true).unwrap();
-        assert!(model.is_overridden("OverrideMemory"));
-        assert_eq!(model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 8192);
-        assert_eq!(model.effective_memory(), (defaults::MIN_MEM_ALLOC, 8192));
-
-        // Ungated keys always read global.
+        assert_eq!(model.effective_memory(), (defaults::MIN_MEM_ALLOC, 4096));
+        // Gate on: the instance's value, which is what the instance settings page
+        // writes when it turns *Override memory* on.
+        let mut instance = Settings::empty(dir.path().join("instance.cfg"));
+        instance.set_bool("OverrideMemory", true);
+        instance.set_i64("MaxMemAlloc", 8192);
+        let gated = SettingsModel::with_instance(
+            Settings::empty(dir.path().join("prismlauncher.cfg")),
+            instance,
+        );
+        assert_eq!(gated.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 8192);
+        assert_eq!(gated.effective_memory(), (defaults::MIN_MEM_ALLOC, 8192));
+        // An ungated key reads the launcher's file whatever the instance holds.
         assert_eq!(model.get_str("JavaPath", None, ""), "/usr/bin/java");
-    }
-
-    #[test]
-    fn settings_without_instance_reads_global_and_rejects_overrides() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut global = Settings::empty(dir.path().join("prismlauncher.cfg"));
-        global.set_i64("MaxMemAlloc", 2048);
-        let mut model = SettingsModel::new(global);
-
-        assert_eq!(model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 2048);
-        assert!(!model.is_overridden("OverrideMemory"));
-        assert!(model.set_override("OverrideMemory", true).is_err());
-        assert!(model.set_instance_i64("MaxMemAlloc", 1).is_err());
-        assert!(model.set_instance_str("k", "v").is_err());
-        assert!(model.set_instance_bool("k", true).is_err());
-
-        model.set_global_i64("MaxMemAlloc", 3072);
-        model.set_global_str("Name", "n");
-        model.set_global_bool("B", true);
-        assert_eq!(model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 3072);
-        model.save().unwrap();
-        let back = Settings::load(model.global().path()).unwrap();
-        assert_eq!(back.get_i64("MaxMemAlloc", 0), 3072);
     }
 }

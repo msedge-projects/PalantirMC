@@ -1605,6 +1605,45 @@ missing: the run is the launcher's, not the page's.
       the_shell_can_send` now puts the game up before it presses Stop, which is
       what makes the state it asserts reachable at all.
 
+### The view-model crate, retired
+
+The delete's first slice, and it is the one with a floor under it. `palantir-gui`
+was a crate of its own whose only dependant was the desktop and whose reason to
+exist was a CLI that no longer does; its doc comment still claimed the shell and
+the CLI both went through it. Three readers actually do -- `instances.rs` loads
+the list to build the library's cards, `launch.rs` resolves a run through the
+override gates, and `app.rs` builds one row -- so the crate could not simply go,
+and the move is what it got: `crates/palantir-desktop/src/model.rs`, whole, with a
+hand-written `Error` rather than a `thiserror` derive, because a dependency added
+for one `Display` arm is one the crate carries from then on.
+
+What the move exposed is the part worth reading. As a library, every one of this
+model's methods was "used" and the dead-code pass could say nothing. Inside the
+binary, the compiler answered the question the port has been asking all along --
+*what does the launcher actually call* -- and the answer was: four list methods
+the library's own page supersedes (its search and sort are `pages/home.rs`'s, per
+`Library.vue`), and the whole write side of the settings model
+(`new`, `global`, `global_mut`, `instance`, `is_overridden`, `set_override`, three
+`set_global_*`, three `set_instance_*`, `save`). A hundred and twenty-odd lines of
+API kept for a page nobody has written. They went, with the one test that only
+proved them, and the two that remain assert the behaviour the readers depend on:
+the gate deciding instance-from-global, and an ungated key always reading the
+launcher's file.
+
+- [x] G87: `palantir-gui` is retired -- the model moved into the desktop crate,
+      its unused half deleted, and the crate dropped from the workspace
+  CHECK: cargo test --workspace --all-targets --locked
+  EXPECT: test result: ok. 1034 passed; 0 failed; 13 ignored
+  EVIDENCE: the two readers are covered by their own suites (`instances.rs`
+      builds its cards from the list, `launch.rs` resolves memory through
+      `effective_memory`), and the model's own five tests came with it: a library
+      target that no longer exists is a test binary that no longer runs, which is
+      why the workspace's total moves rather than stays. The moved file is the
+      only source in the change; `Cargo.lock` loses the package, the workspace
+      manifest loses the member, and the desktop manifest loses the dependency.
+      The deleted methods are named above so that a later reader who wants one
+      back knows it was never wired, rather than lost.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1625,9 +1664,8 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    606 passed; 0 failed  (palantir-desktop, bin)
+    610 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
-      6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
     213 passed; 0 failed  (palantir-net, lib)
       0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
@@ -1646,13 +1684,13 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1036 tests pass, nothing in the correctness-deny set is failing, and all four
+1034 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 606 now: the seam (G75), the interaction (G76), the
+engine's slices landed and is 610 now: the seam (G75), the interaction (G76), the
 settings pane (G77), stage 5's three flows (G78-G80), the launch (G81), the
 switch (G82), stage 3's panel (G83), the loader read and the dialog that chooses
-one (G84-G85) and the action bar (G86) added fifty-two between them, and the run
-above was taken after all of them. The caveat in the transcript below -- that a
+one (G84-G85), the action bar (G86) and the view-model crate's retirement (G87)
+added fifty-six between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),

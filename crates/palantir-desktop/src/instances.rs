@@ -16,7 +16,7 @@ use palantir_core::instance::{groups::Groups, Instance};
 use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::defaults;
-use palantir_gui::InstanceEntry;
+use crate::model::InstanceEntry;
 
 use crate::catalog::LoaderKind;
 use crate::mods::list_mods;
@@ -154,7 +154,7 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
 pub fn load(paths: &PalantirPaths) -> LoadedInstances {
     let instances_dir = paths.configured_instances_dir();
     let groups = Groups::load(paths);
-    let model = match palantir_gui::InstanceListModel::load(paths) {
+    let model = match crate::model::InstanceListModel::load(paths) {
         Ok(model) => model,
         Err(error) => {
             return LoadedInstances {
@@ -569,7 +569,7 @@ mod tests {
         );
 
         // …and the card agrees with the disk.
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Fabric);
         assert_eq!(card.loader_version, "0.19.5");
@@ -597,7 +597,7 @@ mod tests {
         assert!(!instance.patches_dir().join("net.fabricmc.fabric-loader.json").exists());
 
         // …and the card agrees with the disk.
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Vanilla);
         assert_eq!(card.subtitle(), "26.2");
@@ -647,7 +647,7 @@ mod tests {
         let created = create(&paths, &spec).unwrap();
         assert_eq!(created.warnings.len(), 1);
         assert!(created.warnings[0].contains("no Fabric build"));
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Vanilla);
         assert_eq!(card.subtitle(), "1.21.1");
@@ -704,7 +704,7 @@ mod tests {
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         assert_eq!(instance.settings().get_i64("MaxMemAlloc", 0), 6144);
         assert!(instance.settings().get_bool("OverrideMemory", false));
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         assert_eq!(summarize(&paths.instances_dir(), &model.entries()[0]).max_mem_mb, 6144);
     }
 

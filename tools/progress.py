@@ -82,7 +82,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
     4: [(66, 75)],  # the engine, and the first page served by it
-    5: [(78, 81), (84, 86)],  # create, import, the picker, the launch; the loaders; the action bar
+    5: [(78, 81), (84, 87)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate
 }
 
 # The plan's open work, by the bold name its bullet carries, with the number of
@@ -113,7 +113,7 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
     5: [
         (
             "The delete.",
-            2,
+            1,
             "app.rs, and the Prism-shaped palantir-core modules only it calls",
         ),
         (

@@ -41,7 +41,7 @@ use palantir_core::{
     settings::{defaults, Settings},
     version::{ProblemSeverity, RuntimeContext},
 };
-use palantir_gui::SettingsModel;
+use crate::model::SettingsModel;
 use palantir_net::meta::Fetcher;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
 use std::io::BufRead;

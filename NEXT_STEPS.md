@@ -58,19 +58,18 @@ PandoraLauncher notice they were the only reason for: `Cargo.lock` went from 553
 packages to 510, 447 lines of it, with the closure of `anyhow` and of both
 adopted crates.
 
-The workspace is now four crates plus the shell:
+The workspace is now three crates plus the shell:
 
 | Crate | What it is |
 | --- | --- |
 | `palantir-core` | Minecraft's own formats (version JSON, libraries, rules, asset index, launch arguments) and the data-root layout. Still Prism-shaped in `ini`/`settings`/`pack`/`instance`; those go with the importer. |
 | `palantir-net` | Auth, downloads, metadata, the Modrinth API client. |
 | `palantir-loader` | Forge, Fabric, NeoForge, Quilt, and modpack archives. |
-| `palantir-gui` | The view-model the shell reads. Goes with `app.rs`. |
-| `palantir-desktop` | The window: shell, pages, engine glue, platform code. |
+| `palantir-desktop` | The window: shell, pages, engine glue, platform code, and `model.rs` -- the view-model that used to be `palantir-gui`, moved here with the crate retired. |
 
-Backend suites as run in this session: `palantir-core` 168 plus 8, `palantir-gui`
-6, `palantir-loader` 31, `palantir-net` 205, with 12 live tests ignored by design --
-976 in the workspace, and the desktop crate's 554 are in it. Which binary each
+Backend suites as run in this session: `palantir-core` 168 plus 8,
+`palantir-loader` 31, `palantir-net` 213, with 13 live tests ignored by design --
+1034 in the workspace, and the desktop crate's 610 are in it. Which binary each
 number belongs to is written out in [`GATES.md`](GATES.md), because a bare list of
 numbers is how the earlier version of this paragraph managed to mislabel three of
 them.
@@ -513,10 +512,21 @@ ports), 26 (the head and the rail's plate).
 
 ## Deliberately not done in stage 0
 
-`palantir-gui` and the Prism-shaped modules in `palantir-core` stay until the
-shell and the importer that replace them exist, because `app.rs` calls them
-today. Removing them now would mean either a launcher that does not build or a
-half-migrated one that does not open the instances it already has.
+The Prism-shaped modules in `palantir-core` stay until the shell and the importer
+that replace them exist, because `app.rs` calls them today. Removing them now
+would mean either a launcher that does not build or a half-migrated one that does
+not open the instances it already has.
+
+`palantir-gui` is no longer one of them. It was the same kind of hold-out and it
+turned out to be the one with a floor under it: its only dependant was this crate
+and its reason to exist was a CLI that is gone, so it moved in whole as
+`crates/palantir-desktop/src/model.rs` and the crate went. Three of its readers
+are the ones that mattered -- `instances.rs` loads the list, `launch.rs` resolves
+a run through the override gates, and `app.rs` builds a row -- and the fourth is
+its own tests, which came with it. What the move also cost is the half of that
+model nothing called: four list methods the library's own page supersedes and the
+whole write side of the settings model, which belongs to the instance-settings
+page stage 3 still owes.
 
 ## What stage 5 has landed so far
 
@@ -549,11 +559,11 @@ built:
 What stage 5 still owes, in the order it is worth doing:
 
 1. **The delete.** The switch is made: a plain run is the new shell and the old
-   chrome is behind `--classic`. What is left is deleting it -- `app.rs`, 10k
-   lines and most of the correctness warnings, and the Prism-shaped modules in
-   `palantir-core` that only it calls -- which is a slice of its own so that a
-   regression in the switch and one in the delete cannot be confused for each
-   other.
+   chrome is behind `--classic`. One slice of it has landed -- `palantir-gui`
+   moved into the desktop crate as `model.rs`, its dead half deleted, and the
+   crate itself gone (G87). What is left is `app.rs`, 10k lines and most of the
+   correctness warnings, and the Prism-shaped modules in `palantir-core` that only
+   it calls.
 2. **The launch surface.** The reference's action bar and its download manager
    are where a launch is watched there, and the bar is now in this shell's head:
    the run, its level as a chip over a panel, its stop control and the way to its

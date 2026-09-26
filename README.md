@@ -38,7 +38,8 @@ crates/
                       asset index, launch arguments — and the data-root layout.
   palantir-net/       Auth, downloads, metadata and the Modrinth API client.
   palantir-loader/    Forge, Fabric, NeoForge, Quilt and modpack archives.
-  palantir-gui/       The view-model the shell reads; goes with `app.rs`.
+                      (The view-model the shell reads used to be a fifth crate,
+                      `palantir-gui`; it is `palantir-desktop/src/model.rs` now.)
 tools/               The measurement and gate harnesses (Python).
 vendor/modrinth-app/ The reference client's source, vendored as the design
                      oracle and pinned in its `UPSTREAM.md`. Read and measured,
