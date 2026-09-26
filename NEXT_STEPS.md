@@ -84,7 +84,7 @@ them.
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). What is not real yet is anything a service answers, and the panel's remaining sections, which all are -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
-| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81). What is not in is the retire of the shell this one replaces, and the loader chips the reference's flow draws beside the game version |
+| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); and a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86). What is not in is the retire of the shell this one replaces |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
 sees every commit while `master` keeps building a launcher that runs. Only
@@ -554,11 +554,10 @@ What stage 5 still owes, in the order it is worth doing:
    `palantir-core` that only it calls -- which is a slice of its own so that a
    regression in the switch and one in the delete cannot be confused for each
    other.
-2. **The loaders.** The picker offers Mojang's versions and the reference's
-   loader chips are not drawn at all; an instance is vanilla-only, and the
-   reference's flow would offer Fabric, Forge, NeoForge, Quilt and the loader
-   builds beside the game version.
-3. **The launch surface.** The reference's action bar -- a bar along the bottom
-   with the running instance, its level and a stop button -- and its download
-   manager are where a launch is watched there; this shell puts one line in the
-   instance header instead, and a second instance cannot be watched at all.
+2. **The launch surface.** The reference's action bar and its download manager
+   are where a launch is watched there, and the bar is now in this shell's head:
+   the run, its level as a chip over a panel, its stop control and the way to its
+   logs, from any page (G86). What is not in is the rest of the download manager
+   -- its job list is one job, because this launcher runs one instance at a time
+   -- and the reference's popover over *every* running process, which needs a
+   second run to exist first.

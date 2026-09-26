@@ -60,6 +60,7 @@ use crate::style::{
     INK_PLATE_TEXT, INK_SECONDARY,
 };
 use crate::icons_gen::{self, Glyph};
+use crate::install;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
@@ -341,6 +342,21 @@ pub struct Shell {
     /// control that does nothing at all is the failure mode this rewrite reports
     /// instead of hiding.
     accounts_note: Option<String>,
+    /// The level the run in flight is at: the last [`launch::LaunchEvent::Progress`]
+    /// its worker reported, kept as *numbers* rather than only as the sentence the
+    /// instance's header draws.
+    ///
+    /// A bar needs a fraction and a state needs a word, and the same fact cannot
+    /// be both if only the formatted line survives. It lives on the shell rather
+    /// than on a page because a run outlives the page it was started from: this is
+    /// what the action bar's download chip is drawn from, and it is what lets the
+    /// launcher be watched from *any* page -- which the per-page line could not
+    /// do, and is the whole reason the reference keeps this surface in its status
+    /// bar.
+    progress: Option<install::Progress>,
+    /// Whether the download manager's panel is open: the reference's own toggle,
+    /// off until its chip is pressed.
+    downloads: bool,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -371,6 +387,24 @@ impl Default for RailSettings {
 
 /// The creation dialog's own button, which is one control on one dialog.
 const CREATE_BUTTON: &str = "shell:create";
+
+/// The action bar's four controls: the download chip (which is also the panel's
+/// own toggle), the two the running chip carries, and the panel's close button.
+const DOWNLOAD_CHIP: &str = "shell:download-chip";
+const BAR_STOP: &str = "shell:bar-stop";
+const BAR_LOGS: &str = "shell:bar-logs";
+const BAR_PANEL_CLOSE: &str = "shell:bar-panel-close";
+
+/// The reference's `py-1.5 px-3 rounded-xl` on both chips: a 20px icon and 6px
+/// of padding on each side, which is 32.
+const BAR_CHIP: f32 = 32.0;
+/// How much of the download chip is the bar rather than the words. The reference
+/// gives its own bar the whole trigger's width and the label to a marquee; a
+/// fixed 64px is this toolkit's version of the same arrangement, and it is what
+/// keeps the chip from resizing on every percentage.
+const DOWNLOAD_BAR: f32 = 64.0;
+/// `OnlineIndicatorIcon`'s dot.
+const INDICATOR: f32 = 8.0;
 
 /// The version picker's two footer states, each its own control: the same row
 /// says one thing when the snapshots are hidden and the other when they are not.
@@ -419,6 +453,52 @@ impl BuildChoice {
             BuildChoice::Other => "shell:create-build:other",
         }
     }
+}
+
+/// The word for the state a run is in, drawn beside its name in the action bar.
+///
+/// The reference's bar carries no such word -- a process it can see is a process
+/// that is running -- and this launcher has two states it cannot see from the
+/// outside: preparing, and being stopped. Both are states in which the controls
+/// beside the word are missing or about to be, which is exactly when a word is
+/// worth drawing. *Running* is the arm with nothing to say, and it says nothing.
+fn state_label(state: store::LaunchState) -> Option<&'static str> {
+    match state {
+        store::LaunchState::Idle | store::LaunchState::Running => None,
+        store::LaunchState::Starting => Some(Key::InstanceActionStarting.message()),
+        store::LaunchState::Stopping => Some(Key::InstanceActionStopping.message()),
+    }
+}
+
+/// The name of an instance, for a surface that has only its id.
+///
+/// The library the pages are drawn from is where a name lives, and a run records
+/// an id: an instance the list has not read yet -- or one that was removed while
+/// it ran -- falls back to the id itself, which is what the reference's own bar
+/// shows for an instance it cannot load.
+fn instance_name(store: &Store, id: &str) -> String {
+    store
+        .instance(id)
+        .ready()
+        .map(|card| card.name.clone())
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// The download panel's own sentence: what is being fetched, how many of them are
+/// done, and how many bytes it has cost.
+///
+/// The rate the reference shows beside these is deliberately absent: a rate needs
+/// a clock and a window, and a number computed from one frame's difference is a
+/// number that jumps. Bytes-to-date is the same fact without the lie.
+fn progress_line(progress: &install::Progress) -> String {
+    if progress.is_indeterminate() {
+        return format!("{}…", progress.label);
+    }
+    let megabytes = progress.bytes as f64 / (1024.0 * 1024.0);
+    format!(
+        "{}: {} of {} · {megabytes:.1} MB",
+        progress.label, progress.done, progress.total
+    )
 }
 
 /// The modloader chips' identities, one per chip.
@@ -527,6 +607,10 @@ pub enum Message {
     SignIn,
     /// The sentence under the card was read.
     DismissAccountsNote,
+    /// The action bar's download chip: open or close the panel under the head.
+    ToggleDownloads,
+    /// The action bar's own stop control: end the run this launcher is in.
+    StopRun,
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
     /// The name in the creation dialog changed.
@@ -629,6 +713,8 @@ impl Shell {
             accounts_warning: None,
             accounts_open: false,
             accounts_note: None,
+            progress: None,
+            downloads: false,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -1137,6 +1223,19 @@ impl Shell {
                 self.accounts_note = None;
                 None
             }
+            Message::ToggleDownloads => {
+                self.downloads = !self.downloads;
+                None
+            }
+            Message::StopRun => {
+                // The instance comes from the store rather than from a page: the
+                // bar is drawn from what this launcher is running, and a page the
+                // user has since navigated away from is not asked.
+                if let Some(id) = self.store.launch().instance.clone() {
+                    self.stop(&id);
+                }
+                None
+            }
             Message::CloseModal => {
                 self.modal = None;
                 None
@@ -1544,6 +1643,17 @@ impl Shell {
         if self.run.as_ref().map(|run| run.instance_id.as_str()) != Some(id) {
             return;
         }
+        // Nothing to kill while the launcher is still preparing: the child slot
+        // is empty until the worker has resolved the version, fetched what was
+        // missing and started the process. Setting *Stopping* here would be a
+        // word with nothing behind it -- the run would go on to start the game
+        // and then report itself running under a chip that says it is being
+        // stopped -- so this is the one state where a stop is refused rather than
+        // performed. It is refused by *not being drawn*, too: the action bar's own
+        // control and the instance page's are both absent while a run prepares.
+        if self.store.launch_state(id) != store::LaunchState::Running {
+            return;
+        }
         self.store.set_launch(store::Launch {
             instance: Some(id.to_string()),
             state: store::LaunchState::Stopping,
@@ -1576,6 +1686,9 @@ impl Shell {
                 if current != Some(run_id) {
                     return;
                 }
+                // Kept as well as said: the line is the instance's own, and the
+                // numbers are what the action bar's chip is drawn from.
+                self.progress = Some(progress.clone());
                 self.say(progress.status_line());
             }
             launch::LaunchEvent::Started { run_id } => {
@@ -1585,6 +1698,12 @@ impl Shell {
                 // What changes here is the control and not the line: the fact is
                 // about the game's window being up, and the run's own last line
                 // is still the last thing the launcher said.
+                //
+                // The level goes with it: fetching is over, and a bar left at
+                // the last phase's fraction would be a download that never
+                // finished. The panel closes for the same reason.
+                self.progress = None;
+                self.downloads = false;
                 self.set_run_state(store::LaunchState::Running);
             }
             launch::LaunchEvent::Done { run_id, note } => {
@@ -1595,6 +1714,8 @@ impl Shell {
                 if let Ok(mut slot) = self.child.lock() {
                     *slot = None;
                 }
+                self.progress = None;
+                self.downloads = false;
                 self.store.set_launch(store::Launch {
                     instance,
                     state: store::LaunchState::Idle,
@@ -1733,13 +1854,19 @@ impl Shell {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
             ..container::Appearance::default()
         };
-        column![
+        let mut window = column![].width(Length::Fill).height(Length::Fill).push(
             container(self.head()).width(Length::Fill).height(Length::Fixed(BAR)).style(chrome),
-            row![self.rail(), self.pane()].height(Length::Fill),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        );
+        // The download manager's panel, between the bar it was opened from and
+        // the page it is about: see [`Shell::download_panel`].
+        if self.downloads {
+            if let Some(progress) = &self.progress {
+                window = window.push(self.download_panel(progress));
+            }
+        }
+        window
+            .push(row![self.rail(), self.pane()].height(Length::Fill))
+            .into()
     }
 
     /// The head: the mark, the history, the breadcrumb, the panel toggle and
@@ -1771,7 +1898,15 @@ impl Shell {
                     .font(medium())
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
             )
+            // The reference's own order on the right of the status bar: the
+            // action bar, then the panel toggle, then the window controls. The
+            // action bar is what makes a run watchable from any page -- the
+            // reference keeps it here rather than on the instance page for exactly
+            // that reason, and this shell used to draw the run only in the header
+            // of the instance it belonged to.
             .push(Space::with_width(Length::Fill))
+            .push(self.action_bar())
+            .push(Space::with_width(8.0))
             .push(self.panel_toggle())
             // `mr-3` on the toggle, then the controls' own reservation.
             .push(Space::with_width(12.0));
@@ -1780,6 +1915,248 @@ impl Shell {
             .height(Length::Fixed(BAR))
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// The action bar: what this launcher is running, and how far the run is
+    /// through whatever it is fetching.
+    ///
+    /// `AppActionBar.vue`'s right-hand cluster, in its own order: the download
+    /// manager's chip first, then the one chip that says what is running. Two
+    /// pieces of it are deliberately not built here, and both are absent features
+    /// rather than missing pixels: the offline banner needs an online/offline
+    /// source this launcher has no opinion about yet, and the update button
+    /// belongs to a self-updater it does not have.
+    fn action_bar(&self) -> Element<'_, Message> {
+        let mut bar = row![].align_items(Alignment::Center).spacing(8.0);
+        if let Some(progress) = &self.progress {
+            bar = bar.push(self.download_chip(progress));
+        }
+        bar.push(self.running_chip()).into()
+    }
+
+    /// The download manager's chip: the glyph, the phase's own label and either
+    /// its percentage or the fact that it has no length yet.
+    ///
+    /// The bar under the label is [`crate::ui::progress`] over the phase's own
+    /// fraction, so the number and the fill cannot disagree: both are read from
+    /// the same `Progress`.
+    fn download_chip(&self, progress: &install::Progress) -> Element<'_, Message> {
+        let theme = self.theme;
+        let (factor, _) = crate::ui::interaction(DOWNLOAD_CHIP);
+        // The reference's `bg-brand-highlight` while its panel is open, which is
+        // how a chip that toggles something says that it is open.
+        let background = self
+            .downloads
+            .then(|| theme_gen::ink(theme, Ink::ColorBrandHighlight));
+        let ink = crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor);
+        let mut body = row![].align_items(Alignment::Center).spacing(8.0);
+        body = body.push(icon::icon(Glyph::Download, 16.0, ink));
+        body = body.push(
+            text(progress.label.clone())
+                .size(13.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(ink)),
+        );
+        body = body.push(
+            text(if progress.is_indeterminate() {
+                // No fraction to show, and a percentage would have to be
+                // invented: the reference's own arm says "working" with a
+                // spinner rather than with a number.
+                "…".to_string()
+            } else {
+                format!("{}%", progress.percent())
+            })
+            .size(13.0)
+            .font(semibold())
+            .style(iced::theme::Text::Color(ink)),
+        );
+        body = body.push(
+            container(crate::ui::progress(theme, progress.fraction()))
+                .width(Length::Fixed(DOWNLOAD_BAR))
+                .center_y(),
+        );
+        let chip = container(body)
+            .height(Length::Fixed(BAR_CHIP))
+            .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 12.0 })
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: background.map(|background| {
+                    Background::Color(crate::theme::brightness(background, factor))
+                }),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..container::Appearance::default()
+            });
+        mouse_area(chip)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover(DOWNLOAD_CHIP, true))
+            .on_exit(Message::hover(DOWNLOAD_CHIP, false))
+            .on_press(Message::ToggleDownloads)
+            .into()
+    }
+
+    /// The chip that says what this launcher is running, with the two controls
+    /// the reference gives it: stop, and go to the instance's logs.
+    ///
+    /// Nothing running is a chip of its own rather than no chip: the reference
+    /// draws *No instances running* beside a grey dot so that the surface keeps
+    /// its place and its shape, and a bar that came and went as processes started
+    /// and stopped would move everything beside it.
+    fn running_chip(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let launch = self.store.launch();
+        let running = launch.state != store::LaunchState::Idle;
+        let mut body = row![].align_items(Alignment::Center).spacing(8.0);
+        if running {
+            let id = launch.instance.clone().unwrap_or_default();
+            // A dot, the instance's name, and the state it is in -- which the
+            // reference leaves to the instance's own header and this shell can
+            // afford to say twice: a run being *stopped* looks exactly like a run
+            // being started from the outside.
+            body = body.push(self.indicator(Ink::Green));
+            body = body.push(
+                mouse_area(
+                    text(instance_name(&self.store, &id))
+                        .size(13.0)
+                        .font(semibold())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                )
+                .interaction(Interaction::Pointer)
+                .on_press(Message::Go(format!("/instance/{id}"))),
+            );
+            if let Some(state) = state_label(launch.state) {
+                body = body.push(
+                    text(state)
+                        .size(13.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                );
+            }
+            // The stop control exists when there is something to stop, which is
+            // [`store::LaunchState::Running`] rather than "not idle": the kill
+            // goes to the child the worker put in the slot, and while a run is
+            // *preparing* there is no such child -- a control that drew itself
+            // there would be a button whose press changed a word and nothing
+            // else. The reference's own condition is the same one: it draws this
+            // for a process it can see.
+            if launch.state == store::LaunchState::Running {
+                body = body.push(crate::ui::icon_button_kind(
+                    theme,
+                    BAR_STOP,
+                    Glyph::StopCircle,
+                    18.0,
+                    crate::ui::Kind::Danger,
+                    Message::StopRun,
+                ));
+            }
+            body = body.push(crate::ui::icon_button(
+                theme,
+                BAR_LOGS,
+                Glyph::TerminalSquare,
+                18.0,
+                Message::Go(format!("/instance/{id}/logs")),
+            ));
+        } else {
+            body = body.push(self.indicator(INK_SECONDARY));
+            body = body.push(
+                text(Key::AppActionBarNoInstancesRunning.message())
+                    .size(13.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        }
+        container(body)
+            .height(Length::Fixed(BAR_CHIP))
+            .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 12.0 })
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// The reference's `OnlineIndicatorIcon`: a dot in the colour of the fact it
+    /// carries.
+    fn indicator(&self, ink: Ink) -> Element<'_, Message> {
+        let theme = self.theme;
+        container(Space::with_width(INDICATOR))
+            .width(Length::Fixed(INDICATOR))
+            .height(Length::Fixed(INDICATOR))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, ink))),
+                border: Border { radius: 999.0.into(), ..Border::default() },
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// The download manager's panel, drawn under the head while it is open.
+    ///
+    /// The reference floats this in a teleported popup; iced 0.12 has no
+    /// z-order and this is the same wall the version picker hit, so it is drawn
+    /// in the layout: a row under the bar, which is where a panel the user opened
+    /// from the bar belongs. What it holds is the one job this launcher can have
+    /// -- the run's own phase -- with the three numbers the reference shows:
+    /// what it is doing, how many of them are done, and how many bytes that is.
+    fn download_panel(&self, progress: &install::Progress) -> Element<'_, Message> {
+        let theme = self.theme;
+        let launch = self.store.launch();
+        let title = launch
+            .instance
+            .as_deref()
+            .map(|id| instance_name(&self.store, id))
+            .unwrap_or_else(|| Key::AppActionBarDownloads.message().to_string());
+        let body = column![]
+            .spacing(6.0)
+            .push(
+                row![]
+                    .align_items(Alignment::Center)
+                    .spacing(8.0)
+                    .push(
+                        text(title)
+                            .size(14.0)
+                            .font(semibold())
+                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    )
+                    .push(Space::with_width(Length::Fill))
+                    .push(crate::ui::icon_button(
+                        theme,
+                        BAR_PANEL_CLOSE,
+                        Glyph::X,
+                        16.0,
+                        Message::ToggleDownloads,
+                    )),
+            )
+            .push(
+                text(progress_line(progress))
+                    .size(13.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            )
+            // The fraction again, as a bar: the same `Progress` the chip was
+            // drawn from, so a panel and a chip cannot disagree.
+            .push(crate::ui::progress(theme, progress.fraction()));
+        container(body)
+            .width(Length::Fill)
+            .padding(Padding { top: 10.0, bottom: 10.0, left: RAIL_PAD, right: CONTROLS_WIDTH })
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
                 ..container::Appearance::default()
             })
             .into()
@@ -3879,6 +4256,13 @@ mod tests {
         // shell has asked the child to die. There is no child in a test -- the
         // slot is empty -- so what is asserted is that the request is harmless
         // and that the state is set before the answer comes back.
+        //
+        // The game has to be *up* first, and that is the behaviour this test now
+        // pins rather than an inconvenience: a stop while the launcher is still
+        // preparing has no child to kill, and setting *Stopping* for it would
+        // leave the run to start the game under a button that said it was being
+        // taken down. Pressing it before the run is up is refused instead, which
+        // is why the instance page draws the button unusable in that state.
         let mut shell = shell_with_home("stop");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
@@ -3886,10 +4270,21 @@ mod tests {
             &mut shell,
             Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
         );
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Starting,
+            "nothing to kill yet"
+        );
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
+        );
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
         assert!(shell.run.is_some(), "the run is not over until the worker says so");
         // A stop for an instance that is not the one running is ignored rather
-        // than killing the wrong game.
+        // than killing the wrong game, and so is a second one for the same run.
         press(
             &mut shell,
             Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
@@ -3990,6 +4385,104 @@ mod tests {
     /// The versions the picker would draw, in the order it draws them.
     fn version_ids(shell: &Shell) -> Vec<&str> {
         shell.version_matches().into_iter().map(|version| version.id.as_str()).collect()
+    }
+
+    #[test]
+    fn the_action_bar_follows_the_run_from_any_page_and_stops_what_is_running() {
+        // The surface the plan names: a run used to be watchable only in the
+        // header of the instance it belonged to, which meant navigating away from
+        // it hid it. The bar is drawn from the store, so the run follows the
+        // reader instead -- and the two facts it carries are the two the reference
+        // carries: what is running, and how to stop it.
+        let mut shell = shell_with_home("action-bar");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Starting);
+        press(&mut shell, Message::Go("/browse/modpack".into()));
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Starting,
+            "the run is the launcher's, not the page's"
+        );
+        assert_eq!(state_label(store::LaunchState::Starting), Some("Starting..."));
+        assert_eq!(state_label(store::LaunchState::Stopping), Some("Stopping..."));
+        assert_eq!(state_label(store::LaunchState::Running), None, "nothing to say");
+        assert_eq!(state_label(store::LaunchState::Idle), None, "and nothing running");
+        // The bar's own stop, while the launcher is still *preparing*: there is no
+        // child process to kill yet, so the control is not drawn and this message
+        // is not one it can send. What a press would do otherwise is change a word
+        // and leave the run to start the game anyway.
+        press(&mut shell, Message::StopRun);
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Starting,
+            "nothing to stop yet"
+        );
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        press(&mut shell, Message::StopRun);
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        // And the name the chip draws: the library's own when it has been read,
+        // the id when it has not -- which is the arm an instance removed while it
+        // was running lands in.
+        assert_eq!(
+            instance_name(&shell.store, "atm10"),
+            "atm10",
+            "the id, for an instance the library has not read"
+        );
+        drop(shell.render());
+    }
+
+    #[test]
+    fn the_download_panel_is_the_launch_s_own_level_and_it_goes_when_the_fetch_does() {
+        // The panel is drawn from the level the run reported, which is the reason
+        // `LaunchEvent::Progress` is kept as numbers rather than only as the
+        // sentence the instance header shows.
+        let mut shell = shell_with_home("downloads");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        play(&mut shell);
+        press(&mut shell, Message::ToggleDownloads);
+        assert!(shell.downloads, "the chip is the panel's own toggle");
+        assert!(shell.progress.is_none(), "and there is nothing to show yet");
+        drop(shell.render());
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Progress {
+                run_id: 1,
+                progress: crate::install::Progress::new("files", 3, 12, 6 * 1024 * 1024),
+            }),
+        );
+        let progress = shell.progress.clone().expect("the level");
+        assert_eq!(progress.fraction(), 0.25);
+        assert_eq!(progress_line(&progress), "files: 3 of 12 · 6.0 MB");
+        // An indeterminate level says so in words rather than inventing a
+        // fraction: the launcher's own "loading" states have no countable total.
+        assert_eq!(
+            progress_line(&crate::install::Progress::starting("installing Java")),
+            "installing Java…"
+        );
+        drop(shell.render());
+        // The game coming up is the end of the fetch: the level goes with it, and
+        // so does the panel a bar would have been left in.
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
+        assert!(shell.progress.is_none());
+        assert!(!shell.downloads);
+        // A run that ends clears both too, for the same reason.
+        press(&mut shell, Message::ToggleDownloads);
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Progress {
+                run_id: 1,
+                progress: crate::install::Progress::starting("natives"),
+            }),
+        );
+        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
+            run_id: 1,
+            note: "process exited (exit status: 0)".to_string(),
+        }));
+        assert!(shell.progress.is_none());
+        assert!(!shell.downloads);
+        assert!(shell.run.is_none());
     }
 
     #[test]

@@ -1504,13 +1504,115 @@ Three things the reference draws that this does not, each for a reason:
       and `a_clock_belongs_to_the_test_that_reads_it` asserts the isolation
       rather than the lock the suite used to have to remember to take.
 
+### The four loaders, and the dialog that chooses one
+
+Prism's repository was where this launcher read its loader builds, and Prism is
+not the reference for anything here: it is a *mirror* of the four loaders' own
+publications, rewritten into another launcher's shape. G84 reads each loader from
+the loader. The four are four shapes rather than one with a different host, which
+is why the reader is four parsers and not one: Fabric and Quilt publish a list of
+builds for one game version (Quilt without a `stable` flag at all, so a build's
+version string has to say it), NeoForge publishes *every* version of itself on its
+maven and the game's own line has to be picked out of it, and Forge promotes two
+builds per game by name -- `recommended` and `latest` -- which is the pair its
+users mean by stable and newest.
+
+G85 is the choice reaching the disk. The reference's custom-setup step is the
+name, the modloader chips, the game-version combobox, then which build of that
+loader, and all four are drawn; what a create writes is a component with the
+build's version in the instance's pack profile, which is what a launch resolves.
+Two decisions are worth reading rather than inferring. **The build request
+carries the question it answers**: a Fabric list arriving after the Quilt chip was
+pressed would otherwise be drawn under the Quilt chip, and one line of comparison
+in `Store::loader_builds`'s own future is what prevents it. **The chips are rules,
+not versions**: *Stable* and *Latest* name a rule, so the build the rule comes to
+is drawn beside the label -- otherwise a create's own consequence is invisible
+until the instance exists.
+
+- [x] G84: the four mod loaders' build lists are read from the loaders'
+      themselves -- Fabric, Quilt, NeoForge and Forge -- newest first, each
+      carrying whether its own source calls it stable
+  CHECK: cargo test -p palantir-net --locked
+  EXPECT: test result: ok. 213 passed
+  EVIDENCE: seven unit tests over the four shapes, the ordering rule and the
+      cache, plus a thirteenth `#[ignore]`d live test that was run against all
+      four services for `1.21.1`: Fabric 60 builds (newest `0.19.5`), Quilt 60
+      (newest `0.31.0-beta.4`, whose default is the newest *release*, `0.30.1`),
+      NeoForge 60 (newest `21.1.251`), Forge two (`52.1.16`, default
+      `recommended` `52.1.0`). The live run corrected an expectation of mine on
+      the way in: `21.4.100-beta` *is* newer than `21.4.5`, so the ordering rule
+      is numbers first and a suffix below its own release, not the reverse.
+- [x] G85: the creation dialog draws the reference's own custom-setup step -- the
+      modloader chips, the game version, then the loader-version chips over the
+      builds *Other* offers -- and what it chooses is what the instance is
+      created with
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 604 passed
+  EVIDENCE: two store tests (the request reads the loader's own service and
+      vanilla asks nothing; a create writes `net.fabricmc.fabric-loader` at the
+      chosen build into `mmc-pack.json`) and three shell tests (the dialog asks
+the loader it opens on, a list about a choice the dialog has left is dropped,
+and the button waits for the loader's own answer while vanilla does not).
+      Vanilla is not a request at all, and the button stays usable when a list
+      came back *empty* or *failed*: those are sentences on the row, and a dialog
+      a reader cannot leave is worse than one that said what happened.
+
+### The launch surface
+
+A run used to be visible in exactly one place: the header of the instance it
+belonged to. Navigate away and the launcher was running something invisible, and
+the reference does not work that way -- its `AppActionBar` sits in the status bar,
+in the right-hand cluster before the sidebar toggle, so a run is watchable from
+whatever page the reader is on and its stop control is always where they left it.
+G86 is that surface, in that place, with the reference's own order: the download
+manager's chip first, then the chip that says what is running, then a dot, the
+instance's name, its stop control and the way to its logs.
+
+The chip's level is why `LaunchEvent::Progress` is kept as *numbers* rather than
+only as the sentence the instance's header shows: a bar needs a fraction and the
+same fact cannot be both if only the formatted line survives. The panel that chip
+opens is drawn in the layout rather than floating -- iced 0.12 has no z-order,
+which is the same wall the version picker hit -- and it shows the three things the
+reference shows: what is being fetched, how many of them are done, and the bytes
+that has cost. The rate the reference puts beside them is deliberately absent: a
+rate needs a clock and a window, and a number computed from one frame's difference
+is a number that jumps.
+
+Two things the reference draws are absent and are absent features rather than
+missing pixels: the offline banner needs an online/offline source this launcher
+has no opinion about yet, and the update button belongs to a self-updater it does
+not have. The third is a limit of this launcher rather than of this gate: the
+reference's popover lists *every* running process, and this one runs one instance
+at a time -- `Shell::play` refuses while a run is in flight -- so there is one job
+to list and a chip rather than a menu. What *is* asserted is the half that was
+missing: the run is the launcher's, not the page's.
+
+- [x] G86: the action bar in the head follows the run from any page, with the
+      run's own level as a chip and a panel, and a stop control that exists when
+      there is something to stop
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 606 passed
+  EVIDENCE: two new shell tests. One starts a run, navigates away and asserts the
+      run is still the store's, that the four state words are the reference's own
+      (and that *Running* draws none, because a process that is up needs no
+      word), and that a stop pressed while the launcher is still *preparing* is
+      refused -- the child slot is empty then, and the kill has nothing to send
+      it to. The other asserts the level: a quarter of three-of-twelve reads
+      25%, the panel's line carries the count and the bytes, an indeterminate
+      level says so in words instead of inventing a fraction, and both the level
+      and the panel go when the fetch does. That refusal is a behaviour change
+      with a test to match: `stopping_is_a_state_the_header_can_draw_and_a_kill_
+      the_shell_can_send` now puts the game up before it presses Stop, which is
+      what makes the state it asserts reachable at all.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
-Ten runs at the time of writing, one per commit from `82232f9` onwards —
+At the time of writing, one per commit from `82232f9` onwards —
 `36033443993`, `36038333030`, `36143868395`, `36152873678`, `36156018946`,
-`36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`, and
-every push adds one — each died in three to six seconds with zero steps and
+`36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`,
+`36241262447`, `36242305444`, `36254170068`, and every push adds one — each died
+in three to six seconds with zero steps and
 the same annotation: `recent account payments have failed or your spending limit
 needs to be increased`. So no job ran, in either workflow, and there is no
 `test result` line from a runner to quote for any of them. The ids are written
@@ -1523,12 +1625,12 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    599 passed; 0 failed  (palantir-desktop, bin)
+    606 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
-    205 passed; 0 failed  (palantir-net, lib)
-      0 passed; 0 failed; 12 ignored  (palantir-net, tests/live.rs)
+    213 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.75s
@@ -1544,11 +1646,12 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1021 tests pass, nothing in the correctness-deny set is failing, and all four
+1036 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 599 now: the seam (G75), the interaction (G76), the
+engine's slices landed and is 606 now: the seam (G75), the interaction (G76), the
 settings pane (G77), stage 5's three flows (G78-G80), the launch (G81), the
-switch (G82) and stage 3's panel (G83) added forty-five between them, and the run
+switch (G82), stage 3's panel (G83), the loader read and the dialog that chooses
+one (G84-G85) and the action bar (G86) added fifty-two between them, and the run
 above was taken after all of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72

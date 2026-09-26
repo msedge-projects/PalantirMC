@@ -69,7 +69,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
     4: [(66, 75)],  # the engine, and the first page served by it
-    5: [(78, 81)],  # create, import, the picker, the launch
+    5: [(78, 81), (84, 86)],  # create, import, the picker, the launch; the loaders; the action bar
 }
 
 # The plan's open work, by the bold name its bullet carries, with the number of
@@ -104,14 +104,9 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
             "app.rs, and the Prism-shaped palantir-core modules only it calls",
         ),
         (
-            "The loaders.",
-            2,
-            "the loader chips, and installing an instance through palantir-loader",
-        ),
-        (
             "The launch surface.",
-            2,
-            "the action bar, and the download manager",
+            1,
+            "the multi-run popover, and a download manager with more than the run's own job",
         ),
     ],
 }
