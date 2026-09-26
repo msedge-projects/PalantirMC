@@ -83,7 +83,7 @@ them.
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). What is not real yet is anything a service answers, and the panel's remaining sections, which all are -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
-| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); and a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86). What is not in is the retire of the shell this one replaces |
+| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88). What is not in is the pruning of what only that shell was still calling, and the rest of the launch surface |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
 sees every commit while `master` keeps building a launcher that runs. Only
@@ -558,12 +558,18 @@ built:
 
 What stage 5 still owes, in the order it is worth doing:
 
-1. **The delete.** The switch is made: a plain run is the new shell and the old
-   chrome is behind `--classic`. One slice of it has landed -- `palantir-gui`
-   moved into the desktop crate as `model.rs`, its dead half deleted, and the
-   crate itself gone (G87). What is left is `app.rs`, 10k lines and most of the
-   correctness warnings, and the Prism-shaped modules in `palantir-core` that only
-   it calls.
+1. **What the old shell was the last caller of.** The delete has landed (G88):
+   `app.rs`, `glyphs.rs`, `icons.rs`, `settings.rs`, the carved Prism instance art
+   and the `--classic` entry point are gone, and the two things the product still
+   needed from that shell -- Windows' own frame handling, and a `--shot` capture
+   its gates are run through -- are this shell's. What the delete exposed is what
+   only that shell was calling: 199 dead items across the crate, 67 of them in
+   `theme.rs`'s hand-written palette and 38 in `browse.rs`. They go next, and one
+   of them cannot be pruned by hand at all: `text_gen.rs` is generated output that
+   CI checks byte for byte, so the allowance for its unused keys has to be emitted
+   by `tools/gen_text.py` rather than deleted row by row. The Prism-shaped
+   `palantir-core` modules stay for now, with the flattening importer that
+   replaces them -- every one of them still has a reader in this crate.
 2. **The launch surface.** The reference's action bar and its download manager
    are where a launch is watched there, and the bar is now in this shell's head:
    the run, its level as a chip over a panel, its stop control and the way to its

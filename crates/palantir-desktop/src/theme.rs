@@ -108,8 +108,8 @@ pub fn brightness(color: Color, factor: f32) -> Color {
 ///
 /// Straight component interpolation, which is what a CSS colour transition is —
 /// and the reference's controls transition their colours (`bg-surface-4`, a
-/// ring appearing) rather than only their filter. Shared with
-/// [`crate::settings`], whose switch track recolours across its own slide.
+/// ring appearing) rather than only their filter. Shared with the Settings
+/// modal's switch, whose track recolours across its own slide.
 pub fn mix(from: Color, to: Color, t: f32) -> Color {
     let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
     Color {
@@ -1067,8 +1067,8 @@ pub struct Btn {
     /// `None` until [`Btn::with_clock`] is given one.
     pub clock: Option<&'static std::sync::Mutex<crate::anim::Interactions>>,
     /// The key this button tweens under. Two buttons sharing a key share a
-    /// tween, which is why every control in the shell is given a key of its
-    /// own by [`crate::app`]'s `hover_button`.
+    /// tween, which is why every control the shell draws is given a key of its
+    /// own through [`crate::ui::interaction`].
     pub key: &'static str,
     /// A scoped hover brightness override for surfaces such as instance cards.
     pub hover_factor: Option<f32>,

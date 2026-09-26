@@ -226,6 +226,13 @@ pub struct Shell {
     modal: Option<Modal>,
     /// Whether the window is maximized, which the window controls' icon needs.
     maximized: bool,
+    /// Where a `--shot` run's picture is going, if this is one. The request is in
+    /// place before the first frame, the timer [`Shell::capture`] asks for fires
+    /// once the window has settled, and writing the frame is what ends the run.
+    shot: Option<std::path::PathBuf>,
+    /// Whether the frame has already been asked for, so a timer that fires twice
+    /// cannot write the same file twice.
+    shot_taken: bool,
     /// The page in the pane, with its own state.
     screen: Screen,
     /// What the pages are answered with: the launcher's own filesystem, and the
@@ -666,6 +673,14 @@ pub enum Message {
     Minimize,
     ToggleMaximize,
     Close,
+    /// The window's own state changed, reported by the window procedure: it is
+    /// maximized now, or it is not, or the pointer moved on or off the maximize
+    /// control. See [`window_state`] for why neither can be a widget's message.
+    WindowStateChanged,
+    /// A `--shot` run's settle timer fired: ask the window for its frame.
+    ShotDue,
+    /// The frame [`Message::ShotDue`] asked for, to be written and to end the run.
+    ShotTaken(iced::window::Screenshot),
 }
 
 impl Shell {
@@ -686,6 +701,8 @@ impl Shell {
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             modal: None,
             maximized: false,
+            shot: None,
+            shot_taken: false,
             create_name: String::new(),
             create_error: None,
             creating: false,
@@ -929,13 +946,61 @@ impl Shell {
     /// either the one the message asked for or the one the page it left behind
     /// owes -- never both, and never two.
     fn handle(&mut self, message: Message) -> iced::Command<Message> {
+        // Hand the window's frame to Windows, as soon as there is a window.
+        //
+        // `native::install_hit_test` takes over `WM_NCHITTEST`, which is what
+        // makes Windows run its own resize loop (with its own cursors, including
+        // the diagonals iced has no way to ask for) and what puts Windows 11's
+        // Snap Layouts on the maximize control. It cannot happen in
+        // [`Shell::new`]: iced runs `Application::new` *before* it builds the
+        // window. The first dispatched message is the earliest safe moment, and
+        // there is one before the window is ever painted. Once it has taken
+        // effect this is an atomic load, so it is called from every message
+        // rather than tracked. A failure is not reported and not retried forever:
+        // the window stays usable, and what is lost is the native cursors, the
+        // resize edges and the flyout.
+        let _ = crate::native::install_hit_test();
         match message {
             Message::Minimize => return window::minimize(Id::MAIN, true),
             Message::ToggleMaximize => {
-                self.maximized = !self.maximized;
+                // With the shim in place this arm is not what the button does:
+                // Windows answers that point as a caption button once
+                // [`caption_target`] names it, so the click goes to the window
+                // rather than to iced. This is what a window without the shim
+                // has, and asking the window instead of inverting a flag keeps
+                // the two paths from disagreeing.
+                self.maximized = !crate::native::window_maximized().unwrap_or(self.maximized);
                 return window::maximize(Id::MAIN, self.maximized);
             }
             Message::Close => return window::close(Id::MAIN),
+            // The caption reads the window itself, so this arm's real job is to
+            // be a message at all: it is what makes iced rebuild the view, and
+            // the rebuild is what shows a maximize the user performed with Snap,
+            // the taskbar or the keyboard.
+            Message::WindowStateChanged => {
+                self.maximized = crate::native::window_maximized().unwrap_or(self.maximized);
+                return iced::Command::none();
+            }
+            // The capture is taken here, at the point the runtime is asked for
+            // the window's frame, rather than by a tool outside the process:
+            // iced draws this window, so it is the only thing that can hand back
+            // exactly what was drawn. `write_shot` then writes it and the window
+            // closes, which is what ends a capture run.
+            Message::ShotDue => {
+                if self.shot.is_some() && !self.shot_taken {
+                    self.shot_taken = true;
+                    return window::screenshot(Id::MAIN, Message::ShotTaken);
+                }
+                return iced::Command::none();
+            }
+            Message::ShotTaken(shot) => {
+                if let Some(path) = self.shot.clone() {
+                    if let Err(error) = write_shot(&path, &shot) {
+                        eprintln!("shot failed: {error}");
+                    }
+                }
+                return window::close(Id::MAIN);
+            }
             _ => {}
         }
         if let Some(asked) = self.act(message) {
@@ -979,6 +1044,12 @@ impl Shell {
                 self.back();
                 None
             }
+            // Neither is a request and neither reaches this far: `handle`
+            // answers the window's own state and the capture's timer before it
+            // asks `act` anything. They are matched here so that adding a
+            // message is a compile error in the one place that has to decide
+            // what to do with it.
+            Message::WindowStateChanged | Message::ShotDue | Message::ShotTaken(_) => None,
             Message::Forward => {
                 self.forward();
                 None
@@ -1836,6 +1907,10 @@ impl Shell {
     // ---- Drawing --------------------------------------------------------
 
     fn render(&self) -> Element<'_, Message> {
+        // Keep the window's hit test pointed at the maximize control: the
+        // rectangle is derived from this shell's own constants, so re-publishing
+        // it is a store behind a lock rather than a measurement to keep in step.
+        crate::native::set_caption_target(caption_target());
         // A modal *replaces* the window's contents rather than covering them,
         // and that is a limitation rather than a choice: iced 0.12 composites a
         // tree in order and has no z-order, so a layer over a layer is not
@@ -3660,6 +3735,16 @@ pub struct Flags {
     pub page: Option<String>,
     /// `--size WxH`, the client size to open at.
     pub size: Option<(u32, u32)>,
+    /// `--shot PATH`: draw this window, write its pixels to PATH as a PNG, and
+    /// close.
+    ///
+    /// The flag the page gates are run through (`tools/appshot.py`), and a flag
+    /// of the launcher rather than a screenshot tool reaching in from outside for
+    /// the reason [`write_shot`] gives: only the process that drew the frame can
+    /// hand back exactly that frame. A capture states its own size and is born
+    /// off the desktop, so taking one neither resizes anything nor interrupts
+    /// whoever is at the machine.
+    pub shot: Option<std::path::PathBuf>,
 }
 
 impl Flags {
@@ -3670,6 +3755,7 @@ impl Flags {
         while let Some(argument) = args.next() {
             match argument.as_str() {
                 "--page" => flags.page = args.next(),
+                "--shot" => flags.shot = args.next().map(std::path::PathBuf::from),
                 "--size" => {
                     flags.size = args.next().and_then(|value| {
                         let (width, height) = value.split_once('x')?;
@@ -3689,6 +3775,84 @@ impl Flags {
             .and_then(Address::parse)
             .unwrap_or_else(|| Address::at(route::Route::Home))
     }
+}
+
+/// Subscription id of the window's own state, reported by the window procedure.
+const WINDOW_STATE_ID: &str = "palantirmc-window-state";
+/// Subscription id of the `--shot` capture's settle timer.
+const SHOT_ID: &str = "palantirmc-shot";
+/// How long a `--shot` run gives the window before taking its picture.
+///
+/// The number the old shell used, kept because the page gates were measured
+/// against it: long enough that a page which reads a file or asks a service has
+/// its answer on screen, short enough that a run of captures is not waiting on
+/// the timer.
+const SHOT_SETTLE: std::time::Duration = std::time::Duration::from_millis(3000);
+
+/// The window's own state, as the window procedure reports it.
+///
+/// Neither thing it reports can be a widget's message. The maximize control is
+/// answered as non-client -- which is what puts Snap Layouts on it -- so no
+/// widget ever sees that pointer; and a window maximizes by paths with no button
+/// in them at all: Aero Snap, the taskbar, `Win`+`Up`, and the native control
+/// itself. iced rebuilds a view only when a message arrives, so both need a
+/// message, and both change from outside the app. Polling for them would redraw
+/// an idle launcher forever; instead the window procedure -- which is told about
+/// the pointer by Windows and about maximizing by the window itself -- reports
+/// each change down the pipe this subscription holds open. The cost is zero
+/// until something actually changes.
+fn window_state() -> Subscription<Message> {
+    iced::subscription::channel(WINDOW_STATE_ID, 4, |mut sender| async move {
+        let (reports, mut receiver) = futures::channel::mpsc::unbounded();
+        crate::native::watch_window_state(reports);
+        loop {
+            if futures::StreamExt::next(&mut receiver).await.is_none() {
+                break;
+            }
+            if sender.try_send(Message::WindowStateChanged).is_err() {
+                break;
+            }
+        }
+        // A channel subscription's future never resolves -- iced ends it by
+        // dropping the receiver -- and `Infallible` is how that is said.
+        futures::future::pending::<std::convert::Infallible>().await
+    })
+}
+
+/// The maximize control's rectangle, for the window procedure.
+///
+/// [`Shell::window_controls`] draws the row from these constants -- `px-1.5`,
+/// three `h-9 w-9` buttons, two `gap-2`s, all centred in the head's own height --
+/// so the button's rectangle is arithmetic rather than a measurement. A rectangle
+/// that cannot go stale does not have to be kept in step by hand, and publishing
+/// it is what makes Windows answer the pointer over it as a caption button.
+fn caption_target() -> crate::native::CaptionTarget {
+    crate::native::CaptionTarget {
+        right_inset: CONTROLS_PAD + CONTROLS_BUTTON + CONTROLS_GAP,
+        width: CONTROLS_BUTTON,
+        top: (BAR - CONTROLS_BUTTON) / 2.0,
+        bottom: (BAR + CONTROLS_BUTTON) / 2.0,
+    }
+}
+
+/// Write a captured frame to `path` as a PNG.
+///
+/// Written by this process rather than read out of the window by a tool, and
+/// that is the whole reason `--shot` is a launcher flag: iced draws the window,
+/// so the pixels it hands back are exactly the frame it drew -- no occlusion by
+/// whatever else is on the desktop, no scaling by a screen capture, and no
+/// dependence on a compositor this build may not even be running on.
+fn write_shot(path: &std::path::Path, shot: &iced::window::Screenshot) -> Result<(), String> {
+    // `::image`, not `image`: this file imports iced's `image` widget, so the
+    // bare name is the widget rather than the crate that encodes the PNG.
+    let (width, height) = (shot.size.width, shot.size.height);
+    let pixels = shot.bytes.as_ref().clone();
+    let image = ::image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| format!("{} bytes is not {width}x{height} of RGBA", shot.bytes.len()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    image.save(path).map_err(|error| error.to_string())
 }
 
 /// The theme in force, as the generated tables index it.
@@ -3759,6 +3923,12 @@ impl iced::Application for Shell {
             .with_store(store)
             .with_prefs(paths.clone(), prefs)
             .with_accounts(accounts, accounts_warning);
+        // A capture request is in place before the first frame, which is what
+        // makes the settle timer count from the window opening rather than from
+        // the first message to arrive after it.
+        if let Some(path) = flags.shot.clone() {
+            shell.shot = Some(path);
+        }
         // The page a window opens on may owe a request before any message has
         // arrived -- `/browse/modpack` owes a search -- and the first frame is the
         // first moment there is anywhere to put the answer, so it is asked for
@@ -3784,12 +3954,14 @@ impl iced::Application for Shell {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // Two subscriptions and neither is owed: the frame clock while something
-        // is moving, and the launch while a game is being started or is up. Both
-        // say `none` when they are not needed, which is what keeps an idle window
-        // -- and a launcher with nothing running -- from waking anything up.
+        // Four subscriptions and none is owed: the frame clock while something is
+        // moving, the launch while a game is being started or is up, the window's
+        // own state while Windows can change it, and the settle timer while a
+        // capture is waiting. Each says `none` when it is not needed, which is
+        // what keeps an idle window -- and a launcher with nothing running -- from
+        // waking anything up.
         let frames = if self.animating() { self.frames() } else { Subscription::none() };
-        Subscription::batch([frames, self.launching()])
+        Subscription::batch([frames, self.launching(), window_state(), self.capture()])
     }
 }
 
@@ -3819,6 +3991,29 @@ impl Shell {
                     Err(error) if error.is_full() => {}
                     Err(_) => break,
                 }
+            });
+            loop {
+                futures::future::pending::<()>().await;
+            }
+        })
+    }
+
+    /// The capture a `--shot` run asked for: one settle timer, then the frame.
+    ///
+    /// The settle is not politeness: a window asked for its pixels on its first
+    /// frame would capture whatever had been laid out by then, and a page that
+    /// reads a file or asks a service is not finished by its first frame. The
+    /// timer is a thread for the same reason the frame clock is one, and it ends
+    /// with the subscription: iced drops the receiver once the run has its
+    /// answer, and the thread's next send fails.
+    fn capture(&self) -> Subscription<Message> {
+        if self.shot.is_none() || self.shot_taken {
+            return Subscription::none();
+        }
+        iced::subscription::channel(SHOT_ID, 1, |mut sender| async move {
+            let _ = std::thread::spawn(move || {
+                std::thread::sleep(SHOT_SETTLE);
+                let _ = sender.try_send(Message::ShotDue);
             });
             loop {
                 futures::future::pending::<()>().await;

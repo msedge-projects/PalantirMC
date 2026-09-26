@@ -22,8 +22,8 @@
 //! drawing, and skipping it would cost the polish while saving nothing.
 //!
 //! The mechanism that keeps it free at rest is the same: [`SwitchAnim::animating`]
-//! gates the frame subscription in [`crate::app`], so a shell whose switches have
-//! all arrived asks for no frames at all.
+//! gates the frame clock in [`crate::shell`], so a shell whose switches have all
+//! arrived asks for no frames at all.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

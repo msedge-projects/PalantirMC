@@ -66,8 +66,8 @@ pub fn window_title() -> String {
 const LOGO_SIDE: u32 = 256;
 
 /// Handle for the hero logo. Built once per process; `Handle` clones are
-/// `Arc` bumps, so per-frame cost is nil (see `crate::icons` for the
-/// renderer-side caching analysis, which applies identically here).
+/// `Arc` bumps, so per-frame cost is nil -- the same caching argument
+/// [`crate::icon`] makes for the reference's geometry.
 ///
 /// The pixels are decoded here rather than left to the renderer so that what
 /// gets cached is [`LOGO_SIDE`] square rather than the full original: on this

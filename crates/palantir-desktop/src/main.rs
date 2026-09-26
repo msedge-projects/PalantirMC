@@ -1,17 +1,10 @@
 #![windows_subsystem = "windows"]
 //! PalantirMC desktop entry point (iced 0.12).
 //!
-//! The whole interface lives in [`app::PalantirApp`]; this file only holds the
-//! two thin runtime shells over it:
-//!
-//! * [`State`] implements [`iced::Sandbox`] — the crate's original API, kept
-//!   compiling and working. `Sandbox` cannot stream background output (its
-//!   blanket `Application` impl hardcodes `Subscription::none()`), so a launch
-//!   here performs an honest synchronous dry run and instances load during
-//!   construction.
-//! * [`App`] implements [`iced::Application`] from the same iced 0.12 crate and
-//!   wires the subscriptions: instance scans, the version catalog, Modrinth
-//!   searches and downloads, launcher scans and the launch stream.
+//! One shell draws this window: [`shell::Shell`], the reference's own
+//! information architecture in iced. What this file holds is the runtime around
+//! it — which renderer, which window, which fonts — and the tests that check the
+//! window opens where the screen allows.
 //!
 //! Window: the shell draws its own title bar, so the window is created without
 //! decorations and carries the PalantirMC icon. `cargo build`/`cargo test`
@@ -25,7 +18,6 @@
 
 mod accounts;
 mod anim;
-mod app;
 mod brand;
 mod browse;
 mod catalog;
@@ -36,38 +28,35 @@ mod catalog;
 /// hand-written palette that the last stage of the rewrite deletes, and the list
 /// of themes is the reference's, not a palette's.
 mod color_theme;
-mod glyphs;
 mod gpu;
 /// Reporting a pointer crossing as a message: the only place a hover tween
 /// can be started from. See the module for why the view cannot start one.
 mod hover;
 /// Drawing one of the reference's icons: the scale and the centring, which are
-/// the two things a caller cannot guess. Used by the rewrite's shell and by the
-/// shell that replaces it.
+/// the two things a caller cannot guess.
 mod icon;
-mod icons;
 /// The reference client's icon set, compiled from its vendored SVGs by
 /// `tools/gen_icons.py` into geometry the toolkit strokes.
 ///
 /// Not `cfg(test)`, for the same reason [`theme_gen`] is not: this is the
-/// intended runtime source. [`icons`] -- the carved bitmaps it replaces -- is
-/// still what the shell draws from, and goes with it in stage 2.
+/// intended runtime source — the shell's icons are these, and the last carved
+/// bitmaps went with the shell they were drawn in.
 mod icons_gen;
 mod install;
 mod instances;
 mod java_runtime;
 mod launch;
-/// The view-model the old shell read, and the two readers that are left: the
-/// instance list `instances.rs` is built from, and the override-gated settings
-/// `launch.rs` resolves a run with.
+/// The view-model whose two readers are left: the instance list `instances.rs` is
+/// built from, and the override-gated settings `launch.rs` resolves a run with.
 ///
 /// It arrived as a crate of its own -- `palantir-gui`, whose only dependant was
-/// this one and whose reason to exist was a CLI that is gone -- and it lives here
-/// now so that the crate can go. What is deliberately *not* done in the same
-/// move is renaming or reshaping it: the model is Prism-shaped because
-/// `palantir_core::settings` is, and both go when the flattening importer
-/// replaces the last of them. Moving it and redesigning it in one step would make
-/// a broken launch impossible to tell from a changed one.
+/// the shell that has since been deleted and whose reason to exist was a CLI
+/// that is gone -- and it lives here now so that the crate can go. What is
+/// deliberately *not* done in the same move is renaming or reshaping it: the
+/// model is Prism-shaped because `palantir_core::settings` is, and both go when
+/// the flattening importer replaces the last of them. Moving it and redesigning
+/// it in one step would make a broken launch impossible to tell from a changed
+/// one.
 mod model;
 mod mods;
 /// The reference's motion: its own durations and curves, and the cubic Bézier
@@ -75,9 +64,7 @@ mod mods;
 ///
 /// Every number comes from [`theme_gen`], so a duration is a citation rather
 /// than a choice; the solver is checked against Chromium's own answers, which
-/// `tools/curve_samples.html` measures. Stage 2 of the rewrite spec is what
-/// draws with it.
-#[allow(dead_code)]
+/// `tools/curve_samples.html` measures.
 mod motion;
 mod native;
 /// The scaffold every page is built from: the state of what a page asked for, and
@@ -110,31 +97,17 @@ mod reference_vocabulary;
 /// Not the old shell's page list. That one put Mods, Worlds, Logs, Settings,
 /// Accounts and About on the rail; the reference keeps the first four inside
 /// an instance and Settings in a modal, and this is the module that says so.
-/// The shell that draws from it is stage 2 of the rewrite spec -- until then
-/// nothing references this, which is what the `allow(dead_code)` below is for.
-#[allow(dead_code)]
 mod route;
 mod screenshots;
 mod scroll;
-/// The shell the rewrite is building: the rail, the head, the page pane, the
-/// right panel and Settings as a modal, on the reference's own information
-/// architecture.
+/// The shell: the rail, the head, the page pane, the right panel and Settings as
+/// a modal, on the reference's own information architecture.
 ///
-/// **This is the shell a plain run gets.** The plan's own condition for the switch
-/// was that it can launch an instance, and it can (G81); the shell it replaces is
-/// behind `--classic` for as long as it takes to delete, which is where its
-/// capture flag (`--shot`) and its own page names still live. `--shell` is still
-/// accepted and is now the default, so a shortcut written before the switch keeps
-/// opening what it opened.
-#[allow(dead_code)]
+/// **This is the only shell there is.** It replaced the one that preceded it,
+/// which is deleted rather than kept behind a flag: its page names, its capture
+/// flag and its `PalantirApp` state are gone, and the parts of it the product
+/// still needed — the native frame, and a `--shot` capture — are here.
 mod shell;
-mod settings;
-/// Where a page's data comes from: the launcher's own filesystem, and an honest
-/// sentence for everything that has to come from a service instead.
-///
-/// The pages draw from this, and the parts that need a service are answered here
-/// through the engine -- see the module for why a part that is not built yet says
-/// so out loud rather than drawing an empty list.
 mod store;
 /// The vocabulary the interface paints with: which token an ink is, and which
 /// face a piece of text is set in.
@@ -179,9 +152,7 @@ mod theme_gen;
 #[cfg(test)]
 mod theme_tokens;
 
-use app::{console_scroll_id, Message, PalantirApp};
-use iced::widget::scrollable::RelativeOffset;
-use iced::{window, Application, Command, Element, Sandbox, Settings, Subscription, Theme};
+use iced::{window, Application, Settings};
 
 /// The size the shell would like, before the screen gets a say.
 const PREFERRED_SIZE: (f32, f32) = (1280.0, 820.0);
@@ -200,61 +171,6 @@ fn opening_size() -> (f32, f32) {
         MINIMUM_SIZE,
         WORK_AREA_FRACTION,
     )
-}
-
-/// Window settings: undecorated (the shell paints its own bar), branded icon,
-/// and a size the screen can actually hold.
-///
-/// Opening larger than the display is what made the window feel broken: on a
-/// 1366x768 screen the old fixed 1280x820 put the status bar and the bottom of
-/// the sidebar off-screen, so they could neither be read nor grabbed. Sizing
-/// from the work area fixes that at the source rather than asking the user to
-/// resize a window that is already bigger than their screen.
-fn window_settings(start: &app::Start) -> window::Settings {
-    // A `--shot` run states its size outright rather than letting the screen
-    // decide: the numbers it is checked against are client pixels of another
-    // window at an exact size, and a capture that opened at 92% of the work area
-    // would make every one of them wrong by a scale factor instead of failing.
-    let (width, height) = start
-        .size
-        .map(|(width, height)| (width as f32, height as f32))
-        .unwrap_or_else(opening_size);
-    // A capture is born off the desktop -- see `Start::is_capture`. Everything
-    // else centres itself, which is what the window is for.
-    let position = if start.is_capture() {
-        window::Position::Specific(iced::Point::new(native::beyond_every_monitor_x(), 8.0))
-    } else {
-        window::Position::Centered
-    };
-    window::Settings {
-        size: iced::Size::new(width, height),
-        position,
-        min_size: Some(iced::Size::new(MINIMUM_SIZE.0, MINIMUM_SIZE.1)),
-        decorations: false,
-        icon: brand::window_icon(),
-        ..Default::default()
-    }
-}
-
-/// Hand the window's frame back to Windows, as soon as there is a window.
-///
-/// `install_hit_test` takes over `WM_NCHITTEST` on the shell's window, which is
-/// what makes Windows run its own resize loop (with its own cursors, including
-/// the diagonals iced has no way to ask for) and what makes the maximize button
-/// a non-client region Windows 11 will put Snap Layouts on.
-///
-/// It cannot happen in `new`: iced runs `Application::new` *before* it builds
-/// the window. The first dispatched message is the earliest safe moment, and
-/// there is one before the window is ever painted — the constructor asks the
-/// window whether it opened maximized. Once it has taken effect this is an
-/// atomic load, so it is called from every update rather than tracked.
-///
-/// A failure is not reported and not retried forever: the shell's own resize
-/// bands still work without it (see `PalantirApp::view`), so the window stays
-/// usable and the only losses are the native cursors, Aero Snap's edges and
-/// the Snap Layouts flyout.
-fn install_hit_test() {
-    let _ = native::install_hit_test();
 }
 
 /// The five Inter weights the shell draws with, carried in the binary.
@@ -287,33 +203,18 @@ fn main() -> iced::Result {
     // Decide the renderer from what this machine can actually provide, before
     // iced builds its compositor. See `gpu` for why this is a probe.
     let _ = gpu::select_renderer();
-    // The command line is read twice, from one vector: once for the one decision
-    // it makes about which of the two shells this process is, and once as the
-    // flags of whichever one that is.
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if !classic_shell(&arguments) {
-        return run_shell(arguments.iter().cloned());
-    }
-    // The OS appearance feeds the "Sync with system" theme, so it is read once
-    // here rather than in a paint path, and the saved theme is put in force
-    // before the first frame. Both belong to the process rather than to
-    // `PalantirApp`, which is why they are applied by the entry point: constructing
-    // an app has no business changing global state, and keeping it that way is
-    // what stops the test suite's fifty-odd app constructions from racing each
-    // other through the palette.
-    // Both roots, from the one place that resolves them: the settings live in
-    // this launcher's own directory, and the game data lives wherever those
-    // settings say — which may be an install another launcher created.
-    let (home, _data) = PalantirApp::roots();
-    // The command line is read before the window settings are built, because it
-    // decides two of them: a capture names its own size and is born off the
-    // desktop. The flags are still handed to `App::run` as well, which is what
-    // turns `--page` into a message once the runtime is up.
-    let start = app::Start::from_args(arguments.iter().cloned());
-    theme::set_os_prefers_light(native::system_prefers_light());
-    theme::set_color_theme(prefs::load(&home).theme());
+    run_shell(std::env::args().skip(1))
+}
+
+/// Run the shell: the window, the fonts, and the flags this run was given.
+fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
+    let flags = shell::Flags::from_args(args);
+    // A capture states its size and is born off the desktop; both are decided
+    // here because they are window settings, and read before `flags` is moved
+    // into them.
+    let capture = flags.shot.is_some();
     let mut settings = Settings::default();
-    settings.window = window_settings(&start);
+    settings.window = shell_window_settings(flags.size, capture);
     settings.antialiasing = false;
     settings.fonts = FONTS
         .iter()
@@ -324,60 +225,39 @@ fn main() -> iced::Result {
     // Headings then ask for a heavier face of the same family (`theme::semibold()`
     // for a page title, `theme::bold()` for emphasis) and everything else inherits.
     settings.default_font = theme::medium();
-    // `--page`, `--modal`, `--shot` and `--size` describe *this run*; nothing may
-    // remember them once it is over.
-    settings.flags = start;
-    App::run(settings)
-}
-
-/// Which of the two shells this process is.
-///
-/// The rewrite's shell is what a run gets, and the shell it replaces is behind
-/// `--classic` for as long as it takes to delete. The flag is named for what it
-/// asks for rather than for what used to be the default: `--shell` would read, a
-/// year from now, like a flag that does nothing -- and it is still accepted, which
-/// is what keeps a shortcut written before the switch working.
-fn classic_shell(arguments: &[String]) -> bool {
-    arguments.iter().any(|argument| argument == "--classic")
-}
-
-/// Run the rewrite's shell.
-///
-/// The same window and the same five fonts as the launcher, because the two are
-/// one product and only the shell around the pages is being replaced. What
-/// differs is the size flag: the shell's `--page` takes a path the route table
-/// knows rather than one of the old shell's page names, so a capture addresses a
-/// page the way the reference's own router does.
-///
-/// There is no capture flag here yet. `--shot` belongs to the old shell and its
-/// machinery is wound through that shell's frame handling; this shell needs one of
-/// its own, because that is where the first per-page gate does -- and until it has
-/// one, a capture is taken by running the old shell with `--classic`.
-fn run_shell(args: impl Iterator<Item = String>) -> iced::Result {
-    let flags = shell::Flags::from_args(args);
-    let mut settings = Settings::default();
-    settings.window = shell_window_settings(flags.size);
-    settings.antialiasing = false;
-    settings.fonts = FONTS
-        .iter()
-        .map(|bytes| std::borrow::Cow::Borrowed(*bytes))
-        .collect();
-    // The same family and weight the launcher defaults to; `shell`'s own
-    // `medium()` is the same face, named there so the shell does not depend on
-    // the module this rewrite replaces.
-    settings.default_font = theme::medium();
+    // `--page`, `--size` and `--shot` describe *this run*; nothing may remember
+    // them once it is over.
     settings.flags = flags;
     shell::Shell::run(settings)
 }
 
-/// Window settings for the rewrite's shell: the same window, its own size flag.
-fn shell_window_settings(size: Option<(u32, u32)>) -> window::Settings {
+/// Window settings: undecorated (the shell paints its own bar), branded icon,
+/// and a size the screen can actually hold.
+///
+/// Opening larger than the display is what made the window feel broken: on a
+/// 1366x768 screen a fixed 1280x820 put the status bar and the bottom of the
+/// sidebar off-screen, so they could neither be read nor grabbed. Sizing from
+/// the work area fixes that at the source rather than asking the user to resize
+/// a window that is already bigger than their screen.
+fn shell_window_settings(size: Option<(u32, u32)>, capture: bool) -> window::Settings {
+    // A capture states its size outright rather than letting the screen decide:
+    // the numbers it is checked against are client pixels of another window at
+    // an exact size, and a capture that opened at 92% of the work area would make
+    // every one of them wrong by a scale factor instead of failing.
     let (width, height) = size
         .map(|(width, height)| (width as f32, height as f32))
         .unwrap_or_else(opening_size);
+    // A capture is born off the desktop, so it neither takes the focus nor
+    // flashes a window at whoever asked for it; everything else centres itself,
+    // which is what a window is for.
+    let position = if capture {
+        window::Position::Specific(iced::Point::new(native::beyond_every_monitor_x(), 8.0))
+    } else {
+        window::Position::Centered
+    };
     window::Settings {
         size: iced::Size::new(width, height),
-        position: window::Position::Centered,
+        position,
         min_size: Some(iced::Size::new(MINIMUM_SIZE.0, MINIMUM_SIZE.1)),
         decorations: false,
         icon: brand::window_icon(),
@@ -385,143 +265,13 @@ fn shell_window_settings(size: Option<(u32, u32)>) -> window::Settings {
     }
 }
 
-/// Original `Sandbox` shell: fully interactive for everything synchronous.
-pub struct State {
-    app: PalantirApp,
-}
-
-impl Sandbox for State {
-    type Message = Message;
-
-    fn new() -> Self {
-        State { app: PalantirApp::boot() }
-    }
-
-    fn title(&self) -> String {
-        self.app.title()
-    }
-
-    fn update(&mut self, message: Message) {
-        install_hit_test();
-        let launched = matches!(message, Message::PlayInstance(_));
-        let _ = self.app.update(message);
-        if launched {
-            // No subscription runtime here: resolve + report synchronously.
-            self.app.sandbox_drain_launch();
-        }
-    }
-
-    fn view(&self) -> Element<'_, Message> {
-        self.app.view()
-    }
-
-    fn theme(&self) -> Theme {
-        theme::app_theme()
-    }
-}
-
-/// Full shell with background work and launch streaming via `Subscription`.
-/// Starts from an instant placeholder ([`PalantirApp::pending`]) so the window
-/// paints before any disk IO finishes.
-pub struct App {
-    app: PalantirApp,
-}
-
-impl Application for App {
-    type Executor = iced::executor::Default;
-    type Flags = app::Start;
-    type Message = Message;
-    type Theme = Theme;
-
-    fn new(flags: app::Start) -> (Self, Command<Message>) {
-        // Ask the window what state it is already in: without this the maximize
-        // button cannot know whether to offer Maximize or Restore.
-        let probe = window::fetch_maximized(window::Id::MAIN, Message::MaximizedChanged);
-        let mut app = PalantirApp::boot_pending();
-        // A capture needs its camera before it needs its page: the timer starts
-        // with the runtime, and `--page` below only decides what the frame it
-        // catches is of.
-        if let Some(path) = flags.shot.clone() {
-            app.set_shot(path, app::SHOT_SETTLE);
-        }
-        // The command line's own messages run before the window exists, which is
-        // safe: `update` is where a page's work begins, and every command it
-        // returns is dispatched once the runtime is up. They run *after* the
-        // constructor's own, so `--modal` wins over the first-run question.
-        let mut commands = vec![probe];
-        for message in flags.messages() {
-            commands.push(app.update(message));
-        }
-        (App { app }, Command::batch(commands))
-    }
-
-    fn title(&self) -> String {
-        self.app.title()
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
-        install_hit_test();
-        let snap = matches!(message, Message::LaunchLog { .. }) && self.app.autoscroll_enabled();
-        let command = self.app.update(message);
-        if snap {
-            iced::widget::scrollable::snap_to(console_scroll_id(), RelativeOffset::END)
-        } else {
-            command
-        }
-    }
-
-    fn view(&self) -> Element<'_, Message> {
-        self.app.view()
-    }
-
-    fn theme(&self) -> Theme {
-        theme::app_theme()
-    }
-
-    fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([self.app.subscription(), self.app.keyboard()])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Only the tests build an app against an explicit directory; a real run
-    // gets both roots from `PalantirApp::roots`.
-    use palantir_core::paths::PalantirPaths;
-
-    #[test]
-    fn a_plain_run_is_the_rewrite_s_shell_and_the_old_one_asks_for_itself() {
-        // The switch the plan gated on "the new shell can launch an instance",
-        // asserted where it is made: no arguments is the new shell, and only the
-        // flag that names the old one runs it. `--shell` is accepted and changes
-        // nothing, because it is the default now.
-        assert!(!classic_shell(&[]));
-        assert!(!classic_shell(&["--shell".to_string()]));
-        assert!(!classic_shell(&["--page".to_string(), "/instance/atm10".to_string()]));
-        assert!(classic_shell(&["--classic".to_string()]));
-        assert!(classic_shell(&["--shot".to_string(), "out.png".to_string(), "--classic".to_string()]));
-    }
-
-    #[test]
-    fn shells_share_title_and_theme() {
-        // Hermetic on purpose: both shells wrap a launcher pointed at the same
-        // empty data root, so their titles must agree exactly instead of
-        // depending on whatever the developer's real data root has selected.
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PalantirPaths::at(dir.path());
-        std::fs::create_dir_all(paths.configured_instances_dir()).unwrap();
-        let state = State { app: PalantirApp::with_paths(paths.clone()) };
-        let app = App { app: PalantirApp::with_paths(paths) };
-        assert_eq!(<State as Sandbox>::title(&state), app.title());
-        assert_eq!(<State as Sandbox>::title(&state), brand::APP_NAME);
-        assert!(format!("{:?}", <State as Sandbox>::theme(&state)).contains("PalantirMC"));
-        assert!(format!("{:?}", app.theme()).contains("PalantirMC"));
-    }
 
     #[test]
     fn window_is_undecorated_and_branded() {
-        let settings = window_settings(&app::Start::default());
+        let settings = shell_window_settings(None, false);
         assert!(!settings.decorations, "the shell paints its own title bar");
         assert!(settings.icon.is_some(), "the window carries the brand icon");
         assert_eq!(settings.min_size, Some(iced::Size::new(980.0, 640.0)));
@@ -536,6 +286,22 @@ mod tests {
             window::Position::Centered,
             "the window centres itself instead of landing wherever Windows decides"
         );
+    }
+
+    #[test]
+    fn a_capture_states_its_size_and_hides_itself_off_the_desktop() {
+        // Both halves of the `--shot` contract the page gates are run through:
+        // the size is the caller's, so a capture is the pixels of a window that
+        // size, and the position is off the desktop, so taking one does not
+        // interrupt whoever is at the machine.
+        let settings = shell_window_settings(Some((1280, 720)), true);
+        assert_eq!(settings.size, iced::Size::new(1280.0, 720.0));
+        match settings.position {
+            window::Position::Specific(point) => {
+                assert!(point.x > 0.0, "a capture parks itself past the desktop's right edge");
+            }
+            other => panic!("a capture must state its position, got {other:?}"),
+        }
     }
 
     #[test]
@@ -573,32 +339,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn sandbox_launch_without_selection_is_honest() {
-        // Hermetic on purpose: the real data root may pre-select an instance,
-        // so this builds against an empty temp root instead.
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PalantirPaths::at(dir.path());
-        std::fs::create_dir_all(paths.configured_instances_dir()).unwrap();
-        let mut state = State { app: PalantirApp::with_paths(paths) };
-        <State as Sandbox>::update(&mut state, Message::PlayInstance(String::new()));
-        assert!(state.app.take_active_run().is_none());
-        assert!(state.app.status().contains("Pick an instance"));
-    }
-
-    #[test]
-    fn view_builds_without_a_window() {
-        // A full `view()` pass over the default state: catches layout builder
-        // regressions (bad lengths, mismatched widget types) in CI.
-        let dir = tempfile::tempdir().unwrap();
-        let paths = PalantirPaths::at(dir.path());
-        std::fs::create_dir_all(paths.configured_instances_dir()).unwrap();
-        let state = State { app: PalantirApp::with_paths(paths) };
-        // Building the tree is the test: every widget is constructed, every
-        // style function runs, and the element is dropped again.
-        let element: Element<'_, Message> = <State as Sandbox>::view(&state);
-        let _ = element;
-    }
-
 }

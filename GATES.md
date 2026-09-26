@@ -1644,6 +1644,103 @@ launcher's file.
       The deleted methods are named above so that a later reader who wants one
       back knows it was never wired, rather than lost.
 
+### The shell this rewrite replaces, deleted
+
+The switch was made at G82; this is the part that has to follow it, or what is on
+`rewrite-modrinth-native` is a fork with two shells rather than a rewrite. Gone:
+`app.rs` (10,483 lines -- the state, the update and the whole view tree),
+`glyphs.rs` (964, the hand-drawn chrome `icons_gen.rs` replaced), `icons.rs`
+(292) and `settings.rs` (2,016 -- the old settings and About pages), with the
+carved Prism instance art their only reader kept (`assets/icons/*.png`, ten
+files), the `--classic` entry point, and the `--page`/`--modal`/`--shot`
+machinery that lived in that shell's `Start`. `main.rs` is 604 lines of window
+and font setup now instead of two shells and a `Sandbox`; `assets/ATTRIBUTION`
+records what happened to the art rather than describing files that are gone.
+
+Two things the product needed from that shell could not go with it, and both are
+now the new shell's:
+
+* **The window's frame.** `native::install_hit_test` takes over
+  `WM_NCHITTEST`, and that is what gives the window Windows' own resize loop
+  (with its cursors, including the diagonals iced has no way to ask for) and
+  Windows 11's Snap Layouts on the maximize control. The old shell was its only
+  caller, and this shell has no drawn resize bands, so without it nothing would
+  have resized the window at all. It is called from `Shell::handle` -- the first
+  message is the earliest moment there is a window, because iced builds the
+  window after `Application::new` -- the maximize rectangle is published from
+  `Shell::render` and derived from the shell's own `CONTROLS_*` constants (so
+  there is no measurement to keep in step), and the window's own state arrives
+  through a subscription the window procedure reports into: maximizing by Snap,
+  the taskbar or `Win`+`Up` is something iced is never told about, and a
+  maximize glyph that goes stale is the bug that subscription exists to prevent.
+  The control's click belongs to Windows once that rectangle is named, which is
+  why `ToggleMaximize` now asks the window instead of inverting its own flag.
+* **A capture.** `--shot PATH` is what `tools/appshot.py` and
+  `tools/page_gate.py` are run through, and it is a launcher flag for the reason
+  it always was: iced draws the frame, so the process that drew it is the only
+  one that can hand back exactly that frame -- no occlusion, no screen capture,
+  no compositor to be running. It is a settle timer, `window::screenshot` and
+  `write_shot`, which writes the PNG and closes the window; `--size` still states
+  the client pixels and a capture is still born off the desktop, both asserted in
+  `main.rs`'s tests.
+
+What the delete cost is visible in the warnings rather than in the tests. With
+the last caller gone, 199 dead items showed themselves across the crate: 67 in
+`theme.rs` (the hand-written palette, whose own deletion is stage 2's last piece),
+38 in `browse.rs`, 17 in `catalog.rs`, and smaller counts in twelve more files.
+They are not part of this slice -- the shell's removal does not depend on them,
+and one of them cannot be pruned by hand at all: `text_gen.rs` is generated,
+byte-checked output, so the allowance for the keys no page or shell paints yet
+has to be emitted by `tools/gen_text.py` rather than deleted row by row. That is
+the plan's next item, and it is named as such.
+
+- [x] G88: the shell this rewrite replaces is deleted, and the frame and the
+      capture it owned are this shell's own
+  CHECK: cargo test --workspace --all-targets --locked
+  EXPECT: test result: ok. 903 passed; 0 failed; 13 ignored
+  EVIDENCE: the transcript of that command on the pushed tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    479 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    213 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+the workspace compiles, nothing in the correctness-deny set fails, and 288
+warnings remain -- of which 199 are the dead items above, 56 the unused keys of
+the generated `text_gen.rs`, and none of them a correctness lint
+```
+
+  903 tests pass where 1034 did, and the difference is the point rather than a
+  loss: the deleted modules carried 131 tests (the old shell's, and the old
+  settings page's), and a test for a page that no longer exists is not coverage.
+  The four files that remain in the desktop crate's `src/` that this slice did
+  not touch -- the pages, the store, the generated tables -- are unaffected, and
+  the two behaviours it added are asserted: the window opens undecorated,
+  branded and screen-fitted (`main.rs`), and a capture states its own size and
+  hides off the desktop (`main.rs`). The frame itself needs a window to be seen:
+  `native.rs`'s hit-test tests are unaffected and still compare `hit_code`
+  against the fixture, and the live check of the whole path is the capture below.
+
+  A capture taken through the ported path, on this machine:
+
+```
+$ cargo build -p palantir-desktop --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.04s
+$ python tools/appshot.py --page home --size 1280x720 --out .scratch/shell-after-delete.png
+C:\PalantirMC\.scratch\shell-after-delete.png: 1280x720, written in 16.1s (launcher exit 0)
+```
+
+  That capture holds 1,706 distinct colours, and its five commonest are
+  `(22,24,28)`, `(39,41,46)`, `(52,54,60)`, `(26,35,33)` and `(22,29,28)` -- the
+  reference's dark base, its raised surface and its hairlines. A blank window is
+  one colour; a shell that painted is this.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
