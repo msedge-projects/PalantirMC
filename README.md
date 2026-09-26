@@ -104,7 +104,15 @@ tag is one of the few actions that needs a human's go-ahead first (see
 - `tools/unused_deps.py` — the unused-dependency check `cargo` does not have: a
   manifest that declares what no source in its crate names. A hit is a question
   to read, not a verdict (a package's lib name is not always its package name).
-  Not wired into CI: `tools/**` deliberately starts no run.
+- `tools/progress.py` — the plan's progress counted rather than described. It
+  reads `NEXT_STEPS.md`'s stage table for what each stage is and what it still
+  owes, reads `GATES.md`'s ledger for the slices that landed, and prints a
+  percentage per stage and overall. Landed slices are gates, each attributed to
+  one stage in the tool; the only number it owns is the estimate of how many
+  gates an open item will take, and it prints that with its reasons. `--check`
+  fails when the three disagree — a gate no stage owns, a stage marked done
+  with open work, an open bullet renamed. Not wired into CI: `tools/**`
+  deliberately starts no run.
 
 Captures live in `.scratch/` and are never committed. `GATES.md` records which
 gates are environment-dependent and what a green run means for each.

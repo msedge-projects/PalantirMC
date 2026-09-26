@@ -130,4 +130,6 @@ Keep it quantitative and terse: stages and slices from `NEXT_STEPS.md`, the
 test counts from the run in hand, and a rough percentage against the stage
 table -- with a one-line note when a number is an estimate rather than a
 measurement. Update `NEXT_STEPS.md`'s stage table in the same commit as the
-slice that moved it, so the percentage has one source of truth.
+slice that moved it, and take the percentage from `python tools/progress.py`
+rather than writing one by hand: it reads that table and `GATES.md`'s ledger,
+so the two cannot drift apart, and it fails when they do.
