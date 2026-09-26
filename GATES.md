@@ -1249,7 +1249,7 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    554 passed; 0 failed  (palantir-desktop, bin)
+    572 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
@@ -1268,8 +1268,11 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-976 tests pass, nothing in the correctness-deny set is failing, and all four
-generated files match their sources. The caveat in the transcript below -- that a
+994 tests pass, nothing in the correctness-deny set is failing, and all four
+generated files match their sources. The desktop's own line was 554 when the
+engine's slices landed and is 572 now: the seam (G75), the interaction (G76) and
+the settings pane (G77) added eighteen between them, and the run above was taken
+after all three. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),
@@ -1315,9 +1318,10 @@ otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
 makes the runner the authority. What it does say is that all 875 tests pass, that
 nothing in the correctness-deny set is failing, and that all three generated
-files match their sources; the run above, at 949, is the same set after the
-engine's slices landed. Re-running the push when the account can schedule jobs
-is the first thing to do with this tree.
+files match their sources; the run under "The engine's transcript" above, at 994,
+is the same set after the seam, the interaction and the settings pane landed.
+Re-running the push when the account can schedule jobs is the first thing to do
+with this tree.
 
 ## What these gates cannot say
 
