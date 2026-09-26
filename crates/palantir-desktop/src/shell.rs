@@ -41,7 +41,7 @@
 use std::time::Duration;
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
-use iced::widget::{column, container, image, mouse_area, row, text, Space};
+use iced::widget::{column, container, image, mouse_area, row, text, text_input, Space};
 use iced::window;
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
@@ -53,7 +53,7 @@ use crate::brand;
 use crate::color_theme::ColorTheme;
 use crate::icon;
 use crate::style::{
-    disabled, heading, medium, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
+    disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
     INK_PLATE_TEXT,
 };
 use crate::icons_gen::{self, Glyph};
@@ -192,6 +192,19 @@ pub struct Shell {
     /// Where that file is, once the application has said. `None` in a test, which
     /// is what keeps a test from writing to the real preferences.
     home: Option<palantir_core::paths::PalantirPaths>,
+    /// The name in the creation dialog.
+    create_name: String,
+    /// What the last create could not do, shown in the dialog it was asked from.
+    create_error: Option<String>,
+    /// A create is in flight, which is what makes the dialog's button unusable
+    /// rather than counted twice.
+    creating: bool,
+    /// The dialog's button was pressed and the request has not left yet.
+    ///
+    /// A flag rather than a return value because [`Shell::act`]'s only answer is
+    /// [`discover::Asked`]: a create is not a page's request, and widening that
+    /// return type would make every arm of its match say so.
+    create_requested: bool,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -220,6 +233,9 @@ impl Default for RailSettings {
     }
 }
 
+/// The creation dialog's own button, which is one control on one dialog.
+const CREATE_BUTTON: &str = "shell:create";
+
 /// The modal's controls are the kit's, and the kit asks for a crossing.
 ///
 /// Written by hand rather than through `crate::hovered!` because this message
@@ -245,6 +261,9 @@ impl crate::ui::Hovered for Message {
 pub enum Modal {
     /// `AppSettingsModal`.
     Settings,
+    /// The creation flow (`CreationFlowModal`): a name, and the button that
+    /// makes the instance.
+    Create,
 }
 
 /// Everything the shell can be told.
@@ -279,6 +298,12 @@ pub enum Message {
     Sidebar(bool),
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
+    /// The name in the creation dialog changed.
+    CreateName(String),
+    /// The creation dialog's own button: make the instance.
+    Create,
+    /// The answer to a create: the new instance's id, or why there is none.
+    Created(Result<String, String>),
     /// One frame of the clock.
     Tick,
     Minimize,
@@ -304,6 +329,10 @@ impl Shell {
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             modal: None,
             maximized: false,
+            create_name: String::new(),
+            create_error: None,
+            creating: false,
+            create_requested: false,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -519,13 +548,18 @@ impl Shell {
             Message::Close => return window::close(Id::MAIN),
             _ => {}
         }
-        match self.act(message) {
-            Some(asked) => self.search(asked),
-            // Nothing was asked for, but a page may be on screen that has never
-            // been asked anything -- a tab that was just switched, or the page a
-            // window opened on. Both are the same answer: ask on its behalf.
-            None => self.opening_command(),
+        if let Some(asked) = self.act(message) {
+            return self.search(asked);
         }
+        // A create is not a page's request and does not go through `Asked`, so it
+        // is raised as a flag by `act` and taken here: one press, one command.
+        if std::mem::take(&mut self.create_requested) {
+            return self.create();
+        }
+        // Nothing was asked for, but a page may be on screen that has never
+        // been asked anything -- a tab that was just switched, or the page a
+        // window opened on. Both are the same answer: ask on its behalf.
+        self.opening_command()
     }
 
     /// Apply a message, and answer with the request it made.
@@ -557,6 +591,46 @@ impl Shell {
                 self.choose_theme(choice);
                 None
             }
+            Message::CreateName(name) => {
+                self.create_name = name;
+                // The sentence was about the name that has just changed, so it is
+                // not about this one.
+                self.create_error = None;
+                None
+            }
+            Message::Create => {
+                if !self.creating {
+                    // Marked busy as the request leaves rather than when it comes
+                    // back: a second press before the answer arrives would create
+                    // the instance twice.
+                    self.creating = true;
+                    self.create_requested = true;
+                }
+                None
+            }
+            Message::Created(result) => {
+                self.creating = false;
+                match result {
+                    Ok(id) => {
+                        // The list the pages are drawn from was read at startup, so
+                        // an instance that was just written is on disk and not on
+                        // the page until it is read again -- and the flow leaves
+                        // the reader in the instance it made.
+                        self.store.reload();
+                        self.create_error = None;
+                        self.create_name.clear();
+                        self.modal = None;
+                        self.go(Address::at(route::Route::Instance {
+                            id,
+                            tab: route::InstanceTab::Content,
+                        }));
+                    }
+                    // The dialog stays up with the reason in it: a failure the
+                    // reader cannot see is a button that does nothing.
+                    Err(reason) => self.create_error = Some(reason),
+                }
+                None
+            }
             Message::Control { key, over, hover } => {
                 crate::ui::pointer_with(
                     key,
@@ -571,8 +645,12 @@ impl Shell {
                         self.go(address);
                     }
                 }
-                if slot == Rail::Settings {
-                    self.modal = Some(Modal::Settings);
+                // The two rail buttons that open a flow rather than a page: the
+                // reference's `+` and the gear.
+                match slot {
+                    Rail::Settings => self.modal = Some(Modal::Settings),
+                    Rail::CreateInstance => self.open_create(),
+                    _ => {}
                 }
                 None
             }
@@ -592,6 +670,10 @@ impl Shell {
                         None
                     }
                     Some(pages::Ask::Search(asked)) => Some(asked),
+                    Some(pages::Ask::Create) => {
+                        self.open_create();
+                        None
+                    }
                     None => None,
                 }
             }
@@ -618,13 +700,36 @@ impl Shell {
         }
     }
 
+    /// Open the creation dialog, on a name nobody has typed yet.
+    fn open_create(&mut self) {
+        self.create_name.clear();
+        self.create_error = None;
+        self.creating = false;
+        self.modal = Some(Modal::Create);
+    }
+
+    /// Create the instance the dialog names, off the frame thread.
+    ///
+    /// A create writes a folder, a config and a version profile, so it goes where
+    /// a search goes: a thread, and back as a message. The version is Mojang's
+    /// current release, which the store asks for itself -- the dialog names the
+    /// instance, the launcher knows what Minecraft is.
+    fn create(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let name = self.create_name.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.create_instance(&name, None)),
+            Message::Created,
+        )
+    }
+
     /// The request the page on screen owes, if it owes one.
     fn opening_command(&mut self) -> iced::Command<Message> {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
-            // The only two things a page can ask for, and a navigation cannot be
-            // owed: nothing is waiting for one.
-            Some(pages::Ask::Open(_)) => iced::Command::none(),
+            // A navigation and a creation are not owed: nothing is waiting for
+            // one, and the page that owes nothing says nothing.
+            Some(pages::Ask::Open(_) | pages::Ask::Create) => iced::Command::none(),
             None => iced::Command::none(),
         }
     }
@@ -958,17 +1063,22 @@ impl Shell {
         grid.into()
     }
 
-    /// The scrim and the dialog, over whatever the shell was drawing.
-    fn modal_layer(&self) -> Element<'_, Message> {
+    /// The dialog's frame: the same width, padding, surface and close button
+    /// whichever modal it holds.
+    fn dialog<'a>(
+        &'a self,
+        title: Key,
+        body: Element<'a, Message>,
+    ) -> Element<'a, Message> {
         let theme = self.theme;
-        let dialog = container(
+        container(
             column![]
                 .spacing(12.0)
                 .push(
                     row![]
                         .align_items(Alignment::Center)
                         .push(
-                            text("Settings")
+                            text(title.message())
                                 .size(20.0)
                                 .font(heading())
                                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
@@ -976,19 +1086,7 @@ impl Shell {
                         .push(Space::with_width(Length::Fill))
                         .push(self.history_button(Glyph::X, true, Message::CloseModal)),
                 )
-                .push(
-                    text(Key::SettingsAppearanceTitle.message())
-                        .size(16.0)
-                        .font(heading())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                )
-                .push(
-                    text(Key::SettingsDisplayThemeDescription.message())
-                        .size(14.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-                )
-                .push(self.theme_options())
+                .push(body),
         )
         .width(Length::Fixed(560.0))
         .padding(24.0)
@@ -996,7 +1094,90 @@ impl Shell {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
             border: Border { radius: 16.0.into(), ..Border::default() },
             ..container::Appearance::default()
-        });
+        })
+        .into()
+    }
+
+    /// Settings: the appearance pane, which is the themes.
+    fn settings_dialog(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        self.dialog(
+            Key::SettingsAppearanceTitle,
+            column![]
+                .spacing(12.0)
+                .push(
+                    text(Key::SettingsDisplayThemeDescription.message())
+                        .size(14.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                )
+                .push(self.theme_options())
+                .into(),
+        )
+    }
+
+    /// The creation dialog: a name, and the button that makes it.
+    ///
+    /// The version is not asked for here. The reference's flow has a picker fed by
+    /// Mojang's own list, and this launcher can read that list now
+    /// ([`crate::store::Store::current_release`]); asking for it in the dialog as
+    /// well would be a second list to keep in step with the first, so what the
+    /// instance is created *for* is the current release, and a picker is the next
+    /// thing this dialog grows.
+    fn create_dialog(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let busy = self.creating;
+        let mut body = column![]
+            .spacing(12.0)
+            .push(
+                text(Key::CreationFlowModalCustomSetupNameLabel.message())
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .push(
+                text_input(
+                    Key::CreationFlowModalCustomSetupNamePlaceholder.message(),
+                    &self.create_name,
+                )
+                .on_input(Message::CreateName)
+                .padding(Padding { top: 10.0, bottom: 10.0, left: 12.0, right: 12.0 })
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme)))),
+            );
+        if let Some(reason) = &self.create_error {
+            body = body.push(
+                text(reason.clone())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Red))),
+            );
+        }
+        body = body.push(
+            row![]
+                .align_items(Alignment::Center)
+                .push(Space::with_width(Length::Fill))
+                .push(crate::ui::button_or(
+                    theme,
+                    CREATE_BUTTON,
+                    Key::CreationFlowButtonCreateInstance,
+                    crate::ui::Kind::Colored,
+                    (!busy).then_some(Message::Create),
+                )),
+        );
+        self.dialog(Key::CreationFlowTitleCreateInstance, body.into())
+    }
+
+    /// The scrim and the dialog, over whatever the shell was drawing.
+    fn modal_layer(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let dialog = match self.modal {
+            Some(Modal::Create) => self.create_dialog(),
+            // The layer is only drawn while a modal is up, and Settings is the one
+            // that exists: a `None` here is not reachable from `render`.
+            Some(Modal::Settings) | None => self.settings_dialog(),
+        };
         let scrim = container(dialog)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1650,6 +1831,66 @@ mod tests {
             assert_eq!(&before, shell.address(), "{slot} is not a link");
         }
         assert_eq!(shell.modal, Some(Modal::Settings), "settings opens its modal");
+    }
+
+    #[test]
+    fn the_rail_s_plus_opens_the_creation_flow() {
+        // The reference's own `+`: a button on the rail, not a link, and the
+        // dialog it opens is a modal rather than a page.
+        let mut shell = shell_at("/");
+        assert_eq!(shell.modal, None);
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        assert_eq!(shell.modal, Some(Modal::Create));
+        assert_eq!(shell.address().to_path(), "/", "the + is not a link");
+        // And the library's own button reports the same thing, out of the page.
+        let mut shell = shell_at("/");
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Home(pages::home::Message::CreateInstance)),
+        );
+        assert_eq!(shell.modal, Some(Modal::Create));
+    }
+
+    #[test]
+    fn a_create_that_cannot_run_keeps_the_dialog_and_says_why() {
+        // What a reader must not get is a dialog that closed and nothing else: a
+        // store with no launcher behind it is the smallest failure to check that
+        // with, and it is the one a test can produce.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        press(&mut shell, Message::CreateName("Sodium test".to_string()));
+        press(&mut shell, Message::Create);
+        assert!(shell.creating, "the button is unusable while it is in flight");
+        assert!(
+            !shell.create_requested,
+            "the flag is what `handle` takes to build the command, so it is already spent"
+        );
+        press(
+            &mut shell,
+            Message::Created(Err("give the instance a name".to_string())),
+        );
+        assert_eq!(shell.modal, Some(Modal::Create), "the dialog stays up");
+        assert_eq!(shell.create_error.as_deref(), Some("give the instance a name"));
+        assert!(!shell.creating, "and the button is usable again");
+        // Typing again clears it: the sentence was about the name that changed.
+        press(&mut shell, Message::CreateName("Sodium".to_string()));
+        assert_eq!(shell.create_error, None);
+    }
+
+    #[test]
+    fn a_created_instance_is_read_again_and_opened() {
+        // The half a dialog cannot show: the list the pages draw from was read at
+        // startup, so the shell reads it again -- and leaves the reader in the
+        // instance it just made, which is what the reference's flow does.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        press(&mut shell, Message::CreateName("ATM10".to_string()));
+        press(&mut shell, Message::Create);
+        press(&mut shell, Message::Created(Ok("ATM10".to_string())));
+        assert_eq!(shell.modal, None, "the dialog is gone");
+        assert!(!shell.creating);
+        assert_eq!(shell.address().to_path(), "/instance/ATM10");
+        assert!(matches!(shell.screen, Screen::Instance(_)), "on the new page");
     }
 
     #[test]

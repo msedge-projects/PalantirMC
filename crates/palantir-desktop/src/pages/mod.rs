@@ -106,6 +106,13 @@ pub enum Ask {
     Open(Open),
     /// Ask the store, through the engine, for search results.
     Search(discover::Asked),
+    /// Open the creation flow.
+    ///
+    /// The third kind, and the same shape as the other two: the *button* is the
+    /// page's, and the dialog, the request and the folder are not. A page that
+    /// could create an instance would have to know where instances live, which
+    /// is what [`crate::store`] is for.
+    Create,
 }
 
 impl Message {
@@ -182,6 +189,12 @@ impl Screen {
             }
             (Screen::Discover(_), Message::Discover(discover::Message::Open(id))) => {
                 return Some(Ask::Open(Open::Project(id)))
+            }
+            // The library's create button is reported rather than applied: what
+            // makes an instance is the store, and where the flow goes afterwards
+            // is the shell's.
+            (Screen::Home(_), Message::Home(home::Message::CreateInstance)) => {
+                return Some(Ask::Create)
             }
             (Screen::Home(state), Message::Home(message)) => state.update(message),
             (Screen::Discover(state), Message::Discover(message)) => {

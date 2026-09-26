@@ -258,6 +258,14 @@ pub enum Chrome {
     Bare,
 }
 
+impl Field {
+    /// A field that paints its own frame, for a caller that is not building one
+    /// of this module's rows around it -- the shell's create dialog is one.
+    pub fn bordered(theme: Gen) -> Field {
+        Field { theme, chrome: Chrome::Bordered }
+    }
+}
+
 impl iced::widget::text_input::StyleSheet for Field {
     type Style = Theme;
 
@@ -408,7 +416,25 @@ pub fn button<'a, Message: Clone + Hovered + 'a>(
     kind: Kind,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let (factor, _) = interaction(key);
+    button_or(theme, key, label, kind, Some(on_press))
+}
+
+/// A button that can be unusable, which is `on_press: None`.
+///
+/// The reference has no disabled *button*: `Button.vue` always takes an action,
+/// and a flow that is waiting draws a spinner instead. A dialog whose own action
+/// is in flight has to draw something, and the honest one is the same button with
+/// its press removed and its ink dimmed -- a click that goes nowhere would be the
+/// alternative, and it would be counted twice.
+pub fn button_or<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    label: Key,
+    kind: Kind,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let usable = on_press.is_some();
+    let (factor, _) = if usable { interaction(key) } else { (1.0, 0.0) };
     let (background, border, ink) = match kind {
         Kind::Standard => (
             Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
@@ -427,10 +453,18 @@ pub fn button<'a, Message: Clone + Hovered + 'a>(
         ),
         Kind::Quiet => (None, None, theme_gen::ink(theme, INK_CONTRAST)),
     };
-    let background = background.map(|background| match background {
-        Background::Color(color) => Background::Color(crate::theme::brightness(color, factor)),
-        gradient => gradient,
-    });
+    let ink = if usable { ink } else { crate::style::faded(ink) };
+    let background = background
+        .map(|background| match background {
+            Background::Color(color) => Background::Color(crate::theme::brightness(color, factor)),
+            gradient => gradient,
+        })
+        // A dimmed fill rather than no fill: `disabled()` moves the label, and a
+        // button whose fill vanished would change shape while it was pressed.
+        .map(|background| match background {
+            Background::Color(color) if !usable => Background::Color(crate::style::faded(color)),
+            other => other,
+        });
     let face = container(
         text(label.message())
             .size(14.0)
@@ -451,12 +485,14 @@ pub fn button<'a, Message: Clone + Hovered + 'a>(
         },
         ..container::Appearance::default()
     });
-    mouse_area(face)
+    let area = mouse_area(face)
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
-        .on_exit(Message::hover(key, false))
-        .on_press(on_press)
-        .into()
+        .on_exit(Message::hover(key, false));
+    match on_press {
+        Some(on_press) => area.on_press(on_press).into(),
+        None => area.into(),
+    }
 }
 
 /// A quiet icon button, the square one the reference uses in a bar.

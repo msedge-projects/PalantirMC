@@ -78,6 +78,14 @@ pub const DISABLED_OPACITY: f32 = 0.2;
 /// fainter ink, which is what `opacity-20` on a *child* icon means in the
 /// reference.
 pub fn disabled(theme: Gen, ink: Ink) -> Color {
-    let color = theme_gen::ink(theme, ink);
+    faded(theme_gen::ink(theme, ink))
+}
+
+/// The same colour at a disabled control's opacity.
+///
+/// For a caller that already holds a resolved colour -- the widget kit paints its
+/// buttons from `theme_gen::ink` calls made at build time -- and wants the same
+/// dimming [`disabled`] applies to a token.
+pub fn faded(color: Color) -> Color {
     Color { a: color.a * DISABLED_OPACITY, ..color }
 }

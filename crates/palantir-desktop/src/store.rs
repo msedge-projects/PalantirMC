@@ -40,11 +40,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use palantir_core::paths::PalantirPaths;
-use palantir_net::engine::{Backoff, Cancel, Fetch, HttpPool, MetadataCache, ModrinthApi};
+use palantir_net::engine::{
+    Backoff, Cancel, Fetch, HttpPool, MetadataCache, ModrinthApi, PistonMeta,
+};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
-use crate::instances::{self, InstanceCard};
+use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
 use crate::pages::discover::Hit;
@@ -58,6 +60,11 @@ pub struct Store {
     instances_dir: PathBuf,
     /// The way out to a service, when this store has one.
     engine: Option<Engine>,
+    /// Where the launcher's own files are, for the operations that write rather
+    /// than read. `None` in a store with no launcher behind it, which is what a
+    /// test over a scratch cache is -- and then creating an instance answers with
+    /// the not-implemented sentence rather than writing somewhere invented.
+    paths: Option<PalantirPaths>,
 }
 
 /// The network behind a store: one pool, one cache, one policy.
@@ -75,6 +82,13 @@ pub struct Engine {
     /// Modrinth over the engine's cache. An `Arc` because it is handed to a
     /// worker thread per request rather than borrowed across one.
     api: Arc<ModrinthApi>,
+    /// Mojang's own metadata over the *same* cache and pool as Modrinth's.
+    ///
+    /// One directory rather than two, because the launcher asks both services the
+    /// same kind of question -- "what does this document say right now" -- and a
+    /// second cache is a second set of stale answers nobody knows about. An `Arc`
+    /// for the same reason the API's is: the engine is cloned into a worker.
+    piston: Arc<PistonMeta>,
 }
 
 impl Engine {
@@ -95,13 +109,22 @@ impl Engine {
     /// search testable without a network: a test passes a `MapFetch` that answers
     /// what it scripted, and the code under test cannot tell the difference.
     pub fn over(cache_dir: impl Into<PathBuf>, fetch: Arc<dyn Fetch>) -> Engine {
-        let cache = MetadataCache::new(cache_dir.into(), DEFAULT_TTL);
-        Engine { api: Arc::new(ModrinthApi::new(cache, fetch)) }
+        let dir = cache_dir.into();
+        let cache = MetadataCache::new(dir.clone(), DEFAULT_TTL);
+        Engine {
+            api: Arc::new(ModrinthApi::new(cache, fetch.clone())),
+            piston: Arc::new(PistonMeta::new(MetadataCache::new(dir, DEFAULT_TTL), fetch)),
+        }
     }
 
     /// Modrinth over this engine's cache.
     pub fn api(&self) -> &ModrinthApi {
         &self.api
+    }
+
+    /// Mojang's metadata over the same cache and pool.
+    pub fn piston(&self) -> &PistonMeta {
+        &self.piston
     }
 }
 
@@ -126,7 +149,88 @@ impl Store {
             // given one: see [`Store::with_engine`], and the module documentation
             // for why the absence is a state a page can be told about.
             engine: None,
+            paths: Some(paths.clone()),
         }
+    }
+
+    /// Read the instance list again, after something changed it.
+    ///
+    /// A create or an import writes a folder, and the list the pages are drawn
+    /// from was read at startup: without this, an instance that was just made is
+    /// on disk and not on the page that made it.
+    pub fn reload(&mut self) {
+        let Some(paths) = &self.paths else {
+            return;
+        };
+        let loaded = instances::load(paths);
+        self.instances = if loaded.cards.is_empty() {
+            Load::Empty
+        } else {
+            Load::Ready(loaded.cards)
+        };
+        self.instances_dir = loaded.instances_dir;
+    }
+
+    /// The newest release Mojang publishes, as the launcher's own metadata
+    /// reader sees it.
+    ///
+    /// This is what a create flow opens on when it has no version chosen: the
+    /// reference asks for a version, and a launcher that has to be told which
+    /// Minecraft exists is a launcher that will be wrong the week a release lands.
+    pub fn current_release(&self) -> Result<String, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Minecraft's version list"));
+        };
+        let manifest = engine
+            .piston()
+            .manifest(&Cancel::new(), &Backoff::default())
+            .map_err(|error| format!("Mojang's version list could not be read: {error}"))?;
+        manifest
+            .newest_release()
+            .map(|version| version.id.clone())
+            .ok_or_else(|| "Mojang's version list names no release".to_string())
+    }
+
+    /// Create an instance in this launcher's own format.
+    ///
+    /// **Blocking**, for [`Store::search`]'s reason: it writes a folder, a config
+    /// and a version profile, and the shell runs it on the thread it runs requests
+    /// on. `game` is the version the instance is for; `None` asks Mojang which one
+    /// is current, which is what the create flow does when nothing was chosen.
+    ///
+    /// The answer is the new instance's id -- what the address to open it with is
+    /// made of -- and the shell reloads the list it draws from.
+    pub fn create_instance(&self, name: &str, game: Option<&str>) -> Result<String, String> {
+        let Some(paths) = &self.paths else {
+            return Err(not_implemented("Creating an instance"));
+        };
+        let game = match game.map(str::trim).filter(|game| !game.is_empty()) {
+            Some(game) => game.to_string(),
+            None => self.current_release()?,
+        };
+        instances::create(paths, &NewInstance::vanilla(name, &game)).map(|created| created.id)
+    }
+
+    /// What is already on this machine and could be imported.
+    ///
+    /// Every launcher this one knows how to read (`instances::candidate_roots`),
+    /// with the ones whose id is already taken skipped.
+    pub fn importable(&self) -> Vec<ImportCandidate> {
+        match &self.paths {
+            Some(paths) => instances::find_importable(paths),
+            None => Vec::new(),
+        }
+    }
+
+    /// Import one instance, by the folder it was found in.
+    ///
+    /// **Blocking** as well, and for the same reason: an import is a copy of a
+    /// whole instance tree.
+    pub fn import_instance(&self, source: &Path) -> Result<String, String> {
+        let Some(paths) = &self.paths else {
+            return Err(not_implemented("Importing from another launcher"));
+        };
+        instances::import_instance(paths, source)
     }
 
     /// The instance list, in whatever state it is in.
@@ -386,6 +490,7 @@ pub fn bytes_label(bytes: u64) -> String {
 mod tests {
     use super::*;
     use palantir_net::engine::request::{MapFetch, Route};
+    use palantir_net::PISTON_MANIFEST_URL;
 
     fn scratch(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join("palantirmc-store-tests").join(name);
@@ -420,6 +525,57 @@ mod tests {
     /// A store whose only way out is a server that answers what a test scripted.
     fn store_over(name: &str, fetch: Arc<MapFetch>) -> Store {
         Store::default().with_engine(Engine::over(scratch(name), fetch))
+    }
+
+    /// A version manifest with one release in it, in Mojang's own shape.
+    const MANIFEST_BODY: &str = r#"{
+        "latest": { "release": "1.21.4", "snapshot": "25w02a" },
+        "versions": [
+            { "id": "1.21.4", "type": "release", "url": "https://piston.invalid/1.21.4.json",
+              "time": "2024-12-03T10:00:00+00:00", "releaseTime": "2024-12-03T10:00:00+00:00",
+              "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 }
+        ]
+    }"#;
+
+    #[test]
+    fn creating_an_instance_asks_mojang_which_version_is_current() {
+        // The first write-side seam: the version is Mojang's answer rather than a
+        // number this launcher invented, the folder is written in the launcher's
+        // own format, and the list the pages draw from shows it afterwards.
+        let home = scratch("create");
+        let paths = PalantirPaths::at(&home);
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(PISTON_MANIFEST_URL, Route::text(MANIFEST_BODY));
+        let mut store = Store::load(&paths)
+            .with_engine(Engine::over(scratch("create-cache"), fetch.clone()));
+        assert!(matches!(store.instances(), Load::Empty), "a home with nothing in it");
+
+        let id = store.create_instance("Scratch instance", None).expect("an instance");
+        assert!(
+            store.instance_dir(&id).join("instance.cfg").exists(),
+            "the instance is written where the launcher keeps them"
+        );
+        assert_eq!(fetch.count(), 1, "the version came from Mojang's own list, once");
+        // And what was written is what the library draws from, once it is read
+        // again -- which is the half a create without a reload would not have.
+        store.reload();
+        let cards = store.instances().ready().expect("the reloaded list");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].id, id);
+    }
+
+    #[test]
+    fn a_create_with_nothing_behind_it_says_what_is_missing() {
+        // A store with no launcher and no engine is a test's store, and it answers
+        // with the sentence rather than writing an instance somewhere invented.
+        let reason = Store::default()
+            .create_instance("Nowhere", None)
+            .expect_err("nothing to create it with");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
+        let named = Store::default()
+            .create_instance("Nowhere", Some("1.21.4"))
+            .expect_err("nothing to create it with");
+        assert!(named.contains("Creating an instance"), "{named}");
     }
 
     #[test]

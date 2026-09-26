@@ -193,9 +193,10 @@ impl State {
         match message {
             Message::Search(text) => self.search = text,
             Message::Sort(sort) => self.sort = sort,
-            Message::CreateInstance => {
-                self.notice = Some(crate::store::not_implemented("Creating an instance"))
-            }
+            // Reported rather than applied, like `Open`: what makes an instance is
+            // the store and where the flow goes is the shell, so this comes back
+            // out of `Screen::update` as `Ask::Create`.
+            Message::CreateInstance => {}
             Message::ImportFromLauncher => {
                 self.notice = Some(crate::store::not_implemented("Importing from another launcher"))
             }
@@ -530,13 +531,16 @@ mod tests {
 
     #[test]
     fn a_first_run_gets_the_welcome_screen_and_nothing_else() {
-        // The welcome screen's two actions are the reference's, and neither is built
-        // yet: what the page must not do is look like it worked.
+        // The welcome screen's two actions are the reference's. Create is reported
+        // to the shell -- the dialog, the request and the folder are its -- and
+        // import is still the page's to answer for, which it does by saying so.
         let mut state = State::default();
         assert!(state.notice.is_none());
         state.update(Message::CreateInstance);
-        let notice = state.notice.clone().expect("a notice");
-        assert!(notice.contains("is not implemented yet"), "{notice}");
+        assert!(
+            state.notice.is_none(),
+            "creating is the shell's to do now, so the page says nothing about it"
+        );
         state.update(Message::ImportFromLauncher);
         assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
         state.update(Message::Search("x".to_string()));
