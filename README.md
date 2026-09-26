@@ -112,7 +112,12 @@ tag is one of the few actions that needs a human's go-ahead first (see
   gates an open item will take, and it prints that with its reasons. `--check`
   fails when the three disagree — a gate no stage owns, a stage marked done
   with open work, an open bullet renamed. Not wired into CI: `tools/**`
-  deliberately starts no run.
+  deliberately starts no run. It also counts what the tree is made of: lines
+  and code lines per crate, with the four generated files — `icons_gen.rs`,
+  `text_gen.rs`, `theme_gen.rs`, `theme_tokens.rs` — reported as their own
+  total, because 47,000 machine-written lines inside a hand-written crate's
+  row is a number that hides rather than tells. `vendor/` is not counted: it
+  is another project's source.
 - `tools/progress.cmd` — the double-click entry point for the above, and the
   answer to a console that opens and closes before its output can be read. A
   `.py` opened from Explorer goes to whatever `python` resolves to, and on this

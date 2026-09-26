@@ -4,7 +4,8 @@
 Why this exists: a percentage kept in prose drifts. The number in the last
 message is right until the next slice lands, and nothing re-derives it. This
 reads the two documents that do not drift for a reason -- `NEXT_STEPS.md`'s
-stage table and `GATES.md`'s ledger -- and prints what they add up to.
+stage table and `GATES.md`'s ledger -- and prints what they add up to, plus
+how many lines the tree it is counting is made of.
 
 What a slice is here: one gate. `GATES.md` is where a landed slice becomes
 evidence (`- [x] GNN: ...`), so the ledger is the count of work that happened,
@@ -47,6 +48,18 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+
+# What the code count reads, and what it deliberately does not. The vendored
+# reference is another project's source, `dist/` is a downloaded build and
+# `.scratch/` is a working directory -- counting any of them would be counting
+# somebody else's lines, or the same lines twice.
+CODE_DIRS = ("crates", "tools", ".github")
+CODE_SKIP = {"target", "dist", ".scratch", ".git", "vendor"}
+# The four files a tool writes. They are ours in the sense that this repository
+# commits them, and not ours in the sense the count is for: 44,000 of the
+# desktop's lines are icons and copy compiled out of the reference, and a total
+# that hid that would make the hand-written tree look four times its size.
+GENERATED = ("icons_gen.rs", "text_gen.rs", "theme_gen.rs", "theme_tokens.rs")
 
 # `- [x] G83: the right panel draws ...`, and the same with an empty box.
 GATE = re.compile(r"^- \[([x ])\] (G\d+[a-z]?): (.*)$")
@@ -167,6 +180,75 @@ def parse_open_items(text: str) -> dict[int, list[str]]:
         if item is not None:
             open_items[stage].append(item.group(1))
     return open_items
+
+
+def count_lines(path: Path) -> tuple[int, int]:
+    """Physical lines, and the lines that are not blank or comment-only.
+
+    A `//`-led line is a comment and a `#`-led line is a Python one; block
+    comments are not tracked, because this tree does not use them and a counter
+    that guessed at `/* */` nesting would be a counter nobody could check. The
+    docstrings a Python file opens with are code by this rule, which is the right
+    answer for a Python file: they are the tool's own contract.
+    """
+    total = 0
+    code = 0
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return (0, 0)
+    for line in text.splitlines():
+        total += 1
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        code += 1
+    return (total, code)
+
+
+def code_size(root: Path) -> tuple[list[tuple[str, str, int, int]], tuple[int, int, int, int]]:
+    """What this repository owns: a row per crate, plus the tools and the total.
+
+    Returns the rows -- name, note, physical lines, code lines -- and the four
+    summary numbers, so the hand-written and generated halves can be printed as
+    two totals rather than as one unrepeatable sum.
+    """
+    rows: list[tuple[str, str, int, int]] = []
+    hand_lines = hand_code = 0
+    gen_lines = gen_code = 0
+    for directory in CODE_DIRS:
+        base = root / directory
+        if not base.is_dir():
+            continue
+        groups: dict[str, list[int]] = {}
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in (".rs", ".py"):
+                continue
+            if CODE_SKIP & set(path.relative_to(root).parts):
+                continue
+            # `crates/<crate>` is one row; `tools` and `.github` are one each.
+            if directory == "crates":
+                relative = path.relative_to(base).parts
+                name = f"crates/{relative[0]}" if relative else "crates"
+            else:
+                name = directory
+            lines, code = count_lines(path)
+            generated = path.name in GENERATED
+            bucket = groups.setdefault(name, [0, 0, 0, 0])
+            bucket[0] += lines
+            bucket[1] += code
+            bucket[2] += lines if generated else 0
+            bucket[3] += code if generated else 0
+            if generated:
+                gen_lines += lines
+                gen_code += code
+            else:
+                hand_lines += lines
+                hand_code += code
+        for name, (lines, code, generated_lines, _) in sorted(groups.items()):
+            note = f"{generated_lines:,} generated" if generated_lines else ""
+            rows.append((name, note, lines, code))
+    return rows, (hand_lines, hand_code, gen_lines, gen_code)
 
 
 def owner_of(gate_id: str) -> str | None:
@@ -305,6 +387,25 @@ def main() -> int:
     for number, what, _ in stages:
         for name, gates, why in OPEN.get(number, ()):
             print(f"  stage {number}  {name:<46}  {gates:>2} gates  ({why})")
+
+    # What the work above is made of. Physical lines first, then the lines that
+    # are not blank or comment-only, because the two answer different questions:
+    # the first is the file's size and the second is how much of it is a
+    # statement. `vendor/` is not counted at all: it is another project's source.
+    rows, (hand_lines, hand_code, gen_lines, gen_code) = code_size(root)
+    print()
+    print("code this repository owns, by crate (vendor/ and dist/ are not ours):")
+    print(f"  {'where':<24}  {'lines':>8}  {'code':>8}  note")
+    for name, note, lines, code in rows:
+        print(f"  {name:<24}  {lines:>8,}  {code:>8,}  {note}")
+    print(
+        f"  {'hand-written total':<24}  {hand_lines:>8,}  {hand_code:>8,}  "
+        "every .rs under crates/ and every .py under tools/ and .github/",
+    )
+    print(
+        f"  {'of which generated':<24}  {gen_lines:>8,}  {gen_code:>8,}  "
+        "icons_gen.rs, text_gen.rs, theme_gen.rs, theme_tokens.rs",
+    )
     return 0
 
 
