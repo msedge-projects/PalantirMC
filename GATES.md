@@ -1282,6 +1282,55 @@ the code behind it sat finished.
       opens rather than when it is drawn, which is why the list is a field of the
       shell: it walks every launcher root, and a walk per frame is a walk per frame.
 
+### What the instance is for
+
+G80 is the picker the create dialog was missing. The dialog could make an
+instance for Mojang's current release and nothing else, and the reference's own
+flow asks: `CustomSetupStage.vue` draws a searchable combobox over Mojang's
+version list with a footer that adds the snapshots and old builds to it
+(`Combobox.vue`: `filteredOptions`, `DEFAULT_MAX_HEIGHT = 300`, and the
+`dropdown-footer` slot whose button reads *Show all versions* / *Hide
+snapshots*), opens on the version in force, and creates for whichever one is
+chosen. The list is a request rather than a field read, so it is the third of the
+dialog's own requests -- after a create and an import -- and it travels the same
+way: a flag out of `act`, a thread, and a message back.
+
+- [x] G80: the create dialog offers every version Mojang publishes, opens on the
+      current release, and creates for the version it is on
+  CHECK: cargo test -p palantir-desktop --locked --bin PalantirMC
+  EXPECT: test result: ok. 584 passed
+  EVIDENCE: 584 tests over the desktop binary, five of them new. The store's half
+      is one request for two facts (`Store::versions`): the test asserts that the
+      list comes back in the manifest's own order with the flags right -- a
+      snapshot and an old beta are `release: false`, the release between them is
+      not -- and that the create flow's own fallback (`current_release`) is the
+      cached copy of the same document rather than a second request, which is what
+      keeps the picker and the create from being told about two different moments.
+      A store with no engine answers with the sentence instead of a list. The
+      shell's half is four claims. Opening the dialog is a request: the test calls
+      `act` directly to assert the flag is set before `handle` spends it, and that
+      the picker is `Loading` while it waits. The answer is Mojang's: `Ready`
+      once it arrives, and `chosen_version()` is `latest.release` -- not the first
+      row of the list, which is a snapshot in the fixture. The filter is the
+      reference's: releases until the footer, everything after it, a `contains`
+      search over the ids (`21.3` finds `1.21.3`) and, when a search finds
+      nothing, the same *No versions available* sentence a list with nothing in it
+      draws -- asserted by rendering both states, because a picker that draws an
+      empty box is the failure the sentence exists to prevent. And a list that did
+      not arrive is a sentence and not an empty picker: `Load::Failed`, no chosen
+      version, and a create that still leaves -- with nothing chosen, which is the
+      store's own question to Mojang, the same answer the picker would have opened
+      on. Two numbers come from the reference and are named here rather than
+      measured: the options stop at 300px and scroll past it (`DEFAULT_MAX_HEIGHT`,
+      which bounds the options and not the footer), and an option's own hover end
+      is 1.15 (`hover:brightness-[115%]`), which is why its crossing is published
+      through `Hovered::hover_with` rather than through the shell's global
+      `hover_brightness`. One deviation is deliberate and is the modal layer's own:
+      the reference teleports its dropdown to the window's edge and floats it over
+      the dialog, and iced 0.12 has no z-order, so the same body is drawn under the
+      field it belongs to -- and the chosen version is printed in the picker's own
+      heading, which is where the reference's trigger mirrors it.
+
 ### The engine's transcript, and the pushes that could not start
 
 Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
@@ -1301,7 +1350,7 @@ instead, with the same flags, on the tree that was pushed:
 $ cargo test --workspace --all-targets --locked
     168 passed; 0 failed  (palantir-core, lib)
       8 passed; 0 failed  (palantir-core, tests/compat.rs)
-    579 passed; 0 failed  (palantir-desktop, bin)
+    584 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
       6 passed; 0 failed  (palantir-gui, lib)
      31 passed; 0 failed  (palantir-loader, lib)
@@ -1320,11 +1369,11 @@ text generation is byte-identical
 token generation is byte-identical
 ```
 
-1001 tests pass, nothing in the correctness-deny set is failing, and all four
+1006 tests pass, nothing in the correctness-deny set is failing, and all four
 generated files match their sources. The desktop's own line was 554 when the
-engine's slices landed and is 579 now: the seam (G75), the interaction (G76), the
-settings pane (G77) and stage 5's first two flows (G78, G79) added twenty-five
-between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
+engine's slices landed and is 584 now: the seam (G75), the interaction (G76), the
+settings pane (G77), stage 5's first two flows (G78, G79) and the version picker
+(G80) added thirty between them, and the run above was taken after all of them. The caveat in the transcript below -- that a
 local run is not a clean checkout -- applies here too, with one thing added:
 **four live tests have run against the real world and passed** (G68, G70, G72
 and G74),
@@ -1370,8 +1419,9 @@ otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
 makes the runner the authority. What it does say is that all 875 tests pass, that
 nothing in the correctness-deny set is failing, and that all three generated
-files match their sources; the run under "The engine's transcript" above, at 1001,
-is the same set after the seam, the interaction and the settings pane landed.
+files match their sources; the run under "The engine's transcript" above, at 1006,
+is the same set after the seam, the interaction, the settings pane and stage 5's
+flows so far landed.
 Re-running the push when the account can schedule jobs is the first thing to do
 with this tree.
 

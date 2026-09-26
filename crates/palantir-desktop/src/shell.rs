@@ -41,7 +41,7 @@
 use std::time::Duration;
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
-use iced::widget::{column, container, image, mouse_area, row, text, text_input, Space};
+use iced::widget::{column, container, image, mouse_area, row, scrollable, text, text_input, Space};
 use iced::window;
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
@@ -58,11 +58,12 @@ use crate::style::{
 };
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
-use crate::page::ROW_GAP;
+use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
 use crate::pages::{self, discover, Screen};
 use crate::route::{self, Address, Mark, Rail};
-use crate::store::{Engine, Store};
+use crate::store::{self, Engine, Store};
+use crate::ui::Hovered;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -214,6 +215,22 @@ pub struct Shell {
     importing: bool,
     /// The row whose button was pressed, taken by `handle` to build the command.
     import_requested: Option<std::path::PathBuf>,
+    /// Mojang's version list, as the creation dialog asked for it: read once per
+    /// opening rather than per frame, for [`Shell::import_found`]'s reason -- the
+    /// list is every version ever published, and it is a request.
+    versions: Load<store::VersionList>,
+    /// What the dialog's version search field holds.
+    version_query: String,
+    /// Whether the picker is showing everything Mojang publishes rather than the
+    /// releases: the reference's `showSnapshots`, off until its footer is used.
+    version_snapshots: bool,
+    /// The version picked in the dialog. `None` is "whatever Mojang says is
+    /// current", which is what the picker opens on.
+    version_choice: Option<String>,
+    /// The dialog was opened and the version request has not left yet. Taken by
+    /// `handle` for [`Shell::create_requested`]'s reason: the dialog's own
+    /// requests are not a page's, so they do not travel as an `Asked`.
+    versions_requested: bool,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -244,6 +261,23 @@ impl Default for RailSettings {
 
 /// The creation dialog's own button, which is one control on one dialog.
 const CREATE_BUTTON: &str = "shell:create";
+
+/// The version picker's two footer states, each its own control: the same row
+/// says one thing when the snapshots are hidden and the other when they are not.
+const VERSION_SHOW_ALL: &str = "shell:version-show-all";
+const VERSION_HIDE_SNAPSHOTS: &str = "shell:version-hide-snapshots";
+
+/// `Combobox.vue`'s `DEFAULT_MAX_HEIGHT`: its options stop growing at 300px and
+/// scroll past that. The footers of the dropdown are not part of it -- they are
+/// the dropdown's own last rows -- so this bounds the list and nothing else.
+const VERSION_LIST_HEIGHT: f32 = 300.0;
+/// The reference's option row: `px-4 py-3`.
+const VERSION_ROW_SIDE: f32 = 16.0;
+const VERSION_ROW_HEIGHT: f32 = 12.0;
+/// `getOptionClasses`' `hover:brightness-[115%]` on an option that is not the
+/// one in force. Not [`crate::theme::hover_brightness`]: the picker declares its
+/// own hover end, which is what [`crate::ui::Hovered::hover_with`] is for.
+const VERSION_ROW_HOVER: f32 = 1.15;
 
 /// The modal's controls are the kit's, and the kit asks for a crossing.
 ///
@@ -320,6 +354,15 @@ pub enum Message {
     Import(std::path::PathBuf),
     /// The answer to an import: the instance's new id, or why there is none.
     Imported(Result<String, String>),
+    /// The answer to the dialog's version request: Mojang's list, or why there is
+    /// none.
+    Versions(Result<store::VersionList, String>),
+    /// The dialog's version search field changed.
+    VersionQuery(String),
+    /// The picker's footer: show everything Mojang publishes, or only releases.
+    VersionSnapshots(bool),
+    /// A version was picked in the dialog.
+    VersionChoice(String),
     /// One frame of the clock.
     Tick,
     Minimize,
@@ -353,6 +396,11 @@ impl Shell {
             import_error: None,
             importing: false,
             import_requested: None,
+            versions: Load::Idle,
+            version_query: String::new(),
+            version_snapshots: false,
+            version_choice: None,
+            versions_requested: false,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -580,6 +628,9 @@ impl Shell {
         if let Some(source) = self.import_requested.take() {
             return self.import(source);
         }
+        if std::mem::take(&mut self.versions_requested) {
+            return self.versions_command();
+        }
         // Nothing was asked for, but a page may be on screen that has never
         // been asked anything -- a tab that was just switched, or the page a
         // window opened on. Both are the same answer: ask on its behalf.
@@ -637,6 +688,29 @@ impl Shell {
                     self.importing = true;
                     self.import_requested = Some(source);
                 }
+                None
+            }
+            Message::Versions(result) => {
+                // A list with nothing in it is `Empty` rather than a list: the
+                // picker draws "no versions available" for one and a scrollable
+                // of nothing for the other.
+                self.versions = match result {
+                    Ok(list) if list.versions.is_empty() => Load::Empty,
+                    Ok(list) => Load::Ready(list),
+                    Err(reason) => Load::Failed(reason),
+                };
+                None
+            }
+            Message::VersionQuery(query) => {
+                self.version_query = query;
+                None
+            }
+            Message::VersionSnapshots(show) => {
+                self.version_snapshots = show;
+                None
+            }
+            Message::VersionChoice(id) => {
+                self.version_choice = Some(id);
                 None
             }
             Message::Imported(result) => {
@@ -754,11 +828,23 @@ impl Shell {
         }
     }
 
-    /// Open the creation dialog, on a name nobody has typed yet.
+    /// Open the creation dialog, on a name nobody has typed yet and the version
+    /// list asked for.
+    ///
+    /// The list is a request rather than a field read: it is Mojang's whole
+    /// version manifest, and the dialog cannot offer a version it has not been
+    /// told about. The flag carries it out of here for the reason
+    /// [`Shell::create_requested`] exists -- `act`'s only answer is a page's
+    /// request, and this is the dialog's.
     fn open_create(&mut self) {
         self.create_name.clear();
         self.create_error = None;
         self.creating = false;
+        self.versions = Load::Loading;
+        self.versions_requested = true;
+        self.version_query.clear();
+        self.version_snapshots = false;
+        self.version_choice = None;
         self.modal = Some(Modal::Create);
     }
 
@@ -788,16 +874,40 @@ impl Shell {
     /// Create the instance the dialog names, off the frame thread.
     ///
     /// A create writes a folder, a config and a version profile, so it goes where
-    /// a search goes: a thread, and back as a message. The version is Mojang's
-    /// current release, which the store asks for itself -- the dialog names the
-    /// instance, the launcher knows what Minecraft is.
+    /// a search goes: a thread, and back as a message. What it is for is the
+    /// version the picker is on; when there is none -- a dialog whose list never
+    /// arrived -- the store asks Mojang itself, which is the same answer as the
+    /// picker would have opened on.
     fn create(&self) -> iced::Command<Message> {
         let store = self.store.clone();
         let name = self.create_name.clone();
+        let game = self.chosen_version();
         iced::Command::perform(
-            crate::store::off_thread(move || store.create_instance(&name, None)),
+            crate::store::off_thread(move || store.create_instance(&name, game.as_deref())),
             Message::Created,
         )
+    }
+
+    /// Ask Mojang which versions exist, off the frame thread.
+    ///
+    /// The dialog's own request, so it is built where the dialog is: a `Loading`
+    /// state was set by [`Shell::open_create`], and this is what turns it into an
+    /// answer or into [`crate::store::not_implemented`]'s sentence.
+    fn versions_command(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        iced::Command::perform(crate::store::off_thread(move || store.versions()), Message::Versions)
+    }
+
+    /// The version the picker is on: what the user chose, or Mojang's own latest
+    /// release once the list has arrived.
+    ///
+    /// One reading rather than two, because the heading and the create command
+    /// both need it and a dialog that showed one version while creating another
+    /// is the failure this exists to prevent.
+    fn chosen_version(&self) -> Option<String> {
+        self.version_choice
+            .clone()
+            .or_else(|| self.versions.ready().map(|list| list.latest_release.clone()))
     }
 
     /// The request the page on screen owes, if it owes one.
@@ -1195,14 +1305,15 @@ impl Shell {
         )
     }
 
-    /// The creation dialog: a name, and the button that makes it.
+    /// The creation dialog: a name, the version the instance is for, and the
+    /// button that makes it.
     ///
-    /// The version is not asked for here. The reference's flow has a picker fed by
-    /// Mojang's own list, and this launcher can read that list now
-    /// ([`crate::store::Store::current_release`]); asking for it in the dialog as
-    /// well would be a second list to keep in step with the first, so what the
-    /// instance is created *for* is the current release, and a picker is the next
-    /// thing this dialog grows.
+    /// The picker is the reference's own control (`CustomSetupStage.vue`): a
+    /// searchable field over Mojang's version list, and under it the dropdown the
+    /// field belongs to -- the options, then the footer that adds the snapshots
+    /// and old builds to them. What the reference *teleports* to the window's
+    /// edge is drawn here in place, which is the same wall the modal layer hit:
+    /// iced 0.12 composites a tree in order and has no z-order.
     fn create_dialog(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let busy = self.creating;
@@ -1224,7 +1335,15 @@ impl Shell {
                 .size(14.0)
                 .font(medium())
                 .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme)))),
-            );
+            )
+            .push(self.version_heading())
+            .push(crate::ui::search(
+                theme,
+                Key::CreationFlowModalCustomSetupGameVersionSearchPlaceholder.message(),
+                &self.version_query,
+                Message::VersionQuery,
+            ))
+            .push(self.version_picker());
         if let Some(reason) = &self.create_error {
             body = body.push(
                 text(reason.clone())
@@ -1246,6 +1365,227 @@ impl Shell {
                 )),
         );
         self.dialog(Key::CreationFlowTitleCreateInstance, body.into())
+    }
+
+    /// The picker's heading: the reference's own label for the version, with the
+    /// version in force beside it.
+    ///
+    /// The reference shows the same value *in* its trigger -- a searchable
+    /// combobox mirrors the selection over its own search field -- and a toolkit
+    /// with no overlay has to say it somewhere, which is here rather than
+    /// nowhere: a field showing a search term and a picker with a highlighted row
+    /// are not enough on their own when the list is scrolled past the choice.
+    fn version_heading(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let mut heading = row![].align_items(Alignment::Center).push(
+            text(Key::LabelGameVersion.message())
+                .size(14.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+        );
+        if let Some(chosen) = self.chosen_version() {
+            heading = heading.push(Space::with_width(Length::Fill)).push(
+                text(chosen)
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        }
+        heading.into()
+    }
+
+    /// The versions the picker's list is drawn from: Mojang's own order, with the
+    /// search and the snapshots footer applied.
+    ///
+    /// A `contains` rather than a prefix match, because the part of a version a
+    /// user remembers is as often its end as its beginning: `1.20` finds `1.20.1`,
+    /// and `w02a` finds `25w02a`.
+    fn version_matches(&self) -> Vec<&store::GameVersion> {
+        let Some(list) = self.versions.ready() else {
+            return Vec::new();
+        };
+        let needle = self.version_query.trim().to_ascii_lowercase();
+        list.versions
+            .iter()
+            .filter(|version| self.version_snapshots || version.release)
+            .filter(|version| {
+                needle.is_empty() || version.id.to_ascii_lowercase().contains(&needle)
+            })
+            .collect()
+    }
+
+    /// The picker's list and its footer: the reference's dropdown body, drawn
+    /// under the field it belongs to.
+    ///
+    /// Every state the request can be in is drawn as a sentence rather than as an
+    /// empty list, which is the whole reason the store answers with a reason: a
+    /// picker with no options because the request failed looks exactly like a
+    /// picker with no options because there are none.
+    fn version_picker(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let body: Element<'_, Message> = match &self.versions {
+            // Asked, not answered. The reference shows its own loading label in
+            // place of the options while that is true.
+            Load::Idle | Load::Loading => {
+                self.version_note(Key::LabelLoading.message(), INK_SECONDARY)
+            }
+            // A failure is a sentence and not an empty list -- and it is the
+            // reader's own machine that will be fine, so it is not drawn as an
+            // error either.
+            Load::Failed(reason) => self.version_note(reason, Ink::Red),
+            Load::Empty => self.version_note(
+                Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+                INK_SECONDARY,
+            ),
+            Load::Ready(_) => {
+                let matches = self.version_matches();
+                if matches.is_empty() {
+                    // The reference's own arm: a search that found nothing gets
+                    // the same sentence as a list that has nothing in it.
+                    self.version_note(
+                        Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+                        INK_SECONDARY,
+                    )
+                } else {
+                    let rows: Vec<Element<'_, Message>> = matches
+                        .into_iter()
+                        .map(|version| self.version_row(version))
+                        .collect();
+                    // The list scrolls past 300px, which is the reference's own
+                    // bound on its options -- and it is the options rather than
+                    // the dropdown, so the footer stays outside it.
+                    container(scrollable(column(rows).width(Length::Fill)))
+                        .width(Length::Fill)
+                        .max_height(VERSION_LIST_HEIGHT)
+                        .into()
+                }
+            }
+        };
+        let (key, label, glyph) = if self.version_snapshots {
+            (VERSION_HIDE_SNAPSHOTS, Key::ButtonHideSnapshots, Glyph::EyeOff)
+        } else {
+            (VERSION_SHOW_ALL, Key::ButtonShowAllVersions, Glyph::Eye)
+        };
+        container(column![body, self.version_toggle(key, label, glyph)])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme| container::Appearance {
+                // The reference's teleported dropdown: `bg-surface-4`, a
+                // `--surface-5` hairline and `rounded-[14px]`.
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 14.0.into(),
+                },
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// One row of the picker's list: the reference's option, lit green when it is
+    /// the version in force.
+    ///
+    /// `getOptionClasses` in `Combobox.vue` is the whole of it: the option in
+    /// force is `bg-highlight-green text-green`, every other one is `bg-surface-4
+    /// text-contrast hover:brightness-[115%]`. The brightness is this option's own
+    /// hover end, which is why the crossing carries it.
+    fn version_row(&self, version: &store::GameVersion) -> Element<'_, Message> {
+        let theme = self.theme;
+        let id = version.id.clone();
+        let selected = self.chosen_version().as_deref() == Some(id.as_str());
+        let key = crate::ui::scoped("shell:version", &id);
+        let (factor, _) = crate::ui::interaction(key);
+        let (background, ink) = if selected {
+            (theme_gen::ink(theme, Ink::GreenHighlight), theme_gen::ink(theme, Ink::Green))
+        } else {
+            (
+                crate::theme::brightness(theme_gen::ink(theme, Ink::Surface4), factor),
+                crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor),
+            )
+        };
+        let option = container(
+            text(id.clone())
+                .size(14.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(ink)),
+        )
+        .width(Length::Fill)
+        .padding(Padding {
+            top: VERSION_ROW_HEIGHT,
+            bottom: VERSION_ROW_HEIGHT,
+            left: VERSION_ROW_SIDE,
+            right: VERSION_ROW_SIDE,
+        })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(background)),
+            ..container::Appearance::default()
+        });
+        mouse_area(option)
+            .on_enter(Message::hover_with(key, true, VERSION_ROW_HOVER))
+            .on_exit(Message::hover_with(key, false, VERSION_ROW_HOVER))
+            .on_press(Message::VersionChoice(id))
+            .into()
+    }
+
+    /// One sentence of the picker's own body, in the box its options are drawn
+    /// in.
+    fn version_note(&self, sentence: &str, ink: Ink) -> Element<'_, Message> {
+        let theme = self.theme;
+        container(
+            text(sentence.to_string())
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, ink))),
+        )
+        .width(Length::Fill)
+        .padding(Padding {
+            top: VERSION_ROW_HEIGHT,
+            bottom: VERSION_ROW_HEIGHT,
+            left: VERSION_ROW_SIDE,
+            right: VERSION_ROW_SIDE,
+        })
+        .into()
+    }
+
+    /// The picker's footer: the reference's own row that adds the snapshots and
+    /// old builds to the list, and takes them away again.
+    ///
+    /// Its hover is `text-secondary hover:text-contrast`, which is an ink that
+    /// moves rather than a surface that brightens, so it is drawn from the clock's
+    /// hover *fraction* instead of from its brightness factor.
+    fn version_toggle(&self, key: &'static str, label: Key, glyph: Glyph) -> Element<'_, Message> {
+        let theme = self.theme;
+        let (_, fraction) = crate::ui::interaction(key);
+        let ink = crate::theme::mix(
+            theme_gen::ink(theme, INK_SECONDARY),
+            theme_gen::ink(theme, INK_CONTRAST),
+            fraction,
+        );
+        let row = container(
+            row![]
+                .align_items(Alignment::Center)
+                .spacing(6.0)
+                .push(icon::icon(glyph, 16.0, ink))
+                .push(
+                    text(label.message())
+                        .size(14.0)
+                        .font(semibold())
+                        .style(iced::theme::Text::Color(ink)),
+                ),
+        )
+        .width(Length::Fill)
+        .center_x()
+        .padding(Padding {
+            top: VERSION_ROW_HEIGHT,
+            bottom: VERSION_ROW_HEIGHT,
+            left: 0.0,
+            right: 0.0,
+        });
+        mouse_area(row)
+            .on_enter(Message::hover(key, true))
+            .on_exit(Message::hover(key, false))
+            .on_press(Message::VersionSnapshots(!self.version_snapshots))
+            .into()
     }
 
     /// The import step: what the other launchers on this machine hold, one row
@@ -2089,6 +2429,102 @@ mod tests {
         assert!(!shell.creating);
         assert_eq!(shell.address().to_path(), "/instance/ATM10");
         assert!(matches!(shell.screen, Screen::Instance(_)), "on the new page");
+    }
+
+    /// A version list in the shape Mojang publishes: two releases, a snapshot and
+    /// an old beta, newest first.
+    fn version_list() -> store::VersionList {
+        store::VersionList {
+            latest_release: "1.21.4".to_string(),
+            versions: [("25w02a", false), ("1.21.4", true), ("1.21.3", true), ("b1.7.3", false)]
+                .into_iter()
+                .map(|(id, release)| store::GameVersion { id: id.to_string(), release })
+                .collect(),
+        }
+    }
+
+    /// The versions the picker would draw, in the order it draws them.
+    fn version_ids(shell: &Shell) -> Vec<&str> {
+        shell.version_matches().into_iter().map(|version| version.id.as_str()).collect()
+    }
+
+    #[test]
+    fn the_creation_dialog_asks_mojang_for_the_versions_it_offers() {
+        // The dialog cannot offer a version it has not been told about, and the
+        // list is a request rather than a field read -- so opening the dialog sets
+        // the waiting state and the flag that carries the request out of `act`,
+        // which `handle` spends on the way to building it.
+        let mut shell = shell_at("/");
+        let _ = shell.act(Message::Rail(Rail::CreateInstance));
+        assert_eq!(shell.modal, Some(Modal::Create));
+        assert!(matches!(shell.versions, Load::Loading), "the dialog waits on its own request");
+        assert!(shell.versions_requested, "and the request has not left `act` yet");
+        press(&mut shell, Message::Versions(Ok(version_list())));
+        assert_eq!(shell.versions.ready(), Some(&version_list()));
+        assert!(
+            !shell.versions_requested,
+            "the flag is what `handle` takes to build the command, so it is already spent"
+        );
+        // And the picker opens on Mojang's own answer rather than on the first row
+        // of the list, which is a snapshot.
+        assert_eq!(shell.chosen_version().as_deref(), Some("1.21.4"));
+        drop(shell.render());
+    }
+
+    #[test]
+    fn the_picker_shows_the_releases_and_its_footer_adds_the_rest() {
+        // The reference's own arrangement: the list is the releases until the
+        // dropdown's footer asks for everything, and the search narrows whichever
+        // list is showing.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        press(&mut shell, Message::Versions(Ok(version_list())));
+        assert_eq!(version_ids(&shell), vec!["1.21.4", "1.21.3"], "releases until asked for more");
+        press(&mut shell, Message::VersionSnapshots(true));
+        assert_eq!(version_ids(&shell), vec!["25w02a", "1.21.4", "1.21.3", "b1.7.3"]);
+        // A version is found by the part of it a user remembers rather than only
+        // by its beginning: `21.3` is the end of `1.21.3`.
+        press(&mut shell, Message::VersionQuery("21.3".to_string()));
+        assert_eq!(version_ids(&shell), vec!["1.21.3"]);
+        press(&mut shell, Message::VersionQuery("nothing publishes this".to_string()));
+        assert!(version_ids(&shell).is_empty());
+        // A picker that found nothing is a sentence, and the sentence is drawn by
+        // the same code path as the list: this is the render that proves it.
+        drop(shell.render());
+        // Choosing is what the heading and the create both read, and a choice
+        // outranks Mojang's own answer.
+        press(&mut shell, Message::VersionSnapshots(false));
+        press(&mut shell, Message::VersionQuery(String::new()));
+        press(&mut shell, Message::VersionChoice("1.21.3".to_string()));
+        assert_eq!(shell.chosen_version().as_deref(), Some("1.21.3"));
+        drop(shell.render());
+    }
+
+    #[test]
+    fn a_version_list_that_did_not_arrive_is_a_sentence_and_not_an_empty_picker() {
+        // The failure path, and the one that would look like a working picker if
+        // the list were drawn as an empty list: the reason is what is drawn, and
+        // the create still leaves with nothing chosen -- which is the store's own
+        // question to Mojang rather than a version this dialog invented.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        press(&mut shell, Message::Versions(Err(store::not_implemented("Minecraft's version list"))));
+        assert!(matches!(shell.versions, Load::Failed(_)));
+        assert_eq!(shell.chosen_version(), None);
+        drop(shell.render());
+        press(&mut shell, Message::Create);
+        assert!(shell.creating);
+        // And a list that came back with nothing in it is the other arm of the
+        // same sentence: `Empty` rather than a list of nothing.
+        press(
+            &mut shell,
+            Message::Versions(Ok(store::VersionList {
+                latest_release: "1.21.4".to_string(),
+                versions: Vec::new(),
+            })),
+        );
+        assert_eq!(shell.versions, Load::Empty);
+        drop(shell.render());
     }
 
     #[test]

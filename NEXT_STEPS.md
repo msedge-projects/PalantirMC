@@ -84,7 +84,7 @@ them.
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in and run under `--shell`. The old chrome is still what runs by default, which is the plan's own decision -- it is switched over when the new shell can launch an instance |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76) and Settings offers the reference's colour themes (G77). What is not real yet is anything a service answers, and the right panel -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
-| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+`, for the version Mojang's own metadata says is current, and the reader lands in it (G78); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79). What is not in is the rest of the flow -- a version picker, the launch itself, and the retire of the shell this one replaces |
+| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79). What is not in is the rest of the flow -- the launch itself, and the retire of the shell this one replaces |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
 sees every commit while `master` keeps building a launcher that runs. Only
@@ -500,3 +500,33 @@ ports), 26 (the head and the rail's plate).
 shell and the importer that replace them exist, because `app.rs` calls them
 today. Removing them now would mean either a launcher that does not build or a
 half-migrated one that does not open the instances it already has.
+
+## What stage 5 has landed so far
+
+Three pieces, and each one replaced a sentence that said the feature was not
+built:
+
+* **A create, and the pickup behind it** (G78). `store.rs` gained the write side
+  -- `create_instance` asks Mojang which version is current when the flow has no
+  version of its own, writes the instance through `instances::create`, and the
+  shell reads the library again so the new instance is on the page that made it.
+* **The import, and the empty case** (G79). The launcher's own `find_importable`
+  scan, run when the step opens rather than per frame, drawn as the reference's
+  own rows and as its *no instances found* copy when this machine holds none.
+* **The version picker** (G80). The list is a request, not a field read: one read
+  of Mojang's manifest answers both what versions exist and which one is current,
+  the picker filters it the way the reference's combobox does (releases, then
+  everything behind the footer's own button, and a substring search over the
+  ids), and what the user picks is what the instance is created for.
+
+What stage 5 still owes, in the order it is worth doing:
+
+1. **The launch itself.** `launch.rs` is the oldest finished part of this
+   launcher and nothing in the new shell calls it: the instance page's Play button
+   answers with the not-implemented sentence. That is the last thing between
+   `--shell` and being the default, which is the plan's own gate for retiring the
+   old chrome.
+2. **The loaders.** The picker offers Mojang's versions and the reference's
+   loader chips are not drawn at all; an instance is vanilla-only, and the
+   reference's flow would offer Fabric, Forge, NeoForge, Quilt and the loader
+   builds beside the game version.

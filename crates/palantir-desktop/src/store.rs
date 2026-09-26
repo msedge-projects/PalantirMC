@@ -41,7 +41,7 @@ use std::sync::Arc;
 
 use palantir_core::paths::PalantirPaths;
 use palantir_net::engine::{
-    Backoff, Cancel, Fetch, HttpPool, MetadataCache, ModrinthApi, PistonMeta,
+    Backoff, Cancel, Fetch, HttpPool, Manifest, MetadataCache, ModrinthApi, PistonMeta,
 };
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
@@ -171,6 +171,22 @@ impl Store {
         self.instances_dir = loaded.instances_dir;
     }
 
+    /// Mojang's manifest, or the reason there is none.
+    ///
+    /// One reader for the two questions the create flow asks it, so that a change
+    /// to how the list is fetched or how a failure is worded is in one place.
+    /// **Blocking**, like every engine call: the shell runs it off the frame
+    /// thread.
+    fn manifest(&self) -> Result<Manifest, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Minecraft's version list"));
+        };
+        engine
+            .piston()
+            .manifest(&Cancel::new(), &Backoff::default())
+            .map_err(|error| format!("Mojang's version list could not be read: {error}"))
+    }
+
     /// The newest release Mojang publishes, as the launcher's own metadata
     /// reader sees it.
     ///
@@ -178,17 +194,32 @@ impl Store {
     /// reference asks for a version, and a launcher that has to be told which
     /// Minecraft exists is a launcher that will be wrong the week a release lands.
     pub fn current_release(&self) -> Result<String, String> {
-        let Some(engine) = &self.engine else {
-            return Err(not_implemented("Minecraft's version list"));
-        };
-        let manifest = engine
-            .piston()
-            .manifest(&Cancel::new(), &Backoff::default())
-            .map_err(|error| format!("Mojang's version list could not be read: {error}"))?;
-        manifest
+        self.manifest()?
             .newest_release()
             .map(|version| version.id.clone())
             .ok_or_else(|| "Mojang's version list names no release".to_string())
+    }
+
+    /// Every version Mojang publishes, with the one a picker opens on.
+    ///
+    /// **Blocking**, and the one request the creation dialog makes: the list is a
+    /// thousand entries, and a picker that asked per frame would make a request
+    /// per frame. Both facts come out of the same document on purpose -- a picker
+    /// that asked twice could be told about a list and about "current" at two
+    /// different moments, and then open on a version that is in neither.
+    pub fn versions(&self) -> Result<VersionList, String> {
+        let manifest = self.manifest()?;
+        Ok(VersionList {
+            latest_release: manifest.latest_release,
+            versions: manifest
+                .versions
+                .iter()
+                .map(|version| GameVersion {
+                    id: version.id.clone(),
+                    release: version.is_release(),
+                })
+                .collect(),
+        })
     }
 
     /// Create an instance in this launcher's own format.
@@ -305,6 +336,34 @@ impl Store {
             .map_err(|error| error.to_string())?;
         Ok(answer.hits.iter().map(Hit::from_api).collect())
     }
+}
+
+/// One version Mojang publishes, as a picker needs it.
+///
+/// The manifest says four things a version can be -- `release`, `snapshot`,
+/// `old_beta`, `old_alpha` -- and the reference's picker draws one of them
+/// differently: its snapshots toggle keeps the releases and hides the rest. So
+/// the type travels as that one bit plus the id, which is what a picker draws and
+/// what the created instance is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameVersion {
+    /// The id a user types and a folder is named after: `1.21.4`, `25w02a`.
+    pub id: String,
+    /// Whether this is a full release rather than a snapshot or an old build.
+    pub release: bool,
+}
+
+/// Mojang's whole version list, with the answer a picker opens on.
+///
+/// Two fields rather than one because the picker needs both before it can draw
+/// anything: the list to choose from, and the version to be on when the user has
+/// chosen nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionList {
+    /// Mojang's own `latest.release`, which the picker opens on.
+    pub latest_release: String,
+    /// Every version, in the order published: newest first.
+    pub versions: Vec<GameVersion>,
 }
 
 /// The sentence a page shows when it cannot answer from disk yet.
@@ -536,6 +595,61 @@ mod tests {
               "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 }
         ]
     }"#;
+
+    /// A version manifest with one of each kind of thing Mojang publishes, in
+    /// Mojang's own shape and its own order: newest first.
+    const MIXED_MANIFEST_BODY: &str = r#"{
+        "latest": { "release": "1.21.4", "snapshot": "25w02a" },
+        "versions": [
+            { "id": "25w02a", "type": "snapshot", "url": "https://piston.invalid/25w02a.json",
+              "time": "2025-01-08T10:00:00+00:00", "releaseTime": "2025-01-08T10:00:00+00:00",
+              "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 },
+            { "id": "1.21.4", "type": "release", "url": "https://piston.invalid/1.21.4.json",
+              "time": "2024-12-03T10:00:00+00:00", "releaseTime": "2024-12-03T10:00:00+00:00",
+              "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 },
+            { "id": "b1.7.3", "type": "old_beta", "url": "https://piston.invalid/b1.7.3.json",
+              "time": "2011-07-01T10:00:00+00:00", "releaseTime": "2011-07-01T10:00:00+00:00",
+              "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 }
+        ]
+    }"#;
+
+    #[test]
+    fn the_version_picker_asks_mojang_once_for_the_list_and_what_is_current() {
+        // The creation dialog has to offer every version Mojang publishes and open
+        // on the current one, and it has to do it in one request: two reads are two
+        // chances to be told about a list and about "current" at different moments,
+        // and then the picker opens on a version that is in neither.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(PISTON_MANIFEST_URL, Route::text(MIXED_MANIFEST_BODY));
+        let store = store_over("versions", fetch.clone());
+        let list = store.versions().expect("a version list");
+        assert_eq!(
+            list.latest_release, "1.21.4",
+            "Mojang's own `latest.release`, not a re-derived one"
+        );
+        assert_eq!(
+            list.versions.iter().map(|version| version.id.as_str()).collect::<Vec<_>>(),
+            vec!["25w02a", "1.21.4", "b1.7.3"],
+            "the manifest's own order, newest first"
+        );
+        assert!(!list.versions[0].release, "a snapshot is not a release");
+        assert!(list.versions[1].release);
+        assert!(!list.versions[2].release, "an old beta is not a release either");
+        assert_eq!(fetch.count(), 1);
+        // And the create flow's own fallback reads the same document, which is
+        // cached: a second request here would be the second answer this test
+        // exists to prevent.
+        assert_eq!(store.current_release().expect("a release"), "1.21.4");
+        assert_eq!(fetch.count(), 1);
+    }
+
+    #[test]
+    fn a_version_list_with_nothing_behind_it_says_what_is_missing() {
+        // The arm a store with no engine takes, which is the sentence the picker
+        // shows in place of a list.
+        let reason = Store::default().versions().expect_err("no engine");
+        assert_eq!(reason, not_implemented("Minecraft's version list"));
+    }
 
     #[test]
     fn creating_an_instance_asks_mojang_which_version_is_current() {
