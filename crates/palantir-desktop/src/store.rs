@@ -15,22 +15,39 @@
 //!   are directory reads;
 //! * the tail of an instance's newest log, which is a file read.
 //!
-//! What it cannot answer is everything that comes from a service: project pages,
-//! Discover's search, Skins, Servers and the hosting half of an instance. Those
-//! come back as [`page::Load::Failed`] carrying [`not_implemented`]'s sentence,
-//! which says what is missing rather than pretending to be an empty list. A page
-//! that shows "no results" when the request never happened is the failure mode this
-//! module exists to prevent.
+//! What it cannot answer from disk is everything that comes from a service, and
+//! that is what the [`Engine`] below is for: Discover's search goes out through
+//! the engine in `palantir-net` and comes back as hits. A request the store still
+//! cannot make answers with [`not_implemented`]'s sentence, which says what is
+//! missing rather than pretending to be an empty list. A page that shows "no
+//! results" when the request never happened is the failure mode this module exists
+//! to prevent.
+//!
+//! ## The one thread boundary
+//!
+//! A page cannot make a request. The engine is *blocking* on purpose
+//! (`engine::http` is the blocking `reqwest`: one pool, one ceiling, one retry
+//! policy, none of which need a runtime), and a page is drawn on the frame thread,
+//! so a call from a page would drop a frame for every millisecond the service
+//! took. [`Store::search`] is therefore synchronous -- it returns when the answer
+//! is in -- and the shell is the one caller that runs it somewhere else. Above
+//! that line everything is ordinary code: a request is a value, an answer is a
+//! [`Load`], and no page contains an `async`.
 
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use palantir_core::paths::PalantirPaths;
+use palantir_net::engine::{Backoff, Cancel, Fetch, HttpPool, MetadataCache, ModrinthApi};
+use palantir_net::engine::Search as ApiSearch;
+use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
 use crate::instances::{self, InstanceCard};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
+use crate::pages::discover::Hit;
 
 /// What the interface knows, and how it came to know it.
 #[derive(Debug, Clone, Default)]
@@ -39,7 +56,56 @@ pub struct Store {
     instances: Load<Vec<InstanceCard>>,
     /// Where they live, so an instance's own folders can be read.
     instances_dir: PathBuf,
+    /// The way out to a service, when this store has one.
+    engine: Option<Engine>,
 }
+
+/// The network behind a store: one pool, one cache, one policy.
+///
+/// A store has an engine or it does not, and the two are different in a way the
+/// reader can see: without one, a request answers with `not_implemented`. That is
+/// why this is an `Option` rather than a store that quietly has no engine -- a
+/// test, or a launcher run with no cache directory it can write, gets the honest
+/// sentence instead of a request that goes nowhere.
+///
+/// Cheap to clone, and it has to be: the shell clones it into the thread a search
+/// runs on, which is the whole of what crosses the boundary.
+#[derive(Debug, Clone)]
+pub struct Engine {
+    /// Modrinth over the engine's cache. An `Arc` because it is handed to a
+    /// worker thread per request rather than borrowed across one.
+    api: Arc<ModrinthApi>,
+}
+
+impl Engine {
+    /// The engine for a launcher's own directory: one HTTP pool under the
+    /// process-wide ceiling, and metadata cached in `cache/meta/`.
+    ///
+    /// The directory is [`PalantirPaths::meta_dir`] rather than one of this
+    /// module's choosing: it is the launcher's existing cache root, it is
+    /// already created by `ensure_layout`, and a second cache directory would be
+    /// a second set of stale answers nobody knows about.
+    pub fn new(paths: &PalantirPaths) -> Engine {
+        Engine::over(paths.meta_dir(), Arc::new(HttpPool::new(DEFAULT_LIMIT, DEFAULT_TIMEOUT)))
+    }
+
+    /// The same engine over an explicit cache directory and fetch seam.
+    ///
+    /// The seam is `palantir_net::engine::request::Fetch`, which is what makes a
+    /// search testable without a network: a test passes a `MapFetch` that answers
+    /// what it scripted, and the code under test cannot tell the difference.
+    pub fn over(cache_dir: impl Into<PathBuf>, fetch: Arc<dyn Fetch>) -> Engine {
+        let cache = MetadataCache::new(cache_dir.into(), DEFAULT_TTL);
+        Engine { api: Arc::new(ModrinthApi::new(cache, fetch)) }
+    }
+
+    /// Modrinth over this engine's cache.
+    pub fn api(&self) -> &ModrinthApi {
+        &self.api
+    }
+}
+
+// ---- The launcher's own files, and the way out to a service ----------------
 
 impl Store {
     /// Read the launcher's instances.
@@ -56,6 +122,10 @@ impl Store {
                 Load::Ready(loaded.cards)
             },
             instances_dir: loaded.instances_dir,
+            // A store read from disk has no way out to a service until it is
+            // given one: see [`Store::with_engine`], and the module documentation
+            // for why the absence is a state a page can be told about.
+            engine: None,
         }
     }
 
@@ -94,6 +164,43 @@ impl Store {
     pub fn not_implemented(&self, what: &str) -> String {
         not_implemented(what)
     }
+
+    /// The engine behind this store, if it has one.
+    pub fn engine(&self) -> Option<&Engine> {
+        self.engine.as_ref()
+    }
+
+    /// The same store with an engine behind it.
+    pub fn with_engine(mut self, engine: Engine) -> Store {
+        self.engine = Some(engine);
+        self
+    }
+
+    /// Run one search, and answer when the answer is in.
+    ///
+    /// **Blocking.** The shell hands this to a thread of its own; see the module
+    /// documentation for why that boundary is here rather than inside a page.
+    ///
+    /// A store with no engine answers with the same sentence a page opens with,
+    /// which is the point: a reader cannot tell which of the two they are looking
+    /// at, and neither of them is an empty list of results.
+    pub fn search(&self, query: &ApiSearch) -> Result<Vec<Hit>, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Discover's search"));
+        };
+        // A token per request, because the engine takes one: a search that is
+        // superseded can be stopped mid-body once the shell keeps this token,
+        // which is the next thing this seam wants. The retry policy is the
+        // engine's own default rather than a number chosen here -- a call site
+        // that decided how many attempts to make is the failure mode the engine
+        // exists to prevent.
+        let cancel = Cancel::new();
+        let answer = engine
+            .api()
+            .search(query, &cancel, &Backoff::default())
+            .map_err(|error| error.to_string())?;
+        Ok(answer.hits.iter().map(Hit::from_api).collect())
+    }
 }
 
 /// The sentence a page shows when it cannot answer from disk yet.
@@ -110,6 +217,35 @@ impl Store {
 /// whatever lands next.
 pub fn not_implemented(what: &str) -> String {
     format!("{what} is not implemented yet.")
+}
+
+/// Run a blocking request on a thread of its own, and await the answer.
+///
+/// This is the whole crossing between the engine, which is blocking, and iced,
+/// which is not: the work happens on a thread that owns it, and what comes back is
+/// a value through a channel. It is a function here rather than four lines in the
+/// shell for one reason -- a test can await it without a window, so the crossing
+/// itself is gated rather than assumed.
+///
+/// The work answers with a `Result`, and so does this, one level rather than two:
+/// a *failure* is the store's own reason (a 404, a digest that did not match), and
+/// a worker that dies before answering at all -- a panic in a `Drop`, a thread the
+/// OS refuses -- is the same shape with a sentence of its own, because a receiver
+/// whose sender went with the thread resolves rather than waiting forever.
+pub async fn off_thread<T, E>(
+    work: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, E>
+where
+    T: Send + 'static,
+    E: From<String> + Send + 'static,
+{
+    let (sender, receiver) = futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    receiver.await.unwrap_or_else(|_| {
+        Err(E::from("the request stopped before it answered".to_string()))
+    })
 }
 
 // ---- The instance's own folders -----------------------------------------
@@ -249,6 +385,7 @@ pub fn bytes_label(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palantir_net::engine::request::{MapFetch, Route};
 
     fn scratch(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join("palantirmc-store-tests").join(name);
@@ -266,6 +403,92 @@ mod tests {
         assert!(!reason.contains("stage"), "a stage number is a word for developers: {reason}");
         assert!(reason.starts_with("Discover's search"), "{reason}");
         assert!(!reason.to_lowercase().contains("error"), "{reason}");
+    }
+
+    /// A search body with one hit in it, in the API's own shape.
+    const SEARCH_BODY: &str = r#"{
+        "hits": [{
+            "project_id": "AANobbMI", "slug": "sodium", "title": "Sodium",
+            "description": "Modern rendering engine", "author": "jellysquid",
+            "downloads": 41000000, "follows": 9000,
+            "icon_url": "https://cdn.modrinth.com/icon.png", "latest_version": "mc1.21.4-0.6.5",
+            "versions": ["1.21.4"], "categories": ["fabric", "optimization"]
+        }],
+        "offset": 0, "limit": 20, "total_hits": 214
+    }"#;
+
+    /// A store whose only way out is a server that answers what a test scripted.
+    fn store_over(name: &str, fetch: Arc<MapFetch>) -> Store {
+        Store::default().with_engine(Engine::over(scratch(name), fetch))
+    }
+
+    #[test]
+    fn a_search_through_the_engine_comes_back_as_cards() {
+        // The whole seam in one test: a page's question goes out as the URL the
+        // engine builds, and what comes back is the page's own `Hit` -- so a
+        // change to either end of the seam fails here rather than in a window.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_over("search", fetch.clone());
+        let query = ApiSearch::new("sodium").of_type("mod").sorted_by("downloads").with_limit(20);
+        fetch.set_route(&query.url(), Route::text(SEARCH_BODY));
+
+        let hits = store.search(&query).expect("an answer");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "AANobbMI", "the stable id, not the slug");
+        assert_eq!(hits[0].title, "Sodium");
+        assert_eq!(hits[0].author, "jellysquid");
+        assert_eq!(hits[0].summary, "Modern rendering engine");
+        assert_eq!(hits[0].downloads, 41_000_000);
+        assert_eq!(hits[0].follows, 9_000);
+        // The tags come from the hit itself: no second request per card.
+        assert_eq!(hits[0].game_versions, vec!["1.21.4"]);
+        assert_eq!(hits[0].loaders, vec!["fabric", "optimization"]);
+        assert_eq!(fetch.count(), 1);
+
+        // And the answer is cached, so the same search again is no request.
+        let again = store.search(&query).expect("the same answer");
+        assert_eq!(again, hits);
+        assert_eq!(fetch.count(), 1, "a fresh search is not asked for twice");
+    }
+
+    #[test]
+    fn a_request_runs_off_the_thread_that_draws_and_comes_back_through_a_channel() {
+        // The crossing itself: the engine's call is blocking, so it happens on a
+        // thread that owns it, and what the caller awaits is the channel. A test
+        // can await it here because the shell's only part in this is which thread
+        // the future runs on.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_over("off-thread", fetch.clone());
+        let query = ApiSearch::new("sodium");
+        fetch.set_route(&query.url(), Route::text(SEARCH_BODY));
+        let asked = query.clone();
+        let hits =
+            futures::executor::block_on(off_thread(move || store.search(&asked))).expect("an answer");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Sodium");
+    }
+
+    #[test]
+    fn a_search_that_fails_is_reported_rather_than_answered_with_nothing() {
+        // A request that never happened is not an empty result set: a service
+        // that answers 404 comes back as a reason, and the page prints it.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_over("search-failure", fetch);
+        let reason = store.search(&ApiSearch::new("sodium")).expect_err("a failure");
+        assert!(reason.contains("404"), "{reason}");
+        assert!(!reason.is_empty());
+    }
+
+    #[test]
+    fn a_store_with_no_engine_says_so_rather_than_answering_with_nothing() {
+        // The arm a test store takes, and the sentence a page opens with: the two
+        // have to be the same sentence, because a reader cannot be told which of
+        // them they are looking at.
+        let plain = Store::default();
+        assert!(plain.engine().is_none());
+        let reason = plain.search(&ApiSearch::new("sodium")).expect_err("no engine");
+        assert_eq!(reason, not_implemented("Discover's search"));
+        assert!(Store::default().with_engine(Engine::over(scratch("engine"), Arc::new(MapFetch::new()))).engine().is_some());
     }
 
     #[test]

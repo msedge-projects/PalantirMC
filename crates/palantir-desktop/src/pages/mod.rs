@@ -79,7 +79,7 @@ pub enum Message {
     User(user::Message),
 }
 
-/// Something a page asked for that only the shell can do.
+/// A navigation a page asked for.
 ///
 /// Opening a thing is not page state: it changes which page is on screen, and the
 /// history. A page therefore *reports* it rather than performing it, and the shell
@@ -91,6 +91,33 @@ pub enum Open {
     Instance(String),
     /// Show a project, at `/project/:id`.
     Project(String),
+}
+
+/// Something a page asked for that only the shell can do.
+///
+/// The second kind is a *request*: a page describes what to ask for and the shell
+/// is the one that can ask it, because asking is blocking and a page is drawn on
+/// the frame thread (see [`crate::store`]). Neither kind is page state, and both
+/// come back to the page as a message of its own -- a navigation by being applied
+/// to the address, an answer by [`Message::search_result`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ask {
+    /// Navigate to a thing.
+    Open(Open),
+    /// Ask the store, through the engine, for search results.
+    Search(discover::Asked),
+}
+
+impl Message {
+    /// The message that carries a search answer back to the page that asked.
+    ///
+    /// The shell builds this and never names a page's own messages: the seam
+    /// between the engine and a page is this one function wide, so moving a search
+    /// to another page is a change here rather than everywhere the shell runs a
+    /// request.
+    pub fn search_result(asked: &discover::Asked, result: Result<Vec<discover::Hit>, String>) -> Message {
+        Message::Discover(discover::Message::Found { round: asked.round, result })
+    }
 }
 
 impl Screen {
@@ -145,19 +172,27 @@ impl Screen {
     ///
     /// The store is handed in because the pages act on the machine through it
     /// rather than on themselves: the Content tab toggles a mod file, and a search
-    /// or a listing is a request the store makes.
-    pub fn update(&mut self, message: Message, store: &Store) -> Option<Open> {
+    /// is a request the store makes.
+    pub fn update(&mut self, message: Message, store: &Store) -> Option<Ask> {
         match (self, message) {
             // A card press is navigation, and is reported rather than applied: the
             // page does not know what else has to change when the pane does.
             (Screen::Home(_), Message::Home(home::Message::Open(id))) => {
-                return Some(Open::Instance(id))
+                return Some(Ask::Open(Open::Instance(id)))
             }
             (Screen::Discover(_), Message::Discover(discover::Message::Open(id))) => {
-                return Some(Open::Project(id))
+                return Some(Ask::Open(Open::Project(id)))
             }
             (Screen::Home(state), Message::Home(message)) => state.update(message),
-            (Screen::Discover(state), Message::Discover(message)) => state.update(message),
+            (Screen::Discover(state), Message::Discover(message)) => {
+                // The one page that asks for anything yet. The request it reports
+                // is a value: the shell runs it, and the answer comes back as a
+                // message rather than as a return value, because an answer
+                // arrives turns later.
+                if let Some(asked) = state.update(message) {
+                    return Some(Ask::Search(asked));
+                }
+            }
             (Screen::Project(state), Message::Project(message)) => state.update(message),
             (Screen::Instance(state), Message::Instance(message)) => state.update(message, store),
             (Screen::Skins(state), Message::Skins(message)) => state.update(message),
@@ -169,6 +204,19 @@ impl Screen {
             _ => {}
         }
         None
+    }
+
+    /// The request the page on screen owes because nothing has been asked for yet.
+    ///
+    /// `/browse/modpack` shows results rather than an invitation to press Search,
+    /// which is what the reference does, so the shell asks on behalf of a page as
+    /// soon as that page is drawn -- including the page a window opens on, which
+    /// has never had a message of its own.
+    pub fn opening(&mut self) -> Option<Ask> {
+        match self {
+            Screen::Discover(state) => state.opening().map(Ask::Search),
+            _ => None,
+        }
     }
 
     /// The tab an instance page is showing.
@@ -226,6 +274,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::page::Load;
     use crate::route::{InstanceTab, ProjectTab, ProjectType, ServerTab};
 
     /// Every address the route table has a shape for.
@@ -354,7 +403,7 @@ mod tests {
         let mut home = Screen::at(&Address::parse("/").expect("home"));
         assert_eq!(
             home.update(Message::Home(home::Message::Open("atm10".to_string())), &store),
-            Some(Open::Instance("atm10".to_string()))
+            Some(Ask::Open(Open::Instance("atm10".to_string())))
         );
         assert!(matches!(home, Screen::Home(_)), "the page is still the library");
         let mut discover = Screen::at(&Address::parse("/browse/modpack").expect("browse"));
@@ -363,7 +412,7 @@ mod tests {
                 Message::Discover(discover::Message::Open("sodium".to_string())),
                 &store
             ),
-            Some(Open::Project("sodium".to_string()))
+            Some(Ask::Open(Open::Project("sodium".to_string())))
         );
         // And on the wrong page the same message is not a navigation.
         let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
@@ -371,6 +420,49 @@ mod tests {
             skins.update(Message::Home(home::Message::Open("atm10".to_string())), &store),
             None
         );
+    }
+
+    #[test]
+    fn a_search_is_reported_to_the_shell_and_the_answer_comes_back_as_a_message() {
+        // The other half of what a page can ask for: a request goes out of
+        // `update`, and its answer arrives as a message from the shell. Neither
+        // end of that is the shell's to name.
+        let store = Store::default();
+        let mut screen = Screen::at(&Address::parse("/browse/modpack").expect("browse"));
+        // A page that has been drawn owes its first request before anything is
+        // pressed.
+        let Some(Ask::Search(first)) = screen.opening() else {
+            panic!("a freshly drawn Discover page owes a request");
+        };
+        assert_eq!(first.round, 1);
+        // Asked once, and asking again is the button's.
+        assert_eq!(screen.opening(), None);
+        let Some(Ask::Search(second)) =
+            screen.update(Message::Discover(discover::Message::Search), &store)
+        else {
+            panic!("the Search button asks");
+        };
+        assert_eq!(second.round, 2);
+        // The answer is routed by the shell and lands on the page that asked.
+        let hits = vec![discover::Hit {
+            id: "AANobbMI".to_string(),
+            title: "Sodium".to_string(),
+            author: "jellysquid".to_string(),
+            summary: "Modern rendering engine".to_string(),
+            downloads: 1,
+            follows: 1,
+            game_versions: Vec::new(),
+            loaders: Vec::new(),
+        }];
+        let answer = Message::search_result(&second, Ok(hits.clone()));
+        assert_eq!(screen.update(answer, &store), None);
+        match &screen {
+            Screen::Discover(state) => assert_eq!(state.results, Load::Ready(hits)),
+            other => panic!("{other:?} is not discover"),
+        }
+        // And the same request on a page that is not Discover is not a request.
+        let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
+        assert_eq!(skins.opening(), None);
     }
 
     #[test]

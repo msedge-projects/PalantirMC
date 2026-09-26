@@ -57,9 +57,9 @@ use crate::style::{
 };
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
-use crate::pages::{self, Screen};
+use crate::pages::{self, discover, Screen};
 use crate::route::{self, Address, Mark, Rail};
-use crate::store::Store;
+use crate::store::{Engine, Store};
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -177,8 +177,8 @@ pub struct Shell {
     maximized: bool,
     /// The page in the pane, with its own state.
     screen: Screen,
-    /// What the pages can be answered with. Stage 4 fills the parts that need a
-    /// service; what it holds now is the launcher's own filesystem.
+    /// What the pages are answered with: the launcher's own filesystem, and the
+    /// engine for what has to come from a service.
     store: Store,
 }
 
@@ -410,25 +410,55 @@ impl Shell {
     ///
     /// Named `handle` rather than `update` so that a call can never be read as
     /// the trait's own method, which arrives one indirection later.
+    ///
+    /// A message goes in and at most one command comes out, in two steps: the
+    /// window controls, which are commands of their own rather than page state;
+    /// then [`Shell::act`], whose only kind of answer is a request. A request is
+    /// either the one the message asked for or the one the page it left behind
+    /// owes -- never both, and never two.
     fn handle(&mut self, message: Message) -> iced::Command<Message> {
+        match message {
+            Message::Minimize => return window::minimize(Id::MAIN, true),
+            Message::ToggleMaximize => {
+                self.maximized = !self.maximized;
+                return window::maximize(Id::MAIN, self.maximized);
+            }
+            Message::Close => return window::close(Id::MAIN),
+            _ => {}
+        }
+        match self.act(message) {
+            Some(asked) => self.search(asked),
+            // Nothing was asked for, but a page may be on screen that has never
+            // been asked anything -- a tab that was just switched, or the page a
+            // window opened on. Both are the same answer: ask on its behalf.
+            None => self.opening_command(),
+        }
+    }
+
+    /// Apply a message, and answer with the request it made.
+    ///
+    /// Everything that is not a request is a change of state here, which is what
+    /// keeps the return type one thing: a `None` means "nothing left this turn",
+    /// and the only thing that can leave is a request.
+    fn act(&mut self, message: Message) -> Option<discover::Asked> {
         match message {
             Message::Go(path) => {
                 if let Some(address) = Address::parse(&path) {
                     self.go(address);
                 }
-                iced::Command::none()
+                None
             }
             Message::Back => {
                 self.back();
-                iced::Command::none()
+                None
             }
             Message::Forward => {
                 self.forward();
-                iced::Command::none()
+                None
             }
             Message::Hover(slot) => {
                 self.hovered = slot;
-                iced::Command::none()
+                None
             }
             Message::Rail(slot) => {
                 if let Some(path) = Shell::destination(slot) {
@@ -439,43 +469,75 @@ impl Shell {
                 if slot == Rail::Settings {
                     self.modal = Some(Modal::Settings);
                 }
-                iced::Command::none()
+                None
             }
             Message::Screen(message) => {
-                // A page that opens a thing is navigating, not changing its own
-                // mind: which page is in the pane, and what the history records,
-                // are the shell's. A page reports it and this is where the report
-                // is acted on.
-                if let Some(open) = self.screen.update(message, &self.store) {
-                    let path = match open {
-                        pages::Open::Instance(id) => format!("/instance/{id}"),
-                        pages::Open::Project(id) => format!("/project/{id}"),
-                    };
-                    if let Some(address) = Address::parse(&path) {
-                        self.go(address);
+                // A page reports what it wants and this is where the report is
+                // acted on: opening a thing is a navigation, and a search is a
+                // request, and neither is the page's to perform.
+                match self.screen.update(message, &self.store) {
+                    Some(pages::Ask::Open(open)) => {
+                        let path = match open {
+                            pages::Open::Instance(id) => format!("/instance/{id}"),
+                            pages::Open::Project(id) => format!("/project/{id}"),
+                        };
+                        if let Some(address) = Address::parse(&path) {
+                            self.go(address);
+                        }
+                        None
                     }
+                    Some(pages::Ask::Search(asked)) => Some(asked),
+                    None => None,
                 }
-                iced::Command::none()
             }
             Message::Sidebar(shown) => {
                 self.sidebar = shown;
-                iced::Command::none()
+                None
             }
             Message::CloseModal => {
                 self.modal = None;
-                iced::Command::none()
+                None
             }
             Message::Tick => {
                 self.advance(FRAME);
-                iced::Command::none()
+                None
             }
-            Message::Minimize => window::minimize(Id::MAIN, true),
-            Message::ToggleMaximize => {
-                self.maximized = !self.maximized;
-                window::maximize(Id::MAIN, self.maximized)
-            }
-            Message::Close => window::close(Id::MAIN),
+            // Handled before this, in `handle`: they are the messages whose
+            // answer is a command rather than a request.
+            Message::Minimize | Message::ToggleMaximize | Message::Close => None,
         }
+    }
+
+    /// The request the page on screen owes, if it owes one.
+    fn opening_command(&mut self) -> iced::Command<Message> {
+        match self.screen.opening() {
+            Some(pages::Ask::Search(asked)) => self.search(asked),
+            // The only two things a page can ask for, and a navigation cannot be
+            // owed: nothing is waiting for one.
+            Some(pages::Ask::Open(_)) => iced::Command::none(),
+            None => iced::Command::none(),
+        }
+    }
+
+    /// Run a search and bring the answer back as a page message.
+    ///
+    /// The work itself happens in [`crate::store::off_thread`], which is the
+    /// crossing between a blocking engine and a toolkit that is not: awaiting the
+    /// call here, on the thread that draws, would be a dropped frame for every
+    /// millisecond the service took. The ceiling the engine holds is what keeps a
+    /// user who types quickly from opening a connection per keystroke.
+    ///
+    /// The round the request was made in travels with the message, so a slow
+    /// answer to a question the page has replaced is dropped by the page rather
+    /// than drawn (`discover::State::update`).
+    fn search(&self, asked: discover::Asked) -> iced::Command<Message> {
+        let store = self.store.clone();
+        // Cloned rather than borrowed: the worker takes the query, and the answer
+        // still needs the round it came with.
+        let query = asked.query.clone();
+        iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
+            Message::Screen(pages::Message::search_result(&asked, result))
+        })
     }
 
     // ---- Drawing --------------------------------------------------------
@@ -1176,8 +1238,17 @@ impl iced::Application for Shell {
             show_skins: prefs.show_skin_selector_in_sidebar,
             show_screenshots: prefs.show_all_screenshots_in_sidebar,
         };
-        let store = Store::load(&paths);
-        (Shell::new(flags.opening(), theme, &settings).with_store(store), iced::Command::none())
+        // The engine's cache goes in this launcher's own `cache/meta/`, which is
+        // where the launcher already keeps metadata it has fetched: a second cache
+        // directory would be a second set of stale answers nobody knows about.
+        let store = Store::load(&paths).with_engine(Engine::new(&paths));
+        let mut shell = Shell::new(flags.opening(), theme, &settings).with_store(store);
+        // The page a window opens on may owe a request before any message has
+        // arrived -- `/browse/modpack` owes a search -- and the first frame is the
+        // first moment there is anywhere to put the answer, so it is asked for
+        // here rather than waited for.
+        let command = shell.opening_command();
+        (shell, command)
     }
 
     fn title(&self) -> String {

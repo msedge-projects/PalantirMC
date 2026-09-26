@@ -197,7 +197,8 @@ mod tests {
             "project_id": "AANobbMI", "slug": "sodium", "title": "Sodium",
             "description": "Modern rendering engine", "author": "jellysquid",
             "downloads": 41000000, "follows": 9000,
-            "icon_url": "https://cdn.modrinth.com/icon.png", "latest_version": "mc1.21.4-0.6.5"
+            "icon_url": "https://cdn.modrinth.com/icon.png", "latest_version": "mc1.21.4-0.6.5",
+            "versions": ["1.21.4", "1.21.3"], "categories": ["fabric", "optimization"]
         }],
         "offset": 0, "limit": 50, "total_hits": 214
     }"#;
@@ -240,6 +241,11 @@ mod tests {
         assert_eq!(response.hits.len(), 1);
         assert_eq!(response.hits[0].title, "Sodium");
         assert_eq!(response.hits[0].project_ref(), "AANobbMI");
+        // The two fields a card draws tags from are the hit's own, not a second
+        // request per card: the game versions and the categories (loaders among
+        // them) come back with the search.
+        assert_eq!(response.hits[0].versions, vec!["1.21.4", "1.21.3"]);
+        assert_eq!(response.hits[0].categories, vec!["fabric", "optimization"]);
         assert!(api.searches.cached(&search.url()).is_some(), "the response was kept, with an age");
         assert!(api.cache_dir().exists());
 

@@ -8621,12 +8621,18 @@ mod tests {
             "a hover must ask for the frames that carry it"
         );
 
-        // A frame or two later it is on its way and not yet arrived.
+        // A frame later it has moved off rest. The upper bound is the hover end
+        // rather than "not yet arrived", because `sleep` promises a *lower*
+        // bound: a machine running eighty-odd tests at once can take longer than
+        // the tween's own 150ms to schedule this thread, and then the value read
+        // here is legitimately the end. What the tick has to have done is move
+        // the control off 1.0 -- a clock nothing ticks reads exactly 1.0 -- and
+        // that is what this asserts, under load or not.
         std::thread::sleep(std::time::Duration::from_millis(30));
         let _ = app.update(Message::PageScrollTick);
         let middle = factor(key, true, false);
         assert!(
-            middle > 1.0 && middle < theme::hover_brightness(),
+            middle > 1.0 && middle <= theme::hover_brightness(),
             "got {middle}, rest 1.0, hover {}",
             theme::hover_brightness()
         );

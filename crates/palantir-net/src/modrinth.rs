@@ -139,6 +139,19 @@ pub struct ModrinthSearchHit {
     /// Newest version id, if any.
     #[serde(default)]
     pub latest_version: String,
+    /// The game versions the project supports, as the search API lists them.
+    ///
+    /// On a *search hit* rather than on the project document, and that is the
+    /// API's shape rather than a choice: a browsing card shows these tags without
+    /// a second request per card, which is the whole reason the field is on the
+    /// hit at all.
+    #[serde(default)]
+    pub versions: Vec<String>,
+    /// The project's categories, which is also where a hit carries its loaders
+    /// (`fabric`, `quilt`, `forge`, `neoforge`, ...): Modrinth tags them in the
+    /// same list, and its own cards draw both from it.
+    #[serde(default)]
+    pub categories: Vec<String>,
 }
 
 impl ModrinthSearchHit {
@@ -424,6 +437,8 @@ mod tests {
             follows: 0,
             icon_url: String::new(),
             latest_version: String::new(),
+            versions: Vec::new(),
+            categories: Vec::new(),
         };
         assert_eq!(hit.project_ref(), "sodium");
     }
@@ -440,6 +455,8 @@ mod tests {
             follows: 0,
             icon_url: String::new(),
             latest_version: String::new(),
+            versions: Vec::new(),
+            categories: Vec::new(),
         };
         assert_eq!(hit.project_ref(), "ID");
     }

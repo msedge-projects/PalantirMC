@@ -18,26 +18,29 @@
 //! a string the reference does not translate would be inventing a difference
 //! rather than removing one.
 //!
-//! The results themselves come from Modrinth's search API. The request goes through
-//! the store (`Store::search`), which hands it to the engine on a thread of its own
-//! and answers here as a [`Load`]; a store with no engine to ask still draws the
-//! control row and says where the list is ([`crate::store::not_implemented`]), and
-//! the *input* controls are live either way, so the state the user sets is the state
-//! the request is made with.
+//! The results themselves come from Modrinth's search API, and the page *asks* for
+//! them rather than fetching them: [`State::update`] and [`State::opening`] hand the
+//! shell an [`Asked`], the shell runs it through the store off the frame thread, and
+//! the answer comes back as [`Message::Found`]. A store with no engine to ask
+//! answers with a sentence rather than a list (see [`crate::store`]), and the four
+//! states of the answer draw through [`crate::page::draw`] either way.
 //!
 //! The vocabulary -- the five orders, the six view sizes, the three messages -- is
 //! declared here rather than in the search code, because the strings the controls
 //! show are the reference's own literals and a label invented elsewhere is a label
-//! nobody can trace. The attribute below permits what nothing constructs yet.
+//! nobody can trace. [`State::request`] is the other half of that: the controls and
+//! the query string are one thing read twice.
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
 use iced::widget::{column, mouse_area, row, text, Space};
 use iced::{Alignment, Element, Length};
+use palantir_net::engine::Search as ApiSearch;
+use palantir_net::ModrinthSearchHit;
 
 use crate::page::{self, Load, GAP, GRID_GAP, ROW_GAP};
 use crate::route::ProjectType;
-use crate::store::{self, Store};
+use crate::store::Store;
 use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
@@ -66,6 +69,30 @@ pub struct Hit {
     pub game_versions: Vec<String>,
     /// Its loaders or categories.
     pub loaders: Vec<String>,
+}
+
+impl Hit {
+    /// One card, from one hit of the search API.
+    ///
+    /// The translation lives here rather than in the store so that the store can
+    /// answer with whatever the API gives it: what a card *is* belongs to the page
+    /// that draws it, and a card that grew a field would otherwise change a
+    /// module that has never drawn one.
+    pub fn from_api(hit: &ModrinthSearchHit) -> Hit {
+        Hit {
+            id: hit.project_ref().to_string(),
+            title: hit.title.clone(),
+            author: hit.author.clone(),
+            summary: hit.description.clone(),
+            downloads: hit.downloads,
+            follows: hit.follows,
+            // The API calls them `versions` and `categories`; the card calls them
+            // the tags a reader compares against their own game (`hit_card` draws
+            // the loaders first).
+            game_versions: hit.versions.clone(),
+            loaders: hit.categories.clone(),
+        }
+    }
 }
 
 /// The orders the search can be asked in.
@@ -145,6 +172,31 @@ pub enum Message {
     /// pane is the shell's business, so this comes back out of
     /// [`crate::pages::Screen::update`] as an [`crate::pages::Open`].
     Open(String),
+    /// The answer to a request, from the shell.
+    ///
+    /// The round is what makes a slow answer harmless: a page that has asked
+    /// again in the meantime has moved past this one, and putting the older
+    /// search's results under the newer search's controls is the kind of wrong a
+    /// reader cannot even see.
+    Found {
+        /// Which request this answers, as [`Asked::round`] numbered it.
+        round: u64,
+        /// The hits, or the reason there are none.
+        result: Result<Vec<Hit>, String>,
+    },
+}
+
+/// A request the page has made, and which one it was.
+///
+/// Handed out by [`State::ask`] and [`State::opening`] rather than built by the
+/// caller, because the round is the page's own bookkeeping: a caller that could
+/// pick one could pick a stale one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    /// Which search this is, counting from one.
+    pub round: u64,
+    /// What was asked for, as the engine takes it.
+    pub query: ApiSearch,
 }
 
 /// Discover's own state: what the user is asking for, and what came back.
@@ -162,6 +214,9 @@ pub struct State {
     pub page: usize,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
+    /// How many times this page has asked, which is how an answer is told apart
+    /// from an answer to a question it has since replaced.
+    round: u64,
 }
 
 impl State {
@@ -174,20 +229,32 @@ impl State {
             view: DEFAULT_VIEW,
             page: 1,
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
-            // and an unmade *request* are different sentences on the screen.
-            results: Load::Failed(store::not_implemented("Discover's search")),
+            // and an unmade *request* are different sentences on the screen. The
+            // shell asks for this page as soon as it draws it (`Screen::opening`),
+            // so `Idle` is a state that lasts one message rather than a page that
+            // sits there.
+            results: Load::Idle,
+            round: 0,
         }
     }
 
-    /// Apply a message.
-    pub fn update(&mut self, message: Message) {
+    /// Apply a message, and report the request it asked for.
+    ///
+    /// One message in, at most one request out: a page cannot ask twice in a turn,
+    /// and the shell cannot be handed a request it has already run.
+    pub fn update(&mut self, message: Message) -> Option<Asked> {
         match message {
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
                     self.project_type = project_type;
                     // A different tab is a different search, and the reference
-                    // resets the page rather than carrying it across.
+                    // resets the page rather than carrying it across. The results
+                    // go back to `Idle` rather than staying: what is on screen
+                    // belongs to the tab the user has just left. The shell asks
+                    // for the new tab on its way out of this message, which is
+                    // what `opening` is.
                     self.page = 1;
+                    self.results = Load::Idle;
                 }
             }
             Message::Query(query) => {
@@ -201,12 +268,58 @@ impl State {
             }
             Message::View(view) => self.view = view,
             Message::Page(page) => self.page = page.max(1),
-            Message::Search => {
-                self.results = Load::Failed(store::not_implemented("Discover's search"));
+            Message::Search => return Some(self.ask()),
+            Message::Found { round, result } => {
+                // An answer to a question this page has replaced is dropped. It
+                // is not an error and not worth a notice: the user asked for
+                // something newer and the newer answer is on its way.
+                if round == self.round {
+                    self.results = match result {
+                        Ok(hits) if hits.is_empty() => Load::Empty,
+                        Ok(hits) => Load::Ready(hits),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
             }
             // The shell's to do, and not this page's: see the enum.
             Message::Open(_) => {}
         }
+        None
+    }
+
+    /// The request this page owes because nothing has been asked for yet.
+    ///
+    /// `None` once it has asked, which is what keeps a page from asking on every
+    /// message: the shell calls this after every message it handles and gets
+    /// nothing for the ninety-nine out of a hundred that are not "this page was
+    /// just built".
+    pub fn opening(&mut self) -> Option<Asked> {
+        if self.results == Load::Idle {
+            Some(self.ask())
+        } else {
+            None
+        }
+    }
+
+    /// Bump the round, mark the page as waiting, and describe the request.
+    fn ask(&mut self) -> Asked {
+        self.round += 1;
+        self.results = Load::Loading;
+        Asked { round: self.round, query: self.request() }
+    }
+
+    /// The search this page's controls describe.
+    ///
+    /// The controls and the request are the same thing read twice: the tab is the
+    /// project type, the sort is the API's index, the view size is the limit, and
+    /// the page number is the offset. One place, so a control that changes cannot
+    /// fail to change the request.
+    pub fn request(&self) -> ApiSearch {
+        ApiSearch::new(self.query.trim())
+            .of_type(self.project_type.token())
+            .sorted_by(self.sort.token())
+            .with_limit(self.view as u32)
+            .from_row((self.page.saturating_sub(1) * self.view) as u32)
     }
 
     /// The placeholder the search field shows.
@@ -435,13 +548,120 @@ mod tests {
     }
 
     #[test]
-    fn the_results_say_where_they_will_come_from_until_they_can() {
-        let state = State::new(ProjectType::Modpack);
-        let reason = state.results.failure().expect("a reason");
-        assert!(reason.contains("is not implemented yet"), "{reason}");
-        // And they are not an empty *answer*: the page must not say "no results"
-        // about a request that has not been made.
+    fn a_page_that_has_not_asked_yet_is_waiting_rather_than_empty() {
+        // The page opens unasked, which draws as "Loading results…" rather than as
+        // "no results": the two are different sentences and only one of them is
+        // true of a request nobody has made.
+        let mut state = State::new(ProjectType::Modpack);
+        assert_eq!(state.results, Load::Idle);
+        assert!(state.results.waiting());
         assert_ne!(state.results, Load::Empty);
+
+        // And the request it owes is its own controls, read as a query: the tab as
+        // the project type, the sort as the API's index, the view size as the
+        // limit, the page as the offset.
+        let asked = state.opening().expect("the request the page owes");
+        assert_eq!(asked.round, 1);
+        assert_eq!(asked.query.query, "");
+        assert_eq!(asked.query.project_type.as_deref(), Some("modpack"));
+        assert_eq!(asked.query.index.as_deref(), Some("relevance"));
+        assert_eq!(asked.query.limit, 20);
+        assert_eq!(asked.query.offset, 0);
+        assert_eq!(state.results, Load::Loading);
+        // Asking is once: a page that has asked does not ask again on every
+        // message the shell handles.
+        assert!(state.opening().is_none());
+    }
+
+    #[test]
+    fn the_controls_and_the_request_are_the_same_thing_read_twice() {
+        let mut state = State::new(ProjectType::Shader);
+        state.update(Message::Query("  complementary  ".to_string()));
+        state.update(Message::Sort(Sort::DateUpdated));
+        state.update(Message::View(50));
+        state.update(Message::Page(3));
+        let request = state.request();
+        // The query is trimmed, because a search for trailing spaces is a
+        // different cache key for the same question.
+        assert_eq!(request.query, "complementary");
+        assert_eq!(request.project_type.as_deref(), Some("shader"));
+        assert_eq!(request.index.as_deref(), Some("updated"));
+        assert_eq!(request.limit, 50);
+        assert_eq!(request.offset, 100, "the third page of fifty is a hundred rows in");
+    }
+
+    #[test]
+    fn an_answer_lands_on_the_question_it_was_asked() {
+        let mut state = State::new(ProjectType::Modpack);
+        let first = state.opening().expect("a request");
+        state.update(Message::Found { round: first.round, result: Ok(vec![hit("Sodium")]) });
+        assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
+
+        // An empty answer is `Empty` -- the reference's own "no results" -- and
+        // not an empty list.
+        state.update(Message::Found { round: first.round, result: Ok(Vec::new()) });
+        assert_eq!(state.results, Load::Empty);
+
+        // A failure carries the reason it failed.
+        state.update(Message::Found { round: first.round, result: Err("404 for the search".into()) });
+        assert_eq!(state.results, Load::Failed("404 for the search".into()));
+
+        // A slow answer to a question the page has replaced is dropped rather than
+        // drawn: the newer request's results are the ones that match the controls
+        // on screen.
+        let second = state.update(Message::Search).expect("the button asks again");
+        assert!(second.round > first.round);
+        state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) });
+        assert_eq!(state.results, Load::Loading, "the stale answer changed nothing");
+        state.update(Message::Found { round: second.round, result: Ok(vec![hit("Fresh")]) });
+        assert_eq!(state.results, Load::Ready(vec![hit("Fresh")]));
+    }
+
+    #[test]
+    fn a_tab_change_puts_the_page_back_to_unasked_and_to_the_first_page() {
+        // The results on screen belong to the tab the user has left, so they go;
+        // the shell asks for the new tab on the way out of the message.
+        let mut state = State::new(ProjectType::Modpack);
+        state.opening();
+        state.update(Message::Found { round: 1, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::Page(4));
+        assert_eq!(state.update(Message::ProjectType(ProjectType::Mod)), None);
+        assert_eq!(state.page, 1);
+        assert_eq!(state.results, Load::Idle);
+        let asked = state.opening().expect("the new tab's request");
+        assert_eq!(asked.round, 2);
+        assert_eq!(asked.query.project_type.as_deref(), Some("mod"));
+        // And the tab already on screen is not a change, so nothing is thrown away.
+        state.update(Message::Found { round: 2, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::ProjectType(ProjectType::Mod));
+        assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
+    }
+
+    #[test]
+    fn a_card_is_read_out_of_the_api_s_hit() {
+        let api = ModrinthSearchHit {
+            project_id: "AANobbMI".to_string(),
+            slug: "sodium".to_string(),
+            title: "Sodium".to_string(),
+            description: "Modern rendering engine".to_string(),
+            author: "jellysquid".to_string(),
+            downloads: 41_000_000,
+            follows: 9_000,
+            icon_url: "https://cdn.modrinth.com/icon.png".to_string(),
+            latest_version: "mc1.21.4-0.6.5".to_string(),
+            versions: vec!["1.21.4".to_string()],
+            categories: vec!["fabric".to_string()],
+        };
+        let card = Hit::from_api(&api);
+        assert_eq!(card.id, "AANobbMI", "the id, because the route follows it");
+        assert_eq!(card.title, "Sodium");
+        assert_eq!(card.summary, "Modern rendering engine");
+        assert_eq!(card.game_versions, vec!["1.21.4"]);
+        assert_eq!(card.loaders, vec!["fabric"]);
+        // A hit with no id falls back to the slug, which is the other thing the
+        // route accepts.
+        let slug_only = ModrinthSearchHit { project_id: String::new(), ..api };
+        assert_eq!(Hit::from_api(&slug_only).id, "sodium");
     }
 
     #[test]
