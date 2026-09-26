@@ -58,6 +58,8 @@ use crate::style::{
 };
 use crate::icons_gen::{self, Glyph};
 use crate::motion::{Timing, Tween};
+use crate::page::ROW_GAP;
+use crate::text_gen::Key;
 use crate::pages::{self, discover, Screen};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{Engine, Store};
@@ -181,6 +183,15 @@ pub struct Shell {
     /// What the pages are answered with: the launcher's own filesystem, and the
     /// engine for what has to come from a service.
     store: Store,
+    /// The preferences the shell's own settings are drawn from.
+    ///
+    /// The shell owns the colour theme rather than being handed one, because
+    /// Settings is where it changes: a choice made in the modal has to redraw the
+    /// window it was made in, and be in the file for the next launch.
+    prefs: crate::prefs::Prefs,
+    /// Where that file is, once the application has said. `None` in a test, which
+    /// is what keeps a test from writing to the real preferences.
+    home: Option<palantir_core::paths::PalantirPaths>,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -206,6 +217,21 @@ impl Default for RailSettings {
     /// The reference's own defaults, from `helpers/settings.ts`.
     fn default() -> RailSettings {
         RailSettings { hide_sidebar: false, show_skins: false, show_screenshots: true }
+    }
+}
+
+/// The modal's controls are the kit's, and the kit asks for a crossing.
+///
+/// Written by hand rather than through `crate::hovered!` because this message
+/// family already has a `Hover` of its own -- the rail's, whose payload is a slot
+/// rather than a key -- and a second variant of the same name would not compile.
+impl crate::ui::Hovered for Message {
+    fn hover(key: &'static str, over: bool) -> Message {
+        Message::Control { key, over, hover: None }
+    }
+
+    fn hover_with(key: &'static str, over: bool, hover: f32) -> Message {
+        Message::Control { key, over, hover: Some(hover) }
     }
 }
 
@@ -235,6 +261,20 @@ pub enum Message {
     Hover(Option<Rail>),
     /// A rail slot was clicked.
     Rail(Rail),
+    /// A colour theme was chosen in Settings.
+    ColorTheme(ColorTheme),
+    /// A control drawn by the shell itself published a pointer crossing.
+    ///
+    /// The rail has its own tween and its own message ([`Message::Hover`]); the
+    /// modal's controls are built by [`crate::ui`], which asks for this.
+    Control {
+        /// The control's stable name, one per control.
+        key: &'static str,
+        /// Whether the pointer arrived or left.
+        over: bool,
+        /// The hover end, where the control declares one of its own.
+        hover: Option<f32>,
+    },
     /// The right panel was shown or hidden.
     Sidebar(bool),
     /// A modal asked to close, from its own button or from its scrim.
@@ -266,6 +306,8 @@ impl Shell {
             maximized: false,
             screen,
             store: Store::default(),
+            prefs: crate::prefs::Prefs::default(),
+            home: None,
         };
         shell.settle();
         shell
@@ -275,6 +317,32 @@ impl Shell {
     pub fn with_store(mut self, store: Store) -> Shell {
         self.store = store;
         self
+    }
+
+    /// The preferences the shell's own settings come from, and the file behind
+    /// them.
+    pub fn with_prefs(
+        mut self,
+        home: palantir_core::paths::PalantirPaths,
+        prefs: crate::prefs::Prefs,
+    ) -> Shell {
+        self.prefs = prefs;
+        self.home = Some(home);
+        self
+    }
+
+    /// Take a colour theme: the window, the setting, and the file.
+    ///
+    /// A write that fails does not undo the choice, for [`crate::prefs`]'s
+    /// reason: the window should still look the way it was just asked to, and a
+    /// settings file that cannot be written is a problem for the next launch
+    /// rather than a reason to refuse this one.
+    fn choose_theme(&mut self, choice: ColorTheme) {
+        self.prefs.color_theme = choice.id().to_string();
+        self.theme = generated_theme(choice, crate::theme::os_prefers_light());
+        if let Some(home) = &self.home {
+            let _ = crate::prefs::save(home, &self.prefs);
+        }
     }
 
     /// Where the shell is.
@@ -483,6 +551,18 @@ impl Shell {
             }
             Message::Hover(slot) => {
                 self.hovered = slot;
+                None
+            }
+            Message::ColorTheme(choice) => {
+                self.choose_theme(choice);
+                None
+            }
+            Message::Control { key, over, hover } => {
+                crate::ui::pointer_with(
+                    key,
+                    over,
+                    hover.unwrap_or_else(crate::theme::hover_brightness),
+                );
                 None
             }
             Message::Rail(slot) => {
@@ -853,6 +933,31 @@ impl Shell {
             .into()
     }
 
+    /// The themes Settings offers, by the reference's own rule.
+    ///
+    /// `AppearanceSettings.vue` filters its list on `appSettings.devMode` and on
+    /// the theme in force: retro is behind dev mode until it is the theme already
+    /// chosen. `ColorTheme::options` owns that rule, and this launcher has no dev
+    /// mode to hand it, so what the pane offers is the rule read once, with
+    /// `false`.
+    fn theme_options(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let current = self.prefs.theme();
+        let mut grid = row![].spacing(ROW_GAP);
+        for option in ColorTheme::options(false, current) {
+            let key = crate::ui::scoped("settings:theme", option.id());
+            let kind = if option == current { crate::ui::Kind::Colored } else { crate::ui::Kind::Standard };
+            grid = grid.push(crate::ui::button(
+                theme,
+                key,
+                option.label_key(),
+                kind,
+                Message::ColorTheme(option),
+            ));
+        }
+        grid.into()
+    }
+
     /// The scrim and the dialog, over whatever the shell was drawing.
     fn modal_layer(&self) -> Element<'_, Message> {
         let theme = self.theme;
@@ -872,11 +977,18 @@ impl Shell {
                         .push(self.history_button(Glyph::X, true, Message::CloseModal)),
                 )
                 .push(
-                    text("Settings is a modal in the reference, not a page: there is no /settings route, and the rail's button opens this. Its body arrives with the pages.")
+                    text(Key::SettingsAppearanceTitle.message())
+                        .size(16.0)
+                        .font(heading())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                )
+                .push(
+                    text(Key::SettingsDisplayThemeDescription.message())
                         .size(14.0)
                         .font(medium())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-                ),
+                )
+                .push(self.theme_options())
         )
         .width(Length::Fixed(560.0))
         .padding(24.0)
@@ -1272,7 +1384,9 @@ impl iced::Application for Shell {
         // where the launcher already keeps metadata it has fetched: a second cache
         // directory would be a second set of stale answers nobody knows about.
         let store = Store::load(&paths).with_engine(Engine::new(&paths));
-        let mut shell = Shell::new(flags.opening(), theme, &settings).with_store(store);
+        let mut shell = Shell::new(flags.opening(), theme, &settings)
+            .with_store(store)
+            .with_prefs(paths.clone(), prefs);
         // The page a window opens on may owe a request before any message has
         // arrived -- `/browse/modpack` owes a search -- and the first frame is the
         // first moment there is anywhere to put the answer, so it is asked for
@@ -1536,6 +1650,35 @@ mod tests {
             assert_eq!(&before, shell.address(), "{slot} is not a link");
         }
         assert_eq!(shell.modal, Some(Modal::Settings), "settings opens its modal");
+    }
+
+    #[test]
+    fn the_settings_modal_offers_the_themes_and_takes_one() {
+        // The pane the modal has been waiting for since stage 2: the colour
+        // themes `color_theme.rs` has carried all along, offered by the
+        // reference's own rule and taken by the window that shows them.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::Settings));
+        let offered = ColorTheme::options(false, shell.prefs.theme());
+        assert!(offered.contains(&ColorTheme::Dark));
+        assert!(offered.contains(&ColorTheme::Light));
+        assert!(
+            !offered.contains(&ColorTheme::Retro),
+            "retro is behind dev mode until it is the theme already in force"
+        );
+        // Every option is a control the kit builds, which is what `render`
+        // proves: a button the kit cannot build is a modal that panics.
+        drop(shell.render());
+        press(&mut shell, Message::ColorTheme(ColorTheme::Light));
+        assert_eq!(shell.theme, Gen::Light);
+        assert_eq!(shell.prefs.theme(), ColorTheme::Light);
+        // And once retro *is* the theme in force, the filter keeps offering it:
+        // the reference's rule read from the other side.
+        press(&mut shell, Message::ColorTheme(ColorTheme::Retro));
+        assert_eq!(shell.theme, Gen::Retro);
+        assert!(ColorTheme::options(false, shell.prefs.theme()).contains(&ColorTheme::Retro));
+        // A test has no home, so nothing was written to anyone's preferences.
+        assert!(shell.home.is_none());
     }
 
     #[test]
