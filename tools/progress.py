@@ -26,6 +26,11 @@ tree.
     python tools/progress.py            # the table
     python tools/progress.py --check    # silent on success, drift on failure
 
+On Windows, `tools/progress.cmd` is the same run for a shell where `python`
+is the Microsoft Store alias or absent: it finds an interpreter itself, and it
+is the entry point that keeps a double-clicked console open long enough to be
+read.
+
 Exit status is 1 when the documents disagree with each other or with this
 file: a met gate no stage owns, a stage row that is `Done` with open work, an
 `In progress` stage with nothing open, an open list whose items no longer match

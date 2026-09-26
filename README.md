@@ -113,6 +113,14 @@ tag is one of the few actions that needs a human's go-ahead first (see
   fails when the three disagree — a gate no stage owns, a stage marked done
   with open work, an open bullet renamed. Not wired into CI: `tools/**`
   deliberately starts no run.
+- `tools/progress.cmd` — the double-click entry point for the above, and the
+  answer to a console that opens and closes before its output can be read. A
+  `.py` opened from Explorer goes to whatever `python` resolves to, and on this
+  machine that is the Microsoft Store alias, which exists, answers "not found"
+  and exits. The wrapper finds the `py` launcher (or a python.org install)
+  itself, runs the script from the repository root, and pauses only when
+  nothing asked it not to: `--check` and `--no-pause` suppress the pause so a
+  caller that can read output is never left waiting on a keypress.
 
 Captures live in `.scratch/` and are never committed. `GATES.md` records which
 gates are environment-dependent and what a green run means for each.
