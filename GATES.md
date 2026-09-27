@@ -2103,6 +2103,50 @@ CONFIRMED: text generation is byte-identical
   it when the account can schedule jobs is still the first thing to do with this
   tree.
 
+- [x] G92: the plan is a page as well as a table, and the page is checked against
+      the documents it is drawn from
+  CHECK: python tools/dashboard.py --check
+  EXPECT: CONFIRMED: the page carries all 93 gates, 6 stage cards and every subject as written
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 93 gates, 6 stage cards and every subject as written
+
+$ python tools/progress.py --dashboard
+wrote C:\PalantirMC\.scratch\progress.html  (56,068 bytes)
+```
+
+  `progress.py` answers "how much is left" in a table that has to be re-read from
+  the top; this answers it in a window. `tools/dashboard.py` draws the same two
+  documents -- the stage cards with their gates and their open work, the whole
+  gate ledger with every subject line, and the code the repository owns -- into
+  one HTML file with its styles and its script inside it.
+
+  Nothing is fetched. No font, no framework, no stylesheet, no favicon: a page
+  that needs a network is blank exactly when the network is what is being worked
+  on, which is most of this project's recent history. The four palettes are the
+  launcher's own -- the `LIGHT`/`DARK`/`OLED`/`RETRO` columns of `theme_gen.rs`'s
+  colour table -- so the page and the thing the page is about are painted from
+  the same colours, and there is no fifth opinion about what the launcher's green
+  is. The theme is remembered per browser, because this is a page left open for
+  hours.
+
+  It is interactive in the four ways a reader of this plan actually needs, and
+  no others: `/` focuses the search, `Esc` clears it, `0`-`5` filters the ledger
+  to a stage, and a gate chip on a stage card scrolls the ledger to that gate.
+  The counts on the filter chips are live, and the ring at the top is the same
+  `plan_totals` the terminal table prints -- pulled out into a function for
+  exactly this reason, because a page that computed its own answer could
+  disagree with the pane left open beside it.
+
+  `--check` states what the page must carry, so that it cannot quietly stop
+  carrying it: every gate in the ledger, a card for every stage, one ledger row
+  per gate, and every subject present as written. It earned its place on the
+  first run -- the row count came back as 91 against a page that draws 97,
+  because `class="gate"` also matches `class="gate-chip"`, which is exactly the
+  kind of thing a page breaks on invisibly and a reader never notices.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

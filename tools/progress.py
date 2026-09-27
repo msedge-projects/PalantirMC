@@ -87,7 +87,7 @@ OPEN_ITEM = re.compile(r"^(?:\* |\d+\. )\*\*(.+?)\*\*")
 # stage delivered is in a range below. A new gate is a new line here; the run
 # fails until someone decides which stage it belongs to, which is the point.
 GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
-    "before": [(1, 57)],  # the shell this rewrite replaces; G46b lives here too
+    "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
     4: [(66, 75), (91, 91)],  # the engine; the first page on it; the launch's transfers
@@ -514,10 +514,33 @@ def main() -> int:
                         help="redraw whenever NEXT_STEPS.md or GATES.md changes")
     parser.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
                         help="how often --watch looks for a change (default: 1)")
+    parser.add_argument("--dashboard", nargs="?", const="", metavar="PATH",
+                        help="write the HTML dashboard instead of the table "
+                             "(default: .scratch/progress.html)")
     parser.add_argument("--root", default=str(REPO),
                         help="the tree to read (default: this repository)")
     args = parser.parse_args()
     root = Path(args.root)
+
+    if args.dashboard is not None:
+        # Imported here rather than at the top: the terminal report is the tool
+        # and this is the other face of it, and a page nobody asked for is not a
+        # cost the common case should pay.
+        import dashboard
+
+        out = Path(args.dashboard) if args.dashboard else root / ".scratch" / "progress.html"
+        page, problems = dashboard.render(root)
+        if problems:
+            for problem in problems:
+                print(f"progress: {problem}", file=sys.stderr)
+            return 1
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(page, encoding="utf-8")
+        # The path rather than only a byte count: the whole point of writing a
+        # file is that the caller can open it, and the shell that opened it is
+        # not always the shell that asked for it.
+        print(f"wrote {out}  ({len(page):,} bytes)")
+        return 0
 
     if args.watch:
         # A floor rather than a reject: a poll this tool owes nothing to being

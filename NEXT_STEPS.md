@@ -72,7 +72,11 @@ Backend suites as run against this tree: `palantir-core` 168 plus 8,
 879 in the workspace, of which the desktop crate's 455 plus its 4 native tests
 are 459. Which binary each number belongs to is written out in
 [`GATES.md`](GATES.md), because a bare list of numbers is how the earlier version
-of this paragraph managed to mislabel three of them.
+of this paragraph managed to mislabel three of them. The same numbers are on a
+page as well as in a table: `python tools/progress.py --dashboard` writes the
+stage cards, the whole gate ledger and the code sizes to `.scratch/progress.html`,
+and `python tools/dashboard.py --check` is what keeps it carrying every gate
+(G92).
 
 ## The plan, and where each stage stands
 
