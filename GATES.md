@@ -2338,7 +2338,8 @@ exit 0; `palantir-net` (lib) 1 warning, `palantir-desktop` (bin) 3 and (bin
   `36299945287` -- both of them `Test workspace` and `Lint` dying in two seconds
   with zero steps and `recent account payments have failed or your spending
   limit needs to be increased`, and both of them leaving `Live services` and
-  `Build exe` unscheduled.
+  `Build exe` unscheduled. The record commit after it, `516b8fc`, is run
+  `36301457725` -- the same block once more, three seconds and zero steps.
 
 - [x] G95: Minecraft's own version file is read from piston, and the translation
       the mirror was doing is measured against the mirror
@@ -2456,12 +2457,12 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out
   URL is one the service has nothing at, which is what makes "from piston alone"
   measurable rather than a reading of the routing table.
 
-  The runner could not be the receipt again: this slice's push is recorded below
-  with the run the account gave it -- `Test workspace` and `Lint` dying in two
-  seconds with zero steps and `recent account payments have failed or your
-  spending limit needs to be increased`, with `Live services` and `Build exe`
-  never scheduled. The transcript above is this machine's, run with the flags
-  `ci.yml` uses.
+  The runner could not be the receipt again: this slice's push, `0508b03`, is run
+  `36305229876` -- `Test workspace` and `Lint` dying in four seconds with zero
+  steps and `recent account payments have failed or your spending limit needs to
+  be increased`, with `Live services` and `Build exe` skipped rather than
+  scheduled. The transcript above is this machine's, run with the flags `ci.yml`
+  uses.
 
 ## What these gates cannot say
 

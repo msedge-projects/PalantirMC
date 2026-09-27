@@ -36,8 +36,8 @@ push superseded it. A cancelled run is not a passing one, and it is not a failin
 one either.
 
 **Stages 2, 3 and the engine's slices were pushed to a runner that could not
-start.** Forty-six runs on this branch at the time of writing, one per push from
-`82232f9` onwards -- `36038333030` the first, `36301407378` the latest -- died in
+start.** Forty-eight runs on this branch at the time of writing, one per push from
+`82232f9` onwards -- `36038333030` the first, `36305229876` the latest -- died in
 three to six seconds with zero steps and the same message -- `recent account
 payments have failed or your spending limit needs to be increased` -- which is a
 billing state and not a verdict on the tree; none of the jobs was scheduled, so
