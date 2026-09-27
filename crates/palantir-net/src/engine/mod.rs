@@ -21,6 +21,7 @@
 //! | [`http`] | The one `reqwest` client, the `Range` header, and the honest answer when a range is ignored |
 //! | [`download`] | One file: resumed if it can be, restarted if it must be, verified before it is done |
 //! | [`schedule`] | A queue of files over a few workers, where every job reports and any one can be stopped |
+//! | [`forge`] | Forge's and NeoForge's installer jars: the launch profile inside them, and the processors that install them |
 //! | [`piston`] | Mojang's own version manifest and version files, checked against the digests it publishes |
 //! | [`modrinth`] | Modrinth's API over the same cache, with a TTL short enough for a search |
 //! | [`loaders`] | What Fabric, Quilt, NeoForge and Forge each publish as their own build list, read from the loader that published it rather than from the other launcher's mirror of it |
@@ -53,6 +54,7 @@ pub mod cache;
 pub mod cancel;
 pub mod content;
 pub mod download;
+pub mod forge;
 pub mod http;
 pub mod limit;
 pub mod loaders;
@@ -66,6 +68,11 @@ pub use cache::{Cached, MetadataCache, DEFAULT_TTL, IMMUTABLE_TTL};
 pub use cancel::Cancel;
 pub use content::{ContentStore, Digest, Stored};
 pub use download::{fetch_to_file, Download, Downloaded};
+pub use forge::{
+    component_uid, installer_url, parse_installer, translate_profile, DataValue, InstallSpec,
+    InstallerMeta, ParsedInstaller, Processor, CENTRAL_MAVEN, FORGE_MAVEN, MOJANG_LIBRARIES,
+    NEOFORGE_MAVEN,
+};
 pub use http::{HttpPool, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT};
 pub use limit::{Limit, Permit};
 pub use loaders::{default_build, Build, Loader, LoaderMeta, MAX_BUILDS};

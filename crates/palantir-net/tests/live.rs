@@ -1132,3 +1132,144 @@ fn every_loader_publishes_its_builds_where_this_code_says_it_does() {
     }
     assert!(meta.cache_dir().exists(), "the bodies were written where a second run reads them");
 }
+
+/// The two Forge-shaped loaders' own installers, against the files they replace.
+///
+/// `InstallerMeta::profile` exists because this launcher's model reads Prism's
+/// *rewrite* of the installer's `version.json` rather than the publisher's own
+/// file, so a unit test can only say that the translation agrees with the
+/// fixture its author wrote -- and that fixture was written from the same
+/// reading of the installer as the code. This asks the loader's maven and the
+/// mirror for the same build and compares their answers, which is what turns
+/// "the profile comes from the installer" into a measurement.
+///
+/// What cannot agree is named rather than papered over: the mirror rewrites
+/// the file around ForgeWrapper (its main class, and its own artifact in place
+/// of the loader's), drops `order`-less purity for an `order` and a
+/// `requires` naming the game, and serves the standard argument prefix the
+/// `net.minecraft` component contributes at merge time. The loader's own game
+/// arguments are the tail of the mirror's string in both cases.
+#[test]
+#[ignore = "live: reaches maven.minecraftforge.net, maven.neoforged.net and meta.prismlauncher.org"]
+fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, InstallerMeta, MetadataCache, DEFAULT_TTL};
+
+    /// One pinned build per loader: the build the mirror also serves, so the
+    /// comparison is of the same component and version on both sides.
+    const BUILDS: &[(&str, &str, &str, &str, &str)] = &[
+        // loader name, game, build, mirror uid, the loader's own main class.
+        ("forge", "1.21.1", "52.1.0", "net.minecraftforge", "net.minecraftforge.bootstrap.ForgeBootstrap"),
+        ("neoforge", "1.21.1", "21.1.172", "net.neoforged", "cpw.mods.bootstraplauncher.BootstrapLauncher"),
+    ];
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let pool = std::sync::Arc::new(HttpPool::default());
+    let installers = InstallerMeta::new(
+        MetadataCache::new(tmp.path().join("installers"), DEFAULT_TTL),
+        pool,
+    );
+    let cancel = Cancel::new();
+    let backoff = Backoff::with_attempts(2);
+
+    for (name, game, build, uid, main) in BUILDS {
+        let loader = palantir_net::engine::Loader::from_name(name)
+            .unwrap_or_else(|| panic!("{name} is not a loader"));
+        let ours = installers
+            .profile(loader, game, build, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{name} {build} from its installer: {e}"));
+        let theirs = live_store(&tmp.path().join("mirror"))
+            .version_file(uid, build)
+            .unwrap_or_else(|e| panic!("{uid} {build} from the mirror: {e}"));
+
+        // The version file's own identity: the installer names the game build
+        // in `id` and no component, so the uid and version are the caller's.
+        assert_eq!(ours.uid, *uid);
+        assert_eq!(ours.version, *build, "{name}: the version is the build that was asked for");
+        assert_eq!(ours.main_class, *main, "{name} {build} launches through {}", ours.main_class);
+        assert_eq!(
+            theirs.main_class, "io.github.zekerzhayard.forgewrapper.installer.Main",
+            "{uid} {build} is no longer rewritten around ForgeWrapper: {main}",
+            main = theirs.main_class
+        );
+
+        // The libraries: every library the mirror serves but the wrapper is
+        // in the installer's file, and everything the installer names but the
+        // mirror drops is the loader's own artifact (Forge) or the logging
+        // stack the wrapper replaces (NeoForge).
+        for library in &theirs.libraries {
+            if library.name.artifact() == "ForgeWrapper" {
+                continue;
+            }
+            let name = library.name.serialize();
+            assert!(
+                ours.libraries.iter().any(|l| l.name.serialize() == name),
+                "{uid} {build}: the mirror serves {name}, which the installer lost"
+            );
+        }
+        let mut only_ours: Vec<String> =
+            ours.libraries.iter().map(|l| l.name.serialize()).filter(|name| {
+                !theirs.libraries.iter().any(|l| l.name.serialize() == *name)
+            }).collect();
+        only_ours.sort();
+        let groups: Vec<String> = only_ours
+            .iter()
+            .map(|name| {
+                palantir_core::version::GradleSpecifier::parse(name).group().to_string()
+            })
+            .collect();
+        if *name == "forge" {
+            assert_eq!(
+                only_ours,
+                vec![format!("net.minecraftforge:forge:{game}-{build}:client")],
+                "{uid} {build}: the difference is not just the loader's own artifact: {only_ours:?}"
+            );
+        } else {
+            assert_eq!(
+                only_ours.len(),
+                3,
+                "{uid} {build}: the difference is not just the logging stack: {only_ours:?}"
+            );
+            assert!(
+                groups.iter().all(|group| group == "org.apache.logging.log4j"),
+                "{uid} {build}: unexpected libraries only the installer names: {only_ours:?}"
+            );
+        }
+
+        // The arguments: the mirror serves the standard prefix (the game
+        // component's half of the merge) with the loader's own game arguments
+        // after it, so the translation is the tail of the mirror's string.
+        assert!(
+            !ours.minecraft_arguments.is_empty(),
+            "{name} {build} translated to no game arguments at all"
+        );
+        let tail = if *name == "forge" {
+            format!(
+                "{} --fml.forgeGroup net.minecraftforge --fml.forgeVersion {build} --fml.mcVersion {game}",
+                ours.minecraft_arguments
+            )
+        } else {
+            ours.minecraft_arguments.clone()
+        };
+        assert!(
+            theirs.minecraft_arguments.ends_with(&tail),
+            "{uid} {build}:\n  mirror: {}\n  tail:   {tail}",
+            theirs.minecraft_arguments
+        );
+
+        // The rewrite's own additions: an `order` and a requirement naming
+        // the game, neither of which the publisher states.
+        assert!(theirs.has_order, "{uid} {build} carries no order now");
+        assert!(
+            !ours.has_order,
+            "{uid} {build} carries an 'order' key, which is the mirror's addition"
+        );
+        assert!(
+            theirs.requires.iter().any(|r| r.uid == "net.minecraft"),
+            "{uid} {build} no longer requires the game it patches"
+        );
+        assert!(
+            ours.requires.is_empty(),
+            "{uid} {build} states a requirement the publisher did not"
+        );
+    }
+}

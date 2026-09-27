@@ -23,6 +23,10 @@ sha1 = "0.10"
 # `auth` builds the entitlements request id itself: the endpoint takes a UUID
 # and answers an empty item list without one. Already in the workspace lock file.
 uuid.workspace = true
+# `forge` reads the launch profile out of the loader's installer jar, which is
+# a zip. Same version `palantir-loader` already uses, so it adds no package to
+# the lock file.
+zip = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

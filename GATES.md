@@ -2677,7 +2677,15 @@ P7dR8mSH differ: 298 = no-release 295 + newer-non-release 3 + other 0
   EXPECT: test result: ok. 913 passed; 0 failed; 14 ignored, between the seven suites
           exit 0 for clippy, with no warning in a line this slice added
   EVIDENCE: the transcripts of these commands on this tree, and of the live pack
-            the rule was checked against:
+             the rule was checked against:
+- [x] G99: the two Forge-shaped loaders' own installers are read from their own
+      maven, and the launch profile inside each is translated into the shape
+      `resolve` merges
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_installers_profile
+  EXPECT: test result: ok. 917 passed; 0 failed; 15 ignored, between the seven suites
+          1 passed, and it compared each installer's file with the mirror's field for field
+  EVIDENCE: the transcript of these commands on this tree:
 
 ```
 $ cargo test --workspace --all-targets --locked
@@ -2760,6 +2768,56 @@ Cobblemon Official Modpack [Fabric] | modpack | 12 versions
   be increased`, and `Live services` and `Build exe` skipped rather than
   scheduled: the same block as the nine before it. The transcripts above are this
   machine's, run with the flags `ci.yml` uses.
+    473 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    224 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 15 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, and not one warning in a line this slice added
+
+$ cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_installers_profile
+test the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out
+```
+
+  `crates/palantir-net/src/engine/forge.rs` is the reader: `installer_url`
+  names the installer jar per build (Forge's under the game and the build,
+  NeoForge's under the build alone, and none for Fabric and Quilt, whose
+  profile is a document), `parse_installer` opens the jar over the engine's
+  own cache -- believed for a year, like a version file, because a released
+  build's bytes do not move -- and `translate_profile` turns `version.json`
+  into the shape `VersionFile` parses, the way `PistonMeta::translated` does
+  for Mojang's file. The installer jar needed one dependency this crate did
+  not have: `zip` 0.6, the version `palantir-loader` already uses, so the
+  lock file gains an edge and no package.
+
+  The measurement is two pinned builds the mirror also serves -- Forge
+  `1.21.1-52.1.0` (`recommended`, so the stable default) and NeoForge
+  `21.1.172` -- and it says the mirror's copy is a rewrite, the way G95 said
+  it about the game's file. Their main classes differ by design (the
+  loader's own `ForgeBootstrap`/`BootstrapLauncher` against the mirror's
+  ForgeWrapper), their library lists differ by exactly one artifact (Forge:
+  the loader's own `:client` against the wrapper; NeoForge: the three
+  `org.apache.logging.log4j` jars the wrapper replaces), and the translated
+  game arguments are the tail of the mirror's string -- with Forge's three
+  `--fml.*` flags appended by the mirror, asserted as the documented suffix
+  rather than assumed. `has_order` and the `requires` naming the game are
+  the mirror's additions, asserted absent here and present there.
+
+  Two things the era decided. Old Forge builds carry the profile as
+  `versionInfo` inside `install_profile.json` with no `version.json`, and
+  those are read from that key with their own `minecraftArguments` string
+  kept; older still -- neither key -- is refused by name, because a profile
+  of that age names tweakers this launcher does not run. And
+  `arguments.jvm` is dropped in translation for the reason the mirror drops
+  it: its tokens (`${classpath_separator}`, a module path) are ones no
+  launch fills, and the wrapper rebuilds that path at launch instead.
+
+  The runner could not be the receipt: billing is still blocked, so pushes
+  land as four-second runs with zero steps and the same annotation. The
+  transcript above is this machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
 
