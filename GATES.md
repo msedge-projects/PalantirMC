@@ -2254,6 +2254,88 @@ when it was taken
   `Build exe` unscheduled. The transcript above is this machine's, run with the
   flags `ci.yml` uses.
 
+- [x] G94: a loader's launch profile comes from the loader's own service, and
+      what is left on Prism's mirror is measured rather than assumed
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo test -p palantir-desktop --locked -- meta::tests::a_fabric_instance_resolves_its_loader_from_fabric
+  EXPECT: test result: ok. 884 passed; 0 failed; 13 ignored
+          1 passed, and it created a real instance for it
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    458 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    215 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo test -p palantir-desktop --locked -- meta::tests::a_fabric_instance_resolves_its_loader_from_fabric
+running 1 test
+test meta::tests::a_fabric_instance_resolves_its_loader_from_fabric ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-net` (lib) 1 warning, `palantir-desktop` (bin) 3 and (bin
+"PalantirMC" test) 21, and `grep -cE "never (used|read|constructed)"` is 0
+```
+
+  The last stage-4 item was named as one thing -- "the metadata source `resolve`
+  reads" -- and it is three, because the mirror was measured before it was moved.
+  `meta.prismlauncher.org` is not a copy of the publishers' files: Prism fetches
+  each one, rewrites it, and serves the rewrite. Two of the rewrites can be
+  served from the publisher directly, and one of them landed here.
+
+  **Fabric and Quilt.** Their own services publish a launch profile per *game
+  version*: `meta.fabricmc.net/v2/versions/loader/{game}/{build}/profile/json` and
+  `meta.quiltmc.org/v3/versions/loader/{game}/{build}/profile/json`. That document
+  is Mojang's shape -- `id`, `inheritsFrom`, `mainClass`, `libraries`, and
+  `arguments` -- with no `order`, which is Prism's addition to the same file, so it
+  parses the way piston's version files do. Measured against Prism's copy of the
+  same build: the loader's own file has the *mappings jar among its libraries*
+  (`net.fabricmc:intermediary:1.21.4`, `org.quiltmc:hashed:1.21.4`), where Prism
+  splits it into a second component and states a `requires` for it. An instance
+  this launcher creates lists two components, so the difference is not cosmetic:
+  the mappings reach the classpath because the loader says so, not because another
+  launcher's server wrote a requirement.
+
+  `crates/palantir-desktop/src/meta.rs` is the store `resolve` is handed now: one
+  instance's game version read off its pack profile, the loaders' own profiles
+  over the wire's cache and client (`Wire::loaders` is the handle), and Prism's
+  mirror beside them for everything else. The route is one function --
+  `PublisherMeta::source` -- so "what is still on the mirror" is readable rather
+  than implied, and it is tested as a table: Fabric and Quilt to the publisher,
+  `net.minecraft`, `net.minecraftforge`, `net.neoforged` and
+  `net.fabricmc.intermediary` to the mirror. An instance that names no game
+  version is its own case and takes the mirror too, rather than failing a launch
+  over a URL that cannot be built.
+
+  **What the measurement says is left, and why it is two more slices rather than
+  a URL.** `net.minecraft`'s mirror file is Mojang's rewritten: `arguments.game`
+  and `.jvm` flattened into the legacy `minecraftArguments` string, `javaVersion`
+  into `compatibleJavaMajors`, `downloads.client` into `mainJar`, plus `+traits`
+  (`XR:Initial`, `FirstThreadOnMacOS`, the quick-play features). This launcher's
+  version-file model reads the translated shape and has no reading of Mojang's
+  `arguments` at all, so piston's file is a translation to write rather than a
+  source to switch. Forge's and NeoForge's is a different one: their profile is
+  inside an installer jar whose processors patch the client and unpack maven
+  artifacts, and Prism's copy is a rewrite around ForgeWrapper, a third-party
+  project that runs those processors at launch. Both are now bullets in
+  `NEXT_STEPS.md` with those measurements in them.
+
+  Two things the loader's own file carries that this launcher still does not read
+  are named rather than discovered later: a per-library digest (Fabric and Quilt
+  put `sha1` at the top level of a library entry; this model reads it under
+  `downloads.artifact`, and Prism's copy drops it too, so nothing regressed) and
+  Fabric's own `-DFabricMcEmu` JVM argument (the mirror's copy does not have it
+  either). Both are in the module's documentation, because a reader who measures
+  them again has spent an afternoon on a sentence.
+
+  The runner could not be the receipt: this slice's push is billed like the ones
+  before it, and `NEXT_STEPS.md` records which run each push got.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

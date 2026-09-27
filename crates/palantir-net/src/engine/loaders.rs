@@ -19,19 +19,23 @@
 //! ## What a caller gets
 //!
 //! [`Build`]s, newest first, each carrying whether its own source called it
-//! stable. Nothing here downloads or installs a loader: this answers *which*
-//! builds exist, and the build a user picks is written into the instance's pack
-//! profile by the create flow. What is deliberately not here yet is the loader's
-//! libraries: those come from the same four services (Fabric and Quilt publish a
-//! whole launch profile per build), and fetching them is the install half of this
-//! item rather than its list.
+//! stable, and -- for the two loaders that publish one -- the *launch profile* of
+//! a build, which is the document a resolver merges: its libraries, its main
+//! class and its mappings jar. Nothing here downloads or installs a loader, and
+//! Forge and NeoForge have no profile to ask for: their launch profile is not a
+//! document a service serves but the `version.json` inside an installer jar, and
+//! a launcher is expected to *run* that installer's processors. Serving that is
+//! install work, and it is named as such in `NEXT_STEPS.md` rather than faked
+//! with a URL here.
 //!
 //! Believed for [`crate::engine::cache::DEFAULT_TTL`], like a version list: a
 //! loader release is not a search result, and a list that is an hour old is still
 //! a list of every build there is.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use palantir_core::version::VersionFile;
 
 use crate::engine::cache::MetadataCache;
 use crate::engine::cancel::Cancel;
@@ -107,6 +111,28 @@ impl Loader {
             Loader::Forge => FORGE_PROMOTIONS_URL.to_string(),
         }
     }
+
+    /// Where the launch profile of one build is, on the service that published
+    /// the list it was picked from.
+    ///
+    /// `None` for Forge and NeoForge, and not because they publish nothing: a
+    /// launch profile for those two is not a document a service serves. Their
+    /// installer jar carries a `version.json`, and a launcher that reads it is
+    /// expected to *run* the installer -- its processors patch the client jar and
+    /// unzip the maven artifacts the profile names -- which is why this launcher
+    /// resolves them through Prism's rewritten copy today. `None` is that fact
+    /// stated once, rather than a URL that would answer 404.
+    pub fn profile_url(self, game: &str, build: &str) -> Option<String> {
+        match self {
+            Loader::Fabric => Some(format!(
+                "https://meta.fabricmc.net/v2/versions/loader/{game}/{build}/profile/json"
+            )),
+            Loader::Quilt => Some(format!(
+                "https://meta.quiltmc.org/v3/versions/loader/{game}/{build}/profile/json"
+            )),
+            Loader::NeoForge | Loader::Forge => None,
+        }
+    }
 }
 
 /// NeoForge's whole publication, as its maven API describes it.
@@ -140,13 +166,14 @@ pub fn default_build(builds: &[Build]) -> Option<&Build> {
         .or_else(|| builds.first())
 }
 
-/// The loaders' build lists, over the engine's cache.
+/// The loaders' own metadata, over the engine's cache.
 ///
-/// One cache directory for all four, because the entries are told apart by URL
-/// and a loader's publication ages like any other version list.
+/// One cache directory for all four and for both kinds of document -- the build
+/// list and the launch profile -- because the entries are told apart by URL and a
+/// loader's publication ages like any other version list.
 pub struct LoaderMeta {
     /// Where a body lives once it has been fetched, and how long it is believed.
-    builds: MetadataCache,
+    documents: MetadataCache,
     /// The way bytes arrive. The engine's own pool in production, a scripted
     /// server in a test.
     fetch: Arc<dyn Fetch>,
@@ -156,19 +183,19 @@ pub struct LoaderMeta {
 /// a handle that printed it would be printing a connection pool.
 impl std::fmt::Debug for LoaderMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoaderMeta").field("dir", &self.builds.dir()).finish_non_exhaustive()
+        f.debug_struct("LoaderMeta").field("dir", &self.documents.dir()).finish_non_exhaustive()
     }
 }
 
 impl LoaderMeta {
     /// A handle over `cache`, fetching through `fetch`.
     pub fn new(cache: MetadataCache, fetch: Arc<dyn Fetch>) -> LoaderMeta {
-        LoaderMeta { builds: cache, fetch }
+        LoaderMeta { documents: cache, fetch }
     }
 
     /// The directory bodies are cached in.
     pub fn cache_dir(&self) -> &Path {
-        self.builds.dir()
+        self.documents.dir()
     }
 
     /// Every build of `loader` usable on `game`, newest first.
@@ -185,7 +212,7 @@ impl LoaderMeta {
         backoff: &Backoff,
     ) -> Result<Vec<Build>, Error> {
         let url = loader.list_url(game);
-        let cached = self.builds.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let cached = self.documents.get(&url, self.fetch.as_ref(), cancel, backoff)?;
         let text = String::from_utf8_lossy(&cached.body).into_owned();
         let value: serde_json::Value = serde_json::from_str(&text)
             .map_err(|error| Error::json(url.clone(), error.to_string()))?;
@@ -194,6 +221,52 @@ impl LoaderMeta {
         sort_newest_first(&mut builds);
         builds.truncate(MAX_BUILDS);
         Ok(builds)
+    }
+
+    /// The launch profile of one build of `loader`, as the loader's own service
+    /// serves it.
+    ///
+    /// This is the document a resolver merges: the loader's libraries -- the ASM
+    /// stack it loads, its jars, and the mappings jar *for this game version*,
+    /// which Fabric and Quilt both list among them -- its main class, and the
+    /// loader's own JVM arguments. It is Mojang's shape (`id`, `inheritsFrom`,
+    /// `libraries`, `mainClass`, `arguments`) with no `order`, which is Prism's
+    /// addition to the same file, so it parses the way piston's version files do:
+    /// a missing `order` is the shape of the source rather than a warning.
+    ///
+    /// `game` is part of the question rather than a detail of the URL: both
+    /// services publish one profile per game version, and the mappings inside
+    /// the one that comes back are built for that game.
+    ///
+    /// Blocking, like every engine call. A loader with no profile to ask for
+    /// ([`Loader::profile_url`]) is an error naming that, rather than an empty
+    /// file the resolver would merge and then blame on the instance.
+    pub fn profile(
+        &self,
+        loader: Loader,
+        game: &str,
+        build: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<VersionFile, palantir_core::error::Error> {
+        let Some(url) = loader.profile_url(game, build) else {
+            return Err(palantir_core::error::Error::format(
+                PathBuf::from(loader.name()),
+                format!(
+                    "{} publishes no launch profile to read: its own is inside an \
+                     installer this launcher does not run yet",
+                    loader.name()
+                ),
+            ));
+        };
+        let held = self
+            .documents
+            .get(&url, self.fetch.as_ref(), cancel, backoff)
+            .map_err(Error::into_core)?;
+        let text = String::from_utf8_lossy(&held.body).into_owned();
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|error| palantir_core::error::Error::json(&url, error.to_string()))?;
+        VersionFile::parse(&value, &PathBuf::from(&url), false)
     }
 }
 
@@ -426,6 +499,23 @@ mod tests {
       }
     }"#;
 
+    /// A trimmed Fabric launch profile: the real shape, with the mappings jar
+    /// among its libraries and no `order` anywhere.
+    const FABRIC_PROFILE: &str = r#"{
+      "id": "fabric-loader-0.19.5-1.21.4",
+      "inheritsFrom": "1.21.4",
+      "releaseTime": "2026-09-01T00:00:00+00:00",
+      "time": "2026-09-01T00:00:00+00:00",
+      "type": "release",
+      "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+      "arguments": { "game": [], "jvm": ["-DFabricMcEmu= net.minecraft.client.main.Main "] },
+      "libraries": [
+        { "name": "org.ow2.asm:asm:9.10.1", "url": "https://maven.fabricmc.net/" },
+        { "name": "net.fabricmc:intermediary:1.21.4", "url": "https://maven.fabricmc.net/" },
+        { "name": "net.fabricmc:fabric-loader:0.19.5", "url": "https://maven.fabricmc.net/" }
+      ]
+    }"#;
+
     /// A handle over a scratch directory whose only routes are the ones a test
     /// scripts, so a test that forgets one fails instead of dialling out.
     fn meta(name: &str, ttl: Duration) -> (LoaderMeta, Arc<MapFetch>) {
@@ -445,6 +535,54 @@ mod tests {
     }
 
     #[test]
+    fn a_fabric_profile_comes_from_fabric_with_the_mappings_inside_it() {
+        let (meta, fetch) = meta("fabric-profile", crate::engine::cache::DEFAULT_TTL);
+        let url = Loader::Fabric
+            .profile_url("1.21.4", "0.19.5")
+            .expect("Fabric publishes one");
+        fetch.set_route(&url, Route::text(FABRIC_PROFILE));
+
+        let profile = meta
+            .profile(Loader::Fabric, "1.21.4", "0.19.5", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the profile");
+        assert_eq!(profile.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
+        assert!(
+            !profile.has_order,
+            "the loader's own file carries no `order`: that key is Prism's addition to the same document"
+        );
+        assert!(profile.requires.is_empty(), "and no requirement to reach the mappings by");
+        let libraries: Vec<String> = profile
+            .libraries
+            .iter()
+            .map(|library| format!("{}:{}", library.name.artifact(), library.name.version()))
+            .collect();
+        assert_eq!(
+            libraries,
+            vec!["asm:9.10.1", "intermediary:1.21.4", "fabric-loader:0.19.5"],
+            "the mappings jar is the loader's own library, not a second component to resolve"
+        );
+
+        // Asked again, the document is already held: the cache is what makes a
+        // second lookup free rather than a second request.
+        meta.profile(Loader::Fabric, "1.21.4", "0.19.5", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the profile again");
+        assert_eq!(fetch.count(), 1, "one document, one request");
+    }
+
+    #[test]
+    fn a_loader_that_publishes_no_profile_says_so_instead_of_asking() {
+        // Forge's own launch profile is inside an installer a launcher is meant
+        // to run, so there is no URL to be wrong about: the answer names that.
+        let (meta, fetch) = meta("forge-profile", crate::engine::cache::DEFAULT_TTL);
+        assert!(Loader::Forge.profile_url("1.21.4", "54.1.0").is_none());
+        let error = meta
+            .profile(Loader::Forge, "1.21.4", "54.1.0", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect_err("no profile to read");
+        assert!(error.to_string().contains("installer"), "{error}");
+        assert_eq!(fetch.count(), 0, "and nothing was asked for");
+    }
+
+    #[test]
     fn fabric_lists_its_builds_newest_first_with_the_flag_its_service_sends() {
         let (meta, fetch) = meta("fabric", crate::engine::cache::DEFAULT_TTL);
         let url = Loader::Fabric.list_url("1.21.4");
@@ -459,7 +597,7 @@ mod tests {
         );
         // A build list is cached under its own URL, so the picker asking twice
         // costs one request.
-        assert!(meta.builds.cached(&url).is_some(), "the body was kept, with an age");
+        assert!(meta.documents.cached(&url).is_some(), "the body was kept, with an age");
         let _ = run(&meta, Loader::Fabric, "1.21.4").expect("the list again");
         assert_eq!(fetch.count(), 1, "the second ask was answered from disk");
     }

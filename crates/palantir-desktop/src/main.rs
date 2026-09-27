@@ -21,6 +21,10 @@ mod anim;
 mod brand;
 mod browse;
 mod catalog;
+/// The metadata a launch resolves through: the loaders' own services, and
+/// Prism's mirror only where a publisher serves nothing in the shape this
+/// launcher reads.
+mod meta;
 /// The colour theme setting: the reference's own option list, its dev-mode rule
 /// for retro, and labels read from the generated string table.
 ///

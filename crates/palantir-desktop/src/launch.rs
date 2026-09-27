@@ -4,9 +4,10 @@
 //! that used to be missing now in place:
 //!
 //! * **The game is installed, not assumed.** Metadata is resolved through
-//!   [`OnlineMetaStore`], which fetches what is not cached and writes it in the
-//!   offline store's layout; then [`crate::install`] fetches the libraries, the
-//!   client jar, the asset index and its objects, and extracts the natives.
+//!   [`PublisherMeta`], which asks the loaders' own services for a loader's
+//!   launch profile and Prism's mirror for what they do not serve; then
+//!   [`crate::install`] fetches the libraries, the client jar, the asset index
+//!   and its objects, and extracts the natives.
 //!   Only after that does anything check for a main jar — the old flow demanded
 //!   one up front and so could never bootstrap a fresh instance.
 //! * **The session is real.** An offline account produces the legacy session it
@@ -45,6 +46,7 @@ use palantir_core::{
 // against whatever the caller handed it.
 #[cfg(test)]
 use palantir_core::resolve::OfflineMetaStore;
+use crate::meta::PublisherMeta;
 use crate::model::SettingsModel;
 use crate::wire::Wire;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
@@ -1347,20 +1349,21 @@ pub fn record_play_time(
 
 /// The metadata store and the wire a real launch uses.
 ///
-/// The store is still the mirror `resolve` reads its version files through:
-/// moving that onto the engine as well is what the stage's open item has left,
-/// and it is a change of *which service* is asked rather than of how the asking
-/// happens.
+/// The store is per instance, because one of the questions it answers is asked at
+/// one instance's game version: Fabric's and Quilt's launch profiles are the
+/// publishers' own documents, read over the wire's cache and client, and what is
+/// left on the mirror is named in [`crate::meta`] with the measurement that put it
+/// there.
+///
 /// Everything the launch transfers goes over the wire: the client jar, the
 /// libraries, the asset objects, the Java runtime, and the documents the Java
 /// path reads on the way, all under one pool, one ceiling, one retry policy and
 /// one queue, with each file checked against the digest its publisher stated
 /// before the transfer renames it into place.
-pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, Wire) {
-    (
-        palantir_net::OnlineMetaStore::new(palantir_net::DEFAULT_META_BASE_URL, paths.meta_dir()),
-        Wire::new(paths.meta_dir()),
-    )
+pub fn online_backend(paths: &PalantirPaths, instance_id: &str) -> (PublisherMeta, Wire) {
+    let wire = Wire::new(paths.meta_dir());
+    let store = PublisherMeta::for_instance(&wire, paths, instance_id);
+    (store, wire)
 }
 
 // ---- worker ---------------------------------------------------------------
@@ -1435,7 +1438,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<L
         }
         match prepared {
             Some(prepared) => {
-                let (mut store, wire) = online_backend(&paths);
+                let (mut store, wire) = online_backend(&paths, &params.instance_id);
                 prepare_launch(
                     &paths,
                     &params.instance_id,
