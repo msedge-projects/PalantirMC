@@ -36,13 +36,15 @@ push superseded it. A cancelled run is not a passing one, and it is not a failin
 one either.
 
 **Stages 2, 3 and the engine's slices were pushed to a runner that could not
-start.** Ten runs at the time of writing, one per commit from `82232f9` onwards --
-`36038333030`, `36033443993`, `36143868395`, `36152873678`, `36156018946`,
-`36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`, and one
-more per push -- died in three to six seconds with zero steps and the same message
--- `recent account payments have failed or your spending limit needs to be
-increased` -- which is a billing state and not a verdict on the tree; none of the
-jobs was scheduled, so none could report the expected `test result: ok`. The tree
+start.** Forty-two runs on this branch at the time of writing, one per push from
+`82232f9` onwards -- `36038333030` the first, `36297604580` the latest -- died in
+three to six seconds with zero steps and the same message -- `recent account
+payments have failed or your spending limit needs to be increased` -- which is a
+billing state and not a verdict on the tree; none of the jobs was scheduled, so
+none could report the expected `test result: ok`. One push left nothing at all to
+read: `21abf30`, which the next push superseded inside ninety seconds, because
+`ci.yml` sets `concurrency: cancel-in-progress` and a superseded push leaves no
+run object behind. The tree
 was therefore measured on the machine it was written on, with the same commands
 CI runs, and the transcripts are in
 [`GATES.md`](GATES.md) beside the gates they evidence. **This is a weaker receipt

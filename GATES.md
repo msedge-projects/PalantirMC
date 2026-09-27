@@ -2098,10 +2098,16 @@ CONFIRMED: text generation is byte-identical
   service* is asked rather than of how the asking happens, and mixing it into a
   slice about the asking would have made both halves harder to check.
 
-  The runner could not be the receipt again: the push for this slice is billed
-  like the three before it, with zero steps and the same annotation. Re-running
-  it when the account can schedule jobs is still the first thing to do with this
-  tree.
+  The runner could not be the receipt again, and this is the one slice whose
+  push left nothing at all to look at: `21abf30` was followed ninety seconds
+  later by `57c92ba`, `ci.yml` sets `concurrency: cancel-in-progress`, and a
+  superseded push leaves no run object behind -- the API answers
+  `total_count: 0` for that sha where it answers `1` for every other push here.
+  What the runner has of this slice is the run for that next push's tip,
+  `36297604580`: four seconds, zero steps, `recent account payments have failed
+  or your spending limit needs to be increased`, listed against both `Test
+  workspace` and `Lint`. Re-running both pushes when the account can schedule
+  jobs is still the first thing to do with this tree.
 
 - [x] G92: the plan is a page as well as a table, and the page is checked against
       the documents it is drawn from
@@ -2146,6 +2152,11 @@ wrote C:\PalantirMC\.scratch\progress.html  (56,068 bytes)
   first run -- the row count came back as 91 against a page that draws 97,
   because `class="gate"` also matches `class="gate-chip"`, which is exactly the
   kind of thing a page breaks on invisibly and a reader never notices.
+
+  The runner could not be the receipt: this slice's push, `57c92ba`, is run
+  `36297604580` -- four seconds, zero steps, the same billing annotation -- and
+  it is also the only run that carries G91's commit, since the two were pushed
+  within ninety seconds of each other.
 
 ## What these gates cannot say
 
