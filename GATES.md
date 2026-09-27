@@ -3020,12 +3020,12 @@ right, so the arm is what changed rather than the count.
   Both need the sign-in flow, which is the same gap the checklist's third step says
   out loud.
 
-  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID` -- the same block as the twelve before it, `Test workspace` and `Lint`
-  failing in a few seconds with zero steps and `The job was not started because
+  The runner could not be the receipt: this slice's push, `49be552`, is run
+  `36339693983` -- the same block as the twelve before it, `Lint` and `Test
+  workspace` failing with **zero steps** and `The job was not started because
   recent account payments have failed or your spending limit needs to be
-  increased`, its dependants skipped rather than scheduled. The transcripts above
-  are this machine's, run with the flags `ci.yml` uses.
+  increased`, with `Live services` and `Build exe` skipped rather than scheduled.
+  The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
 
