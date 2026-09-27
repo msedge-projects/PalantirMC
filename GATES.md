@@ -2333,8 +2333,12 @@ exit 0; `palantir-net` (lib) 1 warning, `palantir-desktop` (bin) 3 and (bin
   either). Both are in the module's documentation, because a reader who measures
   them again has spent an afternoon on a sentence.
 
-  The runner could not be the receipt: this slice's push is billed like the ones
-  before it, and `NEXT_STEPS.md` records which run each push got.
+  The runner could not be the receipt: this slice's push, `e49eb11`, is run
+  `36301407378`, and the record commit before it, `6b7fc10`, is run
+  `36299945287` -- both of them `Test workspace` and `Lint` dying in two seconds
+  with zero steps and `recent account payments have failed or your spending
+  limit needs to be increased`, and both of them leaving `Live services` and
+  `Build exe` unscheduled.
 
 ## What these gates cannot say
 
