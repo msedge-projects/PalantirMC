@@ -26,11 +26,19 @@ tree.
 
     python tools/progress.py            # the table
     python tools/progress.py --check    # silent on success, drift on failure
+    python tools/progress.py --watch    # the table again, whenever a document moves
 
 On Windows, `tools/progress.cmd` is the same run for a shell where `python`
 is the Microsoft Store alias or absent: it finds an interpreter itself, and it
 is the entry point that keeps a double-clicked console open long enough to be
 read.
+
+`--watch` is for a session that is landing slices: it re-reads both documents
+on an interval, redraws only when one of them has changed, and clears the
+screen first, so what a reader has is the current number rather than a scroll
+of every number it has been. `--check --watch` is the same pane for the rule
+instead of the number -- nothing while the documents agree, and the drift
+printed once, at the moment it appears.
 
 Exit status is 1 when the documents disagree with each other or with this
 file: a met gate no stage owns, a stage row that is `Done` with open work, an
@@ -45,6 +53,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -262,25 +271,19 @@ def owner_of(gate_id: str) -> str | None:
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true",
-                        help="print nothing when the documents agree; exit 1 when they do not")
-    parser.add_argument("--root", default=str(REPO),
-                        help="the tree to read (default: this repository)")
-    args = parser.parse_args()
-    root = Path(args.root)
+def report(root: Path) -> tuple[str, list[str]]:
+    """The table as text, and the disagreements that stop it being printed.
 
+    A function rather than the body of `main`, because `--watch` asks for a
+    fresh report on every change: the loop has to be able to render again
+    without inheriting half of the last one.
+    """
     next_steps = (root / "NEXT_STEPS.md").read_text(encoding="utf-8")
     gates_md = (root / "GATES.md").read_text(encoding="utf-8")
 
     problems: list[str] = []
-    try:
-        stages = parse_stages(next_steps)
-        open_items = parse_open_items(next_steps)
-    except ValueError as problem:
-        print(f"progress: {problem}", file=sys.stderr)
-        return 1
+    stages = parse_stages(next_steps)
+    open_items = parse_open_items(next_steps)
     ledger = parse_ledger(gates_md)
 
     stage_numbers = [number for number, _, _ in stages]
@@ -342,16 +345,12 @@ def main() -> int:
         sized[number] = (met, open_estimate + unmet)
 
     if problems:
-        for problem in problems:
-            print(f"progress: {problem}", file=sys.stderr)
-        return 1
+        return "", problems
 
-    if args.check:
-        return 0
-
+    out: list[str] = []
     # The table. `what` is truncated for the column; the documents hold the
     # whole sentence.
-    print(f"{'stage':>5}  {'what':<52}  {'met':>4}  {'open':>4}  {'done':>5}")
+    out.append(f"{'stage':>5}  {'what':<52}  {'met':>4}  {'open':>4}  {'done':>5}")
     for number, what, state in stages:
         met, open_estimate = sized[number]
         if state == "done":
@@ -359,7 +358,7 @@ def main() -> int:
         else:
             percent = round(100 * met / (met + open_estimate))
         column = what if len(what) <= 52 else what[:49] + "..."
-        print(f"{number:>5}  {column:<52}  {met:>4}  {open_estimate:>4}  {percent:>4}%")
+        out.append(f"{number:>5}  {column:<52}  {met:>4}  {open_estimate:>4}  {percent:>4}%")
 
     # The overall is the mean of the stage numbers, each stage weighted by what
     # it holds -- its met gates plus its open items -- so a stage with more of
@@ -375,38 +374,157 @@ def main() -> int:
     met_total = sum(met for met, _ in sized.values())
     slice_total = sum(met + open_estimate for met, open_estimate in sized.values())
     met_before = met_by_stage.get("before", 0)
-    print()
-    print(f"overall: {overall}%  (the stage numbers above, weighted by what each stage holds)")
-    print(f"slices:  {met_total} of {slice_total} met in stages 0-{stage_numbers[-1]}; "
-          f"{met_before} more gates are the shell this rewrite replaces")
+    out.append("")
+    out.append(f"overall: {overall}%  (the stage numbers above, weighted by what each stage holds)")
+    out.append(f"slices:  {met_total} of {slice_total} met in stages 0-{stage_numbers[-1]}; "
+               f"{met_before} more gates are the shell this rewrite replaces")
     unmet = [gate_id for gate_id, met, _ in ledger if not met]
     if unmet:
-        print(f"unmet:   {len(unmet)} gate(s) not met: {', '.join(unmet)}")
+        out.append(f"unmet:   {len(unmet)} gate(s) not met: {', '.join(unmet)}")
 
-    print()
-    print("open work, the plan's own list; the gate counts are this file's estimate:")
+    out.append("")
+    out.append("open work, the plan's own list; the gate counts are this file's estimate:")
     for number, what, _ in stages:
         for name, gates, why in OPEN.get(number, ()):
-            print(f"  stage {number}  {name:<46}  {gates:>2} gates  ({why})")
+            out.append(f"  stage {number}  {name:<46}  {gates:>2} gates  ({why})")
 
     # What the work above is made of. Physical lines first, then the lines that
     # are not blank or comment-only, because the two answer different questions:
     # the first is the file's size and the second is how much of it is a
     # statement. `vendor/` is not counted at all: it is another project's source.
     rows, (hand_lines, hand_code, gen_lines, gen_code) = code_size(root)
-    print()
-    print("code this repository owns, by crate (vendor/ and dist/ are not ours):")
-    print(f"  {'where':<24}  {'lines':>8}  {'code':>8}  note")
+    out.append("")
+    out.append("code this repository owns, by crate (vendor/ and dist/ are not ours):")
+    out.append(f"  {'where':<24}  {'lines':>8}  {'code':>8}  note")
     for name, note, lines, code in rows:
-        print(f"  {name:<24}  {lines:>8,}  {code:>8,}  {note}")
-    print(
+        out.append(f"  {name:<24}  {lines:>8,}  {code:>8,}  {note}")
+    out.append(
         f"  {'hand-written total':<24}  {hand_lines:>8,}  {hand_code:>8,}  "
         "every .rs under crates/ and every .py under tools/ and .github/",
     )
-    print(
+    out.append(
         f"  {'of which generated':<24}  {gen_lines:>8,}  {gen_code:>8,}  "
         "icons_gen.rs, text_gen.rs, theme_gen.rs, theme_tokens.rs",
     )
+    return "\n".join(out) + "\n", []
+
+
+def document_signature(root: Path) -> tuple[tuple[int, int], ...]:
+    """`(mtime, size)` per document, so that a save is seen as a change.
+
+    mtime alone is not enough: two saves inside one filesystem timestamp tick
+    are a thing editors do, and the second would be missed. A document caught
+    mid-save -- missing, or truncated by the editor that is writing it -- is a
+    state like any other, and the redraws on the way in and the way out are how
+    the pane recovers.
+    """
+    signature = []
+    for name in ("NEXT_STEPS.md", "GATES.md"):
+        try:
+            info = (root / name).stat()
+        except OSError:
+            signature.append((-1, -1))
+        else:
+            signature.append((info.st_mtime_ns, info.st_size))
+    return tuple(signature)
+
+
+def watch(root: Path, *, check: bool, interval: float) -> int:
+    """`report` on every change to the documents, until interrupted.
+
+    A pane rather than a print: the table is cleared and redrawn, so a reader
+    watching a slice land has the current number instead of a scroll of every
+    number it has been. When stdout is not a terminal -- a log, a pipe -- the
+    clear is left out and each redraw is announced with the timestamped header
+    alone, because a file full of escape codes is not a readable log.
+
+    `--check` keeps its meaning here: nothing at all while the documents agree,
+    and the disagreement printed the moment it appears. It goes on watching
+    afterwards, so that fixing the plan clears the pane the same way any other
+    change does.
+    """
+    watched = ("NEXT_STEPS.md", "GATES.md")
+    tty = sys.stdout.isatty()
+    stamp: tuple[tuple[int, int], ...] | None = None
+    verdict: bool | None = None
+    try:
+        while True:
+            state = document_signature(root)
+            if state == stamp:
+                time.sleep(interval)
+                continue
+            stamp = state
+            now = time.strftime("%H:%M:%S")
+            try:
+                text, problems = report(root)
+            except (ValueError, OSError) as problem:
+                text, problems = "", [str(problem)]
+            if check:
+                if bool(problems) != verdict:
+                    verdict = bool(problems)
+                    print(f"progress --check  {now}  {'drift' if verdict else 'ok'}")
+                    for problem in problems:
+                        print(f"progress: {problem}", file=sys.stderr)
+                    # A verdict with no flush is a verdict nobody sees: this
+                    # branch prints once and then goes quiet, and a pane that
+                    # has stopped writing is a pane with its output still on a
+                    # buffer.
+                    sys.stdout.flush()
+            else:
+                if tty:
+                    sys.stdout.write("\x1b[2J\x1b[H")
+                print(f"progress --watch  {now}  (every {interval:g}s; Ctrl-C to stop)")
+                stamps = ", ".join(
+                    f"{name} {time.strftime('%H:%M:%S', time.localtime(mtime / 1e9))}"
+                    if mtime > 0 else f"{name} (missing)"
+                    for name, (mtime, _) in zip(watched, state)
+                )
+                print(f"watching {stamps}")
+                if problems:
+                    print("the documents do not agree:")
+                    for problem in problems:
+                        print(f"  {problem}")
+                else:
+                    sys.stdout.write(text)
+                sys.stdout.flush()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        # Ctrl-C ends the pane, and the prompt wants the newline a cleared
+        # screen has been holding back.
+        sys.stdout.write("\n")
+        return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--check", action="store_true",
+                        help="print nothing when the documents agree; exit 1 when they do not")
+    parser.add_argument("--watch", action="store_true",
+                        help="redraw whenever NEXT_STEPS.md or GATES.md changes")
+    parser.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
+                        help="how often --watch looks for a change (default: 1)")
+    parser.add_argument("--root", default=str(REPO),
+                        help="the tree to read (default: this repository)")
+    args = parser.parse_args()
+    root = Path(args.root)
+
+    if args.watch:
+        # A floor rather than a reject: a poll this tool owes nothing to being
+        # fast at, and `--interval 0` from a script should not spin a core.
+        return watch(root, check=args.check, interval=max(args.interval, 0.1))
+
+    try:
+        text, problems = report(root)
+    except (ValueError, OSError) as problem:
+        print(f"progress: {problem}", file=sys.stderr)
+        return 1
+    if problems:
+        for problem in problems:
+            print(f"progress: {problem}", file=sys.stderr)
+        return 1
+    if args.check:
+        return 0
+    print(text, end="")
     return 0
 
 

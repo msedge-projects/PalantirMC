@@ -12,6 +12,7 @@ rem nothing but a double-click could have started it.
 rem
 rem   tools\progress.cmd              the table, and a pause so it can be read
 rem   tools\progress.cmd --check      silent, exit 1 on drift -- no pause
+rem   tools\progress.cmd --watch      the table, redrawn whenever a document moves
 rem   tools\progress.cmd --no-pause   the table without the pause
 rem   tools\progress.cmd --which      print the interpreter this would use
 rem
@@ -67,6 +68,7 @@ set "PAUSE=1"
 :args
 if "%~1"=="" goto args_done
 if /i "%~1"=="--check" set "PAUSE=0"
+if /i "%~1"=="--watch" set "PAUSE=0"
 if /i "%~1"=="--no-pause" set "PAUSE=0"
 if /i "%~1"=="--no-pause" goto args_next
 set "ARGS=%ARGS% %1"
@@ -82,8 +84,9 @@ set "CODE=%ERRORLEVEL%"
 popd
 
 rem A double-click is the one caller that cannot read a console that closes, so
-rem it is the one caller that gets a pause. `--check` says "script" and never
-rem pauses: an agent running it would have nothing to press.
+rem it is the one caller that gets a pause. `--check` and `--watch` say
+rem "script" and never pause: an agent running the first would have nothing to
+rem press, and the second is a pane it stops with Ctrl-C.
 if "%PAUSE%"=="0" exit /b %CODE%
 echo.
 echo (exit %CODE%)
