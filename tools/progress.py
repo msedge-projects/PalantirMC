@@ -90,7 +90,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
-    4: [(66, 75), (91, 91), (93, 94)],  # the engine; the first page on it; the launch's and a pack's transfers; the loaders' own profiles (G92 is the dashboard, owned by `before`)
+    4: [(66, 75), (91, 91), (93, 95)],  # the engine; the first page on it; the launch's and a pack's transfers; the loaders' own profiles and Minecraft's own file (G92 is the dashboard, owned by `before`)
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
 
@@ -113,13 +113,6 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
         ),
     ],
     4: [
-        (
-            "Minecraft's own version file.",
-            2,
-            "the translation Prism's mirror does and this launcher's model "
-            "reads: `arguments` to the legacy string, `javaVersion` to Java "
-            "majors, `downloads.client` to the main jar, and `+traits`",
-        ),
         (
             "Forge and NeoForge.",
             2,

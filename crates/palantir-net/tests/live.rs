@@ -743,6 +743,119 @@ fn the_live_piston_manifest_names_a_release_whose_version_file_parses() {
     );
 }
 
+/// The translation, against the file it replaces.
+///
+/// `from_mojang` exists because this launcher's model reads Prism's *rewrite* of
+/// Mojang's version file rather than Mojang's own shape, so a unit test can only
+/// say that the translation agrees with the fixture its author wrote -- and that
+/// fixture was written from the same reading of the mirror as the code. This asks
+/// both services for the same version and compares their answers field by field,
+/// which is what turns "the translation does what the mirror did" into a
+/// measurement, and which is the only way to catch a field the mirror moves and
+/// the code does not.
+///
+/// What cannot agree is named rather than papered over: the mirror drops the
+/// `assets` key (its `assetIndex` carries the id), adds an `XR:Initial` trait for
+/// a feature this launcher does not offer, and serves LWJGL as a component of its
+/// own rather than among the game's libraries. The argument strings are compared
+/// for equality, `--clientId ${clientid} --xuid ${auth_xuid}` included, because
+/// the translation drops that pair for exactly the reason the mirror does: no
+/// launch of this launcher fills those two tokens.
+#[test]
+#[ignore = "live: reaches piston-meta.mojang.com and meta.prismlauncher.org"]
+fn the_translation_agrees_with_the_mirror_the_shell_read() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, MetadataCache, PistonMeta, DEFAULT_TTL};
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let pool = std::sync::Arc::new(HttpPool::default());
+    let piston = PistonMeta::new(
+        MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL),
+        pool,
+    );
+    let cancel = Cancel::new();
+    let backoff = Backoff::with_attempts(2);
+
+    let ours = piston
+        .translated(GAME, "net.minecraft", &cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{GAME} from piston: {e}"));
+    let theirs = live_store(&tmp.path().join("mirror"))
+        .version_file("net.minecraft", GAME)
+        .unwrap_or_else(|e| panic!("{GAME} from the mirror: {e}"));
+
+    // The version file's own identity: piston names no component, the caller's
+    // uid is what a resolver files it under.
+    assert_eq!(ours.uid, "net.minecraft");
+    assert_eq!(ours.version, GAME);
+    assert_eq!(ours.main_class, theirs.main_class);
+    assert!(ours.minecraft_arguments.starts_with("--username"));
+    assert_eq!(
+        ours.minecraft_arguments, theirs.minecraft_arguments,
+        "the argument strings differ, so one of the two is not passing the \
+         arguments this launcher fills and no others"
+    );
+    assert_eq!(ours.compatible_java_majors, theirs.compatible_java_majors);
+    assert_eq!(ours.compatible_java_name, theirs.compatible_java_name);
+
+    // The asset index, field for field -- the one document a launch cannot get
+    // wrong without the game refusing to start.
+    let ours_index = ours.asset_index.as_ref().expect("an asset index");
+    let theirs_index = theirs.asset_index.as_ref().expect("an asset index");
+    assert_eq!(ours_index.id, theirs_index.id);
+    assert_eq!(ours_index.url, theirs_index.url);
+    assert_eq!(ours_index.sha1, theirs_index.sha1);
+    assert_eq!(ours_index.size, theirs_index.size);
+
+    // The client jar: the mirror writes the same Maven coordinate for it that the
+    // translation does, and the same digest the manifest publishes.
+    let ours_jar = ours.main_jar.as_ref().expect("the client jar");
+    let theirs_jar = theirs.main_jar.as_ref().expect("the client jar");
+    assert_eq!(ours_jar.name.serialize(), theirs_jar.name.serialize());
+    let ours_client = ours_jar
+        .mojang_downloads
+        .as_ref()
+        .and_then(|downloads| downloads.artifact.as_ref())
+        .expect("its artifact");
+    let theirs_client = theirs_jar
+        .mojang_downloads
+        .as_ref()
+        .and_then(|downloads| downloads.artifact.as_ref())
+        .expect("its artifact");
+    assert_eq!(ours_client.url, theirs_client.url);
+    assert_eq!(ours_client.sha1, theirs_client.sha1);
+    assert_eq!(ours_client.size, theirs_client.size);
+
+    // The behaviours: the same set, minus the one this launcher has no use for.
+    let expected: std::collections::BTreeSet<String> = theirs
+        .traits
+        .iter()
+        .filter(|trait_| trait_.as_str() != "XR:Initial")
+        .cloned()
+        .collect();
+    assert_eq!(ours.traits, expected, "the derived traits are not the mirror's");
+
+    // The libraries. The mirror's list is a subset of Mojang's -- every name it
+    // serves is in the file -- and the difference is LWJGL, which the mirror keeps
+    // in a component of its own (`org.lwjgl3`, named in the `requires` this
+    // launcher no longer needs) and which Mojang names among the game's own
+    // libraries, natives included.
+    for library in &theirs.libraries {
+        let name = library.name.serialize();
+        assert!(
+            ours.libraries.iter().any(|l| l.name.serialize() == name),
+            "the mirror serves {name}, which the translation lost"
+        );
+    }
+    assert!(
+        ours.libraries.iter().any(|l| l.name.group() == "org.lwjgl"),
+        "{GAME} resolved with no LWJGL libraries at all"
+    );
+    assert!(
+        !theirs.libraries.iter().any(|l| l.name.group() == "org.lwjgl"),
+        "the mirror now serves LWJGL among the game's libraries, so the second \
+         component this launcher used to resolve is a duplicate"
+    );
+}
+
 /// The content store against the CDN, which is where "never download the same
 /// jar twice" has to be true to be worth anything.
 ///

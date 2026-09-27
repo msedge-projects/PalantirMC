@@ -242,6 +242,51 @@ impl PistonMeta {
         cancel: &Cancel,
         backoff: &Backoff,
     ) -> Result<VersionFile, palantir_core::error::Error> {
+        let (value, url) = self.body(id, cancel, backoff)?;
+        // Piston's files carry no `order` key -- that is Prism's addition -- so a
+        // missing one is the shape of the source rather than a warning.
+        VersionFile::parse(&value, &PathBuf::from(&url), false)
+    }
+
+    /// The version file for `id`, *translated* into the shape this launcher's
+    /// resolver reads.
+    ///
+    /// [`PistonMeta::version`] hands back Mojang's own document, which is not
+    /// what `resolve` merges: that model reads Prism's rewrite of it, where the
+    /// game's arguments are one legacy string, the client jar is a library and
+    /// the Java the version needs is stated in its own keys. This is that
+    /// translation, applied to the same digest-checked document, and it is the
+    /// reason a launcher can read Mojang's own metadata rather than another
+    /// launcher's copy of it.
+    ///
+    /// `uid` is the caller's rather than a constant here: `net.minecraft` is
+    /// Prism's name for this component, and this module is about Mojang's service,
+    /// which has no component ids at all.
+    pub fn translated(
+        &self,
+        id: &str,
+        uid: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<VersionFile, palantir_core::error::Error> {
+        let (value, url) = self.body(id, cancel, backoff)?;
+        let mut translated = palantir_core::version::from_mojang(&value)
+            .map_err(|detail| palantir_core::error::Error::json(&url, detail))?;
+        if let Some(object) = translated.as_object_mut() {
+            object.insert("uid".to_string(), serde_json::Value::String(uid.to_string()));
+            object.insert("version".to_string(), serde_json::Value::String(id.to_string()));
+        }
+        VersionFile::parse(&translated, &PathBuf::from(&url), false)
+    }
+
+    /// The version file's body for `id`, verified against the manifest's digest,
+    /// with the URL it came from.
+    fn body(
+        &self,
+        id: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<(serde_json::Value, String), palantir_core::error::Error> {
         let manifest = self.manifest(cancel, backoff)?;
         let entry = manifest.find(id).ok_or_else(|| {
             palantir_core::error::Error::format(
@@ -263,9 +308,7 @@ impl PistonMeta {
         let text = String::from_utf8_lossy(&held.body).into_owned();
         let value: serde_json::Value = serde_json::from_str(&text)
             .map_err(|error| palantir_core::error::Error::json(&url, error.to_string()))?;
-        // Piston's files carry no `order` key -- that is Prism's addition -- so a
-        // missing one is the shape of the source rather than a warning.
-        VersionFile::parse(&value, &PathBuf::from(&url), false)
+        Ok((value, url))
     }
 
     /// The newest full release's version file.
@@ -320,11 +363,21 @@ mod tests {
         )
     }
 
-    /// A version file the launcher can actually work from.
+    /// A version file the launcher can actually work from: Mojang's own shape, and
+    /// it carries the three things the translation exists to move -- the game's
+    /// arguments, the Java the version needs, and the client jar.
     const VERSION_BODY: &str = r#"{
         "id": "1.21.4", "type": "release", "mainClass": "net.minecraft.client.main.Main",
         "assets": "17", "complianceLevel": 1,
-        "arguments": { "game": [], "jvm": [] },
+        "javaVersion": { "component": "java-runtime-delta", "majorVersion": 21 },
+        "downloads": { "client": { "sha1": "aa", "size": 100,
+                                   "url": "https://piston.invalid/client.jar" } },
+        "arguments": {
+          "game": ["--username", "${auth_player_name}",
+                   {"rules": [{"action": "allow",
+                                "features": {"is_quick_play_multiplayer": true}}],
+                    "value": "--quickPlayMultiplayer"}],
+          "jvm": ["-Djava.library.path=${natives_directory}"] },
         "libraries": [ { "name": "org.lwjgl:lwjgl:3.3.3" } ]
     }"#;
 
@@ -397,6 +450,34 @@ mod tests {
         assert_eq!(file.libraries.len(), 1);
         assert_eq!(fetch.count(), 2, "the manifest, then the file");
         assert!(meta.cache_dir().exists(), "the cache directory was made");
+    }
+
+    #[test]
+    fn the_translated_file_is_the_shape_this_launcher_resolves() {
+        // The same digest-checked document as `version`, put through the
+        // translation: arguments into the legacy string, the Java the version
+        // needs into its own keys, the client jar into a library named for it, and
+        // the conditional argument's feature into the trait the launcher reads.
+        let (meta, _fetch) = scripted("translated");
+        let file = meta
+            .translated("1.21.4", "net.minecraft", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the translated file");
+        assert_eq!(file.uid, "net.minecraft");
+        assert_eq!(file.version, "1.21.4");
+        assert_eq!(file.minecraft_arguments, "--username ${auth_player_name}");
+        assert_eq!(file.compatible_java_majors, vec![21]);
+        assert_eq!(file.compatible_java_name, "java-runtime-delta");
+        assert!(file.traits.contains("FirstThreadOnMacOS"), "{:?}", file.traits);
+        assert!(file.traits.contains("feature:is_quick_play_multiplayer"));
+        let jar = file.main_jar.expect("the client jar");
+        assert_eq!(jar.name.artifact(), "minecraft");
+        assert_eq!(jar.name.classifier(), "client");
+        let artifact = jar
+            .mojang_downloads
+            .and_then(|downloads| downloads.artifact)
+            .expect("its artifact");
+        assert_eq!(artifact.url, "https://piston.invalid/client.jar");
+        assert_eq!(artifact.sha1, "aa");
     }
 
     #[test]

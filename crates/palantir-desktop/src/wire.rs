@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use palantir_net::engine::{
     next_event, Backoff, Cancel, Digest, Download, Event, Fetch, HttpPool, Job, JobId, LoaderMeta,
-    MetadataCache, Scheduler, DEFAULT_LIMIT, DEFAULT_TTL, DEFAULT_TIMEOUT,
+    MetadataCache, PistonMeta, Scheduler, DEFAULT_LIMIT, DEFAULT_TTL, DEFAULT_TIMEOUT,
 };
 
 /// One file to fetch, and the digest that says it arrived.
@@ -101,6 +101,11 @@ impl Wire {
     /// thing the wire exists to stop.
     pub fn loaders(&self) -> LoaderMeta {
         LoaderMeta::new(self.cache.clone(), self.fetch.clone())
+    }
+
+    /// Mojang's own metadata over the same cache and client, for the same reason.
+    pub fn piston(&self) -> PistonMeta {
+        PistonMeta::new(self.cache.clone(), self.fetch.clone())
     }
 
     /// One document, through the cache: a request only when it has to.

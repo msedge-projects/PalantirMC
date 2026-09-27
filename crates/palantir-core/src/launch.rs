@@ -272,6 +272,37 @@ pub fn process_minecraft_args(
     args.iter().map(|a| replace_tokens(a, &map)).collect()
 }
 
+/// The `${...}` tokens a launch fills, and the only ones the version-file
+/// translation keeps in an argument list.
+///
+/// Two functions do the filling: [`profile_var_map`] supplies the profile's own
+/// tokens and [`process_minecraft_args`] adds the session's. An argument whose
+/// value is a token outside this list reaches the game as the literal text
+/// `${that_token}`, because [`replace_tokens`] leaves an unknown token alone —
+/// so the translation drops such an argument (and the flag it belongs to)
+/// rather than pass it on. Mojang's `--clientId ${clientid} --xuid ${auth_xuid}`
+/// pair, published for 1.19 and later, is the only one measured, and the mirror
+/// this launcher used to read drops the same pair.
+///
+/// Kept beside the two functions that fill it so that a reader adding a token
+/// here sees the whole rule at once.
+pub const FILLED_TOKENS: &[&str] = &[
+    "profile_name",
+    "version_name",
+    "version_type",
+    "game_directory",
+    "game_assets",
+    "assets_root",
+    "assets_index_name",
+    "library_directory",
+    "auth_session",
+    "auth_access_token",
+    "auth_player_name",
+    "auth_uuid",
+    "user_properties",
+    "user_type",
+];
+
 /// The `INST_*` environment variables Prism exports
 /// (`MinecraftInstance::getVariables`).
 pub fn instance_env_vars(
@@ -515,6 +546,66 @@ mod tests {
                 "17".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn the_token_list_is_exactly_what_a_launch_fills() {
+        // The list is the translation's other half: it decides which of Mojang's
+        // arguments survive. Both directions are checked here, because either
+        // one being wrong is silent -- a missing token drops an argument the
+        // launcher could have filled, and an extra one keeps an argument it
+        // cannot, which reaches the game as `${clientid}`.
+        let (_dir, paths, instance) = rooted();
+        let mut p = profile();
+        p.minecraft_arguments = FILLED_TOKENS
+            .iter()
+            .map(|token| format!("--{token} ${{{token}}}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let map = instance_var_map(&paths, &instance, &p);
+
+        // Without a session, the profile's map is all there is: what is left
+        // unfilled is the session's own six, named here rather than read off the
+        // list, so that this half of the check is a statement about
+        // `process_minecraft_args` and not a restatement of `FILLED_TOKENS`.
+        let without = process_minecraft_args(&p, None, None, &map);
+        let mut survived: Vec<&str> = without
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("${").and_then(|t| t.strip_suffix('}')))
+            .collect();
+        survived.sort_unstable();
+        assert_eq!(
+            survived,
+            [
+                "auth_access_token",
+                "auth_player_name",
+                "auth_session",
+                "auth_uuid",
+                "user_properties",
+                "user_type",
+            ],
+            "the session's tokens are the only ones a profile alone does not fill"
+        );
+
+        // With one, nothing in the list is left unfilled -- the direction that
+        // matters, since a token here that the session does not supply would be
+        // dropped from every translated file.
+        let with = process_minecraft_args(&p, Some(&AuthSession::default()), None, &map);
+        assert!(
+            !with.iter().any(|arg| arg.contains("${")),
+            "the session did not fill: {:?}",
+            with.iter().filter(|arg| arg.contains("${")).collect::<Vec<_>>()
+        );
+
+        // And the other direction, for the profile's half: `profile_var_map`
+        // filling a token the list does not name would drop an argument the
+        // launcher could have filled.
+        for key in map.keys() {
+            assert!(
+                FILLED_TOKENS.contains(&key.as_str()),
+                "{key} is filled but not in FILLED_TOKENS"
+            );
+        }
     }
 
     #[test]

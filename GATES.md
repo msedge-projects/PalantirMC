@@ -2340,6 +2340,129 @@ exit 0; `palantir-net` (lib) 1 warning, `palantir-desktop` (bin) 3 and (bin
   limit needs to be increased`, and both of them leaving `Live services` and
   `Build exe` unscheduled.
 
+- [x] G95: Minecraft's own version file is read from piston, and the translation
+      the mirror was doing is measured against the mirror
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_translation_agrees_with_the_mirror_the_shell_read
+  EXPECT: test result: ok. 895 passed; 0 failed; 14 ignored, between the seven suites
+          1 passed, and it compared the two services' answers field for field
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    459 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    216 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 14 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-core` (lib) 9 warnings, (bin test) 10, `palantir-net` 1,
+`palantir-desktop` 3 and 22 -- none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0
+
+$ cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_translation_agrees_with_the_mirror_the_shell_read
+test the_translation_agrees_with_the_mirror_the_shell_read ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out
+```
+
+  The mirror was measured before it was moved, and the measurement said the
+  mirror's copy of `net.minecraft` is not a copy: Prism fetches Mojang's file,
+  rewrites it, and serves the rewrite. `arguments` -- the object with `game` and
+  `jvm` -- becomes the legacy `minecraftArguments` string, `javaVersion` becomes
+  `compatibleJavaMajors` and `compatibleJavaName`, `downloads.client` becomes a
+  `mainJar` library named `com.mojang:minecraft:<id>:client`, and `+traits` is
+  added. This launcher's `VersionFile` reads that translated shape and has no
+  reading of Mojang's `arguments` at all, so pointing `resolve` at piston meant
+  writing the translation down: `crates/palantir-core/src/version/mojang.rs`, with
+  the tables in its documentation, and `PistonMeta::translated` applying it to the
+  document that has already been checked against the manifest's `sha1`.
+
+  Six versions were measured field by field rather than one -- `1.21.4`,
+  `1.21.1`, `1.19.4`, `1.16.5`, `1.12.2`, `1.6.4` -- because the shapes differ and
+  the two ends of that list are different documents: `1.13` and later publish
+  arguments as an object, `1.6.4` and `1.12.2` publish one legacy string, and the
+  Java the version needs is stated only from `1.17` on. Two of the measurements
+  changed this launcher rather than the translation.
+
+  **The arguments the launcher cannot fill.** Every version from 1.19 publishes
+  `--clientId ${clientid} --xuid ${auth_xuid}`, and Prism drops that pair, for a
+  reason that shows up only when the two substitution tables are read together:
+  `process_minecraft_args` fills the profile's eight tokens and the session's six,
+  and `replace_tokens` leaves an unknown token *as it found it*, so the pair would
+  reach the game as `--clientId` followed by the literal string `${clientid}` --
+  and would read to the launcher's own log redaction as two secrets. Those two
+  tokens are the only ones in piston's whole list that no launch fills, measured
+  across all six versions; the translation now drops an argument whose value is a
+  token outside `launch::FILLED_TOKENS` together with the flag in front of it, and
+  a new test in `launch.rs` states what that list is from both ends -- with a
+  session nothing in it survives, and without one exactly the session's six do --
+  so a token added to the list without a function that fills it fails there rather
+  than at a launch.
+
+  **Natives are their own entries now.** `1.19` introduced
+  `org.lwjgl:lwjgl:3.3.3:natives-windows` -- a native with its classifier in the
+  version slot and no `natives` map anywhere -- and the model read those as
+  ordinary jars, which put a native library on the classpath and left the shared
+  objects inside it where the JVM never looks. `Library::is_native` now answers for
+  both shapes, `compatible_native` returns an entry's own classifier first, and
+  `install.rs` matches a native's artifact only against the path the metadata named
+  for it; `to_json` still writes the `natives` map only for the classic shape, so a
+  classic file round-trips unchanged. Measured: piston's `1.21.1` lists 48 such
+  entries, and the mirror's copy of the same version lists none.
+
+  **The consequence no reading of the routing table would have found: `org.lwjgl3`.**
+  Prism's `net.minecraft` carries no LWJGL at all -- 0 of its 41 libraries for
+  `1.21.1`, 0 of 57 for `1.21.4` -- because it serves those from a component of
+  its own and names it: `requires: [{"uid": "org.lwjgl3", "suggests": "3.3.3"}]`,
+  whose file holds 72 libraries. This launcher copied that shape into every
+  instance it creates (`PackProfile::vanilla` writes the `org.lwjgl3` slot with no
+  version), so the slot's version came off that `requires` -- which piston's file
+  does not have. Left alone, the slot would have become the hard error
+  "no version is pinned and no other component requires one", which blocks a
+  launch, for every instance on disk. Two changes, both about the same fact:
+  `resolve` reports a versionless slot whose libraries another loaded file already
+  carries as a component with nothing behind it instead of an error, keyed on the
+  data (`org.lwjgl3`'s libraries are the `org.lwjgl` group) rather than on a uid
+  list, so a profile still pointed at the mirror resolves the slot exactly as
+  before -- `compat.rs`'s Fabric instance, whose fixture file still carries the
+  `requires`, is that contrast case and stayed green -- and `vanilla` writes one
+  component, because against Mojang's file there is nothing to put in the second.
+  The unit test that states the new rule also states what it is worth on a
+  classpath: LWJGL appears once.
+
+  What is deliberately not translated is named in the module's documentation,
+  because each one is a decision rather than an omission: `arguments.jvm` (Prism's
+  own files carry `+jvmArgs: []` for all four modern versions measured -- the
+  launcher builds `-Djava.library.path`, the classpath and its platform
+  workarounds itself), the conditional `arguments.game` entries (the demo flag, the
+  window size, the quick-play destinations, whose *features* become the traits
+  `launch.rs` already keys the quick-play flags off), and `logging`,
+  `complianceLevel` and `minimumLauncherVersion`, for which the model has no field.
+
+  The live test is the receipt the fixtures cannot be: it asks piston and the
+  mirror for the same version and compares the two answers, so a field the mirror
+  moves and the code does not is a failure rather than a rereading. They agree on
+  the main class, the argument string -- `--clientId` included, since both drop
+  it -- the Java majors and name, the asset index field for field, and the client
+  jar's coordinate, digest, size and URL; the traits agree once the mirror's own
+  `XR:Initial` is set aside, and every library the mirror serves is asserted to be
+  among the translation's, with the difference asserted to *be* LWJGL: the
+  translation carries `org.lwjgl` libraries and the mirror's file carries none. A
+  desktop-level test drives the same claim through a real instance and a scripted
+  service: a vanilla instance resolves with no problems while the mirror's base
+  URL is one the service has nothing at, which is what makes "from piston alone"
+  measurable rather than a reading of the routing table.
+
+  The runner could not be the receipt again: this slice's push is recorded below
+  with the run the account gave it -- `Test workspace` and `Lint` dying in two
+  seconds with zero steps and `recent account payments have failed or your
+  spending limit needs to be increased`, with `Live services` and `Build exe`
+  never scheduled. The transcript above is this machine's, run with the flags
+  `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

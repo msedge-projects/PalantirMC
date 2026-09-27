@@ -7,6 +7,11 @@
 pub mod compare;
 pub mod gradle;
 pub mod library;
+/// Mojang's own version file, translated into the meta shape this launcher
+/// reads. Its own module because it is about the model rather than about a
+/// service, and because the tables in its documentation are the measurement
+/// that makes it possible.
+pub mod mojang;
 pub mod profile;
 pub mod rules;
 pub mod version_file;
@@ -14,6 +19,7 @@ pub mod version_file;
 pub use compare::PalantirVersion;
 pub use gradle::GradleSpecifier;
 pub use library::{ApplicableFiles, DownloadInfo, Library, LibraryDownloads};
+pub use mojang::from_mojang;
 pub use profile::LaunchProfile;
 pub use rules::{Action, Applied, OsSpec, Rule, RuntimeContext};
 pub use version_file::VersionFile;

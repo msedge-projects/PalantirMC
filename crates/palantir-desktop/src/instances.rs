@@ -599,8 +599,10 @@ mod tests {
         let created = create(&paths, &NewInstance::vanilla("Plain", "26.2")).unwrap();
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         let profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
-        // `net.minecraft` plus the lwjgl3 component every Prism profile carries.
-        assert_eq!(profile.components().len(), 2);
+        // One component. The `org.lwjgl3` slot Prism writes beside it is not
+        // needed against Mojang's own file, which carries the LWJGL libraries
+        // itself, so a new instance does not name it.
+        assert_eq!(profile.components().len(), 1);
         assert_eq!(profile.get("net.minecraft").unwrap().version, "26.2");
         assert!(
             !profile

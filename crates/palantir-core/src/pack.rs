@@ -383,9 +383,19 @@ impl PackProfile {
             .collect()
     }
 
-    /// A minimal vanilla profile: `net.minecraft` pinned to `version` plus
-    /// the `org.lwjgl3` slot, both marked important (the shape Prism writes
-    /// after creating a vanilla instance).
+    /// A minimal vanilla profile: one component, `net.minecraft` pinned to
+    /// `version`, marked important.
+    ///
+    /// Prism writes a second slot beside it -- `org.lwjgl3` -- because its own
+    /// `net.minecraft` file has no LWJGL entries at all: it serves them as a
+    /// component of their own and names that component in a `requires`. Mojang's
+    /// file keeps the libraries (56 of them for 1.21.4, plain and natives both),
+    /// so a reader of piston has nothing to put in that slot -- it would name the
+    /// same jars a second time, under the two naming schemes. An instance that
+    /// already carries the slot, written by Prism or by a build of this launcher
+    /// from before it read piston, resolves it as a component with nothing behind
+    /// it instead of failing ([`crate::resolve`]), and Prism adds the slot back
+    /// for itself when it opens a profile whose `net.minecraft` requires one.
     pub fn vanilla(version: &str) -> PackProfile {
         let mut p = PackProfile::default();
         p.append(Component {
@@ -394,7 +404,6 @@ impl PackProfile {
             important: true,
             ..Default::default()
         });
-        p.append(Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() });
         p
     }
 }
@@ -543,10 +552,10 @@ mod tests {
     #[test]
     fn profile_mutations_follow_prism_rules() {
         let mut p = PackProfile::vanilla("1.21.1");
-        assert_eq!(p.components().len(), 2);
+        assert_eq!(p.components().len(), 1);
+        assert_eq!(p.components()[0].uid, "net.minecraft");
         // important components are not removable
         assert!(!p.remove("net.minecraft"));
-        assert!(!p.remove("org.lwjgl3"));
         // a non-important component is removable
         p.append(Component { uid: "custom.thing".into(), ..Default::default() });
         assert!(p.remove("custom.thing"));

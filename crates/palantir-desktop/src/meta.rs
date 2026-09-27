@@ -6,25 +6,23 @@
 //! are still answered by Prism's mirror, and what is left there is measured
 //! rather than assumed:
 //!
-//! * **Minecraft's own version file.** The mirror's copy is not a copy: it is a
-//!   *translation* of Mojang's, with the `arguments` object flattened into the
-//!   legacy `minecraftArguments` string, `javaVersion` into
-//!   `compatibleJavaMajors`, `downloads.client` into `mainJar`, and `+traits`
-//!   added on top. This launcher's version-file model reads the translated shape
-//!   -- it has no reading of Mojang's `arguments` at all -- so moving this one to
-//!   piston means doing that translation here, which is a slice rather than a
-//!   URL. `engine::piston` already serves the version *list*.
+//! * **Minecraft's own version file**, which is piston's -- read through
+//!   `engine::piston` and translated into the shape this launcher's model reads by
+//!   `palantir_core::version::mojang`, whose documentation carries the tables. The
+//!   mirror's copy of the same file is that translation done elsewhere, which is
+//!   why this is a slice rather than a changed URL.
 //! * **Forge and NeoForge.** Their launch profile is inside an installer jar, and
 //!   a launcher is expected to *run* that installer's processors -- they patch the
 //!   client jar and unpack maven artifacts -- so there is no document a service
 //!   serves. [`Loader::profile_url`] answers `None` for them and carries the
 //!   measurement; Prism's copy is a rewrite of that file around a wrapper which
 //!   runs the processors at launch instead.
-//! * **Everything else**, including the mappings components (`net.fabricmc.intermediary`,
-//!   `org.quiltmc.hashed`) an *imported* instance may list. A fabric instance this
-//!   launcher creates lists two components, and the loader's own profile already
-//!   carries the mappings jar for its game version among its libraries -- which is
-//!   why the mirror's `requires` for a second component is not needed here.
+//! * **Everything else**, including the mappings components
+//!   (`net.fabricmc.intermediary`, `org.quiltmc.hashed`) an *imported* instance may
+//!   list. A Fabric instance this launcher creates lists two components, and the
+//!   loader's own profile already carries the mappings jar for its game version
+//!   among its libraries -- which is why the mirror's `requires` for a second
+//!   component is not needed here.
 //!
 //! ## What the loader's own file does not carry
 //!
@@ -42,7 +40,7 @@ use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::resolve::{MetaStore, VersionEntry};
 use palantir_core::version::VersionFile;
-use palantir_net::engine::{Backoff, Cancel, Loader, LoaderMeta};
+use palantir_net::engine::{Backoff, Cancel, Loader, LoaderMeta, PistonMeta};
 use palantir_net::{OnlineMetaStore, DEFAULT_META_BASE_URL};
 
 use crate::wire::Wire;
@@ -55,6 +53,8 @@ const MINECRAFT_UID: &str = "net.minecraft";
 pub struct PublisherMeta {
     /// The loaders' own profiles, over the wire's cache and client.
     loaders: LoaderMeta,
+    /// Mojang's own version files, over the same cache and client.
+    piston: PistonMeta,
     /// Prism's mirror, for every question the publishers above do not answer in
     /// the shape this launcher reads.
     mirror: OnlineMetaStore,
@@ -80,6 +80,7 @@ impl PublisherMeta {
         )
     }
 
+
     /// The same store with the mirror's base URL and directory, and the game
     /// version, named rather than read off an instance.
     fn over(
@@ -90,6 +91,7 @@ impl PublisherMeta {
     ) -> PublisherMeta {
         PublisherMeta {
             loaders: wire.loaders(),
+            piston: wire.piston(),
             mirror: OnlineMetaStore::new(mirror_base, mirror_dir),
             game,
         }
@@ -102,6 +104,9 @@ impl PublisherMeta {
     /// profile, and an instance that names the game version to ask it about, and
     /// the publisher answers; anything else is the mirror's.
     fn source(&self, uid: &str) -> Source {
+        if uid == MINECRAFT_UID {
+            return Source::Piston;
+        }
         match (published_loader(uid), self.game.as_deref()) {
             (Some(loader), Some(_)) => Source::Publisher(loader),
             _ => Source::Mirror,
@@ -112,6 +117,12 @@ impl PublisherMeta {
 impl MetaStore for PublisherMeta {
     fn version_file(&mut self, uid: &str, version: &str) -> Result<VersionFile, CoreError> {
         match self.source(uid) {
+            Source::Piston => self.piston.translated(
+                version,
+                MINECRAFT_UID,
+                &Cancel::new(),
+                &Backoff::default(),
+            ),
             Source::Publisher(loader) => {
                 // `source` only answers `Publisher` when the game version is
                 // known, which is the middle of the URL this asks for.
@@ -135,9 +146,12 @@ impl MetaStore for PublisherMeta {
 /// Where one version file comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
+    /// Mojang's own service, whose file this launcher translates.
+    Piston,
     /// The loader's own service, which publishes a profile per game version.
     Publisher(Loader),
-    /// Prism's mirror, which is a translation and therefore complete.
+    /// Prism's mirror, for the questions the publishers do not answer in the
+    /// shape this launcher reads.
     Mirror,
 }
 
@@ -172,6 +186,11 @@ fn instance_game(paths: &PalantirPaths, instance_id: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::wire::Script;
+    use palantir_core::instance::Instance;
+    use palantir_core::resolve::resolve;
+    use palantir_core::version::{ProblemSeverity, RuntimeContext};
+    use palantir_net::engine::Digest;
+    use palantir_net::PISTON_MANIFEST_URL;
 
     /// A store over a service that answers nothing, for the questions that are
     /// about routing: what is asked of whom, without a document anywhere.
@@ -189,14 +208,13 @@ mod tests {
     #[test]
     fn the_publishers_answer_for_their_own_loaders_and_the_mirror_for_the_rest() {
         let store = routing(Some("1.21.4"));
+        assert_eq!(store.source("net.minecraft"), Source::Piston);
         assert_eq!(store.source("net.fabricmc.fabric-loader"), Source::Publisher(Loader::Fabric));
         assert_eq!(store.source("org.quiltmc.quilt-loader"), Source::Publisher(Loader::Quilt));
-        // Minecraft's own file is the mirror's until the translation the module
-        // documents exists in this crate; the two Forge-shaped uids and the
-        // mappings components have no publisher-served profile at all.
-        for uid in
-            ["net.minecraft", "net.minecraftforge", "net.neoforged", "net.fabricmc.intermediary"]
-        {
+        // The two Forge-shaped uids have no publisher-served profile at all, and
+        // the mappings components an imported instance may list are the mirror's
+        // too.
+        for uid in ["net.minecraftforge", "net.neoforged", "net.fabricmc.intermediary"] {
             assert_eq!(store.source(uid), Source::Mirror, "{uid} is the mirror's");
         }
     }
@@ -252,6 +270,113 @@ mod tests {
         assert_eq!(file.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
         assert_eq!(file.libraries.len(), 2, "the mappings jar is one of its libraries");
         assert!(file.requires.is_empty(), "nothing to reach the mappings by");
+    }
+
+    #[test]
+    fn a_vanilla_instance_resolves_its_game_file_from_piston_alone() {
+        // The slice's claim, end to end and without a network: the profile names
+        // `net.minecraft`, the document arrives from Mojang's own service, and the
+        // classpath the resolution builds carries the LWJGL libraries the game's
+        // file names -- which is what Prism's copy of the same version does not
+        // name, because it serves those as a component of its own. The mirror's
+        // base URL is one the scripted service has nothing at, so a single
+        // question asked of it would come back as a problem: the resolution being
+        // clean is what makes "from piston alone" a measurement rather than a
+        // reading of `source`.
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let paths = PalantirPaths::at(dir.path());
+        let created = crate::instances::create(
+            &paths,
+            &crate::instances::NewInstance::vanilla("Plainly", "1.21.4"),
+        )
+        .expect("an instance");
+
+        // Mojang's shape, trimmed: the game's arguments with the pair this
+        // launcher cannot fill, the Java the version needs, the client jar, and
+        // an LWJGL entry of the kind 1.19 and later publish as its own entry.
+        const BODY: &str = r#"{
+          "id": "1.21.4", "type": "release", "releaseTime": "2024-12-03T10:12:57+00:00",
+          "mainClass": "net.minecraft.client.main.Main", "assets": "19",
+          "assetIndex": {"id": "19", "sha1": "aa", "size": 10, "totalSize": 20,
+                         "url": "https://piston.invalid/19.json"},
+          "javaVersion": {"component": "java-runtime-delta", "majorVersion": 21},
+          "downloads": {"client": {"sha1": "bb", "size": 28,
+                                   "url": "https://piston.invalid/client.jar"}},
+          "arguments": {"jvm": ["-Djava.library.path=${natives_directory}"],
+                        "game": ["--username", "${auth_player_name}",
+                                 "--clientId", "${clientid}", "--xuid", "${auth_xuid}"]},
+          "libraries": [
+            {"name": "com.mojang:brigadier:1.3.10",
+             "downloads": {"artifact": {"path": "com/mojang/brigadier/1.3.10/brigadier-1.3.10.jar",
+                                        "sha1": "cc", "size": 5,
+                                        "url": "https://libraries.invalid/brigadier.jar"}}},
+            {"name": "org.lwjgl:lwjgl:3.3.3",
+             "downloads": {"artifact": {"path": "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar",
+                                        "sha1": "dd", "size": 6,
+                                        "url": "https://libraries.invalid/lwjgl.jar"}}}
+          ]
+        }"#;
+        let digest = Digest::sha1(BODY.as_bytes()).hex().to_string();
+        let mut script = Script::new();
+        script.insert_str(
+            PISTON_MANIFEST_URL,
+            &format!(
+                r#"{{"latest": {{"release": "1.21.4", "snapshot": "25w02a"}},
+                    "versions": [{{"id": "1.21.4", "type": "release",
+                                   "url": "https://piston.invalid/1.21.4.json",
+                                   "releaseTime": "2024-12-03T10:12:57+00:00",
+                                   "sha1": "{digest}"}}]}}"#
+            ),
+        );
+        script.insert_str("https://piston.invalid/1.21.4.json", BODY);
+
+        let wire = script.wire();
+        let mut store = PublisherMeta::over(
+            &wire,
+            "https://mirror.invalid/v1",
+            &dir.path().join("meta"),
+            Some("1.21.4".to_string()),
+        );
+        let instance = Instance::open(&paths.instances_dir().join(&created.id))
+            .expect("the instance on disk");
+        let profile = PackProfile::load(&instance.mmc_pack_path()).expect("its pack profile");
+        let resolution = resolve(
+            &profile,
+            &instance.patches_dir(),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .expect("a resolution");
+
+        assert_eq!(
+            resolution.severity(),
+            ProblemSeverity::None,
+            "problems: {:?}",
+            resolution.problems
+        );
+        assert_eq!(resolution.profile.main_class, "net.minecraft.client.main.Main");
+        assert_eq!(resolution.profile.compatible_java_majors, vec![21]);
+        assert_eq!(
+            resolution.profile.minecraft_arguments,
+            "--username ${auth_player_name}",
+            "the pair the launcher cannot fill is not on the command line"
+        );
+        // LWJGL is on the classpath because the game's file names it, and the one
+        // component the profile names is what put it there.
+        assert!(
+            resolution
+                .profile
+                .libraries
+                .iter()
+                .any(|library| library.name.group() == "org.lwjgl"),
+            "{:?}",
+            resolution
+                .profile
+                .libraries
+                .iter()
+                .map(|library| library.name.serialize())
+                .collect::<Vec<_>>()
+        );
     }
 
 }

@@ -405,11 +405,18 @@ fn file_facts(library: &Library, rel: &str, arch: &str) -> Option<(String, Strin
         return Some((library.absolute_url.clone(), String::new(), 0));
     }
     if let Some(downloads) = &library.mojang_downloads {
-        if !library.is_native() {
-            if let Some(artifact) = &downloads.artifact {
-                if !artifact.url.is_empty() {
-                    return Some((artifact.url.clone(), artifact.sha1.clone(), artifact.size));
-                }
+        if let Some(artifact) = &downloads.artifact {
+            // An ordinary library *is* its artifact. A native has to be the file
+            // the metadata named for it: the classic shape names it in
+            // `downloads.classifiers`, and a native that is its own entry
+            // (`org.lwjgl:lwjgl:3.3.3:natives-windows`) names it as that entry's
+            // artifact, which is why the path is compared rather than assumed.
+            let is_this_file = !library.is_native()
+                || artifact.path.as_deref()
+                    .map(|path| format!("libraries/{path}") == rel)
+                    .unwrap_or(false);
+            if is_this_file && !artifact.url.is_empty() {
+                return Some((artifact.url.clone(), artifact.sha1.clone(), artifact.size));
             }
         }
         for info in downloads.classifiers.values() {
