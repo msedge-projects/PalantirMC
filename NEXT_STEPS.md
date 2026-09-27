@@ -88,7 +88,7 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). Home is the welcome screen on a first run (G103). The right panel draws four of its five sections now -- the getting-started checklist and the friends sentence a reader with no Modrinth session sees (G102), Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). What is not real yet is Skins, Servers and an instance's hosting half, and the panel's fundraiser banner -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); the panel's news feed is a document on the same cache (G101); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95). What is left of the metadata source `resolve` reads is the two Forge-shaped loaders -- see "What stage 4 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **Done**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); the panel's news feed is a document on the same cache (G101); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95); and the two Forge-shaped loaders install from their own jars too -- each build's launch profile read out of its installer and translated the same way (G99), with the installer's own processors run at install time over the same queue, resume and digest check (G100) |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -605,26 +605,23 @@ finished; and `Scheduler::shutdown` must cancel before it drops the queue, so th
 jobs still in flight see a cancelled token and report instead of being counted as
 work nobody stopped.
 
-What stage 4 does **not** have yet, named rather than implied. One bullet, and
-the split is what a measurement found rather than a preference: the mirror
-`resolve` used to read was never a copy of the publishers' files, so moving a
-question off it is moving the *translation* with it. Two of the three
-questions are off it now -- the loaders that publish a launch profile (G94),
-and Minecraft's own file, whose translation is `palantir-core`'s `version::mojang`
-and whose measurement is a live test against the mirror for the same version
-(G95) -- and what is left needs a different kind of work. The mappings
-components an *imported* instance lists (`net.fabricmc.intermediary`,
-`org.quiltmc.hashed`) stay the mirror's: one library each, from a maven the
-publisher serves, which is a URL change rather than a translation.
-
-* **Forge and NeoForge.** Their launch profile is not a document any service
-  serves: a launcher reads the `version.json` inside the installer jar and is
-  expected to *run* that installer's processors, which patch the client jar and
-  unpack the maven artifacts the profile names. Prism's copy is a rewrite of
-  that file around ForgeWrapper, a third-party project that runs those
-  processors at launch instead -- which is what resolves a Forge instance today,
-  and why leaving this one on the mirror is not a cosmetic gap. `NEXT_STEPS.md`'s
-  own rule applies: this is install work, and it is named as such.
+What stage 4 held open, and what closed it. The mirror `resolve` used to read
+was never a copy of the publishers' files, so moving a question off it is
+moving the *translation* with it: the loaders that publish a launch profile
+(G94), Minecraft's own file, whose translation is `palantir-core`'s
+`version::mojang` and whose measurement is a live test against the mirror for
+the same version (G95), and now the two Forge-shaped loaders, whose
+installers' own files replaced the mirror's ForgeWrapper rewrite in both
+places it stood -- the launch profile, read out of each build's installer jar
+and translated the way the game's file was (G99), and the install itself, with
+the installer's own processors run at install time instead of at launch (G100).
+The mappings components an *imported* instance lists
+(`net.fabricmc.intermediary`, `org.quiltmc.hashed`) stay the mirror's: one
+library each, from a maven the publisher serves, which is a URL change rather
+than a translation. What still points at the mirror is the resolve-time
+routing for those two uids (`PublisherMeta` in the desktop crate): the engine
+reads and installs from the publishers now, and flipping that switch is the
+desktop track's line to move rather than this stage's.
 
 ## Where the old sections went
 

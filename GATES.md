@@ -2826,7 +2826,16 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out
           (the merged tree's count: G99's Forge commit is under this one)
           exit 0 for clippy, with no warning in a line this slice added
   EVIDENCE: the transcripts of these commands on this tree, and of the live feed the
-            section is drawn from:
+             section is drawn from:
+- [x] G100: the installers' processors patch the client and unpack the maven
+      artifacts at install time, the way the official installer does
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 forge_and_neoforge_processors
+  EXPECT: test result: ok. 928 passed; 0 failed; 16 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+          1 passed, and it installed one Forge build and one NeoForge build for real
+  EVIDENCE: the transcripts of these commands on this tree:
 
 ```
 $ cargo test --workspace --all-targets --locked
@@ -2930,7 +2939,69 @@ article keys: ['date', 'link', 'summary', 'thumbnail', 'title']
   steps** and `The job was not started because recent account payments have failed
   or your spending limit needs to be increased`, with `Build exe` and `Live
   services` skipped rather than scheduled: the same block as the eleven before it.
-  The transcripts above are this machine's, run with the flags `ci.yml` uses.
+  The transcripts above are this   machine's, run with the flags `ci.yml` uses.
+    476 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    232 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-core` (lib) 9 warnings, its `compat` test 1 and its lib test
+10; `palantir-net` (lib) 1 and its lib test 1 duplicate; `palantir-desktop` (bin)
+3 and (bin test) 21 -- none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0
+
+$ cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 forge_and_neoforge_processors
+test forge_and_neoforge_processors_install_a_client ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 218.20s
+```
+
+  `install` in `crates/palantir-net/src/engine/forge.rs` is the official
+  installer's sequence in two phases, like the official installer: first
+  every library, tool and input the running processors name is resolved
+  through the maven roots (the loader's own maven, then central, then
+  Mojang's libraries) and digest-checked into the content store against the
+  `.sha1` sidecar, then each processor's arguments are expanded from `data`
+  (`{MINECRAFT_JAR}`, `{ROOT}`, `{INSTALLER}`, `{LIBRARY_DIR}` and the
+  `[maven]` entries, plus `{SIDE}` and `{MINECRAFT_VERSION}`) and run under a
+  runtime `palantir-core`'s Java locator found, with the instance root as its
+  working directory. The tool is `java -cp` over the resolved jars at the
+  `Main-Class` the jar's own manifest declares. Server-only processors are
+  skipped on a client install; an output already present and matching is the
+  resume case; a processor that fails takes the install with it with its
+  index, its coordinate and the tool's own output attached.
+
+  The client jar the processors read is Mojang's, fetched and digest-checked
+  through `piston.rs` and the content store -- the live test resolves it the
+  way a launch does and hands the stored file over, so no second download of
+  anything else exists to be wrong about.
+
+  Three things the live run taught, all about telling inputs apart. The
+  installer jar itself moved onto the content store beside the tools: Forge's
+  maven stalls a single slow connection -- a 6MB installer outlasts one
+  request timeout -- and the store's staging file is where the next attempt
+  continues, which the metadata cache cannot do. A product of the chain is
+  never resolved: it exists on no maven, so the declared outputs are
+  collected first (a server-skipped processor's outputs excluded, since they
+  are never written on this side) and anything resolving into them is left
+  for the tool that writes them. And a data entry no maven hosts is
+  tolerated rather than refused in phase zero -- MCP_DATA extracts its
+  mappings out of the neoform zip and DOWNLOAD_MOJMAPS fetches Mojang's own,
+  so the run, with the processor named, is what judges those, not the
+  resolver. Measured: Forge `1.21.1-52.1.0` runs 3 processors and skips 4,
+  NeoForge `21.1.172` runs 6 and skips 4, both patched clients land with the
+  digest their last processor declared, and the mirror's file for the same
+  versions is still the ForgeWrapper launch those products are for.
+
+  G99's `profile` grew a content-store argument with the installer move, and
+  the G99 live test moves with it; its assertions are unchanged.
+
+  The runner could not be the receipt: this slice's push is the run the next
+  `gh run list` names, expected four seconds with zero steps and the same
+  billing annotation as G99's push (`36333913779`, `Test workspace` and
+  `Lint` failing, `Live services` and `Build exe` skipped). The transcript
+  above is this machine's, run with the flags `ci.yml` uses.
 
 - [x] G102: the panel's getting-started checklist, and the friends sentence beside it
   CHECK: cargo test --workspace --all-targets --locked

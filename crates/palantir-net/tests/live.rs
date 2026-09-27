@@ -1229,6 +1229,7 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
         MetadataCache::new(tmp.path().join("installers"), DEFAULT_TTL),
         pool,
     );
+    let pstore = palantir_net::engine::ContentStore::new(tmp.path().join("pstore"));
     let cancel = Cancel::new();
     let backoff = Backoff::with_attempts(2);
 
@@ -1236,7 +1237,7 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
         let loader = palantir_net::engine::Loader::from_name(name)
             .unwrap_or_else(|| panic!("{name} is not a loader"));
         let ours = installers
-            .profile(loader, game, build, &cancel, &backoff)
+            .profile(loader, game, build, &pstore, &cancel, &backoff)
             .unwrap_or_else(|e| panic!("{name} {build} from its installer: {e}"));
         let theirs = live_store(&tmp.path().join("mirror"))
             .version_file(uid, build)
@@ -1331,6 +1332,193 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
         assert!(
             ours.requires.is_empty(),
             "{uid} {build} states a requirement the publisher did not"
+        );
+    }
+}
+
+/// The processors, run for real: one Forge build and one NeoForge build
+/// installed into a temp instance each.
+///
+/// This is the part Prism does at launch instead (ForgeWrapper): the
+/// profile's libraries are not the whole install, because the processors
+/// patch the client jar and unpack the maven artifacts the profile names.
+/// What is asserted is the installer's own sequence end to end -- every tool
+/// and classpath entry resolved through its maven and digest-checked by the
+/// content store, every argument expanded from `data`, the client's own jar
+/// Mojang's (fetched and digest-checked through `piston.rs`, never
+/// re-downloaded under another name), each declared output present and
+/// matching afterwards -- and that what the mirror resolves for the same
+/// versions is still the ForgeWrapper launch the installed files are for.
+///
+/// The builds are G99's pins, so the profile half is already measured: this
+/// is the install half. It downloads tens of megabytes and runs Java tools
+/// for minutes, which is why it is `#[ignore]`d like every other live test.
+#[test]
+#[ignore = "live: installs real Forge+NeoForge builds (downloads, Java processors, minutes)"]
+fn forge_and_neoforge_processors_install_a_client() {
+    use palantir_net::engine::{
+        find_java, install, Backoff, Cancel, ContentStore, Digest, HttpPool, InstallCtx,
+        InstallerMeta, Loader, MetadataCache, PistonMeta, CLIENT_SIDE, DEFAULT_TTL,
+    };
+
+    /// Loader name, game, build, mirror uid, processors expected to run on a
+    /// client install, and ones expected to skip (server-only).
+    const BUILDS: &[(&str, &str, &str, &str, usize, usize)] = &[
+        ("forge", "1.21.1", "52.1.0", "net.minecraftforge", 3, 4),
+        ("neoforge", "1.21.1", "21.1.172", "net.neoforged", 6, 4),
+    ];
+
+    let java = find_java().expect("this machine has no Java to run the processors with");
+    let cancel = Cancel::new();
+    // An install is tens of megabytes off throttled hosts: a long request
+    // timeout so a slow-but-moving transfer finishes in one attempt, and
+    // attempts to spare so a stalled one resumes rather than fails. Resume
+    // is per digest in the content store, so every attempt continues the
+    // last one instead of restarting it.
+    let pool = std::sync::Arc::new(HttpPool::new(
+        palantir_net::engine::DEFAULT_LIMIT,
+        std::time::Duration::from_secs(600),
+    ));
+    let backoff = Backoff::with_attempts(8);
+
+    for (name, game, build, uid, ran, skipped) in BUILDS {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let installers = InstallerMeta::new(
+            MetadataCache::new(tmp.path().join("installers"), DEFAULT_TTL),
+            pool.clone(),
+        );
+        let store = ContentStore::new(tmp.path().join("content"));
+        let loader =
+            Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
+
+        // The installer jar, and the install it declares.
+        let (bytes, parsed) = installers
+            .parsed(loader, game, build, &store, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{name} {build} installer: {e}"));
+        assert!(
+            !parsed.install.processors.is_empty(),
+            "{name} {build} declares no processors at all"
+        );
+
+        // Mojang's client jar, through piston and the content store: the
+        // digest is the manifest's own, so these bytes are the bytes Mojang
+        // meant rather than merely ones that arrived and parsed.
+        let piston = PistonMeta::new(
+            MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL),
+            pool.clone(),
+        );
+        let translated = piston
+            .translated(game, "net.minecraft", &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{game} from piston: {e}"));
+        let artifact = translated
+            .main_jar
+            .as_ref()
+            .and_then(|jar| jar.mojang_downloads.as_ref())
+            .and_then(|downloads| downloads.artifact.as_ref())
+            .unwrap_or_else(|| panic!("{game} publishes no client jar"));
+        let digest = Digest::parse(&artifact.sha1)
+            .unwrap_or_else(|e| panic!("the client digest is not a digest: {e}"));
+        store
+            .fetch_blocking(pool.as_ref(), &artifact.url, &digest, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("Mojang's client jar: {e}"));
+        let minecraft_jar = store.path(&digest);
+
+        let root = tmp.path().join("instance");
+        let library_dir = root.join("libraries");
+        let extract_dir = tmp.path().join("extract");
+        let installer_path = tmp.path().join("installer.jar");
+        std::fs::write(&installer_path, &bytes).expect("writing the installer jar");
+        let ctx = InstallCtx {
+            meta: &installers,
+            store: &store,
+            library_dir: &library_dir,
+            root: &root,
+            installer_path: &installer_path,
+            installer_bytes: &bytes,
+            minecraft_jar: &minecraft_jar,
+            extract_dir: &extract_dir,
+            java: &java,
+            side: CLIENT_SIDE,
+            game,
+        };
+        let report = install(loader, &parsed.install, &ctx, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{name} {build} install: {e}"));
+        let did_run = report.iter().filter(|p| !p.skipped).count();
+        let did_skip = report.iter().filter(|p| p.skipped).count();
+        assert_eq!(
+            (did_run, did_skip),
+            (*ran, *skipped),
+            "{name} {build}: unexpected run/skip counts: {report:?}"
+        );
+
+        // The patched client the whole chain exists to produce: present,
+        // with the digest the last processor declared.
+        let patched = parsed.install.data.get("PATCHED").unwrap_or_else(|| {
+            panic!("{name} {build} names no PATCHED data entry")
+        });
+        let patched_coord = match patched {
+            palantir_net::DataValue::Artifact(coord) => coord.clone(),
+            other => panic!("{name} {build} PATCHED is not an artifact: {other:?}"),
+        };
+        let spec = palantir_core::version::GradleSpecifier::parse(&patched_coord);
+        let patched_path = library_dir.join(spec.to_path(""));
+        assert!(
+            patched_path.is_file(),
+            "{name} {build}: no patched client at {}",
+            patched_path.display()
+        );
+        let declared = parsed.install.processors.iter().find_map(|p| {
+            p.outputs.iter().find_map(|(path, sha)| {
+                (path.contains("PATCHED")).then(|| sha.clone())
+            })
+        });
+        if let Some(sha) = declared {
+            // The value may itself be a `{DATA}` token for the sha literal.
+            let sha = parsed.install.data.get(
+                sha.trim().trim_start_matches('{').trim_end_matches('}'),
+            ).and_then(|v| match v {
+                palantir_net::DataValue::Literal(hex) => Some(hex.clone()),
+                _ => None,
+            }).unwrap_or(sha);
+            if let Ok(expected) = Digest::parse(&sha) {
+                expected.verify_file(&patched_path).unwrap_or_else(|e| {
+                    panic!("{name} {build} patched client fails its declared digest: {e}")
+                });
+            }
+        }
+
+        // And what a launch resolves for the same versions is still the
+        // ForgeWrapper file the installed products are launched through --
+        // with the installer's own profile agreeing with it the way G99
+        // measured, so the install and the resolution are about the same
+        // build rather than two builds with the same number.
+        let theirs = live_store(&tmp.path().join("mirror"))
+            .version_file(uid, build)
+            .unwrap_or_else(|e| panic!("{uid} {build} from the mirror: {e}"));
+        assert_eq!(
+            theirs.main_class, "io.github.zekerzhayard.forgewrapper.installer.Main",
+            "{uid} {build} is no longer a ForgeWrapper launch"
+        );
+        assert!(
+            !theirs.libraries.is_empty(),
+            "{uid} {build} resolves with no libraries"
+        );
+        let ours = installers
+            .profile(loader, game, build, &store, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{name} {build} profile after install: {e}"));
+        for library in &theirs.libraries {
+            if library.name.artifact() == "ForgeWrapper" {
+                continue;
+            }
+            let name = library.name.serialize();
+            assert!(
+                ours.libraries.iter().any(|l| l.name.serialize() == name),
+                "{uid} {build}: the mirror serves {name}, which the installed build lost"
+            );
+        }
+        println!(
+            "{name} {build}: {did_run} processors ran, {did_skip} skipped, patched client {} bytes",
+            patched_path.metadata().map(|m| m.len()).unwrap_or(0)
         );
     }
 }
