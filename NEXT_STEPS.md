@@ -88,7 +88,7 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). What is not real yet is anything a service answers, and the panel's remaining sections, which all are -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91). What is left is `browse.rs`'s pack install and the metadata source `resolve` reads -- see "What stage 4 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as does a modpack's own file list (G93). What is left is the metadata source `resolve` reads -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -402,7 +402,7 @@ alternative:
 | `cache` | A metadata "cache" whose only rule was "if the file is on disk, use it" -- which is a write-once archive, and how a launcher comes to offer a loader build that was published last year |
 | `content` | Three trees holding the same jar three times: `libraries/`, `assets/` and a `.minecraft/versions/` copy of what a version asks for. Now every file is named by its own digest, so what is already here is never fetched again |
 | `piston` | `meta.prismlauncher.org`, which is Prism's mirror of Mojang's own metadata rewritten into Prism's shape. Now the launcher reads piston directly, and checks every version file against the `sha1` the manifest published for it |
-| `modrinth` | The desktop crate's `browse.rs`, which reaches `api.modrinth.com` with a `reqwest` client of its own -- a second connection pool and a second answer to "how many requests is this launcher making". Discover's search now goes through this module on the engine's cache and ceiling (G73-G75); the desktop's other call sites still use theirs |
+| `modrinth` | The desktop crate's `browse.rs`, which reaches `api.modrinth.com` with a `reqwest` client of its own -- a second connection pool and a second answer to "how many requests is this launcher making". Discover's search goes through this module on the engine's cache and ceiling (G73-G75), and the desktop's last client of its own went with the pack installer (G93): `palantir-desktop` depends on `reqwest` no longer |
 
 The cache is the one worth reading twice, because it is the only part of this
 that changes what a user sees. An entry has an age; inside its TTL the bytes on
@@ -491,17 +491,18 @@ work nobody stopped.
 
 What stage 4 does **not** have yet, named rather than implied:
 
-* **The desktop's other call sites on the engine.** Both metadata sources exist
+* **The metadata source `resolve` reads.** Both metadata sources exist
   (`engine::piston` and `engine::modrinth`, gated by G71-G74) and one page asks
-  through one of them now (G75); the launch path's *transfers* followed with the
-  wire (G91), so a launch's libraries, asset objects and Java runtime draw the
-  one ceiling and come back resumable, digest-checked and cancellable. Two
-  things are still their own: `browse.rs`'s pack installer, which is `#[cfg(test)]`
-  code today and reaches the network with its own client, and `resolve`'s
-  metadata, which still reads Prism's mirror rather than the loaders' own
-  services -- that second one is a change of *which service* is asked rather than
-  of how the asking happens, which is why it was left out of a slice about the
-  asking.
+  through one of them now (G75); every *transfer* the launcher makes went over
+  the wire with the launch path (G91) and the pack installer (G93), so a launch's
+  libraries, asset objects and Java runtime and a modpack's own file list all
+  draw the one ceiling and come back resumable, digest-checked and cancellable
+  -- `palantir-desktop` no longer names an HTTP client at all. What is left is
+  which service answers a *loader*: `resolve` still reads Prism's mirror
+  (`meta.prismlauncher.org`) for a loader's version list and version file, where
+  Fabric, Quilt, Forge and NeoForge each publish their own. That is a change of
+  *which service* is asked rather than of how the asking happens, which is why it
+  was left out of the slices about the asking.
 
 ## Where the old sections went
 

@@ -14,39 +14,25 @@
 // request building and pack reading are what its tests cover, and the shell's
 // own Discover page asks `palantir-net` directly since the old shell went.
 //
-// `Path` and the hasher joined that list when the launch path moved onto the
-// engine's wire (G91): `sha1_file` is the pack installer's own check now, so
-// nothing this module compiles into the binary names either of them.
+// The pack installer's transfers joined them with the launch path's (G93): the
+// files a pack lists go over the launcher's one wire, so nothing here builds a
+// client, a fetcher or a thread count of its own, and the `User-Agent`
+// Modrinth's guidelines ask for is the one `engine::http` sets on the client
+// every request already goes through.
 #[cfg(test)]
-use std::path::Path;
-#[cfg(test)]
-use sha1::Digest;
-#[cfg(test)]
-use std::path::PathBuf;
-#[cfg(test)]
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use serde::Deserialize;
 #[cfg(test)]
 use palantir_loader::{PackFile, PackPlan};
-#[cfg(test)]
-use palantir_net::download_many_with_progress;
-#[cfg(test)]
-use palantir_net::meta::{BlockingHttpFetcher, Fetcher};
 #[cfg(test)]
 use palantir_net::modrinth::ModrinthProjectVersion;
 #[cfg(test)]
 use crate::catalog::LoaderKind;
 #[cfg(test)]
 use crate::install::{self, Progress};
-
-/// User agent identifying this launcher, as Modrinth's API guidelines ask.
 #[cfg(test)]
-pub const USER_AGENT: &str = concat!("PalantirMC/", env!("CARGO_PKG_VERSION"));
-
-/// How long a browse request may take.
-#[cfg(test)]
-pub const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
+use crate::wire::{FileJob, Wire};
 
 /// Content tabs exposed by Modrinth's public project types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -216,16 +202,6 @@ pub fn parse_search(body: &str) -> Result<Vec<Hit>, String> {
     Ok(envelope.hits)
 }
 
-/// HTTP client used by every browse call.
-#[cfg(test)]
-pub fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|error| format!("cannot build an HTTP client: {error}"))
-}
-
 /// Choose the best version for an instance.
 ///
 /// Rules, in order:
@@ -295,41 +271,6 @@ pub struct InstalledFile {
     pub verified: bool,
 }
 
-/// `sha1` hex digest, lowercase.
-#[cfg(test)]
-pub fn sha1_hex(bytes: &[u8]) -> String {
-    let mut hasher = sha1::Sha1::new();
-    hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
-}
-
-/// `sha1` of a file on disk, lowercase hex.
-///
-/// Streamed rather than read whole: a modpack's files include 40 MB mod jars,
-/// and the digest is the only thing about them this launcher wants in memory.
-/// The 64 KiB window is the same one the downloader writes through.
-/// Test-only since the launch path moved onto the engine's queue: what is left
-/// in this module that hashes a file is the pack installer's own checker, which
-/// is where the rule about a mismatched jar is written down.
-#[cfg(test)]
-pub fn sha1_file(path: &Path) -> Result<String, String> {
-    use std::io::Read as _;
-    let mut file = std::fs::File::open(path)
-        .map_err(|error| format!("reading '{}' failed: {error}", path.display()))?;
-    let mut hasher = sha1::Sha1::new();
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("reading '{}' failed: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
 /// Make an API-provided file name safe to write on Windows.
 #[cfg(test)]
 pub fn safe_file_name(name: &str) -> Result<String, String> {
@@ -347,28 +288,16 @@ pub fn safe_file_name(name: &str) -> Result<String, String> {
     Ok(cleaned)
 }
 
-/// Verify downloaded bytes against a Modrinth `sha1` (and size when known).
-#[cfg(test)]
-pub fn verify_download(bytes: &[u8], expected_sha1: Option<&str>, expected_size: u64) -> Result<bool, String> {
-    if expected_size > 0 && bytes.len() as u64 != expected_size {
-        return Err(format!("size mismatch: expected {expected_size} bytes, got {}", bytes.len()));
-    }
-    match expected_sha1.map(str::trim).filter(|digest| !digest.is_empty()) {
-        Some(expected) => {
-            let actual = sha1_hex(bytes);
-            if !actual.eq_ignore_ascii_case(expected) {
-                return Err(format!("sha1 mismatch: expected {expected}, got {actual}"));
-            }
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
 /// Download a version's primary file into the selected content folder.
+///
+/// One file over the launcher's one queue: the transfer resumes a part file it
+/// finds, is checked against the `sha1` the API published before the rename,
+/// and draws the process-wide ceiling while it runs. The published *size* is
+/// still checked here, because it is the only check a file with no digest has
+/// -- and because the length is the caller's to know, the transfer's is not.
 #[cfg(test)]
 pub fn install_version(
-    client: &reqwest::blocking::Client,
+    wire: &Wire,
     target_dir: &Path,
     version: &ModrinthProjectVersion,
 ) -> Result<InstalledFile, String> {
@@ -379,25 +308,31 @@ pub fn install_version(
         return Err(format!("{} publishes no direct download", version.name));
     }
     let filename = safe_file_name(&file.filename)?;
-    let response = client
-        .get(&file.url)
-        .send()
-        .map_err(|error| format!("downloading {filename} failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("downloading {filename} failed: HTTP {status}"));
-    }
-    let bytes = response
-        .bytes()
-        .map_err(|error| format!("reading {filename} failed: {error}"))?
-        .to_vec();
-    let verified = verify_download(&bytes, file.sha1(), file.size)?;
     palantir_core::util::ensure_dir(target_dir)
         .map_err(|error| format!("creating {} failed: {error}", target_dir.display()))?;
     let path = target_dir.join(&filename);
-    palantir_core::util::atomic_write(&path, &bytes)
-        .map_err(|error| format!("writing {} failed: {error}", path.display()))?;
-    Ok(InstalledFile { filename, path, bytes: bytes.len(), verified })
+    let jobs = [FileJob::new(&file.url, &path, file.sha1().unwrap_or_default())];
+    wire.files(&jobs, 1, &mut |_, _| {})
+        .remove(0)
+        .map_err(|reason| format!("downloading {filename} failed: {reason}"))?;
+    // Measured where it landed rather than counted off the wire: a file that is
+    // already there and already right transfers nothing at all.
+    let bytes = std::fs::metadata(&path)
+        .map(|meta| meta.len())
+        .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+    if file.size > 0 && bytes != file.size {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!(
+            "downloading {filename} failed: size mismatch: expected {} bytes, got {bytes}",
+            file.size
+        ));
+    }
+    Ok(InstalledFile {
+        filename,
+        path,
+        bytes: usize::try_from(bytes).unwrap_or(usize::MAX),
+        verified: file.sha1().is_some(),
+    })
 }
 
 /// What fetching a pack's listed files came to.
@@ -420,24 +355,24 @@ pub struct PackFetch {
 /// The pack's own `path` decides where each file lands, under the instance
 /// root; [`PackFile::relative_path`] has already refused anything that would
 /// escape it, and the refusal was reported at planning time rather than
-/// silently rewritten here. Every file is checked against the `sha1` the pack
-/// published, and a mismatch is deleted rather than kept: a corrupted mod jar
-/// is a crash at startup, while a missing one is a line the user can act on.
+/// silently rewritten here. Every file that states a `sha1` is checked against
+/// it by the transfer itself, which never renames a part file that fails the
+/// check: a corrupted mod jar in `mods/` is a crash at startup, while a missing
+/// one is a line the user can act on.
 ///
 /// A file the pack lists with several URLs gets its mirrors tried in order when
 /// the first one fails — that is what the list is for.
 #[cfg(test)]
 pub fn fetch_pack_files(
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     root: &Path,
     files: &[PackFile],
-    threads: usize,
+    workers: usize,
     progress: &mut dyn FnMut(Progress),
 ) -> PackFetch {
     let mut fetch = PackFetch::default();
-    let mut jobs: Vec<(String, PathBuf)> = Vec::new();
-    // Parallel to `jobs`: the file each job came from and where it is going, for
-    // the digest and the mirrors after the download.
+    // The file each job came from and where it is going, for the digest, the
+    // mirrors and the report after the download.
     let mut planned: Vec<(&PackFile, PathBuf)> = Vec::new();
     for file in files {
         let Some(relative) = file.relative_path() else {
@@ -460,95 +395,55 @@ pub fn fetch_pack_files(
             fetch.present += 1;
             continue;
         }
-        jobs.push((file.downloads[0].clone(), dest.clone()));
         planned.push((file, dest));
     }
-    if jobs.is_empty() {
+    if planned.is_empty() {
         return fetch;
     }
-    let total = jobs.len();
-    let results = download_many_with_progress(fetcher, &jobs, threads.max(1), &mut |done, bytes| {
+    let total = planned.len();
+    let jobs: Vec<FileJob> = planned
+        .iter()
+        .map(|(file, dest)| {
+            FileJob::new(&file.downloads[0], dest, file.sha1.clone().unwrap_or_default())
+        })
+        .collect();
+    let results = wire.files(&jobs, workers.max(1), &mut |done, bytes| {
         progress(Progress::new("pack files", done, total, bytes));
     });
-    for (index, (_, result)) in results.into_iter().enumerate() {
-        let (file, dest) = &planned[index];
-        let outcome = match result {
-            Ok(bytes) => Ok(bytes),
+    for ((file, dest), result) in planned.iter().zip(results) {
+        let bytes = match result {
+            Ok(bytes) => bytes,
             // The first URL failed, so the mirrors get their turn before this
             // file is written off. Sequential and rare: a pack lists mirrors
-            // for the file the primary host would not serve, not for balance.
-            Err(error) => {
-                let mut last = error.to_string();
+            // for the file the primary host would not serve, not for balance,
+            // and a mirror is one more job on the same queue.
+            Err(mut last) => {
                 let mut recovered = None;
                 for mirror in file.downloads.iter().skip(1) {
-                    match fetch_one(fetcher, mirror, dest) {
+                    let jobs =
+                        [FileJob::new(mirror, dest, file.sha1.clone().unwrap_or_default())];
+                    let mut one = wire.files(&jobs, 1, &mut |_, _| {});
+                    match one.remove(0) {
                         Ok(bytes) => {
                             recovered = Some(bytes);
                             break;
                         }
-                        Err(error) => last = error.to_string(),
+                        Err(error) => last = error,
                     }
                 }
-                recovered.ok_or(last)
+                match recovered {
+                    Some(bytes) => bytes,
+                    None => {
+                        fetch.failed.push(format!("{}: {last}", file.path));
+                        continue;
+                    }
+                }
             }
         };
-        let bytes = match outcome {
-            Ok(bytes) => bytes,
-            Err(reason) => {
-                fetch.failed.push(format!("{}: {reason}", file.path));
-                continue;
-            }
-        };
-        match verify_pack_file(dest, file) {
-            Ok(()) => {
-                fetch.fetched += 1;
-                fetch.bytes += bytes;
-            }
-            Err(reason) => {
-                // Worse than missing: the next launch would trust it.
-                let _ = std::fs::remove_file(dest);
-                fetch.failed.push(format!("{}: {reason}", file.path));
-            }
-        }
+        fetch.fetched += 1;
+        fetch.bytes += bytes;
     }
     fetch
-}
-
-/// Fetch one URL with `fetcher`, writing it into `dest`.
-#[cfg(test)]
-fn fetch_one(fetcher: &(dyn Fetcher + Sync), url: &str, dest: &Path) -> Result<u64, String> {
-    if let Some(parent) = dest.parent() {
-        if !parent.as_os_str().is_empty() {
-            palantir_core::util::ensure_dir(parent)
-                .map_err(|error| format!("creating {} failed: {error}", parent.display()))?;
-        }
-    }
-    // `.part` then rename, so an interrupted mirror attempt never leaves a
-    // half file where a later check would trust it.
-    let part = dest.with_extension("part");
-    let mut sink = std::fs::File::create(&part)
-        .map_err(|error| format!("writing {} failed: {error}", part.display()))?;
-    let written = fetcher
-        .fetch_to(url, &mut sink)
-        .map_err(|error| error.to_string())?;
-    drop(sink);
-    std::fs::rename(&part, dest)
-        .map_err(|error| format!("finishing {} failed: {error}", dest.display()))?;
-    Ok(written)
-}
-
-/// Check a fetched pack file against the `sha1` the pack published.
-#[cfg(test)]
-fn verify_pack_file(dest: &Path, file: &PackFile) -> Result<(), String> {
-    let Some(expected) = file.sha1.as_deref().filter(|digest| !digest.is_empty()) else {
-        return Ok(());
-    };
-    let actual = sha1_file(dest)?;
-    if actual.eq_ignore_ascii_case(expected) {
-        Ok(())
-    } else {
-        Err(format!("sha1 mismatch: packed {expected}, downloaded {actual}"))
-    }
 }
 
 /// A pack installed as a new instance, files and all.
@@ -570,7 +465,7 @@ pub struct InstalledPack {
 /// user would have typed.
 #[cfg(test)]
 pub fn install_pack_archive(
-    client: &reqwest::blocking::Client,
+    wire: &Wire,
     paths: &palantir_core::paths::PalantirPaths,
     archive: &Path,
     progress: &mut dyn FnMut(Progress),
@@ -581,13 +476,13 @@ pub fn install_pack_archive(
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Imported pack".to_string());
-    import_and_fetch(client, paths, &bytes, name.as_str(), progress)
+    import_and_fetch(wire, paths, &bytes, name.as_str(), progress)
 }
 
 /// Import pack bytes and fetch everything the index lists.
 #[cfg(test)]
 fn import_and_fetch(
-    client: &reqwest::blocking::Client,
+    wire: &Wire,
     paths: &palantir_core::paths::PalantirPaths,
     bytes: &[u8],
     name: &str,
@@ -612,10 +507,9 @@ fn import_and_fetch(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| name.to_string());
-    // The Browse client is reused for the files so Modrinth gets the same
-    // `User-Agent` it got for the search that led here.
-    let fetcher = BlockingHttpFetcher::with_client(client.clone(), HTTP_TIMEOUT);
-    let fetch = fetch_pack_files(&fetcher, &root, &plan.files, install::DEFAULT_THREADS, progress);
+    // The launcher's one wire, so a pack's files draw the same ceiling as
+    // everything else it is fetching at that moment.
+    let fetch = fetch_pack_files(wire, &root, &plan.files, install::DEFAULT_THREADS, progress);
     Ok(InstalledPack { id, fetch, skipped: plan.skipped })
 }
 
@@ -623,6 +517,9 @@ fn import_and_fetch(
 mod tests {
     use super::*;
     use palantir_net::modrinth::ModrinthVersionFile;
+    use std::sync::Arc;
+
+    use crate::wire::Script;
 
     fn version(name: &str, kind: &str, games: &[&str], loaders: &[&str], with_file: bool) -> ModrinthProjectVersion {
         ModrinthProjectVersion {
@@ -778,21 +675,56 @@ mod tests {
     }
 
     #[test]
-    fn download_verification_checks_size_and_sha1() {
-        let bytes = b"hello";
-        let digest = sha1_hex(bytes);
-        assert!(verify_download(bytes, Some(&digest), 5).unwrap());
-        assert!(verify_download(bytes, Some(&digest.to_uppercase()), 5).unwrap());
-        assert!(verify_download(bytes, None, 5).unwrap() == false);
-        let err = verify_download(bytes, Some(&sha1_hex(b"other")), 5).unwrap_err();
-        assert!(err.contains("sha1 mismatch"), "error: {err}");
-        let err = verify_download(bytes, None, 6).unwrap_err();
-        assert!(err.contains("size mismatch"), "error: {err}");
+    fn a_mod_file_is_fetched_over_the_wire_and_measured_where_it_lands() {
+        // The whole path without a network: the engine's queue fetches the body
+        // and checks the `sha1` the API published before it renames the part
+        // file, and the caller measures what is on disk afterwards -- which is
+        // the file's length rather than what came off the wire, because a file
+        // that is already here and already right transfers nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        let body = b"a mod jar";
+        let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
+        candidate.files[0]
+            .hashes
+            .insert("sha1".to_string(), install::sha1_hex(body));
+        candidate.files[0].size = body.len() as u64;
+        let mut script = Script::new();
+        script.insert(&candidate.files[0].url, body.to_vec());
+        let fetch = Arc::new(script.fetch());
+        let wire = Wire::over(dir.path().join("wire"), fetch.clone());
+
+        let installed = install_version(&wire, &mods, &candidate).unwrap();
+        assert_eq!(installed.filename, "sodium.jar");
+        assert_eq!(installed.bytes, body.len());
+        assert!(installed.verified, "the published sha1 was checked");
+        assert_eq!(std::fs::read(&installed.path).unwrap(), body);
+        assert_eq!(fetch.count(), 1, "one file, one request");
+
+        let again = install_version(&wire, &mods, &candidate).unwrap();
+        assert_eq!(again.bytes, body.len());
+        assert_eq!(fetch.count(), 1, "a file that is already here is not asked for twice");
     }
 
     #[test]
-    fn sha1_matches_the_known_digest_of_abc() {
-        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    fn a_file_whose_length_is_not_the_published_one_is_dropped() {
+        // The length is the check the caller still owns, and for a file the API
+        // publishes no digest for it is the only one there is.
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        let body = b"a mod jar";
+        let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
+        candidate.files[0].size = body.len() as u64 + 1;
+        let mut script = Script::new();
+        script.insert(&candidate.files[0].url, body.to_vec());
+        let wire = script.wire();
+
+        let error = install_version(&wire, &mods, &candidate).unwrap_err();
+        assert!(error.contains("size mismatch"), "error: {error}");
+        assert!(
+            !mods.join("sodium.jar").exists(),
+            "a file of the wrong length is not left where the game would load it"
+        );
     }
 
     #[test]
@@ -800,21 +732,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mods = dir.path().join("mods");
         let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
-        candidate.files[0].hashes.insert("sha1".to_string(), sha1_hex(b"jar bytes"));
+        candidate.files[0].hashes.insert("sha1".to_string(), install::sha1_hex(b"jar bytes"));
         candidate.files[0].size = 9;
-        let client = client().unwrap();
+        let script = Script::new();
+        let wire = script.wire();
 
         // No files at all: refused before any request.
         let empty = ModrinthProjectVersion { files: Vec::new(), ..candidate.clone() };
-        assert!(install_version(&client, &mods, &empty).is_err());
+        assert!(install_version(&wire, &mods, &empty).is_err());
         // No direct URL: also refused before any request.
         let no_url = ModrinthProjectVersion {
             files: vec![ModrinthVersionFile { url: String::new(), ..candidate.files[0].clone() }],
             ..candidate.clone()
         };
-        let error = install_version(&client, &mods, &no_url).unwrap_err();
+        let error = install_version(&wire, &mods, &no_url).unwrap_err();
         assert!(error.contains("no direct download"), "error: {error}");
         assert!(!mods.join("sodium.jar").exists());
+        assert_eq!(script.fetch().count(), 0, "neither refusal made a request");
     }
 
     #[test]
@@ -822,28 +756,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = palantir_core::paths::PalantirPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
-        let client = client().unwrap();
+        // An archive that is not a pack is refused before the wire is touched,
+        // which is what makes an empty wire the right double for it.
+        let wire = Script::new().wire();
         let bogus = dir.path().join("not-a-pack.zip");
         std::fs::write(&bogus, b"definitely not a zip archive").unwrap();
-        let error = install_pack_archive(&client, &paths, &bogus, &mut |_| {}).unwrap_err();
+        let error = install_pack_archive(&wire, &paths, &bogus, &mut |_| {}).unwrap_err();
         assert!(error.contains("readable pack"), "error: {error}");
-        assert!(install_pack_archive(&client, &paths, &dir.path().join("missing.zip"), &mut |_| {})
+        assert!(install_pack_archive(&wire, &paths, &dir.path().join("missing.zip"), &mut |_| {})
             .is_err());
     }
 
     #[test]
     fn a_pack_file_is_fetched_verified_and_dropped_when_it_does_not_match() {
-        // The fetch is driven through the same `Fetcher` the install phases use,
-        // so the whole path is exercised without a network: one good file, one
-        // whose bytes are not what the pack's `sha1` says, and one already
-        // present.
+        // The fetch is driven through the launcher's own wire, so the whole
+        // path is exercised without a network: one good file, one whose bytes
+        // are not what the pack's `sha1` says, and one already present.
         let dir = tempfile::tempdir().unwrap();
         let good = b"good mod bytes";
         let files = vec![
             PackFile {
                 path: "mods/good.jar".to_string(),
                 downloads: vec!["https://cdn.example.invalid/good.jar".to_string()],
-                sha1: Some(sha1_hex(good)),
+                sha1: Some(install::sha1_hex(good)),
                 size: good.len() as u64,
             },
             PackFile {
@@ -861,20 +796,18 @@ mod tests {
         ];
         std::fs::create_dir_all(dir.path().join("shaderpacks")).unwrap();
         std::fs::write(dir.path().join("shaderpacks").join("here.zip"), b"x").unwrap();
-        let mut fetcher = palantir_net::MapFetcher::new();
-        fetcher.insert("https://cdn.example.invalid/good.jar", good.to_vec());
-        fetcher.insert("https://cdn.example.invalid/bad.jar", b"tampered".to_vec());
-        // Spelled the way `MapFetcher` stores them, so the assertion below is
-        // about the pack's files rather than about the fixture.
-        assert!(!fetcher.is_empty());
+        let mut script = Script::new();
+        script.insert("https://cdn.example.invalid/good.jar", good.to_vec());
+        script.insert("https://cdn.example.invalid/bad.jar", b"tampered".to_vec());
+        let wire = script.wire();
         let mut reports = 0usize;
-        let fetch = fetch_pack_files(&fetcher, dir.path(), &files, 2, &mut |_| reports += 1);
+        let fetch = fetch_pack_files(&wire, dir.path(), &files, 2, &mut |_| reports += 1);
         assert_eq!(fetch.fetched, 1);
         assert_eq!(fetch.present, 1, "a file that is already there is left alone");
         assert_eq!(fetch.bytes, good.len() as u64);
         assert_eq!(fetch.failed.len(), 1);
         assert!(fetch.failed[0].contains("mods/bad.jar"), "{:?}", fetch.failed);
-        assert!(fetch.failed[0].contains("sha1 mismatch"));
+        assert!(fetch.failed[0].contains("hash mismatch"), "{:?}", fetch.failed);
         assert!(dir.path().join("mods").join("good.jar").is_file());
         assert!(
             !dir.path().join("mods").join("bad.jar").exists(),

@@ -90,7 +90,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
-    4: [(66, 75), (91, 91)],  # the engine; the first page on it; the launch's transfers
+    4: [(66, 75), (91, 91), (93, 93)],  # the engine; the first page on it; the launch's and a pack's transfers (G92 is the dashboard, owned by `before`)
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
 
@@ -114,10 +114,10 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
     ],
     4: [
         (
-            "The desktop's other call sites on the engine.",
+            "The metadata source `resolve` reads.",
             2,
-            "browse.rs's pack install onto the engine, and the metadata source "
-            "`resolve` reads",
+            "the loader version list and version file from Fabric's, Quilt's, "
+            "Forge's and NeoForge's own services rather than Prism's mirror",
         ),
     ],
 }

@@ -29,10 +29,11 @@ palantir-core = { path = "../palantir-core" }
 palantir-net = { path = "../palantir-net" }
 palantir-loader = { path = "../palantir-loader" }
 futures = "0.3"
-# Same version/features as `palantir-net`, which already pulls reqwest into the
-# workspace: browsing the Modrinth API needs headers (a User-Agent), which the
-# metadata fetcher cannot set.
-reqwest = { version = "0.11", features = ["blocking"] }
+# No `reqwest` here, deliberately: this crate used to hold its own client for the
+# Modrinth API, which meant a second connection pool, a second `User-Agent` and a
+# second answer to "how many requests is this launcher making". Its last caller
+# was `browse.rs`'s pack installer, and that goes over `palantir-net`'s engine
+# now (G93), so the only HTTP client this launcher has is the engine's.
 # Offline account UUIDs are `java.util.UUID.nameUUIDFromBytes("OfflinePlayer:<name>")`,
 # which is MD5-based; matching it is what makes the same name the same player in
 # Prism, the vanilla launcher, and here.

@@ -2158,6 +2158,100 @@ wrote C:\PalantirMC\.scratch\progress.html  (56,068 bytes)
   it is also the only run that carries G91's commit, since the two were pushed
   within ninety seconds of each other.
 
+- [x] G93: a pack installs over the engine's queue, and the window's own crate
+      names no HTTP client at all
+  CHECK: cargo tree -p palantir-desktop --depth 1 -e normal --locked | grep -c reqwest
+         cargo test --workspace --all-targets --locked
+  EXPECT: 0
+          every suite line `test result: ok`, 879 passed and 13 ignored between them
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo tree -p palantir-desktop --depth 1 -e normal --locked | grep -c reqwest
+0
+
+$ cargo tree -p palantir-desktop --depth 1 -e normal --locked
+palantir-desktop v0.1.0 (C:\PalantirMC\crates\palantir-desktop)
+├── futures v0.3.34
+├── iced v0.12.1
+├── image v0.24.9
+├── md-5 v0.10.6
+├── palantir-core v0.1.0 (C:\PalantirMC\crates\palantir-core)
+├── palantir-loader v0.1.0 (C:\PalantirMC\crates\palantir-loader)
+├── palantir-net v0.1.0 (C:\PalantirMC\crates\palantir-net)
+├── serde v1.0.229
+├── serde_json v1.0.151
+├── sha1 v0.10.7
+├── wgpu v0.19.4
+└── windows-sys v0.52.0
+
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed; 0 ignored  (palantir-core, lib)
+      8 passed; 0 failed; 0 ignored  (palantir-core, tests/compat.rs)
+    455 passed; 0 failed; 0 ignored  (palantir-desktop, bin)
+      4 passed; 0 failed; 0 ignored  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed; 0 ignored  (palantir-loader, lib)
+    213 passed; 0 failed; 0 ignored  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-desktop` (bin) 3 warnings, (bin test) 20, none of them in the
+file this slice touched, and `grep -cE "never (used|read|constructed)"` is 0
+
+$ cargo build -p palantir-desktop --locked && target/debug/PalantirMC.exe --shot .scratch/after-g93b.png
+exit 0, 1257x707, 1,903 distinct colours, and pixel-identical to the capture
+G90 took (`ImageChops.difference(...).getbbox()` is None): the window is not
+what this slice moved, and the crate it is drawn from had one dependency fewer
+when it was taken
+```
+
+  `browse.rs`'s pack installer was the last thing in the launcher that fetched a
+  file with machinery of its own: it built a `reqwest` client, wrapped it in the
+  old `BlockingHttpFetcher`, and handed the pair to `download_many_with_progress`
+  -- a second connection pool, a second answer to how many requests this launcher
+  makes, and a `.part`-then-rename written by hand in `fetch_one`. Installing a
+  pack is now one `Wire::files` call for the files' primary URLs and, for the rare
+  file whose host would not serve it, one more job per mirror on the same queue.
+
+  Everything the old path did itself is now the engine's: the resume, the digest
+  check before the rename, the deletion of a part file that fails it, the retry
+  policy and the process-wide ceiling. What went with it is this module's own
+  byte-checker (`sha1_hex`, `sha1_file`, `verify_download`), the client builder,
+  and the `USER_AGENT` constant that existed because the metadata fetcher could
+  not set one -- `engine::http` already sends the same string on the client every
+  request goes through, so nothing a service sees changed.
+
+  One check stayed here, because it is the caller's and not the transfer's: the
+  *length* the API published. It is the only check a file with no digest has, and
+  it is measured on the file that landed rather than counted off the wire -- a
+  second install of the same file transfers nothing at all, so a byte count from
+  the wire would read as an empty file. `installed.bytes` is that measurement.
+
+  Two tests state what the single-file install does now, one request and the file
+  measured where it lands, and one states what the length check is still for: a
+  body of the wrong length is deleted rather than left where the game would load
+  it. The pack test drives the engine's own `MapFetch` through `wire::Script` and
+  asserts the engine's wording for a mismatched file -- `hash mismatch`, naming
+  the part file and both digests -- which is the receipt that the check happens in
+  the transfer rather than after it.
+
+  The crate's `reqwest` dependency came out of `Cargo.toml` with the last of its
+  users, which is what the `CHECK` above is: the crate that draws the window no
+  longer has an HTTP client to name. `palantir-net` still depends on it, and that
+  is the point -- one client, in the engine.
+
+  Deliberately not in this slice: `palantir_net::download`, the blocking pipeline
+  the engine replaced, now has no caller outside its own tests and the live
+  tests' `verify_sha256`. It is named rather than deleted here because deleting it
+  means re-sourcing that live check, and a slice about the pack installer is not
+  where a live receipt should change shape.
+
+  The runner could not be the receipt again: the push before this slice,
+  `b46d59f`, is run `36298415367` -- `Test workspace` and `Lint` both died in two
+  seconds with zero steps and `recent account payments have failed or your
+  spending limit needs to be increased`. The transcript above is this machine's,
+  run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
