@@ -2754,10 +2754,11 @@ Cobblemon Official Modpack [Fabric] | modpack | 12 versions
   hand the line back for a file install and *not* for a pack, rather than sending
   a message to a page that is gone.
 
-  The runner could not be the receipt: this slice's push is recorded by the commit
-  that follows it, and the account gave it the same block as the nine before --
-  `Test workspace` and `Lint` dying in seconds with zero steps, and `Live
-  services` and `Build exe` never scheduled. The transcripts above are this
+  The runner could not be the receipt: this slice's push, `fd0f2ff`, is run
+  `36331380300` -- `Test workspace` and `Lint` dying in three seconds with zero
+  steps and `recent account payments have failed or your spending limit needs to
+  be increased`, and `Live services` and `Build exe` skipped rather than
+  scheduled: the same block as the nine before it. The transcripts above are this
   machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
