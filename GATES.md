@@ -2664,10 +2664,11 @@ P7dR8mSH differ: 298 = no-release 295 + newer-non-release 3 + other 0
   wrote it agrees with whatever it finds, the same failure a stale fixture makes
   permanent. `Script::wire` removes its directory before it builds over it now.
 
-  The runner could not be the receipt: this slice's push is recorded by the commit
-  that follows it, and the account gave it the same block as the eight before --
-  `Test workspace` and `Lint` dying in seconds with zero steps, and `Live
-  services` and `Build exe` never scheduled. The transcripts above are this
+  The runner could not be the receipt: this slice's push, `7a943aa`, is run
+  `36328010219` -- `Test workspace` and `Lint` dying in two seconds with zero
+  steps and `recent account payments have failed or your spending limit needs to
+  be increased`, and `Live services` and `Build exe` skipped rather than
+  scheduled: the same block as the eight before it. The transcripts above are this
   machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
