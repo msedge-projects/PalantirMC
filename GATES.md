@@ -2464,6 +2464,84 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out
   scheduled. The transcript above is this machine's, run with the flags `ci.yml`
   uses.
 
+- [x] G96: the project page is served by the engine, three documents behind one
+      `Load`
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_live_modrinth_api_answers
+  EXPECT: test result: ok. 901 passed; 0 failed; 14 ignored, between the seven suites
+          1 passed, and it read the project and its team from the live service
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    464 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    217 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 14 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-core` (lib) 9 warnings, (bin test) 10, `palantir-net` 1,
+`palantir-desktop` 3 and 23 -- none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0
+
+$ cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 the_live_modrinth_api_answers
+test the_live_modrinth_api_answers_a_typed_search_and_a_version_list ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out
+```
+
+  Discover's search was the only page that asked the engine for anything, and the
+  seam it built was one function wide: a page describes what to ask for out of
+  `update` or `opening`, the shell carries it to the engine off the frame thread,
+  and the answer comes back as a message of that page's own. The project page is
+  the second user of it, and the second user is what turned the shell's
+  `Option<discover::Asked>` into an enum: a page's request is a *value* only that
+  page can build, so widening the one type would have made every arm of the
+  shell's match talk about Discover. `Asked { Search, Project }` is two lines, and
+  each one travels back to its own page as its own message.
+
+  Modrinth splits one project three ways, and the page is one `Load`, so the
+  split is joined where the page cannot see it: `ModrinthApi::project` (the
+  document the header is) and `ModrinthApi::members` (the people, which the
+  document does not name) are new and cached under their own URLs at the metadata
+  default TTL, the version list was already there, and `Store::project` makes the
+  three calls and answers with the one thing the page draws. The translation is
+  the page's (`Project::from_api`), for `Hit::from_api`'s reason: what a page *is*
+  belongs to the page that draws it. A team that cannot be read is the one failure
+  that does not fail the page -- the author is a caption under the title, and a
+  project with no caption is still a project -- and a cached page revisited costs
+  no request at all, which the store's test asserts by counting three and then
+  three again.
+
+  **The measurement that changed the code, and the fixture that would have
+  agreed with the wrong rule.** The first version of the byline looked for a team
+  member whose role was `Owner` and fell back to the first member. The live
+  service says there is no such role: Sodium's team comes back as `Maintainer`,
+  `Project Lead`, `Maintainer`, and *every* member carries `ordering: 0`, so
+  neither the order nor the vocabulary spells out an owner the way the guess
+  assumed -- and the guess would have credited the first maintainer. What the
+  API does publish is the rank it assigns to the account that owns the project,
+  so that is what is credited now: the `Project Lead` when the team has one, then
+  the first member. The unit fixture was rewritten from the measured shape for
+  the same reason the rule changed: a fixture written from the guess would have
+  passed the whole time, which is what the live test above exists to catch.
+
+  Two things about the page are named rather than left to be discovered. Its
+  **Install** button still says what arrives later, and that is a bullet of its
+  own in `NEXT_STEPS.md` now: the version list the button would choose from is on
+  the page already, and what is missing is the transfer into an instance. And the
+  long description is still drawn as paragraphs of its own text rather than as
+  rendered markdown, which the page's module documentation has said since the
+  page was drawn and which this slice did not change.
+
+  The runner could not be the receipt: this slice's push is recorded by the commit
+  that follows it, and the account gave it the same block as the seven before --
+  `Test workspace` and `Lint` dying in seconds with zero steps, and `Live
+  services` and `Build exe` never scheduled. The transcript above is this
+  machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

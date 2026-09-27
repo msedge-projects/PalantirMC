@@ -39,7 +39,8 @@ use crate::engine::cancel::Cancel;
 use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
-    search_url_parts, version_url, ModrinthProjectVersion, ModrinthSearchResponse,
+    project_members_url, project_url, search_url_parts, version_url, ModrinthMember,
+    ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse,
 };
 use crate::Error;
 
@@ -168,6 +169,41 @@ impl ModrinthApi {
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
+    /// One project's own document.
+    ///
+    /// The header a project page draws: the title, the summary, the long
+    /// description, the counts, the game versions and loaders it claims, and its
+    /// gallery. Believed for the project TTL, which is the metadata default -- a
+    /// description changes when an author edits it, on the same slow clock as a
+    /// version list.
+    pub fn project(
+        &self,
+        project: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<ModrinthProject, Error> {
+        let url = project_url(project);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
+    /// The people on one project's team, in the API's order.
+    ///
+    /// A second request, because the project document names a team and not a
+    /// person: Modrinth's own page draws the owner's name under the title, and
+    /// that name lives here. Cached under its own URL, so a page that only wants
+    /// the description never pays for it.
+    pub fn members(
+        &self,
+        project: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<Vec<ModrinthMember>, Error> {
+        let url = project_members_url(project);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
     /// Every version of one project, newest first as Modrinth lists them.
     ///
     /// Unfiltered on purpose: filtering by game version and loader happens in the
@@ -215,6 +251,29 @@ mod tests {
         }],
         "dependencies": []
     }]"#;
+
+    /// One `GET /v2/project/{id}` body, in the API's own shape. A two-hash raw
+    /// string, because a markdown body's heading opens with `"#`.
+    const PROJECT_BODY: &str = r##"{
+        "id": "AANobbMI", "slug": "sodium", "project_type": "mod",
+        "title": "Sodium", "description": "Modern rendering engine",
+        "body": "# Sodium\n\nFaster.\n",
+        "downloads": 41000000, "followers": 9000,
+        "game_versions": ["1.21.4", "1.21.3"], "loaders": ["fabric"],
+        "gallery": [{
+            "url": "https://cdn.modrinth.com/shot.png", "title": "In the nether",
+            "description": "A cave", "featured": true
+        }]
+    }"##;
+
+    /// One `GET /v2/project/{id}/members` body: an owner and a member, the way
+    /// Modrinth orders them.
+    const MEMBERS_BODY: &str = r#"[
+        {"team_id": "t1", "role": "Owner", "ordering": 0,
+         "user": {"id": "u1", "username": "jellysquid3"}},
+        {"team_id": "t1", "role": "Member", "ordering": 1,
+         "user": {"id": "u2", "username": "embeddedt"}}
+    ]"#;
 
     /// An API over a scratch directory whose only routes are the ones a test
     /// scripts, so a test that forgets one fails instead of dialling out.
@@ -324,6 +383,41 @@ mod tests {
         assert_eq!(fetch.count(), 1);
         api.versions("sodium", &Cancel::new(), &Backoff::with_attempts(1)).expect_err("no route");
         assert_eq!(fetch.count(), 2, "a slug is a different URL and so a different cache entry");
+    }
+
+    #[test]
+    fn a_project_and_its_team_are_two_cached_documents() {
+        let (api, fetch) = api("project", DEFAULT_TTL);
+        fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        fetch.set_route(&project_members_url("AANobbMI"), Route::text(MEMBERS_BODY));
+
+        let project = api
+            .project("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the project");
+        assert_eq!(project.title, "Sodium");
+        assert_eq!(project.project_type, "mod");
+        assert_eq!(project.downloads, 41_000_000);
+        assert_eq!(project.game_versions, vec!["1.21.4", "1.21.3"]);
+        assert_eq!(project.loaders, vec!["fabric"]);
+        assert_eq!(project.gallery.len(), 1);
+        assert_eq!(project.gallery[0].title, "In the nether");
+        assert!(project.body.contains("# Sodium"), "{}", project.body);
+
+        let members = api
+            .members("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the team");
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].role, "Owner");
+        assert_eq!(members[0].user.username, "jellysquid3");
+        assert_eq!(members[1].user.username, "embeddedt");
+
+        // Both are cached under their own URL: asked again, no request at all,
+        // and the two handles are separate entries rather than one document.
+        api.project("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.members("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        assert_eq!(fetch.count(), 2, "a second read of each is free");
+        assert!(api.projects.cached(&project_url("AANobbMI")).is_some());
+        assert!(api.projects.cached(&project_members_url("AANobbMI")).is_some());
     }
 
     #[test]

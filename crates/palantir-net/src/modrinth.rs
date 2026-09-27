@@ -216,6 +216,9 @@ pub struct ModrinthProjectVersion {
     /// Download count.
     #[serde(default)]
     pub downloads: u64,
+    /// What changed in this version, in markdown.
+    #[serde(default)]
+    pub changelog: String,
     /// Target game versions (e.g. `["1.20.4"]`).
     #[serde(default)]
     pub game_versions: Vec<String>,
@@ -268,6 +271,100 @@ impl ModrinthVersionFile {
     pub fn sha1(&self) -> Option<&str> {
         self.hashes.get("sha1").map(String::as_str)
     }
+}
+
+/// Build the project URL for a project id or slug.
+///
+/// Calls `GET /v2/project/{project}` -- the document a project page's header is.
+pub fn project_url(project: &str) -> String {
+    format!("{}/project/{}", MODRINTH_BASE_URL, percent_encode_path(project))
+}
+
+/// Build the team-members URL for a project id or slug.
+///
+/// Calls `GET /v2/project/{project}/members`. A project document names the team
+/// it belongs to but not the people on it, and Modrinth's own project page shows
+/// one of them by name -- so the name is a second request, against this URL.
+pub fn project_members_url(project: &str) -> String {
+    format!("{}/project/{}/members", MODRINTH_BASE_URL, percent_encode_path(project))
+}
+
+/// One `GET /v2/project/{id}` response (subset; unknown fields ignored).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthProject {
+    /// Project id.
+    #[serde(default)]
+    pub id: String,
+    /// URL slug.
+    #[serde(default)]
+    pub slug: String,
+    /// Modrinth's own project type (`mod`, `modpack`, `resourcepack`, ...).
+    #[serde(default)]
+    pub project_type: String,
+    /// Title.
+    #[serde(default)]
+    pub title: String,
+    /// The one-line summary.
+    #[serde(default)]
+    pub description: String,
+    /// The long description, in markdown.
+    #[serde(default)]
+    pub body: String,
+    /// Total downloads.
+    #[serde(default)]
+    pub downloads: u64,
+    /// Followers.
+    #[serde(default)]
+    pub followers: u64,
+    /// The game versions it has a version for.
+    #[serde(default)]
+    pub game_versions: Vec<String>,
+    /// The loaders it runs on.
+    #[serde(default)]
+    pub loaders: Vec<String>,
+    /// The gallery, in the order the author put it in.
+    #[serde(default)]
+    pub gallery: Vec<ModrinthGalleryImage>,
+}
+
+/// One entry of a project's `gallery` array.
+///
+/// An image is a URL and a caption; the caption has a title and a longer
+/// description, and either may be missing, which is why the page falls back to
+/// the URL when it draws one.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthGalleryImage {
+    /// Where the image is.
+    #[serde(default)]
+    pub url: String,
+    /// The caption's title.
+    #[serde(default)]
+    pub title: String,
+    /// The caption's description.
+    #[serde(default)]
+    pub description: String,
+}
+
+/// One `GET /v2/project/{id}/members` entry (subset).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthMember {
+    /// The user on the team.
+    #[serde(default)]
+    pub user: ModrinthUser,
+    /// Their role: `Owner`, `Member`, and so on.
+    #[serde(default)]
+    pub role: String,
+}
+
+/// A user, as a member list names one.
+///
+/// The whole user object is much larger; the one field this launcher reads is
+/// the name a project page draws under the title.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct ModrinthUser {
+    /// Display name.
+    #[serde(default)]
+    pub username: String,
 }
 
 /// Percent-encode a query string (RFC 3986 unreserved set left intact).
@@ -537,6 +634,7 @@ mod tests {
             version_number: String::new(),
             version_type: String::new(),
             downloads: 0,
+            changelog: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: Vec::new(),
@@ -561,6 +659,7 @@ mod tests {
             version_number: String::new(),
             version_type: String::new(),
             downloads: 0,
+            changelog: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: vec![mk(false, "a.jar"), mk(false, "b.jar")],

@@ -529,6 +529,7 @@ mod tests {
             version_number: name.to_string(),
             version_type: kind.to_string(),
             downloads: 0,
+            changelog: String::new(),
             game_versions: games.iter().map(|g| g.to_string()).collect(),
             loaders: loaders.iter().map(|l| l.to_string()).collect(),
             files: if with_file {

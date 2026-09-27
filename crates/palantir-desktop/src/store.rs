@@ -46,6 +46,7 @@ use palantir_net::engine::{
     MetadataCache, ModrinthApi, PistonMeta,
 };
 use palantir_net::engine::Search as ApiSearch;
+use palantir_net::modrinth::ModrinthMember;
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
 use crate::catalog::LoaderKind;
@@ -53,6 +54,7 @@ use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
 use crate::pages::discover::Hit;
+use crate::pages::project::Project;
 
 /// What the interface knows, and how it came to know it.
 #[derive(Debug, Clone, Default)]
@@ -525,6 +527,56 @@ impl Store {
             .map_err(|error| error.to_string())?;
         Ok(answer.hits.iter().map(Hit::from_api).collect())
     }
+
+    /// Read one project: its own document, its team, and its versions.
+    ///
+    /// **Blocking**, for [`Store::search`]'s reason, and three requests for the
+    /// one answer because Modrinth splits a project three ways: the project
+    /// document names the team but not the person on it, and the versions are a
+    /// list endpoint of their own. All three are cached by the engine under their
+    /// own URLs, so a page revisited is free.
+    ///
+    /// A team that cannot be read is the one failure that does not fail the page:
+    /// the author's name is a caption under the title, and a project with no
+    /// caption is a project. Everything else is the answer or its reason.
+    pub fn project(&self, id: &str) -> Result<Project, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("This project"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let project = api
+            .project(id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let members = api.members(id, &cancel, &backoff).unwrap_or_default();
+        let versions = api
+            .versions(id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        Ok(Project::from_api(&project, author_of(&members), &versions))
+    }
+}
+
+/// The name a project page draws under the title, out of a team list.
+///
+/// Measured against the live service rather than assumed, because the first
+/// guess was wrong in a way a fixture would have agreed with: **there is no
+/// `Owner` role in this API.** Sodium's team comes back as three members whose
+/// roles are `Maintainer`, `Project Lead` and `Maintainer`, and every one of
+/// them carries `ordering: 0`, so neither the role nor the order spells out the
+/// project's owner. What the vocabulary does have is the rank Modrinth assigns
+/// to the account that owns the project, so that is what is credited: the
+/// `Project Lead` when the team has one, then the first member -- the list is in
+/// the service's own order, and its first entry is the one Modrinth's own page
+/// puts at the top. An empty team is the empty name rather than a place held in
+/// the layout.
+fn author_of(members: &[ModrinthMember]) -> &str {
+    members
+        .iter()
+        .find(|member| member.role == "Project Lead")
+        .or_else(|| members.first())
+        .map(|member| member.user.username.as_str())
+        .unwrap_or_default()
 }
 
 /// One version Mojang publishes, as a picker needs it.
@@ -767,6 +819,7 @@ pub fn bytes_label(bytes: u64) -> String {
 mod tests {
     use super::*;
     use palantir_net::engine::request::{MapFetch, Route};
+    use palantir_net::modrinth::{project_members_url, project_url, version_url};
     use palantir_net::PISTON_MANIFEST_URL;
 
     fn scratch(name: &str) -> PathBuf {
@@ -830,6 +883,85 @@ mod tests {
               "sha1": "0000000000000000000000000000000000000000", "complianceLevel": 1 }
         ]
     }"#;
+
+    /// One `GET /v2/project/{id}` body, in the API's own shape. A two-hash raw
+    /// string, because a markdown body's heading opens with `"#`.
+    const PROJECT_BODY: &str = r##"{
+        "id": "AANobbMI", "slug": "sodium", "project_type": "mod",
+        "title": "Sodium", "description": "Modern rendering engine",
+        "body": "# Sodium\n\nFaster.\n", "downloads": 41000000, "followers": 9000,
+        "game_versions": ["1.21.4"], "loaders": ["fabric"],
+        "gallery": [{"url": "https://cdn.modrinth.com/shot.png", "title": "In the nether"}]
+    }"##;
+
+    /// One `GET /v2/project/{id}/members` body, with the roles the live service
+    /// actually publishes: a maintainer first, then the project's lead. Every
+    /// member's `ordering` is zero, which is why the role decides who is
+    /// credited -- see `author_of`.
+    const MEMBERS_BODY: &str = r#"[
+        {"role": "Maintainer", "ordering": 0, "user": {"username": "IMS"}},
+        {"role": "Project Lead", "ordering": 0, "user": {"username": "jellysquid3"}},
+        {"role": "Maintainer", "ordering": 0, "user": {"username": "douira"}}
+    ]"#;
+
+    /// One `GET /v2/project/{id}/version` body.
+    const MODRINTH_VERSIONS_BODY: &str = r#"[{
+        "id": "abc123", "project_id": "AANobbMI", "name": "Sodium 0.6.5",
+        "version_number": "mc1.21.4-0.6.5", "version_type": "release", "downloads": 1234,
+        "changelog": "Fixed a thing.", "game_versions": ["1.21.4"], "loaders": ["fabric"],
+        "files": [], "dependencies": []
+    }]"#;
+
+    #[test]
+    fn the_project_page_reads_three_documents_and_credits_the_team() {
+        // Modrinth splits a project three ways -- the document, the team, the
+        // versions -- and the page is one `Load`, so the store is where the three
+        // become one answer. The author is the part that is not in the project
+        // document at all.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        fetch.set_route(&project_members_url("AANobbMI"), Route::text(MEMBERS_BODY));
+        fetch.set_route(&version_url("AANobbMI"), Route::text(MODRINTH_VERSIONS_BODY));
+        let store = store_over("project", fetch.clone());
+
+        let project = store.project("AANobbMI").expect("the project");
+        assert_eq!(project.id, "AANobbMI");
+        assert_eq!(project.title, "Sodium");
+        assert_eq!(
+            project.author, "jellysquid3",
+            "the Project Lead, not the first member, out of the same list"
+        );
+        assert_eq!(project.summary, "Modern rendering engine");
+        assert_eq!(project.loaders, vec!["fabric"]);
+        assert_eq!(project.gallery, vec!["In the nether"]);
+        assert_eq!(project.versions.len(), 1);
+        assert_eq!(project.versions[0].number, "mc1.21.4-0.6.5");
+        assert_eq!(fetch.count(), 3, "one request per document, and no more");
+
+        // Asked again, the three are answered from the cache: a page revisited
+        // costs nothing at all.
+        let again = store.project("AANobbMI").expect("the project, again");
+        assert_eq!(again, project);
+        assert_eq!(fetch.count(), 3);
+    }
+
+    #[test]
+    fn a_team_that_cannot_be_read_does_not_fail_the_project_page() {
+        // The author is a caption under the title. A service that will not name
+        // the team leaves the caption empty rather than leaving the page blank --
+        // and the two reads around it are still asked for.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        // No route for the members: `MapFetch` fails a URL nobody scripted.
+        fetch.set_route(&version_url("AANobbMI"), Route::text(MODRINTH_VERSIONS_BODY));
+        let store = store_over("project-no-team", fetch.clone());
+
+        let project = store.project("AANobbMI").expect("the project");
+        assert_eq!(project.title, "Sodium");
+        assert_eq!(project.author, "");
+        assert_eq!(project.versions.len(), 1);
+        assert_eq!(fetch.count(), 3, "the members were asked for and failed");
+    }
 
     #[test]
     fn the_version_picker_asks_mojang_once_for_the_list_and_what_is_current() {

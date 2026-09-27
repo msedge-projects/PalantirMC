@@ -65,11 +65,26 @@ use crate::install;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
-use crate::pages::{self, discover, Screen};
+use crate::pages::{self, discover, project, Screen};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
 use crate::ui::Hovered;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
+
+/// A request a turn left for this shell to run off the frame thread.
+///
+/// [`Shell::act`]'s answer was `Option<discover::Asked>` while Discover was the
+/// only page that asked for anything. The project page made it two, and this is
+/// an enum rather than the one type widened: what a page asks for is a *value*
+/// only that page can build, and each one travels back to its own page as a
+/// message of that page's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Asked {
+    /// A search, as Discover describes it.
+    Search(discover::Asked),
+    /// A project, as the project page describes it.
+    Project(project::Asked),
+}
 
 // ---- Geometry, quoted from the reference --------------------------------
 
@@ -1059,7 +1074,10 @@ impl Shell {
             _ => {}
         }
         if let Some(asked) = self.act(message) {
-            return self.search(asked);
+            return match asked {
+                Asked::Search(asked) => self.search(asked),
+                Asked::Project(asked) => self.project(asked),
+            };
         }
         // A create and an import are not a page's requests and do not go through
         // `Asked`, so they are raised as flags by `act` and taken here: one press,
@@ -1087,7 +1105,7 @@ impl Shell {
     /// Everything that is not a request is a change of state here, which is what
     /// keeps the return type one thing: a `None` means "nothing left this turn",
     /// and the only thing that can leave is a request.
-    fn act(&mut self, message: Message) -> Option<discover::Asked> {
+    fn act(&mut self, message: Message) -> Option<Asked> {
         match message {
             Message::Go(path) => {
                 if let Some(address) = Address::parse(&path) {
@@ -1298,7 +1316,8 @@ impl Shell {
                         }
                         None
                     }
-                    Some(pages::Ask::Search(asked)) => Some(asked),
+                    Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
+                    Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::Create) => {
                         self.open_create();
                         None
@@ -1627,6 +1646,7 @@ impl Shell {
     fn opening_command(&mut self) -> iced::Command<Message> {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
+            Some(pages::Ask::Project(asked)) => self.project(asked),
             // A navigation, a creation and a launch are not *owed*: nothing is
             // waiting for one, and the page that owes nothing says nothing. A
             // launch in particular is a button's doing rather than a page's
@@ -1661,6 +1681,19 @@ impl Shell {
         let query = asked.query.clone();
         iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
             Message::Screen(pages::Message::search_result(&asked, result))
+        })
+    }
+
+    /// Read one project and bring the answer back as a page message.
+    ///
+    /// [`Shell::search`]'s twin, and blocking for the same reason: three requests
+    /// on the frame thread would be three dropped frames, and the engine's own
+    /// cache is what makes a page revisited cost nothing.
+    fn project(&self, asked: project::Asked) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let id = asked.id.clone();
+        iced::Command::perform(crate::store::off_thread(move || store.project(&id)), move |result| {
+            Message::Screen(pages::Message::project_result(&asked, result))
         })
     }
 

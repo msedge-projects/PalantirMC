@@ -6,9 +6,12 @@
 //! -- plus the two the router reaches without a tab of their own (a single version
 //! and the changelog).
 //!
-//! Everything here comes from Modrinth's API. What this page therefore does today
-//! is draw the *shape*: the header with its facts filled in when they arrive, the
-//! tab strip live (a tab is navigation, not data), and each tab's four states.
+//! Everything here comes from Modrinth's API, and the page *asks* for it rather
+//! than fetching it: [`State::update`] and [`State::opening`] hand the shell an
+//! [`Asked`], the shell runs it through the store off the frame thread, and the
+//! answer comes back as [`Message::Found`]. The round travels with the request
+//! the way Discover's does, so an answer to a project the reader has already left
+//! is dropped instead of drawn under the one they are looking at.
 //!
 //! The description is markdown in the reference -- it renders `project.body`
 //! through the same `markdown-body` stylesheet the web app uses. Drawing raw
@@ -19,6 +22,8 @@
 
 use iced::widget::{column, row, text};
 use iced::{Element, Length};
+
+use palantir_net::modrinth::{ModrinthProject, ModrinthProjectVersion};
 
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP, ROW_GAP};
@@ -73,6 +78,78 @@ pub struct Version {
     pub changelog: String,
 }
 
+/// One request, as the shell takes it.
+///
+/// A value rather than three arguments, for [`crate::pages::discover::Asked`]'s
+/// reason: the round is what makes a slow answer harmless, and the id is what
+/// the answer is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    /// Which request this is, counting from one.
+    pub round: u64,
+    /// Which project, as the API names it.
+    pub id: String,
+}
+
+impl Project {
+    /// One project, from the API's own documents.
+    ///
+    /// Three of them, because Modrinth splits the answer three ways and each
+    /// split is a request of its own: the project document names the team but not
+    /// the person on it, the author is therefore a member list, and the versions
+    /// are their own list rather than a field of the project. The translation
+    /// lives here rather than in the store for
+    /// [`crate::pages::discover::Hit::from_api`]'s reason: what a page *is*
+    /// belongs to the page that draws it, and a page that grew a field would
+    /// otherwise change a module that has never drawn one.
+    pub fn from_api(
+        project: &ModrinthProject,
+        author: &str,
+        versions: &[ModrinthProjectVersion],
+    ) -> Project {
+        Project {
+            id: project.id.clone(),
+            title: project.title.clone(),
+            author: author.to_string(),
+            summary: project.description.clone(),
+            body: project.body.clone(),
+            downloads: project.downloads,
+            follows: project.followers,
+            game_versions: project.game_versions.clone(),
+            loaders: project.loaders.clone(),
+            // An image's caption is its title, and a gallery entry with no
+            // caption is drawn by its URL rather than as a blank row: both are
+            // what the reference's own gallery does.
+            gallery: project
+                .gallery
+                .iter()
+                .map(|image| {
+                    if image.title.is_empty() {
+                        image.url.clone()
+                    } else {
+                        image.title.clone()
+                    }
+                })
+                .collect(),
+            versions: versions.iter().map(Version::from_api).collect(),
+        }
+    }
+}
+
+impl Version {
+    /// One version, from the API's own entry.
+    pub fn from_api(version: &ModrinthProjectVersion) -> Version {
+        Version {
+            number: version.version_number.clone(),
+            name: version.name.clone(),
+            game_versions: version.game_versions.clone(),
+            loaders: version.loaders.clone(),
+            downloads: version.downloads,
+            changelog: version.changelog.clone(),
+        }
+    }
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -82,6 +159,17 @@ pub enum Message {
     Refresh,
     /// The project's main action was pressed.
     Install,
+    /// The answer to a request, from the shell.
+    ///
+    /// The round is what makes a slow answer harmless: a page that has asked
+    /// again in the meantime has moved past this one, and drawing an older
+    /// project under the newer id is the kind of wrong a reader cannot see.
+    Found {
+        /// Which request this answers, as [`Asked::round`] numbered it.
+        round: u64,
+        /// The project, or the reason there is none.
+        result: Result<Project, String>,
+    },
     /// The pointer entered or left one of the page's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     Hover {
@@ -114,6 +202,9 @@ pub struct State {
     pub project: Load<Project>,
     /// The last thing the page could not do.
     pub notice: Option<String>,
+    /// How many times this page has asked, which is how an answer is told apart
+    /// from an answer to a question it has since replaced.
+    round: u64,
 }
 
 impl State {
@@ -122,23 +213,61 @@ impl State {
         State {
             id,
             tab,
-            project: Load::Failed(store::not_implemented("This project")),
+            project: Load::Idle,
             notice: None,
+            round: 0,
         }
     }
 
-    /// Apply a message.
-    pub fn update(&mut self, message: Message) {
+    /// Apply a message, and answer with the request it made.
+    pub fn update(&mut self, message: Message) -> Option<Asked> {
         match message {
             Message::Tab(tab) => self.tab = tab,
-            Message::Refresh => self.project = Load::Failed(store::not_implemented("This project")),
+            // The button asks again rather than standing in for an answer: what
+            // the page knows is dropped, and the shell is told to go and get it.
+            Message::Refresh => return Some(self.ask()),
             Message::Install => self.notice = Some(store::not_implemented("Installing a project")),
+            Message::Found { round, result } => {
+                // An answer to a request this page has replaced is dropped. It is
+                // not an error and not worth a notice: the reader asked for
+                // something newer and the newer answer is on its way.
+                if round == self.round {
+                    self.project = match result {
+                        Ok(project) => Load::Ready(project),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                    // The notice belongs to the page the answer just replaced:
+                    // what a button said about the project that is no longer on
+                    // screen is not about the one that is.
+                    self.notice = None;
+                }
+            }
             Message::Hover { key, over, hover } => crate::ui::pointer_with(
                 key,
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
         }
+        None
+    }
+
+    /// The request this page owes because nothing has been asked for yet.
+    ///
+    /// `None` once it has asked, which is what keeps the page from asking on
+    /// every message the shell routes to it.
+    pub fn opening(&mut self) -> Option<Asked> {
+        if self.project == Load::Idle {
+            Some(self.ask())
+        } else {
+            None
+        }
+    }
+
+    /// Bump the round, mark the page as waiting, and describe the request.
+    fn ask(&mut self) -> Asked {
+        self.round += 1;
+        self.project = Load::Loading;
+        Asked { round: self.round, id: self.id.clone() }
     }
 
     /// The tabs the page offers, in the reference's order.
@@ -367,11 +496,93 @@ mod tests {
     }
 
     #[test]
-    fn a_project_that_cannot_be_read_says_so_rather_than_showing_an_empty_one() {
-        let state = State::new("sodium".to_string(), ProjectTab::Description);
-        let reason = state.project.failure().expect("a reason");
-        assert!(reason.contains("is not implemented yet"), "{reason}");
-        assert_ne!(state.project, Load::Empty, "an unmade request is not an empty project");
+    fn a_fresh_page_owes_a_request_and_a_failed_one_keeps_its_reason() {
+        let mut state = State::new("sodium".to_string(), ProjectTab::Description);
+        // Nothing has been asked for yet, which is not the same as an empty
+        // project: the shell asks for what `opening` describes.
+        assert_eq!(state.project, Load::Idle);
+        let asked = state.opening().expect("the first request");
+        assert_eq!(asked.id, "sodium");
+        assert_eq!(asked.round, 1);
+        assert_eq!(state.project, Load::Loading, "the page waits once it has asked");
+        assert!(state.opening().is_none(), "and does not ask twice");
+        // The answer, or the reason there is none -- never an empty project.
+        state.update(Message::Found { round: 1, result: Err("no such project".to_string()) });
+        assert_eq!(state.project.failure(), Some("no such project"));
+    }
+
+    #[test]
+    fn an_answer_to_a_request_the_page_has_replaced_is_dropped() {
+        let mut state = State::new("sodium".to_string(), ProjectTab::Description);
+        let first = state.opening().expect("the first request");
+        let second = state.update(Message::Refresh).expect("a refresh asks again");
+        assert_eq!(second.round, first.round + 1);
+        // The first answer arrives late: it is dropped rather than drawn under
+        // the request that replaced it, and it is not an error either.
+        state.update(Message::Found { round: first.round, result: Ok(project()) });
+        assert_eq!(state.project, Load::Loading, "the stale answer was dropped");
+        state.update(Message::Found { round: second.round, result: Ok(project()) });
+        assert!(state.project.ready().is_some(), "the answer in force was taken");
+    }
+
+    #[test]
+    fn the_api_documents_become_what_the_page_draws() {
+        // Three documents in, one page out: the project's own, the team's, and the
+        // version list's. The author comes from the members because the project
+        // document does not carry one, and a gallery entry with no caption is
+        // drawn by its URL rather than as a blank row.
+        let api_project = ModrinthProject {
+            id: "AANobbMI".to_string(),
+            slug: "sodium".to_string(),
+            project_type: "mod".to_string(),
+            title: "Sodium".to_string(),
+            description: "Modern rendering engine".to_string(),
+            body: "# Sodium".to_string(),
+            downloads: 41_000_000,
+            followers: 9_000,
+            game_versions: vec!["1.21.4".to_string()],
+            loaders: vec!["fabric".to_string()],
+            gallery: vec![
+                palantir_net::modrinth::ModrinthGalleryImage {
+                    url: "https://cdn.modrinth.com/shot.png".to_string(),
+                    title: "In the nether".to_string(),
+                    description: String::new(),
+                },
+                palantir_net::modrinth::ModrinthGalleryImage {
+                    url: "https://cdn.modrinth.com/uncaptioned.png".to_string(),
+                    title: String::new(),
+                    description: String::new(),
+                },
+            ],
+        };
+        let api_versions = [ModrinthProjectVersion {
+            id: "abc".to_string(),
+            project_id: "AANobbMI".to_string(),
+            name: "Sodium 0.6.5".to_string(),
+            version_number: "mc1.21.4-0.6.5".to_string(),
+            version_type: "release".to_string(),
+            downloads: 1234,
+            changelog: "Fixed a thing.".to_string(),
+            game_versions: vec!["1.21.4".to_string()],
+            loaders: vec!["fabric".to_string()],
+            files: Vec::new(),
+            dependencies: Vec::new(),
+        }];
+
+        let page = Project::from_api(&api_project, "jellysquid3", &api_versions);
+        assert_eq!(page.id, "AANobbMI");
+        assert_eq!(page.title, "Sodium");
+        assert_eq!(page.author, "jellysquid3");
+        assert_eq!(page.summary, "Modern rendering engine");
+        assert_eq!(page.downloads, 41_000_000);
+        assert_eq!(page.follows, 9_000);
+        assert_eq!(page.gallery, vec!["In the nether", "https://cdn.modrinth.com/uncaptioned.png"]);
+        assert_eq!(page.versions.len(), 1);
+        assert_eq!(page.versions[0].number, "mc1.21.4-0.6.5");
+        assert_eq!(page.versions[0].name, "Sodium 0.6.5");
+        assert_eq!(page.versions[0].downloads, 1234);
+        assert_eq!(page.versions[0].changelog, "Fixed a thing.");
+        assert_eq!(page.versions[0].loaders, vec!["fabric"]);
     }
 
     #[test]
@@ -386,7 +597,9 @@ mod tests {
         for theme in Gen::ALL {
             for tab in tabs.clone() {
                 let mut state = State::new("sodium".to_string(), tab);
-                // The failed arm, then the ready one with data, then empty.
+                // Every state the page can be in, including the one it opens in.
+                drop(view(*theme, &state, &store));
+                state.project = Load::Loading;
                 drop(view(*theme, &state, &store));
                 state.project = Load::Ready(project());
                 drop(view(*theme, &state, &store));
@@ -402,13 +615,15 @@ mod tests {
     }
 
     #[test]
-    fn installing_says_what_arrives_later_and_refreshing_asks_again() {
+    fn installing_still_says_what_arrives_later_and_a_tab_change_keeps_the_project() {
         let mut state = State::new("sodium".to_string(), ProjectTab::Description);
         state.update(Message::Install);
         assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
+        state.project = Load::Ready(project());
         state.update(Message::Tab(ProjectTab::Versions));
         assert_eq!(state.tab, ProjectTab::Versions);
-        state.update(Message::Refresh);
-        assert!(state.project.failure().is_some());
+        // A tab is navigation, not a request: the project on screen stays.
+        assert!(state.project.ready().is_some());
+        assert!(state.update(Message::Tab(ProjectTab::Gallery)).is_none());
     }
 }

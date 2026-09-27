@@ -598,8 +598,8 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
 /// The unit tests hold the encoder against an expected URL, which is exactly the
 /// kind of agreement a fixture and its code are capable of getting wrong
 /// together, so the live run asks the service: a typed search has to come back
-/// with hits, and the project named by the first one has to have versions a
-/// launcher could install.
+/// with hits, and the project named by the first one has to be a *page* -- its
+/// own document, the team that owns it, and versions a launcher could install.
 ///
 /// The second is the cache. A second identical search must cost *no* request, and
 /// that is asserted by counting what the pool actually sent -- a search that was
@@ -641,7 +641,44 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
         .expect("the same search, from the cache");
     assert_eq!(again, response, "a cached search is the same answer");
 
-    // And the project the search named has versions, with files and digests.
+    // And the project the search named is a document of its own: the title, the
+    // body a page draws, and the counts. A card's fields come off the search, but
+    // opening it is this request, and a page cannot be built from a search hit.
+    let project = api
+        .project(first.project_ref(), &cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{}: {e}", first.project_ref()));
+    assert!(!project.id.is_empty() && !project.title.is_empty(), "{project:?}");
+    assert!(
+        !project.body.trim().is_empty(),
+        "{} opens with no description at all",
+        project.title
+    );
+    assert_eq!(project.title, first.title, "the search and the project disagree about the title");
+
+    // The team is a second request, and it is where a page's byline comes from:
+    // Modrinth's project document names a team id and no person. What the team
+    // list *is* was measured here rather than assumed -- Sodium's three members
+    // come back with the roles `Maintainer`, `Project Lead`, `Maintainer`, and
+    // every one of them carries `ordering: 0`, so neither the order nor an
+    // `Owner` role names the owner and the store credits the `Project Lead`
+    // instead (`store::author_of`). What this asserts is the part a service
+    // change would break: members come back, with names and with roles.
+    let members = api
+        .members(first.project_ref(), &cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{}'s team: {e}", first.project_ref()));
+    assert!(!members.is_empty(), "{} has no team at all", project.title);
+    assert!(
+        members.iter().all(|member| !member.user.username.is_empty()),
+        "a member with no name on {}: {members:?}",
+        project.title
+    );
+    assert!(
+        members.iter().any(|member| !member.role.is_empty()),
+        "nobody on {}'s team has a role: {members:?}",
+        project.title
+    );
+
+    // And it has versions, with files and digests.
     let versions = api
         .versions(first.project_ref(), &cancel, &backoff)
         .unwrap_or_else(|e| panic!("{}: {e}", first.project_ref()));

@@ -89,7 +89,7 @@ OPEN_ITEM = re.compile(r"^(?:\* |\d+\. )\*\*(.+?)\*\*")
 GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
-    3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
+    3: [(62, 65), (76, 77), (83, 83), (96, 96)],  # routes, scaffold, widgets; hover; themes; the panel; the project page's own documents
     4: [(66, 75), (91, 91), (93, 95)],  # the engine; the first page on it; the launch's and a pack's transfers; the loaders' own profiles and Minecraft's own file (G92 is the dashboard, owned by `before`)
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
@@ -101,10 +101,16 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
 OPEN: dict[int, list[tuple[str, int, str]]] = {
     3: [
         (
-            "Only Discover's data is real.",
-            5,
-            "the project page, install into an instance, Skins, Servers, "
-            "an instance's hosting half",
+            "Installing a project is not real.",
+            2,
+            "one file for a mod-shaped project, and the pack case that makes "
+            "an instance out of one",
+        ),
+        (
+            "Skins, Servers and the hosting half of an instance are not real.",
+            3,
+            "the Skins page, the Servers page and an instance's own hosting "
+            "half, each of which is a service this launcher does not read yet",
         ),
         (
             "The panel's other sections are not built.",

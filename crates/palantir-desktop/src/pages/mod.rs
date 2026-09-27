@@ -99,13 +99,20 @@ pub enum Open {
 /// is the one that can ask it, because asking is blocking and a page is drawn on
 /// the frame thread (see [`crate::store`]). Neither kind is page state, and both
 /// come back to the page as a message of its own -- a navigation by being applied
-/// to the address, an answer by [`Message::search_result`].
+/// to the address, an answer by [`Message::search_result`] or
+/// [`Message::project_result`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
     /// Navigate to a thing.
     Open(Open),
     /// Ask the store, through the engine, for search results.
     Search(discover::Asked),
+    /// Ask the store, through the engine, for one project: its own document, the
+    /// people on its team, and its version list.
+    ///
+    /// One request rather than three because a project page draws all three at
+    /// once, and three `Load`s for one page is three ways to be half drawn.
+    Project(project::Asked),
     /// Open the creation flow.
     ///
     /// The third kind, and the same shape as the other two: the *button* is the
@@ -140,6 +147,15 @@ impl Message {
     /// request.
     pub fn search_result(asked: &discover::Asked, result: Result<Vec<discover::Hit>, String>) -> Message {
         Message::Discover(discover::Message::Found { round: asked.round, result })
+    }
+
+    /// The message that carries a project answer back to the page that asked.
+    ///
+    /// The same seam as [`Message::search_result`], and the reason it is a
+    /// function rather than a variant the shell names: the answer's own type is
+    /// the page's, and the shell has never seen one.
+    pub fn project_result(asked: &project::Asked, result: Result<project::Project, String>) -> Message {
+        Message::Project(project::Message::Found { round: asked.round, result })
     }
 }
 
@@ -228,7 +244,13 @@ impl Screen {
                     return Some(Ask::Search(asked));
                 }
             }
-            (Screen::Project(state), Message::Project(message)) => state.update(message),
+            (Screen::Project(state), Message::Project(message)) => {
+                // The second page that asks for something: the shell runs it and
+                // the answer comes back turns later, exactly as Discover's does.
+                if let Some(asked) = state.update(message) {
+                    return Some(Ask::Project(asked));
+                }
+            }
             (Screen::Instance(state), Message::Instance(message)) => {
                 // The one page that can ask for something other than a
                 // navigation yet: an instance's Play and Stop are the shell's to
@@ -257,6 +279,7 @@ impl Screen {
     pub fn opening(&mut self) -> Option<Ask> {
         match self {
             Screen::Discover(state) => state.opening().map(Ask::Search),
+            Screen::Project(state) => state.opening().map(Ask::Project),
             _ => None,
         }
     }
@@ -462,6 +485,29 @@ mod tests {
             skins.update(Message::Home(home::Message::Open("atm10".to_string())), &store),
             None
         );
+    }
+
+    #[test]
+    fn a_project_page_asks_for_its_own_documents_on_arrival() {
+        // The second page that owes a request. `/project/sodium` is a document,
+        // a team and a version list, and the page is one `Load`, so the shell is
+        // asked once and the answer carries all three back.
+        let store = Store::default();
+        let mut screen = Screen::at(&Address::parse("/project/sodium").expect("a project page"));
+        let Some(Ask::Project(first)) = screen.opening() else {
+            panic!("a freshly drawn project page owes a request");
+        };
+        assert_eq!(first.id, "sodium");
+        assert_eq!(first.round, 1);
+        assert_eq!(screen.opening(), None, "asked once, and the refresh button is what asks again");
+        // The answer comes back as a message of the page's own, built by the shell
+        // and never named here.
+        let message = Message::project_result(&first, Err("no such project".to_string()));
+        screen.update(message, &store);
+        let Screen::Project(state) = &screen else {
+            panic!("still the project page");
+        };
+        assert_eq!(state.project.failure(), Some("no such project"));
     }
 
     #[test]
