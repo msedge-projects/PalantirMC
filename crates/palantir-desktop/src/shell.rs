@@ -408,6 +408,9 @@ pub struct Shell {
     /// instance. Taken by the command that runs it, so it is `None` while there is
     /// nothing to do.
     install_requested: Option<(String, String)>,
+    /// A pack's install, which has no instance to name: the project that becomes
+    /// one. Taken by its command, for [`Shell::install_requested`]'s reason.
+    pack_requested: Option<String>,
     /// Why the last install did not work, drawn inside the dialog.
     ///
     /// The dialog's own sentence rather than the page's notice, because the
@@ -653,7 +656,8 @@ pub enum Modal {
     /// The same flow's import step: what the other launchers on this machine are
     /// holding, and a button per instance.
     Import,
-    /// Which instance a project goes into: the reference's *Install to instance*,
+    /// Where a project goes: into an instance the reader picks, or -- for a pack --
+    /// into an instance the install makes. The reference's *Install to instance*,
     /// drawn as a dialog (see [`Shell::install_dialog`]).
     Install {
         /// Which project, as the API names it.
@@ -662,6 +666,9 @@ pub enum Modal {
         /// asked the engine again for a title it could have been handed would be a
         /// request per press for a word the page is already holding.
         title: String,
+        /// Whether the project is a pack, which is the one kind with no folder to
+        /// be offered: it becomes an instance of its own instead.
+        pack: bool,
     },
 }
 
@@ -697,12 +704,16 @@ pub enum Message {
     Sidebar(bool),
     /// One of the install dialog's rows: put this project into that instance.
     InstallInto(String),
-    /// The install that was asked for came back. The line it succeeded with, or
-    /// why it did not.
+    /// The install dialog's pack action: make an instance out of this project.
+    InstallPack,
+    /// The install that was asked for came back, with the line it succeeded with
+    /// or why it did not.
     ///
-    /// A sentence rather than the [`store::Installed`] value itself: the page that
-    /// shows it is a page, and what a page draws is a line of text.
-    Installed(Result<String, String>),
+    /// [`store::Outcome`] rather than the [`store::Installed`] value itself: the
+    /// page that shows it is a page, and what a page draws is a line of text -- but
+    /// a pack *made* something, and the reader is left in it rather than on the
+    /// project page.
+    Installed(Result<store::Outcome, String>),
     /// The install dialog's empty state: open the creation flow, which is where an
     /// instance comes from in the first place.
     OpenCreate,
@@ -854,6 +865,7 @@ impl Shell {
             switchers: false,
             installing: false,
             install_requested: None,
+            pack_requested: None,
             install_error: None,
             installed: None,
             screen,
@@ -1142,6 +1154,9 @@ impl Shell {
         if let Some((project, instance)) = self.install_requested.take() {
             return self.install(&project, &instance);
         }
+        if let Some(project) = self.pack_requested.take() {
+            return self.install_pack(&project);
+        }
         if let Some(result) = self.installed.take() {
             // The sentence reaches the page the way the shell tells a page
             // anything -- `Message::Screen` -- applied here rather than through a
@@ -1210,23 +1225,55 @@ impl Shell {
                 }
                 None
             }
+            Message::InstallPack => {
+                if !self.installing {
+                    if let Some(Modal::Install { project, pack: true, .. }) = &self.modal {
+                        // The same guard for the same reason, one step stronger:
+                        // this press unpacks an archive and then downloads every
+                        // file it lists.
+                        self.installing = true;
+                        self.install_error = None;
+                        self.pack_requested = Some(project.clone());
+                    }
+                }
+                None
+            }
             Message::Installed(result) => {
                 self.installing = false;
                 match &result {
-                    Ok(_) => {
+                    Ok(outcome) => {
                         // The dialog has done its job and the sentence belongs
                         // where the button was: a modal over it would be covering
                         // the answer it just produced.
                         self.modal = None;
                         self.install_error = None;
+                        // A pack made an instance, and the reference leaves the
+                        // reader in what it just made -- so the list the pages are
+                        // drawn from is read again, and the reader is sent to it.
+                        if let store::Outcome::Pack { id, .. } = outcome {
+                            self.store.reload();
+                            self.go(Address::at(route::Route::Instance {
+                                id: id.clone(),
+                                tab: route::InstanceTab::Content,
+                            }));
+                        }
                     }
                     // A failure keeps the dialog up, because the answer to it is
                     // to pick a different instance -- which needs the list.
                     Err(reason) => self.install_error = Some(reason.clone()),
                 }
-                // Sent on to the page as a message of its own: the sentence stays
-                // after the dialog is gone, which is what makes it worth saying.
-                self.installed = Some(result);
+                // A file's line goes on to the page, because the page that asked
+                // is still the page on screen and the line stays after the dialog
+                // is gone -- which is what makes it worth saying. A pack's does
+                // not: the reader has been moved to the instance it made, and a
+                // notice is a page's, drawn on a page they are no longer on. The
+                // instance appearing in the library is the feedback, and it is a
+                // better one than a sentence about it.
+                self.installed = match result {
+                    Ok(store::Outcome::File(line)) => Some(Ok(line)),
+                    Ok(store::Outcome::Pack { .. }) => None,
+                    Err(reason) => Some(Err(reason)),
+                };
                 None
             }
             Message::OpenCreate => {
@@ -1424,6 +1471,7 @@ impl Shell {
                         self.modal = Some(Modal::Install {
                             project: install.id,
                             title: install.title,
+                            pack: install.pack,
                         });
                         None
                     }
@@ -1827,7 +1875,23 @@ impl Shell {
             // landed, which version of it and which instance are all facts the
             // page asked for a transfer rather than for, and the sentence is
             // drawn in the same shape whether it worked or not.
-            |result| Message::Installed(result.map(|installed| installed.summary())),
+            |result| Message::Installed(result.map(|installed| store::Outcome::File(installed.summary()))),
+        )
+    }
+
+    /// Install one project as an instance of its own, and bring the outcome back
+    /// as a sentence plus the instance it made.
+    ///
+    /// [`Shell::install`]'s twin, blocking for the same reason and a longer one:
+    /// this downloads the pack, unpacks it and then downloads every file its index
+    /// lists, which is the longest thing this launcher does that is not a launch.
+    fn install_pack(&self, project: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        // Cloned rather than borrowed: the worker outlives this call.
+        let project = project.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.install_pack(&project)),
+            Message::Installed,
         )
     }
 
@@ -3876,7 +3940,11 @@ impl Shell {
     /// (*Install to instance*). It is a modal here for the reason every dialog in
     /// this shell is: iced 0.12 composites its tree in order and has no z-order, so
     /// a thing drawn over a page is drawn by the one layer that is over a page.
-    fn install_dialog<'a>(&'a self, project: &str, title: &str) -> Element<'a, Message> {
+    ///
+    /// A pack is the one project for which the question has a single answer, so
+    /// the list is not drawn: it becomes an instance of its own, and the dialog
+    /// says so and asks for the press.
+    fn install_dialog<'a>(&'a self, project: &str, title: &str, pack: bool) -> Element<'a, Message> {
         let theme = self.theme;
         let mut body = column![]
             .spacing(10.0)
@@ -3898,31 +3966,60 @@ impl Shell {
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
             );
         }
-        match self.store.instances() {
-            Load::Ready(cards) if !cards.is_empty() => {
-                for card in cards {
-                    body = body.push(self.install_row(card));
+        if pack {
+            // One answer rather than a list, because a pack has no folder to land
+            // in: the install makes the instance, names it after the project and
+            // takes its Minecraft version and its loaders from the pack's own
+            // index. The reference asks nothing here at all -- it makes the
+            // instance and opens it -- and the dialog stays because a failure has
+            // to be visible somewhere and this launcher says its installs here.
+            let what = if title.is_empty() { project } else { title };
+            body = body.push(
+                text(format!(
+                    "{what} becomes an instance of its own, with the Minecraft version and the \
+                     loaders its own index names."
+                ))
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+            body = body.push(crate::ui::button(
+                theme,
+                INSTALL_PACK_KEY,
+                // The reference's own word for it: its project cards install with
+                // the copy the library's *Create instance* uses, because in the
+                // reference installing a project *is* creating an instance.
+                Key::AppLibraryContextMenuCreateInstance,
+                crate::ui::Kind::Colored,
+                Message::InstallPack,
+            ));
+        } else {
+            match self.store.instances() {
+                Load::Ready(cards) if !cards.is_empty() => {
+                    for card in cards {
+                        body = body.push(self.install_row(card));
+                    }
                 }
-            }
-            // The empty state is the welcome screen's question, asked here: there
-            // is nothing to install into, and the way out is the flow that makes
-            // one. The button is a message of its own rather than the rail's,
-            // because a rail message would also move the rail's selection and
-            // whatever else pressing a rail slot does.
-            _ => {
-                body = body.push(
-                    text(Key::AppLibraryGroupNoInstancesFound.message())
-                        .size(14.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-                );
-                body = body.push(crate::ui::button(
-                    theme,
-                    INSTALL_CREATE_KEY,
-                    Key::AppWelcomeScreenCreateInstance,
-                    crate::ui::Kind::Standard,
-                    Message::OpenCreate,
-                ));
+                // The empty state is the welcome screen's question, asked here:
+                // there is nothing to install into, and the way out is the flow
+                // that makes one. The button is a message of its own rather than
+                // the rail's, because a rail message would also move the rail's
+                // selection and whatever else pressing a rail slot does.
+                _ => {
+                    body = body.push(
+                        text(Key::AppLibraryGroupNoInstancesFound.message())
+                            .size(14.0)
+                            .font(medium())
+                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    );
+                    body = body.push(crate::ui::button(
+                        theme,
+                        INSTALL_CREATE_KEY,
+                        Key::AppWelcomeScreenCreateInstance,
+                        crate::ui::Kind::Standard,
+                        Message::OpenCreate,
+                    ));
+                }
             }
         }
         if let Some(reason) = &self.install_error {
@@ -3988,7 +4085,9 @@ impl Shell {
         let dialog = match &self.modal {
             Some(Modal::Create) => self.create_dialog(),
             Some(Modal::Import) => self.import_dialog(),
-            Some(Modal::Install { project, title }) => self.install_dialog(project, title),
+            Some(Modal::Install { project, title, pack }) => {
+                self.install_dialog(project, title, *pack)
+            }
             // The layer is only drawn while a modal is up, and Settings is the one
             // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
@@ -4171,6 +4270,9 @@ fn card_frame<'a, Message: 'a>(
 /// A stable name per control, like every other key in the shelf: two buttons that
 /// happen to share a word must not light together.
 const INSTALL_CREATE_KEY: &str = "shell:install:create";
+
+/// The pack install's own button, in the dialog that has no rows at all.
+const INSTALL_PACK_KEY: &str = "shell:install:pack";
 
 /// A crossing published by one of the card's own surfaces.
 ///
@@ -4895,9 +4997,10 @@ mod tests {
             Message::Screen(pages::Message::Project(project::Message::Install)),
         );
         match &shell.modal {
-            Some(Modal::Install { project, title }) => {
+            Some(Modal::Install { project, title, pack }) => {
                 assert_eq!(project, "sodium");
                 assert_eq!(title, "", "the page has drawn nothing yet, so it names no title");
+                assert!(!pack, "and the page has not loaded, so it cannot say it is a pack");
             }
             other => panic!("the install dialog: {other:?}"),
         }
@@ -4921,7 +5024,9 @@ mod tests {
         // the line, because the button that asked is on the page.
         press(
             &mut shell,
-            Message::Installed(Ok("Installed Sodium 0.6.5 into atm10".to_string())),
+            Message::Installed(Ok(store::Outcome::File(
+                "Installed Sodium 0.6.5 into atm10".to_string(),
+            ))),
         );
         assert_eq!(shell.modal, None, "the dialog is done");
         assert!(!shell.installing);
@@ -4987,6 +5092,87 @@ mod tests {
         assert_eq!(Key::AppProjectVersionInstalling.message(), "Installing");
         assert_eq!(Key::AppWelcomeScreenCreateInstance.message(), "Create an instance");
         assert_eq!(Key::AppLibraryGroupNoInstancesFound.message(), "No instances found");
+    }
+
+    #[test]
+    fn a_pack_is_asked_for_once_and_the_reader_is_left_in_the_instance_it_made() {
+        // The pack path: the dialog draws one action rather than a list of
+        // instances -- a pack has no folder to land in, so there is nothing to
+        // choose -- and the answer does not just print a sentence, it makes an
+        // instance and takes the reader to it, which is what the reference does.
+        let mut shell = shell_with_instance("install-pack");
+        press(&mut shell, Message::Go("/project/cobblemon".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Project(project::Message::Install)),
+        );
+        // The page has drawn nothing, so the shell cannot know it is a pack: this
+        // is the same dialog the file install gets.
+        assert!(matches!(shell.modal, Some(Modal::Install { pack: false, .. })));
+        // Whatever the page said, the pack action is the one that runs it, and a
+        // pack action from a dialog that is not a pack's does nothing at all.
+        press(&mut shell, Message::InstallPack);
+        assert!(!shell.installing, "a file install is not a pack install");
+
+        // The page says what it is, and the dialog changes shape with it.
+        shell.modal = Some(Modal::Install {
+            project: "cobblemon".to_string(),
+            title: "Cobblemon".to_string(),
+            pack: true,
+        });
+        press(&mut shell, Message::InstallPack);
+        assert!(shell.installing, "busy as the request leaves");
+        assert_eq!(shell.pack_requested, None, "and taken by the command");
+        drop(shell.render());
+
+        // The answer names the instance it made, and the reader lands in it with
+        // the list of instances read again -- a new instance is on disk and not on
+        // any page until then.
+        press(
+            &mut shell,
+            Message::Installed(Ok(store::Outcome::Pack {
+                id: "Cobblemon".to_string(),
+                line: "Installed Cobblemon as Cobblemon, 12 files".to_string(),
+            })),
+        );
+        assert_eq!(shell.modal, None, "the dialog is done");
+        assert!(!shell.installing);
+        assert_eq!(
+            shell.screen.project_notice(),
+            None,
+            "and no line is left on a page the reader has been moved off"
+        );
+        // The instance itself is the store's doing, and `store.rs` is where it is
+        // asserted; what the shell owes is the address. (Nothing is installed here
+        // -- the outcome is injected -- so there is no folder to find either way.)
+        assert_eq!(
+            shell.address().route,
+            Route::Instance { id: "Cobblemon".to_string(), tab: route::InstanceTab::Content },
+            "the reader is left looking at the instance the outcome named"
+        );
+
+        // A pack that cannot be installed keeps the dialog, for the file path's
+        // reason and a stronger one: there is no second place to try, so the
+        // sentence is the whole of the answer.
+        shell.modal = Some(Modal::Install {
+            project: "cobblemon".to_string(),
+            title: "Cobblemon".to_string(),
+            pack: true,
+        });
+        press(&mut shell, Message::InstallPack);
+        press(
+            &mut shell,
+            Message::Installed(Err("that archive is not a readable pack".to_string())),
+        );
+        assert_eq!(
+            shell.install_error.as_deref(),
+            Some("that archive is not a readable pack")
+        );
+        assert!(matches!(shell.modal, Some(Modal::Install { pack: true, .. })));
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            drop(shell.render());
+        }
     }
 
     /// Ask the instance page on screen to run its instance.

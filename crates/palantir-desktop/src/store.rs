@@ -262,6 +262,25 @@ impl Installed {
     }
 }
 
+/// What an install came to, in the two shapes the shell treats differently.
+///
+/// Both carry the sentence the page draws; only a pack carries somewhere for the
+/// reader to *be*, which is the whole difference: a file went into an instance
+/// they were already looking at, and a pack made one they have never seen -- and
+/// the reference leaves them in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// A file in an instance, and the line about it.
+    File(String),
+    /// A new instance, and the line about it.
+    Pack {
+        /// The instance's id (its folder name), which is where to go.
+        id: String,
+        /// The line the page shows.
+        line: String,
+    },
+}
+
 // ---- The launcher's own files, and the way out to a service ----------------
 
 impl Store {
@@ -681,6 +700,55 @@ impl Store {
             version: version.version_number.clone(),
             instance: card.name,
             file,
+        })
+    }
+
+    /// Install a modpack as an instance of its own.
+    ///
+    /// **Blocking**, for [`Store::install_project`]'s reason and a bigger one: this
+    /// is a document read, a pack download, an unpack and a download per file the
+    /// pack lists, which is the longest thing this launcher does that is not a
+    /// launch.
+    ///
+    /// The version is chosen by [`install::newest_pack_version`] rather than by the
+    /// instance-matching rule, because there is no instance yet to match: a pack
+    /// carries its own Minecraft version and its own loaders in its index, and
+    /// *that* is what the instance it makes is made of. The instance's name is the
+    /// project's title, which is what the reader pressed and what the reference
+    /// names it.
+    pub fn install_pack(&self, project_id: &str) -> Result<Outcome, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Installing a modpack"));
+        };
+        let Some(paths) = &self.paths else {
+            return Err(not_implemented("Installing a modpack"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let project = api
+            .project(project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let versions = api
+            .versions(project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let version = install::newest_pack_version(&versions)
+            .ok_or_else(|| format!("{} has published nothing to install", project.title))?;
+        // The archive is cached outside every instance, under the digest the API
+        // published, so a second install of the same pack version is a read of a
+        // file this launcher already checked rather than another 300 MB.
+        let wire = Wire::over(paths.meta_dir(), engine.fetch());
+        let archive = install::fetch_pack_archive(&wire, &paths.meta_dir().join("packs"), version)?;
+        let installed = install::install_pack_archive(
+            &wire,
+            paths,
+            &archive,
+            project.title.as_str(),
+            &mut |_| {},
+        )?;
+        Ok(Outcome::Pack {
+            id: installed.id.clone(),
+            line: installed.summary(&project.title),
         })
     }
 }
@@ -1207,21 +1275,124 @@ mod tests {
 
     #[test]
     fn a_pack_is_refused_by_name_because_it_becomes_an_instance_of_its_own() {
-        // The one project type whose install is not a folder. It is refused with a
-        // sentence naming the kind rather than with "there is no folder for that",
-        // because a pack really is installable -- as a new instance, which is the
-        // next slice rather than a silent no.
+        // The one project type whose install is not a folder, and the one command
+        // that cannot be pointed at an instance at all: `install_pack` is where it
+        // goes instead. The refusal names the kind rather than saying "there is no
+        // folder for that", because a pack *is* installable.
         let fetch = Arc::new(MapFetch::new());
-        fetch.set_route(
-            &project_url("pack"),
-            Route::text(&PROJECT_BODY.replace("\"mod\"", "\"modpack\"")),
-        );
+        fetch.set_route(&project_url("pack"), Route::text(PACK_PROJECT_BODY));
         fetch.set_route(&version_url("pack"), Route::text(&versions_with_files("0")));
         let store = store_with_instance("install-pack", fetch.clone());
         let reason = store.install_project("pack", "atm10").expect_err("a pack");
         assert!(reason.contains("modpack"), "{reason}");
         assert!(reason.contains("instance of its own"), "{reason}");
         assert_eq!(fetch.count(), 2, "and nothing was downloaded");
+    }
+
+    /// One `GET /v2/project/{id}` body for a pack: the same shape as
+    /// [`PROJECT_BODY`] with the type that makes it one, under a title that is not
+    /// Sodium's -- the instance a pack makes is named after it.
+    const PACK_PROJECT_BODY: &str = r##"{
+        "id": "cobblemon", "slug": "cobblemon", "project_type": "modpack",
+        "title": "Cobblemon", "description": "Pokemon, in Minecraft",
+        "body": "", "downloads": 41000000, "followers": 9000,
+        "game_versions": ["1.21.4"], "loaders": ["fabric"], "gallery": []
+    }"##;
+
+    /// One `GET /v2/project/{id}/version` body for a pack: the archive itself is
+    /// the version's primary file, which is the whole of what this rule reads.
+    fn pack_versions_body(sha1: &str, size: usize) -> String {
+        format!(
+            r#"[{{
+        "id": "pack-1", "project_id": "cobblemon", "name": "Cobblemon 1.6.1",
+        "version_number": "1.6.1", "version_type": "release", "downloads": 10,
+        "changelog": "", "game_versions": ["1.21.4"], "loaders": ["fabric"],
+        "files": [{{"url": "https://cdn.modrinth.com/data/cobblemon.mrpack",
+                   "filename": "Cobblemon-1.6.1.mrpack", "primary": true, "size": {size},
+                   "hashes": {{"sha1": "{sha1}"}}}}], "dependencies": []
+    }}]"#
+        )
+    }
+
+    /// A `.mrpack` in memory: an index that names a Minecraft version, a loader and
+    /// one remote file, plus one overrides file. The smallest thing that is a pack.
+    fn pack_archive(index: &serde_json::Value) -> Vec<u8> {
+        use std::io::Write as _;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(buf);
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("modrinth.index.json", options).unwrap();
+        writer.write_all(index.to_string().as_bytes()).unwrap();
+        writer.start_file("overrides/config/cobblemon.json", options).unwrap();
+        writer.write_all(b"{}").unwrap();
+        writer.finish().unwrap().into_inner()
+    }
+
+    /// A store over a launcher with no instances in it: what installing a pack
+    /// needs, and the thing that makes the pack's own instance the first one.
+    fn store_without_instances(name: &str, fetch: Arc<MapFetch>) -> Store {
+        let root = scratch(name);
+        let paths = PalantirPaths::at(&root);
+        std::fs::create_dir_all(paths.instances_dir()).expect("an instances directory");
+        Store::load(&paths).with_engine(Engine::over(paths.meta_dir(), fetch))
+    }
+
+    #[test]
+    fn installing_a_modpack_makes_an_instance_of_its_own_and_fetches_what_it_lists() {
+        // The whole path of a pack press: the project document says it is a pack,
+        // the version list gives the archive, the archive's index names the game
+        // version and the loader the *instance* is made of, and the files it lists
+        // land in that instance -- including the mods it names.
+        let mod_bytes = b"a pack mod";
+        let index = serde_json::json!({
+            "formatVersion": 1,
+            "game": "minecraft",
+            "versionId": "1.6.1",
+            "name": "Cobblemon",
+            "files": [{
+                "path": "mods/cobblemon.jar",
+                "hashes": { "sha1": install::sha1_hex(mod_bytes) },
+                "downloads": ["https://cdn.modrinth.com/data/cobblemon.jar"],
+                "fileSize": mod_bytes.len(),
+            }],
+            "dependencies": { "minecraft": "1.21.4", "fabric-loader": "0.16.9" },
+        });
+        let archive = pack_archive(&index);
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("cobblemon"), Route::text(PACK_PROJECT_BODY));
+        fetch.set_route(
+            &version_url("cobblemon"),
+            Route::text(&pack_versions_body(&install::sha1_hex(&archive), archive.len())),
+        );
+        fetch.set_route(
+            "https://cdn.modrinth.com/data/cobblemon.mrpack",
+            Route::body(archive.clone()),
+        );
+        fetch.set_route(
+            "https://cdn.modrinth.com/data/cobblemon.jar",
+            Route::body(mod_bytes.to_vec()),
+        );
+        let store = store_without_instances("install-modpack", fetch.clone());
+
+        let Outcome::Pack { id, line } = store.install_pack("cobblemon").expect("a pack") else {
+            panic!("a pack install is the shape that makes an instance")
+        };
+        assert_eq!(id, "Cobblemon", "named after the project the reader pressed");
+        assert_eq!(line, "Installed Cobblemon as Cobblemon, 1 file");
+        assert_eq!(fetch.count(), 4, "the document, the versions, the archive, one file");
+        let root = store.instance_dir(&id);
+        assert_eq!(
+            std::fs::read(root.join("mods").join("cobblemon.jar")).expect("the pack mod"),
+            mod_bytes
+        );
+        assert!(
+            root.join("config").join("cobblemon.json").is_file(),
+            "the overrides tree is written at the instance root, with `overrides/` stripped"
+        );
+        let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).expect("a profile");
+        assert!(pack.contains("1.21.4"), "the instance is the pack's game: {pack}");
+        assert!(pack.contains("net.fabricmc.fabric-loader"), "and its loader: {pack}");
     }
 
     #[test]

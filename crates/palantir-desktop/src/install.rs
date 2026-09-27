@@ -1042,6 +1042,241 @@ pub fn install_file(
     })
 }
 
+// ---- content: a pack becomes an instance of its own -----------------------
+//
+// The other shape of install. A pack is not a file that goes *in* an instance,
+// it *is* one: its index names the Minecraft version and the loaders, its
+// `overrides/` tree is written over the new instance root, and the files it lists
+// are fetched into their own paths. These rules were the old shell's too, beside
+// the single-file ones, and they are here for the same reason: a rule in a
+// `#[cfg(test)]` module is a rule the binary does not have.
+
+/// Choose the version of a pack to install.
+///
+/// Releases first, then betas, then alphas, and within a kind the API's own
+/// publish-date order -- the reference's list, and the rule the old shell's
+/// `newest_version` held. A game version is deliberately *not* consulted, which is
+/// where this differs from [`preferred_version`]: a pack carries its own Minecraft
+/// version and loader in its index, so matching one against whatever instance
+/// happens to be selected is how a launcher ends up refusing to install a 1.20.1
+/// pack because 1.21 is the one on screen.
+pub fn newest_pack_version(
+    versions: &[palantir_net::modrinth::ModrinthProjectVersion],
+) -> Option<&palantir_net::modrinth::ModrinthProjectVersion> {
+    for kind in ["release", "beta", "alpha"] {
+        if let Some(found) = versions
+            .iter()
+            .find(|candidate| candidate.primary_file().is_some() && candidate.version_type == kind)
+        {
+            return Some(found);
+        }
+    }
+    versions.iter().find(|candidate| candidate.primary_file().is_some())
+}
+
+/// What fetching a pack's listed files came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackFetch {
+    /// Files downloaded this time.
+    pub fetched: usize,
+    /// Files that were already on disk and correct enough to leave alone.
+    pub present: usize,
+    /// Bytes written.
+    pub bytes: u64,
+    /// One line per file that could not be installed.
+    pub failed: Vec<String>,
+}
+
+/// Download the files a pack's index lists into the instance it was imported
+/// into.
+///
+/// The pack's own `path` decides where each file lands, under the instance root;
+/// [`palantir_loader::PackFile::relative_path`] has already refused anything that
+/// would escape it, and the refusal is reported rather than silently rewritten
+/// here. Every file that states a `sha1` is checked against it by the transfer
+/// itself, which never renames a part file that fails the check: a corrupted mod
+/// jar in `mods/` is a crash at startup, while a missing one is a line the user
+/// can act on.
+///
+/// A file the pack lists with several URLs gets its mirrors tried in order when
+/// the first one fails -- that is what the list is for.
+pub fn fetch_pack_files(
+    wire: &Wire,
+    root: &Path,
+    files: &[palantir_loader::PackFile],
+    workers: usize,
+    progress: &mut dyn FnMut(Progress),
+) -> PackFetch {
+    let mut fetch = PackFetch::default();
+    // The file each job came from and where it is going, for the digest, the
+    // mirrors and the report after the download.
+    let mut planned: Vec<(&palantir_loader::PackFile, PathBuf)> = Vec::new();
+    for file in files {
+        let Some(relative) = file.relative_path() else {
+            fetch
+                .failed
+                .push(format!("{}: refusing to write that path", file.path));
+            continue;
+        };
+        if file.downloads.is_empty() {
+            // `plan_pack` never produces this, but this is a public entry point
+            // and indexing `downloads[0]` is not how a missing URL should be
+            // reported.
+            fetch.failed.push(format!("{}: no download URL", file.path));
+            continue;
+        }
+        let dest = root.join(relative);
+        if file.satisfied_at(&dest) {
+            fetch.present += 1;
+            continue;
+        }
+        planned.push((file, dest));
+    }
+    if planned.is_empty() {
+        return fetch;
+    }
+    let total = planned.len();
+    let jobs: Vec<FileJob> = planned
+        .iter()
+        .map(|(file, dest)| {
+            FileJob::new(&file.downloads[0], dest, file.sha1.clone().unwrap_or_default())
+        })
+        .collect();
+    let results = wire.files(&jobs, workers.max(1), &mut |done, bytes| {
+        progress(Progress::new("pack files", done, total, bytes));
+    });
+    for ((file, dest), result) in planned.iter().zip(results) {
+        let bytes = match result {
+            Ok(bytes) => bytes,
+            // The first URL failed, so the mirrors get their turn before this
+            // file is written off. Sequential and rare: a pack lists mirrors for
+            // the file the primary host would not serve, not for balance, and a
+            // mirror is one more job on the same queue.
+            Err(mut last) => {
+                let mut recovered = None;
+                for mirror in file.downloads.iter().skip(1) {
+                    let jobs = [FileJob::new(mirror, dest, file.sha1.clone().unwrap_or_default())];
+                    let mut one = wire.files(&jobs, 1, &mut |_, _| {});
+                    match one.remove(0) {
+                        Ok(bytes) => {
+                            recovered = Some(bytes);
+                            break;
+                        }
+                        Err(error) => last = error,
+                    }
+                }
+                match recovered {
+                    Some(bytes) => bytes,
+                    None => {
+                        fetch.failed.push(format!("{}: {last}", file.path));
+                        continue;
+                    }
+                }
+            }
+        };
+        fetch.fetched += 1;
+        fetch.bytes += bytes;
+    }
+    fetch
+}
+
+/// A pack installed as an instance of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledPack {
+    /// The new instance's id (its folder name).
+    pub id: String,
+    /// What the files came to.
+    pub fetch: PackFetch,
+    /// Entries the pack listed that were not installed, with the reason.
+    pub skipped: Vec<String>,
+}
+
+impl InstalledPack {
+    /// The line the page draws after a pack is installed.
+    ///
+    /// It names the instance, because that is the thing that did not exist
+    /// before and the thing the reader now has to find in the library -- and it
+    /// says how many files came with it, so a pack that installed its index and
+    /// nothing else is visible rather than silent.
+    pub fn summary(&self, project: &str) -> String {
+        let files = self.fetch.fetched + self.fetch.present;
+        let noun = if files == 1 { "file" } else { "files" };
+        let mut line = format!("Installed {project} as {}, {files} {noun}", self.id);
+        if !self.fetch.failed.is_empty() {
+            line.push_str(&format!(", {} could not be fetched", self.fetch.failed.len()));
+        }
+        if !self.skipped.is_empty() {
+            line.push_str(&format!(", {} entries are not installable", self.skipped.len()));
+        }
+        line
+    }
+}
+
+/// Fetch a pack's archive into the launcher's cache and answer where it landed.
+///
+/// The archive *is* the pack's primary file, so this is [`install_file`] with a
+/// cache directory for a target -- the same digest check, the same resume, the
+/// same ceiling. Keeping it in `cache/meta/packs/` rather than in memory is what
+/// makes a second install of the same pack version cost nothing, and it is also
+/// what keeps a 300 MB pack out of the frame thread's stack.
+pub fn fetch_pack_archive(
+    wire: &Wire,
+    cache_dir: &Path,
+    version: &palantir_net::modrinth::ModrinthProjectVersion,
+) -> Result<PathBuf, String> {
+    Ok(install_file(wire, cache_dir, version)?.path)
+}
+
+/// Install a pack that is already on disk as a new instance named `name`.
+///
+/// The archive's own file stem is *not* the name: a project page knows what the
+/// project is called, and `Cobblemon [Fabric] 1.6.1.mrpack` is not what a reader
+/// wants in their library.
+pub fn install_pack_archive(
+    wire: &Wire,
+    paths: &PalantirPaths,
+    archive: &Path,
+    name: &str,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledPack, String> {
+    let bytes = std::fs::read(archive)
+        .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
+    import_and_fetch(wire, paths, &bytes, name, progress)
+}
+
+/// Import pack bytes and fetch everything the index lists.
+fn import_and_fetch(
+    wire: &Wire,
+    paths: &PalantirPaths,
+    bytes: &[u8],
+    name: &str,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<InstalledPack, String> {
+    let plan = palantir_loader::plan_pack(bytes)
+        .map_err(|error| format!("that archive is not a readable pack: {error}"))?;
+    let instances_dir = paths.configured_instances_dir();
+    let root = match palantir_loader::detect_format(bytes) {
+        palantir_loader::PackFormat::MrPack => {
+            palantir_loader::import_mrpack(bytes, &instances_dir, name)
+        }
+        palantir_loader::PackFormat::CurseForge => {
+            palantir_loader::import_curseforge(bytes, &instances_dir, name)
+        }
+        palantir_loader::PackFormat::Unknown => {
+            return Err("that archive is neither a .mrpack nor a CurseForge pack".to_string())
+        }
+    }
+    .map_err(|error| format!("importing the pack failed: {error}"))?;
+    let id = root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string());
+    // The launcher's one wire, so a pack's files draw the same ceiling as
+    // everything else it is fetching at that moment.
+    let fetch = fetch_pack_files(wire, &root, &plan.files, DEFAULT_THREADS, progress);
+    Ok(InstalledPack { id, fetch, skipped: plan.skipped })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1231,6 +1466,175 @@ mod tests {
         assert!(error.contains("no direct download"), "error: {error}");
         assert!(!mods.join("sodium.jar").exists());
         assert_eq!(script.fetch().count(), 0, "neither refusal made a request");
+    }
+
+    /// One version of a pack, with whatever game version and loader an index
+    /// would carry -- neither of which this rule reads.
+    fn pack_version(name: &str, kind: &str, with_file: bool) -> ModrinthProjectVersion {
+        ModrinthProjectVersion {
+            version_type: kind.to_string(),
+            ..published(name, &["1.21.4"], &["fabric"], with_file)
+        }
+    }
+
+    #[test]
+    fn the_newest_pack_is_chosen_without_regard_to_the_selection() {
+        let versions = vec![
+            pack_version("beta-new", "beta", true),
+            pack_version("release-old", "release", true),
+            pack_version("no-file", "release", false),
+        ];
+        // Releases first, whatever game version or loader they carry: the pack
+        // brings its own, and there is no selected instance to match.
+        assert_eq!(newest_pack_version(&versions).unwrap().name, "release-old");
+        assert!(newest_pack_version(&[]).is_none());
+        let only_beta = vec![pack_version("b", "beta", true)];
+        assert_eq!(newest_pack_version(&only_beta).unwrap().name, "b");
+        // And a list of nothing but fileless versions has no answer at all.
+        assert!(newest_pack_version(&[pack_version("x", "release", false)]).is_none());
+    }
+
+    #[test]
+    fn pack_install_rejects_non_pack_files() {
+        let (dir, paths) = test_paths();
+        // An archive that is not a pack is refused before the wire is touched,
+        // which is what makes an empty wire the right double for it.
+        let wire = Script::new().wire();
+        let bogus = dir.path().join("not-a-pack.zip");
+        std::fs::write(&bogus, b"definitely not a zip archive").unwrap();
+        let error =
+            install_pack_archive(&wire, &paths, &bogus, "Bogus", &mut |_| {}).unwrap_err();
+        assert!(error.contains("readable pack"), "error: {error}");
+        assert!(install_pack_archive(
+            &wire,
+            &paths,
+            &dir.path().join("missing.zip"),
+            "Missing",
+            &mut |_| {}
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_pack_file_is_fetched_verified_and_dropped_when_it_does_not_match() {
+        // The fetch is driven through the launcher's own wire, so the whole path
+        // is exercised without a network: one good file, one whose bytes are not
+        // what the pack's `sha1` says, and one already present.
+        let dir = tempfile::tempdir().unwrap();
+        let good = b"good mod bytes";
+        let files = vec![
+            palantir_loader::PackFile {
+                path: "mods/good.jar".to_string(),
+                downloads: vec!["https://cdn.example.invalid/good.jar".to_string()],
+                sha1: Some(sha1_hex(good)),
+                size: good.len() as u64,
+            },
+            palantir_loader::PackFile {
+                path: "mods/bad.jar".to_string(),
+                downloads: vec!["https://cdn.example.invalid/bad.jar".to_string()],
+                sha1: Some("0000000000000000000000000000000000000000".to_string()),
+                size: 4,
+            },
+            palantir_loader::PackFile {
+                path: "shaderpacks/here.zip".to_string(),
+                downloads: vec!["https://cdn.example.invalid/here.zip".to_string()],
+                sha1: None,
+                size: 0,
+            },
+        ];
+        std::fs::create_dir_all(dir.path().join("shaderpacks")).unwrap();
+        std::fs::write(dir.path().join("shaderpacks").join("here.zip"), b"x").unwrap();
+        let mut script = Script::new();
+        script.insert("https://cdn.example.invalid/good.jar", good.to_vec());
+        script.insert("https://cdn.example.invalid/bad.jar", b"tampered".to_vec());
+        let wire = script.wire();
+        let mut reports = 0usize;
+        let fetch = fetch_pack_files(&wire, dir.path(), &files, 2, &mut |_| reports += 1);
+        assert_eq!(fetch.fetched, 1);
+        assert_eq!(fetch.present, 1, "a file that is already there is left alone");
+        assert_eq!(fetch.bytes, good.len() as u64);
+        assert_eq!(fetch.failed.len(), 1);
+        assert!(fetch.failed[0].contains("mods/bad.jar"), "{:?}", fetch.failed);
+        assert!(fetch.failed[0].contains("hash mismatch"), "{:?}", fetch.failed);
+        assert!(dir.path().join("mods").join("good.jar").is_file());
+        assert!(
+            !dir.path().join("mods").join("bad.jar").exists(),
+            "a file that fails its digest is removed, not kept for the next launch to trust"
+        );
+        assert!(reports > 0, "the bar hears about the phase");
+    }
+
+    #[test]
+    fn a_pack_installs_as_an_instance_of_its_own_and_says_what_it_came_to() {
+        // The whole tail without a network: an index that names a Minecraft
+        // version and a loader, one overrides file, and one remote mod.
+        let (dir, paths) = test_paths();
+        let mod_bytes = b"mod jar";
+        let index = serde_json::json!({
+            "formatVersion": 1,
+            "game": "minecraft",
+            "versionId": "1.6.1",
+            "name": "Cobblemon",
+            "files": [{
+                "path": "mods/cobblemon.jar",
+                "hashes": { "sha1": sha1_hex(mod_bytes) },
+                "downloads": ["https://cdn.example.invalid/cobblemon.jar"],
+                "fileSize": mod_bytes.len(),
+            }],
+            "dependencies": { "minecraft": "1.21.4", "fabric-loader": "0.16.9" },
+        });
+        let archive = pack_zip(&index, "overrides/config/cobblemon.json", b"{}");
+        // The entry's name is the whole path inside the zip, `overrides/` and
+        // all: the loader strips that prefix when it writes the tree, which is
+        // why the assertion below is not looking under `overrides/`.
+        let mut script = Script::new();
+        script.insert("https://cdn.example.invalid/cobblemon.jar", mod_bytes.to_vec());
+        let wire = script.wire();
+        let installed =
+            install_pack_archive(&wire, &paths, &write_archive(&dir, &archive), "Cobblemon", &mut |_| {})
+                .expect("the pack installs");
+        assert_eq!(installed.id, "Cobblemon");
+        assert_eq!(installed.fetch.fetched, 1);
+        assert!(installed.skipped.is_empty());
+        assert_eq!(
+            installed.summary("Cobblemon"),
+            "Installed Cobblemon as Cobblemon, 1 file"
+        );
+        let root = paths.instances_dir().join("Cobblemon");
+        assert!(root.join("mods").join("cobblemon.jar").is_file());
+        assert_eq!(
+            std::fs::read_to_string(root.join("config").join("cobblemon.json"))
+                .unwrap_or_default(),
+            "{}",
+            "the pack's overrides land in the instance root, with `overrides/` stripped"
+        );
+        let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
+        assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
+        assert!(pack.contains("1.21.4"), "pack: {pack}");
+    }
+
+    /// A `.mrpack` in memory: the index, one overrides file, nothing else.
+    ///
+    /// `entry` is the name inside the zip, so it carries the pack's own
+    /// `overrides/` prefix -- the layout the loader strips.
+    fn pack_zip(index: &serde_json::Value, entry: &str, body: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(buf);
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("modrinth.index.json", options).unwrap();
+        writer.write_all(index.to_string().as_bytes()).unwrap();
+        writer.start_file(entry, options).unwrap();
+        writer.write_all(body).unwrap();
+        writer.finish().unwrap().into_inner()
+    }
+
+    /// Write an archive into a temp dir and answer where it is.
+    fn write_archive(dir: &tempfile::TempDir, bytes: &[u8]) -> PathBuf {
+        let path = dir.path().join("Cobblemon [Fabric].mrpack");
+        std::fs::write(&path, bytes).unwrap();
+        path
     }
 
     fn library_from(value: serde_json::Value) -> Library {

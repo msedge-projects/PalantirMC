@@ -2671,6 +2671,95 @@ P7dR8mSH differ: 298 = no-release 295 + newer-non-release 3 + other 0
   scheduled: the same block as the eight before it. The transcripts above are this
   machine's, run with the flags `ci.yml` uses.
 
+- [x] G98: a modpack is installed as an instance of its own
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 913 passed; 0 failed; 14 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree, and of the live pack
+            the rule was checked against:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    476 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    217 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 14 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; 42 warnings between the crates, the same count as the slice before --
+`palantir-core` (lib) 9, its `compat` test 1 and its lib test 10; `palantir-net` 1
+and 1 duplicate; `palantir-desktop` (bin) 3 and (bin test) 21 -- none of them in a
+line this slice added, and `grep -cE "never (used|read|constructed)"` is 0.
+
+$ python - <<'PY'          # the rule, against the live service
+PY
+Fabulously Optimized | modpack | 473 versions
+  the rule picks: 14.1.0 release -> Fabulously.Optimized-v14.1.0.mrpack 167784 bytes
+  sha1: a972f29de7a636e21ebbcff505ffdb335da6e3e1
+  downloaded: 167784 bytes
+  index: Fabulously Optimized | minecraft 26.2 | loaders {'fabric-loader': '0.19.5'} | 51 files to fetch
+  overrides dir: overrides
+Cobblemon Official Modpack [Fabric] | modpack | 12 versions
+  the rule picks: 1.8.1 release -> Cobblemon Modpack [Fabric] 1.8.1.mrpack 100909813 bytes
+  sha1: d889988c972796bc991c69ce1a7e971bf1c17559
+  (the archive is 100 MB, so the rule and the published digest are the receipt)
+```
+
+  The last of the install rules, and the same move as the last slice: `browse.rs`
+  held `newest_version`, `PackFetch`, `fetch_pack_files`, `install_pack_archive`
+  and `import_and_fetch` in a `#[cfg(test)]` module, so none of them was reachable
+  from the binary. They are live in `install.rs` now, with their tests, and the
+  old module is down to the two things its own tests are about (the tab strip's
+  kind table and the search parser).
+
+  **The one install whose version is not asked of an instance.** A pack carries
+  its own Minecraft version and its own loaders in its index, so there is nothing
+  to match against: the rule is the newest version that *has* a file, releases
+  before betas before alphas, whatever game version it names -- the reference's
+  list, and the rule the old shell's `newest_version` held. Measured live rather
+  than argued: Fabulously Optimized has 473 versions, the rule picks `14.1.0`, and
+  the archive's own index names Minecraft **26.2** with `fabric-loader 0.19.5`, 51
+  files to fetch and an `overrides/` tree. A matching rule would have refused that
+  pack on any instance older than 26.2, which is the failure this rule exists to
+  avoid.
+
+  The tail is a cache and an unpack. The archive is fetched by the same rule that
+  fetches any single file -- `install::fetch_pack_archive` is `install::install_file`
+  pointed at `cache/meta/packs/`, so the published `sha1` is checked before the
+  rename and a second install of the same version is a read of a file already
+  verified -- and then the loader crate makes the instance: `modrinth.index.json`'s
+  `dependencies` become `mmc-pack.json`, its `overrides/` tree is written at the
+  instance root with the prefix stripped, and the 51 files go over the launcher's
+  one `Wire`, mirrors tried in order, each checked against its own digest.
+  `Store::install_pack` is the blocking call that drives it, `store::Outcome` is
+  what tells a finished install's two shapes apart (a line for a page, or an
+  instance to leave the reader in), and the shell's dialog draws one action
+  instead of the instance list -- because for a pack there is no list to draw, and
+  the reference's answer to the same question is to make the instance and open it.
+
+  **Two things the tests caught, both about the shape of the tail.** The first is
+  a fixture that agreed with a wrong assertion: the shell's test helper wrote zip
+  entries as `overrides/<path>`, so the install test's path assertion was looking
+  for `overrides/config/...` under the instance root -- where it would have been
+  if the loader had *not* stripped the prefix. The loader strips it (measured in
+  the store's own scratch directory: `instances/Cobblemon/config/cobblemon.json`),
+  so the helper now takes the zip entry's whole name and the assertion looks where
+  the file really lands. The second is the one thing a pack outcome cannot do: a
+  line for the page. The reader is moved to the instance the pack made, so there
+  is no page left to draw a notice on -- `store::Outcome` is what lets the shell
+  hand the line back for a file install and *not* for a pack, rather than sending
+  a message to a page that is gone.
+
+  The runner could not be the receipt: this slice's push is recorded by the commit
+  that follows it, and the account gave it the same block as the nine before --
+  `Test workspace` and `Lint` dying in seconds with zero steps, and `Live
+  services` and `Build exe` never scheduled. The transcripts above are this
+  machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

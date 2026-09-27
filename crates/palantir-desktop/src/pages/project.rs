@@ -28,7 +28,7 @@ use palantir_net::modrinth::{ModrinthProject, ModrinthProjectVersion};
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP, ROW_GAP};
 use crate::pages::Ask;
-use crate::route::ProjectTab;
+use crate::route::{ProjectTab, ProjectType};
 use crate::store::Store;
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
@@ -60,6 +60,9 @@ pub struct Project {
     pub gallery: Vec<String>,
     /// The versions it has published.
     pub versions: Vec<Version>,
+    /// What kind of project it is, or nothing when the API named a kind this
+    /// launcher does not install.
+    pub kind: Option<ProjectType>,
 }
 
 /// One published version.
@@ -105,6 +108,9 @@ pub struct Install {
     pub id: String,
     /// Its title, as the page is drawing it. Empty when the page has none yet.
     pub title: String,
+    /// Whether it is a pack, which is the one kind whose install has no folder to
+    /// land in: the dialog asks for a new instance instead of offering one.
+    pub pack: bool,
 }
 
 impl Project {
@@ -129,6 +135,13 @@ impl Project {
             author: author.to_string(),
             summary: project.description.clone(),
             body: project.body.clone(),
+            // What the thing *is*, which the header does not draw and one press
+            // does need: a pack is installed by becoming an instance rather than
+            // by landing in a folder, and the dialog that asks where to put it
+            // asks a different question for one. Kept as the API spelled it, with
+            // an unknown type left unknown rather than guessed at -- a project
+            // type this launcher has not heard of is not a mod.
+            kind: ProjectType::from_token(&project.project_type),
             downloads: project.downloads,
             follows: project.followers,
             game_versions: project.game_versions.clone(),
@@ -278,6 +291,14 @@ impl State {
                         .ready()
                         .map(|project| project.title.clone())
                         .unwrap_or_default(),
+                    // An unloaded page is not a pack: the dialog it opens refuses
+                    // nothing, and the press that would have installed a file
+                    // still has a folder to offer.
+                    pack: self
+                        .project
+                        .ready()
+                        .map(|project| project.kind == Some(ProjectType::Modpack))
+                        .unwrap_or(false),
                 }));
             }
             // A sentence either way, in the slot every other thing the page could
@@ -516,6 +537,7 @@ mod tests {
             author: "jellysquid3".to_string(),
             summary: "A rendering engine".to_string(),
             body: "# Sodium\n\nFaster.\n\n- one\n- two".to_string(),
+            kind: Some(ProjectType::Mod),
             downloads: 1234567,
             follows: 4321,
             game_versions: vec!["1.21".to_string()],
@@ -656,6 +678,11 @@ mod tests {
         let page = Project::from_api(&api_project, "jellysquid3", &api_versions);
         assert_eq!(page.id, "AANobbMI");
         assert_eq!(page.title, "Sodium");
+        assert_eq!(
+            page.kind,
+            Some(ProjectType::Mod),
+            "the type is read, because the install dialog needs it"
+        );
         assert_eq!(page.author, "jellysquid3");
         assert_eq!(page.summary, "Modern rendering engine");
         assert_eq!(page.downloads, 41_000_000);
@@ -709,6 +736,7 @@ mod tests {
                     install.title, "Sodium",
                     "the dialog is the shell's and has never seen a project document"
                 );
+                assert!(!install.pack, "and this one lands in a folder");
             }
             other => panic!("the install button asks which instance: {other:?}"),
         }
@@ -716,6 +744,17 @@ mod tests {
             state.notice.is_none(),
             "and says nothing about a transfer that has not started"
         );
+        // A pack says so, because the shell's dialog asks a different question for
+        // one: a pack has no folder to land in, it becomes an instance.
+        let mut pack = State::new("cobblemon".to_string(), ProjectTab::Description);
+        pack.project = Load::Ready(Project {
+            kind: Some(ProjectType::Modpack),
+            ..project()
+        });
+        match pack.update(Message::Install) {
+            Some(Ask::Install(install)) => assert!(install.pack, "a pack is named as one"),
+            other => panic!("a pack asks too: {other:?}"),
+        }
         // Pressed before the project has arrived, the ask still goes out and names
         // no title rather than asking the service for one.
         let mut fresh = State::new("sodium".to_string(), ProjectTab::Description);
