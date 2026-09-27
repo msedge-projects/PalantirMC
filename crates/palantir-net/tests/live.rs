@@ -696,6 +696,67 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
     );
 }
 
+/// Modrinth's news feed: the one document the panel draws that is not the API.
+///
+/// It is asserted rather than assumed for the reason every live test in this file
+/// exists: the shape was read off the live service (`/news/feed/articles.json`,
+/// 45 articles, each with `title`, `summary`, `thumbnail`, `date` and `link`), and
+/// a fixture written from a guess would have agreed with a parser that read the
+/// wrong keys. What this catches is the service changing the envelope under the
+/// panel -- `articles` renamed, a date that is no longer ISO-8601, a link that is
+/// no longer absolute.
+#[test]
+#[ignore = "live: reaches modrinth.com"]
+fn the_live_news_feed_parses_into_articles_the_panel_can_draw() {
+    use palantir_net::engine::{Backoff, Cancel, HttpPool, MetadataCache, ModrinthApi};
+    use palantir_net::modrinth::NEWS_URL;
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let pool = std::sync::Arc::new(HttpPool::default());
+    let api = ModrinthApi::new(
+        MetadataCache::new(tmp.path().join("modrinth"), palantir_net::DEFAULT_TTL),
+        pool,
+    );
+    let cancel = Cancel::new();
+    let backoff = Backoff::with_attempts(2);
+
+    let news = api
+        .news(&cancel, &backoff)
+        .unwrap_or_else(|e| panic!("{NEWS_URL}: {e}"));
+    assert!(!news.is_empty(), "the feed has no articles at all");
+    // The first four are what the panel draws, so those are the four this is
+    // about: every field the card uses has to be there for the live feed.
+    for article in news.iter().take(4) {
+        assert!(!article.title.is_empty(), "an article with no title: {article:?}");
+        assert!(
+            article.link.starts_with("https://"),
+            "an article whose link is not absolute: {}",
+            article.link
+        );
+        assert!(
+            article.date.len() >= 10 && article.date.as_bytes()[4] == b'-',
+            "a date that is not ISO-8601: {}",
+            article.date
+        );
+        // And the format the card draws it in is a month name and a year, which
+        // is the one thing the parser does to the date.
+        let label = article.date_label();
+        assert!(
+            label.contains(", 20"),
+            "{}'s date drew as '{label}'",
+            article.title
+        );
+    }
+
+    // Newest first is the order the panel's four come out in, and it is the
+    // service's order rather than this launcher's: a feed that reversed would put
+    // the oldest announcement at the top of the sidebar.
+    let dates: Vec<&str> = news.iter().take(4).map(|article| article.date.as_str()).collect();
+    let mut sorted = dates.clone();
+    sorted.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(dates, sorted, "the feed is not newest first");
+}
+
 /// Mojang's own metadata, which is the source this launcher has never used.
 ///
 /// The shell this rewrite replaces reads `meta.prismlauncher.org`, a mirror:

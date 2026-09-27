@@ -367,6 +367,97 @@ pub struct ModrinthUser {
     pub username: String,
 }
 
+/// Modrinth's news feed: the one Modrinth document this launcher reads that is
+/// not the API.
+///
+/// `App.vue` fetches exactly this URL at startup and takes `res.articles`, so the
+/// panel's news section is a publisher's own file rather than a scraped page. It
+/// is not under `/v2` and it is not a project's metadata; a feed of
+/// announcements, published as JSON for the news page and its readers.
+pub const NEWS_URL: &str = "https://modrinth.com/news/feed/articles.json";
+
+/// The news page the panel's *View all news* button opens: the reference's own
+/// `href` in `App.vue`, spelled once here because the shell draws it and nothing
+/// else in this launcher writes a URL by hand.
+pub const NEWS_PAGE_URL: &str = "https://modrinth.com/news";
+
+/// The feed's own envelope, `{ "articles": [...] }`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct NewsFeed {
+    /// The articles, newest first as the feed publishes them.
+    #[serde(default)]
+    pub articles: Vec<NewsArticle>,
+}
+
+/// One news article.
+///
+/// Five fields, measured off the live feed rather than guessed: the title, the
+/// one-line summary, a thumbnail URL, an ISO-8601 date, and the article's own
+/// link. Everything is defaulted, because a feed is a stranger's JSON and one
+/// article missing a summary should cost the panel a paragraph rather than the
+/// whole section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct NewsArticle {
+    /// The headline.
+    #[serde(default)]
+    pub title: String,
+    /// One line under it.
+    #[serde(default)]
+    pub summary: String,
+    /// The card's image, as a URL on Modrinth's own CDN.
+    #[serde(default)]
+    pub thumbnail: String,
+    /// When it was published, ISO-8601 (`2026-09-07T19:00:00.000Z`).
+    #[serde(default)]
+    pub date: String,
+    /// The article's own page on modrinth.com.
+    #[serde(default)]
+    pub link: String,
+}
+
+/// The month names the reference's `dateStyle: 'long'` uses, in its default
+/// locale. Twelve entries rather than a date crate: this launcher draws one
+/// format, and a dependency that can format any date is a dependency that has to
+/// be kept current for a word.
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+impl NewsArticle {
+    /// The publication date as the reference draws it: `September 7, 2026`.
+    ///
+    /// Read out of the ISO-8601 string's own first ten characters, which is the
+    /// only part of it this needs; a time zone would move the *day* of an evening
+    /// announcement, and the reference reads the same string the same way.
+    ///
+    /// A date that cannot be read is drawn as it was published rather than as
+    /// nothing: a wrong-looking date is a bug report, a missing one is silence.
+    pub fn date_label(&self) -> String {
+        let date = self.date.get(..10).unwrap_or_default();
+        let mut parts = date.split('-');
+        let year = parts.next().and_then(|part| part.parse::<i32>().ok());
+        let month = parts.next().and_then(|part| part.parse::<usize>().ok());
+        let day = parts.next().and_then(|part| part.parse::<u32>().ok());
+        match (year, month, day) {
+            (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) => {
+                format!("{} {day}, {year}", MONTHS[month - 1])
+            }
+            _ => self.date.clone(),
+        }
+    }
+}
+
 /// Percent-encode a query string (RFC 3986 unreserved set left intact).
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -412,6 +503,45 @@ fn hex_nibble(v: u8) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An article with just a date, which is all `date_label` reads.
+    fn dated(date: &str) -> NewsArticle {
+        NewsArticle { date: date.to_string(), ..NewsArticle::default() }
+    }
+
+    #[test]
+    fn a_news_date_is_drawn_the_way_the_reference_draws_it() {
+        // `dateStyle: 'long'` in the reference's own locale: `September 7, 2026`.
+        // The day is not zero-padded, because the reference's formatter is not.
+        assert_eq!(dated("2026-09-07T19:00:00.000Z").date_label(), "September 7, 2026");
+        assert_eq!(dated("2026-01-31T00:00:00.000Z").date_label(), "January 31, 2026");
+        assert_eq!(dated("2026-12-01").date_label(), "December 1, 2026");
+        // A date this launcher cannot read is drawn as it was published rather
+        // than as nothing: a wrong-looking date is a bug report, an empty one is
+        // silence. A month of 13 is not a month.
+        assert_eq!(dated("not a date").date_label(), "not a date");
+        assert_eq!(dated("2026-13-01T00:00:00Z").date_label(), "2026-13-01T00:00:00Z");
+        assert_eq!(dated("").date_label(), "");
+    }
+
+    #[test]
+    fn the_feed_is_an_articles_envelope_and_nothing_else_is_required() {
+        // The shape the live feed serves, measured: one top-level key, and every
+        // article field optional so that one article missing a summary costs the
+        // panel a paragraph rather than the whole section.
+        let feed: NewsFeed = serde_json::from_str(
+            r#"{"articles": [{"title": "A", "date": "2026-09-07T19:00:00.000Z"}]}"#,
+        )
+        .expect("the feed's own shape");
+        assert_eq!(feed.articles.len(), 1);
+        assert_eq!(feed.articles[0].title, "A");
+        assert_eq!(feed.articles[0].summary, "");
+        assert_eq!(feed.articles[0].link, "");
+        // And an envelope with no `articles` at all is an empty feed rather than
+        // a parse failure: the panel draws nothing for it either way.
+        let empty: NewsFeed = serde_json::from_str("{}").expect("no articles key");
+        assert!(empty.articles.is_empty());
+    }
 
     #[test]
     fn search_url_encodes_query_and_limit() {

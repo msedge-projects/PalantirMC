@@ -68,7 +68,8 @@ pub use engine::{
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
     ModrinthDependency, ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse,
-    ModrinthVersionFile, search_url, version_url, MODRINTH_BASE_URL,
+    ModrinthVersionFile, NewsArticle, NewsFeed, search_url, version_url, MODRINTH_BASE_URL,
+    NEWS_PAGE_URL, NEWS_URL,
 };
 
 use std::path::PathBuf;

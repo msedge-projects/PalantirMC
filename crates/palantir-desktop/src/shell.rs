@@ -67,6 +67,7 @@ use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
 use crate::pages::{self, discover, project, Screen};
+use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
 use crate::ui::Hovered;
@@ -411,6 +412,23 @@ pub struct Shell {
     /// A pack's install, which has no instance to name: the project that becomes
     /// one. Taken by its command, for [`Shell::install_requested`]'s reason.
     pack_requested: Option<String>,
+    /// The panel's news section: the newest articles, or why there are none.
+    ///
+    /// Asked for once, at startup, because the panel is drawn on every route --
+    /// a section that waited for a page to ask for it would blank out whenever
+    /// the reader moved. `Loading` until the answer arrives, and nothing is drawn
+    /// for either that or a failure: the reference's own `v-if="news.length"`
+    /// draws no section for an empty feed, and an unreachable feed is not an
+    /// error a reader can act on.
+    news: Load<Vec<NewsArticle>>,
+    /// Why the last link did not open, drawn under the news section it was
+    /// pressed in.
+    ///
+    /// A link that does not open is the one thing here a reader can report, so it
+    /// is said rather than dropped -- and the opener refuses anything that is not
+    /// `http`/`https` before a program is ever built, which is the failure this
+    /// note is most likely to carry (`crate::open`).
+    link_note: Option<String>,
     /// Why the last install did not work, drawn inside the dialog.
     ///
     /// The dialog's own sentence rather than the page's notice, because the
@@ -706,6 +724,12 @@ pub enum Message {
     InstallInto(String),
     /// The install dialog's pack action: make an instance out of this project.
     InstallPack,
+    /// The panel's news feed came back, or did not.
+    News(Result<Vec<NewsArticle>, String>),
+    /// One of the news section's links: open it in the machine's own browser.
+    OpenUrl(String),
+    /// The link note's dismiss button.
+    DismissLinkNote,
     /// The install that was asked for came back, with the line it succeeded with
     /// or why it did not.
     ///
@@ -860,6 +884,8 @@ impl Shell {
             accounts_warning: None,
             accounts_open: false,
             accounts_note: None,
+            news: Load::Loading,
+            link_note: None,
             jobs: BTreeMap::new(),
             downloads: false,
             switchers: false,
@@ -1525,6 +1551,28 @@ impl Shell {
                 self.accounts_note = None;
                 None
             }
+            Message::News(result) => {
+                // A failure is kept in the state rather than thrown away, and the
+                // section draws nothing for it -- but the *reason* is here for the
+                // next reader of this code, and for a later slice that decides a
+                // broken feed is worth a line.
+                self.news = match result {
+                    Ok(articles) => Load::Ready(articles),
+                    Err(reason) => Load::Failed(reason),
+                };
+                None
+            }
+            Message::OpenUrl(url) => {
+                // The opener is where the scheme is checked: a feed is a
+                // stranger's JSON, and a press is what hands a string to the
+                // operating system.
+                self.link_note = crate::open::url(&url).err();
+                None
+            }
+            Message::DismissLinkNote => {
+                self.link_note = None;
+                None
+            }
             Message::ToggleDownloads => {
                 self.downloads = !self.downloads;
                 None
@@ -1821,6 +1869,15 @@ impl Shell {
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
+    }
+
+    /// Read the news feed and bring the answer back as a shell message.
+    ///
+    /// Off the frame thread, for [`Shell::search`]'s reason: it is one blocking
+    /// request, and the panel is drawn on the first frame the window has.
+    fn news_command(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        iced::Command::perform(crate::store::off_thread(move || store.news()), Message::News)
     }
 
     /// Run a search and bring the answer back as a page message.
@@ -3016,14 +3073,31 @@ impl Shell {
     /// and one scroll region inside it (`app-sidebar-scrollable`) that the
     /// sections stack in. The sections are the onboarding checklist, this card
     /// ("Playing as", `app.sidebar.playing-as`), the friends list, the fundraiser
-    /// banner and the news feed; the second of those is the only one this launcher
-    /// can draw anything in, and the others are absent rather than drawn empty.
+    /// banner and the news feed. Two of those are here now -- this card (G83) and
+    /// the news feed (G101) -- in the reference's own order, with the friends list
+    /// and the banner still absent rather than drawn empty: the first needs
+    /// Modrinth sign-in and a friends endpoint, and the banner's campaign is served
+    /// by an endpoint this launcher does not read.
     fn panel(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let mut sections = column![].width(Length::Fill).push(self.playing_as());
         if let Some(note) = &self.accounts_note {
             sections = sections.push(
-                container(self.accounts_note_block(note))
+                container(self.panel_note_block(Key::MinecraftAccountSignIn.message(), note, ACCOUNTS_NOTE_DISMISS, Message::DismissAccountsNote))
+                    .width(Length::Fill)
+                    .padding(PANEL_SECTION_PAD),
+            );
+        }
+        // The news section, where the reference has it: after the accounts card and
+        // the two sections this launcher does not draw. Nothing at all is drawn
+        // when the feed has no articles -- the reference's own `v-if` -- which is
+        // also what a feed that could not be reached looks like.
+        if let Some(news) = self.news_section() {
+            sections = sections.push(news);
+        }
+        if let Some(note) = &self.link_note {
+            sections = sections.push(
+                container(self.panel_note_block("link", note, LINK_NOTE_DISMISS, Message::DismissLinkNote))
                     .width(Length::Fill)
                     .padding(PANEL_SECTION_PAD),
             );
@@ -3084,7 +3158,13 @@ impl Shell {
 
     /// What one of the card's controls could not do, with the control that reads
     /// it -- [`crate::page::notice`]'s shape, drawn where the press was made.
-    fn accounts_note_block(&self, note: &str) -> Element<'_, Message> {
+    fn panel_note_block(
+        &self,
+        header: &str,
+        note: &str,
+        dismiss_key: &'static str,
+        dismiss: Message,
+    ) -> Element<'_, Message> {
         let theme = self.theme;
         row![]
             .spacing(ROW_GAP)
@@ -3092,18 +3172,142 @@ impl Shell {
             .push(crate::ui::admonition(
                 theme,
                 crate::ui::Severity::Info,
-                Key::MinecraftAccountSignIn.message(),
+                header,
                 note,
             ))
             .push(Space::with_width(Length::Fill))
-            .push(crate::ui::icon_button(
-                theme,
-                ACCOUNTS_NOTE_DISMISS,
-                Glyph::X,
-                16.0,
-                Message::DismissAccountsNote,
-            ))
+            .push(crate::ui::icon_button(theme, dismiss_key, Glyph::X, 16.0, dismiss))
             .into()
+    }
+
+    /// The panel's news section: the newest articles, and the way to the rest.
+    ///
+    /// `App.vue` draws it as a `p-4` column with the reference's own heading
+    /// (`app.news.title`), one `NewsArticleCard` per article and a `ButtonLink` to
+    /// the news page. Three things are this launcher's rather than the reference's:
+    ///
+    /// * **Four articles**, which is the reference's own slice of the feed
+    ///   (`articles.slice(0, 4)`), so the section is a fixed height in the panel
+    ///   rather than as long as the feed happens to be.
+    /// * **No thumbnail.** The card's first element is its image, and this launcher
+    ///   has no way to draw a remote one yet: the image widget it has takes bytes
+    ///   it was handed, and nothing here fetches a picture at all. The title, the
+    ///   summary and the date are drawn, and the picture is named as missing rather
+    ///   than faked with an empty frame.
+    /// * **A card whose link is not openable is not drawn.** A press hands the URL
+    ///   to the operating system, so a card that could not be opened would be a
+    ///   control that does nothing -- which is the one thing this shell refuses.
+    fn news_section(&self) -> Option<Element<'_, Message>> {
+        let theme = self.theme;
+        let shown = self.news_shown();
+        if shown.is_empty() {
+            return None;
+        }
+        let mut cards = column![].width(Length::Fill).spacing(CARD_TOP);
+        for article in shown {
+            cards = cards.push(self.news_card(article));
+        }
+        cards = cards.push(crate::ui::button_with_icon(
+            theme,
+            NEWS_VIEW_ALL_KEY,
+            Glyph::Newspaper,
+            Key::AppNewsViewAll,
+            crate::ui::Kind::Colored,
+            Length::Fill,
+            Some(Message::OpenUrl(NEWS_PAGE_URL.to_string())),
+        ));
+        Some(
+            column![]
+                .width(Length::Fill)
+                .push(
+                    container(
+                        column![]
+                            .width(Length::Fill)
+                            .spacing(CARD_TOP)
+                            .push(
+                                text(Key::AppNewsTitle.message())
+                                    .size(PANEL_HEADING)
+                                    .font(medium())
+                                    .style(iced::theme::Text::Color(theme_gen::ink(
+                                        theme,
+                                        INK_DEFAULT,
+                                    ))),
+                            )
+                            .push(cards),
+                    )
+                    .width(Length::Fill)
+                    .padding(PANEL_SECTION_PAD),
+                )
+                .into(),
+        )
+    }
+
+    /// The articles the panel draws: the feed's newest four, minus the ones a card
+    /// cannot be built from.
+    ///
+    /// A separate function from the drawing because what is *shown* is the part
+    /// worth asserting: the panel draws a fixed number of cards whatever the feed
+    /// holds, and an article with no title or a link this launcher will not open is
+    /// not one of them.
+    fn news_shown(&self) -> Vec<&NewsArticle> {
+        let Load::Ready(articles) = &self.news else {
+            return Vec::new();
+        };
+        articles
+            .iter()
+            .filter(|article| {
+                !article.title.is_empty() && crate::open::is_openable(&article.link)
+            })
+            .take(MAX_NEWS)
+            .collect()
+    }
+
+    /// One news article, as a pressable card.
+    ///
+    /// `NewsArticleCard.vue`: the title, the summary when there is one, and the
+    /// date at the foot under `mt-auto` -- and the whole card is the link, which
+    /// is what `AutoLink` is. The hover brightens it, the reference's own
+    /// `hover:brightness-125` on the card rather than a tint of this launcher's.
+    fn news_card<'a>(&'a self, article: &'a NewsArticle) -> Element<'a, Message> {
+        let theme = self.theme;
+        let key = crate::ui::scoped("panel:news", &article.link);
+        let (factor, _) = crate::ui::interaction(key);
+        let mut body = column![]
+            .width(Length::Fill)
+            .spacing(4.0)
+            .push(
+                text(article.title.clone())
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            );
+        if !article.summary.is_empty() {
+            body = body.push(crate::ui::paragraph(theme, &article.summary));
+        }
+        body = body.push(
+            text(article.date_label())
+                .size(12.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        );
+        let link = article.link.clone();
+        crate::ui::card_at(
+            theme,
+            factor,
+            mouse_area(body)
+                .interaction(Interaction::Pointer)
+                .on_enter(Message::hover_with(
+                    key,
+                    true,
+                    crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                ))
+                .on_exit(Message::hover_with(
+                    key,
+                    false,
+                    crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                ))
+                .on_press(Message::OpenUrl(link)),
+        )
     }
 
     /// `AccountsCard.vue`: the launcher's accounts, as the panel shows them.
@@ -4274,6 +4478,18 @@ const INSTALL_CREATE_KEY: &str = "shell:install:create";
 /// The pack install's own button, in the dialog that has no rows at all.
 const INSTALL_PACK_KEY: &str = "shell:install:pack";
 
+/// The panel's news section: its *View all news* button's stable name, and how
+/// many articles it draws.
+///
+/// Four is the reference's own number (`App.vue` slices the feed to four for the
+/// sidebar), and it is what keeps the section a known height in a column that also
+/// holds the accounts card.
+const NEWS_VIEW_ALL_KEY: &str = "shell:news:view-all";
+const MAX_NEWS: usize = 4;
+
+/// The link note's dismiss button.
+const LINK_NOTE_DISMISS: &str = "shell:link-note:dismiss";
+
 /// A crossing published by one of the card's own surfaces.
 ///
 /// The kit's controls publish [`Message::Control`] with no hover end, and the
@@ -4667,7 +4883,12 @@ impl iced::Application for Shell {
         // arrived -- `/browse/modpack` owes a search -- and the first frame is the
         // first moment there is anywhere to put the answer, so it is asked for
         // here rather than waited for.
-        let command = shell.opening_command();
+        //
+        // The panel's news feed rides along, and this is the only place it is asked
+        // for: the panel is on every route, so a section that waited for a page to
+        // owe it would be blank until the reader providentially visited one. Two
+        // commands on one frame, each of them off the frame thread.
+        let command = iced::Command::batch([shell.opening_command(), shell.news_command()]);
         (shell, command)
     }
 
@@ -5171,6 +5392,75 @@ mod tests {
         assert!(matches!(shell.modal, Some(Modal::Install { pack: true, .. })));
         for theme in Gen::ALL {
             shell.theme = *theme;
+            drop(shell.render());
+        }
+    }
+
+    /// One article, in the feed's own shape.
+    fn news_article(title: &str, link: &str, date: &str) -> NewsArticle {
+        NewsArticle {
+            title: title.to_string(),
+            summary: format!("{title}, in a sentence."),
+            thumbnail: String::new(),
+            date: date.to_string(),
+            link: link.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_panel_draws_the_four_newest_articles_and_the_way_to_the_rest() {
+        let mut shell = shell_with_home("panel-news");
+        // Nothing is drawn before the feed arrives, and nothing is drawn for a feed
+        // that never does: the reference's own `v-if` is `news.length > 0`, and an
+        // unreachable feed is not an error a reader can act on.
+        assert!(shell.news_shown().is_empty());
+        shell.news = Load::Failed("no network".to_string());
+        assert!(shell.news_shown().is_empty());
+        assert!(shell.news_section().is_none());
+
+        shell.news = Load::Ready(
+            (0..6)
+                .map(|i| {
+                    news_article(
+                        &format!("Article {i}"),
+                        &format!("https://modrinth.com/news/article/{i}"),
+                        &format!("2026-09-0{}T19:00:00.000Z", i + 1),
+                    )
+                })
+                .collect(),
+        );
+        // Four, in the feed's own order -- the reference's own slice of it -- and
+        // the fifth and sixth are not drawn at all.
+        let shown = shell.news_shown();
+        assert_eq!(shown.len(), MAX_NEWS, "the panel draws a fixed number of cards");
+        assert_eq!(shown[0].title, "Article 0");
+        assert_eq!(shown[3].title, "Article 3");
+        assert!(shell.news_section().is_some());
+
+        // An article with no title, and one whose link this launcher will not open,
+        // are not cards: a press hands the URL to the operating system, so a card
+        // that could not be opened would be a control that does nothing.
+        shell.news = Load::Ready(vec![
+            news_article("", "https://modrinth.com/news/article/untitled", "2026-09-01T00:00:00.000Z"),
+            news_article("A local file", "file:///etc/passwd", "2026-09-01T00:00:00.000Z"),
+            news_article("Openable", "https://modrinth.com/news/article/good", "2026-09-02T00:00:00.000Z"),
+        ]);
+        assert_eq!(shell.news_shown().len(), 1);
+
+        // The one press a test can make without starting a browser: a link the
+        // opener refuses. It is said under the section rather than dropped, and the
+        // dismiss clears it.
+        press(&mut shell, Message::OpenUrl("file:///etc/passwd".to_string()));
+        let note = shell.link_note.clone().expect("a sentence");
+        assert!(note.contains("is not a link this launcher will open"), "{note}");
+        press(&mut shell, Message::DismissLinkNote);
+        assert!(shell.link_note.is_none());
+
+        // And the section is drawn in every theme, with a feed and without one.
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            drop(shell.render());
+            shell.news = Load::Loading;
             drop(shell.render());
         }
     }

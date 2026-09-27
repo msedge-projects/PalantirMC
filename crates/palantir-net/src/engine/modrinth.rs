@@ -40,7 +40,8 @@ use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
     project_members_url, project_url, search_url_parts, version_url, ModrinthMember,
-    ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse,
+    ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse, NewsArticle, NewsFeed,
+    NEWS_URL,
 };
 use crate::Error;
 
@@ -219,6 +220,25 @@ impl ModrinthApi {
         let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
+
+    /// Modrinth's news feed, newest first.
+    ///
+    /// The one document here that is not the API: the panel's news section is
+    /// drawn from it, and the reference fetches the same URL itself. Believed for
+    /// the project TTL -- the metadata default -- rather than [`SEARCH_TTL`]: a
+    /// feed of announcements is not a question about what people are using right
+    /// now, and an article half an hour old is still the article under the
+    /// reader's nose.
+    ///
+    /// The whole feed is returned and the *panel* takes the first four it draws,
+    /// which is the reference's own split: its fetch slices four for the sidebar
+    /// and its news page reads the rest of the same response.
+    pub fn news(&self, cancel: &Cancel, backoff: &Backoff) -> Result<Vec<NewsArticle>, Error> {
+        let held = self.projects.get(NEWS_URL, self.fetch.as_ref(), cancel, backoff)?;
+        let feed: NewsFeed = serde_json::from_slice(&held.body)
+            .map_err(|error| Error::json(NEWS_URL, error.to_string()))?;
+        Ok(feed.articles)
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +295,20 @@ mod tests {
          "user": {"id": "u2", "username": "embeddedt"}}
     ]"#;
 
+    /// Two articles, in the feed's own shape and its own order, as the live feed
+    /// publishes them (`2026-09-07T19:00:00.000Z` is a real entry's date).
+    const NEWS_BODY: &str = r#"{
+        "articles": [
+            {"title": "Sync settings across instances",
+             "summary": "Keep game options the same across your instances.",
+             "thumbnail": "https://modrinth.com/news/article/sync-settings/thumbnail.webp",
+             "date": "2026-09-07T19:00:00.000Z",
+             "link": "https://modrinth.com/news/article/sync-settings"},
+            {"title": "A second article", "date": "2026-08-01T10:00:00.000Z",
+             "link": "https://modrinth.com/news/article/second"}
+        ]
+    }"#;
+
     /// An API over a scratch directory whose only routes are the ones a test
     /// scripts, so a test that forgets one fails instead of dialling out.
     fn api(name: &str, ttl: Duration) -> (ModrinthApi, Arc<MapFetch>) {
@@ -287,6 +321,28 @@ mod tests {
 
     fn run(api: &ModrinthApi, search: &Search) -> Result<ModrinthSearchResponse, Error> {
         api.search(search, &Cancel::new(), &Backoff::with_attempts(1))
+    }
+
+    #[test]
+    fn the_news_feed_reads_five_fields_and_is_cached_like_a_document() {
+        let (api, fetch) = api("news", DEFAULT_TTL);
+        fetch.set_route(NEWS_URL, Route::text(NEWS_BODY));
+
+        let news = api.news(&Cancel::new(), &Backoff::with_attempts(1)).expect("the feed");
+        assert_eq!(news.len(), 2, "the whole feed, in the order it was published");
+        assert_eq!(news[0].title, "Sync settings across instances");
+        assert_eq!(news[0].summary, "Keep game options the same across your instances.");
+        assert!(news[0].date.ends_with('Z'), "the date travels as published");
+        assert_eq!(news[0].link, "https://modrinth.com/news/article/sync-settings");
+        assert!(news[0].thumbnail.ends_with("thumbnail.webp"));
+        // An article that publishes no summary is a card with one paragraph fewer,
+        // not a feed that fails to parse.
+        assert_eq!(news[1].summary, "");
+        assert_eq!(news[1].thumbnail, "");
+
+        api.news(&Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        assert_eq!(fetch.count(), 1, "a feed inside its belief costs nothing");
+        assert_eq!(fetch.requests()[0].url, NEWS_URL);
     }
 
     #[test]

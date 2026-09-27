@@ -71,6 +71,13 @@ mod mods;
 /// `tools/curve_samples.html` measures.
 mod motion;
 mod native;
+/// Opening a link in the browser the machine already has.
+///
+/// One function and one rule set -- `http`/`https` and nothing else -- because the
+/// links this launcher draws include a stranger's feeds and a press is what hands
+/// a string to the operating system. The panel's news section is what needed it
+/// first (`NEXT_STEPS.md`, stage 3).
+mod open;
 /// The scaffold every page is built from: the state of what a page asked for, and
 /// the blocks it draws when the answer is not ready yet.
 ///

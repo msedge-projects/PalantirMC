@@ -87,8 +87,8 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). What is not real yet is Skins, Servers and an instance's hosting half, and the panel's remaining sections -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95). What is left of the metadata source `resolve` reads is the two Forge-shaped loaders -- see "What stage 4 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). The right panel draws a second section now -- Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). What is not real yet is Skins, Servers and an instance's hosting half, and the panel's remaining sections -- see "What stage 3 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); the panel's news feed is a document on the same cache (G101); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95). What is left of the metadata source `resolve` reads is the two Forge-shaped loaders -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -393,6 +393,32 @@ built rather than doing nothing. The section is drawn one step early: the
 reference gates it on the onboarding checklist's own `hasLoggedIntoMinecraft`,
 and that checklist is one of the sections that are not built.
 
+The panel's second section is Modrinth's news feed (G101). `App.vue` reads
+`https://modrinth.com/news/feed/articles.json` -- the one Modrinth document on
+this engine that is not the API -- and draws the reference's own heading, the
+feed's first four articles as cards and a button to the news page. The shape was
+measured rather than assumed: 45 articles, five fields (title, summary,
+thumbnail, date, link), everything defaulted so one article without a summary
+costs a paragraph rather than the section. The date is drawn the way the
+reference's `dateStyle: 'long'` does -- `September 7, 2026`, from a twelve-name
+table and the string's own first ten characters rather than a date crate -- and
+the feed is believed for the project TTL, not the search TTL, because an article
+half an hour old is still the article under the reader's nose.
+
+The section needed something the launcher did not have: an **opener** (`open.rs`),
+because two of its three controls are links and a control that does nothing is the
+one thing this shell refuses. It is the only place this starts a program that is
+neither Minecraft nor Java, so its rules live there: `http` and `https` only, each
+followed by `//`, everything else refused with a sentence -- the feed is a
+stranger's JSON, and `file:///C:/Windows/System32/cmd.exe` arriving as a string
+must not become a program. The command is built per platform by
+`command_for(platform, url)` so all three are asserted on whichever machine runs
+the tests, and the Windows one carries `start`'s empty title argument, without
+which a URL with a space in it opens an empty window named by half the address.
+Nothing waits for the browser. The thumbnail is *not* drawn -- nothing in this
+launcher fetches a picture yet -- and an empty or failed feed draws nothing at all,
+which is the reference's own `v-if="news.length"`.
+
 Three things about the pages are decisions worth keeping:
 
 1. **A page reports navigation, it does not perform it.** Pressing an instance
@@ -424,11 +450,13 @@ What stage 3 does **not** have yet, named rather than implied:
   the three fill.
 * **The panel's other sections are not built.** The panel is no longer a wash
   (G83): Discover, a project and a profile force it on (`App.vue`'s
-  `forceSidebar`), and it draws `app-sidebar`'s scroll region with its first
-  section, *Playing as* and the accounts card. What the reference stacks beside
-  that one -- the onboarding checklist, the friends list, the fundraiser banner
-  and the news feed -- are absent rather than drawn empty, because each is a
-  service's answer.
+  `forceSidebar`), and it draws `app-sidebar`'s scroll region with its first two
+  sections -- *Playing as* with the accounts card, and the news feed with its
+  four cards and its button to the rest (G101). What the reference stacks beside
+  those -- the onboarding checklist, the friends list and the fundraiser banner
+  over it -- are absent rather than drawn empty, because each is a service's
+  answer: a friends list is Modrinth's authenticated one, and the banner's
+  campaign is served by an endpoint this launcher has not been given.
 
 Two gaps that were on this list are closed and stay named here so the next reader
 knows when: the controls tween their hover off the same clock the rail's plate

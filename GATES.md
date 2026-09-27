@@ -2819,6 +2819,118 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out
   land as four-second runs with zero steps and the same annotation. The
   transcript above is this machine's, run with the flags `ci.yml` uses.
 
+- [x] G101: the panel's news feed, and the opener its links needed
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 928 passed; 0 failed; 16 ignored, between the seven suites
+          (the merged tree's count: G99's Forge commit is under this one)
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree, and of the live feed the
+            section is drawn from:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    481 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    227 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; 42 warnings between the crates, the same count as the slice before --
+`palantir-core` (lib) 9, its `compat` test 1 and its lib test 10; `palantir-net` 1
+and 1 duplicate; `palantir-desktop` (bin) 3 and (bin test) 21 -- none of them in a
+line this slice added (`grep news` and `grep open.rs` over the log find no
+warning), and `grep -cE "never (used|read|constructed)"` is 0.
+
+$ python - <<'PY'          # the feed, read live
+PY
+top-level keys: ['articles']
+articles: 45
+article keys: ['date', 'link', 'summary', 'thumbnail', 'title']
+  title: Sync settings across instances
+  summary: Keep game options, servers, resource packs, and more the same across your instances.
+  thumbnail: https://modrinth.com/news/article/sync-settings/thumbnail.webp
+  date: 2026-09-07T19:00:00.000Z
+  link: https://modrinth.com/news/article/sync-settings
+```
+
+  The panel's second section, and the first thing in this launcher that opens a
+  link. `App.vue` draws it from `https://modrinth.com/news/feed/articles.json`:
+  the reference's own heading (`app.news.title`), `articles.slice(0, 4)` as
+  `NewsArticleCard`s, and a `ButtonLink` -- this launcher's icon-and-label button
+  -- to `https://modrinth.com/news`. The feed is the one Modrinth document the
+  engine reads that is **not** the API: not under `/v2`, not a project's metadata,
+  a publisher's own JSON for its news page. Measured rather than assumed -- 45
+  articles, five fields, the names above; a fixture would have agreed with wrong
+  keys, which is why the live test is the one that reads it off the service and
+  the unit test only proves the reader against a body in that shape.
+
+  **The date, and the cache.** The reference formats the article's date with
+  `dateStyle: 'long'`, which is `September 7, 2026`: a twelve-name table and the
+  ISO-8601 string's own first ten characters, rather than a date crate that can
+  format anything for the sake of one format. A date that cannot be read is drawn
+  as it was published rather than as nothing, because a wrong-looking date is a bug
+  report and a missing one is silence. The feed is believed for the *project* TTL
+  and not the search TTL: a feed of announcements is not a question about what
+  people are using right now, and an article half an hour old is still the article
+  under the reader's nose.
+
+  **The opener, and why this slice had to grow one.** Two of the section's three
+  controls are links -- each card is its own link (`AutoLink`), and *View all news*
+  is `NEWS_PAGE_URL` -- so without an opener the section would be drawn out of
+  controls that do nothing, which is the one thing this shell's conventions refuse.
+  `open.rs` is that opener, and it is the only place this launcher starts a program
+  that is neither Minecraft nor Java, so its rules are stated there rather than at
+  each call site. Two schemes and not every scheme: `http` and `https`, each
+  followed by `//` (a link names a host), everything else refused with a sentence --
+  because the feed is a stranger's JSON, and `file:///C:/Windows/System32/cmd.exe`
+  or a Windows `cmd:`-style scheme arriving as a string must not become a program.
+  The command is a *value*, built per platform by `command_for(platform, url)`, so
+  the tests assert all three commands on whichever machine runs them -- and the
+  Windows one is `cmd /C start "" <url>` with the empty argument, because `start`
+  reads its first quoted argument as the window *title*, so a URL with a space in it
+  would otherwise open an empty window named by half of the address. Nothing waits
+  for the browser, and a failure comes back as a sentence rather than as a silent
+  nothing.
+
+  **What the section does not draw, and each reason.** A card with no title is
+  dropped, and so is one whose link this launcher will not open: the panel's job is
+  to draw the articles it can hand to the operating system, and `news_shown` is the
+  function that says which those are, separating the choice from the drawing so the
+  choice is what a test asserts. The **thumbnail is not drawn at all**: the card's
+  first element is its image, and nothing in this launcher fetches a picture yet,
+  so the title, the summary and the date are drawn and the picture is named as
+  missing rather than faked with an empty frame. And an empty or failed feed draws
+  **nothing** -- the reference's own `v-if="news.length"` -- rather than a heading
+  over no articles; a feed that did not arrive is not a section, and the shell keeps
+  the failure in its state for the record.
+
+  Eight tests, none of them about pixels: the live test parses the real feed into
+  articles a card can be built from; the engine's proves five defaulted fields, a
+  missing summary costing a paragraph rather than the parse, and a feed inside its
+  belief costing nothing; `modrinth`'s proves the date label and the fallback; and
+  `open`'s three prove the scheme list (including the refusals), the three platform
+  commands, and a refused link saying so instead of starting something. The shell's
+  two draw a feed of four plus the button and assert the drops -- the untitled
+  article, the `file:///` one -- in every theme.
+
+  Why G101 and not G99. The Forge and NeoForge work order
+  (`.scratch/HANDOFF-forge-neoforge.md`) names its gate numbers before this slice
+  landed, so that two agents writing into one ledger cannot collide; that work put
+  its two loaders in one entry and took G99, and this slice -- which is stage 3's
+  and has nothing to do with it -- takes the number above it. The two commits
+  rebased against each other on the way in, and the counts above are the merged
+  tree's, not either slice's alone.
+
+  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID` -- the same block as the ten before it, `Test workspace` dying in a few
+  seconds with zero steps and `recent account payments have failed or your spending
+  limit needs to be increased`, its dependants skipped rather than scheduled. The
+  transcripts above are this machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

@@ -46,7 +46,7 @@ use palantir_net::engine::{
     MetadataCache, ModrinthApi, PistonMeta,
 };
 use palantir_net::engine::Search as ApiSearch;
-use palantir_net::modrinth::ModrinthMember;
+use palantir_net::modrinth::{ModrinthMember, NewsArticle};
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
 use crate::catalog::LoaderKind;
@@ -605,6 +605,29 @@ impl Store {
         Ok(answer.hits.iter().map(Hit::from_api).collect())
     }
 
+    /// Modrinth's news feed, for the panel's news section.
+    ///
+    /// **Blocking**, like every engine call, so the shell runs it off the frame
+    /// thread -- and asked for *once*, at startup, because the panel is drawn on
+    /// every route: a section that waited for a page to ask for it would blank out
+    /// whenever the reader moved. The engine holds the answer for the metadata
+    /// default, and the panel draws the newest four of it.
+    ///
+    /// A store with no engine says so in the same sentence every other unbuilt
+    /// thing does; the panel draws no section for either, because there is nothing
+    /// here a reader can act on.
+    pub fn news(&self) -> Result<Vec<NewsArticle>, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("The news feed"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        engine
+            .api()
+            .news(&cancel, &backoff)
+            .map_err(|error| error.to_string())
+    }
+
     /// Read one project: its own document, its team, and its versions.
     ///
     /// **Blocking**, for [`Store::search`]'s reason, and three requests for the
@@ -1015,7 +1038,7 @@ pub fn bytes_label(bytes: u64) -> String {
 mod tests {
     use super::*;
     use palantir_net::engine::request::{MapFetch, Route};
-    use palantir_net::modrinth::{project_members_url, project_url, version_url};
+    use palantir_net::modrinth::{project_members_url, project_url, version_url, NEWS_URL};
     use palantir_net::PISTON_MANIFEST_URL;
 
     fn scratch(name: &str) -> PathBuf {
@@ -1287,6 +1310,42 @@ mod tests {
         assert!(reason.contains("modpack"), "{reason}");
         assert!(reason.contains("instance of its own"), "{reason}");
         assert_eq!(fetch.count(), 2, "and nothing was downloaded");
+    }
+
+    /// A news feed body, in the live feed's own shape: one envelope, five fields
+    /// per article, newest first.
+    const NEWS_FEED_BODY: &str = r#"{
+        "articles": [
+            {"title": "Sync settings across instances",
+             "summary": "Keep game options the same across your instances.",
+             "thumbnail": "https://modrinth.com/news/article/sync-settings/thumbnail.webp",
+             "date": "2026-09-07T19:00:00.000Z",
+             "link": "https://modrinth.com/news/article/sync-settings"},
+            {"title": "An older one", "date": "2026-08-01T10:00:00.000Z",
+             "link": "https://modrinth.com/news/article/older"}
+        ]
+    }"#;
+
+    #[test]
+    fn the_news_feed_is_read_once_and_then_answered_from_the_engine_s_own_cache() {
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(NEWS_URL, Route::text(NEWS_FEED_BODY));
+        let store = store_over("news", fetch.clone());
+
+        let news = store.news().expect("the feed");
+        assert_eq!(news.len(), 2, "the whole feed; the panel takes four of it");
+        assert_eq!(news[0].title, "Sync settings across instances");
+        assert_eq!(news[0].date_label(), "September 7, 2026");
+        assert_eq!(news[1].summary, "", "an article with no summary is still an article");
+        assert_eq!(fetch.count(), 1);
+        // The feed is a document, so the second read is the engine's own cache:
+        // the panel is drawn on every frame and must not ask again.
+        assert_eq!(store.news().expect("again").len(), 2);
+        assert_eq!(fetch.count(), 1);
+        // A store with no engine says so in the same sentence every unbuilt thing
+        // does, and the panel draws no section for either.
+        let reason = Store::default().news().expect_err("no engine");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
     }
 
     /// One `GET /v2/project/{id}` body for a pack: the same shape as
