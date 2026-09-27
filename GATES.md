@@ -2247,10 +2247,12 @@ when it was taken
   where a live receipt should change shape.
 
   The runner could not be the receipt again: the push before this slice,
-  `b46d59f`, is run `36298415367` -- `Test workspace` and `Lint` both died in two
-  seconds with zero steps and `recent account payments have failed or your
-  spending limit needs to be increased`. The transcript above is this machine's,
-  run with the flags `ci.yml` uses.
+  `b46d59f`, is run `36298415367` and this slice's own push, `04a84e0`, is run
+  `36299906456` -- both of them `Test workspace` and `Lint` dying in two seconds
+  with zero steps and `recent account payments have failed or your spending
+  limit needs to be increased`, and both of them leaving `Live services` and
+  `Build exe` unscheduled. The transcript above is this machine's, run with the
+  flags `ci.yml` uses.
 
 ## What these gates cannot say
 
