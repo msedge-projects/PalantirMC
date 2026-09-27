@@ -2932,6 +2932,101 @@ article keys: ['date', 'link', 'summary', 'thumbnail', 'title']
   services` skipped rather than scheduled: the same block as the eleven before it.
   The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
+- [x] G102: the panel's getting-started checklist, and the friends sentence beside it
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 937 passed; 0 failed; 16 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    490 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    227 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; 42 warnings between the crates, the same count as the slice before --
+`palantir-core` (lib) 9, its `compat` test 1 and its lib test 10; `palantir-net` 1
+and 1 duplicate; `palantir-desktop` (bin) 3 and (bin test) 21 -- none of them in a
+line this slice added, and `grep -cE "never (used|read|constructed)"` is 0. The
+count was 43 on the first run of this tree: `checklist_step`'s radio-glyph arm
+converted an `Element` into the same type, and clippy's `useless_conversion` was
+right, so the arm is what changed rather than the count.
+```
+
+  The panel's third section, and the first one whose data is not a service's
+  answer. `onboarding-checklist/index.vue` draws it and
+  `providers/onboarding-checklist.ts` is where its flags come from: a Tauri plugin
+  (`plugin:onboarding-checklist`) whose Rust is not vendored beside this tree, so
+  what could be read is the *shape* of that answer and the rules the frontend
+  applies to it. Both are written down in `checklist.rs` rather than guessed at in
+  the shell -- the generated `OnboardingChecklist` type is four flags, and
+  `App.vue`'s own line is `showFriendsList = !showChecklist ||
+  hasLoggedIntoModrinth`. Two of the three steps are facts this launcher already
+  holds: an instance exists, and an account is signed in. The third is Modrinth's
+  and is `false`, because this launcher has no Modrinth sign-in at all; the step is
+  drawn outstanding rather than quietly ticked, and its press says the flow is not
+  built.
+
+  **The one rule this tree cannot measure, and the reading it uses instead.**
+  `show_checklist` is the plugin's and the vendored frontend only *reads* it:
+  nothing in it dismisses the checklist, and the provider's own fold is an `&&`
+  over the events, so the frontend never decides it either. What this launcher
+  reads is completion of the steps it can *finish* -- an instance is missing or no
+  account is signed in -- and the third step is out of that reading on purpose. A
+  section pinned on a step nobody here can complete would stay up forever, and what
+  that step carries is not lost by leaving it out: the prompt moves to the friends
+  section beside it, which is exactly where the reference draws the same sentence
+  for a reader with no Modrinth session. While the section *is* up the third step is
+  drawn with the other two. This is an inference with the reference's alternative
+  named beside it, not a measurement, and it is the one place in this slice where
+  the answer came from judgement rather than from a file.
+
+  **A debt from G83 is paid.** *Playing as* is drawn `v-show="hasLoggedIntoMinecraft"`
+  in the reference, and G83 drew it always and said so, because that flag is the
+  checklist's own and the checklist did not exist yet. It is the checklist's second
+  fact now, so the card is drawn when there is an account and not otherwise: a
+  launcher with no account draws the steps that lead to one, and the empty card is
+  what an empty *store* draws. The gate keeps the two states apart in one test.
+
+  **The friends section, in the state this launcher can be in.** `FriendsList.vue`
+  behind `v-show="showFriendsList"`: with no credentials it holds one sentence --
+  `friends.sign-in-to-add-friends`, whose `<link>` slot is the sign-in and whose
+  rest says what it is for -- and no heading, because that component's "Friends"
+  heading is inside its own `v-if="userCredentials"`. The generated table keeps the
+  markup verbatim, which it has to, since the tag's *name* is the slot a component
+  fills; so `text::tagged` is new in this slice, three parts and four tests, and the
+  panel draws the sentence with its tags taken out. One departure, the toolkit's:
+  iced 0.12's `text` is a single run and there is no `rich_text` widget, so the
+  link's words cannot be in the accent while the sentence around them is not. The
+  sentence is one pressable paragraph instead of a sentence with a link inside it --
+  the same press over a wider target rather than a second control -- and its press
+  is the checklist's third step, so the two say the same thing about the same flow.
+
+  Nine tests: four in `checklist.rs` (the reference's own copy and order, the two
+  local facts, the third step's move to the friends section, and the friends rule
+  read from both sides), one in `text.rs` for the tag split, and four in the shell
+  (the facts and the card's gate, the accordion open by default, the three presses,
+  and the friends sentence with its own press).
+
+  Still absent, and named rather than drawn empty: the fundraiser banner, whose
+  campaign is served by an endpoint this launcher has not been given, and the
+  friends list's *signed-in* half, which is Modrinth's authenticated friends API.
+  Both need the sign-in flow, which is the same gap the checklist's third step says
+  out loud.
+
+  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID` -- the same block as the twelve before it, `Test workspace` and `Lint`
+  failing in a few seconds with zero steps and `The job was not started because
+  recent account payments have failed or your spending limit needs to be
+  increased`, its dependants skipped rather than scheduled. The transcripts above
+  are this machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

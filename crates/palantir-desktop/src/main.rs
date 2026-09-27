@@ -21,6 +21,10 @@ mod anim;
 mod brand;
 mod browse;
 mod catalog;
+/// The panel's getting-started checklist: its three steps, and the two rules the
+/// reference draws them by -- the flag that shows the section, and the one the
+/// friends list beside it is gated on.
+mod checklist;
 /// The metadata a launch resolves through: the loaders' own services, and
 /// Prism's mirror only where a publisher serves nothing in the shape this
 /// launcher reads.

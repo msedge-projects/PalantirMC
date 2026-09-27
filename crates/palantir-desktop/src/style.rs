@@ -87,5 +87,15 @@ pub fn disabled(theme: Gen, ink: Ink) -> Color {
 /// buttons from `theme_gen::ink` calls made at build time -- and wants the same
 /// dimming [`disabled`] applies to a token.
 pub fn faded(color: Color) -> Color {
-    Color { a: color.a * DISABLED_OPACITY, ..color }
+    at_opacity(color, DISABLED_OPACITY)
+}
+
+/// The same colour at `factor` of its own opacity.
+///
+/// [`faded`] is the one call site that means *unusable*; this is for the places
+/// the reference fades a whole element rather than disabling a control -- the
+/// onboarding checklist's finished step is `opacity-50` over its fill, its
+/// hairline and its label at once.
+pub fn at_opacity(color: Color, factor: f32) -> Color {
+    Color { a: color.a * factor, ..color }
 }

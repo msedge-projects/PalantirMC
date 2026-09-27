@@ -119,6 +119,32 @@ impl Plural<'_> {
     }
 }
 
+/// A message's `<tag>...</tag>` slot, split out of the sentence around it.
+///
+/// The reference's copy marks the part of a sentence that is a *control* with a
+/// tag: `friends.sign-in-to-add-friends` is
+/// `"<link>Sign in to a Modrinth account</link> to add friends and see what
+/// they're playing!"`, and the component renders what is between the tags as a
+/// `text-brand cursor-pointer` span with the sign-in behind it rather than as
+/// prose. The generated table keeps the markup verbatim -- it has to, because the
+/// tag's *name* is the slot the component fills -- so a caller that draws a
+/// tagged message has to split it, and this is that split: the text before the
+/// slot, the slot's own words, and the text after.
+///
+/// `None` when the message has no such tag, or has one that is never closed --
+/// half a sentence is worse than a whole one, so an unclosed tag is not a slot but
+/// a message with no slot. Most of the copy has no tag at all, and a caller that
+/// asks for one and gets `None` should draw the sentence rather than invent a
+/// control for it.
+pub fn tagged<'a>(message: &'a str, tag: &str) -> Option<(&'a str, &'a str, &'a str)> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = message.find(&open)?;
+    let rest = start + open.len();
+    let end = rest + message.get(rest..)?.find(&close)?;
+    Some((&message[..start], &message[rest..end], &message[end + close.len()..]))
+}
+
 /// An integer as `Intl.NumberFormat` writes it in English: thousands separated.
 ///
 /// Hand-rolled rather than reaching for a formatting crate: the reference
@@ -154,6 +180,30 @@ mod tests {
         // The longest thing a u64 can be, so an off-by-one in the boundary count
         // shows up here rather than in a live count of downloads.
         assert_eq!(number(u64::MAX), "18,446,744,073,709,551,615");
+    }
+
+    #[test]
+    fn a_tagged_message_splits_around_its_slot() {
+        // The reference's own sentence, tag and all, out of the generated table.
+        let sentence = "<link>Sign in to a Modrinth account</link> to add friends and see what they're playing!";
+        let (before, slot, after) = tagged(sentence, "link").expect("a slot");
+        assert_eq!(before, "");
+        assert_eq!(slot, "Sign in to a Modrinth account");
+        assert_eq!(after, " to add friends and see what they're playing!");
+        // Text on both sides, which is the shape most tagged copy has.
+        assert_eq!(tagged("a <b>bold</b> word", "b"), Some(("a ", "bold", " word")));
+        // A tag nobody asked for is not a slot, and neither is a tag that was
+        // opened and never closed: half a sentence is worse than none.
+        assert_eq!(tagged("a <b>bold</b> word", "link"), None);
+        assert_eq!(tagged("<link>unclosed", "link"), None);
+        assert_eq!(tagged("no tags at all", "link"), None);
+        assert_eq!(tagged("", "link"), None);
+        // The first slot is the one that is taken, and a tag inside the slot is
+        // not the closing tag.
+        assert_eq!(
+            tagged("<b>one</b> then <b>two</b>", "b"),
+            Some(("", "one", " then <b>two</b>"))
+        );
     }
 
     #[test]

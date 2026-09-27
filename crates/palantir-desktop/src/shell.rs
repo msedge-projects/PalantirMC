@@ -55,6 +55,7 @@ use crate::brand;
 use crate::color_theme::ColorTheme;
 use crate::launch::{self, ActiveRunData, ChildSlot};
 
+use crate::checklist::{Checklist, Step};
 use crate::icon;
 use crate::style::{
     disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
@@ -180,6 +181,25 @@ const ACCOUNTS_HEADER: &str = "shell:accounts:header";
 const ACCOUNTS_SIGN_IN: &str = "shell:accounts:sign-in";
 const ACCOUNTS_ADD: &str = "shell:accounts:add";
 const ACCOUNTS_NOTE_DISMISS: &str = "shell:accounts:note";
+/// The checklist's own header: the accordion the section opens and closes with.
+///
+/// One key for the header and one per step (`crate::ui::scoped` over the step's
+/// name), because each row is a control of its own and a crossing is reported per
+/// control.
+const CHECKLIST_HEADER: &str = "shell:checklist:header";
+/// The sentence the Modrinth step could not do anything about.
+const MODRINTH_NOTE_DISMISS: &str = "shell:checklist:modrinth-note";
+/// The circle a finished step's check sits in: the reference's `size-[18px]`.
+const STEP_MARK_CIRCLE: f32 = 18.0;
+/// The check inside that circle: `size-3`.
+const STEP_CHECK: f32 = 12.0;
+/// A finished step's `opacity-50`: the whole row fades, fill and hairline and
+/// label together, which is what the reference's `opacity-50` does to a button.
+const STEP_DONE_OPACITY: f32 = 0.5;
+/// A step row's own padding: the reference's `h-10 rounded-xl ... px-4`.
+const STEP_SIDE: f32 = 16.0;
+/// The accordion's padding, which is `p-3` on both its header and its body.
+const CHECKLIST_PAD: f32 = 12.0;
 
 /// The `md` `IconButton`'s corner radius, `rounded-xl`.
 const CONTROL_RADIUS: f32 = 12.0;
@@ -371,6 +391,17 @@ pub struct Shell {
     /// control that does nothing at all is the failure mode this rewrite reports
     /// instead of hiding.
     accounts_note: Option<String>,
+    /// Whether the checklist's body is open. The reference's accordion is
+    /// `open-by-default`, so the panel shows all three steps until it is pressed.
+    checklist_open: bool,
+    /// What the checklist's *Sign in to Modrinth* step could not do, drawn under
+    /// the section it was pressed in.
+    ///
+    /// Its own sentence rather than the accounts note's, because Modrinth's
+    /// sign-in is not the Microsoft flow that note is about -- and its own field
+    /// rather than a flag on that one, so that a reader who reads one does not
+    /// clear the other.
+    modrinth_note: Option<String>,
     /// Where each run that is downloading is: the last
     /// [`launch::LaunchEvent::Progress`] its worker reported, kept as *numbers*
     /// rather than only as the sentence the instance's header draws.
@@ -756,6 +787,16 @@ pub enum Message {
     SignIn,
     /// The sentence under the card was read.
     DismissAccountsNote,
+    /// One of the checklist's three steps, pressed.
+    ///
+    /// The step rather than its label, because what a press *does* is the step's
+    /// own: one opens the creation flow, one opens the accounts card's sign-in and
+    /// one has no flow behind it at all.
+    Checklist(Step),
+    /// The checklist's header: open its body or close it.
+    ToggleChecklist,
+    /// The sentence under the checklist was read.
+    DismissModrinthNote,
     /// The action bar's download chip: open or close the panel under the head.
     ToggleDownloads,
     /// The chevron beside the running instance's name: open or close the popover
@@ -884,6 +925,8 @@ impl Shell {
             accounts_warning: None,
             accounts_open: false,
             accounts_note: None,
+            checklist_open: true,
+            modrinth_note: None,
             news: Load::Loading,
             link_note: None,
             jobs: BTreeMap::new(),
@@ -1529,6 +1572,32 @@ impl Shell {
             }
             Message::ToggleAccounts => {
                 self.accounts_open = !self.accounts_open;
+                None
+            }
+            Message::ToggleChecklist => {
+                self.checklist_open = !self.checklist_open;
+                None
+            }
+            Message::Checklist(step) => {
+                // `App.vue`'s own three handlers: `@create-instance` opens the
+                // creation flow, `@login-minecraft` the accounts card's sign-in,
+                // and `@login-modrinth` Modrinth's. Two of the three land on an
+                // answer this launcher does not have: the first is this shell's
+                // own dialog, the second the sentence the card already gives, and
+                // the third has no flow anywhere here, so it says so where the
+                // press was made.
+                match step {
+                    Step::CreateInstance => self.act(Message::OpenCreate),
+                    Step::LoginMinecraft => self.act(Message::SignIn),
+                    Step::LoginModrinth => {
+                        self.modrinth_note =
+                            Some(store::not_implemented("Signing in to Modrinth"));
+                        None
+                    }
+                }
+            }
+            Message::DismissModrinthNote => {
+                self.modrinth_note = None;
                 None
             }
             Message::SelectAccount(uuid) => {
@@ -3066,21 +3135,50 @@ impl Shell {
             .into()
     }
 
-    /// The right panel: the reference's own column, with its first section in it.
+    /// The right panel: the reference's own column, with its sections in it.
     ///
     /// `App.vue`'s `app-sidebar`: a `--right-bar-width` column under the wash,
     /// a hairline down its page edge (`border-l border-[--brand-gradient-border]`),
     /// and one scroll region inside it (`app-sidebar-scrollable`) that the
     /// sections stack in. The sections are the onboarding checklist, this card
     /// ("Playing as", `app.sidebar.playing-as`), the friends list, the fundraiser
-    /// banner and the news feed. Two of those are here now -- this card (G83) and
-    /// the news feed (G101) -- in the reference's own order, with the friends list
-    /// and the banner still absent rather than drawn empty: the first needs
-    /// Modrinth sign-in and a friends endpoint, and the banner's campaign is served
-    /// by an endpoint this launcher does not read.
+    /// banner and the news feed. Four of those are here now -- the checklist
+    /// (G102), this card (G83), the friends list in the state the reference draws
+    /// for a reader with no Modrinth session (G102 too) and the news feed (G101) --
+    /// in the reference's own order, with the fundraiser banner still absent rather
+    /// than drawn empty: its campaign is served by an endpoint this launcher does
+    /// not read.
+    /// The checklist's own rule is what decides between them, and it is drawn where
+    /// the reference draws it -- the first thing in the scroll region, above the
+    /// card rather than inside the block the rest of the sections sit in.
     fn panel(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let mut sections = column![].width(Length::Fill).push(self.playing_as());
+        let mut sections = column![].width(Length::Fill);
+        if let Some(checklist) = self.checklist_section() {
+            sections = sections.push(checklist);
+        }
+        // *Playing as* is `v-show="hasLoggedIntoMinecraft"`, which is the
+        // checklist's second fact: a launcher with no account signed in draws the
+        // steps that lead to one rather than a card about the account it has not
+        // got. The card's own empty branch is still there for a store that exists
+        // and holds nothing, which is the state this launcher's tests build.
+        if self.logged_into_minecraft() {
+            sections = sections.push(self.playing_as());
+        }
+        if let Some(friends) = self.friends_section() {
+            sections = sections.push(friends);
+        }
+        // The Modrinth note is drawn here rather than under the checklist, because
+        // two sections raise it: the checklist's third step while the steps are up,
+        // and the friends sentence once they are not. Under both, the sentence is
+        // always the one that was just pressed.
+        if let Some(note) = &self.modrinth_note {
+            sections = sections.push(
+                container(self.panel_note_block(Key::OnboardingChecklistLoginModrinth.message(), note, MODRINTH_NOTE_DISMISS, Message::DismissModrinthNote))
+                    .width(Length::Fill)
+                    .padding(PANEL_SECTION_PAD),
+            );
+        }
         if let Some(note) = &self.accounts_note {
             sections = sections.push(
                 container(self.panel_note_block(Key::MinecraftAccountSignIn.message(), note, ACCOUNTS_NOTE_DISMISS, Message::DismissAccountsNote))
@@ -3117,16 +3215,314 @@ impl Shell {
         .into()
     }
 
-    /// The panel's first section: what a launch would sign in as.
+    /// Whether this launcher holds an account a launch would sign in as.
+    ///
+    /// The checklist's `has_logged_into_minecraft`, and the *Playing as*
+    /// section's own gate: the reference asks a plugin for the flag and this
+    /// launcher asks the file both it and the other launcher write.
+    fn logged_into_minecraft(&self) -> bool {
+        self.accounts.as_ref().is_some_and(|store| !store.list().is_empty())
+    }
+
+    /// The checklist as this launcher's facts have it.
+    ///
+    /// `has_created_instance` is the library list the shell already holds -- so a
+    /// created, imported or pack-made instance all count, which is what the
+    /// reference's flag means -- and `has_logged_into_minecraft` is an account in
+    /// the file. The third fact is Modrinth's and is `false` here: this launcher
+    /// has no Modrinth sign-in at all, so the step is outstanding rather than
+    /// quietly ticked, and `crate::checklist` is where that reading is written
+    /// down.
+    fn checklist(&self) -> Checklist {
+        Checklist::of(
+            matches!(self.store.instances(), Load::Ready(cards) if !cards.is_empty()),
+            self.logged_into_minecraft(),
+            false,
+        )
+    }
+
+    /// The panel's getting-started checklist, or nothing when every step is done.
+    ///
+    /// `onboarding-checklist/index.vue`, drawn where `App.vue` puts it: the first
+    /// thing in the panel's scroll region, above the *Playing as* card and outside
+    /// the block the other sections stack in, under a `border-b` and `px-3 p-4`.
+    /// The accordion is the reference's `open-by-default` one, and its header is
+    /// the `button-class` the checklist hands it -- `border-button-border
+    /// bg-button-bg` at `rounded-2xl`, with the section's title (`Getting
+    /// started`) and the chevron the panel's other accordion draws, `hover:
+    /// brightness-110` over the whole row -- with the body under it at `p-3`,
+    /// `border-surface-5` and `rounded-b-2xl`.
+    ///
+    /// The section is drawn only while [`Checklist::show`] says so, which is where
+    /// this launcher's reading of the plugin's own `show_checklist` lives.
+    fn checklist_section(&self) -> Option<Element<'_, Message>> {
+        let theme = self.theme;
+        let checklist = self.checklist();
+        if !checklist.show() {
+            return None;
+        }
+        // `rounded-2xl` is 1rem, which is the theme's own `--radius-lg`.
+        let radius = theme_gen::span(theme_gen::Span::RadiusLg);
+        // `rounded-t-2xl`, and `rounded-b-2xl` back while the body is away: a closed
+        // checklist's header is a pill, which is the reference's own
+        // `collapsedCornersVisible` class. Worked out here rather than inside the
+        // closure that paints it, because that closure has to be `'static` and
+        // reading the shell's own field in it would borrow the shell.
+        let header_radius = if self.checklist_open {
+            iced::border::Radius::from([radius, radius, 0.0, 0.0])
+        } else {
+            iced::border::Radius::from(radius)
+        };
+        let (factor, _) = crate::ui::interaction(CHECKLIST_HEADER);
+        let header_ink = crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor);
+        let header = mouse_area(
+            container(
+                row![]
+                    .width(Length::Fill)
+                    .spacing(CARD_ROW_GAP)
+                    .align_items(Alignment::Center)
+                    .push(
+                        text(Key::OnboardingChecklistTitle.message())
+                            .size(PANEL_HEADING)
+                            .font(semibold())
+                            .style(iced::theme::Text::Color(header_ink)),
+                    )
+                    // The Accordion rotates its `DropdownIcon` when it opens;
+                    // iced cannot rotate a glyph, so the two chevrons are drawn,
+                    // as they are on the accounts card.
+                    .push(icon::icon(
+                        if self.checklist_open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                        CARD_MARK,
+                        header_ink,
+                    )),
+            )
+            .width(Length::Fill)
+            .padding(Padding {
+                top: CHECKLIST_PAD,
+                bottom: CHECKLIST_PAD,
+                left: CHECKLIST_PAD,
+                right: CHECKLIST_PAD,
+            })
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(crate::theme::brightness(
+                    theme_gen::ink(theme, Ink::ButtonBg),
+                    factor,
+                ))),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::ButtonBorder),
+                    width: 1.0,
+                    radius: header_radius,
+                },
+                ..container::Appearance::default()
+            }),
+        )
+        .interaction(Interaction::Pointer)
+        .on_enter(card_crossing(CHECKLIST_HEADER, true))
+        .on_exit(card_crossing(CHECKLIST_HEADER, false))
+        .on_press(Message::ToggleChecklist);
+
+        let mut section = column![].width(Length::Fill).push(header);
+        if self.checklist_open {
+            let mut rows = column![].width(Length::Fill).spacing(CARD_TOP);
+            for step in Step::ALL {
+                rows = rows.push(self.checklist_step(step, checklist.complete(step)));
+            }
+            section = section.push(
+                container(rows)
+                    .width(Length::Fill)
+                    .padding(Padding {
+                        top: CHECKLIST_PAD,
+                        bottom: CHECKLIST_PAD,
+                        left: CHECKLIST_PAD,
+                        right: CHECKLIST_PAD,
+                    })
+                    .style(move |_theme: &Theme| container::Appearance {
+                        background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+                        border: Border {
+                            color: theme_gen::ink(theme, Ink::Surface5),
+                            width: 1.0,
+                            radius: iced::border::Radius::from([0.0, 0.0, radius, radius]),
+                        },
+                        ..container::Appearance::default()
+                    }),
+            );
+        }
+        Some(
+            column![]
+                .width(Length::Fill)
+                .push(
+                    container(section).width(Length::Fill).padding(Padding {
+                        top: PANEL_SECTION_PAD,
+                        bottom: PANEL_SECTION_PAD,
+                        // `px-3`: the checklist's own horizontal padding is 12
+                        // rather than the panel sections' 16, which is the
+                        // reference's `px-3 p-4`.
+                        left: CHECKLIST_PAD,
+                        right: CHECKLIST_PAD,
+                    }),
+                )
+                .push(hairline(theme, false))
+                .into(),
+        )
+    }
+
+    /// The panel's friends section: what the reference draws for a reader with no
+    /// Modrinth session.
+    ///
+    /// `App.vue` draws `FriendsList` `v-show="showFriendsList"`, and what that
+    /// component holds with no credentials is the reference's own sentence --
+    /// `friends.sign-in-to-add-friends`, whose `<link>` slot is the sign-in and the
+    /// rest of which says what it is for -- under the section's own `p-4
+    /// border-b`. No heading at that point, in the reference as here: its "Friends"
+    /// heading is inside that component's own `v-if="userCredentials"`.
+    ///
+    /// One departure, and it is the toolkit's rather than a choice: iced 0.12's
+    /// `text` is a single run, so the link's words cannot be drawn in the accent
+    /// while the sentence around them is not -- there is no inline span in this
+    /// version, and no `rich_text` widget either. The sentence is therefore one
+    /// pressable paragraph rather than a sentence with a link inside it, which is
+    /// the same press over a wider target rather than a second control.
+    fn friends_section(&self) -> Option<Element<'_, Message>> {
+        let theme = self.theme;
+        if !self.checklist().friends_visible() {
+            return None;
+        }
+        let sentence = Key::FriendsSignInToAddFriends.message();
+        // The slot's own words with the markup taken out, because the generated
+        // table keeps the tags verbatim: a panel that drew them would be the one
+        // thing a reader would report.
+        let plain = match crate::text::tagged(sentence, "link") {
+            Some((before, slot, after)) => format!("{before}{slot}{after}"),
+            None => sentence.to_string(),
+        };
+        Some(
+            column![]
+                .width(Length::Fill)
+                .push(
+                    container(
+                        mouse_area(crate::ui::paragraph(theme, &plain))
+                            .interaction(Interaction::Pointer)
+                            // The same press the checklist's third step makes, up to
+                            // and including the sentence it draws.
+                            .on_press(Message::Checklist(Step::LoginModrinth)),
+                    )
+                    .width(Length::Fill)
+                    .padding(PANEL_SECTION_PAD),
+                )
+                .push(hairline(theme, false))
+                .into(),
+        )
+    }
+
+    /// One step of the checklist: the reference's own row.
+    ///
+    /// `h-10 rounded-xl border-button-border bg-button-bg px-4`, the label at
+    /// `font-medium`, and the picture on the left -- a filled accent circle with a
+    /// check when the step is done (`bg-primary size-[18px]`, `size-3` check) and
+    /// a radio-button glyph when it is not. A finished row is the reference's own
+    /// `:disabled` state: `opacity-50` over the whole row, the label in
+    /// `text-secondary`, and no press, so the row says what it is rather than
+    /// being a control that looks live and does nothing.
+    ///
+    /// Two departures, both the toolkit's rather than a choice. iced has no
+    /// strikethrough, so the finished label is the faded secondary ink without the
+    /// line through it; and the reference's `shadow-[0_1px_0.5px_rgb(0_0_0_/_12%)]`
+    /// is not painted, for the reason `reference_tokens.rs` gives -- a shadow is
+    /// not a token this port paints with.
+    fn checklist_step<'a>(&'a self, step: Step, complete: bool) -> Element<'a, Message> {
+        let theme = self.theme;
+        let key = crate::ui::scoped("panel:checklist", &format!("{step:?}"));
+        let (factor, _) = if complete { (1.0, 0.0) } else { crate::ui::interaction(key) };
+        // `move` because the frame's own style closure is `'static` and this is
+        // called from inside it; both captured values are `Copy`.
+        let fade = move |color: Color| {
+            let color = crate::theme::brightness(color, factor);
+            if complete {
+                crate::style::at_opacity(color, STEP_DONE_OPACITY)
+            } else {
+                color
+            }
+        };
+        let mark: Element<'a, Message> = if complete {
+            container(icon::icon(
+                Glyph::Check,
+                STEP_CHECK,
+                theme_gen::ink(theme, Ink::AccentContrast),
+            ))
+            .width(Length::Fixed(STEP_MARK_CIRCLE))
+            .height(Length::Fixed(STEP_MARK_CIRCLE))
+            .center_x()
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
+                border: Border {
+                    radius: (STEP_MARK_CIRCLE / 2.0).into(),
+                    ..Border::default()
+                },
+                ..container::Appearance::default()
+            })
+            .into()
+        } else {
+            // Already an `Element`: this arm's `into()` was a conversion of the
+            // same type to itself, which clippy's `useless_conversion` caught.
+            icon::icon(
+                Glyph::RadioButton,
+                crate::ui::CONTROL_ICON,
+                fade(theme_gen::ink(theme, INK_CONTRAST)),
+            )
+        };
+        let label = text(step.label().message())
+            .size(14.0)
+            .font(medium())
+            .style(iced::theme::Text::Color(fade(theme_gen::ink(theme, if complete {
+                INK_SECONDARY
+            } else {
+                INK_CONTRAST
+            }))));
+        let row = container(
+            row![]
+                .width(Length::Fill)
+                .spacing(CARD_ROW_GAP)
+                .align_items(Alignment::Center)
+                .push(mark)
+                .push(label),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(crate::ui::CONTROL))
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: STEP_SIDE,
+            right: STEP_SIDE,
+        })
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(fade(theme_gen::ink(theme, Ink::ButtonBg)))),
+            border: Border {
+                color: fade(theme_gen::ink(theme, Ink::ButtonBorder)),
+                width: 1.0,
+                radius: crate::ui::CONTROL_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        });
+        let area = mouse_area(row)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover(key, true))
+            .on_exit(Message::hover(key, false));
+        match complete {
+            true => area.into(),
+            false => area.on_press(Message::Checklist(step)).into(),
+        }
+    }
+
+    /// The panel's first card: what a launch would sign in as.
     ///
     /// `App.vue` draws it `p-4` under a `border-b`, and only when
-    /// `hasLoggedIntoMinecraft`. That flag is the onboarding checklist's own -- the
-    /// checklist is what this launcher has not built -- so the section is drawn
-    /// always here, one step early. The alternative is a panel that stays the wash
-    /// until an unbuilt flag is set, which is the gap this stage closes; and the
-    /// empty card below is the reference's own picture of a launcher with no
-    /// account, so what is drawn early is the reference's shape either way.
-    /// `GATES.md` G83 records the difference.
+    /// `hasLoggedIntoMinecraft`. G83 drew it always, because that flag is the
+    /// onboarding checklist's and the checklist had not landed; the flag is the
+    /// checklist's second fact now (`crate::checklist`), so the section is drawn
+    /// when there is an account and not otherwise -- see [`Shell::panel`] for the
+    /// gate, which is that flag read as the fact this launcher holds.
     fn playing_as(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let section = column![]
@@ -6372,6 +6768,151 @@ mod tests {
         press(&mut shell, Message::SelectAccount("nobody".into()));
         press(&mut shell, Message::RemoveAccount("nobody".into()));
         assert!(shell.accounts_note.is_none());
+    }
+
+    #[test]
+    fn the_checklist_reads_the_facts_the_launcher_holds_and_gates_the_card_behind_them() {
+        // The three facts, off this launcher: a library with an instance in it, an
+        // account file with one in it, and Modrinth's -- which is false here,
+        // because this launcher has no Modrinth sign-in at all.
+        let shell = shell_with_instance("panel-checklist");
+        let checklist = shell.checklist();
+        assert!(checklist.show(), "two steps are outstanding");
+        assert!(checklist.complete(Step::CreateInstance), "the library holds one");
+        assert!(!checklist.complete(Step::LoginMinecraft));
+        assert!(!checklist.complete(Step::LoginModrinth));
+        assert!(!checklist.friends_visible(), "and the friends list waits behind it");
+        // `App.vue` draws *Playing as* `v-show="hasLoggedIntoMinecraft"`, and that
+        // flag is the checklist's own second fact now: no account, no card. Every
+        // theme is drawn because the section's inks come from the generated
+        // tables, and one of the four could be missing a token the others have.
+        assert!(!shell.logged_into_minecraft(), "no account file at all");
+        let mut shell = shell;
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        // With an account the card is back, that step is done, and the section is
+        // *not* up any more -- both steps this launcher can finish are finished,
+        // and Modrinth's third one cannot hold the section up forever. What is
+        // drawn in its place is the friends section, whose own sentence is the
+        // third step's prompt in the place the reference puts it.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("accounts.json");
+        let (accounts, warning) = AccountsStore::load_with_report(&path);
+        let mut shell = shell.with_accounts(accounts, warning);
+        {
+            let accounts = shell.accounts.as_mut().expect("a store");
+            accounts.add("Steve").expect("a name");
+        }
+        assert!(shell.logged_into_minecraft());
+        assert!(shell.checklist().complete(Step::LoginMinecraft));
+        assert!(!shell.checklist().show());
+        assert!(shell.checklist().friends_visible());
+        assert!(shell.friends_section().is_some());
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+    }
+
+    #[test]
+    fn the_friends_section_is_the_reference_s_sentence_and_its_press_is_the_sign_in() {
+        // A shell with an instance and an account: the two things the checklist
+        // waits for, so the section is the one on screen -- which is the reference's
+        // own `showFriendsList = !showChecklist || hasLoggedIntoModrinth` with the
+        // third fact false.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("accounts.json");
+        let (accounts, warning) = AccountsStore::load_with_report(&path);
+        let mut shell = shell_with_instance("panel-friends").with_accounts(accounts, warning);
+        {
+            let accounts = shell.accounts.as_mut().expect("a store");
+            accounts.add("Steve").expect("a name");
+        }
+        assert!(shell.friends_section().is_some());
+        // The sentence is the reference's, with its tag taken out: the generated
+        // table keeps `<link>` verbatim, and drawing it would be the one thing a
+        // reader would report.
+        let sentence = Key::FriendsSignInToAddFriends.message();
+        assert!(sentence.contains("<link>"), "the table keeps the markup");
+        let (before, slot, after) = crate::text::tagged(sentence, "link").expect("a slot");
+        assert_eq!(format!("{before}{slot}{after}"), "Sign in to a Modrinth account to add friends and see what they're playing!");
+        // No heading while there are no credentials, which is the reference's own
+        // `v-if="userCredentials"` around it.
+        assert_eq!(Key::FriendsHeading.message(), "Friends");
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        // The press is the third step of the checklist, so it is the same sentence
+        // the step gives rather than a second one about the same flow.
+        press(&mut shell, Message::Checklist(Step::LoginModrinth));
+        assert_eq!(
+            shell.modrinth_note.as_deref(),
+            Some(store::not_implemented("Signing in to Modrinth").as_str())
+        );
+        // Once the instance goes the checklist is up again and the friends section
+        // waits behind it -- the other half of the rule, read from the panel's own
+        // drawing rather than from the enum.
+        assert!(Checklist::of(false, true, false).show());
+        assert!(!Checklist::of(false, true, false).friends_visible());
+    }
+
+    #[test]
+    fn the_checklist_s_header_opens_the_body_it_starts_open() {
+        // The reference's accordion is `open-by-default`, like the card's is not:
+        // a reader who has not made an instance is shown the steps rather than a
+        // header they have to guess at.
+        let mut shell = shell_with_instance("panel-checklist-toggle");
+        assert!(shell.checklist_open);
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        press(&mut shell, Message::ToggleChecklist);
+        assert!(!shell.checklist_open);
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            let _ = shell.panel();
+        }
+        press(&mut shell, Message::ToggleChecklist);
+        assert!(shell.checklist_open);
+    }
+
+    #[test]
+    fn the_checklist_s_three_steps_do_what_the_reference_s_three_handlers_do() {
+        let mut shell = shell_with_instance("panel-checklist-press");
+        // *Create first instance* is `@create-instance`, which opens the creation
+        // flow -- this shell's own dialog.
+        press(&mut shell, Message::Checklist(Step::CreateInstance));
+        assert_eq!(shell.modal, Some(Modal::Create));
+        // *Sign in to Minecraft* is `@login-minecraft`, which opens the accounts
+        // card's sign-in: the same press the card's own button makes, so it is the
+        // same sentence rather than a second one.
+        press(&mut shell, Message::Checklist(Step::LoginMinecraft));
+        assert_eq!(
+            shell.accounts_note.as_deref(),
+            Some(store::not_implemented("Signing in to Minecraft").as_str())
+        );
+        // *Sign in to Modrinth* has no flow anywhere in this launcher, and its
+        // sentence is its own: it is not the Microsoft flow the note above is
+        // about, and reading one does not clear the other.
+        press(&mut shell, Message::Checklist(Step::LoginModrinth));
+        assert_eq!(
+            shell.modrinth_note.as_deref(),
+            Some(store::not_implemented("Signing in to Modrinth").as_str())
+        );
+        press(&mut shell, Message::DismissModrinthNote);
+        assert!(shell.modrinth_note.is_none());
+        assert!(shell.accounts_note.is_some(), "the other sentence is still there");
+        // And nothing a press could not finish is finished: the section is still up
+        // with both sign-ins outstanding, which is the honest picture of a launcher
+        // that has neither flow yet.
+        let checklist = shell.checklist();
+        assert!(checklist.show());
+        assert!(!checklist.complete(Step::LoginMinecraft));
+        assert!(!checklist.complete(Step::LoginModrinth));
     }
 
     #[test]
