@@ -27,8 +27,9 @@ use palantir_net::modrinth::{ModrinthProject, ModrinthProjectVersion};
 
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP, ROW_GAP};
+use crate::pages::Ask;
 use crate::route::ProjectTab;
-use crate::store::{self, Store};
+use crate::store::Store;
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
@@ -89,6 +90,21 @@ pub struct Asked {
     pub round: u64,
     /// Which project, as the API names it.
     pub id: String,
+}
+
+/// The install the page is asking for: which project, and what to call it in the
+/// dialog the shell opens.
+///
+/// The title travels with the id because the dialog is the shell's and the shell
+/// has never seen a project document: a `Key` cannot hold a title, and asking the
+/// engine again for a caption the page is already drawing would be a request per
+/// press for a word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Install {
+    /// Which project, as the API names it.
+    pub id: String,
+    /// Its title, as the page is drawing it. Empty when the page has none yet.
+    pub title: String,
 }
 
 impl Project {
@@ -157,8 +173,22 @@ pub enum Message {
     Tab(ProjectTab),
     /// The project was asked for again.
     Refresh,
-    /// The project's main action was pressed.
+    /// The project's main action was pressed: ask which instance it goes into.
+    ///
+    /// A request rather than a notice, which is what this was until the install
+    /// was real: the page reports the press (see [`Ask`]) and the shell opens a
+    /// dialog, because *which instances this launcher has* is not a fact the page
+    /// holds -- and neither is where their folders are.
     Install,
+    /// The install this page asked for has an outcome to show.
+    ///
+    /// One string rather than a `Result`: the page draws the sentence and nothing
+    /// else, and *which* it was has already been decided by the shell that worded
+    /// it -- the half that needs the difference is the dialog, which is the
+    /// shell's. It is also the smaller type, which the enum cares about: a
+    /// `Result<String, String>` is two `String`s wide and would have made every
+    /// message in this family that size.
+    Noted(String),
     /// The answer to a request, from the shell.
     ///
     /// The round is what makes a slow answer harmless: a page that has asked
@@ -168,7 +198,13 @@ pub enum Message {
         /// Which request this answers, as [`Asked::round`] numbered it.
         round: u64,
         /// The project, or the reason there is none.
-        result: Result<Project, String>,
+        ///
+        /// Boxed because a message is moved on every frame and an enum is as wide
+        /// as its widest variant: a `Project` is a dozen strings and three lists,
+        /// and carrying one by value would make *every* message of this family
+        /// that size -- which clippy says in one line (`large_enum_variant`), and
+        /// the test at the foot of this file says in bytes.
+        result: Result<Box<Project>, String>,
     },
     /// The pointer entered or left one of the page's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
@@ -219,21 +255,42 @@ impl State {
         }
     }
 
-    /// Apply a message, and answer with the request it made.
-    pub fn update(&mut self, message: Message) -> Option<Asked> {
+    /// Apply a message, and answer with what the shell has to do about it.
+    ///
+    /// The answer is an [`Ask`] rather than this page's own [`Asked`] because the
+    /// page has two kinds of request now: re-read me (which the round numbers), and
+    /// install me somewhere (which names an instance the page has never heard of).
+    /// The instance page answers with an `Ask` for the same reason.
+    pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
             Message::Tab(tab) => self.tab = tab,
             // The button asks again rather than standing in for an answer: what
             // the page knows is dropped, and the shell is told to go and get it.
-            Message::Refresh => return Some(self.ask()),
-            Message::Install => self.notice = Some(store::not_implemented("Installing a project")),
+            Message::Refresh => return Some(Ask::Project(self.ask())),
+            Message::Install => {
+                // The sentence about the last install is about a press this one
+                // replaces, and the dialog that opens says what happens next.
+                self.notice = None;
+                return Some(Ask::Install(Install {
+                    id: self.id.clone(),
+                    title: self
+                        .project
+                        .ready()
+                        .map(|project| project.title.clone())
+                        .unwrap_or_default(),
+                }));
+            }
+            // A sentence either way, in the slot every other thing the page could
+            // not do is drawn in: what worked is worth saying for the same reason
+            // what failed is.
+            Message::Noted(line) => self.notice = Some(line),
             Message::Found { round, result } => {
                 // An answer to a request this page has replaced is dropped. It is
                 // not an error and not worth a notice: the reader asked for
                 // something newer and the newer answer is on its way.
                 if round == self.round {
                     self.project = match result {
-                        Ok(project) => Load::Ready(project),
+                        Ok(project) => Load::Ready(*project),
                         Err(reason) => Load::Failed(reason),
                     };
                     // The notice belongs to the page the answer just replaced:
@@ -508,6 +565,8 @@ mod tests {
         assert!(state.opening().is_none(), "and does not ask twice");
         // The answer, or the reason there is none -- never an empty project.
         state.update(Message::Found { round: 1, result: Err("no such project".to_string()) });
+        // The failure arm is the one a page is drawn from before a project is,
+        // so it is the arm this test needs; the ready arm is the line below.
         assert_eq!(state.project.failure(), Some("no such project"));
     }
 
@@ -515,14 +574,39 @@ mod tests {
     fn an_answer_to_a_request_the_page_has_replaced_is_dropped() {
         let mut state = State::new("sodium".to_string(), ProjectTab::Description);
         let first = state.opening().expect("the first request");
-        let second = state.update(Message::Refresh).expect("a refresh asks again");
+        let second = match state.update(Message::Refresh) {
+            Some(Ask::Project(asked)) => asked,
+            other => panic!("a refresh asks for the project again: {other:?}"),
+        };
         assert_eq!(second.round, first.round + 1);
         // The first answer arrives late: it is dropped rather than drawn under
         // the request that replaced it, and it is not an error either.
-        state.update(Message::Found { round: first.round, result: Ok(project()) });
+        state.update(Message::Found { round: first.round, result: Ok(Box::new(project())) });
         assert_eq!(state.project, Load::Loading, "the stale answer was dropped");
-        state.update(Message::Found { round: second.round, result: Ok(project()) });
+        state.update(Message::Found { round: second.round, result: Ok(Box::new(project())) });
         assert!(state.project.ready().is_some(), "the answer in force was taken");
+    }
+
+    #[test]
+    fn a_page_message_is_small() {
+        // Every message of this page is built and moved per frame, and an enum is
+        // as wide as its widest variant. `Found`'s project is boxed for this
+        // reason; this is the assertion that keeps a later field from quietly
+        // undoing it, and the measurement is in the message rather than in a
+        // comment so a failure says how far off it is.
+        //
+        // The bound is 40 rather than less because 40 is the floor for any page
+        // of this launcher: `Hover` is a `&'static str`, a flag and a hover
+        // reading, which is 32 bytes plus the tag every enum carries, and the
+        // `hovered!` macro hands every page that shape. So the claim this makes
+        // is that the box holds `Found` *at* that floor instead of above it -- a
+        // `Project` carried by value would be the width of every message here,
+        // which is the `large_enum_variant` clippy names.
+        assert!(
+            std::mem::size_of::<Message>() <= 40,
+            "project::Message is {} bytes",
+            std::mem::size_of::<Message>()
+        );
     }
 
     #[test]
@@ -615,10 +699,45 @@ mod tests {
     }
 
     #[test]
-    fn installing_still_says_what_arrives_later_and_a_tab_change_keeps_the_project() {
+    fn the_install_button_asks_the_shell_for_a_place_to_put_the_project() {
         let mut state = State::new("sodium".to_string(), ProjectTab::Description);
-        state.update(Message::Install);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
+        state.project = Load::Ready(project());
+        match state.update(Message::Install) {
+            Some(Ask::Install(install)) => {
+                assert_eq!(install.id, "sodium");
+                assert_eq!(
+                    install.title, "Sodium",
+                    "the dialog is the shell's and has never seen a project document"
+                );
+            }
+            other => panic!("the install button asks which instance: {other:?}"),
+        }
+        assert!(
+            state.notice.is_none(),
+            "and says nothing about a transfer that has not started"
+        );
+        // Pressed before the project has arrived, the ask still goes out and names
+        // no title rather than asking the service for one.
+        let mut fresh = State::new("sodium".to_string(), ProjectTab::Description);
+        match fresh.update(Message::Install) {
+            Some(Ask::Install(install)) => assert_eq!(install.title, ""),
+            other => panic!("still an ask: {other:?}"),
+        }
+        // What comes back is a sentence in the slot everything the page could not
+        // do is drawn in, and a failure replaces the success that preceded it.
+        state.update(Message::Noted("Installed Sodium 0.6.5 into atm10".to_string()));
+        assert_eq!(state.notice.as_deref(), Some("Installed Sodium 0.6.5 into atm10"));
+        state.update(Message::Noted("no version of Sodium is for Fabric 1.21.4".to_string()));
+        assert_eq!(
+            state.notice.as_deref(),
+            Some("no version of Sodium is for Fabric 1.21.4"),
+            "and what failed replaces what worked"
+        );
+    }
+
+    #[test]
+    fn a_tab_change_keeps_the_project_on_screen() {
+        let mut state = State::new("sodium".to_string(), ProjectTab::Description);
         state.project = Load::Ready(project());
         state.update(Message::Tab(ProjectTab::Versions));
         assert_eq!(state.tab, ProjectTab::Versions);

@@ -2543,6 +2543,133 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out
   scheduled: the same block as the seven before it. The transcript above is this
   machine's, run with the flags `ci.yml` uses.
 
+- [x] G97: a project's own file is installed into the instance the reader picks
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 910 passed; 0 failed; 14 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree, and of the live
+            measurement the rule was chosen by:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    473 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    217 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 14 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-core` (lib) 9 warnings, its `compat` test 1 and its lib test
+10; `palantir-net` (lib) 1 and its lib test 1 duplicate; `palantir-desktop` (bin)
+3 and (bin test) 21 -- none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0. `large_enum_variant` is 0 for
+the first time: the one at `pages/project.rs` was this slice's to fix, and
+boxing the one `Project` a page message carries is what fixed it.
+
+$ python - <<'PY'          # the choice, asked of the live service twice
+# for each game version a project supports: the first version matching
+# (game version, loader) against the first *release* matching the same, then
+# the primary file of the version the first rule picks, downloaded and hashed.
+PY
+AANobbMI versions: 256                  (Sodium)
+AANobbMI game versions: 41
+AANobbMI game versions where first-match and newest-release differ: 9
+AANobbMI   e.g. 1.18 -> mc1.18-0.4.0-alpha5 vs None
+AANobbMI the rule picks for 1.21.4 + fabric : mc1.21.4-0.6.13-fabric release
+AANobbMI   file: sodium-fabric-0.6.13+mc1.21.4.jar 1306799 bytes
+AANobbMI   sha1: c881d2db971207c396b5629632437f1520c0c478
+AANobbMI   downloaded: 1306799 bytes; sha1 c881d2db... matches
+P7dR8mSH versions: 1203                  (fabric-api)
+P7dR8mSH game versions: 389
+P7dR8mSH game versions where first-match and newest-release differ: 298
+P7dR8mSH   e.g. 1.14-pre1 -> 0.2.7+build.122 vs None
+P7dR8mSH the rule picks for 1.21.4 + fabric : 0.119.4+1.21.4 release
+P7dR8mSH   file: fabric-api-0.119.4+1.21.4.jar 2149128 bytes
+P7dR8mSH   downloaded: 2149128 bytes; sha1 1c7871b6... matches
+
+$ python - <<'PY'          # what those disagreements *are*
+PY
+AANobbMI differ: 9 = no-release 7 + newer-non-release 2 + other 0
+P7dR8mSH differ: 298 = no-release 295 + newer-non-release 3 + other 0
+```
+
+  **The rules, and where they had to live.** Every install rule this launcher
+  has ever had was in `browse.rs`, and `browse.rs` is `#[cfg(test)]` -- the old
+  shell's module -- so what the launcher had was tests agreeing with code the
+  binary could not call. The button did not need a rewrite; it needed a move, and
+  the move is the slice. `install.rs` gained the choice (`preferred_version`) and
+  the transfer (`install_file`) as live functions beside `plan`/`run`; `route.rs`
+  gained `ProjectType::target_folder`, the one place a kind decides a directory
+  (`mods`, `plugins`, `resourcepacks`, `datapacks`, `shaderpacks`, and nothing
+  for a pack or a server); `store.rs` gained `Store::install_project`, blocking on
+  one thread and a channel for `Store::search`'s reason -- no page holds a
+  runtime -- and reading the project and its version list through the engine's
+  own cache; the shell gained `Modal::Install` with a row per instance, and the
+  page reports its press as `Ask::Install { id, title }` rather than doing
+  anything itself, because *which instances exist* and *where their folders are*
+  are not facts a page holds.
+
+  **The rule is a measurement, and the reading that looks safer is wrong.** The
+  version to install is the *first* one in `/v2/project/{id}/version` that matches
+  the instance -- the reference's `findPreferredVersion`, and deliberately not a
+  ranking by release type. The service answers publish-date descending (measured
+  on Sodium's 256 versions, every `date_published` strictly ordered), so the first
+  match *is* the newest, and the type is a label rather than a preference. The
+  rule this replaces, `browse::pick_version`, ranked `release`, then `beta`, then
+  `alpha`, which installs an older release over the newer beta the reader is
+  looking at: the two rules disagree on **9 of Sodium's 41 game versions and 298
+  of fabric-api's 389**, and almost every one of those is a game version with no
+  release at all -- 7 of the 9 and 295 of the 298, where the release-only rule
+  answers `None` and refuses to install anything, and the rest are a game version
+  whose newest build is a beta, which the release-only rule would fill with an
+  older release (`mc1.18-0.4.0-alpha5` and `0.2.7+build.122` are the first of
+  each).
+  A mod matches its instance's loader, and a mod its author also published as a
+  data pack is found on the second pass (`datapack` in `loaders`, the reference's
+  own fallback); anything that is not a mod is matched on the game version alone,
+  because a resource pack or a shader has no loader to be wrong about. One thing
+  this rule adds to the reference's: a version with no file is skipped in both
+  passes, because a version that cannot be downloaded is not an answer to
+  "install this", and the next one down the list usually is.
+
+  The transfer is one file over the launcher's one queue, through the same
+  `Wire` the launch uses -- `FileJob` with the published `sha1`, so the engine's
+  resume, digest check before the rename and process-wide ceiling all apply, and a
+  mod and the launch that will load it are one connection pool apart. The
+  published *size* is checked where the file landed rather than counted off the
+  wire, and a file that is already there and already right transfers nothing: the
+  store's test presses install twice and counts three requests both times (the
+  document, the version list, the file), and the first press is asserted against
+  the file's own bytes, name, path and digest flag. A published name is a
+  stranger's string joined onto a directory under the instance root, so
+  `safe_file_name` refuses a separator or a `..` outright and replaces Windows'
+  reserved characters, because real shader packs carry them (`Complementary:
+  Reimagined` is not an attack). A pack is refused *by name* instead of by
+  silence -- "Sodium is a modpack, and one of those becomes an instance of its own
+  rather than a folder inside one" -- and that refusal, not the mod-shaped
+  install, is what stage 3 still owes.
+
+  **A test double that was reading another run's answers, found because one test
+  failed one run in ten.** `wire.rs`'s `Script` numbers its cache directories
+  from a per-process counter, and the engine's metadata cache names a directory
+  after the URL's hash with hours-long TTLs -- so the nth `Script::wire()` of a
+  run landed on the directory the nth call of the *previous* run had left behind.
+  Measured before it was fixed: twenty directories holding `java21.json`, two of
+  them with different bodies. `java_runtime::tests::a_manifest_that_does_not_match_its_published_digest_is_refused`
+  failed about one run in ten and passed alone, which is the signature of a test
+  that is reading somebody else's fixture: a double that outlives the test that
+  wrote it agrees with whatever it finds, the same failure a stale fixture makes
+  permanent. `Script::wire` removes its directory before it builds over it now.
+
+  The runner could not be the receipt: this slice's push is recorded by the commit
+  that follows it, and the account gave it the same block as the eight before --
+  `Test workspace` and `Lint` dying in seconds with zero steps, and `Live
+  services` and `Build exe` never scheduled. The transcripts above are this
+  machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

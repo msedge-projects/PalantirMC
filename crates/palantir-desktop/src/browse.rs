@@ -28,7 +28,6 @@ use palantir_loader::{PackFile, PackPlan};
 #[cfg(test)]
 use palantir_net::modrinth::ModrinthProjectVersion;
 #[cfg(test)]
-use crate::catalog::LoaderKind;
 #[cfg(test)]
 use crate::install::{self, Progress};
 #[cfg(test)]
@@ -94,23 +93,6 @@ impl ContentType {
     /// All supported tabs, in the order the reference draws them.
     pub const fn all() -> [Self; 5] {
         [Self::Modpacks, Self::Mods, Self::ResourcePacks, Self::DataPacks, Self::Shaders]
-    }
-
-    /// Folder inside an instance this content goes into.
-    ///
-    /// `None` for modpacks, and that is the point of the option: a pack is
-    /// installed as a *new instance*, not into an existing one. The old
-    /// `"mods"` answer for it is what made Browse drop a `.mrpack` into the
-    /// selected instance's mod folder, where the game read it as a broken mod
-    /// and none of the pack was present.
-    pub const fn target_folder(self) -> Option<&'static str> {
-        match self {
-            Self::Mods => Some("mods"),
-            Self::ResourcePacks => Some("resourcepacks"),
-            Self::DataPacks => Some("datapacks"),
-            Self::Shaders => Some("shaderpacks"),
-            Self::Modpacks => None,
-        }
     }
 
     /// Whether the target folder is a loader-specific mod folder.
@@ -202,41 +184,6 @@ pub fn parse_search(body: &str) -> Result<Vec<Hit>, String> {
     Ok(envelope.hits)
 }
 
-/// Choose the best version for an instance.
-///
-/// Rules, in order:
-/// 1. the version must list `game` in `game_versions` and carry at least one
-///    downloadable file;
-/// 2. it must declare the target loader (`fabric`, `neoforge`, `forge`,
-///    `quilt`); vanilla targets accept any loader;
-/// 3. among those, the newest `release` wins, then the newest `beta`, then the
-///    newest `alpha` — "newest" being API order, which is publish-date
-///    descending. [`ModrinthProjectVersion`] carries no timestamp, so order is
-///    the only ordering signal available.
-#[cfg(test)]
-pub fn pick_version<'a>(
-    versions: &'a [ModrinthProjectVersion],
-    game: &str,
-    loader: LoaderKind,
-) -> Option<&'a ModrinthProjectVersion> {
-    let compatible = |candidate: &&ModrinthProjectVersion| {
-        candidate.primary_file().is_some()
-            && candidate.game_versions.iter().any(|version| version == game)
-            && (loader == LoaderKind::Vanilla
-                || candidate.loaders.iter().any(|name| name == loader.modrinth_name()))
-    };
-    for kind in ["release", "beta", "alpha"] {
-        let found = versions
-            .iter()
-            .filter(compatible)
-            .find(|candidate| candidate.version_type == kind);
-        if let Some(version) = found {
-            return Some(version);
-        }
-    }
-    versions.iter().filter(compatible).next()
-}
-
 /// Choose a project's newest downloadable version, whatever it targets.
 ///
 /// Used for modpacks, and only for modpacks: a pack carries its own Minecraft
@@ -255,84 +202,6 @@ pub fn newest_version(versions: &[ModrinthProjectVersion]) -> Option<&ModrinthPr
         }
     }
     versions.iter().find(|candidate| candidate.primary_file().is_some())
-}
-
-/// A file that was written into an instance.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg(test)]
-pub struct InstalledFile {
-    /// File name as written.
-    pub filename: String,
-    /// Full destination path.
-    pub path: PathBuf,
-    /// Bytes written.
-    pub bytes: usize,
-    /// Whether the `sha1` the API published was checked.
-    pub verified: bool,
-}
-
-/// Make an API-provided file name safe to write on Windows.
-#[cfg(test)]
-pub fn safe_file_name(name: &str) -> Result<String, String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return Err("the project published a file without a name".to_string());
-    }
-    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
-        return Err(format!("refusing to write suspicious file name '{trimmed}'"));
-    }
-    let cleaned: String = trimmed
-        .chars()
-        .map(|c| if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0') { '_' } else { c })
-        .collect();
-    Ok(cleaned)
-}
-
-/// Download a version's primary file into the selected content folder.
-///
-/// One file over the launcher's one queue: the transfer resumes a part file it
-/// finds, is checked against the `sha1` the API published before the rename,
-/// and draws the process-wide ceiling while it runs. The published *size* is
-/// still checked here, because it is the only check a file with no digest has
-/// -- and because the length is the caller's to know, the transfer's is not.
-#[cfg(test)]
-pub fn install_version(
-    wire: &Wire,
-    target_dir: &Path,
-    version: &ModrinthProjectVersion,
-) -> Result<InstalledFile, String> {
-    let file = version
-        .primary_file()
-        .ok_or_else(|| format!("{} has no downloadable file", version.name))?;
-    if file.url.is_empty() {
-        return Err(format!("{} publishes no direct download", version.name));
-    }
-    let filename = safe_file_name(&file.filename)?;
-    palantir_core::util::ensure_dir(target_dir)
-        .map_err(|error| format!("creating {} failed: {error}", target_dir.display()))?;
-    let path = target_dir.join(&filename);
-    let jobs = [FileJob::new(&file.url, &path, file.sha1().unwrap_or_default())];
-    wire.files(&jobs, 1, &mut |_, _| {})
-        .remove(0)
-        .map_err(|reason| format!("downloading {filename} failed: {reason}"))?;
-    // Measured where it landed rather than counted off the wire: a file that is
-    // already there and already right transfers nothing at all.
-    let bytes = std::fs::metadata(&path)
-        .map(|meta| meta.len())
-        .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
-    if file.size > 0 && bytes != file.size {
-        let _ = std::fs::remove_file(&path);
-        return Err(format!(
-            "downloading {filename} failed: size mismatch: expected {} bytes, got {bytes}",
-            file.size
-        ));
-    }
-    Ok(InstalledFile {
-        filename,
-        path,
-        bytes: usize::try_from(bytes).unwrap_or(usize::MAX),
-        verified: file.sha1().is_some(),
-    })
 }
 
 /// What fetching a pack's listed files came to.
@@ -517,7 +386,6 @@ fn import_and_fetch(
 mod tests {
     use super::*;
     use palantir_net::modrinth::ModrinthVersionFile;
-    use std::sync::Arc;
 
     use crate::wire::Script;
 
@@ -550,17 +418,16 @@ mod tests {
         }
     }
 
+    /// The tab strip's own rule, and the one assertion that outlived it: a pack
+    /// is installed as an instance of its own rather than into a folder, which
+    /// is why it is the one tab whose content has no `mods` to go in. The folder
+    /// table itself is `route::ProjectType::target_folder` now -- the install
+    /// path is live and this module is not.
     #[test]
     fn a_modpack_targets_an_instance_of_its_own() {
-        assert_eq!(ContentType::Mods.target_folder(), Some("mods"));
-        assert_eq!(ContentType::Shaders.target_folder(), Some("shaderpacks"));
-        assert_eq!(
-            ContentType::Modpacks.target_folder(),
-            None,
-            "a pack is an instance, not a folder inside one"
-        );
         assert!(!ContentType::Modpacks.needs_loader());
         assert_eq!(ContentType::Modpacks.api_value(), "modpack");
+        assert!(ContentType::Mods.needs_loader());
     }
 
     /// The strip's order and its opening tab are the reference's, measured off
@@ -633,123 +500,6 @@ mod tests {
         // A hit with no project id falls back to its slug.
         hit.project_id.clear();
         assert_eq!(hit.project_ref(), "s");
-    }
-
-    #[test]
-    fn picking_a_version_respects_game_loader_and_type_order() {
-        let versions = vec![
-            version("alpha-new", "alpha", &["26.2"], &["fabric"], true),
-            version("beta-old", "beta", &["26.2"], &["fabric"], true),
-            version("release-old", "release", &["26.2"], &["fabric"], true),
-            version("other-game", "release", &["1.21.1"], &["fabric"], true),
-            version("forge-only", "release", &["26.2"], &["forge"], true),
-            version("no-file", "release", &["26.2"], &["fabric"], false),
-        ];
-        let picked = pick_version(&versions, "26.2", LoaderKind::Fabric).unwrap();
-        assert_eq!(picked.name, "release-old", "releases win over newer betas/alphas");
-        assert_eq!(pick_version(&versions, "26.2", LoaderKind::Forge).unwrap().name, "forge-only");
-        // Vanilla targets accept any loader.
-        assert_eq!(pick_version(&versions, "26.2", LoaderKind::Vanilla).unwrap().name, "release-old");
-        // Nothing matches an unsupported loader.
-        assert!(pick_version(&versions, "26.2", LoaderKind::Quilt).is_none());
-        assert!(pick_version(&versions, "1.0", LoaderKind::Fabric).is_none());
-    }
-
-    #[test]
-    fn picking_a_version_falls_back_to_newest_when_no_release_exists() {
-        let versions = vec![
-            version("beta-new", "beta", &["26.2"], &["fabric"], true),
-            version("alpha-old", "alpha", &["26.2"], &["fabric"], true),
-        ];
-        assert_eq!(pick_version(&versions, "26.2", LoaderKind::Fabric).unwrap().name, "beta-new");
-        let only_alpha = vec![version("only", "alpha", &["26.2"], &["fabric"], true)];
-        assert_eq!(pick_version(&only_alpha, "26.2", LoaderKind::Fabric).unwrap().name, "only");
-    }
-
-    #[test]
-    fn file_names_are_sanitized_and_paths_refused() {
-        assert_eq!(safe_file_name("sodium-fabric-0.6.0+mc1.21.1.jar").unwrap(), "sodium-fabric-0.6.0+mc1.21.1.jar");
-        assert_eq!(safe_file_name("we:ird?.jar").unwrap(), "we_ird_.jar");
-        assert!(safe_file_name("").is_err());
-        assert!(safe_file_name("nested/evil.jar").is_err());
-        assert!(safe_file_name("..\\evil.jar").is_err());
-    }
-
-    #[test]
-    fn a_mod_file_is_fetched_over_the_wire_and_measured_where_it_lands() {
-        // The whole path without a network: the engine's queue fetches the body
-        // and checks the `sha1` the API published before it renames the part
-        // file, and the caller measures what is on disk afterwards -- which is
-        // the file's length rather than what came off the wire, because a file
-        // that is already here and already right transfers nothing.
-        let dir = tempfile::tempdir().unwrap();
-        let mods = dir.path().join("mods");
-        let body = b"a mod jar";
-        let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
-        candidate.files[0]
-            .hashes
-            .insert("sha1".to_string(), install::sha1_hex(body));
-        candidate.files[0].size = body.len() as u64;
-        let mut script = Script::new();
-        script.insert(&candidate.files[0].url, body.to_vec());
-        let fetch = Arc::new(script.fetch());
-        let wire = Wire::over(dir.path().join("wire"), fetch.clone());
-
-        let installed = install_version(&wire, &mods, &candidate).unwrap();
-        assert_eq!(installed.filename, "sodium.jar");
-        assert_eq!(installed.bytes, body.len());
-        assert!(installed.verified, "the published sha1 was checked");
-        assert_eq!(std::fs::read(&installed.path).unwrap(), body);
-        assert_eq!(fetch.count(), 1, "one file, one request");
-
-        let again = install_version(&wire, &mods, &candidate).unwrap();
-        assert_eq!(again.bytes, body.len());
-        assert_eq!(fetch.count(), 1, "a file that is already here is not asked for twice");
-    }
-
-    #[test]
-    fn a_file_whose_length_is_not_the_published_one_is_dropped() {
-        // The length is the check the caller still owns, and for a file the API
-        // publishes no digest for it is the only one there is.
-        let dir = tempfile::tempdir().unwrap();
-        let mods = dir.path().join("mods");
-        let body = b"a mod jar";
-        let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
-        candidate.files[0].size = body.len() as u64 + 1;
-        let mut script = Script::new();
-        script.insert(&candidate.files[0].url, body.to_vec());
-        let wire = script.wire();
-
-        let error = install_version(&wire, &mods, &candidate).unwrap_err();
-        assert!(error.contains("size mismatch"), "error: {error}");
-        assert!(
-            !mods.join("sodium.jar").exists(),
-            "a file of the wrong length is not left where the game would load it"
-        );
-    }
-
-    #[test]
-    fn installing_refuses_versions_without_files_and_leaves_no_trace() {
-        let dir = tempfile::tempdir().unwrap();
-        let mods = dir.path().join("mods");
-        let mut candidate = version("sodium", "release", &["26.2"], &["fabric"], true);
-        candidate.files[0].hashes.insert("sha1".to_string(), install::sha1_hex(b"jar bytes"));
-        candidate.files[0].size = 9;
-        let script = Script::new();
-        let wire = script.wire();
-
-        // No files at all: refused before any request.
-        let empty = ModrinthProjectVersion { files: Vec::new(), ..candidate.clone() };
-        assert!(install_version(&wire, &mods, &empty).is_err());
-        // No direct URL: also refused before any request.
-        let no_url = ModrinthProjectVersion {
-            files: vec![ModrinthVersionFile { url: String::new(), ..candidate.files[0].clone() }],
-            ..candidate.clone()
-        };
-        let error = install_version(&wire, &mods, &no_url).unwrap_err();
-        assert!(error.contains("no direct download"), "error: {error}");
-        assert!(!mods.join("sodium.jar").exists());
-        assert_eq!(script.fetch().count(), 0, "neither refusal made a request");
     }
 
     #[test]

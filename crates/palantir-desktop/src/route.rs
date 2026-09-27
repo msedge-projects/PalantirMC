@@ -133,6 +133,30 @@ impl ProjectType {
         }
     }
 
+    /// The folder inside an instance this kind installs into.
+    ///
+    /// `None` for the two kinds that are not a folder inside somebody's
+    /// instance: a pack *is* an instance (that is why the option exists at all),
+    /// and a server is a process this launcher does not host. A caller that gets
+    /// `None` has to say so rather than guess a folder.
+    ///
+    /// The four Minecraft ones are the names the old shell's table carried
+    /// (`browse::ContentType::target_folder`, measured then and unchanged);
+    /// their live home is here now, next to the tokens and labels of the same
+    /// vocabulary. `plugins` is the fifth, and it is not read by the client: it
+    /// is where a server's own loader looks, which is what the reference's
+    /// content kinds name (`server-panel-sync.ts`).
+    pub fn target_folder(self) -> Option<&'static str> {
+        match self {
+            ProjectType::Modpack | ProjectType::Server => None,
+            ProjectType::Mod => Some("mods"),
+            ProjectType::Plugin => Some("plugins"),
+            ProjectType::ResourcePack => Some("resourcepacks"),
+            ProjectType::Datapack => Some("datapacks"),
+            ProjectType::Shader => Some("shaderpacks"),
+        }
+    }
+
     /// The kind a path segment names, aliases included.
     ///
     /// The two aliases are the reference's own: `PROJECT_TYPE_ALIASES` in
@@ -921,6 +945,29 @@ mod tests {
         // not one of the tabs, so it is in `ALL` and not in `TABS`.
         assert!(ProjectType::ALL.contains(&ProjectType::Plugin));
         assert!(!ProjectType::TABS.contains(&ProjectType::Plugin));
+    }
+
+    /// The install table, from the API's own spelling of a project type through
+    /// to the folder under an instance root.
+    #[test]
+    fn a_kind_installs_into_the_folder_it_names() {
+        let folder = |token: &str| {
+            ProjectType::from_token(token).and_then(|kind| kind.target_folder())
+        };
+        assert_eq!(folder("mod"), Some("mods"));
+        assert_eq!(folder("resourcepack"), Some("resourcepacks"));
+        assert_eq!(folder("datapack"), Some("datapacks"));
+        // The API's long spelling, which is why this goes through `from_token`
+        // rather than comparing the string to a token.
+        assert_eq!(folder("shaderpack"), Some("shaderpacks"));
+        assert_eq!(folder("plugin"), Some("plugins"));
+        assert_eq!(
+            folder("modpack"),
+            None,
+            "a pack is an instance, not a folder inside one"
+        );
+        assert_eq!(folder("minecraft_java_server"), None);
+        assert_eq!(folder("not a type"), None);
     }
 
     #[test]

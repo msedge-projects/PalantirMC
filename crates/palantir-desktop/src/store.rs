@@ -50,11 +50,14 @@ use palantir_net::modrinth::ModrinthMember;
 use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
 
 use crate::catalog::LoaderKind;
+use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
 use crate::pages::discover::Hit;
 use crate::pages::project::Project;
+use crate::route::ProjectType;
+use crate::wire::Wire;
 
 /// What the interface knows, and how it came to know it.
 #[derive(Debug, Clone, Default)]
@@ -140,8 +143,17 @@ pub struct Launch {
 ///
 /// Cheap to clone, and it has to be: the shell clones it into the thread a search
 /// runs on, which is the whole of what crosses the boundary.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Engine {
+    /// The pool every request this engine makes goes through, kept so that work
+    /// which is not a metadata read can use it too.
+    ///
+    /// A module install and a launch's own files are downloads rather than
+    /// document reads, and they belong on the engine's pool for the reason the
+    /// engine exists: one connection pool, one timeout, one process-wide ceiling.
+    /// A second pool built from the same numbers would be a second ceiling, which
+    /// is the thing the numbers are for.
+    fetch: Arc<dyn Fetch>,
     /// Modrinth over the engine's cache. An `Arc` because it is handed to a
     /// worker thread per request rather than borrowed across one.
     api: Arc<ModrinthApi>,
@@ -159,6 +171,17 @@ pub struct Engine {
     /// second cache is a second set of stale answers nobody knows about. An `Arc`
     /// for the same reason the API's is: the engine is cloned into a worker.
     piston: Arc<PistonMeta>,
+}
+
+impl std::fmt::Debug for Engine {
+    /// Hand-written, and only because of one field: [`Engine::fetch`] is a trait
+    /// object, which has no `Debug` unless every implementor is made to have one.
+    /// What is worth reading in a debug dump of a store is which services it can
+    /// reach rather than the pool's own fields, so the pool is named and not
+    /// printed.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine").field("fetch", &"<the engine's own pool>").finish_non_exhaustive()
+    }
 }
 
 impl Engine {
@@ -182,10 +205,17 @@ impl Engine {
         let dir = cache_dir.into();
         let cache = MetadataCache::new(dir.clone(), DEFAULT_TTL);
         Engine {
+            fetch: fetch.clone(),
             api: Arc::new(ModrinthApi::new(cache, fetch.clone())),
             piston: Arc::new(PistonMeta::new(MetadataCache::new(dir.clone(), DEFAULT_TTL), fetch.clone())),
             loaders: Arc::new(LoaderMeta::new(MetadataCache::new(dir, DEFAULT_TTL), fetch)),
         }
+    }
+
+    /// The pool under every request this engine makes, for the transfers that
+    /// are files rather than documents.
+    pub fn fetch(&self) -> Arc<dyn Fetch> {
+        self.fetch.clone()
     }
 
     /// Modrinth over this engine's cache.
@@ -201,6 +231,34 @@ impl Engine {
     /// The loaders' own build lists over the same cache and pool.
     pub fn loaders(&self) -> &LoaderMeta {
         &self.loaders
+    }
+}
+
+/// One project installed into one instance: what landed, and what to call it.
+///
+/// The three names are carried rather than looked up again because the sentence a
+/// page shows uses all three and none of them is the id it asked with: a reader
+/// pressed *Install* on a title and chose an instance by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installed {
+    /// The project's title, as Modrinth spells it.
+    pub project: String,
+    /// The version that was chosen, as published.
+    pub version: String,
+    /// The instance's display name.
+    pub instance: String,
+    /// The file that landed, and where.
+    pub file: crate::install::InstalledFile,
+}
+
+impl Installed {
+    /// The line the project page shows once it has worked, in the reference's own
+    /// shape ("Installed" and then the thing, rather than a stage name).
+    pub fn summary(&self) -> String {
+        format!(
+            "Installed {} {} into {}",
+            self.project, self.version, self.instance
+        )
     }
 }
 
@@ -554,6 +612,76 @@ impl Store {
             .versions(id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
         Ok(Project::from_api(&project, author_of(&members), &versions))
+    }
+
+    /// Install one project into one instance.
+    ///
+    /// **Blocking**, like every engine call: the shell runs it off the frame
+    /// thread.
+    ///
+    /// The whole path is one decision -- *which version, and where does it go* --
+    /// and both halves of it come from the instance the reader picked: the version
+    /// is the newest one that matches that instance's game version and loader
+    /// ([`install::preferred_version`]), and the folder is what the project *is*
+    /// ([`ProjectType::target_folder`]). Neither is the page's to decide, which is
+    /// why the button reports a press and this does the work.
+    ///
+    /// The two documents the version comes out of are read again rather than taken
+    /// from the page: the page has a title and a version list to draw, not a
+    /// `project_type`, and a launcher that let a page tell it where to write would
+    /// be trusting the page's copy of an answer the service has since replaced.
+    /// Both reads are cached, so a press right after a page load costs nothing.
+    pub fn install_project(&self, project_id: &str, instance_id: &str) -> Result<Installed, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Installing a project"));
+        };
+        let Some(paths) = &self.paths else {
+            // A store with no launcher behind it has no cache directory to
+            // download through and no instances directory to write into.
+            return Err(not_implemented("Installing a project"));
+        };
+        let Load::Ready(card) = self.instance(instance_id) else {
+            return Err(format!("there is no instance called '{instance_id}'"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let project = api
+            .project(project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let versions = api
+            .versions(project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let target = format!("{} {}", card.loader.label(), card.mc_version);
+        let version = install::preferred_version(
+            &versions,
+            &project.project_type,
+            &card.mc_version,
+            card.loader.modrinth_name(),
+        )
+        .ok_or_else(|| format!("{} has no version for {target}", project.title))?;
+        let kind = ProjectType::from_token(&project.project_type);
+        let Some(folder) = kind.and_then(ProjectType::target_folder) else {
+            // A pack is not a file that goes in a folder, and saying which kind it
+            // is is more use than saying "no".
+            return Err(format!(
+                "{} is a {}, and one of those becomes an instance of its own rather than a folder \
+                 inside one",
+                project.title,
+                kind.map(|kind| kind.sentence(1)).unwrap_or("project")
+            ));
+        };
+        // The engine's own pool, not a second one built from the same numbers: a
+        // mod and the launch that will load it are one ceiling apart.
+        let wire = Wire::over(paths.meta_dir(), engine.fetch());
+        let dir = self.instance_dir(instance_id).join(folder);
+        let file = install::install_file(&wire, &dir, version)?;
+        Ok(Installed {
+            project: project.title,
+            version: version.version_number.clone(),
+            instance: card.name,
+            file,
+        })
     }
 }
 
@@ -961,6 +1089,139 @@ mod tests {
         assert_eq!(project.author, "");
         assert_eq!(project.versions.len(), 1);
         assert_eq!(fetch.count(), 3, "the members were asked for and failed");
+    }
+
+    /// One `GET /v2/project/{id}/version` body with a file in it, in the API's
+    /// own shape: the newest matching version first, and one that is not for this
+    /// instance after it.
+    ///
+    /// The digest is a parameter because it is what decides whether a second
+    /// install transfers anything: the queue skips a file that is already there
+    /// and matches the `sha1` the API published, and fetches one it cannot check
+    /// (which is why the caller still measures the length).
+    fn versions_with_files(sha1: &str) -> String {
+        format!(
+            r#"[{{
+        "id": "new", "project_id": "AANobbMI", "name": "Sodium 0.6.5",
+        "version_number": "mc1.21.4-0.6.5", "version_type": "beta", "downloads": 10,
+        "changelog": "", "game_versions": ["1.21.4"], "loaders": ["fabric"],
+        "files": [{{"url": "https://cdn.modrinth.com/data/sodium.jar",
+                   "filename": "sodium-fabric-0.6.5.jar", "primary": true, "size": 9,
+                   "hashes": {{"sha1": "{sha1}"}}}}], "dependencies": []
+    }}, {{
+        "id": "old", "project_id": "AANobbMI", "name": "Sodium 0.5.0",
+        "version_number": "mc1.20.1-0.5.0", "version_type": "release", "downloads": 900,
+        "changelog": "", "game_versions": ["1.20.1"], "loaders": ["fabric"],
+        "files": [{{"url": "https://cdn.modrinth.com/data/old.jar",
+                   "filename": "sodium-fabric-0.5.0.jar", "primary": true, "size": 10,
+                   "hashes": {{}}}}], "dependencies": []
+    }}]"#
+        )
+    }
+
+    /// A store with one Fabric instance in it, whose only way out is the engine.
+    fn store_with_instance(name: &str, fetch: Arc<MapFetch>) -> Store {
+        let root = scratch(name);
+        let paths = PalantirPaths::at(&root);
+        std::fs::create_dir_all(paths.instances_dir()).expect("an instances directory");
+        crate::instances::create(
+            &paths,
+            &NewInstance {
+                name: "atm10".to_string(),
+                loader: LoaderKind::Fabric,
+                game: "1.21.4".to_string(),
+                loader_build: Some("0.16.9".to_string()),
+                icon_key: None,
+                icon_source: None,
+                max_mem_mb: None,
+                java_path: None,
+            },
+        )
+        .expect("a fabric instance");
+        Store::load(&paths).with_engine(Engine::over(paths.meta_dir(), fetch))
+    }
+
+    #[test]
+    fn installing_a_project_puts_the_version_that_matches_into_the_right_folder() {
+        // The whole path of one press: the project document says what the thing
+        // is, its version list says what fits the instance, and the file lands in
+        // the folder that kind belongs in -- over the engine's own queue, so the
+        // counts here are of requests that really went through it.
+        let body = b"a mod jar";
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        fetch.set_route(
+            &version_url("AANobbMI"),
+            Route::text(&versions_with_files(&install::sha1_hex(body))),
+        );
+        fetch.set_route("https://cdn.modrinth.com/data/sodium.jar", Route::body(body.to_vec()));
+        let store = store_with_instance("install-project", fetch.clone());
+
+        let installed = store.install_project("AANobbMI", "atm10").expect("an install");
+        assert_eq!(installed.project, "Sodium");
+        assert_eq!(
+            installed.version, "mc1.21.4-0.6.5",
+            "the newest version for this instance, not the newest release"
+        );
+        assert_eq!(installed.file.filename, "sodium-fabric-0.6.5.jar");
+        assert_eq!(installed.summary(), "Installed Sodium mc1.21.4-0.6.5 into atm10");
+        let path = store.instance_dir("atm10").join("mods").join("sodium-fabric-0.6.5.jar");
+        assert_eq!(installed.file.path, path);
+        assert_eq!(std::fs::read(&path).expect("the file"), b"a mod jar");
+        assert!(installed.file.verified, "the published sha1 was checked");
+        assert_eq!(installed.file.bytes, body.len() as u64);
+        assert_eq!(fetch.count(), 3, "the document, the version list and the file");
+
+        // Pressed again, nothing is transferred: the file is already there and
+        // matched the digest the API published, and the two documents are cached.
+        let again = store.install_project("AANobbMI", "atm10").expect("the same install");
+        assert_eq!(again.version, installed.version);
+        assert_eq!(fetch.count(), 3, "a second press costs nothing");
+    }
+
+    #[test]
+    fn installing_says_what_it_cannot_do_instead_of_writing_somewhere_invented() {
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        fetch.set_route(&version_url("AANobbMI"), Route::text("[]"));
+        let store = store_with_instance("install-refusals", fetch.clone());
+
+        // No such instance: named rather than guessed at.
+        let reason = store.install_project("AANobbMI", "gone").expect_err("no instance");
+        assert!(reason.contains("gone"), "{reason}");
+        // A version list with nothing for this instance: the sentence names what
+        // the instance *is*, which is what the reader can act on.
+        let bare = Arc::new(MapFetch::new());
+        bare.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
+        bare.set_route(&version_url("AANobbMI"), Route::text("[]"));
+        let store = store_with_instance("install-no-version", bare.clone());
+        let reason = store.install_project("AANobbMI", "atm10").expect_err("no version");
+        assert!(reason.contains("Fabric 1.21.4"), "the target is named: {reason}");
+        assert_eq!(bare.count(), 2, "and no file was asked for");
+        // A store with no engine, and one with no launcher behind it: the two
+        // ways this cannot be attempted at all.
+        let reason = Store::default().install_project("AANobbMI", "atm10").expect_err("no engine");
+        assert!(reason.contains("is not implemented yet"), "{reason}");
+        assert!(store.install_project("AANobbMI", "gone").is_err());
+    }
+
+    #[test]
+    fn a_pack_is_refused_by_name_because_it_becomes_an_instance_of_its_own() {
+        // The one project type whose install is not a folder. It is refused with a
+        // sentence naming the kind rather than with "there is no folder for that",
+        // because a pack really is installable -- as a new instance, which is the
+        // next slice rather than a silent no.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(
+            &project_url("pack"),
+            Route::text(&PROJECT_BODY.replace("\"mod\"", "\"modpack\"")),
+        );
+        fetch.set_route(&version_url("pack"), Route::text(&versions_with_files("0")));
+        let store = store_with_instance("install-pack", fetch.clone());
+        let reason = store.install_project("pack", "atm10").expect_err("a pack");
+        assert!(reason.contains("modpack"), "{reason}");
+        assert!(reason.contains("instance of its own"), "{reason}");
+        assert_eq!(fetch.count(), 2, "and nothing was downloaded");
     }
 
     #[test]

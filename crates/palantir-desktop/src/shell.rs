@@ -62,6 +62,7 @@ use crate::style::{
 };
 use crate::icons_gen::{self, Glyph};
 use crate::install;
+use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
@@ -395,6 +396,31 @@ pub struct Shell {
     /// the chevron beside the running instance's name), and either can be open
     /// with the other closed.
     switchers: bool,
+    /// Whether an install is in flight, so that a second press cannot start a
+    /// second transfer of the same file.
+    ///
+    /// The flag is set as the request leaves rather than when it comes back, for
+    /// the reason the creation flow's is: the gap between the two is a window a
+    /// user can press in, and two transfers writing one file through one part
+    /// file is a corrupted mod.
+    installing: bool,
+    /// The install the dialog's last press asked for: which project, into which
+    /// instance. Taken by the command that runs it, so it is `None` while there is
+    /// nothing to do.
+    install_requested: Option<(String, String)>,
+    /// Why the last install did not work, drawn inside the dialog.
+    ///
+    /// The dialog's own sentence rather than the page's notice, because the
+    /// failure is about the choice the dialog is asking for -- no version for that
+    /// instance, no permission in its folder -- and the answer is to pick another
+    /// instance, which a reader can only do while the dialog is still up.
+    install_error: Option<String>,
+    /// What the last install came to, waiting to be handed to the page.
+    ///
+    /// Raised by [`Shell::act`] and taken by [`Shell::handle`], like the create
+    /// flow's flag and for the same reason: a page is told in a message, and only
+    /// the caller that builds commands can send one.
+    installed: Option<Result<String, String>>,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -617,7 +643,7 @@ impl crate::ui::Hovered for Message {
 /// purpose: the reference has no `/settings` route, its modal is opened from the
 /// rail's settings button, and the old shell's `/settings` page is one of the
 /// pages [`crate::route`] refuses. The rest arrive with the pages that open them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Modal {
     /// `AppSettingsModal`.
     Settings,
@@ -627,6 +653,16 @@ pub enum Modal {
     /// The same flow's import step: what the other launchers on this machine are
     /// holding, and a button per instance.
     Import,
+    /// Which instance a project goes into: the reference's *Install to instance*,
+    /// drawn as a dialog (see [`Shell::install_dialog`]).
+    Install {
+        /// Which project, as the API names it.
+        project: String,
+        /// What to call it, which the page that owns it sent along: a dialog that
+        /// asked the engine again for a title it could have been handed would be a
+        /// request per press for a word the page is already holding.
+        title: String,
+    },
 }
 
 /// Everything the shell can be told.
@@ -659,6 +695,17 @@ pub enum Message {
     },
     /// The right panel was shown or hidden.
     Sidebar(bool),
+    /// One of the install dialog's rows: put this project into that instance.
+    InstallInto(String),
+    /// The install that was asked for came back. The line it succeeded with, or
+    /// why it did not.
+    ///
+    /// A sentence rather than the [`store::Installed`] value itself: the page that
+    /// shows it is a page, and what a page draws is a line of text.
+    Installed(Result<String, String>),
+    /// The install dialog's empty state: open the creation flow, which is where an
+    /// instance comes from in the first place.
+    OpenCreate,
     /// The accounts card's header: open its body or close it.
     ToggleAccounts,
     /// One of the card's rows: sign a launch in as this account.
@@ -805,6 +852,10 @@ impl Shell {
             jobs: BTreeMap::new(),
             downloads: false,
             switchers: false,
+            installing: false,
+            install_requested: None,
+            install_error: None,
+            installed: None,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -1088,6 +1139,17 @@ impl Shell {
         if let Some(source) = self.import_requested.take() {
             return self.import(source);
         }
+        if let Some((project, instance)) = self.install_requested.take() {
+            return self.install(&project, &instance);
+        }
+        if let Some(result) = self.installed.take() {
+            // The sentence reaches the page the way the shell tells a page
+            // anything -- `Message::Screen` -- applied here rather than through a
+            // command that yields it: iced has no "send this message now" command,
+            // and a future that resolved to one would be adding a turn to a
+            // sentence the page can draw in this frame.
+            let _ = self.act(Message::Screen(pages::Message::install_result(result)));
+        }
         if std::mem::take(&mut self.versions_requested) {
             return self.versions_command();
         }
@@ -1133,6 +1195,42 @@ impl Shell {
             }
             Message::ColorTheme(choice) => {
                 self.choose_theme(choice);
+                None
+            }
+            Message::InstallInto(instance) => {
+                if !self.installing {
+                    if let Some(Modal::Install { project, .. }) = &self.modal {
+                        // Set as the request leaves rather than when it comes
+                        // back: a second press in the gap would put two transfers
+                        // on one file, through one part file.
+                        self.installing = true;
+                        self.install_error = None;
+                        self.install_requested = Some((project.clone(), instance));
+                    }
+                }
+                None
+            }
+            Message::Installed(result) => {
+                self.installing = false;
+                match &result {
+                    Ok(_) => {
+                        // The dialog has done its job and the sentence belongs
+                        // where the button was: a modal over it would be covering
+                        // the answer it just produced.
+                        self.modal = None;
+                        self.install_error = None;
+                    }
+                    // A failure keeps the dialog up, because the answer to it is
+                    // to pick a different instance -- which needs the list.
+                    Err(reason) => self.install_error = Some(reason.clone()),
+                }
+                // Sent on to the page as a message of its own: the sentence stays
+                // after the dialog is gone, which is what makes it worth saying.
+                self.installed = Some(result);
+                None
+            }
+            Message::OpenCreate => {
+                self.open_create();
                 None
             }
             Message::CreateName(name) => {
@@ -1318,6 +1416,17 @@ impl Shell {
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
+                    Some(pages::Ask::Install(install)) => {
+                        // The dialog is opened rather than a transfer started: the
+                        // missing half of the request is *which instance*, and only
+                        // a reader knows that.
+                        self.install_error = None;
+                        self.modal = Some(Modal::Install {
+                            project: install.id,
+                            title: install.title,
+                        });
+                        None
+                    }
                     Some(pages::Ask::Create) => {
                         self.open_create();
                         None
@@ -1652,8 +1761,11 @@ impl Shell {
             // launch in particular is a button's doing rather than a page's
             // arrival, and starting a game because a window opened on its page
             // would be a launcher that plays by itself.
+            // An install is not *owed* either: nothing is waiting for one, and the
+            // dialog it opens is a press away.
             Some(
                 pages::Ask::Open(_)
+                | pages::Ask::Install(_)
                 | pages::Ask::Create
                 | pages::Ask::Import
                 | pages::Ask::Play(_)
@@ -1695,6 +1807,28 @@ impl Shell {
         iced::Command::perform(crate::store::off_thread(move || store.project(&id)), move |result| {
             Message::Screen(pages::Message::project_result(&asked, result))
         })
+    }
+
+    /// Install one project into one instance, and bring the outcome back as a
+    /// sentence.
+    ///
+    /// [`Shell::project`]'s twin, blocking for the same reason and a stronger one:
+    /// this one is not three document reads but a document read, a version choice
+    /// and a file transfer, and the transfer is where a frame thread would sit for
+    /// as long as the file takes.
+    fn install(&self, project: &str, instance: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        // Cloned rather than borrowed: the worker outlives this call, and both
+        // names are its.
+        let (project, instance) = (project.to_string(), instance.to_string());
+        iced::Command::perform(
+            crate::store::off_thread(move || store.install_project(&project, &instance)),
+            // The value becomes the line here rather than in the page: what
+            // landed, which version of it and which instance are all facts the
+            // page asked for a transfer rather than for, and the sentence is
+            // drawn in the same shape whether it worked or not.
+            |result| Message::Installed(result.map(|installed| installed.summary())),
+        )
     }
 
     // ---- Launching ------------------------------------------------------
@@ -3735,12 +3869,126 @@ impl Shell {
         )
     }
 
+    /// The install dialog: which of the launcher's instances this project goes
+    /// into.
+    ///
+    /// The reference asks the same question with a dropdown on the project page
+    /// (*Install to instance*). It is a modal here for the reason every dialog in
+    /// this shell is: iced 0.12 composites its tree in order and has no z-order, so
+    /// a thing drawn over a page is drawn by the one layer that is over a page.
+    fn install_dialog<'a>(&'a self, project: &str, title: &str) -> Element<'a, Message> {
+        let theme = self.theme;
+        let mut body = column![]
+            .spacing(10.0)
+            .push(
+                text(if title.is_empty() { project.to_string() } else { title.to_string() })
+                    .size(16.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            ;
+        // The reference's own word for it (`app.project.version.installing`), shown
+        // only while a transfer is running: a dialog that always said *Installing*
+        // would be lying about a launcher that is waiting to be told where.
+        if self.installing {
+            body = body.push(
+                text(Key::AppProjectVersionInstalling.message())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        }
+        match self.store.instances() {
+            Load::Ready(cards) if !cards.is_empty() => {
+                for card in cards {
+                    body = body.push(self.install_row(card));
+                }
+            }
+            // The empty state is the welcome screen's question, asked here: there
+            // is nothing to install into, and the way out is the flow that makes
+            // one. The button is a message of its own rather than the rail's,
+            // because a rail message would also move the rail's selection and
+            // whatever else pressing a rail slot does.
+            _ => {
+                body = body.push(
+                    text(Key::AppLibraryGroupNoInstancesFound.message())
+                        .size(14.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                );
+                body = body.push(crate::ui::button(
+                    theme,
+                    INSTALL_CREATE_KEY,
+                    Key::AppWelcomeScreenCreateInstance,
+                    crate::ui::Kind::Standard,
+                    Message::OpenCreate,
+                ));
+            }
+        }
+        if let Some(reason) = &self.install_error {
+            body = body.push(crate::ui::admonition(
+                theme,
+                crate::ui::Severity::Critical,
+                "install",
+                reason,
+            ));
+        }
+        self.dialog(Key::AppUserProjectInstallToInstance, body.into())
+    }
+
+    /// One instance in the install dialog: its name, what it runs, and the press
+    /// that puts the project into it.
+    ///
+    /// The whole row is the target rather than a button beside it, which is what
+    /// the reference's dropdown rows are -- and it is the same shape as the
+    /// library's cards, whose pressable part is their body.
+    fn install_row<'a>(&'a self, card: &'a InstanceCard) -> Element<'a, Message> {
+        let theme = self.theme;
+        let key = crate::ui::scoped("shell:install", &card.id);
+        let (factor, _) = crate::ui::interaction(key);
+        let details = column![]
+            .spacing(2.0)
+            .push(
+                text(card.name.clone())
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .push(
+                text(card.subtitle())
+                    .size(13.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        let target = Message::InstallInto(card.id.clone());
+        crate::ui::card_at(
+            theme,
+            factor,
+            mouse_area(details.width(Length::Fill))
+                .interaction(Interaction::Pointer)
+                .on_enter(Message::hover_with(
+                    key,
+                    true,
+                    crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                ))
+                .on_exit(Message::hover_with(
+                    key,
+                    false,
+                    crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+                ))
+                // A press while a transfer is in flight does nothing: two
+                // transfers of one file through one part file is a corrupted mod.
+                .on_press(target),
+        )
+    }
+
     /// The scrim and the dialog, over whatever the shell was drawing.
     fn modal_layer(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let dialog = match self.modal {
+        let dialog = match &self.modal {
             Some(Modal::Create) => self.create_dialog(),
             Some(Modal::Import) => self.import_dialog(),
+            Some(Modal::Install { project, title }) => self.install_dialog(project, title),
             // The layer is only drawn while a modal is up, and Settings is the one
             // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
@@ -3916,6 +4164,13 @@ fn card_frame<'a, Message: 'a>(
         })
         .into()
 }
+
+/// The install dialog's one control that is not a row: the button that opens the
+/// creation flow when there is no instance to install into.
+///
+/// A stable name per control, like every other key in the shelf: two buttons that
+/// happen to share a word must not light together.
+const INSTALL_CREATE_KEY: &str = "shell:install:create";
 
 /// A crossing published by one of the card's own surfaces.
 ///
@@ -4610,6 +4865,128 @@ mod tests {
         Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
             .with_store(Store::load(&paths))
             .with_prefs(paths, crate::prefs::Prefs::default())
+    }
+
+    /// A shell whose launcher has one instance, so the install dialog has
+    /// something to offer it.
+    fn shell_with_instance(name: &str) -> Shell {
+        let root = std::env::temp_dir().join("palantirmc-shell-install").join(name);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch root");
+        let paths = palantir_core::paths::PalantirPaths::at(root);
+        crate::instances::create(
+            &paths,
+            &crate::instances::NewInstance::vanilla("atm10", "1.21.4"),
+        )
+        .expect("an instance");
+        Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
+            .with_store(Store::load(&paths))
+            .with_prefs(paths, crate::prefs::Prefs::default())
+    }
+
+    #[test]
+    fn installing_a_project_asks_which_instance_and_hands_the_sentence_to_the_page() {
+        let mut shell = shell_with_instance("install");
+        // The page reports the press; the shell opens the dialog, because *which
+        // instances exist* is not something a page holds.
+        press(&mut shell, Message::Go("/project/sodium".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Project(project::Message::Install)),
+        );
+        match &shell.modal {
+            Some(Modal::Install { project, title }) => {
+                assert_eq!(project, "sodium");
+                assert_eq!(title, "", "the page has drawn nothing yet, so it names no title");
+            }
+            other => panic!("the install dialog: {other:?}"),
+        }
+        // The page's own sentence is cleared by the press that replaces it, and
+        // the dialog is where the press is answered.
+        assert_eq!(shell.screen.project_notice(), None);
+
+        // A row is the whole of the request: the id travels as a flag `handle`
+        // turns into the transfer, marked busy as it leaves rather than when it
+        // comes back -- the gap is where a second press would be.
+        press(&mut shell, Message::InstallInto("atm10".into()));
+        assert!(shell.installing, "busy as the request leaves");
+        assert_eq!(shell.install_requested, None, "and taken by the command");
+        // A second press in that window changes nothing.
+        shell.install_error = Some("still going".to_string());
+        press(&mut shell, Message::InstallInto("atm10".into()));
+        assert_eq!(shell.install_error.as_deref(), Some("still going"));
+
+        // The answer comes back as a sentence, and both halves of the shell hear
+        // it: the dialog closes (it has nothing left to ask) and the page keeps
+        // the line, because the button that asked is on the page.
+        press(
+            &mut shell,
+            Message::Installed(Ok("Installed Sodium 0.6.5 into atm10".to_string())),
+        );
+        assert_eq!(shell.modal, None, "the dialog is done");
+        assert!(!shell.installing);
+        assert_eq!(shell.screen.project_notice(), Some("Installed Sodium 0.6.5 into atm10"));
+
+        // A failure keeps the dialog up, because the answer to it is another
+        // instance -- which is a choice drawn in the dialog and nowhere else.
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Project(project::Message::Install)),
+        );
+        press(&mut shell, Message::InstallInto("atm10".into()));
+        press(
+            &mut shell,
+            Message::Installed(Err("Sodium has no version for Fabric 1.21.4".to_string())),
+        );
+        assert_eq!(shell.install_error.as_deref(), Some("Sodium has no version for Fabric 1.21.4"));
+        assert!(
+            matches!(shell.modal, Some(Modal::Install { .. })),
+            "the reader picks another instance rather than being told to start over"
+        );
+        assert_eq!(
+            shell.screen.project_notice(),
+            Some("Sodium has no version for Fabric 1.21.4"),
+            "and the sentence stays after the dialog is dismissed"
+        );
+        // Every theme, with and without an instance to offer: the empty state is
+        // the one arm the row loop cannot reach.
+        for theme in Gen::ALL {
+            shell.theme = *theme;
+            drop(shell.render());
+            shell.store = Store::default();
+            drop(shell.render());
+        }
+    }
+
+    #[test]
+    fn the_install_dialog_offers_the_creation_flow_when_there_is_nothing_to_install_into() {
+        // The one press a launcher with no instances owes: the flow that makes
+        // one. It opens the creation dialog rather than installing anywhere,
+        // which is what the reference's welcome screen does with the same words.
+        let mut shell = shell_with_home("install-empty");
+        press(&mut shell, Message::Go("/project/sodium".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Project(project::Message::Install)),
+        );
+        assert!(matches!(shell.modal, Some(Modal::Install { .. })));
+        press(&mut shell, Message::OpenCreate);
+        assert_eq!(shell.modal, Some(Modal::Create));
+        assert!(
+            shell.install_requested.is_none(),
+            "and nothing was installed on the way"
+        );
+    }
+
+    #[test]
+    fn the_install_dialog_s_words_are_the_reference_s_own() {
+        // The three strings the dialog adds are existing keys rather than new
+        // copy, and they are asserted here because a generator that moved under
+        // them would otherwise be a dialog with the wrong words in it.
+        assert_eq!(Key::AppUserProjectInstallToInstance.message(), "Install to instance");
+        assert_eq!(Key::AppProjectVersionInstalling.message(), "Installing");
+        assert_eq!(Key::AppWelcomeScreenCreateInstance.message(), "Create an instance");
+        assert_eq!(Key::AppLibraryGroupNoInstancesFound.message(), "No instances found");
     }
 
     /// Ask the instance page on screen to run its instance.

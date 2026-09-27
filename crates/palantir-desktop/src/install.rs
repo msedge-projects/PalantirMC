@@ -906,12 +906,332 @@ pub fn sha1_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+// ---- content: one project's version into an instance ----------------------
+//
+// The other half of installing: a launch's files come from metadata this
+// launcher already resolves, and a *project*'s file comes from Modrinth. The two
+// rules were the old shell's (`browse.rs`); they live here now that a page asks
+// for them, because a rule in a `cfg(test)` module is a rule the binary does not
+// have.
+
+/// A file that was written into an instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledFile {
+    /// File name as written.
+    pub filename: String,
+    /// Full destination path.
+    pub path: PathBuf,
+    /// Bytes on disk after the transfer.
+    pub bytes: u64,
+    /// Whether the `sha1` the API published was checked.
+    pub verified: bool,
+}
+
+/// Make an API-provided file name safe to write on Windows.
+///
+/// A published name is a stranger's string: it is the second thing after the
+/// URL that an attacker on Modrinth's CDN could choose, and it is joined onto a
+/// directory under the instance root. A separator or a `..` is refused rather
+/// than rewritten -- a file whose name needs rewriting is a file this launcher
+/// does not know how to place -- while Windows' own reserved characters are
+/// replaced, because the published names really do carry them (a shader pack
+/// called `Complementary: Reimagined` is not an attack).
+pub fn safe_file_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("the project published a file without a name".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        return Err(format!("refusing to write suspicious file name '{trimmed}'"));
+    }
+    let cleaned: String = trimmed
+        .chars()
+        .map(|c| if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0') { '_' } else { c })
+        .collect();
+    Ok(cleaned)
+}
+
+/// Choose the version to install into an instance.
+///
+/// The reference's rule (`content-install.ts`'s `findPreferredVersion`), and it
+/// is deliberately *not* a ranking by release type: `/v2/project/{id}/version`
+/// answers publish-date descending -- measured on Sodium's 256 versions, all
+/// `date_published` strictly ordered -- so the first match is the newest one and
+/// the type is a label rather than a preference. The rule this replaces
+/// (`browse::pick_version`) ranked `release`, then `beta`, then `alpha`, which
+/// would install an older release over the newer beta the reader was looking at.
+///
+/// 1. the first version that lists the instance's game version, and -- for a mod
+///    -- the instance's loader;
+/// 2. else the first that also accepts a version flagged `datapack`, which is
+///    the reference's fallback for a mod its author published as both;
+/// 3. else nothing, which the caller turns into a sentence naming the target.
+///
+/// Anything that is not a mod is matched on the game version alone: a resource
+/// pack or a shader has no loader to be wrong about. A version with no file is
+/// skipped in both passes -- the one thing this rule adds to the reference's,
+/// because a version that cannot be downloaded is not an answer to "install
+/// this", and the next one down the list usually is.
+pub fn preferred_version<'a>(
+    versions: &'a [palantir_net::modrinth::ModrinthProjectVersion],
+    project_type: &str,
+    game: &str,
+    loader: &str,
+) -> Option<&'a palantir_net::modrinth::ModrinthProjectVersion> {
+    let is_mod = project_type == "mod";
+    let matches = |candidate: &palantir_net::modrinth::ModrinthProjectVersion,
+                   allow_datapack: bool| {
+        candidate.primary_file().is_some()
+            && candidate.game_versions.iter().any(|listed| listed == game)
+            && (!is_mod
+                || candidate
+                    .loaders
+                    .iter()
+                    .any(|name| name == loader || (allow_datapack && name == "datapack")))
+    };
+    versions
+        .iter()
+        .find(|candidate| matches(candidate, false))
+        .or_else(|| versions.iter().find(|candidate| matches(candidate, true)))
+}
+
+/// Download one version's primary file into `target_dir`.
+///
+/// One file over the launcher's one queue: the transfer resumes a part file it
+/// finds, is checked against the `sha1` the API published before the rename, and
+/// draws the process-wide ceiling while it runs. The published *size* is still
+/// checked here, because it is the only check a file with no digest has -- and
+/// because the length is the caller's to know, the transfer's is not.
+///
+/// Measured where it landed rather than counted off the wire: a file that is
+/// already there and already right transfers nothing at all.
+pub fn install_file(
+    wire: &Wire,
+    target_dir: &Path,
+    version: &palantir_net::modrinth::ModrinthProjectVersion,
+) -> Result<InstalledFile, String> {
+    let file = version
+        .primary_file()
+        .ok_or_else(|| format!("{} has no downloadable file", version.name))?;
+    if file.url.is_empty() {
+        return Err(format!("{} publishes no direct download", version.name));
+    }
+    let filename = safe_file_name(&file.filename)?;
+    palantir_core::util::ensure_dir(target_dir)
+        .map_err(|error| format!("creating {} failed: {error}", target_dir.display()))?;
+    let path = target_dir.join(&filename);
+    let jobs = [FileJob::new(&file.url, &path, file.sha1().unwrap_or_default())];
+    wire.files(&jobs, 1, &mut |_, _| {})
+        .remove(0)
+        .map_err(|reason| format!("downloading {filename} failed: {reason}"))?;
+    let bytes = std::fs::metadata(&path)
+        .map(|meta| meta.len())
+        .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+    if file.size > 0 && bytes != file.size {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!(
+            "downloading {filename} failed: size mismatch: expected {} bytes, got {bytes}",
+            file.size
+        ));
+    }
+    Ok(InstalledFile {
+        filename,
+        path,
+        bytes,
+        verified: file.sha1().is_some(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use palantir_core::version::{LaunchProfile, Library};
+    use palantir_net::modrinth::{ModrinthProjectVersion, ModrinthVersionFile};
     use crate::wire::Script;
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    // ---- content: the install rules, and the tests that came with them -----
+
+    /// One version, as the API publishes it: newest first in a test's list, the
+    /// way the service orders one.
+    fn published(
+        name: &str,
+        games: &[&str],
+        loaders: &[&str],
+        with_file: bool,
+    ) -> ModrinthProjectVersion {
+        ModrinthProjectVersion {
+            id: name.to_string(),
+            project_id: "P".to_string(),
+            name: name.to_string(),
+            version_number: name.to_string(),
+            version_type: "release".to_string(),
+            downloads: 0,
+            changelog: String::new(),
+            game_versions: games.iter().map(|g| g.to_string()).collect(),
+            loaders: loaders.iter().map(|l| l.to_string()).collect(),
+            files: if with_file {
+                vec![ModrinthVersionFile {
+                    url: format!("https://cdn.example.invalid/{name}.jar"),
+                    filename: format!("{name}.jar"),
+                    primary: true,
+                    size: 4,
+                    hashes: HashMap::new(),
+                }]
+            } else {
+                Vec::new()
+            },
+            dependencies: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_newest_matching_version_wins_whatever_its_type() {
+        // The list is in the service's order, which is publish-date descending
+        // (measured on Sodium's 256 versions): the first match is the newest, and
+        // `version_type` is not consulted. The rule this replaced ranked
+        // releases over betas and would have chosen `release-old` here.
+        let versions = vec![
+            published("beta-new", &["1.21.4"], &["fabric"], true),
+            published("release-old", &["1.21.4"], &["fabric"], true),
+            published("other-game", &["1.21.1"], &["fabric"], true),
+            published("forge-only", &["1.21.4"], &["forge"], true),
+            published("no-file", &["1.21.4"], &["fabric"], false),
+        ];
+        assert_eq!(
+            preferred_version(&versions, "mod", "1.21.4", "fabric").unwrap().name,
+            "beta-new"
+        );
+        assert_eq!(
+            preferred_version(&versions, "mod", "1.21.4", "forge").unwrap().name,
+            "forge-only"
+        );
+        assert!(preferred_version(&versions, "mod", "1.21.4", "quilt").is_none());
+        assert!(preferred_version(&versions, "mod", "1.0", "fabric").is_none());
+        // A version with nothing to download is skipped rather than chosen and
+        // then refused, which is the one thing this rule adds to the reference's:
+        // with `no-file` the only candidate there is no answer at all.
+        assert!(
+            preferred_version(&versions[4..], "mod", "1.21.4", "fabric").is_none(),
+            "a version with no file is not a version this can install"
+        );
+        assert!(preferred_version(&[], "mod", "1.21.4", "fabric").is_none());
+    }
+
+    #[test]
+    fn a_mod_published_as_a_data_pack_too_is_the_second_pass() {
+        let versions = vec![
+            published("datapack-first", &["1.21.4"], &["datapack"], true),
+            published("fabric-second", &["1.21.4"], &["fabric"], true),
+        ];
+        assert_eq!(
+            preferred_version(&versions, "mod", "1.21.4", "fabric").unwrap().name,
+            "fabric-second",
+            "the loader the instance runs wins over the fallback"
+        );
+        let only_pack = vec![published("datapack-first", &["1.21.4"], &["datapack"], true)];
+        assert_eq!(
+            preferred_version(&only_pack, "mod", "1.21.4", "fabric").unwrap().name,
+            "datapack-first",
+            "`isVersionCompatible`'s datapack allowance"
+        );
+        // Anything that is not a mod is matched on the game version alone: a
+        // resource pack has no loader to be wrong about.
+        assert_eq!(
+            preferred_version(&only_pack, "resourcepack", "1.21.4", "vanilla").unwrap().name,
+            "datapack-first"
+        );
+        assert!(preferred_version(&only_pack, "resourcepack", "1.0", "vanilla").is_none());
+    }
+
+    #[test]
+    fn file_names_are_sanitized_and_paths_refused() {
+        assert_eq!(
+            safe_file_name("sodium-fabric-0.6.0+mc1.21.1.jar").unwrap(),
+            "sodium-fabric-0.6.0+mc1.21.1.jar"
+        );
+        assert_eq!(safe_file_name("we:ird?.jar").unwrap(), "we_ird_.jar");
+        assert!(safe_file_name("").is_err());
+        assert!(safe_file_name("nested/evil.jar").is_err());
+        assert!(safe_file_name("..\\evil.jar").is_err());
+    }
+
+    #[test]
+    fn a_version_file_is_fetched_over_the_wire_and_measured_where_it_lands() {
+        // The whole path without a network: the engine's queue fetches the body
+        // and checks the `sha1` the API published before it renames the part
+        // file, and the caller measures what is on disk afterwards -- which is
+        // the file's length rather than what came off the wire, because a file
+        // that is already here and already right transfers nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        let body = b"a mod jar";
+        let mut candidate = published("sodium", &["26.2"], &["fabric"], true);
+        candidate.files[0].hashes.insert("sha1".to_string(), sha1_hex(body));
+        candidate.files[0].size = body.len() as u64;
+        let mut script = Script::new();
+        script.insert(&candidate.files[0].url, body.to_vec());
+        let fetch = Arc::new(script.fetch());
+        let wire = Wire::over(dir.path().join("wire"), fetch.clone());
+
+        let installed = install_file(&wire, &mods, &candidate).unwrap();
+        assert_eq!(installed.filename, "sodium.jar");
+        assert_eq!(installed.bytes, body.len() as u64);
+        assert!(installed.verified, "the published sha1 was checked");
+        assert_eq!(std::fs::read(&installed.path).unwrap(), body);
+        assert_eq!(fetch.count(), 1, "one file, one request");
+
+        let again = install_file(&wire, &mods, &candidate).unwrap();
+        assert_eq!(again.bytes, body.len() as u64);
+        assert_eq!(fetch.count(), 1, "a file that is already here is not asked for twice");
+    }
+
+    #[test]
+    fn a_file_whose_length_is_not_the_published_one_is_dropped() {
+        // The length is the check the caller still owns, and for a file the API
+        // publishes no digest for it is the only one there is.
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        let body = b"a mod jar";
+        let mut candidate = published("sodium", &["26.2"], &["fabric"], true);
+        candidate.files[0].size = body.len() as u64 + 1;
+        let mut script = Script::new();
+        script.insert(&candidate.files[0].url, body.to_vec());
+        let wire = script.wire();
+
+        let error = install_file(&wire, &mods, &candidate).unwrap_err();
+        assert!(error.contains("size mismatch"), "error: {error}");
+        assert!(
+            !mods.join("sodium.jar").exists(),
+            "a file of the wrong length is not left where the game would load it"
+        );
+    }
+
+    #[test]
+    fn installing_refuses_versions_without_files_and_leaves_no_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        let mut candidate = published("sodium", &["26.2"], &["fabric"], true);
+        candidate.files[0].hashes.insert("sha1".to_string(), sha1_hex(b"jar bytes"));
+        candidate.files[0].size = 9;
+        let script = Script::new();
+        let wire = script.wire();
+
+        // No files at all: refused before any request.
+        let empty = ModrinthProjectVersion { files: Vec::new(), ..candidate.clone() };
+        assert!(install_file(&wire, &mods, &empty).is_err());
+        // No direct URL: also refused before any request.
+        let no_url = ModrinthProjectVersion {
+            files: vec![ModrinthVersionFile { url: String::new(), ..candidate.files[0].clone() }],
+            ..candidate.clone()
+        };
+        let error = install_file(&wire, &mods, &no_url).unwrap_err();
+        assert!(error.contains("no direct download"), "error: {error}");
+        assert!(!mods.join("sodium.jar").exists());
+        assert_eq!(script.fetch().count(), 0, "neither refusal made a request");
+    }
 
     fn library_from(value: serde_json::Value) -> Library {
         let mut problems = Vec::new();

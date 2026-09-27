@@ -87,8 +87,8 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96). What is not real yet is Skins, Servers and an instance's hosting half, and the panel's remaining sections -- see "What stage 3 has landed so far" |
-| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as does a modpack's own file list (G93); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95). What is left of the metadata source `resolve` reads is the two Forge-shaped loaders -- see "What stage 4 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button now installs the version that matches an instance the reader picks (G97). What is not real yet is a modpack's own install, Skins, Servers and an instance's hosting half, and the panel's remaining sections -- see "What stage 3 has landed so far" |
+| 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as does a modpack's own file list (G93) and an installed project's own file (G97); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95). What is left of the metadata source `resolve` reads is the two Forge-shaped loaders -- see "What stage 4 has landed so far" |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
@@ -328,6 +328,24 @@ the page that draws it. A team that cannot be read is the one failure that does
 not fail the page: the author is a caption under the title, and a project with no
 caption is still a project.
 
+The Install button is real now (G97), and the rule behind it is a measurement
+rather than a preference. Modrinth's version list answers publish-date
+descending, so the version to install is the *first* one that matches the
+instance -- not the newest release, which is the reading that looks safer and is
+wrong: the two rules differ on 9 of Sodium's 41 game versions and 298 of
+fabric-api's 389, because a project publishes betas ahead of the release for the
+same game version. A mod matches its instance's loader (a mod published as a data
+pack as well is the second pass), everything else matches the game version
+alone, and a version with no file at all is skipped rather than installed as
+nothing. The file lands in the folder its kind names -- `mods/`, `plugins/`,
+`resourcepacks/`, `datapacks/`, `shaderpacks/` -- fetched over the same `Wire`
+the launch uses, so a mod and the launch that will load it are one connection
+pool and one ceiling apart, and a file already here under the digest the API
+published costs no request at all: that is what the store's test asserts by
+pressing twice and counting three requests both times. A pack is refused by name
+rather than by silence, because one of those becomes an instance of its own, and
+that -- not the mod-shaped install -- is what stage 3 still owes.
+
 `store.rs` is the seam that makes the pages honest rather than finished. It
 answers what the launcher can already answer -- the instance list and each
 instance's own folders, from the same readers the old interface uses -- and what
@@ -380,12 +398,14 @@ Three things about the pages are decisions worth keeping:
 
 What stage 3 does **not** have yet, named rather than implied:
 
-* **Installing a project is not real.** The project page draws the button and
-  says so when it is pressed (G96), and what it needs is the chosen version's
-  primary file over the engine's own queue into the right folder of an instance
-  the reader picks -- `<instance>/mods/` for a mod, and for a modpack the
-  installer that makes an instance out of it. The version list the button would
-  choose from is on the page already.
+* **A modpack is not installed yet.** What the button does is install a mod,
+  plugin, resource pack, data pack or shader pack into the folder its kind names
+  (G97): the version that matches the instance the reader picked, its primary
+  file over the engine's own queue. A pack is refused by name instead, because
+  installing one makes an *instance* out of it -- the archive, its `overrides/`
+  and the manifest's own file list, which `browse.rs` holds as rules the binary
+  does not have (`#[cfg(test)]`, the state this slice's rules were moved out of),
+  and a server project has no folder for the same reason.
 * **Skins, Servers and the hosting half of an instance are not real.** They say
   so out loud. The control *states* they will be asked with are live, which is
   the part that makes the request a one-line change rather than a page rewrite --

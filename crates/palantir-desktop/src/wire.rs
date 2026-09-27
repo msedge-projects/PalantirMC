@@ -356,6 +356,15 @@ pub(crate) mod script {
             let dir = std::env::temp_dir()
                 .join("palantirmc-script-wire")
                 .join(NEXT.fetch_add(1, Ordering::SeqCst).to_string());
+            // Emptied first, and this is not tidiness: the index is a per-*run*
+            // counter, so the nth call of one run lands on the directory the nth
+            // call of the *previous* run left behind, and the engine's cache is a
+            // directory of hash-named answers with a TTL measured in hours. Two
+            // runs with a different test order therefore read each other's
+            // answers -- measured: 20 of these directories held one URL's body,
+            // two different bodies among them, and the java runtime digest gate
+            // read the fixture from a run where the digests had matched.
+            let _ = std::fs::remove_dir_all(&dir);
             Wire::over(dir, Arc::new(self.fetch()))
         }
     }

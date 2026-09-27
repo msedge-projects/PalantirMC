@@ -113,6 +113,13 @@ pub enum Ask {
     /// One request rather than three because a project page draws all three at
     /// once, and three `Load`s for one page is three ways to be half drawn.
     Project(project::Asked),
+    /// Put a project into one of the launcher's instances.
+    ///
+    /// The same shape as the other asks, pointed at a file instead of a page: the
+    /// *button* is the project page's, and which instances exist, which version
+    /// fits one and where its folder is are all the shell's -- a page that
+    /// installed a mod would have to know the whole of [`crate::store`].
+    Install(project::Install),
     /// Open the creation flow.
     ///
     /// The third kind, and the same shape as the other two: the *button* is the
@@ -155,7 +162,28 @@ impl Message {
     /// function rather than a variant the shell names: the answer's own type is
     /// the page's, and the shell has never seen one.
     pub fn project_result(asked: &project::Asked, result: Result<project::Project, String>) -> Message {
-        Message::Project(project::Message::Found { round: asked.round, result })
+        // Boxed here, at the one crossing between the store's answer and a page's
+        // message, so the page's own arms never box anything (see
+        // `project::Message::Found`).
+        Message::Project(project::Message::Found {
+            round: asked.round,
+            result: result.map(Box::new),
+        })
+    }
+
+    /// The message that carries an install's outcome back to the page whose button
+    /// asked for it.
+    ///
+    /// A sentence rather than the installed file: `store::Installed` has already
+    /// been turned into one by the time it gets here -- the file name, the version
+    /// and the instance's own name are the shell's to know, because the page asked
+    /// for a transfer rather than for a path -- and a failure is a sentence in the
+    /// same slot, which is what the reference's own error cards are.
+    pub fn install_result(result: Result<String, String>) -> Message {
+        Message::Project(project::Message::Noted(match result {
+            Ok(line) => line,
+            Err(reason) => reason,
+        }))
     }
 }
 
@@ -247,8 +275,11 @@ impl Screen {
             (Screen::Project(state), Message::Project(message)) => {
                 // The second page that asks for something: the shell runs it and
                 // the answer comes back turns later, exactly as Discover's does.
+                // This one answers with an `Ask` of its own rather than with the
+                // page's `Asked`, because a project page asks for two kinds of
+                // thing now -- read me again, and put me somewhere.
                 if let Some(asked) = state.update(message) {
-                    return Some(Ask::Project(asked));
+                    return Some(asked);
                 }
             }
             (Screen::Instance(state), Message::Instance(message)) => {
@@ -303,6 +334,19 @@ impl Screen {
     pub fn project_tab(&self) -> Option<crate::route::ProjectTab> {
         match self {
             Screen::Project(state) => Some(state.tab.clone()),
+            _ => None,
+        }
+    }
+
+    /// What a project page is saying about itself, for the same reason.
+    ///
+    /// The sentence an install leaves is the shell's to *deliver* and the page's
+    /// to keep, so the gate that checks the delivery has to be able to read it
+    /// here.
+    #[cfg(test)]
+    pub fn project_notice(&self) -> Option<&str> {
+        match self {
+            Screen::Project(state) => state.notice.as_deref(),
             _ => None,
         }
     }
