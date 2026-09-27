@@ -36,6 +36,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -67,14 +68,25 @@ pub struct Store {
     /// test over a scratch cache is -- and then creating an instance answers with
     /// the not-implemented sentence rather than writing somewhere invented.
     paths: Option<PalantirPaths>,
-    /// The launch the shell is running, if any.
+    /// Every launch this session has been asked for, by the instance it is about.
     ///
     /// The one thing here that is not read from disk, and it is here for the same
     /// reason the rest is: a page cannot ask the shell, and "an instance is
     /// running" is a fact a page's own controls are drawn from. The reference
     /// delivers it the same way -- its process list is a query keyed by instance
-    /// (`instanceKeys.processes(id)`), not a property of the page component.
-    launch: Launch,
+    /// (`instanceKeys.processes(id)`), which is why this is a map and not the one
+    /// run the bar was drawn from: several instances can be running at once, and
+    /// the bar's chip is about one of them while the popover is about all of
+    /// them.
+    launches: BTreeMap<String, Launch>,
+    /// Which of them the action bar's chip is about -- the reference's *selected
+    /// process*, the one its stop control, its logs button and its name belong
+    /// to.
+    ///
+    /// An id rather than a flag on the entry, because what it names can stop
+    /// while other runs go on: [`Store::selected_launch`] decides which id the
+    /// chip is about at the moment it is asked.
+    selected_launch: Option<String>,
 }
 
 /// What a launch is doing, as a page sees it.
@@ -98,17 +110,17 @@ pub enum LaunchState {
     Stopping,
 }
 
-/// The launch this launcher is running, as the pages are drawn from it.
+/// One instance's launch, as the pages are drawn from it.
 ///
-/// `instance` names the instance it is about, and it keeps naming it after the run
-/// has ended: the last thing a run said is worth exactly as much as the run, and
-/// a page that lost it the moment the process exited would show a user who
-/// navigated away and back that nothing had happened.
+/// An entry outlives the run it describes, and that is the point: the last thing
+/// a run said is worth exactly as much as the run, and a page that lost it the
+/// moment the process exited would show a user who navigated away and back that
+/// nothing had happened. So [`LaunchState::Idle`] means both "not running" and
+/// "ran, and this is how it ended".
+///
+/// There is no `instance` field: the map this is held in is keyed by that.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Launch {
-    /// Which instance the launcher is running, or was last running. `None` until
-    /// the first launch of this session.
-    pub instance: Option<String>,
     /// What it is doing.
     pub state: LaunchState,
     /// The launch's own last word: the progress line while it works, the note it
@@ -212,7 +224,8 @@ impl Store {
             // for why the absence is a state a page can be told about.
             engine: None,
             paths: Some(paths.clone()),
-            launch: Launch::default(),
+            launches: BTreeMap::new(),
+            selected_launch: None,
         }
     }
 
@@ -367,37 +380,77 @@ impl Store {
         instances::import_instance(paths, source)
     }
 
-    /// The launch this launcher is running.
-    pub fn launch(&self) -> &Launch {
-        &self.launch
+    /// One instance's launch, if it has ever been asked to run.
+    pub fn launch(&self, id: &str) -> Option<&Launch> {
+        self.launches.get(id)
     }
 
-    /// Record what a launch is doing.
+    /// Every run that is not idle, in instance order: what the action bar's
+    /// popover lists, and what decides whether it is drawn at all.
+    pub fn running_launches(&self) -> Vec<(&str, &Launch)> {
+        self.launches
+            .iter()
+            .filter(|(_, launch)| launch.state != LaunchState::Idle)
+            .map(|(id, launch)| (id.as_str(), launch))
+            .collect()
+    }
+
+    /// Which run the bar's chip is about, if any.
+    ///
+    /// Derived rather than stored, because the id this is drawn from may name a
+    /// run that has since ended: the selected instance while it is running, and
+    /// otherwise the first of the runs that are. A chip that went on naming a run
+    /// which stopped while another was still going would be the bar lying about
+    /// what its own stop control is attached to. `None` is the chip's *No
+    /// instances running* face.
+    pub fn selected_launch(&self) -> Option<&str> {
+        if let Some(id) = &self.selected_launch {
+            if self.launch_state(id) != LaunchState::Idle {
+                return Some(id);
+            }
+        }
+        self.launches
+            .iter()
+            .find(|(_, launch)| launch.state != LaunchState::Idle)
+            .map(|(id, _)| id.as_str())
+    }
+
+    /// Make `id` the run the bar's chip is about.
+    ///
+    /// What the reference's popover does when one of its rows is pressed: the
+    /// chip becomes that process, and with it the stop control and the name.
+    pub fn select_launch(&mut self, id: &str) {
+        self.selected_launch = Some(id.to_string());
+    }
+
+    /// Record what `id`'s launch is doing.
     ///
     /// Called by the shell and by nothing else: it is the one object that knows
     /// which instance was asked to run, and the pages read the answer rather than
     /// deciding it.
-    pub fn set_launch(&mut self, launch: Launch) {
-        self.launch = launch;
+    ///
+    /// A *new* entry becomes the selected one, so the chip follows the press that
+    /// started a run and a second press moves it to the second game. Every later
+    /// word about that same run -- its lines, its level, the note it ends with --
+    /// arrives as an entry that already exists and moves nothing.
+    pub fn set_launch(&mut self, id: &str, launch: Launch) {
+        let first = self.launches.insert(id.to_string(), launch).is_none();
+        if first {
+            self.selected_launch = Some(id.to_string());
+        }
     }
 
     /// What `id`'s launch is doing.
     ///
-    /// [`LaunchState::Idle`] for every instance that is not the one running, so a
-    /// page asks this with its own id and never has to compare anything itself.
+    /// [`LaunchState::Idle`] for every instance that is not running, so a page
+    /// asks this with its own id and never has to compare anything itself.
     pub fn launch_state(&self, id: &str) -> LaunchState {
-        match self.launch.instance.as_deref() {
-            Some(running) if running == id => self.launch.state,
-            _ => LaunchState::Idle,
-        }
+        self.launches.get(id).map_or(LaunchState::Idle, |launch| launch.state)
     }
 
     /// The launch's own last word, when it is about `id`.
     pub fn launch_line(&self, id: &str) -> Option<&str> {
-        match self.launch.instance.as_deref() {
-            Some(running) if running == id => self.launch.line.as_deref(),
-            _ => None,
-        }
+        self.launches.get(id).and_then(|launch| launch.line.as_deref())
     }
 
     /// The instance list, in whatever state it is in.
@@ -1097,22 +1150,56 @@ mod tests {
         let mut store = Store::default();
         assert_eq!(store.launch_state("atm10"), LaunchState::Idle);
         assert_eq!(store.launch_line("atm10"), None);
-        store.set_launch(Launch {
-            instance: Some("atm10".to_string()),
-            state: LaunchState::Running,
-            line: Some("process started, streaming output…".to_string()),
-        });
+        store.set_launch(
+            "atm10",
+            Launch {
+                state: LaunchState::Running,
+                line: Some("process started, streaming output…".to_string()),
+            },
+        );
         assert_eq!(store.launch_state("atm10"), LaunchState::Running);
         assert_eq!(store.launch_state("sodium"), LaunchState::Idle);
         assert_eq!(store.launch_line("sodium"), None);
         assert_eq!(store.launch_line("atm10"), Some("process started, streaming output…"));
-        store.set_launch(Launch {
-            instance: Some("atm10".to_string()),
-            state: LaunchState::Idle,
-            line: Some("process exited (exit status: 0)".to_string()),
-        });
+        store.set_launch(
+            "atm10",
+            Launch {
+                state: LaunchState::Idle,
+                line: Some("process exited (exit status: 0)".to_string()),
+            },
+        );
         assert_eq!(store.launch_state("atm10"), LaunchState::Idle);
         assert!(store.launch_line("atm10").is_some(), "the last word outlives the run");
+    }
+
+    #[test]
+    fn several_runs_are_held_at_once_and_the_chip_follows_one_of_them() {
+        // Two facts, because the bar needs both: the popover is drawn from the
+        // list of runs, and the chip's name, stop control and logs button are the
+        // selected one's.
+        let mut store = Store::default();
+        store.set_launch("atm10", Launch { state: LaunchState::Running, line: None });
+        assert_eq!(store.selected_launch(), Some("atm10"), "the run that was started holds the chip");
+        store.set_launch("sodium", Launch { state: LaunchState::Starting, line: None });
+        assert_eq!(store.selected_launch(), Some("sodium"), "and the next press moves it");
+        let running: Vec<&str> = store.running_launches().iter().map(|(id, _)| *id).collect();
+        assert_eq!(running, vec!["atm10", "sodium"], "both of them are running, in instance order");
+
+        // The selection is a name, and the name can stop running: the chip is
+        // then about another run rather than about a process that is gone.
+        store.set_launch("sodium", Launch { state: LaunchState::Idle, line: None });
+        assert_eq!(store.selected_launch(), Some("atm10"));
+        store.select_launch("sodium");
+        assert_eq!(store.selected_launch(), Some("atm10"), "a stopped run cannot be its subject");
+        store.set_launch("sodium", Launch { state: LaunchState::Running, line: None });
+        assert_eq!(store.selected_launch(), Some("sodium"), "and a pressed row wins while it goes");
+
+        // An entry that has ended keeps its last word and leaves the list, which
+        // is what lets the header of an instance nobody is running still say what
+        // happened to it.
+        store.set_launch("sodium", Launch { state: LaunchState::Idle, line: Some("bye".to_string()) });
+        assert_eq!(store.launch_line("sodium"), Some("bye"));
+        assert_eq!(store.running_launches().len(), 1);
     }
 
     #[test]

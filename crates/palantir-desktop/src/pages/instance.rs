@@ -550,11 +550,13 @@ mod tests {
         }
         let mut store = store_at("launch-control");
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
-        store.set_launch(store::Launch {
-            instance: Some("atm".to_string()),
-            state: LaunchState::Running,
-            line: Some("process started, streaming output…".to_string()),
-        });
+        store.set_launch(
+            "atm",
+            store::Launch {
+                state: LaunchState::Running,
+                line: Some("process started, streaming output…".to_string()),
+            },
+        );
         assert_eq!(store.launch_state("atm"), LaunchState::Running);
         assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
         // And every state draws in every theme: the control is one of four
@@ -566,11 +568,7 @@ mod tests {
             LaunchState::Running,
             LaunchState::Stopping,
         ] {
-            store.set_launch(store::Launch {
-                instance: Some("atm".to_string()),
-                state: state_of_run,
-                line: None,
-            });
+            store.set_launch("atm", store::Launch { state: state_of_run, line: None });
             for theme in Gen::ALL {
                 drop(view(*theme, &state, &store));
             }
@@ -595,11 +593,13 @@ mod tests {
         // as if nothing had.
         let store = store_at("launch-line");
         let mut store = store;
-        store.set_launch(store::Launch {
-            instance: Some("atm".to_string()),
-            state: LaunchState::Idle,
-            line: Some("process exited (exit status: 0)".to_string()),
-        });
+        store.set_launch(
+            "atm",
+            store::Launch {
+                state: LaunchState::Idle,
+                line: Some("process exited (exit status: 0)".to_string()),
+            },
+        );
         assert_eq!(
             store.launch_line("atm"),
             Some("process exited (exit status: 0)"),

@@ -38,6 +38,7 @@
 //!   same colour and the same height -- and [`CONTROLS_WIDTH`] is the reservation
 //!   the reference publishes, computed here rather than measured.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
@@ -182,6 +183,20 @@ const FRAME: Duration = Duration::from_millis(16);
 /// from being torn down and rebuilt every frame.
 const FRAME_ID: &str = "palantirmc-shell-frames";
 
+/// One running instance: what its worker needs, and the slot its process lands in.
+///
+/// The slot is per run rather than per shell, and that is the whole of what a
+/// second concurrent launch needed: the worker puts the child it starts into the
+/// slot it was handed, so one shared slot would leave the first run's process
+/// unreachable the moment a second run started -- and with it the Stop button of
+/// a game still on screen.
+struct Run {
+    /// What the subscription streams under and what the worker needs to start.
+    data: ActiveRunData,
+    /// The game process this run's own worker put in its slot.
+    child: ChildSlot,
+}
+
 // ---- The shell ----------------------------------------------------------
 
 /// What the shell is showing and what is moving.
@@ -303,17 +318,20 @@ pub struct Shell {
     /// A chip was pressed and the loader-build request has not left yet. Taken by
     /// `handle` for [`Shell::versions_requested`]'s reason.
     loader_builds_requested: bool,
-    /// The launch in flight: what the subscription streams under, and what the
-    /// worker needs to start one. `None` is "nothing is running".
-    run: Option<ActiveRunData>,
-    /// How many runs this shell has asked for.
+    /// The launches in flight, one per instance, oldest first.
     ///
-    /// It is what tells one run's messages from another's: a done for a run the
-    /// shell has already replaced must not clear the one that is going.
-    runs: u64,
-    /// The game process, for the Stop button. Shared with the worker, which is
-    /// the only other thing that touches it.
-    child: ChildSlot,
+    /// A list rather than the single run this shell used to hold: the reference
+    /// runs several processes at once, its bar's popover lists them and can stop
+    /// any one of them, and none of that can be built on a shell that refuses a
+    /// second Play. Each run owns the slot its process lands in, so starting one
+    /// cannot orphan another.
+    runs: Vec<Run>,
+    /// How many runs this shell has ever asked for.
+    ///
+    /// It is what tells one run's messages from another's: every
+    /// [`launch::LaunchEvent`] arrives with the id of the run that sent it, and a
+    /// done for a run that has already ended must not touch the ones still going.
+    next_run_id: u64,
     /// The launcher's accounts, read when a launch needs one and written when a
     /// launch renews a session. `None` in a test, which is what keeps a test from
     /// reading -- or writing -- a real `accounts.json`.
@@ -336,9 +354,9 @@ pub struct Shell {
     /// control that does nothing at all is the failure mode this rewrite reports
     /// instead of hiding.
     accounts_note: Option<String>,
-    /// The level the run in flight is at: the last [`launch::LaunchEvent::Progress`]
-    /// its worker reported, kept as *numbers* rather than only as the sentence the
-    /// instance's header draws.
+    /// Where each run that is downloading is: the last
+    /// [`launch::LaunchEvent::Progress`] its worker reported, kept as *numbers*
+    /// rather than only as the sentence the instance's header draws.
     ///
     /// A bar needs a fraction and a state needs a word, and the same fact cannot
     /// be both if only the formatted line survives. It lives on the shell rather
@@ -347,10 +365,21 @@ pub struct Shell {
     /// launcher be watched from *any* page -- which the per-page line could not
     /// do, and is the whole reason the reference keeps this surface in its status
     /// bar.
-    progress: Option<install::Progress>,
+    ///
+    /// Keyed by instance because two runs can be fetching at once: the chip is
+    /// drawn from the selected run's phase, and a run that starts fetching closes
+    /// nothing that another run's phase has open.
+    jobs: BTreeMap<String, install::Progress>,
     /// Whether the download manager's panel is open: the reference's own toggle,
     /// off until its chip is pressed.
     downloads: bool,
+    /// Whether the popover over every running instance is open.
+    ///
+    /// A toggle of its own rather than a flag shared with the panel: the
+    /// reference draws the two from two different controls (`DownloadManager` and
+    /// the chevron beside the running instance's name), and either can be open
+    /// with the other closed.
+    switchers: bool,
 }
 
 /// Which of the reference's rail conditions are on.
@@ -389,6 +418,10 @@ const BAR_STOP: &str = "shell:bar-stop";
 const BAR_LOGS: &str = "shell:bar-logs";
 const BAR_PANEL_CLOSE: &str = "shell:bar-panel-close";
 
+/// The running chip's chevron, which opens the popover over every running
+/// instance.
+const BAR_SWITCHERS: &str = "shell:bar-switchers";
+
 /// The reference's `py-1.5 px-3 rounded-xl` on both chips: a 20px icon and 6px
 /// of padding on each side, which is 32.
 const BAR_CHIP: f32 = 32.0;
@@ -397,6 +430,11 @@ const BAR_CHIP: f32 = 32.0;
 /// fixed 64px is this toolkit's version of the same arrangement, and it is what
 /// keeps the chip from resizing on every percentage.
 const DOWNLOAD_BAR: f32 = 64.0;
+/// The same arrangement inside the panel, where the bar shares its line with a
+/// name and a phase rather than sitting under them.
+const JOB_BAR: f32 = 96.0;
+/// The reference's `w-[20rem]` on the popover over the running instances.
+const SWITCHER_PANEL: f32 = 320.0;
 /// `OnlineIndicatorIcon`'s dot.
 const INDICATOR: f32 = 8.0;
 
@@ -476,6 +514,26 @@ fn instance_name(store: &Store, id: &str) -> String {
         .ready()
         .map(|card| card.name.clone())
         .unwrap_or_else(|| id.to_string())
+}
+
+/// The job the download chip and its panel are about.
+///
+/// The selected run's phase when it has one, and otherwise the first run that is
+/// fetching. The reference draws its chip from its download store's total rather
+/// than from the selected process, and the same reason holds here: a chip that
+/// went blank because the run it names stopped downloading while another was
+/// still going would hide work that is happening. The key is an instance id, so
+/// "first" is the same run on every frame.
+fn shown_job<'a>(
+    jobs: &'a BTreeMap<String, install::Progress>,
+    selected: Option<&str>,
+) -> Option<(&'a str, &'a install::Progress)> {
+    if let Some(id) = selected {
+        if let Some((key, progress)) = jobs.get_key_value(id) {
+            return Some((key.as_str(), progress));
+        }
+    }
+    jobs.iter().next().map(|(id, progress)| (id.as_str(), progress))
 }
 
 /// The download panel's own sentence: what is being fetched, how many of them are
@@ -603,8 +661,21 @@ pub enum Message {
     DismissAccountsNote,
     /// The action bar's download chip: open or close the panel under the head.
     ToggleDownloads,
-    /// The action bar's own stop control: end the run this launcher is in.
-    StopRun,
+    /// The chevron beside the running instance's name: open or close the popover
+    /// over every running instance.
+    ToggleRuns,
+    /// One of that popover's rows: make this run the one the chip is about.
+    ///
+    /// The instance id rather than a position, for [`Message::SelectAccount`]'s
+    /// reason: the list is drawn from what is running, and a run that ended
+    /// between the press and the frame would renumber it.
+    SelectRun(String),
+    /// A stop control: end the run of the instance this press was drawn for.
+    ///
+    /// Named rather than implicit, because there is more than one stop control
+    /// now -- the chip's own, which stops the instance it names, and one per row
+    /// of the popover, which stops that row's.
+    StopRun(String),
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
     /// The name in the creation dialog changed.
@@ -710,15 +781,15 @@ impl Shell {
             loader_builds: Load::Idle,
             loader_builds_for: None,
             loader_builds_requested: false,
-            run: None,
-            runs: 0,
-            child: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            runs: Vec::new(),
+            next_run_id: 0,
             accounts: None,
             accounts_warning: None,
             accounts_open: false,
             accounts_note: None,
-            progress: None,
+            jobs: BTreeMap::new(),
             downloads: false,
+            switchers: false,
             screen,
             store: Store::default(),
             prefs: crate::prefs::Prefs::default(),
@@ -1282,13 +1353,20 @@ impl Shell {
                 self.downloads = !self.downloads;
                 None
             }
-            Message::StopRun => {
-                // The instance comes from the store rather than from a page: the
-                // bar is drawn from what this launcher is running, and a page the
-                // user has since navigated away from is not asked.
-                if let Some(id) = self.store.launch().instance.clone() {
-                    self.stop(&id);
-                }
+            Message::ToggleRuns => {
+                self.switchers = !self.switchers;
+                None
+            }
+            Message::SelectRun(id) => {
+                self.store.select_launch(&id);
+                None
+            }
+            Message::StopRun(id) => {
+                // The instance is the one the control was drawn for, which is what
+                // makes a second run's stop button stop the second run: the bar is
+                // drawn from what this launcher is running, and a page the user has
+                // since navigated away from is not asked.
+                self.stop(&id);
                 None
             }
             Message::CloseModal => {
@@ -1647,57 +1725,71 @@ impl Shell {
     /// asked, because a worker has no business going back to a preferences file
     /// to find out what it was told to use.
     ///
-    /// A second press while a run is going is ignored rather than queued: the
-    /// reference's Play button is the Stop button by then, so the only way to
-    /// send this is a stale frame.
+    /// A press for an instance that is already running is ignored rather than
+    /// queued: the reference's Play button is the Stop button by then, so the only
+    /// way to send this is a stale frame. A press for a *different* instance is
+    /// the thing this used to refuse and now does not: the reference runs several
+    /// processes at once, and its bar is where they are listed.
     fn play(&mut self, id: String) {
-        if self.run.is_some() || id.trim().is_empty() {
+        if id.trim().is_empty() || self.runs.iter().any(|run| run.data.instance_id == id) {
             return;
         }
-        let Some(home) = &self.home else {
+        let Some(data_root) = self.home.as_ref().map(|home| home.root.clone()) else {
             // A shell with no data root is a test's shell: there is nowhere for an
             // instance to be, so there is nothing to launch.
-            self.store.set_launch(store::Launch {
-                instance: Some(id),
-                state: store::LaunchState::Idle,
-                line: Some(store::not_implemented("Launching an instance")),
-            });
+            self.store.set_launch(
+                &id,
+                store::Launch {
+                    state: store::LaunchState::Idle,
+                    line: Some(store::not_implemented("Launching an instance")),
+                },
+            );
             return;
         };
-        // A child left over from a previous run is dropped rather than killed:
-        // the run is over, and a process that is still there is not one this
-        // launcher is tracking any more.
-        if let Ok(mut slot) = self.child.lock() {
-            *slot = None;
-        }
-        self.runs += 1;
-        self.run = Some(ActiveRunData {
-            run_id: self.runs,
-            instance_id: id.clone(),
-            data_root: home.root.clone(),
-            account: self.account(),
-            defaults: launch::LaunchDefaults::from_prefs(&self.prefs),
+        self.next_run_id += 1;
+        let run_id = self.next_run_id;
+        self.runs.push(Run {
+            data: ActiveRunData {
+                run_id,
+                instance_id: id.clone(),
+                data_root,
+                account: self.account(),
+                defaults: launch::LaunchDefaults::from_prefs(&self.prefs),
+            },
+            // Its own slot, empty until its worker starts the game: this is what
+            // makes a second run's stop control the second run's.
+            child: ChildSlot::default(),
         });
-        self.store.set_launch(store::Launch {
-            // The same sentence the worker's own first line uses, because it is
-            // the same fact: the run is being prepared and nothing has happened
-            // yet.
-            line: Some(format!("preparing '{id}'")),
-            instance: Some(id),
-            state: store::LaunchState::Starting,
-        });
+        self.store.set_launch(
+            &id,
+            store::Launch {
+                // The same sentence the worker's own first line uses, because it
+                // is the same fact: the run is being prepared and nothing has
+                // happened yet.
+                line: Some(format!("preparing '{id}'")),
+                state: store::LaunchState::Starting,
+            },
+        );
     }
 
-    /// Stop the instance that is running.
+    /// Stop the run of the instance named `id`, when it is up.
     ///
-    /// The kill is on the child the worker put in the slot, which is the only
-    /// handle to the game this process has. What comes back is the worker's own
-    /// `Done`: killing a process is not the same as reaping it, and the note the
-    /// run ends with is the worker's to write.
+    /// The kill is on the child that run's own worker put in its slot, which is
+    /// the only handle to that game this process has. What comes back is the
+    /// worker's own `Done`: killing a process is not the same as reaping it, and
+    /// the note the run ends with is the worker's to write.
     fn stop(&mut self, id: &str) {
-        if self.run.as_ref().map(|run| run.instance_id.as_str()) != Some(id) {
+        // Cloned out of the list rather than borrowed through the rest of this:
+        // the slot is an `Arc`, and the run it belongs to is about to be written
+        // to in the store.
+        let Some(child) = self
+            .runs
+            .iter()
+            .find(|run| run.data.instance_id == id)
+            .map(|run| run.child.clone())
+        else {
             return;
-        }
+        };
         // Nothing to kill while the launcher is still preparing: the child slot
         // is empty until the worker has resolved the version, fetched what was
         // missing and started the process. Setting *Stopping* here would be a
@@ -1709,73 +1801,83 @@ impl Shell {
         if self.store.launch_state(id) != store::LaunchState::Running {
             return;
         }
-        self.store.set_launch(store::Launch {
-            instance: Some(id.to_string()),
-            state: store::LaunchState::Stopping,
-            line: Some(Key::InstanceActionStopping.message().to_string()),
-        });
-        if let Ok(mut slot) = self.child.lock() {
-            if let Some(child) = slot.as_mut() {
-                let _ = child.kill();
+        self.store.set_launch(
+            id,
+            store::Launch {
+                state: store::LaunchState::Stopping,
+                line: Some(Key::InstanceActionStopping.message().to_string()),
+            },
+        );
+        if let Ok(mut slot) = child.lock() {
+            if let Some(process) = slot.as_mut() {
+                let _ = process.kill();
             }
-        }
+        };
     }
 
     /// What a launch reported, applied to the run it belongs to.
     ///
-    /// Every arm checks the run id first: a done for a run this shell has already
-    /// replaced must not clear the one that is going, and a line from the run
+    /// Every arm looks the run up by id first: a done for a run that has already
+    /// ended must not clear one that is still going, and a line from the run
     /// before must not appear in the header of the run that replaced it.
     fn launched(&mut self, event: launch::LaunchEvent) {
-        let current = self.run.as_ref().map(|run| run.run_id);
         match event {
             launch::LaunchEvent::Log { run_id, lines } => {
-                if current != Some(run_id) {
+                let Some(id) = self.instance_of(run_id) else {
                     return;
-                }
+                };
                 if let Some(line) = lines.last() {
-                    self.say(line.clone());
+                    self.say(&id, line.clone());
                 }
             }
             launch::LaunchEvent::Progress { run_id, progress } => {
-                if current != Some(run_id) {
+                let Some(id) = self.instance_of(run_id) else {
                     return;
-                }
+                };
                 // Kept as well as said: the line is the instance's own, and the
-                // numbers are what the action bar's chip is drawn from.
-                self.progress = Some(progress.clone());
-                self.say(progress.status_line());
+                // numbers are what the action bar's chip and the manager's panel
+                // are drawn from.
+                self.jobs.insert(id.clone(), progress.clone());
+                self.say(&id, progress.status_line());
             }
             launch::LaunchEvent::Started { run_id } => {
-                if current != Some(run_id) {
+                let Some(id) = self.instance_of(run_id) else {
                     return;
-                }
+                };
                 // What changes here is the control and not the line: the fact is
                 // about the game's window being up, and the run's own last line
                 // is still the last thing the launcher said.
                 //
                 // The level goes with it: fetching is over, and a bar left at
                 // the last phase's fraction would be a download that never
-                // finished. The panel closes for the same reason.
-                self.progress = None;
-                self.downloads = false;
-                self.set_run_state(store::LaunchState::Running);
+                // finished. The panel closes only once the level that opened it is
+                // gone -- with another run still fetching, its job holds it open.
+                self.jobs.remove(&id);
+                if self.jobs.is_empty() {
+                    self.downloads = false;
+                }
+                self.set_run_state(&id, store::LaunchState::Running);
             }
             launch::LaunchEvent::Done { run_id, note } => {
-                if current != Some(run_id) {
+                let Some(index) = self.runs.iter().position(|run| run.data.run_id == run_id) else {
                     return;
-                }
-                let instance = self.run.take().map(|run| run.instance_id);
-                if let Ok(mut slot) = self.child.lock() {
+                };
+                let run = self.runs.remove(index);
+                let id = run.data.instance_id;
+                if let Ok(mut slot) = run.child.lock() {
                     *slot = None;
                 }
-                self.progress = None;
-                self.downloads = false;
-                self.store.set_launch(store::Launch {
-                    instance,
-                    state: store::LaunchState::Idle,
-                    line: Some(note),
-                });
+                self.jobs.remove(&id);
+                if self.jobs.is_empty() {
+                    self.downloads = false;
+                }
+                self.store.set_launch(
+                    &id,
+                    store::Launch {
+                        state: store::LaunchState::Idle,
+                        line: Some(note),
+                    },
+                );
                 // The run wrote the play time and the last-played stamp into the
                 // instance's own files, so the library the pages are drawn from is
                 // stale until it is read again.
@@ -1785,28 +1887,32 @@ impl Shell {
         }
     }
 
-    /// Record what the launch is doing, for the pages to draw.
-    fn say(&mut self, line: String) {
-        let Some(run) = &self.run else {
-            return;
-        };
-        let id = run.instance_id.clone();
-        let state = self.store.launch_state(&id);
-        self.store.set_launch(store::Launch { instance: Some(id), state, line: Some(line) });
+    /// The instance a run id belongs to, while that run is still going.
+    ///
+    /// `None` is what every arm of [`Shell::launched`] checks before it touches
+    /// anything: an event for a run that has ended is a fact about the past, and
+    /// acting on it is how one run's stop would clear another run's state.
+    fn instance_of(&self, run_id: u64) -> Option<String> {
+        self.runs
+            .iter()
+            .find(|run| run.data.run_id == run_id)
+            .map(|run| run.data.instance_id.clone())
     }
 
-    /// Put the running instance in another state, keeping the line it is on.
+    /// Record what one run is doing, for the pages to draw.
+    fn say(&mut self, id: &str, line: String) {
+        let state = self.store.launch_state(id);
+        self.store.set_launch(id, store::Launch { state, line: Some(line) });
+    }
+
+    /// Put one running instance in another state, keeping the line it is on.
     ///
     /// The state and the line are two facts rather than one: the game coming up
     /// changes what the button is, and the line is still the last thing the
     /// launcher said.
-    fn set_run_state(&mut self, state: store::LaunchState) {
-        let Some(run) = &self.run else {
-            return;
-        };
-        let id = run.instance_id.clone();
-        let line = self.store.launch_line(&id).map(str::to_string);
-        self.store.set_launch(store::Launch { instance: Some(id), state, line });
+    fn set_run_state(&mut self, id: &str, state: store::LaunchState) {
+        let line = self.store.launch_line(id).map(str::to_string);
+        self.store.set_launch(id, store::Launch { state, line });
     }
 
     /// Write a session a launch renewed back to the account store.
@@ -1833,59 +1939,63 @@ impl Shell {
         }
     }
 
-    /// The launch subscription: nothing while nothing is running, and the run
-    /// itself while there is one.
+    /// Every run's subscription: one channel per run, keyed by that run's id.
     ///
-    /// The worker is blocking and lives on a thread of its own; what crosses back
-    /// is a channel of [`launch::LaunchEvent`]s, pumped into this shell's own
-    /// messages. A full window is waited for rather than dropped -- a line the
-    /// launcher wrote is not a level, and a shell that never hears a run ended
-    /// would go on drawing Stop for a game that is gone.
+    /// A run at a time was the whole of what this used to stream, and the reason
+    /// it is a batch now is the same reason the shell holds a list: iced keeps
+    /// subscriptions apart by key, and each run's key is its own id, which is
+    /// already how the events tell themselves apart. The worker is blocking and
+    /// lives on a thread of its own; what crosses back is a channel of
+    /// [`launch::LaunchEvent`]s, pumped into this shell's own messages. A full
+    /// window is waited for rather than dropped -- a line the launcher wrote is not
+    /// a level, and a shell that never hears a run ended would go on drawing Stop
+    /// for a game that is gone.
     fn launching(&self) -> Subscription<Message> {
-        let Some(run) = self.run.clone() else {
-            return Subscription::none();
-        };
-        let slot = self.child.clone();
-        let id = run.run_id;
-        iced::subscription::channel(id, 128, move |sender| async move {
-            let params = launch::LaunchParams {
-                data_root: run.data_root.clone(),
-                instance_id: run.instance_id.clone(),
-                account: run.account.clone(),
-                run_id: run.run_id,
-                defaults: run.defaults.clone(),
-            };
-            let (events, mut stream) =
-                futures::channel::mpsc::channel::<launch::LaunchEvent>(128);
-            let _ = std::thread::spawn(move || {
-                launch::run_launch_worker(params, slot, events);
-            });
-            let mut sender = sender;
-            while let Some(event) = futures::StreamExt::next(&mut stream).await {
-                let mut pending = Some(Message::Launched(event));
-                while let Some(message) = pending.take() {
-                    match sender.try_send(message) {
-                        // Delivered, and the next event is fetched.
-                        Ok(()) => {}
-                        // Full: the window is a frame behind. A fact is not a
-                        // frame, so the send waits for room rather than dropping
-                        // it.
-                        Err(error) if error.is_full() => {
-                            pending = Some(error.into_inner());
-                            let had_room = futures::future::poll_fn(|cx| sender.poll_ready(cx)).await;
-                            if had_room.is_err() {
-                                break;
+        Subscription::batch(self.runs.iter().map(|entry| {
+            let run = entry.data.clone();
+            let slot = entry.child.clone();
+            let id = run.run_id;
+            iced::subscription::channel(id, 128, move |sender| async move {
+                let params = launch::LaunchParams {
+                    data_root: run.data_root.clone(),
+                    instance_id: run.instance_id.clone(),
+                    account: run.account.clone(),
+                    run_id: run.run_id,
+                    defaults: run.defaults.clone(),
+                };
+                let (events, mut stream) =
+                    futures::channel::mpsc::channel::<launch::LaunchEvent>(128);
+                let _ = std::thread::spawn(move || {
+                    launch::run_launch_worker(params, slot, events);
+                });
+                let mut sender = sender;
+                while let Some(event) = futures::StreamExt::next(&mut stream).await {
+                    let mut pending = Some(Message::Launched(event));
+                    while let Some(message) = pending.take() {
+                        match sender.try_send(message) {
+                            // Delivered, and the next event is fetched.
+                            Ok(()) => {}
+                            // Full: the window is a frame behind. A fact is not a
+                            // frame, so the send waits for room rather than
+                            // dropping it.
+                            Err(error) if error.is_full() => {
+                                pending = Some(error.into_inner());
+                                let had_room =
+                                    futures::future::poll_fn(|cx| sender.poll_ready(cx)).await;
+                                if had_room.is_err() {
+                                    break;
+                                }
                             }
+                            // The window is gone: there is nobody left to tell.
+                            Err(_) => break,
                         }
-                        // The window is gone: there is nobody left to tell.
-                        Err(_) => break,
                     }
                 }
-            }
-            loop {
-                futures::future::pending::<()>().await;
-            }
-        })
+                loop {
+                    futures::future::pending::<()>().await;
+                }
+            })
+        }))
     }
 
     // ---- Drawing --------------------------------------------------------
@@ -1916,12 +2026,20 @@ impl Shell {
         let mut window = column![].width(Length::Fill).height(Length::Fill).push(
             container(self.head()).width(Length::Fill).height(Length::Fixed(BAR)).style(chrome),
         );
-        // The download manager's panel, between the bar it was opened from and
-        // the page it is about: see [`Shell::download_panel`].
-        if self.downloads {
-            if let Some(progress) = &self.progress {
-                window = window.push(self.download_panel(progress));
-            }
+        // The two panels the bar opens, between the bar and the page they are
+        // about, in the order the reference stacks them under its own head: the
+        // popover over every running instance, then the download manager. See
+        // [`Shell::run_switchers`] and [`Shell::download_panel`].
+        //
+        // The popover is drawn only when there is a second run to switch to --
+        // the reference's own condition on the chevron that opens it -- so a
+        // flag left open while a run ended cannot leave a panel with one row in
+        // it, or with none.
+        if self.switchers && self.store.running_launches().len() > 1 {
+            window = window.push(self.run_switchers());
+        }
+        if self.downloads && !self.jobs.is_empty() {
+            window = window.push(self.download_panel());
         }
         window
             .push(row![self.rail(), self.pane()].height(Length::Fill))
@@ -1990,14 +2108,15 @@ impl Shell {
     /// belongs to a self-updater it does not have.
     fn action_bar(&self) -> Element<'_, Message> {
         let mut bar = row![].align_items(Alignment::Center).spacing(8.0);
-        if let Some(progress) = &self.progress {
+        if let Some((_, progress)) = shown_job(&self.jobs, self.store.selected_launch()) {
             bar = bar.push(self.download_chip(progress));
         }
         bar.push(self.running_chip()).into()
     }
 
-    /// The download manager's chip: the glyph, the phase's own label and either
-    /// its percentage or the fact that it has no length yet.
+    /// The download manager's chip: the glyph, the count of jobs the bar is
+    /// carrying, the phase's own label and either its percentage or the fact that
+    /// it has no length yet.
     ///
     /// The bar under the label is [`crate::ui::progress`] over the phase's own
     /// fraction, so the number and the fill cannot disagree: both are read from
@@ -2013,6 +2132,11 @@ impl Shell {
         let ink = crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor);
         let mut body = row![].align_items(Alignment::Center).spacing(8.0);
         body = body.push(icon::icon(Glyph::Download, 16.0, ink));
+        // The count the reference's own bar carries beside its icon, and the
+        // reason the panel below is a list: the chip is about one job, and the
+        // number is what keeps the other ones from being invisible while it is
+        // the only thing on screen.
+        body = body.push(self.job_count(self.jobs.len()));
         body = body.push(
             text(progress.label.clone())
                 .size(13.0)
@@ -2060,8 +2184,13 @@ impl Shell {
             .into()
     }
 
-    /// The chip that says what this launcher is running, with the two controls
-    /// the reference gives it: stop, and go to the instance's logs.
+    /// The chip that says what this launcher is running, with the three controls
+    /// the reference gives it: the chevron over the other running instances, stop,
+    /// and go to the instance's logs.
+    ///
+    /// The chip is about *one* run -- the store's selected one -- and the chevron
+    /// is drawn only when there is another one to switch between, which is the
+    /// reference's own condition (`v-if="currentProcesses.length > 1"`).
     ///
     /// Nothing running is a chip of its own rather than no chip: the reference
     /// draws *No instances running* beside a grey dot so that the surface keeps
@@ -2069,11 +2198,10 @@ impl Shell {
     /// and stopped would move everything beside it.
     fn running_chip(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let launch = self.store.launch();
-        let running = launch.state != store::LaunchState::Idle;
+        let selected = self.store.selected_launch().map(str::to_string);
+        let launch = selected.as_deref().and_then(|id| self.store.launch(id));
         let mut body = row![].align_items(Alignment::Center).spacing(8.0);
-        if running {
-            let id = launch.instance.clone().unwrap_or_default();
+        if let (Some(id), Some(launch)) = (selected, launch) {
             // A dot, the instance's name, and the state it is in -- which the
             // reference leaves to the instance's own header and this shell can
             // afford to say twice: a run being *stopped* looks exactly like a run
@@ -2097,6 +2225,19 @@ impl Shell {
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
                 );
             }
+            // The chevron over the other running instances, which the reference
+            // draws only when there is a second one: with one run there is nothing
+            // to switch to, and a control that opened a list of one would be a
+            // control that does nothing.
+            if self.store.running_launches().len() > 1 {
+                body = body.push(crate::ui::icon_button(
+                    theme,
+                    BAR_SWITCHERS,
+                    if self.switchers { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                    16.0,
+                    Message::ToggleRuns,
+                ));
+            }
             // The stop control exists when there is something to stop, which is
             // [`store::LaunchState::Running`] rather than "not idle": the kill
             // goes to the child the worker put in the slot, and while a run is
@@ -2111,7 +2252,7 @@ impl Shell {
                     Glyph::StopCircle,
                     18.0,
                     crate::ui::Kind::Danger,
-                    Message::StopRun,
+                    Message::StopRun(id.clone()),
                 ));
             }
             body = body.push(crate::ui::icon_button(
@@ -2145,6 +2286,123 @@ impl Shell {
             .into()
     }
 
+    /// The popover over every running instance, drawn under the bar it was opened
+    /// from.
+    ///
+    /// `AppActionBar.vue`'s `FloatingMenu`: `w-[20rem]`, one row per process, each
+    /// row a `rounded-xl bg-surface-4` holding that process's name -- with a star
+    /// on the selected one -- a stop control and its terminal, where pressing the
+    /// row makes that process the one the chip is about. iced 0.12 has no z-order,
+    /// so a panel that *floats* over the page is not something this toolkit can
+    /// express: this is the same wall the version picker and the download manager
+    /// hit, taken the same way -- a row under the bar, which is where a panel
+    /// opened from the bar belongs. It is pushed to the right, under the chip that
+    /// opened it, because that is where the reference drops it.
+    fn run_switchers(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let selected = self.store.selected_launch().map(str::to_string);
+        let mut rows = column![].spacing(6.0);
+        for (id, launch) in self.store.running_launches() {
+            rows = rows.push(self.switcher_row(id, launch.state, selected.as_deref() == Some(id)));
+        }
+        let panel = container(rows)
+            .width(Length::Fixed(SWITCHER_PANEL))
+            .padding(Padding { top: 4.0, bottom: 4.0, left: 4.0, right: 4.0 });
+        container(row![Space::with_width(Length::Fill), panel])
+            .width(Length::Fill)
+            .padding(Padding { top: 8.0, bottom: 8.0, left: RAIL_PAD, right: CONTROLS_WIDTH })
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
+                border: Border {
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// One row of that popover: a running instance, its name and its two controls.
+    ///
+    /// The two controls are glyphs in a [`mouse_area`] rather than
+    /// [`crate::ui::icon_button`]s, and the reason is the hover machinery it is
+    /// built on: that is keyed by a `&'static str`, so every row would have to
+    /// share one key and hovering one row's stop would light up all of them. What
+    /// the reference gives them instead is `active:scale-95` -- a press transform
+    /// this toolkit cannot draw at all -- and its `@click.stop` is what stops a
+    /// stop from also selecting the process, which here is harmless: a press on a
+    /// row's control selects the instance it names and then stops it, and the
+    /// instance a user just stopped is a sensible thing for the bar to be about.
+    fn switcher_row(
+        &self,
+        id: &str,
+        state: store::LaunchState,
+        selected: bool,
+    ) -> Element<'_, Message> {
+        let theme = self.theme;
+        let mut body = row![].align_items(Alignment::Center).spacing(6.0);
+        body = body.push(self.indicator(if selected { Ink::Green } else { INK_SECONDARY }));
+        body = body.push(
+            container(
+                text(instance_name(&self.store, id))
+                    .size(13.0)
+                    .font(if selected { semibold() } else { medium() })
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .width(Length::Fill),
+        );
+        if selected {
+            // `StarIcon` on the process the bar is about, so the mark moves with
+            // the press that makes a row this one.
+            body = body.push(icon::icon(Glyph::Star, 14.0, theme_gen::ink(theme, INK_SECONDARY)));
+        }
+        if let Some(label) = state_label(state) {
+            body = body.push(
+                text(label)
+                    .size(12.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        }
+        // A stop control where there is something to stop, which is the chip's own
+        // rule: while a run prepares there is no process in its slot, and a stop
+        // for one would be a word with nothing behind it.
+        if state == store::LaunchState::Running {
+            body = body.push(
+                mouse_area(icon::icon(Glyph::StopCircle, 16.0, theme_gen::ink(theme, Ink::Red)))
+                    .interaction(Interaction::Pointer)
+                    .on_press(Message::StopRun(id.to_string())),
+            );
+        }
+        body = body.push(
+            mouse_area(icon::icon(
+                Glyph::TerminalSquare,
+                16.0,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ))
+            .interaction(Interaction::Pointer)
+            .on_press(Message::Go(format!("/instance/{id}/logs"))),
+        );
+        mouse_area(
+            container(body)
+                .width(Length::Fill)
+                .padding(Padding { top: 6.0, bottom: 6.0, left: 8.0, right: 8.0 })
+                .style(move |_theme: &Theme| container::Appearance {
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+                    border: Border {
+                        color: theme_gen::ink(theme, Ink::Surface5),
+                        width: 1.0,
+                        radius: 12.0.into(),
+                    },
+                    ..container::Appearance::default()
+                }),
+        )
+        .interaction(Interaction::Pointer)
+        .on_press(Message::SelectRun(id.to_string()))
+        .into()
+    }
+
     /// The reference's `OnlineIndicatorIcon`: a dot in the colour of the fact it
     /// carries.
     fn indicator(&self, ink: Ink) -> Element<'_, Message> {
@@ -2165,47 +2423,42 @@ impl Shell {
     /// The reference floats this in a teleported popup; iced 0.12 has no
     /// z-order and this is the same wall the version picker hit, so it is drawn
     /// in the layout: a row under the bar, which is where a panel the user opened
-    /// from the bar belongs. What it holds is the one job this launcher can have
-    /// -- the run's own phase -- with the three numbers the reference shows:
-    /// what it is doing, how many of them are done, and how many bytes that is.
-    fn download_panel(&self, progress: &install::Progress) -> Element<'_, Message> {
+    /// from the bar belongs.
+    ///
+    /// What it holds is the reference's own shape: a *Tasks* head carrying the
+    /// number of jobs still going, then one row per job ([`Shell::job_row`]). A
+    /// job here is a run's own phase, keyed by instance id, so the list is every
+    /// run that is fetching at once rather than only the one the chip is about --
+    /// two instances installing side by side are two rows, which is the whole
+    /// reason `jobs` is a map and not a field. The head's count is the chip's
+    /// count over the same rows, so the two cannot disagree about how many there
+    /// are.
+    fn download_panel(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let launch = self.store.launch();
-        let title = launch
-            .instance
-            .as_deref()
-            .map(|id| instance_name(&self.store, id))
-            .unwrap_or_else(|| Key::AppActionBarDownloads.message().to_string());
-        let body = column![]
-            .spacing(6.0)
+        let selected = self.store.selected_launch().map(str::to_string);
+        let mut head = row![]
+            .align_items(Alignment::Center)
+            .spacing(8.0)
             .push(
-                row![]
-                    .align_items(Alignment::Center)
-                    .spacing(8.0)
-                    .push(
-                        text(title)
-                            .size(14.0)
-                            .font(semibold())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                    )
-                    .push(Space::with_width(Length::Fill))
-                    .push(crate::ui::icon_button(
-                        theme,
-                        BAR_PANEL_CLOSE,
-                        Glyph::X,
-                        16.0,
-                        Message::ToggleDownloads,
-                    )),
+                text("Tasks")
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
             )
-            .push(
-                text(progress_line(progress))
-                    .size(13.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-            )
-            // The fraction again, as a bar: the same `Progress` the chip was
-            // drawn from, so a panel and a chip cannot disagree.
-            .push(crate::ui::progress(theme, progress.fraction()));
+            .push(self.job_count(self.jobs.len()))
+            .push(Space::with_width(Length::Fill));
+        head = head.push(crate::ui::icon_button(
+            theme,
+            BAR_PANEL_CLOSE,
+            Glyph::X,
+            16.0,
+            Message::ToggleDownloads,
+        ));
+        let mut rows = column![].spacing(6.0);
+        for (id, progress) in &self.jobs {
+            rows = rows.push(self.job_row(id, progress, selected.as_deref() == Some(id.as_str())));
+        }
+        let body = column![].spacing(8.0).push(head).push(rows);
         container(body)
             .width(Length::Fill)
             .padding(Padding { top: 10.0, bottom: 10.0, left: RAIL_PAD, right: CONTROLS_WIDTH })
@@ -2219,6 +2472,113 @@ impl Shell {
                 ..container::Appearance::default()
             })
             .into()
+    }
+
+    /// One job of that panel: the instance it belongs to, the phase's own line,
+    /// the same bar the chip is drawn from, and the way to that instance's logs.
+    ///
+    /// The row is a [`mouse_area`] on [`Message::SelectRun`], which is exactly
+    /// what that message is for: pressing a job makes the bar about the run that
+    /// job belongs to, the way pressing a row of the popover above it does. The
+    /// indicator is the popover's own rule as well -- green on the run the bar is
+    /// about, secondary on the rest.
+    ///
+    /// The reference's job row carries a much larger set of controls -- pause,
+    /// resume, retry, cancel, dismiss, copy details, and a finish time -- and not
+    /// one of them is drawn here, because none of them has anything behind it
+    /// yet: a job in this shell is a running launch's own phase, and the words a
+    /// stopped phase would answer are the run's, on the chip and on the popover
+    /// row. A pause for a fetch that cannot pause would be a control that lies.
+    fn job_row(
+        &self,
+        id: &str,
+        progress: &install::Progress,
+        selected: bool,
+    ) -> Element<'_, Message> {
+        let theme = self.theme;
+        let mut body = row![].align_items(Alignment::Center).spacing(8.0);
+        body = body.push(self.indicator(if selected { Ink::Green } else { INK_SECONDARY }));
+        body = body.push(
+            container(
+                column![]
+                    .spacing(2.0)
+                    .push(
+                        text(instance_name(&self.store, id))
+                            .size(13.0)
+                            .font(if selected { semibold() } else { medium() })
+                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    )
+                    .push(
+                        text(progress_line(progress))
+                            .size(12.0)
+                            .font(medium())
+                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    ),
+            )
+            .width(Length::Fill),
+        );
+        // The fraction again, as a bar: the same `Progress` the chip was drawn
+        // from, so a panel row and a chip cannot disagree.
+        body = body.push(
+            container(crate::ui::progress(theme, progress.fraction()))
+                .width(Length::Fixed(JOB_BAR))
+                .center_y(),
+        );
+        body = body.push(
+            mouse_area(icon::icon(
+                Glyph::TerminalSquare,
+                16.0,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ))
+            .interaction(Interaction::Pointer)
+            .on_press(Message::Go(format!("/instance/{id}/logs"))),
+        );
+        mouse_area(
+            container(body)
+                .width(Length::Fill)
+                .padding(Padding { top: 6.0, bottom: 6.0, left: 8.0, right: 8.0 })
+                .style(move |_theme: &Theme| container::Appearance {
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+                    border: Border {
+                        color: theme_gen::ink(theme, Ink::Surface5),
+                        width: 1.0,
+                        radius: 12.0.into(),
+                    },
+                    ..container::Appearance::default()
+                }),
+        )
+        .interaction(Interaction::Pointer)
+        .on_press(Message::SelectRun(id.to_string()))
+        .into()
+    }
+
+    /// The reference's count pill: how many jobs the bar is carrying, in
+    /// `text-brand` on `--color-green-highlight` inside a `border-brand` ring.
+    ///
+    /// Drawn on the download chip and on the panel's own head from the same
+    /// number, which is what the reference does with the one it puts in both
+    /// places.
+    fn job_count(&self, count: usize) -> Element<'_, Message> {
+        let theme = self.theme;
+        container(
+            text(count.to_string())
+                .size(12.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Brand))),
+        )
+        .height(Length::Fixed(20.0))
+        .padding(Padding { top: 0.0, bottom: 0.0, left: 6.0, right: 6.0 })
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::GreenHighlight))),
+            border: Border {
+                color: theme_gen::ink(theme, Ink::Brand),
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into()
     }
 
     /// A history button: a 28px square, `!border !border-surface-4`.
@@ -4235,7 +4595,7 @@ mod tests {
         let mut shell = shell_with_home("play");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
-        let run = shell.run.as_ref().expect("a run");
+        let run = shell.runs.first().expect("a run").data.clone();
         assert_eq!(run.instance_id, "atm10");
         assert_eq!(run.run_id, 1);
         assert_eq!(run.data_root, shell.home.as_ref().expect("a home").root);
@@ -4246,13 +4606,17 @@ mod tests {
         assert_eq!(run.account.username, "Player", "which is the same player every time");
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Starting);
         assert_eq!(shell.store.launch_line("atm10"), Some("preparing 'atm10'"));
-        // The same message from another instance's page is not this instance's
-        // run: the address is what the page is drawn from, so the page on screen
-        // is the one that asked.
+        // A second instance's page asks for *that* instance, and the shell runs
+        // both: the address is what the page is drawn from, and one launcher can
+        // have two games going. What it does not do is run the same instance
+        // twice.
         press(&mut shell, Message::Go("/instance/other".into()));
         play(&mut shell);
-        assert_eq!(shell.run.as_ref().map(|run| run.instance_id.clone()), Some("atm10".to_string()));
-        assert_eq!(shell.runs, 1, "a launch is not started twice behind one game");
+        let ids: Vec<&str> = shell.runs.iter().map(|run| run.data.instance_id.as_str()).collect();
+        assert_eq!(ids, vec!["atm10", "other"], "a run per press, and one per instance");
+        assert_eq!(shell.next_run_id, 2, "each run has an id of its own");
+        play(&mut shell);
+        assert_eq!(shell.runs.len(), 2, "a launch is not started twice behind one game");
     }
 
     #[test]
@@ -4291,7 +4655,7 @@ mod tests {
             run_id: 1,
             note: "process exited (exit status: 0)".to_string(),
         }));
-        assert!(shell.run.is_none(), "the run is over");
+        assert!(shell.runs.is_empty(), "the run is over");
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Idle);
         assert_eq!(
             shell.store.launch_line("atm10"),
@@ -4299,12 +4663,12 @@ mod tests {
             "and the last thing it said is still what the header shows"
         );
         play(&mut shell);
-        assert_eq!(shell.run.as_ref().map(|run| run.run_id), Some(2));
+        assert_eq!(shell.runs.first().map(|run| run.data.run_id), Some(2));
         press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
             run_id: 1,
             note: "stale".to_string(),
         }));
-        assert!(shell.run.is_some(), "a stale done must not clear the run that is going");
+        assert!(!shell.runs.is_empty(), "a stale done must not clear the run that is going");
         press(
             &mut shell,
             Message::Launched(launch::LaunchEvent::Progress {
@@ -4352,7 +4716,7 @@ mod tests {
             Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
         );
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
-        assert!(shell.run.is_some(), "the run is not over until the worker says so");
+        assert!(!shell.runs.is_empty(), "the run is not over until the worker says so");
         // A stop for an instance that is not the one running is ignored rather
         // than killing the wrong game, and so is a second one for the same run.
         press(
@@ -4394,7 +4758,7 @@ mod tests {
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
         assert!(
-            shell.run.as_ref().expect("a run").account.kind.is_online(),
+            shell.runs.first().expect("a run").data.account.kind.is_online(),
             "a Microsoft account launches with its own session"
         );
         press(
@@ -4433,7 +4797,7 @@ mod tests {
         // this rewrite gives, and the run is not started.
         let mut shell = shell_at("/instance/atm10");
         play(&mut shell);
-        assert!(shell.run.is_none());
+        assert!(shell.runs.is_empty());
         assert_eq!(
             shell.store.launch_line("atm10"),
             Some(store::not_implemented("Launching an instance").as_str())
@@ -4482,7 +4846,7 @@ mod tests {
         // child process to kill yet, so the control is not drawn and this message
         // is not one it can send. What a press would do otherwise is change a word
         // and leave the run to start the game anyway.
-        press(&mut shell, Message::StopRun);
+        press(&mut shell, Message::StopRun("atm10".to_string()));
         assert_eq!(
             shell.store.launch_state("atm10"),
             store::LaunchState::Starting,
@@ -4490,7 +4854,7 @@ mod tests {
         );
         press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
-        press(&mut shell, Message::StopRun);
+        press(&mut shell, Message::StopRun("atm10".to_string()));
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
         // And the name the chip draws: the library's own when it has been read,
         // the id when it has not -- which is the arm an instance removed while it
@@ -4513,7 +4877,7 @@ mod tests {
         play(&mut shell);
         press(&mut shell, Message::ToggleDownloads);
         assert!(shell.downloads, "the chip is the panel's own toggle");
-        assert!(shell.progress.is_none(), "and there is nothing to show yet");
+        assert!(shell.jobs.is_empty(), "and there is nothing to show yet");
         drop(shell.render());
         press(
             &mut shell,
@@ -4522,7 +4886,7 @@ mod tests {
                 progress: crate::install::Progress::new("files", 3, 12, 6 * 1024 * 1024),
             }),
         );
-        let progress = shell.progress.clone().expect("the level");
+        let progress = shell.jobs.get("atm10").cloned().expect("the level");
         assert_eq!(progress.fraction(), 0.25);
         assert_eq!(progress_line(&progress), "files: 3 of 12 · 6.0 MB");
         // An indeterminate level says so in words rather than inventing a
@@ -4535,7 +4899,7 @@ mod tests {
         // The game coming up is the end of the fetch: the level goes with it, and
         // so does the panel a bar would have been left in.
         press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
-        assert!(shell.progress.is_none());
+        assert!(shell.jobs.is_empty(), "the level goes with the fetch that set it");
         assert!(!shell.downloads);
         // A run that ends clears both too, for the same reason.
         press(&mut shell, Message::ToggleDownloads);
@@ -4550,9 +4914,176 @@ mod tests {
             run_id: 1,
             note: "process exited (exit status: 0)".to_string(),
         }));
-        assert!(shell.progress.is_none());
+        assert!(shell.jobs.is_empty());
         assert!(!shell.downloads);
-        assert!(shell.run.is_none());
+        assert!(shell.runs.is_empty());
+    }
+
+    #[test]
+    fn a_second_run_is_listed_by_the_bar_and_the_chip_follows_the_row_that_is_pressed() {
+        // The reference's popover: several processes at once, one of them the one
+        // the chip is about, and pressing a row is what makes it that one. The
+        // chevron over it is drawn only when there is something to switch
+        // between, which is the condition this asserts the inputs of.
+        let mut shell = shell_with_home("switchers");
+        for id in ["atm10", "sodium"] {
+            press(&mut shell, Message::Go(format!("/instance/{id}")));
+            play(&mut shell);
+        }
+        let running: Vec<&str> = shell
+            .store
+            .running_launches()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(running, vec!["atm10", "sodium"], "both runs are the bar's to list");
+        assert_eq!(
+            shell.store.selected_launch(),
+            Some("sodium"),
+            "the run that was just started is the one the chip is about"
+        );
+        // The popover is off until the chevron is pressed, and it is drawn only
+        // while there is a second run to switch to -- which is also the chevron's
+        // own condition in the chip.
+        assert!(!shell.switchers);
+        press(&mut shell, Message::ToggleRuns);
+        assert!(shell.switchers);
+        drop(shell.render());
+        // Pressing a row makes that process the one the chip -- and with it the
+        // stop control and the logs button -- is about.
+        press(&mut shell, Message::SelectRun("atm10".to_string()));
+        assert_eq!(shell.store.selected_launch(), Some("atm10"));
+        // And the last run's end takes the popover with it: a list of one is not
+        // a list, so what is left is a bar with nothing to switch between.
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 2,
+                note: "process exited (exit status: 0)".to_string(),
+            }),
+        );
+        assert_eq!(shell.store.running_launches().len(), 1);
+        drop(shell.render());
+    }
+
+    #[test]
+    fn stopping_one_run_leaves_the_other_one_going() {
+        // The reason the shell holds a list of runs rather than one: a stop is
+        // aimed at an *instance*, and the other game must not be touched by it --
+        // not its state, and not the run the subscription is streaming.
+        let mut shell = shell_with_home("two-runs");
+        for id in ["atm10", "sodium"] {
+            press(&mut shell, Message::Go(format!("/instance/{id}")));
+            play(&mut shell);
+        }
+        for run_id in [1, 2] {
+            press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id }));
+        }
+        press(&mut shell, Message::StopRun("atm10".to_string()));
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        assert_eq!(
+            shell.store.launch_state("sodium"),
+            store::LaunchState::Running,
+            "the other game is not the one that was stopped"
+        );
+        assert_eq!(shell.runs.len(), 2, "and both runs are still the shell's");
+        // The stopped run ends. The other keeps its state and its own run id, and
+        // a done for a run that is already gone changes nothing at all -- which
+        // is the same stale-frame rule the single run had, now that there is more
+        // than one to get it wrong for.
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 1,
+                note: "process exited (exit status: 0)".to_string(),
+            }),
+        );
+        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Idle);
+        assert_eq!(shell.store.launch_state("sodium"), store::LaunchState::Running);
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 9,
+                note: "stale".to_string(),
+            }),
+        );
+        assert_eq!(shell.store.launch_state("sodium"), store::LaunchState::Running);
+        assert_eq!(shell.runs.len(), 1);
+    }
+
+    #[test]
+    fn the_download_chip_shows_the_selected_run_s_phase_or_whatever_is_fetching() {
+        // Two runs can be fetching at once, and the chip is drawn from the
+        // selected run's phase when it has one and from whatever is fetching
+        // otherwise: a chip that went blank because the run it names stopped
+        // downloading would hide work that is happening.
+        let mut jobs = BTreeMap::new();
+        jobs.insert("atm10".to_string(), install::Progress::new("libraries", 1, 4, 0));
+        jobs.insert("sodium".to_string(), install::Progress::new("assets", 1, 2, 0));
+        assert_eq!(
+            shown_job(&jobs, Some("sodium")).map(|(id, _)| id),
+            Some("sodium"),
+            "the selected run's own phase wins"
+        );
+        assert_eq!(
+            shown_job(&jobs, Some("other")).map(|(id, _)| id),
+            Some("atm10"),
+            "an instance that is not fetching falls back to one that is"
+        );
+        assert_eq!(shown_job(&jobs, None).map(|(id, _)| id), Some("atm10"));
+        assert!(shown_job(&BTreeMap::new(), Some("atm10")).is_none());
+    }
+
+    #[test]
+    fn the_download_panel_carries_a_row_for_every_job_it_is_holding() {
+        // "More than the run's own job" is the whole of what this panel is for:
+        // `jobs` is keyed by instance, so two runs fetching at once are two rows
+        // and a head that counts two. A row is an element nothing can read back,
+        // so what is asserted is the state the rows are built from -- and that the
+        // surface draws in it, which is the only way a mistake in a two-row panel
+        // can fail from here.
+        let mut shell = shell_with_home("job-list");
+        for id in ["atm10", "sodium"] {
+            press(&mut shell, Message::Go(format!("/instance/{id}")));
+            play(&mut shell);
+        }
+        for (run_id, label) in [(1, "libraries"), (2, "assets")] {
+            press(
+                &mut shell,
+                Message::Launched(launch::LaunchEvent::Progress {
+                    run_id,
+                    progress: crate::install::Progress::new(label, 1, 4, 0),
+                }),
+            );
+        }
+        let levels: Vec<&str> = shell.jobs.keys().map(String::as_str).collect();
+        assert_eq!(levels, vec!["atm10", "sodium"], "one job per run that is fetching");
+        // The job arrives with the run, so the chip -- and the row the panel marks
+        // -- is about the instance that was just started.
+        assert_eq!(shell.store.selected_launch(), Some("sodium"));
+        press(&mut shell, Message::ToggleDownloads);
+        assert!(shell.downloads);
+        drop(shell.render());
+        // A row is a `SelectRun`, which is what makes this a way to *choose* a job
+        // rather than only to read one: the chip follows the row that is pressed,
+        // exactly as it follows a row of the popover above.
+        press(&mut shell, Message::SelectRun("atm10".to_string()));
+        assert_eq!(shell.store.selected_launch(), Some("atm10"));
+        drop(shell.render());
+        // And a row goes with the run that put it there: both runs end, the map
+        // empties, and an empty map is a panel that is not drawn at all even with
+        // its flag still up.
+        for run_id in [1, 2] {
+            press(
+                &mut shell,
+                Message::Launched(launch::LaunchEvent::Done {
+                    run_id,
+                    note: "process exited (exit status: 0)".to_string(),
+                }),
+            );
+        }
+        assert!(shell.jobs.is_empty());
+        drop(shell.render());
     }
 
     #[test]

@@ -91,7 +91,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
     4: [(66, 75)],  # the engine, and the first page served by it
-    5: [(78, 81), (84, 89)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune
+    5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
 
 # The plan's open work, by the bold name its bullet carries, with the number of
@@ -117,13 +117,6 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
             "The desktop's other call sites on the engine.",
             2,
             "browse.rs onto the engine, and launch.rs onto it",
-        ),
-    ],
-    5: [
-        (
-            "The launch surface.",
-            1,
-            "the multi-run popover, and a download manager with more than the run's own job",
         ),
     ],
 }

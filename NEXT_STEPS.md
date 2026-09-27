@@ -69,8 +69,8 @@ The workspace is now three crates plus the shell:
 
 Backend suites as run against this tree: `palantir-core` 168 plus 8,
 `palantir-loader` 31, `palantir-net` 213, with 13 live tests ignored by design --
-871 in the workspace, of which the desktop crate's 447 plus its 4 native tests
-are 451. Which binary each number belongs to is written out in
+876 in the workspace, of which the desktop crate's 452 plus its 4 native tests
+are 456. Which binary each number belongs to is written out in
 [`GATES.md`](GATES.md), because a bare list of numbers is how the earlier version
 of this paragraph managed to mislabel three of them.
 
@@ -83,7 +83,7 @@ of this paragraph managed to mislabel three of them.
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
 | 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). What is not real yet is anything a service answers, and the panel's remaining sections, which all are -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **In progress**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); the desktop's other call sites still hold their own clients -- see "What stage 4 has landed so far" |
-| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88). What is not in is the pruning of what only that shell was still calling, and the rest of the launch surface |
+| 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
 Stages 1-5 land on a `rewrite-modrinth-native` branch with a draft PR, so CI
 sees every commit while `master` keeps building a launcher that runs. Only
@@ -530,9 +530,8 @@ page stage 3 still owes.
 
 ## What stage 5 has landed so far
 
-Four pieces, and each one replaced a sentence that said the feature was not
-built. A fifth closed the delete, and it is the one piece here that added no
-feature at all:
+Six pieces. Five of them replaced a sentence that said the feature was not
+built; the sixth (G89) is the delete's other half and added no feature at all:
 
 * **A create, and the pickup behind it** (G78). `store.rs` gained the write side
   -- `create_instance` asks Mojang which version is current when the flow has no
@@ -567,13 +566,37 @@ feature at all:
   not built), with no stop-circle glyph on *Stop* (this kit's buttons are
   label-only), and with no gate that has actually run a game on this machine --
   that needs a JVM and a version to install.
+* **Several runs at once, and a job list that is more than the run's own** (G90).
+  The bar could watch one run from any page (G86); what it could not be is *more
+  than one*, which is what the reference's action bar is for. `run:
+  Option<ActiveRunData>` and one shared child slot became `runs: Vec<Run>` with a
+  `ChildSlot` per run -- a stop is aimed at an instance, so the kill has to reach
+  the child that instance's launch put in *its own* slot -- and `launch: Launch`
+  became `launches: BTreeMap<String, Launch>` whose selected id the reader
+  derives. Every `LaunchEvent` is routed to its run by `run_id`, so a stale event
+  cannot write to another run's chip; the popover over the running processes is
+  the reference's own `currentProcesses.length > 1` condition, one row each, and
+  pressing a row is what makes a process the one the bar is about; and `jobs:
+  BTreeMap<String, install::Progress>` means two instances installing at once are
+  two rows in the download manager and a count on its chip.
 
-What stage 5 still owes, in the order it is worth doing:
+## What stage 5 does not carry over, and why
 
-1. **The launch surface.** The reference's action bar and its download manager
-   are where a launch is watched there, and the bar is now in this shell's head:
-   the run, its level as a chip over a panel, its stop control and the way to its
-   logs, from any page (G86). What is not in is the rest of the download manager
-   -- its job list is one job, because this launcher runs one instance at a time
-   -- and the reference's popover over *every* running process, which needs a
-   second run to exist first.
+The stage's own list is done. What follows is what the reference has in the same
+places and this launcher does not, and none of it is a slice the plan asked for:
+
+* **The download manager's per-job controls.** Pause, resume, retry, cancel,
+  dismiss and copy-details are all in the reference's job row and none is here,
+  because a job in this shell is a running launch's own phase: there is nothing
+  behind a pause, and the words a stopped phase would answer are the run's, on
+  the chip and on the popover row. A job that outlives its run -- the reference's
+  completed and *needs attention* sections -- needs a job store that outlives the
+  run too, which is the engine's scheduler wearing a UI rather than this
+  surface's work.
+* **The float.** The reference teleports both the popover and the panel above
+  everything; iced 0.12 has no z-order, so both are rows under the head here,
+  which is the same wall the version picker and the create dialog hit.
+* **A picture of the popover.** It is drawn only when a second run exists, and a
+  `--shot` run cannot start two real launches: what the gate has is a test that
+  renders the whole surface in that state beside a capture proving the surface a
+  plain run draws is unchanged.

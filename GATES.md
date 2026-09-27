@@ -1831,9 +1831,9 @@ text generation is byte-identical
 A local run is not a clean checkout and this document is not going to pretend
 otherwise: the same compiler and the same flags on a machine that has built the
 tree before is a *weaker* claim than the runner's, which is why `AGENTS.md`
-makes the runner the authority. What it does say is that all 875 tests pass, that
-nothing in the correctness-deny set is failing, and that all three generated
-files match their sources; the run under "The engine's transcript" above, at 1015,
+makes the runner the authority. What it does say is that all 876 tests pass (the
+run under G90 below), that nothing in the correctness-deny set is failing, and
+that all three generated files match their sources; the run under "The engine's transcript" above, at 1015,
 is the same set after the seam, the interaction, the settings pane and stage 5's
 flows so far landed.
 Re-running the push when the account can schedule jobs is the first thing to do
@@ -1921,6 +1921,102 @@ taken before this slice (`ImageChops.difference(...).getbbox()` is None)
   the flags `ci.yml` uses. Re-running the push when the account can schedule
   jobs is still the first thing to do with this tree.
 
+- [x] G90: the bar watches several runs at once, and the download manager's job
+      list is more than the run's own job
+  CHECK: cargo test --workspace --all-targets --locked
+  EXPECT: test result: ok. 876 passed; 0 failed; 13 ignored
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    452 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    213 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+warning: `palantir-core` (lib) generated 9 warnings
+warning: `palantir-core` (test "compat") generated 1 warning
+warning: `palantir-net` (lib) generated 1 warning
+warning: `palantir-core` (lib test) generated 10 warnings (9 duplicates)
+warning: `palantir-net` (lib test) generated 1 warning (1 duplicate)
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings (2 duplicates)
+46 warnings, the same profile G89's run had, none of them in the files this
+slice touched, and not one of them a dead item:
+cargo clippy ... 2>&1 | grep -cE "never (used|read|constructed)" is 0
+
+$ cargo build -p palantir-desktop --locked && target/debug/PalantirMC.exe --shot .scratch/after-multirun.png
+exit 0, 1257x707, 1,903 distinct colours, and pixel-identical to the capture
+G89 took before this slice (`ImageChops.difference(...).getbbox()` is None)
+```
+
+  One run at a time was the whole of what the bar could be. The reference's action
+  bar is built for several -- `currentProcesses`, a floating menu over them, and a
+  download manager whose list is every job the app carries -- and this slice is
+  the two models that were missing before either could be drawn, one of them in
+  the shell and one in the store.
+
+  The shell's: `run: Option<ActiveRunData>` and one shared `ChildSlot` became
+  `runs: Vec<Run>`, each `Run` with a slot of its own. That is not tidiness, it is
+  what a stop means -- a stop is aimed at an *instance*, and the kill has to reach
+  the child that instance's launch put in *its* slot, which one shared slot cannot
+  promise. Every `LaunchEvent` already carried a `run_id` (G81's seam, which is
+  also why there was anything to route by), so `instance_of` turns an id back into
+  an instance for as long as that run is the shell's, and a stale id changes
+  nothing at all: the single run's rule, kept now that there is a second run to
+  get it wrong for. `play` refuses the same instance twice and allows a different
+  one, and the launch subscription is a batch of one channel per run.
+
+  The store's: `launch: Launch` became `launches: BTreeMap<String, Launch>` plus a
+  selected id the *reader* derives -- the stored one while it is still running,
+  and otherwise the first run there is. What that buys is the chip's behaviour,
+  which the reference has too: a new entry becomes the selected one, so the bar
+  follows the press that started a run, and later words about that same run move
+  nothing. The order is the map's, so "first" is the same run on every frame.
+
+  The popover is the reference's own condition -- `currentProcesses.length > 1`
+  draws the chevron, a list of one would be a control that does nothing -- with a
+  row per running process under it: the indicator dot, the instance's name, *Star*
+  on the one the bar is about, its state, a red `StopCircle` while it is running,
+  and a `TerminalSquare` to its logs. The whole row is the button: pressing one is
+  `SelectRun`, which is what makes the popover a way to *choose* a process rather
+  than only to read them. The chevron rotates rather than swapping glyph, and the
+  panel goes with the last run that ends, because a list of one is not a list.
+
+  The download manager is the same shape one level down. `jobs` is a
+  `BTreeMap<String, install::Progress>` keyed by instance, so an instance that is
+  fetching is a row, two instances installing side by side are two rows, and the
+  head counts two. The chip carries that count as well -- the reference's own
+  `activeCount` pill, brand ink on `--color-green-highlight` -- because the chip is
+  about one job and the number is what keeps the others from being invisible while
+  it is the only thing on screen. The chip's *label* still falls back the way
+  `shown_job` says: the selected run's phase when it has one, and otherwise the
+  first run that is fetching, because a chip that went blank while another run was
+  still downloading would hide work that is happening.
+
+  Three things were deliberately not drawn. The reference's per-job controls --
+  pause, resume, retry, cancel, dismiss, copy details -- have nothing behind them:
+  a job here is a running launch's own phase, and the words a stopped phase would
+  answer are the run's, on the chip and on the popover row, so a pause for a fetch
+  that cannot pause would be a control that lies. The popover and the panel both
+  float in the reference and are rows under the head here, because iced 0.12 has
+  no z-order -- the wall the version picker and the create dialog already hit,
+  taken the same way and written down where the code is. And **no gate has
+  photographed the popover**: it draws only when a second run exists, and a
+  `--shot` run cannot start two real launches. What it has instead is a test that
+  renders the whole surface in that state -- two runs, the panel down,
+  `drop(shell.render())` -- beside the capture above, which is the other half of
+  the same claim: a plain run's surface is unchanged by any of it.
+
+  The runner could not be the receipt again: the push before this slice,
+  `1a3b367`, is run `36292534532`, three seconds with zero steps and the same
+  billing annotation. Re-running this push when the account can schedule jobs is
+  still the first thing to do with this tree.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
@@ -1950,5 +2046,6 @@ taken before this slice (`ImageChops.difference(...).getbbox()` is None)
 - **One page is switched onto the engine.** Discover's search is the only request
   that goes through the seam; the right panel, the settings modal and every
   instance-facing list still answer from disk or from the copy, so this document
-  says nothing yet about them being served by the code above. That is stage 5's
-  work: instances in our own format, the importers and the launch.
+  says nothing yet about them being served by the code above. Stage 5 does not
+  cover it either: what is left is the panel's other sections and every page that
+  is not Discover, which is what stage 3's own open list names.
