@@ -30,13 +30,22 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::color_theme::ColorTheme;
 
+// Named only by the test-gated painters below, kept because the tests are the
+// record of how those states are drawn.
+#[cfg(test)]
 use iced::gradient::Linear;
-use iced::overlay::menu;
+#[cfg(test)]
 use iced::theme::Palette as IcedPalette;
-use iced::widget::{
-    button, checkbox, container, pick_list, progress_bar, scrollable, text_input,
-};
-use iced::{Background, Border, Color, Font, Gradient, Radians, Theme};
+#[cfg(test)]
+use iced::widget::progress_bar;
+#[cfg(test)]
+use iced::widget::scrollable;
+#[cfg(test)]
+use iced::Radians;
+
+use iced::overlay::menu;
+use iced::widget::{button, checkbox, container, pick_list, text_input};
+use iced::{Background, Border, Color, Font, Theme};
 
 /// Build a color from sRGB bytes (const-friendly, readable hex in the source).
 pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -202,8 +211,10 @@ fn filtered(appearance: button::Appearance, factor: f32) -> button::Appearance {
 /// reads them from there, so nothing has to know which theme that is.
 pub struct Palette {
     /// Window chrome (deepest surface).
+    #[cfg(test)]
     pub bg: Color,
     /// Rails and sidebars.
+    #[cfg(test)]
     pub bg_rail: Color,
     /// Cards, modals and other raised surfaces.
     pub surface: Color,
@@ -238,20 +249,28 @@ pub struct Palette {
     /// Destructive actions.
     pub danger: Color,
     /// The welcome logo tile's own surface.
+    #[cfg(test)]
     pub hero: Color,
     /// The dimmed wash behind a dialog.
+    #[cfg(test)]
     pub backdrop: Color,
     /// The dialog surface, a shade off the cards.
+    #[cfg(test)]
     pub modal: Color,
     /// Top of the right panel's brand wash.
+    #[cfg(test)]
     pub sidebar_top: Color,
     /// Bottom of the right panel's brand wash.
+    #[cfg(test)]
     pub sidebar_bottom: Color,
     /// A card inside the right panel.
+    #[cfg(test)]
     pub sidebar_surface: Color,
     /// An interactive row inside one of those cards.
+    #[cfg(test)]
     pub sidebar_row: Color,
     /// The panel's section divider and its left edge.
+    #[cfg(test)]
     pub sidebar_border: Color,
 }
 
@@ -266,7 +285,9 @@ impl Palette {
     /// `border` where the design system has three).
     pub const fn dark() -> Palette {
         Palette {
+            #[cfg(test)]
             bg: rgb(0x16, 0x18, 0x1C),              // surface-1
+            #[cfg(test)]
             bg_rail: rgb(0x1D, 0x1F, 0x23),         // surface-2
             surface: rgb(0x27, 0x29, 0x2E),         // surface-3, what a card is
             surface_hover: rgb(0x34, 0x36, 0x3C),   // surface-4, and the hover of one
@@ -287,8 +308,11 @@ impl Palette {
             brand_highlight: rgb(0x1D, 0x55, 0x40),
             on_accent: rgb(0x00, 0x00, 0x00),       // --color-accent-contrast is black in dark
             danger: rgb(0xFF, 0x49, 0x6E),          // red-500
+            #[cfg(test)]
             hero: rgb(0x13, 0x1F, 0x17),            // --brand-gradient-strong-bg, light end
+            #[cfg(test)]
             backdrop: alpha(rgb(0x16, 0x18, 0x1C), 0.64), // --splash-overlay
+            #[cfg(test)]
             modal: rgb(0x27, 0x29, 0x2E),           // surface-3: a modal is a card that floats
             // The right panel is not a flat raised strip in the reference --
             // `.app-sidebar` paints `--brand-gradient-bg`, which resolves to a
@@ -297,15 +321,20 @@ impl Palette {
             // dead straight (the midpoint predicts within one level), so a
             // two-stop ramp is the whole of it. Without this the panel read as
             // a lighter strip beside the page instead of as the page tinted.
+            #[cfg(test)]
             sidebar_top: rgb(0x18, 0x25, 0x24),
+            #[cfg(test)]
             sidebar_bottom: rgb(0x13, 0x1A, 0x1A),
             // Inside the panel, `--surface-4` and `--surface-5` are overridden
             // to `--brand-gradient-button` and `--brand-gradient-border`, so
             // cards and rows there are brand-tinted rather than neutral grey.
             // Both measured flat: a card is `#2a3633`, a row inside it `#3a4341`
             // (a step *lighter*, which is why rows keep their own token).
+            #[cfg(test)]
             sidebar_surface: rgb(0x2A, 0x36, 0x33),
+            #[cfg(test)]
             sidebar_row: rgb(0x3A, 0x43, 0x41),
+            #[cfg(test)]
             sidebar_border: rgb(0x30, 0x3E, 0x38), // the section's 1px divider
         }
     }
@@ -325,7 +354,9 @@ impl Palette {
     /// still clearing the floor the rest of the palette is held to.
     pub const fn light() -> Palette {
         Palette {
+            #[cfg(test)]
             bg: rgb(0xEB, 0xEB, 0xEB),              // surface-1
+            #[cfg(test)]
             bg_rail: rgb(0xED, 0xED, 0xED),         // surface-1-5
             surface: rgb(0xF8, 0xF8, 0xF8),         // surface-3
             surface_hover: rgb(0xDD, 0xDD, 0xDD),   // surface-5
@@ -343,19 +374,27 @@ impl Palette {
             brand_highlight: rgb(0xB3, 0xD6, 0xC5),
             on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
             danger: rgb(0xCB, 0x22, 0x45),          // red-600, light --color-red
+            #[cfg(test)]
             hero: rgb(0xE6, 0xF4, 0xEC),            // brand gradient over a light surface
+            #[cfg(test)]
             backdrop: alpha(rgb(0xEB, 0xEB, 0xEB), 0.7),
+            #[cfg(test)]
             modal: rgb(0xF8, 0xF8, 0xF8),           // surface-3
             // The dark panel's wash, re-expressed over this theme's page: green
             // at ~6% fading to ~2%, which is what the dark stops measure as.
             // Light `--color-brand` is green-600, so the tint follows it before
             // being lightened toward the page.
+            #[cfg(test)]
             sidebar_top: rgb(0xDD, 0xE7, 0xE2),
+            #[cfg(test)]
             sidebar_bottom: rgb(0xE6, 0xEA, 0xE8),
             // A light card is already near-white, so the tint moves the other
             // way: the panel's cards step *down* from `surface` rather than up.
+            #[cfg(test)]
             sidebar_surface: rgb(0xF2, 0xF8, 0xF5),
+            #[cfg(test)]
             sidebar_row: rgb(0xE8, 0xF0, 0xEB),
+            #[cfg(test)]
             sidebar_border: rgb(0xC9, 0xDB, 0xD2),
         }
     }
@@ -370,7 +409,9 @@ impl Palette {
             // Omorphia's `.oled-mode` overrides only the seven surfaces; every
             // other token is inherited from dark, which is why only those
             // differ here.
+            #[cfg(test)]
             bg: rgb(0x00, 0x00, 0x00),              // surface-1
+            #[cfg(test)]
             bg_rail: rgb(0x05, 0x05, 0x06),         // surface-1-5
             surface: rgb(0x10, 0x10, 0x13),         // surface-3
             surface_hover: rgb(0x1B, 0x1B, 0x20),   // surface-4
@@ -387,16 +428,24 @@ impl Palette {
             brand_highlight: rgb(0x0C, 0x42, 0x2B),
             on_accent: rgb(0x00, 0x00, 0x00),
             danger: rgb(0xFF, 0x49, 0x6E),
+            #[cfg(test)]
             hero: rgb(0x13, 0x1F, 0x17),
+            #[cfg(test)]
             backdrop: alpha(rgb(0x00, 0x00, 0x00), 0.7),
+            #[cfg(test)]
             modal: rgb(0x10, 0x10, 0x13),           // surface-3
             // The dark panel's wash and surfaces, each moved by the same step
             // that separates this theme's `surface-3` from the dark one, so the
             // panel keeps its relationship to the cards rather than going grey.
+            #[cfg(test)]
             sidebar_top: rgb(0x01, 0x0C, 0x09),
+            #[cfg(test)]
             sidebar_bottom: rgb(0x00, 0x01, 0x00),
+            #[cfg(test)]
             sidebar_surface: rgb(0x13, 0x1D, 0x18),
+            #[cfg(test)]
             sidebar_row: rgb(0x23, 0x2A, 0x26),
+            #[cfg(test)]
             sidebar_border: rgb(0x19, 0x25, 0x1D),
         }
     }
@@ -455,12 +504,14 @@ pub fn color_theme() -> ColorTheme {
 }
 
 /// Put a theme in force. The next `view()` paints with it.
+#[cfg(test)]
 pub fn set_color_theme(theme: ColorTheme) {
     let index = ColorTheme::ALL.iter().position(|candidate| *candidate == theme).unwrap_or(0);
     COLOR_THEME.store(index as u8, Ordering::Relaxed);
 }
 
 /// Record the OS appearance, so [`ColorTheme::System`] can resolve to it.
+#[cfg(test)]
 pub fn set_os_prefers_light(light: bool) {
     OS_PREFERS_LIGHT.store(light, Ordering::Relaxed);
 }
@@ -480,15 +531,21 @@ pub fn palette() -> Palette {
 /// Generated so the twenty colors cannot drift apart: each is a single field
 /// read of [`palette`], and a new color is one line here rather than a
 /// hand-written function that might read the wrong field.
+///
+/// An entry may carry an attribute. That is how `bg` is marked `#[cfg(test)]`:
+/// the shell paints from the generated theme's inks now, so the accessor is
+/// read by the reference-token gate and the tests rather than by the binary,
+/// and the marker says that instead of leaving an uncalled function in the
+/// shipped exe.
 macro_rules! palette_accessors {
-    ($($name:ident($field:ident): $doc:literal,)*) => {
-        $(#[doc = $doc] pub fn $name() -> Color { palette().$field })*
+    ($($(#[$attr:meta])* $name:ident($field:ident): $doc:literal,)*) => {
+        $($(#[$attr])* #[doc = $doc] pub fn $name() -> Color { palette().$field })*
     };
 }
 
 palette_accessors! {
+    #[cfg(test)]
     bg(bg): "Window chrome (deepest surface).",
-    bg_rail(bg_rail): "Rails and sidebars.",
     surface(surface): "Cards and other raised surfaces.",
     surface_hover(surface_hover): "Hovered raised surface.",
     surface_input(surface_input): "Inset fields (search boxes, modal inner panels).",
@@ -501,11 +558,6 @@ palette_accessors! {
     brand_highlight(brand_highlight): "The accent at 25% over the chrome, as a solid.",
     on_accent(on_accent): "Text on top of the accent.",
     danger(danger): "Destructive actions.",
-    sidebar_top(sidebar_top): "Top of the right panel's brand wash.",
-    sidebar_bottom(sidebar_bottom): "Bottom of the right panel's brand wash.",
-    sidebar_surface(sidebar_surface): "A card inside the right panel.",
-    sidebar_row(sidebar_row): "An interactive row inside one of those cards.",
-    sidebar_border(sidebar_border): "The panel's section divider and its left edge.",
     // `hero`, `backdrop` and `modal` are deliberately absent: their only
     // consumers are the three container styles a few lines below, which read
     // them through `palette()`, and two functions of the same name would
@@ -555,9 +607,6 @@ pub const HEAD_RING: Color = rgb(0x40, 0x42, 0x48);
 /// window the two rings' ink boxes measure 28px wide and 8px apart, at x 172 and
 /// x 208 of a 1280px client.
 pub const HEAD_RING_BUTTON: f32 = 28.0;
-/// Side of the chevron inside one.
-pub const HEAD_CHEVRON_GLYPH: f32 = 16.0;
-
 /// Ink of the chevrons inside those two rings.
 ///
 /// The source's `:class="{ 'opacity-20': !canNavigateBack }"` would put a
@@ -568,6 +617,7 @@ pub const HEAD_CHEVRON_GLYPH: f32 = 16.0;
 /// treatment is recorded in `REFERENCE.md` rather than drawn.
 pub const HEAD_CHEVRON: Color = rgb(0x96, 0xA2, 0xB0);
 /// Modal corner radius: `--radius-lg`, as cards.
+#[cfg(test)]
 pub const R_MODAL: f32 = 16.0;
 /// Corner radius on the page pane's top-left, and only there.
 ///
@@ -590,6 +640,7 @@ pub const R_BUTTON_LG: f32 = 14.0;
 /// *not* Omorphia's: this design system's `--radius-md` is 12, and reading the
 /// class names off the stylesheet's scale instead of the utility's is how a key
 /// cap ends up as rounded as a button.
+#[cfg(test)]
 pub const R_KEYCAP: f32 = 6.0;
 
 /// The family name the five bundled Inter faces register under.
@@ -606,6 +657,7 @@ const fn inter(weight: iced::font::Weight) -> Font {
 }
 
 /// Regular (400).
+#[cfg(test)]
 pub const fn regular() -> Font {
     inter(iced::font::Weight::Normal)
 }
@@ -617,11 +669,13 @@ pub const fn medium() -> Font {
 }
 
 /// Semibold (600).
+#[cfg(test)]
 pub const fn semibold() -> Font {
     inter(iced::font::Weight::Semibold)
 }
 
 /// Bold (700), for emphasis on a label that is already medium.
+#[cfg(test)]
 pub const fn bold() -> Font {
     inter(iced::font::Weight::Bold)
 }
@@ -646,6 +700,7 @@ pub const fn heading() -> Font {
 /// Reads the theme in force, so this changes with the choice in Settings:
 /// iced re-reads it whenever it repaints, and the shell repaints after the
 /// message that changes the theme.
+#[cfg(test)]
 pub fn app_theme() -> Theme {
     Theme::custom(
         "PalantirMC".to_string(),
@@ -661,96 +716,8 @@ pub fn app_theme() -> Theme {
 
 // ---- Container styles (plain closures) ---------------------------------
 
-/// Root window background.
-pub fn app_bg(_: &Theme) -> container::Appearance {
-    container::Appearance { background: Some(bg().into()), ..Default::default() }
-}
-
-/// Left icon rail, title bar and right panel: the raised chrome.
-///
-/// All three are `bg-bg-raised` in the reference, which in its palette is
-/// `surface-3` -- the same surface a card is -- and the page sits *inside* that
-/// chrome rather than beside it. Read off its own window: `#27292e` across the
-/// rail, the bar and the panel, against `#16181c` for the content. Ours was
-/// `surface-2`, which read as a slightly lighter page rather than as a frame
-/// around one.
-pub fn rail(_: &Theme) -> container::Appearance {
-    container::Appearance { background: Some(surface().into()), ..Default::default() }
-}
-
-/// The page pane, inside the chrome.
-///
-/// This is the reference's `.app-contents`: the page is a *panel* the chrome
-/// wraps, not a strip beside it, and its top-left corner is `--radius-xl` so
-/// the rail and the bar meet in a notch. The radius needs the background to be
-/// painted here rather than left to the window, because a container's radius
-/// only cuts what that container draws -- behind it the chrome would show
-/// through the corner instead of the corner being cut out of the pane.
-pub fn pane(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(bg().into()),
-        border: Border {
-            radius: [R_PANE, 0.0, 0.0, 0.0].into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
-/// The right panel: the reference's `.app-sidebar`, painted with
-/// `--brand-gradient-bg`.
-///
-/// A gradient rather than a colour because that is what the token is, and the
-/// tiny-skia backend rasterises one in the same pass as a solid fill (`fill_quad`
-/// builds a `Shader`, so a linear ramp costs a gradient object per frame, not
-/// per pixel). The angle is `PI`, which in iced is a gradient running straight
-/// down: `to_distance` subtracts a quarter turn, so `PI` puts stop 0 at the top.
-pub fn sidebar(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(Radians(std::f32::consts::PI))
-                .add_stop(0.0, sidebar_top())
-                .add_stop(1.0, sidebar_bottom()),
-        ))),
-        ..Default::default()
-    }
-}
-
-/// A card inside the right panel: brand-tinted, not the neutral raised grey.
-pub fn sidebar_card(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(sidebar_surface().into()),
-        border: Border { radius: R_CARD.into(), width: 1.0, color: sidebar_border() },
-        ..Default::default()
-    }
-}
-
-/// One row inside such a card (`bg-button-bg` + `border-button-border` in the
-/// reference), used for the "Getting started" steps.
-///
-/// Where the reference draws a 40px row, the height is set by the caller -- this
-/// style is the fill, the hairline border and the 12px corner.
-pub fn sidebar_step(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(sidebar_row().into()),
-        border: Border { radius: R_BUTTON.into(), width: 1.0, color: sidebar_border() },
-        text_color: Some(text()),
-        ..Default::default()
-    }
-}
-
-/// A hairline between the raised chrome and the page.
-///
-/// A 1px fill rather than `horizontal_rule`, because the rule widget takes its
-/// colour from the theme's own rule style while these two lines have a measured
-/// value: `#42444a`, the reference's `surface-5`, on the bar's bottom edge and
-/// on the rail's right edge. iced paints a container's border on all four edges,
-/// so a line that exists on exactly one edge has to be its own widget.
-pub fn separator(_: &Theme) -> container::Appearance {
-    container::Appearance { background: Some(border_strong().into()), ..Default::default() }
-}
-
 /// Raised card with a hairline border.
+#[cfg(test)]
 pub fn card(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface().into()),
@@ -760,6 +727,7 @@ pub fn card(_: &Theme) -> container::Appearance {
 }
 
 /// Inset panel: search boxes and modal inner sections.
+#[cfg(test)]
 pub fn inset(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface_input().into()),
@@ -768,27 +736,9 @@ pub fn inset(_: &Theme) -> container::Appearance {
     }
 }
 
-/// The big rounded square behind the welcome logo.
-///
-/// Flat, like the tooltip and the dialog, and for a reason that was measured
-/// rather than assumed: iced's tiny-skia backend renders a `Shadow` by
-/// computing a signed-distance field for every pixel of the shadow's bounds and
-/// building a fresh premultiplied pixmap from it, with no cache anywhere in the
-/// path. A blurred glow on this tile is therefore re-blurred on every frame the
-/// page paints -- every frame of a scroll included -- which at this size is
-/// tens of thousands of `sqrt` calls and two heap allocations per frame, spent
-/// on a halo the logo's own artwork already carries. The accent hairline does
-/// the same job for one fill.
-pub fn hero_tile(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(palette().hero.into()),
-        border: Border { radius: 22.0.into(), width: 1.0, color: alpha(accent(), 0.25) },
-        ..Default::default()
-    }
-}
-
 /// Dimmed backdrop behind a modal (the main area is replaced, so this reads as
 /// the launcher receding rather than a separate window).
+#[cfg(test)]
 pub fn backdrop(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(palette().backdrop.into()),
@@ -804,6 +754,7 @@ pub fn backdrop(_: &Theme) -> container::Appearance {
 /// and on this backend a large opaque one composites over the dialog's own
 /// contents and paints the whole card near-black. The border plus the darker
 /// backdrop already separate the dialog from the launcher behind it.
+#[cfg(test)]
 pub fn modal(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(palette().modal.into()),
@@ -813,6 +764,7 @@ pub fn modal(_: &Theme) -> container::Appearance {
 }
 
 /// A dot/pill surface in an arbitrary color (status chips, run indicators).
+#[cfg(test)]
 pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
     move |_: &Theme| container::Appearance {
         background: Some(color.into()),
@@ -821,33 +773,8 @@ pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
     }
 }
 
-/// A filled circle of an arbitrary color.
-///
-/// Distinct from [`pill`] on purpose: a pill is a 4px-radius chip whose size is
-/// set by its label, a circle is a fixed dot. The reference's completed-step
-/// marker is the latter -- an 18px `rounded-full` disc -- and a pill-shaped one
-/// would read as a rounded square at that size.
-pub fn circle(color: Color) -> impl Fn(&Theme) -> container::Appearance {
-    move |_: &Theme| container::Appearance {
-        background: Some(color.into()),
-        // A radius past half the box is clamped, so this is a circle at any size
-        // without the caller having to know the box.
-        border: Border { radius: 999.0.into(), ..Default::default() },
-        ..Default::default()
-    }
-}
-
-/// The empty ring of a checklist step that is not done yet: the reference's
-/// `RadioButtonIcon`, which is a 1.5px outline rather than a filled dot.
-pub fn step_ring(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: None,
-        border: Border { radius: 999.0.into(), width: 1.5, color: text_dim() },
-        ..Default::default()
-    }
-}
-
 /// Small tinted capsule used next to the product name and for status text.
+#[cfg(test)]
 pub fn token_pill(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(text(), 0.05).into()),
@@ -858,6 +785,7 @@ pub fn token_pill(_: &Theme) -> container::Appearance {
 }
 
 /// Card variant for the selected instance tile.
+#[cfg(test)]
 pub fn card_selected(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(accent(), 0.08).into()),
@@ -866,17 +794,8 @@ pub fn card_selected(_: &Theme) -> container::Appearance {
     }
 }
 
-/// Bottom status strip.
-pub fn toast(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(surface().into()),
-        border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
-        text_color: Some(text_muted()),
-        ..Default::default()
-    }
-}
-
 /// Small filled pill used for loader/version metadata next to a name.
+#[cfg(test)]
 pub fn chip(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(accent(), 0.14).into()),
@@ -899,56 +818,12 @@ pub fn chip(_: &Theme) -> container::Appearance {
 /// uses, and the reason a 12px glyph never reaches it: the cap's own "N" peaks
 /// at `#848c95` in the capture, which is what antialiasing does to a thin
 /// twelve-pixel stem, not a second color.
+#[cfg(test)]
 pub fn keycap(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface_input().into()),
         border: Border { radius: R_KEYCAP.into(), width: 1.0, color: border_strong() },
         text_color: Some(text_muted()),
-        ..Default::default()
-    }
-}
-
-/// Neutral variant of [`chip`] (no accent: used for game versions).
-pub fn chip_neutral(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(alpha(text(), 0.07).into()),
-        border: Border { radius: R_CHIP.into(), width: 1.0, color: border() },
-        text_color: Some(text_muted()),
-        ..Default::default()
-    }
-}
-
-/// Clickable settings/type row inside the Create Instance dialog.
-pub fn option_row(_: &Theme) -> container::Appearance {
-    container::Appearance {
-        background: Some(alpha(text(), 0.04).into()),
-        border: Border { radius: R_CARD.into(), width: 1.0, color: alpha(text(), 0.06) },
-        text_color: Some(text()),
-        ..Default::default()
-    }
-}
-
-/// A solid rounded block of one colour.
-///
-/// The switch is built from two of these rather than from a canvas: the track
-/// and the knob are both plain rounded rectangles, and painting them as
-/// containers means the colour that moves is computed by a pure function (see
-/// `settings::switch_colors`) instead of inside a draw call. Unlike a canvas
-/// this also keeps the widget tree diffable, so a switch that is not moving
-/// costs nothing at all.
-pub fn plate(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Appearance {
-    move |_: &Theme| container::Appearance {
-        background: Some(color.into()),
-        border: Border { radius: radius.into(), ..Default::default() },
-        ..Default::default()
-    }
-}
-
-/// Square behind an instance icon in a card/grid.
-pub fn icon_tile(background: Color) -> impl Fn(&Theme) -> container::Appearance {
-    move |_: &Theme| container::Appearance {
-        background: Some(background.into()),
-        border: Border { radius: 12.0.into(), ..Default::default() },
         ..Default::default()
     }
 }
@@ -1126,34 +1001,37 @@ fn interaction_progress(hovered: bool) -> f32 {
 }
 
 /// Filled accent button.
+#[cfg(test)]
 pub fn primary() -> Btn {
     Btn::new(Role::Primary)
 }
-/// Raised grey button.
-pub fn secondary() -> Btn {
-    Btn::new(Role::Secondary)
-}
 /// A `size="lg"` brand button.
+#[cfg(test)]
 pub fn brand_large() -> Btn {
     Btn::new(Role::BrandLarge)
 }
 /// A `size="lg"` button on the basic surface.
+#[cfg(test)]
 pub fn base_large() -> Btn {
     Btn::new(Role::BaseLarge)
 }
 /// Borderless button.
+#[cfg(test)]
 pub fn ghost() -> Btn {
     Btn::new(Role::Ghost)
 }
 /// Icon-rail entry.
+#[cfg(test)]
 pub fn rail_button(active: bool) -> Btn {
     Btn::new(Role::Rail { active })
 }
 /// One of the head's two history rings.
+#[cfg(test)]
 pub fn head_ring() -> Btn {
     Btn::new(Role::HeadRing)
 }
 /// Selectable pill.
+#[cfg(test)]
 pub fn chip_button(active: bool) -> Btn {
     Btn::new(Role::Chip { active })
 }
@@ -1171,10 +1049,12 @@ pub fn chip_button(active: bool) -> Btn {
 /// false`, which is what every call site inside a strip passes, and the pair of
 /// wrappers that used to exist only to make the test read nicely left a helper
 /// nothing else called.
+#[cfg(test)]
 pub fn tab_button_at(active: bool, first: bool, last: bool) -> Btn {
     Btn::new(Role::Tab { active, first, last })
 }
 /// The clickable body of an instance card (the card itself is a container).
+#[cfg(test)]
 pub fn card_area(selected: bool) -> Btn {
     Btn::new(Role::CardArea { selected })
 }
@@ -1182,32 +1062,10 @@ pub fn card_area(selected: bool) -> Btn {
 ///
 /// Named `destructive` rather than `danger` because [`danger`] is already the
 /// red itself — one name for the color, one for the button that uses it.
+#[cfg(test)]
 pub fn destructive() -> Btn {
     Btn::new(Role::Danger)
 }
-/// One color-theme choice in Settings.
-pub fn theme_card(selected: bool) -> Btn {
-    Btn::new(Role::ThemeCard { selected })
-}
-
-/// One row of the Settings dialog's section list.
-pub fn nav_item(active: bool) -> Btn {
-    Btn::new(Role::NavItem { active })
-}
-/// Title-bar control.
-pub fn window_button() -> Btn {
-    Btn::new(Role::Window)
-}
-/// Title-bar control drawn from a hover state iced did not observe — see
-/// [`Role::WindowExternallyHovered`].
-pub fn caption_button(hovered: bool) -> Btn {
-    Btn::new(Role::WindowExternallyHovered { hovered })
-}
-/// Title-bar close control.
-pub fn close_button() -> Btn {
-    Btn::new(Role::WindowClose)
-}
-
 impl Btn {
     /// The look a control has right now, and the one place the reference's
     /// interaction is applied.
@@ -1593,6 +1451,7 @@ impl From<Field> for iced::theme::TextInput {
 /// The track is the inset colour the fields use, so an empty bar reads as part
 /// of the surface it sits on; the fill is the accent, the palette's one
 /// saturated colour and therefore the one thing on screen that means moving.
+#[cfg(test)]
 pub fn bar(_theme: &Theme) -> progress_bar::Appearance {
     progress_bar::Appearance {
         background: surface_input().into(),
@@ -1620,13 +1479,17 @@ pub fn bar(_theme: &Theme) -> progress_bar::Appearance {
 /// splash is written once, in the dark look the rest of these tokens describe;
 /// splitting it per look is the same change the rest of the palette is waiting
 /// on, not a separate one.
+#[cfg(test)]
 pub const SPLASH_TINT_TOP: Color = alpha(rgb(66, 131, 92), 0.275);
+#[cfg(test)]
 pub const SPLASH_TINT_BOTTOM: Color = alpha(rgb(17, 35, 43), 0.5);
+#[cfg(test)]
 pub const SPLASH_OVERLAY: Color = alpha(rgb(22, 24, 28), 0.64);
 
 /// Where the reference's tint gradient stops, as a fraction of the window:
 /// `--splash-tint-bottom` sits at `97.29%` and the last two percent carry the
 /// bottom stop's colour unchanged.
+#[cfg(test)]
 pub const SPLASH_TINT_STOP: f32 = 0.9729;
 
 /// Composite `tint` under [`SPLASH_OVERLAY`], then that pair over `base`: the
@@ -1637,6 +1500,7 @@ pub const SPLASH_TINT_STOP: f32 = 0.9729;
 /// cube artwork, which it paints opaque at `--splash-cube-opacity` over
 /// `--color-bg`; that art is theirs and this repo ships none of it, so the
 /// launcher uses the colour it is laid over. `REFERENCE.md` records that.
+#[cfg(test)]
 pub fn splash_sample(tint: Color, base: Color) -> Color {
     /// One source-over step: `top` composited onto `bottom`.
     fn over(top: Color, bottom: Color) -> Color {
@@ -1668,6 +1532,7 @@ pub fn splash_sample(tint: Color, base: Color) -> Color {
 /// the layer thins and what is behind it shows through, instead of the layer
 /// dimming towards black. Everything the page paints takes this factor, so the
 /// page can never be caught half-faded with one part of it still solid.
+#[cfg(test)]
 pub fn splash_background_at(fade: f32) -> Linear {
     let fade = fade.clamp(0.0, 1.0);
     let base = bg();
@@ -1686,6 +1551,7 @@ pub fn splash_background_at(fade: f32) -> Linear {
 /// radius: var(--radius-lg)` -- 16px on an 8px bar, so what is drawn is a 4px
 /// cap -- and a fill of `var(--color-brand)`. `fade` thins both, because the
 /// page fades as one thing.
+#[cfg(test)]
 pub fn splash_bar_at(fade: f32) -> progress_bar::Appearance {
     let fade = fade.clamp(0.0, 1.0);
     progress_bar::Appearance {
@@ -1705,8 +1571,10 @@ pub fn splash_bar_at(fade: f32) -> progress_bar::Appearance {
 /// eases the offset instead of letting iced apply each notch as an instant
 /// 60-pixel jump.
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg(test)]
 pub struct Thin;
 
+#[cfg(test)]
 impl Thin {
     fn appearance(&self, mouse_over: bool) -> scrollable::Appearance {
         scrollable::Appearance {
@@ -1724,6 +1592,7 @@ impl Thin {
     }
 }
 
+#[cfg(test)]
 impl scrollable::StyleSheet for Thin {
     type Style = Theme;
 

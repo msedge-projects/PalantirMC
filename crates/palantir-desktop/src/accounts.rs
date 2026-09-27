@@ -57,6 +57,7 @@ pub enum AccountKind {
 
 impl AccountKind {
     /// Label for the accounts list.
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         match self {
             AccountKind::Offline => "Offline",
@@ -106,6 +107,7 @@ pub const REFRESH_WINDOW_MS: i64 = 12 * 60 * 60 * 1000;
 
 impl AccountEntry {
     /// A new offline account for `username`.
+    #[cfg(test)]
     pub fn offline(username: &str) -> AccountEntry {
         let name = username.trim().to_string();
         AccountEntry {
@@ -120,6 +122,7 @@ impl AccountEntry {
     }
 
     /// A signed-in Microsoft account.
+    #[cfg(test)]
     pub fn microsoft(
         username: &str,
         uuid: &str,
@@ -149,11 +152,13 @@ impl AccountEntry {
     /// A Microsoft account with no refresh token always "needs" one: there is
     /// nothing to renew *with*, and the caller's answer is to send the user
     /// through the device-code flow again, which is the correct outcome.
+    #[cfg(test)]
     pub fn needs_refresh(&self, now_ms: i64) -> bool {
         needs_refresh(self.kind, self.refresh_token.as_deref(), self.expires_at_ms, now_ms)
     }
 
     /// The short line under the name in the accounts list.
+    #[cfg(test)]
     pub fn detail(&self) -> String {
         match self.kind {
             AccountKind::Offline => format!("Offline · {}", self.uuid),
@@ -569,6 +574,7 @@ impl AccountsStore {
     }
 
     /// Add an offline account. Names must be non-blank and unique.
+    #[cfg(test)]
     pub fn add(&mut self, username: &str) -> Result<(), String> {
         let name = username.trim();
         if name.is_empty() {
@@ -592,6 +598,7 @@ impl AccountsStore {
     /// a second sign-in replaces the tokens on the existing entry. The same
     /// method therefore serves both "sign in" and "renew", and the selection
     /// follows the account the user just proved they own.
+    #[cfg(test)]
     pub fn upsert_microsoft(&mut self, entry: AccountEntry) -> Result<(), String> {
         if entry.username.trim().is_empty() || entry.uuid.trim().is_empty() {
             return Err("Microsoft account is missing its profile name or id".to_string());

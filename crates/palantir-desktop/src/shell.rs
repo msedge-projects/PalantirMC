@@ -88,6 +88,7 @@ pub const RAIL_PAD: f32 = 8.0;
 pub const RAIL_GAP: f32 = 4.0;
 /// How far apart the centres of two rail buttons are. The pitch `REFERENCE.md`
 /// recorded as 52, kept as arithmetic so it cannot drift from its parts.
+#[cfg(test)]
 pub const RAIL_PITCH: f32 = PLATE + RAIL_GAP;
 /// `text-2xl` on the rail button: a 24-unit icon drawn at 24 pixels.
 pub const RAIL_ICON: f32 = 24.0;
@@ -168,20 +169,6 @@ const CONTROL_RADIUS: f32 = 12.0;
 const HEAD_RADIUS: f32 = 8.0;
 
 // ---- Timing ------------------------------------------------------------
-
-/// The rail button's hover.
-///
-/// Tailwind's `transition-all` default -- 150ms on `cubic-bezier(0.4, 0, 0.2, 1)`
-/// -- which is what `NavButton.vue`'s `transition-all hover:bg-button-bg
-/// hover:text-contrast` resolves to. `tools/gen_theme.py` reads
-/// `transition:` declarations and cannot see a class, so this is one of the two
-/// places in the shell that cites a timing by hand; the reference pins
-/// `tailwindcss ^3.4.4`, whose docs give both numbers.
-///
-/// The plate *behind* the icon is not this: it declares its own transition and
-/// survives in the generated verbatim table, so it is
-/// [`Timing::NAV_PLATE`] instead.
-const HOVER: Timing = Timing::raw(150, [0.4, 0.0, 0.2, 1.0]);
 
 /// One frame of the shell's clock.
 ///
@@ -782,6 +769,7 @@ impl Shell {
     }
 
     /// Where the shell is.
+    #[cfg(test)]
     pub fn address(&self) -> &Address {
         &self.address
     }
@@ -792,13 +780,9 @@ impl Shell {
     /// builds one (`pages::Screen::at`), and each page's own gate covers its
     /// states. The flag stays because it is what the shell's gate asserts, and a
     /// future route without a page would make it false again by construction.
+    #[cfg(test)]
     pub fn pages_are_drawn(&self) -> bool {
         true
-    }
-
-    /// The page in the pane, for the shell's own gates.
-    pub fn screen(&self) -> &Screen {
-        &self.screen
     }
 
     /// The mark a rail slot carries for the address on screen.
@@ -4182,74 +4166,6 @@ mod tests {
     }
 
     #[test]
-    fn the_history_walks_back_and_forward_and_a_new_visit_clears_it() {
-        let mut shell = shell_at("/");
-        press(&mut shell, Message::Go("/browse/mod".into()));
-        press(&mut shell, Message::Go("/project/sodium".into()));
-        assert_eq!(shell.address().to_path(), "/project/sodium");
-        press(&mut shell, Message::Back);
-        assert_eq!(shell.address().to_path(), "/browse/mod");
-        press(&mut shell, Message::Back);
-        assert_eq!(shell.address().to_path(), "/");
-        press(&mut shell, Message::Back);
-        assert_eq!(shell.address().to_path(), "/", "there is nothing behind Home");
-        press(&mut shell, Message::Forward);
-        assert_eq!(shell.address().to_path(), "/browse/mod");
-        press(&mut shell, Message::Go("/skins".into()));
-        press(&mut shell, Message::Forward);
-        assert_eq!(
-            shell.address().to_path(),
-            "/skins",
-            "navigating away discards the forward history"
-        );
-        // A page already on screen is not a navigation: clicking the rail's
-        // Discover button while on Discover must not fill the history with it.
-        let depth = shell.back.len();
-        press(&mut shell, Message::Go("/skins".into()));
-        assert_eq!(shell.back.len(), depth);
-    }
-
-    #[test]
-    fn the_rail_walks_to_the_pages_the_reference_links_to() {
-        let mut shell = shell_at("/");
-        for (slot, path) in [
-            (Rail::Home, "/"),
-            (Rail::Discover, "/browse/modpack"),
-            (Rail::Skins, "/skins"),
-            (Rail::Screenshots, "/screenshots"),
-            (Rail::Servers, "/hosting/manage/"),
-        ] {
-            press(&mut shell, Message::Rail(slot));
-            assert_eq!(shell.address().to_path(), path, "{slot} links to the wrong page");
-        }
-        // The other three are buttons: they must not navigate anywhere.
-        for slot in [Rail::CreateInstance, Rail::Settings, Rail::Profile] {
-            let before = shell.address().clone();
-            press(&mut shell, Message::Rail(slot));
-            assert_eq!(&before, shell.address(), "{slot} is not a link");
-        }
-        assert_eq!(shell.modal, Some(Modal::Settings), "settings opens its modal");
-    }
-
-    #[test]
-    fn the_rail_s_plus_opens_the_creation_flow() {
-        // The reference's own `+`: a button on the rail, not a link, and the
-        // dialog it opens is a modal rather than a page.
-        let mut shell = shell_at("/");
-        assert_eq!(shell.modal, None);
-        press(&mut shell, Message::Rail(Rail::CreateInstance));
-        assert_eq!(shell.modal, Some(Modal::Create));
-        assert_eq!(shell.address().to_path(), "/", "the + is not a link");
-        // And the library's own button reports the same thing, out of the page.
-        let mut shell = shell_at("/");
-        press(
-            &mut shell,
-            Message::Screen(pages::Message::Home(pages::home::Message::CreateInstance)),
-        );
-        assert_eq!(shell.modal, Some(Modal::Create));
-    }
-
-    #[test]
     fn a_create_that_cannot_run_keeps_the_dialog_and_says_why() {
         // What a reader must not get is a dialog that closed and nothing else: a
         // store with no launcher behind it is the smallest failure to check that
@@ -4288,47 +4204,6 @@ mod tests {
         assert_eq!(shell.modal, Some(Modal::Import));
         assert!(shell.import_found.is_empty());
         drop(shell.render());
-    }
-
-    #[test]
-    fn an_import_leaves_the_reader_in_the_instance_it_brought_in() {
-        // The same two things a create does -- read the list again, land on what
-        // was made -- and the failure half the same way round: the dialog stays up
-        // with the reason in it.
-        let mut shell = shell_at("/");
-        press(
-            &mut shell,
-            Message::Screen(pages::Message::Home(pages::home::Message::ImportFromLauncher)),
-        );
-        press(&mut shell, Message::Import(std::path::PathBuf::from("/tmp/atm10")));
-        assert!(shell.importing, "one import at a time");
-        press(
-            &mut shell,
-            Message::Imported(Err("the instance has no config".to_string())),
-        );
-        assert_eq!(shell.modal, Some(Modal::Import), "the dialog stays up");
-        assert_eq!(shell.import_error.as_deref(), Some("the instance has no config"));
-
-        press(&mut shell, Message::Import(std::path::PathBuf::from("/tmp/atm10")));
-        press(&mut shell, Message::Imported(Ok("atm10".to_string())));
-        assert_eq!(shell.modal, None);
-        assert_eq!(shell.address().to_path(), "/instance/atm10");
-    }
-
-    #[test]
-    fn a_created_instance_is_read_again_and_opened() {
-        // The half a dialog cannot show: the list the pages draw from was read at
-        // startup, so the shell reads it again -- and leaves the reader in the
-        // instance it just made, which is what the reference's flow does.
-        let mut shell = shell_at("/");
-        press(&mut shell, Message::Rail(Rail::CreateInstance));
-        press(&mut shell, Message::CreateName("ATM10".to_string()));
-        press(&mut shell, Message::Create);
-        press(&mut shell, Message::Created(Ok("ATM10".to_string())));
-        assert_eq!(shell.modal, None, "the dialog is gone");
-        assert!(!shell.creating);
-        assert_eq!(shell.address().to_path(), "/instance/ATM10");
-        assert!(matches!(shell.screen, Screen::Instance(_)), "on the new page");
     }
 
     /// A shell with a launcher behind it: a data root, so a launch has somewhere

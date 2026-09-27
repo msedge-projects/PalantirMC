@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use palantir_core::instance::{groups::Groups, Instance};
+use palantir_core::instance::Instance;
 use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::defaults;
@@ -20,9 +20,6 @@ use crate::model::InstanceEntry;
 
 use crate::catalog::LoaderKind;
 use crate::mods::list_mods;
-
-/// Label used for instances that belong to no group.
-pub const UNGROUPED_LABEL: &str = "Ungrouped";
 
 /// Everything a card and the detail sidebar need about one instance.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,24 +78,29 @@ impl InstanceCard {
     }
 
     /// Whether a mod loader is installed.
+    #[cfg(test)]
     pub fn has_loader(&self) -> bool {
         self.loader.loads_mods() && !self.loader_version.is_empty()
     }
 }
 
-/// Result of a full background scan: cards plus the group index and whatever
-/// was pre-selected.
+/// Result of a full background scan: the cards, and the directory they came
+/// from.
+///
+/// `selected` and `status` were the old shell's summary strip — the tests are
+/// their only reader now, so they are gated rather than deleted: they are what
+/// pins the scan's outcome.
 #[derive(Debug, Clone, Default)]
 pub struct LoadedInstances {
     /// One summary per discovered instance, name-sorted.
     pub cards: Vec<InstanceCard>,
-    /// Group membership + collapsed flags.
-    pub groups: Groups,
     /// Pre-selected instance id (`InstanceDir` override applied).
+    #[cfg(test)]
     pub selected: Option<String>,
     /// Resolved instances directory.
     pub instances_dir: PathBuf,
     /// One-line outcome for the status strip.
+    #[cfg(test)]
     pub status: String,
 }
 
@@ -153,30 +155,42 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
 /// empty list plus a status line, never a crash.
 pub fn load(paths: &PalantirPaths) -> LoadedInstances {
     let instances_dir = paths.configured_instances_dir();
-    let groups = Groups::load(paths);
     let model = match crate::model::InstanceListModel::load(paths) {
         Ok(model) => model,
-        Err(error) => {
+        Err(_error) => {
             return LoadedInstances {
-                groups,
                 instances_dir: instances_dir.clone(),
-                status: format!("listing instances failed: {error}"),
+                // The message goes only to the tests' status field — the binary
+                // has no strip to put it on, so the binding is named for the
+                // build that does not use it.
+                #[cfg(test)]
+                status: format!("listing instances failed: {_error}"),
                 ..Default::default()
             };
         }
     };
     let cards: Vec<InstanceCard> =
         model.entries().iter().map(|entry| summarize(&instances_dir, entry)).collect();
+    #[cfg(test)]
     let selected = resolve_selected_id(paths, &cards);
+    #[cfg(test)]
     let status = if cards.is_empty() {
         format!("No instances yet — press N to create one (looked in {}).", instances_dir.display())
     } else {
         format!("{} instance(s) ready", cards.len())
     };
-    LoadedInstances { cards, groups, selected, instances_dir, status }
+    LoadedInstances {
+        cards,
+        instances_dir,
+        #[cfg(test)]
+        selected,
+        #[cfg(test)]
+        status,
+    }
 }
 
 /// Pre-selection for startup: `SelectedInstance` when it still exists.
+#[cfg(test)]
 pub fn resolve_selected_id(paths: &PalantirPaths, cards: &[InstanceCard]) -> Option<String> {
     let want = paths.selected_instance_id()?;
     if want.trim().is_empty() {
@@ -383,6 +397,7 @@ pub fn import_icon_file(paths: &PalantirPaths, source: &Path, id: &str) -> Resul
 }
 
 /// Install an icon file onto an existing instance and persist the key.
+#[cfg(test)]
 pub fn set_instance_icon(paths: &PalantirPaths, id: &str, source: &Path) -> Result<String, String> {
     let key = import_icon_file(paths, source, id)?;
     let mut instance = Instance::open(&paths.configured_instances_dir().join(id))

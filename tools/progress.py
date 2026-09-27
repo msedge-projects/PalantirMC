@@ -91,7 +91,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
     4: [(66, 75)],  # the engine, and the first page served by it
-    5: [(78, 81), (84, 88)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete
+    5: [(78, 81), (84, 89)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune
 }
 
 # The plan's open work, by the bold name its bullet carries, with the number of
@@ -120,12 +120,6 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
         ),
     ],
     5: [
-        (
-            "What the old shell was the last caller of.",
-            1,
-            "the 199 dead items the delete exposed, and the generated table "
-            "whose allowance has to come from its tool",
-        ),
         (
             "The launch surface.",
             1,

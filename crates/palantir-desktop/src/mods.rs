@@ -116,6 +116,7 @@ pub fn set_mod_enabled(mods_dir: &Path, file_name: &str, enabled: bool) -> Resul
 /// Plain file-name listing for simple content folders (`resourcepacks/`,
 /// `shaderpacks/`, `saves/`): every entry (files and directories),
 /// sorted case-insensitively. Missing/unreadable directories yield `[]`.
+#[cfg(test)]
 pub fn list_content_names(dir: &Path) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let entries = match std::fs::read_dir(dir) {

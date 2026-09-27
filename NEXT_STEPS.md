@@ -67,12 +67,12 @@ The workspace is now three crates plus the shell:
 | `palantir-loader` | Forge, Fabric, NeoForge, Quilt, and modpack archives. |
 | `palantir-desktop` | The window: shell, pages, engine glue, platform code, and `model.rs` -- the view-model that used to be `palantir-gui`, moved here with the crate retired. |
 
-Backend suites as run in this session: `palantir-core` 168 plus 8,
+Backend suites as run against this tree: `palantir-core` 168 plus 8,
 `palantir-loader` 31, `palantir-net` 213, with 13 live tests ignored by design --
-1034 in the workspace, and the desktop crate's 610 are in it. Which binary each
-number belongs to is written out in [`GATES.md`](GATES.md), because a bare list of
-numbers is how the earlier version of this paragraph managed to mislabel three of
-them.
+871 in the workspace, of which the desktop crate's 447 plus its 4 native tests
+are 451. Which binary each number belongs to is written out in
+[`GATES.md`](GATES.md), because a bare list of numbers is how the earlier version
+of this paragraph managed to mislabel three of them.
 
 ## The plan, and where each stage stands
 
@@ -531,7 +531,8 @@ page stage 3 still owes.
 ## What stage 5 has landed so far
 
 Four pieces, and each one replaced a sentence that said the feature was not
-built:
+built. A fifth closed the delete, and it is the one piece here that added no
+feature at all:
 
 * **A create, and the pickup behind it** (G78). `store.rs` gained the write side
   -- `create_instance` asks Mojang which version is current when the flow has no
@@ -545,6 +546,17 @@ built:
   the picker filters it the way the reference's combobox does (releases, then
   everything behind the footer's own button, and a substring search over the
   ids), and what the user picks is what the instance is created for.
+* **The delete's other half** (G89). G88's delete exposed what only the old
+  shell was calling -- 199 dead items, 67 of them in `theme.rs`'s palette and 38
+  in `browse.rs` -- and this is that list worked to zero: neither the shipped
+  binary nor the test build reports a dead item now. What a test still reads
+  stayed, as `#[cfg(test)]` rather than deleted, because it is the record of
+  what was measured off the reference; 215 lines of marker went in for those and
+  their like, and the slice is +378/-1,842 across 21 files. The one case a hand
+  could not prune was `text_gen.rs`: generated output CI checks byte for byte,
+  so the allowance for its warnings is `tools/gen_text.py`'s to emit, and it
+  does -- the `enum_variant_names` allow, and 53 single-character `push`es. The
+  32 tests whose only subject was deleted went with them (903 tests to 871).
 * **The launch** (G81). The worker has always been finished; what was missing was
   the seam. It now speaks `LaunchEvent` -- facts rather than one shell's messages,
   which is what let a second shell watch a run at all -- and the instance page
@@ -558,19 +570,7 @@ built:
 
 What stage 5 still owes, in the order it is worth doing:
 
-1. **What the old shell was the last caller of.** The delete has landed (G88):
-   `app.rs`, `glyphs.rs`, `icons.rs`, `settings.rs`, the carved Prism instance art
-   and the `--classic` entry point are gone, and the two things the product still
-   needed from that shell -- Windows' own frame handling, and a `--shot` capture
-   its gates are run through -- are this shell's. What the delete exposed is what
-   only that shell was calling: 199 dead items across the crate, 67 of them in
-   `theme.rs`'s hand-written palette and 38 in `browse.rs`. They go next, and one
-   of them cannot be pruned by hand at all: `text_gen.rs` is generated output that
-   CI checks byte for byte, so the allowance for its unused keys has to be emitted
-   by `tools/gen_text.py` rather than deleted row by row. The Prism-shaped
-   `palantir-core` modules stay for now, with the flattening importer that
-   replaces them -- every one of them still has a reader in this crate.
-2. **The launch surface.** The reference's action bar and its download manager
+1. **The launch surface.** The reference's action bar and its download manager
    are where a launch is watched there, and the bar is now in this shell's head:
    the run, its level as a chip over a panel, its stop control and the way to its
    logs, from any page (G86). What is not in is the rest of the download manager

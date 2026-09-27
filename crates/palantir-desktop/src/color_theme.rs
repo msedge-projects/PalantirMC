@@ -67,6 +67,7 @@ impl ColorTheme {
     /// rather than [`ColorTheme::ALL`], so it cannot offer a card it would have to
     /// paint as something else; the new Settings modal, which paints from the
     /// generated table, offers [`ColorTheme::options`] instead.
+    #[cfg(test)]
     pub const PAINTED: [ColorTheme; 4] = [
         ColorTheme::Dark,
         ColorTheme::Light,
@@ -91,6 +92,13 @@ impl ColorTheme {
     /// The reference uses it to remember which dark theme to return to when the
     /// user switches away from one, which is why it is a property of the setting
     /// rather than of a palette.
+    ///
+    /// `#[cfg(test)]` because nothing in the product asks it: the setting the
+    /// shell reads is resolved through [`crate::shell::generated_theme`], and the
+    /// palette's own notion of dark went with the shell that painted from it.
+    /// What is left is the fixture whose test compares this list against
+    /// `DARK_THEMES`.
+    #[cfg(test)]
     pub const fn is_dark(self) -> bool {
         matches!(self, ColorTheme::Dark | ColorTheme::Oled | ColorTheme::Retro)
     }
@@ -110,6 +118,7 @@ impl ColorTheme {
     }
 
     /// The label on the card.
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         self.label_key().message()
     }

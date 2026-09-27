@@ -19,11 +19,16 @@
 //! on the UI thread: `image::open` on a 1080p PNG takes tens of milliseconds,
 //! and doing that inside a frame would be visible as a stutter.
 
+// The path-shape helpers below are what the tests read: the shell hands this
+// module a path and gets an entry back.
+#[cfg(test)]
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::time::SystemTime;
 
 /// Extensions the page treats as screenshots. Minecraft writes `.png`; the
 /// others are here because people drop edited copies next to the originals.
+#[cfg(test)]
 const IMAGE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
 
 /// Longest side of a generated thumbnail on a 100%-scaled display, in pixels.
@@ -36,6 +41,7 @@ const IMAGE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
 ///
 /// A scaled display gets a proportionally bigger thumbnail ([`thumbnail_side`]),
 /// so this is a floor rather than the size itself.
+#[cfg(test)]
 pub const THUMBNAIL_SIDE: u32 = 268;
 
 /// The largest side [`thumbnail_side`] will ever ask for.
@@ -45,6 +51,7 @@ pub const THUMBNAIL_SIDE: u32 = 268;
 /// ceiling worth carrying on a machine that runs Minecraft. It exists for the
 /// 200%-scaled display, where the tile really is 536 physical pixels wide; past
 /// that the extra sharpness is not worth the memory.
+#[cfg(test)]
 pub const THUMBNAIL_SIDE_MAX: u32 = 448;
 
 /// Longest side to decode a thumbnail at, given the logical width the tile is
@@ -55,6 +62,7 @@ pub const THUMBNAIL_SIDE_MAX: u32 = 448;
 /// soft there, and one always made at 360 would be sharp and 1.8x too big on the
 /// 100% display that most of these machines run. Asking the display makes the
 /// source match the destination at every scale.
+#[cfg(test)]
 pub fn thumbnail_side(tile_width: f32, scale_factor: f32) -> u32 {
     let scaled = (tile_width * scale_factor.max(1.0)).ceil();
     (scaled as u32).clamp(THUMBNAIL_SIDE, THUMBNAIL_SIDE_MAX)
@@ -65,10 +73,12 @@ pub fn thumbnail_side(tile_width: f32, scale_factor: f32) -> u32 {
 /// A cap rather than a pager: the page's job is "show me what I took", and the
 /// newest handful answers that. Anything older is still on disk and still
 /// reachable through the instances folder.
+#[cfg(test)]
 pub const MAX_SHOWN: usize = 48;
 
 /// One screenshot on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub struct Entry {
     /// The file itself.
     pub path: PathBuf,
@@ -84,6 +94,7 @@ pub struct Entry {
 ///
 /// Case-insensitive: Minecraft writes lower-case, but files copied from Windows
 /// Explorer often are not.
+#[cfg(test)]
 pub fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -98,6 +109,7 @@ pub fn is_image(path: &Path) -> bool {
 ///
 /// Built by the caller from the instance list, so this module needs no knowledge
 /// of how instances are stored.
+#[cfg(test)]
 type InstanceDirs = [(String, PathBuf)];
 
 /// Every screenshot under the given instances, newest first.
@@ -106,6 +118,7 @@ type InstanceDirs = [(String, PathBuf)];
 /// thing on the page. Ties — and files whose timestamp the filesystem will not
 /// give up — fall back to the path, so the order is stable rather than dependent
 /// on directory iteration, which is what makes it testable at all.
+#[cfg(test)]
 pub fn scan(instances: &InstanceDirs) -> Vec<Entry> {
     let mut found = Vec::new();
     for (instance, dir) in instances {
@@ -144,6 +157,7 @@ pub fn scan(instances: &InstanceDirs) -> Vec<Entry> {
 /// Deliberately plain data rather than an iced `Handle`, so the decoding and
 /// shrinking can be unit tested without a renderer.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub struct Thumbnail {
     /// Width in pixels, after shrinking.
     pub width: u32,
@@ -163,6 +177,7 @@ pub struct Thumbnail {
 ///
 /// `None` when the file is missing, unreadable or not an image format — a
 /// screenshot that fails to decode must not take the page down with it.
+#[cfg(test)]
 pub fn thumbnail(path: &Path, side: u32) -> Option<Thumbnail> {
     let decoded = image::open(path).ok()?;
     let shrunk = if decoded.width().max(decoded.height()) <= side {
@@ -181,6 +196,7 @@ pub fn thumbnail(path: &Path, side: u32) -> Option<Thumbnail> {
 /// Load thumbnails for a batch of entries, skipping any that will not decode.
 ///
 /// Returns them in the order given, so the grid stays newest-first.
+#[cfg(test)]
 pub fn thumbnails(entries: &[Entry], side: u32) -> Vec<(Entry, Thumbnail)> {
     entries
         .iter()

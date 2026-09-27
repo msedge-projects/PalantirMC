@@ -37,10 +37,14 @@ use palantir_core::{
     launch,
     pack::PackProfile,
     paths::{PalantirPaths, System},
-    resolve::{resolve, MetaStore, OfflineMetaStore},
+    resolve::{resolve, MetaStore},
     settings::{defaults, Settings},
     version::{ProblemSeverity, RuntimeContext},
 };
+// Only the tests need to read a metadata tree from disk: a launch resolves
+// against whatever the caller handed it.
+#[cfg(test)]
+use palantir_core::resolve::OfflineMetaStore;
 use crate::model::SettingsModel;
 use palantir_net::meta::Fetcher;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
@@ -440,26 +444,12 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
-/// Open `path` in the platform file manager (best effort).
-pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
-    let (tool, verb) = if cfg!(windows) {
-        ("explorer", "opening")
-    } else if cfg!(target_os = "macos") {
-        ("open", "opening")
-    } else {
-        ("xdg-open", "opening")
-    };
-    match Command::new(tool).arg(path).spawn() {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("{verb} '{}' failed: {e}", path.display())),
-    }
-}
-
 /// Open `url` in the default browser (best effort).
 ///
 /// Windows needs `cmd /C start` rather than `explorer.exe` for a URL: passing a
 /// URL to Explorer opens a *folder* search instead of the browser, which is the
 /// kind of "it did nothing" failure worth avoiding in a sign-in flow.
+#[cfg(test)]
 pub fn open_url(url: &str) -> Result<(), String> {
     let result = if cfg!(windows) {
         let mut command = Command::new("cmd");
@@ -1361,12 +1351,6 @@ pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, 
         palantir_net::OnlineMetaStore::new(palantir_net::DEFAULT_META_BASE_URL, paths.meta_dir()),
         palantir_net::BlockingHttpFetcher::new(Duration::from_secs(30)),
     )
-}
-
-/// The offline counterpart, for the sandbox shell and for tests: everything
-/// must already be cached and installed.
-pub fn offline_backend(paths: &PalantirPaths) -> (OfflineMetaStore, palantir_net::MapFetcher) {
-    (OfflineMetaStore::new(paths.meta_dir()), palantir_net::MapFetcher::new())
 }
 
 // ---- worker ---------------------------------------------------------------

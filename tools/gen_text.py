@@ -380,6 +380,35 @@ def escape(text: str) -> str:
     return f'"{out}"'
 
 
+def rust_char(char: str) -> str:
+    """A Rust character literal holding `char`."""
+    if char == "'":
+        return "'\\''"
+    if char == "\\":
+        return "'\\\\'"
+    if char == "\n":
+        return "'\\n'"
+    if char == "\r":
+        return "'\\r'"
+    if char == "\t":
+        return "'\\t'"
+    return f"'{char}'"
+
+
+def emit_text(text: str) -> str:
+    """The statement that appends `text` to `out`.
+
+    A one-character literal is a `push`, not a `push_str`. The reference has 53
+    of them -- separators, a full stop, a parenthesis -- and this generator's
+    whole point is that the shell carries no warning it did not choose: the fix
+    belongs here, where the code is written once, rather than in the 53 places a
+    hand-written file would have made.
+    """
+    if len(text) == 1:
+        return f"out.push({rust_char(text)})"
+    return f"out.push_str({escape(text)})"
+
+
 # ---- How an argument is used --------------------------------------------
 
 
@@ -448,7 +477,7 @@ def emit_nodes(nodes, uses: dict, out: list, indent: str) -> None:
     """Emit the statements that append `nodes` to `out`."""
     for node in nodes:
         if isinstance(node, Lit):
-            out.append(f"{indent}out.push_str({escape(node.text)});")
+            out.append(f"{indent}{emit_text(node.text)};")
         elif isinstance(node, Arg):
             binding = argument(node.name)
             if uses[node.name].kind == "plural":
@@ -614,6 +643,11 @@ def emit(messages: dict, counts: Counts) -> str:
     lines.append("///")
     lines.append("/// The order is the reference's keys in sort order, which is also the order of")
     lines.append("/// [`NAMES`] and [`MESSAGES`]: the three arrays are parallel, and a test says so.")
+    lines.append("/// The reference's own keys include ones that end in `key`")
+    lines.append("/// (`app.settings.game-options.keybind.key.keypad-key`), which is what")
+    lines.append("/// `enum_variant_names` objects to. The names are the reference's, so the")
+    lines.append("/// lint is allowed here rather than obeyed.")
+    lines.append("#[allow(clippy::enum_variant_names)]")
     lines.append("#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]")
     lines.append("pub enum Key {")
     for key, name in zip(keys, names):
@@ -621,25 +655,29 @@ def emit(messages: dict, counts: Counts) -> str:
         lines.append(f"    {name},")
     lines.append("}")
     lines.append("")
+    # `static`, not `const`: a 3846-entry const is inlined at every use, and
+    # `large_const_arrays` is right to say so. The cost is that a `const fn`
+    # cannot read a static, so the two accessors below are ordinary functions --
+    # neither is called from a constant expression anywhere.
     lines.append("/// Every variant, in the same order as [`NAMES`] and [`MESSAGES`].")
-    lines.append(f"pub const ALL: [Key; {len(keys)}] = [")
+    lines.append(f"pub static ALL: [Key; {len(keys)}] = [")
     lines.extend(f"    Key::{name}," for name in names)
     lines.append("];")
     lines.append("")
     lines.append("/// The reference's own key for each variant, in [`ALL`] order.")
-    lines.append(f"pub const NAMES: [&str; {len(keys)}] = [")
+    lines.append(f"pub static NAMES: [&str; {len(keys)}] = [")
     lines.extend(f"    {escape(key)}," for key in keys)
     lines.append("];")
     lines.append("")
     lines.append("/// The template for each variant, in [`ALL`] order, exactly as the locale")
     lines.append("/// writes it: ICU markers included, for the strings that have them.")
-    lines.append(f"pub const MESSAGES: [&str; {len(keys)}] = [")
+    lines.append(f"pub static MESSAGES: [&str; {len(keys)}] = [")
     lines.extend(f"    {escape(messages[key])}," for key in keys)
     lines.append("];")
     lines.append("")
     lines.append("impl Key {")
     lines.append("    /// The reference's own key, e.g. `app.action-bar.downloads`.")
-    lines.append("    pub const fn name(self) -> &'static str {")
+    lines.append("    pub fn name(self) -> &'static str {")
     lines.append("        NAMES[self as usize]")
     lines.append("    }")
     lines.append("")
@@ -648,7 +686,7 @@ def emit(messages: dict, counts: Counts) -> str:
     lines.append("    /// For a string with ICU markers this is the *template*, which is what the")
     lines.append("    /// locale holds and what the helper beside this table fills in. Both are")
     lines.append("    /// generated from the same leaf, and a test asserts they are.")
-    lines.append("    pub const fn message(self) -> &'static str {")
+    lines.append("    pub fn message(self) -> &'static str {")
     lines.append("        MESSAGES[self as usize]")
     lines.append("    }")
     lines.append("}")

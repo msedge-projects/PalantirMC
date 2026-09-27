@@ -29,15 +29,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// How long a switch takes to arrive, wall clock.
-///
-/// The reference's `duration-200`, and a *deadline* rather than a frame count
-/// for [`crate::scroll`]'s reason: a machine that answers late draws fewer,
-/// larger steps and still finishes on time.
-pub const DURATION: Duration = Duration::from_millis(200);
-
 /// One switch's position, and the slide carrying it there.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 struct Knob {
     /// The value the setting has: 0.0 off, 1.0 on.
     to: f32,
@@ -49,13 +43,6 @@ struct Knob {
     began: Option<Instant>,
 }
 
-impl Knob {
-    /// A knob already at `value` and going nowhere.
-    fn settled(value: f32) -> Knob {
-        Knob { to: value, from: value, progress: value, began: None }
-    }
-}
-
 /// Every switch's position, keyed by a stable id.
 ///
 /// Keyed by `&'static str` rather than by position, because the position of a
@@ -63,16 +50,19 @@ impl Knob {
 /// section is reordered — and a slide that follows the tree would then be drawn
 /// on whatever landed in that slot.
 #[derive(Debug, Clone, Default)]
+#[cfg(test)]
 pub struct SwitchAnim {
     knobs: HashMap<&'static str, Knob>,
 }
 
+#[cfg(test)]
 impl SwitchAnim {
     /// Where to draw the switch `id`, whose setting is `on`.
     ///
     /// A switch that has never been touched is simply at its value: the first
     /// paint of a pane must not animate every switch on it into place, which is
     /// what reading an absent entry as `0.0` would do.
+    #[cfg(test)]
     pub fn progress(&self, id: &str, on: bool) -> f32 {
         match self.knobs.get(id) {
             Some(knob) => knob.progress,
@@ -80,63 +70,15 @@ impl SwitchAnim {
         }
     }
 
-    /// Record that the setting behind `id` has moved from `from` to `to`, and
-    /// start its slide.
-    ///
-    /// Called from `update`, where the message that changed the setting is
-    /// handled — not from the view, which cannot know whether the value it is
-    /// drawing is new. Both ends travel because a switch that has never been
-    /// touched has no entry here, and the only thing that says where it *was*
-    /// is the value it just left. Guessing that from `to` alone would make a
-    /// first click the one click that jumps instead of sliding.
-    pub fn set(&mut self, id: &'static str, from: bool, to: bool, now: Instant) {
-        let target = if to { 1.0 } else { 0.0 };
-        // A value that did not actually change starts no slide.
-        let knob = self
-            .knobs
-            .entry(id)
-            .or_insert_with(|| Knob::settled(if from { 1.0 } else { 0.0 }));
-        if knob.to == target {
-            return;
-        }
-        // From where the knob is *drawn*, not from the value it had: clicking
-        // twice quickly reverses a half-finished slide instead of snapping it
-        // back to the far end first.
-        knob.from = knob.progress;
-        knob.to = target;
-        knob.began = Some(now);
-    }
-
     /// Whether any knob is still travelling.
     ///
     /// This is what holds the frame subscription open, so it has to be exact:
     /// reporting `true` once too often leaves a shell asking for frames forever.
+    #[cfg(test)]
     pub fn animating(&self) -> bool {
         self.knobs.values().any(|knob| knob.began.is_some())
     }
 
-    /// Advance every slide to `now`, returning whether any is still moving.
-    pub fn tick(&mut self, now: Instant) -> bool {
-        let deadline = DURATION.as_secs_f32();
-        let mut moving = false;
-        for knob in self.knobs.values_mut() {
-            let Some(began) = knob.began else {
-                continue;
-            };
-            let elapsed = now.saturating_duration_since(began).as_secs_f32();
-            let progress = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
-            knob.progress = knob.from + (knob.to - knob.from) * ease(progress);
-            if progress >= 1.0 {
-                // Land exactly, so the animation stops rather than approaching
-                // its target forever and holding the frame subscription open.
-                knob.progress = knob.to;
-                knob.began = None;
-            } else {
-                moving = true;
-            }
-        }
-        moving
-    }
 }
 
 /// CSS `ease`, near enough to be indistinguishable at 24 pixels.
@@ -507,80 +449,6 @@ impl Interactions {
 // the press is — brightness — and the backdrop is drawn as what it actually is:
 // an opacity.
 
-/// How long the modal takes to arrive and to leave, wall clock.
-///
-/// The reference's own `0.2s` on both the overlay and the dialog body. The two
-/// move together because the dialog's `scale`/`opacity` and the overlay's
-/// `opacity` are started by the same class change.
-pub const MODAL_DURATION: Duration = Duration::from_millis(200);
-
-/// The modal's arrival, on the same deadline pattern as everything above.
-///
-/// `progress` is the backdrop's opacity fraction (`0..=1`) and the dialog's
-/// arrival (`0` = the pressed dimness, `1` = seated). A modal that has never
-/// been open reports settled at *closed*: the first frame of an opening modal
-/// must be the first frame of its tween, not its end.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ModalAnim {
-    open: bool,
-    progress: f32,
-    began: Option<Instant>,
-}
-
-impl ModalAnim {
-    /// The backdrop's opacity fraction right now.
-    pub fn backdrop(&self) -> f32 {
-        self.progress
-    }
-
-    /// The dialog's arrival factor, `0..=1`, for [`crate::theme::filtered`].
-    ///
-    /// The dialog arrives *from* the press's dimness — `0.8` — because that is
-    /// what `scale: 0.97` reads as when the toolkit cannot scale a widget inside
-    /// its own box: close enough to see it land, without a transform.
-    pub fn dialog_factor(&self) -> f32 {
-        crate::theme::PRESS_BRIGHTNESS
-            + (1.0 - crate::theme::PRESS_BRIGHTNESS) * self.progress
-    }
-
-    /// Whether the modal is (still) on screen. `false` is what retires it.
-    pub fn open(&self) -> bool {
-        self.open || self.began.is_some()
-    }
-
-    /// Record that the modal opened or closed, and start its tween.
-    pub fn set(&mut self, open: bool, now: Instant) {
-        if self.open == open {
-            return;
-        }
-        self.open = open;
-        self.began = Some(now);
-    }
-
-    /// Whether the tween is moving.
-    pub fn animating(&self) -> bool {
-        self.began.is_some()
-    }
-
-    /// Advance to `now`, returning whether the tween still moves.
-    pub fn tick(&mut self, now: Instant) -> bool {
-        let Some(began) = self.began else {
-            return false;
-        };
-        let deadline = MODAL_DURATION.as_secs_f32();
-        let elapsed = now.saturating_duration_since(began).as_secs_f32();
-        let linear = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
-        let target = if self.open { 1.0 } else { 0.0 };
-        self.progress = self.progress + (target - self.progress) * ease(linear);
-        if linear >= 1.0 {
-            self.progress = target;
-            self.began = None;
-            return false;
-        }
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,99 +464,6 @@ mod tests {
         assert_eq!(anim.progress("a", false), 0.0);
         assert_eq!(anim.progress("a", true), 1.0);
         assert!(!anim.animating(), "nothing has moved, so nothing is moving");
-    }
-
-    #[test]
-    fn a_click_starts_a_slide_and_arrives_on_the_deadline() {
-        let mut anim = SwitchAnim::default();
-        let start = Instant::now();
-        anim.set("a", false, true, start);
-        assert!(anim.animating());
-        assert_eq!(anim.progress("a", true), 0.0, "a slide begins where the knob was");
-
-        // Halfway is strictly between the ends — a jump would be at 1.0 here.
-        assert!(anim.tick(start + DURATION / 2));
-        let middle = anim.progress("a", true);
-        assert!(middle > 0.05 && middle < 0.95, "got {middle}");
-
-        // And the deadline ends it, exactly on the value.
-        assert!(!anim.tick(start + DURATION));
-        assert_eq!(anim.progress("a", true), 1.0);
-        assert!(!anim.animating(), "a settled slide must not hold frames open");
-    }
-
-    #[test]
-    fn the_slide_is_a_function_of_time_not_of_frame_count() {
-        // The property the frame-counted tween could not offer: three late
-        // frames and thirty early ones both finish at the same wall clock time.
-        let start = Instant::now();
-        let mut slow = SwitchAnim::default();
-        slow.set("a", false, true, start);
-        for step in 1..=3 {
-            slow.tick(start + DURATION.mul_f32(step as f32 / 3.0));
-        }
-        assert_eq!(slow.progress("a", true), 1.0);
-        assert!(!slow.animating());
-
-        // Thirty steps of a hair over 6.6 ms each, so the last one lands past
-        // the deadline and the slide is over — the count is not what ends it.
-        let mut fast = SwitchAnim::default();
-        fast.set("a", false, true, start);
-        for step in 1..=30 {
-            fast.tick(start + Duration::from_micros(step * 6_800));
-        }
-        assert_eq!(fast.progress("a", true), 1.0);
-        assert!(!fast.animating());
-    }
-
-    #[test]
-    fn a_reversed_click_turns_around_from_where_it_is() {
-        // Clicking twice in a hurry must not snap the knob to the far end and
-        // start over: it reverses from the pixel it is on. The second click
-        // here lands half a slide in, and the return trip then gets a full
-        // slide of its own — so a tick that is halfway through the *first*
-        // deadline cannot be the end of it.
-        let mut anim = SwitchAnim::default();
-        let start = Instant::now();
-        anim.set("a", false, true, start);
-        anim.tick(start + DURATION / 2);
-        let halfway = anim.progress("a", true);
-        assert!(halfway > 0.0 && halfway < 1.0);
-
-        anim.set("a", true, false, start + DURATION / 2);
-        assert_eq!(anim.progress("a", true), halfway, "the turn-around keeps the position");
-        anim.tick(start + DURATION);
-        let back = anim.progress("a", false);
-        assert!(back > 0.0 && back < halfway, "got {back} back from {halfway}");
-        assert!(anim.animating(), "the return trip is not over yet");
-
-        anim.tick(start + DURATION / 2 + DURATION);
-        assert_eq!(anim.progress("a", false), 0.0);
-        assert!(!anim.animating());
-    }
-
-    #[test]
-    fn setting_the_value_it_already_has_starts_nothing() {
-        let mut anim = SwitchAnim::default();
-        let start = Instant::now();
-        anim.set("a", false, false, start);
-        assert!(!anim.animating(), "off to off is not a transition");
-        anim.set("a", false, true, start);
-        assert!(anim.animating());
-        anim.tick(start + DURATION);
-        anim.set("a", true, true, start + DURATION);
-        assert!(!anim.animating(), "on to on is not a transition either");
-    }
-
-    #[test]
-    fn switches_do_not_share_a_position() {
-        let mut anim = SwitchAnim::default();
-        let start = Instant::now();
-        anim.set("a", false, true, start);
-        anim.set("b", true, false, start);
-        anim.tick(start + DURATION);
-        assert_eq!(anim.progress("a", true), 1.0);
-        assert_eq!(anim.progress("b", false), 0.0);
     }
 
     #[test]
@@ -916,60 +691,4 @@ mod tests {
         assert_eq!(clock.factor("nobody", true, false), crate::theme::hover_brightness());
     }
 
-    #[test]
-    fn a_modal_fades_in_over_the_deadline_and_lands_seated() {
-        let mut modal = ModalAnim::default();
-        let start = Instant::now();
-        modal.set(true, start);
-        assert!(modal.open(), "an opening modal is on screen even before its first tick");
-        assert_eq!(modal.backdrop(), 0.0, "the fade begins from nothing");
-
-        modal.tick(start + MODAL_DURATION / 2);
-        let backdrop = modal.backdrop();
-        assert!(backdrop > 0.05 && backdrop < 0.95, "got {backdrop}");
-        let factor = modal.dialog_factor();
-        assert!(factor > crate::theme::PRESS_BRIGHTNESS && factor < 1.0);
-
-        assert!(!modal.tick(start + MODAL_DURATION));
-        assert_eq!(modal.backdrop(), 1.0);
-        assert_eq!(modal.dialog_factor(), 1.0);
-        assert!(!modal.animating());
-    }
-
-    #[test]
-    fn a_modal_fades_out_and_is_gone_only_at_the_end() {
-        // The leave is why `open()` exists as a separate question from the
-        // flag: a modal told to close must stay on screen *while it fades*, or
-        // the fade-out would never be seen.
-        let mut modal = ModalAnim::default();
-        let start = Instant::now();
-        modal.set(true, start);
-        modal.tick(start + MODAL_DURATION);
-        assert_eq!(modal.backdrop(), 1.0);
-
-        modal.set(false, start);
-        assert!(modal.open(), "a fading-out modal is still on screen");
-        assert!(modal.animating());
-        modal.tick(start + MODAL_DURATION);
-        assert_eq!(modal.backdrop(), 0.0, "the backdrop ends at nothing");
-        assert!(!modal.open(), "and the modal is gone");
-        assert!(!modal.animating());
-    }
-
-    #[test]
-    fn reopening_a_closing_modal_turns_it_around() {
-        let mut modal = ModalAnim::default();
-        let start = Instant::now();
-        modal.set(true, start);
-        modal.tick(start + MODAL_DURATION);
-        modal.set(false, start);
-        modal.tick(start + MODAL_DURATION / 2);
-        let halfway = modal.backdrop();
-        assert!(halfway > 0.0 && halfway < 1.0);
-
-        modal.set(true, start + MODAL_DURATION / 2);
-        assert_eq!(modal.backdrop(), halfway, "the turn keeps the position");
-        modal.tick(start + MODAL_DURATION / 2 + MODAL_DURATION);
-        assert_eq!(modal.backdrop(), 1.0);
-    }
 }

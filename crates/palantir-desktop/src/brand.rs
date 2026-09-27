@@ -28,13 +28,6 @@ use std::sync::OnceLock;
 /// product name is how a window ends up labelled with a different launcher.
 pub const APP_NAME: &str = palantir_core::PRODUCT_NAME;
 
-/// The studio that ships this launcher, as the About page credits it.
-///
-/// Separate from [`APP_NAME`] on purpose: the product is one name and the
-/// studio is another, and a launcher whose About page credits the product only
-/// is how a launcher ends up with no author at all.
-pub const STUDIO: &str = "Palantir Studios";
-
 /// Embedded hero logo (512x512 RGBA PNG, transparent backdrop).
 const LOGO_PNG: &[u8] = include_bytes!("../assets/brand/logo512.png");
 
@@ -47,6 +40,7 @@ pub fn version() -> &'static str {
 }
 
 /// `PalantirMC 0.1.0` — used on the About page and in logs.
+#[cfg(test)]
 pub fn full_name() -> String {
     format!("{APP_NAME} {}", version())
 }

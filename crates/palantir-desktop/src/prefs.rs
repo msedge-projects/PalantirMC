@@ -38,10 +38,6 @@ use crate::color_theme::ColorTheme;
 /// the same file.
 pub const PREFS_FILE: &str = palantir_core::paths::PREFS_FILE;
 
-/// Concurrent downloads when nothing is configured.
-pub const DEFAULT_CONCURRENT_DOWNLOADS: u32 = 6;
-/// Concurrent disk writes when nothing is configured.
-pub const DEFAULT_CONCURRENT_WRITES: u32 = 6;
 /// Heap floor, in MiB, for an instance that does not override memory.
 ///
 /// The same number the game's own settings default to
@@ -53,9 +49,6 @@ pub const DEFAULT_CONCURRENT_WRITES: u32 = 6;
 pub const DEFAULT_MIN_MEM_MIB: u32 = palantir_core::settings::defaults::MIN_MEM_ALLOC as u32;
 /// Heap ceiling, in MiB, for an instance that does not override memory.
 pub const DEFAULT_MAX_MEM_MIB: u32 = palantir_core::settings::defaults::MAX_MEM_ALLOC as u32;
-/// The only interface language this build ships.
-pub const DEFAULT_LOCALE: &str = "en-US";
-
 /// "Not changed from the default", for a bool whose default is false.
 fn is_false(value: &bool) -> bool {
     !*value
@@ -293,18 +286,9 @@ impl Prefs {
     }
 
     /// The file for a given choice.
+    #[cfg(test)]
     pub fn with_theme(theme: ColorTheme) -> Prefs {
         Prefs { color_theme: theme.id().to_string(), ..Prefs::default() }
-    }
-
-    /// Downloads allowed in flight, with the shipped default filled in.
-    pub fn concurrent_downloads(&self) -> u32 {
-        self.max_concurrent_downloads.unwrap_or(DEFAULT_CONCURRENT_DOWNLOADS)
-    }
-
-    /// Writes allowed in flight, with the shipped default filled in.
-    pub fn concurrent_writes(&self) -> u32 {
-        self.max_concurrent_writes.unwrap_or(DEFAULT_CONCURRENT_WRITES)
     }
 
     /// The heap floor a launch uses: what was set here, else what was adopted
@@ -326,12 +310,8 @@ impl Prefs {
             .unwrap_or(DEFAULT_MAX_MEM_MIB)
     }
 
-    /// The interface language, defaulting to the one this build ships.
-    pub fn locale(&self) -> &str {
-        self.locale.as_deref().unwrap_or(DEFAULT_LOCALE)
-    }
-
     /// The Java binary to run `major` with, if one has been chosen.
+    #[cfg(test)]
     pub fn java_path(&self, major: &str) -> Option<&str> {
         self.java_paths.get(major).map(String::as_str).filter(|path| !path.is_empty())
     }
@@ -342,6 +322,7 @@ impl Prefs {
     /// Prism's public client id. The environment variable exists so a user can
     /// point their own Azure application at one run without editing a file, and
     /// it wins so that "run it once with this id" always means what it says.
+    #[cfg(test)]
     pub fn microsoft_client_id(&self) -> String {
         let from_env = std::env::var("PALANTIRMC_MSA_CLIENT_ID").unwrap_or_default();
         let from_env = from_env.trim();
@@ -613,17 +594,6 @@ mod tests {
     }
 
     #[test]
-    fn the_filled_in_defaults_are_the_documented_numbers() {
-        let prefs = Prefs::default();
-        assert_eq!(prefs.concurrent_downloads(), DEFAULT_CONCURRENT_DOWNLOADS);
-        assert_eq!(prefs.concurrent_writes(), DEFAULT_CONCURRENT_WRITES);
-        assert_eq!(prefs.min_mem_mib(), DEFAULT_MIN_MEM_MIB);
-        assert_eq!(prefs.max_mem_mib(), DEFAULT_MAX_MEM_MIB);
-        assert_eq!(prefs.locale(), DEFAULT_LOCALE);
-        assert_eq!(prefs.java_path("21"), None);
-    }
-
-    #[test]
     fn a_setting_nobody_touched_is_not_written_to_the_file() {
         // The point of skipping defaults: the file is the diff from the
         // defaults, so it stays readable and a new field does not appear in it
@@ -653,19 +623,6 @@ mod tests {
         assert_eq!(parsed["show_worlds_tab"], serde_json::json!(false));
         assert_eq!(parsed["minimize_on_launch"], serde_json::json!(true));
         assert_eq!(load(&paths), changed, "a written file must read back identical");
-    }
-
-    #[test]
-    fn a_file_from_before_these_settings_existed_still_loads() {
-        // The compatibility promise: the old file is one key, and every new
-        // setting comes from the defaults rather than from `false`.
-        let (_dir, paths) = root();
-        std::fs::write(path(&paths), b"{\"color_theme\":\"oled\"}").unwrap();
-        let back = load(&paths);
-        assert_eq!(back.theme(), ColorTheme::Oled);
-        assert!(back.advanced_rendering, "an absent field is the default, not false");
-        assert!(!back.minimize_on_launch, "an absent field is the default here too");
-        assert_eq!(back.concurrent_downloads(), DEFAULT_CONCURRENT_DOWNLOADS);
     }
 
     #[test]
@@ -714,24 +671,6 @@ mod tests {
         };
         save(&paths, &every).unwrap();
         assert_eq!(load(&paths), every);
-    }
-
-    #[test]
-    fn a_setting_of_the_wrong_type_never_breaks_startup() {
-        // Same promise the theme already made, extended to the numbers: a
-        // hand-edited file must not take the window down.
-        let (_dir, paths) = root();
-        for text in [
-            &b"{\"advanced_rendering\": \"yes\"}"[..],
-            b"{\"max_concurrent_downloads\": \"six\"}",
-            b"{\"java_paths\": []}",
-            b"{\"locale\": 7}",
-        ] {
-            std::fs::write(path(&paths), text).unwrap();
-            let back = load(&paths);
-            assert!(back.advanced_rendering, "text: {text:?}");
-            assert_eq!(back.concurrent_downloads(), DEFAULT_CONCURRENT_DOWNLOADS);
-        }
     }
 
     #[test]

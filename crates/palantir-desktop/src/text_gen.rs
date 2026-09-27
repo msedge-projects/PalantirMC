@@ -28,6 +28,11 @@ use crate::text;
 ///
 /// The order is the reference's keys in sort order, which is also the order of
 /// [`NAMES`] and [`MESSAGES`]: the three arrays are parallel, and a test says so.
+/// The reference's own keys include ones that end in `key`
+/// (`app.settings.game-options.keybind.key.keypad-key`), which is what
+/// `enum_variant_names` objects to. The names are the reference's, so the
+/// lint is allowed here rather than obeyed.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {
     /// `action.no-permission`
@@ -7725,7 +7730,7 @@ pub enum Key {
 }
 
 /// Every variant, in the same order as [`NAMES`] and [`MESSAGES`].
-pub const ALL: [Key; 3846] = [
+pub static ALL: [Key; 3846] = [
     Key::ActionNoPermission,
     Key::AffiliateCreateButton,
     Key::AffiliateCreateHeader,
@@ -11575,7 +11580,7 @@ pub const ALL: [Key; 3846] = [
 ];
 
 /// The reference's own key for each variant, in [`ALL`] order.
-pub const NAMES: [&str; 3846] = [
+pub static NAMES: [&str; 3846] = [
     "action.no-permission",
     "affiliate.create.button",
     "affiliate.create.header",
@@ -15426,7 +15431,7 @@ pub const NAMES: [&str; 3846] = [
 
 /// The template for each variant, in [`ALL`] order, exactly as the locale
 /// writes it: ICU markers included, for the strings that have them.
-pub const MESSAGES: [&str; 3846] = [
+pub static MESSAGES: [&str; 3846] = [
     "You do not have permission.",
     "Create affiliate link",
     "Creating new affiliate code",
@@ -19277,7 +19282,7 @@ pub const MESSAGES: [&str; 3846] = [
 
 impl Key {
     /// The reference's own key, e.g. `app.action-bar.downloads`.
-    pub const fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         NAMES[self as usize]
     }
 
@@ -19286,7 +19291,7 @@ impl Key {
     /// For a string with ICU markers this is the *template*, which is what the
     /// locale holds and what the helper beside this table fills in. Both are
     /// generated from the same leaf, and a test asserts they are.
-    pub const fn message(self) -> &'static str {
+    pub fn message(self) -> &'static str {
         MESSAGES[self as usize]
     }
 }
@@ -19497,7 +19502,7 @@ pub fn app_instance_confirm_delete_instances_label<'count>(count: impl Into<text
     } else {
         out.push_str("Instances (");
         out.push_str(&count.bare());
-        out.push_str(")");
+        out.push(')');
     }
     out
 }
@@ -19524,7 +19529,7 @@ pub fn app_instance_mods_bulk_update_downloading_projects(current: u64, total: u
     let mut out = String::new();
     out.push_str("Downloading ");
     out.push_str(&text::number(current));
-    out.push_str("/");
+    out.push('/');
     out.push_str(&text::number(total));
     out.push_str(" projects...");
     out
@@ -19537,7 +19542,7 @@ pub fn app_instance_mods_bulk_update_downloading_projects(current: u64, total: u
 /// ```
 pub fn app_instance_mods_project_was_added(name: &str) -> String {
     let mut out = String::new();
-    out.push_str("\"");
+    out.push('"');
     out.push_str(name);
     out.push_str("\" was added");
     out
@@ -19664,7 +19669,7 @@ pub fn app_library_group_instances_modal_title(group_name: &str) -> String {
     let mut out = String::new();
     out.push_str("Add instances to \"");
     out.push_str(group_name);
-    out.push_str("\"");
+    out.push('"');
     out
 }
 
@@ -19919,7 +19924,7 @@ pub fn app_settings_game_options_keybind_assigned_status(setting: &str, binding:
     out.push_str(setting);
     out.push_str(" is now bound to ");
     out.push_str(binding);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -19946,7 +19951,7 @@ pub fn app_settings_game_options_keybind_conflict_description(settings: &str) ->
     let mut out = String::new();
     out.push_str("This is already used by ");
     out.push_str(settings);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -20080,7 +20085,7 @@ pub fn app_settings_resource_management_store_verification_result<'checked, 'rep
         out.push_str(&repaired.grouped());
         out.push_str(" repairs");
     }
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -20150,7 +20155,7 @@ pub fn app_settings_synced_options_multiplayer_servers_search<'count>(count: imp
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.grouped());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("synced server");
     } else {
@@ -20261,7 +20266,7 @@ pub fn app_update_popup_download(size: &str) -> String {
     let mut out = String::new();
     out.push_str("Download (");
     out.push_str(size);
-    out.push_str(")");
+    out.push(')');
     out
 }
 
@@ -20555,7 +20560,7 @@ pub fn content_confirm_deletion_delete_button(count: u64, item_type: &str) -> St
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(item_type);
     out
 }
@@ -20699,7 +20704,7 @@ pub fn content_dependency_warning_delete_many_anyway_button(count: u64, item_typ
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(item_type);
     out.push_str(" anyway");
     out
@@ -20875,7 +20880,7 @@ pub fn content_page_layout_search_placeholder(count: u64, content_type: &str) ->
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str("...");
     out
@@ -20902,9 +20907,9 @@ pub fn content_selection_bar_bulk_deleting(progress: &str, total: &str, content_
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(progress);
-    out.push_str("/");
+    out.push('/');
     out.push_str(total);
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str("...");
     out
@@ -20919,7 +20924,7 @@ pub fn content_selection_bar_bulk_deleting_count(count: u64, content_type: &str)
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out
 }
@@ -20946,9 +20951,9 @@ pub fn content_selection_bar_bulk_disabling(progress: &str, total: &str, content
     let mut out = String::new();
     out.push_str("Disabling ");
     out.push_str(progress);
-    out.push_str("/");
+    out.push('/');
     out.push_str(total);
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str("...");
     out
@@ -20963,7 +20968,7 @@ pub fn content_selection_bar_bulk_disabling_count(count: u64, content_type: &str
     let mut out = String::new();
     out.push_str("Disabling ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out
 }
@@ -20990,9 +20995,9 @@ pub fn content_selection_bar_bulk_enabling(progress: &str, total: &str, content_
     let mut out = String::new();
     out.push_str("Enabling ");
     out.push_str(progress);
-    out.push_str("/");
+    out.push('/');
     out.push_str(total);
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str("...");
     out
@@ -21007,7 +21012,7 @@ pub fn content_selection_bar_bulk_enabling_count(count: u64, content_type: &str)
     let mut out = String::new();
     out.push_str("Enabling ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out
 }
@@ -21034,9 +21039,9 @@ pub fn content_selection_bar_bulk_updating(progress: &str, total: &str, content_
     let mut out = String::new();
     out.push_str("Updating ");
     out.push_str(progress);
-    out.push_str("/");
+    out.push('/');
     out.push_str(total);
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str("...");
     out
@@ -21051,7 +21056,7 @@ pub fn content_selection_bar_bulk_updating_count(count: u64, content_type: &str)
     let mut out = String::new();
     out.push_str("Updating ");
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out
 }
@@ -21077,7 +21082,7 @@ pub fn content_selection_bar_bulk_updating_waiting(content_type: &str) -> String
 pub fn content_selection_bar_selected_count(count: u64, content_type: &str) -> String {
     let mut out = String::new();
     out.push_str(&text::number(count));
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(content_type);
     out.push_str(" selected");
     out
@@ -21149,7 +21154,7 @@ pub fn creation_flow_modal_import_instance_custom_launcher_name(path_name: &str)
     let mut out = String::new();
     out.push_str("Custom (");
     out.push_str(path_name);
-    out.push_str(")");
+    out.push(')');
     out
 }
 
@@ -21245,7 +21250,7 @@ pub fn external_files_permissions_card_included_in_versions<'count>(count: impl 
         out.push_str(&count.grouped());
         out.push_str(" versions");
     }
-    out.push_str(":");
+    out.push(':');
     out
 }
 
@@ -21284,7 +21289,7 @@ pub fn external_files_permissions_card_remove_group_confirmation_title(title: &s
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(title);
-    out.push_str("?");
+    out.push('?');
     out
 }
 
@@ -21313,7 +21318,7 @@ pub fn file_button_file_too_large_description(filename: &str, max_size: &str) ->
     out.push_str(filename);
     out.push_str(" is too big. The maximum file size is ");
     out.push_str(max_size);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -21388,7 +21393,7 @@ pub fn files_delete_modal_deleting_name(name: &str) -> String {
     let mut out = String::new();
     out.push_str("Deleting \"");
     out.push_str(name);
-    out.push_str("\"");
+    out.push('"');
     out
 }
 
@@ -21414,7 +21419,7 @@ pub fn files_image_viewer_image_too_large(max_dimension: &str) -> String {
     let mut out = String::new();
     out.push_str("Image too large to view (max ");
     out.push_str(max_dimension);
-    out.push_str("x");
+    out.push('x');
     out.push_str(max_dimension);
     out.push_str(" pixels)");
     out
@@ -21754,7 +21759,7 @@ pub fn friends_no_friends_match(query: &str) -> String {
     let mut out = String::new();
     out.push_str("No friends matching '");
     out.push_str(query);
-    out.push_str("'");
+    out.push('\'');
     out
 }
 
@@ -21964,9 +21969,9 @@ pub fn instance_files_adding_files(completed: &str, total: &str) -> String {
     let mut out = String::new();
     out.push_str("Adding files (");
     out.push_str(completed);
-    out.push_str("/");
+    out.push('/');
     out.push_str(total);
-    out.push_str(")");
+    out.push(')');
     out
 }
 
@@ -22047,7 +22052,7 @@ pub fn instances_managed_content_modal_search_placeholder<'count>(count: impl In
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.grouped());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("project");
     } else {
@@ -22148,7 +22153,7 @@ pub fn label_played(ago: &str) -> String {
 pub fn markdown_editor_max_length_value(current_length: &str, max_length: &str) -> String {
     let mut out = String::new();
     out.push_str(current_length);
-    out.push_str("/");
+    out.push('/');
     out.push_str(max_length);
     out
 }
@@ -22734,7 +22739,7 @@ pub fn project_download_count_tooltip<'count>(count: impl Into<text::Plural<'cou
     let count = count.into();
     let mut out = String::new();
     out.push_str(&count.grouped());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("download");
     } else {
@@ -22752,7 +22757,7 @@ pub fn project_follower_count_tooltip<'count>(count: impl Into<text::Plural<'cou
     let count = count.into();
     let mut out = String::new();
     out.push_str(&count.grouped());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("follower");
     } else {
@@ -22782,7 +22787,7 @@ pub fn project_online_player_count_tooltip<'count_plural>(count: &str, count_plu
     let count_plural = count_plural.into();
     let mut out = String::new();
     out.push_str(count);
-    out.push_str(" ");
+    out.push(' ');
     if count_plural.is("one") {
         out.push_str("player");
     } else {
@@ -22801,7 +22806,7 @@ pub fn project_recent_plays<'count_plural>(count: &str, count_plural: impl Into<
     let count_plural = count_plural.into();
     let mut out = String::new();
     out.push_str(count);
-    out.push_str(" ");
+    out.push(' ');
     if count_plural.is("one") {
         out.push_str("recent play");
     } else {
@@ -22819,7 +22824,7 @@ pub fn project_recent_plays_tooltip<'count_plural>(count: &str, count_plural: im
     let count_plural = count_plural.into();
     let mut out = String::new();
     out.push_str(count);
-    out.push_str(" ");
+    out.push(' ');
     if count_plural.is("one") {
         out.push_str("recent play");
     } else {
@@ -23039,7 +23044,7 @@ pub fn servers_access_page_notification_invite_cancelled_text(target: &str) -> S
     let mut out = String::new();
     out.push_str("Revoked the invite for ");
     out.push_str(target);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -23052,7 +23057,7 @@ pub fn servers_access_page_notification_invite_resent_text(target: &str) -> Stri
     let mut out = String::new();
     out.push_str("Sent another invite to ");
     out.push_str(target);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -23067,7 +23072,7 @@ pub fn servers_access_page_notification_invite_sent_text(target: &str, role: &st
     out.push_str(target);
     out.push_str(" as ");
     out.push_str(role);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -23080,7 +23085,7 @@ pub fn servers_access_page_notification_member_removed_text(target: &str) -> Str
     let mut out = String::new();
     out.push_str("Revoked access for ");
     out.push_str(target);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -23106,7 +23111,7 @@ pub fn servers_access_page_search_users_placeholder<'count>(count: impl Into<tex
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.bare());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("user");
     } else {
@@ -23125,7 +23130,7 @@ pub fn servers_access_table_action_resend_invite_cooldown(seconds: &str) -> Stri
     let mut out = String::new();
     out.push_str("Resend in ");
     out.push_str(seconds);
-    out.push_str("s");
+    out.push('s');
     out
 }
 
@@ -23160,7 +23165,7 @@ pub fn servers_access_table_user_avatar_alt(username: &str) -> String {
 /// ```
 pub fn servers_audit_log_event_entity_list_hidden_count(count: u64) -> String {
     let mut out = String::new();
-    out.push_str("+");
+    out.push('+');
     out.push_str(&text::number(count));
     out
 }
@@ -23510,7 +23515,7 @@ pub fn servers_backups_delete_modal_backups_label<'count>(count: impl Into<text:
     } else {
         out.push_str("Backups (");
         out.push_str(&count.bare());
-        out.push_str(")");
+        out.push(')');
     }
     out
 }
@@ -23631,7 +23636,7 @@ pub fn servers_installing_banner_error_header_platform(loader: &str, loader_vers
     let mut out = String::new();
     out.push_str("Failed to install ");
     out.push_str(loader);
-    out.push_str(" ");
+    out.push(' ');
     out.push_str(loader_version);
     out.push_str(" for Minecraft ");
     out.push_str(game_version);
@@ -23819,7 +23824,7 @@ pub fn servers_manage_search_placeholder<'count>(count: impl Into<text::Plural<'
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.bare());
-    out.push_str(" ");
+    out.push(' ');
     if count.is("one") {
         out.push_str("server");
     } else {
@@ -24168,7 +24173,7 @@ pub fn sharing_invite_players_modal_invite_expiry_description(duration: &str) ->
     let mut out = String::new();
     out.push_str("Your invite link expires in ");
     out.push_str(duration);
-    out.push_str(".");
+    out.push('.');
     out
 }
 
@@ -24206,7 +24211,7 @@ pub fn time_frame_picker_last_timeframe<'amount>(amount: impl Into<text::Plural<
     let mut out = String::new();
     out.push_str("In the last ");
     out.push_str(&amount.bare());
-    out.push_str(" ");
+    out.push(' ');
     match unit {
         "hours" => {
             if amount.is("one") {

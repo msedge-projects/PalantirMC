@@ -25,6 +25,7 @@
 
 use std::time::Duration;
 
+#[cfg(test)]
 use crate::theme_gen::{self, Curve};
 
 /// How close to the answer a solve has to get.
@@ -162,6 +163,7 @@ impl Timing {
     /// Returning `None` is the useful answer: it means the reference does not
     /// declare a transition with that property and that duration, so a caller
     /// asking for one has invented a number and should be made to notice.
+    #[cfg(test)]
     pub fn declared(property: &str, millis: u32) -> Option<Timing> {
         let index = theme_gen::MOTION
             .binary_search_by_key(&(property, millis), |motion| (motion.property, motion.millis))
@@ -179,6 +181,7 @@ impl Timing {
 
     /// Every row the reference declares for a property, as `(millis, curve,
     /// source)`, in table order.
+    #[cfg(test)]
     pub fn declared_rows(property: &str) -> Vec<(u32, Curve, &'static str)> {
         theme_gen::MOTION
             .iter()
@@ -193,21 +196,9 @@ impl Timing {
     /// Not a licence to pick a duration: the value belongs in the comment
     /// beside the call, as a quote from the reference, and the constant above
     /// is the example.
+    #[cfg(test)]
     pub fn cited(millis: u32, curve: Curve) -> Timing {
         Timing { millis, control: theme_gen::curve(curve) }
-    }
-
-    /// A timing whose curve the generated tables do not name, for a transition
-    /// the reference declares through a class rather than a declaration.
-    ///
-    /// `tools/gen_theme.py` reads CSS `transition:` declarations, so a control
-    /// animated by Tailwind's `transition-all` is invisible to it: the duration
-    /// and the curve live in Tailwind's theme, and what the source file says is
-    /// the word `transition-all`. A caller that needs one of those cites the
-    /// numbers here, with the source in its own comment -- and this is the only
-    /// way to do so, which is what keeps the exception countable.
-    pub const fn raw(millis: u32, control: [f32; 4]) -> Timing {
-        Timing { millis, control }
     }
 
     /// The curve's four control-point coordinates.
@@ -220,6 +211,7 @@ impl Timing {
     /// `None` means the curve came from [`Timing::raw`]. A gate, not a
     /// convenience: it is how a test can say which of the two kinds of timing a
     /// row is without comparing floats by hand.
+    #[cfg(test)]
     pub fn curve(self) -> Option<Curve> {
         theme_gen::ALL_CURVE
             .iter()
@@ -261,6 +253,7 @@ impl Tween {
     }
 
     /// A value starting at `from` and heading for `to`.
+    #[cfg(test)]
     pub fn new(from: f32, to: f32, timing: Timing) -> Tween {
         Tween { from, to, timing, elapsed: Duration::ZERO }
     }
@@ -285,6 +278,7 @@ impl Tween {
 
     /// Jump to the end, whatever the clock says. What a caller does when a
     /// window loses focus or a user asks for reduced motion.
+    #[cfg(test)]
     pub fn finish(&mut self) {
         self.elapsed = self.timing.duration();
     }
@@ -315,17 +309,14 @@ impl Tween {
         self.from + (self.to - self.from) * self.eased()
     }
 
-    /// Where it is heading.
-    pub fn target(&self) -> f32 {
-        self.to
-    }
-
     /// Where the current leg started.
+    #[cfg(test)]
     pub fn origin(&self) -> f32 {
         self.from
     }
 
     /// The timing the current leg runs on.
+    #[cfg(test)]
     pub fn timing(&self) -> Timing {
         self.timing
     }
@@ -352,6 +343,7 @@ impl Tween {
     /// different durations for enter and leave in places -- a 0.2s fade in and
     /// a 0.3s fade out, on `PopupNotificationPanel` -- so the leg's timing is
     /// part of the retarget rather than a property of the value's life.
+    #[cfg(test)]
     pub fn retarget_on(&mut self, to: f32, timing: Timing) {
         let value = self.value();
         let was_aimed = to == self.to && timing == self.timing;

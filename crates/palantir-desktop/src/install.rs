@@ -521,6 +521,7 @@ impl Progress {
     }
 
     /// Bytes received so far, in megabytes.
+    #[cfg(test)]
     pub fn megabytes(&self) -> f64 {
         self.bytes as f64 / (1024.0 * 1024.0)
     }

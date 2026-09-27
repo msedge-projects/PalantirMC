@@ -42,6 +42,7 @@
 //! * **Bounded, not physical.** Easing is against a deadline, so a gesture
 //!   cannot settle forever and cannot grow with the distance it covers.
 
+#[cfg(test)]
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{tree, Tree};
@@ -53,10 +54,12 @@ use iced::{event, Element, Event, Length, Rectangle, Size, Vector};
 /// The log buffer may retain many more lines for troubleshooting, but drawing
 /// all of them makes wheel input expensive. The view renders only the newest
 /// window, which bounds layout/draw work per frame.
+#[cfg(test)]
 pub const LOG_RENDER_CAP: usize = 500;
 
 /// Convert a buffered-line count into the number of rows the log page should
 /// build. This is deliberately O(1) and allocation-free.
+#[cfg(test)]
 pub const fn visible_log_lines(total: usize) -> usize {
     if total < LOG_RENDER_CAP {
         total
@@ -77,6 +80,7 @@ pub const WHEEL_PIXELS_PER_NOTCH: f32 = 60.0;
 /// expected to. It is a *request* rather than a guarantee: the position is
 /// driven by the clock, so a machine that answers late draws fewer, larger
 /// steps rather than falling behind.
+#[cfg(test)]
 pub const FRAME: Duration = Duration::from_millis(16);
 
 /// How long a glide takes, wall clock, on a machine that can draw one.
@@ -85,6 +89,7 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// either way — which is the whole reason this is a duration. A frame count
 /// makes the *length* of the gesture depend on how fast the machine happens to
 /// be, and on a slow renderer that turns a scroll into a slideshow.
+#[cfg(test)]
 pub const DURATION: Duration = Duration::from_millis(160);
 
 /// The frame interval above which this machine is not asked to glide.
@@ -99,12 +104,14 @@ pub const DURATION: Duration = Duration::from_millis(160);
 /// This is measured rather than assumed — see [`ScrollAnim::tick`] — so a
 /// machine with a working GPU gets the glide and a software-rasterised one gets
 /// the instant step, from the same binary and with no setting to get wrong.
+#[cfg(test)]
 pub const SMOOTH_FRAME: Duration = Duration::from_millis(24);
 
 /// Below this many pixels from the target, the animation is over.
 ///
 /// Without a floor, a re-clamped target would leave the page a fraction of a
 /// pixel from where it belongs and keep asking for frames.
+#[cfg(test)]
 pub const SETTLED: f32 = 0.5;
 
 /// How many consecutive slow frames it takes to stop animating on a machine.
@@ -115,6 +122,7 @@ pub const SETTLED: f32 = 0.5;
 /// frames, and the next gesture corrects it. So one fast frame is enough to
 /// resume animating, while a single hitch -- a page fault, another window
 /// painting, a background scan -- is not enough to stop it.
+#[cfg(test)]
 const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 
 /// Where a page's scroll position is, and where it is going.
@@ -122,6 +130,7 @@ const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 /// Plain numbers and a clock rather than a reference to any widget state, so
 /// the whole easing policy is unit tested without a renderer or a window.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg(test)]
 pub struct ScrollAnim {
     /// The offset the content is drawn at.
     pub offset: f32,
@@ -146,15 +155,18 @@ pub struct ScrollAnim {
 
 /// One glide: where it started, when, and the deadline it must meet.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 struct Glide {
     from: f32,
     began: Instant,
     duration: Duration,
 }
 
+#[cfg(test)]
 impl ScrollAnim {
     /// The largest offset that still shows content: never negative, so a page
     /// shorter than the window cannot scroll at all.
+    #[cfg(test)]
     pub fn max_offset(&self) -> f32 {
         (self.content_height - self.view_height).max(0.0)
     }
@@ -342,6 +354,7 @@ impl ScrollAnim {
 /// it has to look like it is obeying — closing most of the distance early and
 /// settling — rather than starting slowly the way an ease-in-out transition
 /// would. `progress` is in `0.0..=1.0`.
+#[cfg(test)]
 fn ease_out(progress: f32) -> f32 {
     let remaining = 1.0 - progress;
     1.0 - remaining * remaining * remaining
@@ -372,27 +385,6 @@ pub fn wheel_notches(delta: &mouse::ScrollDelta) -> f32 {
     match delta {
         mouse::ScrollDelta::Lines { y, .. } => *y,
         mouse::ScrollDelta::Pixels { y, .. } => *y / WHEEL_PIXELS_PER_NOTCH,
-    }
-}
-
-/// Wraps a page's content so the shell, not the scrollable, handles the wheel.
-///
-/// Transparent to layout and to painting: it delegates every one of them to its
-/// content. Its only job is to report a wheel event it has seen and to claim
-/// it, which is what stops `Scrollable` from applying the jump the animation is
-/// supposed to replace.
-pub fn guard<'a, Message, Theme, Renderer>(
-    content: impl Into<Element<'a, Message, Theme, Renderer>>,
-    on_wheel: impl Fn(Wheel) -> Message + 'a,
-) -> WheelGuard<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: 'a,
-{
-    WheelGuard {
-        content: content.into(),
-        on_wheel: Box::new(on_wheel),
     }
 }
 

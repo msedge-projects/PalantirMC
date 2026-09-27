@@ -239,6 +239,7 @@ impl Route {
     /// Worth keeping exactly, spaces and case included: the reference's own
     /// code says `{ name: 'Discover content' }`, and a port that renames its
     /// routes makes every upstream fix harder to follow.
+    #[cfg(test)]
     pub fn name(&self) -> &'static str {
         match self {
             Route::Home => "Home",
@@ -277,6 +278,7 @@ impl Route {
     /// `ProjectTab::Description` and `InstanceTab::Content` are their own
     /// parent: the reference routes the bare path to the first tab, so going
     /// "up" from it is already done.
+    #[cfg(test)]
     pub fn parent(&self) -> Option<Route> {
         match self {
             Route::Server { id, tab } if *tab != ServerTab::Overview => Some(Route::Server {
@@ -292,69 +294,6 @@ impl Route {
                 tab: InstanceTab::Content,
             }),
             _ => None,
-        }
-    }
-
-    /// The path this route is addressed by, with no query.
-    ///
-    /// Ids are percent-encoded the way `encodeURIComponent` encodes them,
-    /// because that is what the reference does at every `router.push` that
-    /// builds one (`/instance/${encodeURIComponent(id)}`), and an instance
-    /// name is allowed to contain a slash.
-    pub fn path(&self) -> String {
-        match self {
-            Route::Home => "/".to_string(),
-            // The trailing slash is `routes.js`'s own path. Both spellings are
-            // accepted when parsing, because `App.vue`'s rail links to
-            // `/hosting/manage` and compares against both.
-            Route::Servers => "/hosting/manage/".to_string(),
-            Route::Server { id, tab } => {
-                let mut path = format!("/hosting/manage/{}", encode(id));
-                match tab {
-                    ServerTab::Overview => {}
-                    ServerTab::Content => path.push_str("/content"),
-                    ServerTab::Files => path.push_str("/files"),
-                    ServerTab::Backups => path.push_str("/backups"),
-                    ServerTab::Access => path.push_str("/access"),
-                }
-                path
-            }
-            Route::Discover { project_type } => format!("/browse/{}", project_type.token()),
-            Route::Skins => "/skins".to_string(),
-            Route::Screenshots => "/screenshots".to_string(),
-            Route::User { user, project_type } => match project_type {
-                Some(kind) => format!("/user/{}/{}", encode(user), kind.token()),
-                None => format!("/user/{}", encode(user)),
-            },
-            Route::Project { id, tab } => {
-                let mut path = format!("/project/{}", encode(id));
-                match tab {
-                    ProjectTab::Description => {}
-                    ProjectTab::Versions => path.push_str("/versions"),
-                    ProjectTab::Version(version) => {
-                        path.push_str("/version/");
-                        path.push_str(&encode(version));
-                    }
-                    ProjectTab::Gallery => path.push_str("/gallery"),
-                }
-                path
-            }
-            Route::Instance { id, tab } => {
-                let mut path = format!("/instance/{}", encode(id));
-                match tab {
-                    InstanceTab::Content => {}
-                    InstanceTab::ContentFilter(kind) => {
-                        path.push_str("/projects/");
-                        path.push_str(kind.token());
-                    }
-                    InstanceTab::Files => path.push_str("/files"),
-                    InstanceTab::Worlds => path.push_str("/worlds"),
-                    InstanceTab::Screenshots => path.push_str("/screenshots"),
-                    InstanceTab::Logs => path.push_str("/logs"),
-                    InstanceTab::Share => path.push_str("/share"),
-                }
-                path
-            }
         }
     }
 
@@ -489,53 +428,9 @@ impl Context {
         self.instance.is_some()
     }
 
-    /// Whether this page was opened from the worlds flow, which is what makes
-    /// Discover show servers instead of projects (`Browse.vue`'s
-    /// `isFromWorlds`).
-    ///
-    /// Named `opened_from_` rather than `from_`, which is the reference's own
-    /// name: a method called `from_*` that takes `self` is the one shape clippy
-    /// reads as a constructor, and an allowance would hide the next real one.
-    pub fn opened_from_worlds(&self) -> bool {
-        self.from.as_deref() == Some("worlds")
-    }
-
     /// Whether this page is inside a hosted server.
     pub fn in_server(&self) -> bool {
         self.server.is_some()
-    }
-
-    /// The query string, leading `?` included, or empty.
-    ///
-    /// The parameter order is `Browse.vue`'s: it builds one object and lets
-    /// `URLSearchParams` serialise it in insertion order, and a test computed
-    /// against the reference's own URLs would see a different string if this
-    /// sorted them instead.
-    pub fn to_query(&self) -> String {
-        let mut pairs: Vec<(&str, &str)> = Vec::new();
-        if let Some(value) = &self.instance {
-            pairs.push(("i", value));
-        }
-        if let Some(value) = &self.add_to_instance {
-            pairs.push(("ai", value));
-        }
-        if let Some(value) = &self.from {
-            pairs.push(("from", value));
-        }
-        if let Some(value) = &self.server {
-            pairs.push(("sid", value));
-        }
-        if let Some(value) = &self.world {
-            pairs.push(("wid", value));
-        }
-        if pairs.is_empty() {
-            return String::new();
-        }
-        let pairs: Vec<String> = pairs
-            .iter()
-            .map(|(key, value)| format!("{key}={}", encode(value)))
-            .collect();
-        format!("?{}", pairs.join("&"))
     }
 
     /// Read the five parameters out of a query string, with or without its
@@ -575,16 +470,6 @@ impl Address {
     /// A top-level page with no context.
     pub fn at(route: Route) -> Address {
         Address { route, context: Context::default() }
-    }
-
-    /// The full path, query included.
-    pub fn to_path(&self) -> String {
-        format!("{}{}", self.route.path(), self.context.to_query())
-    }
-
-    /// The route name, as `routes.js` spells it.
-    pub fn name(&self) -> &'static str {
-        self.route.name()
     }
 
     /// Read an address out of a path, fragment and query included.
@@ -729,11 +614,13 @@ pub enum Mark {
 /// Taken from the reference's own behaviour rather than from RFC 3986, which
 /// leaves `!*'()` out; `encodeURIComponent` is what every `router.push` in the
 /// reference percent-encodes with.
+#[cfg(test)]
 fn is_component_safe(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte)
 }
 
 /// Percent-encode one path segment or query value.
+#[cfg(test)]
 fn encode(raw: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(raw.len());
@@ -836,33 +723,6 @@ mod tests {
     }
 
     #[test]
-    fn every_route_survives_a_trip_through_its_own_path() {
-        for route in sample() {
-            let path = route.path();
-            let parsed = Address::parse(&path);
-            assert_eq!(
-                parsed.as_ref().map(|address| &address.route),
-                Some(&route),
-                "{path} did not come back as {route:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn ids_that_contain_a_slash_stay_one_segment() {
-        // An instance is named by the user, so its id can be anything a file
-        // name can be. `encodeURIComponent` is what the reference pushes with,
-        // and it is the only reason `/instance/a%2Fb/files` parses as the
-        // Files tab of an instance called `a/b`.
-        let path = Route::Instance { id: "a/b".into(), tab: InstanceTab::Files }.path();
-        assert_eq!(path, "/instance/a%2Fb/files");
-        assert_eq!(Address::parse(&path).map(|address| address.route), Some(Route::Instance {
-            id: "a/b".into(),
-            tab: InstanceTab::Files,
-        }));
-    }
-
-    #[test]
     fn the_names_are_the_references_names() {
         // Straight out of `routes.js`. A rename here would make every later
         // port of a page harder to line up with upstream.
@@ -938,31 +798,6 @@ mod tests {
         for path in ["/mods", "/worlds", "/logs", "/settings", "/accounts", "/about", "/nonsense"] {
             assert!(Address::parse(path).is_none(), "{path} should not resolve");
         }
-    }
-
-    #[test]
-    fn the_query_is_read_back_and_written_the_way_the_reference_writes_it() {
-        let address = Address::parse("/browse/mod?i=All%20the%20Mods%2010&from=worlds")
-            .expect("browse inside an instance");
-        assert_eq!(address.route, Route::Discover { project_type: ProjectType::Mod });
-        assert_eq!(address.context.instance.as_deref(), Some("All the Mods 10"));
-        assert!(address.context.in_instance());
-        assert!(address.context.opened_from_worlds());
-        assert!(!address.context.in_server());
-        // `Browse.vue` carries these five onto every tab link it builds, in
-        // this order.
-        assert_eq!(address.context.to_query(), "?i=All%20the%20Mods%2010&from=worlds");
-        assert_eq!(
-            address.to_path(),
-            "/browse/mod?i=All%20the%20Mods%2010&from=worlds"
-        );
-    }
-
-    #[test]
-    fn a_query_free_page_writes_no_question_mark() {
-        assert_eq!(Address::at(Route::Home).to_path(), "/");
-        assert_eq!(Address::at(Route::Skins).to_path(), "/skins");
-        assert_eq!(Context::default().to_query(), "");
     }
 
     #[test]

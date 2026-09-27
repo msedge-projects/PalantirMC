@@ -10,30 +10,43 @@
 //! URL building is shared with `palantir-net::modrinth`; parsing and selection
 //! are pure so the matching rules are unit-tested without a network.
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::Path;
 
-use palantir_loader::{PackFile, PackPlan};
-use palantir_net::download_many_with_progress;
-use palantir_net::meta::{BlockingHttpFetcher, Fetcher};
-use palantir_net::modrinth::{search_url_sorted, version_url, ModrinthProjectVersion};
-use serde::Deserialize;
 use sha1::Digest;
 
+// What the binary no longer needs is marked rather than deleted: the module's
+// request building and pack reading are what its tests cover, and the shell's
+// own Discover page asks `palantir-net` directly since the old shell went.
+#[cfg(test)]
+use std::path::PathBuf;
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use serde::Deserialize;
+#[cfg(test)]
+use palantir_loader::{PackFile, PackPlan};
+#[cfg(test)]
+use palantir_net::download_many_with_progress;
+#[cfg(test)]
+use palantir_net::meta::{BlockingHttpFetcher, Fetcher};
+#[cfg(test)]
+use palantir_net::modrinth::ModrinthProjectVersion;
+#[cfg(test)]
 use crate::catalog::LoaderKind;
+#[cfg(test)]
 use crate::install::{self, Progress};
 
 /// User agent identifying this launcher, as Modrinth's API guidelines ask.
+#[cfg(test)]
 pub const USER_AGENT: &str = concat!("PalantirMC/", env!("CARGO_PKG_VERSION"));
 
 /// How long a browse request may take.
+#[cfg(test)]
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
-
-/// How many search hits the UI keeps (the API caps at 100).
-pub const SEARCH_LIMIT: usize = 20;
 
 /// Content tabs exposed by Modrinth's public project types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg(test)]
 pub enum ContentType {
     /// Modrinth modpacks.
     ///
@@ -56,71 +69,16 @@ pub enum ContentType {
     Shaders,
 }
 
-/// The order Discover asks Modrinth for.
-///
-/// The reference's Sort control offers Relevance, Downloads, Follows, Newest and
-/// Updated, and these are the API's own `index` values for exactly those, in its
-/// own spelling -- so the control's label and the query string are two names for
-/// one thing rather than a mapping nobody can check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Sort {
-    /// Best match for the query: what the API does when asked for nothing, and
-    /// what the reference's Discover page opens on.
-    #[default]
-    Relevance,
-    /// Most downloaded first.
-    Downloads,
-    /// Most followed first.
-    Follows,
-    /// Newest projects first.
-    Newest,
-    /// Most recently updated first.
-    Updated,
-}
-
-impl Sort {
-    /// Label in the Sort control, as the reference sets it.
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Relevance => "Relevance",
-            Self::Downloads => "Downloads",
-            Self::Follows => "Follows",
-            Self::Newest => "Newest",
-            Self::Updated => "Updated",
-        }
-    }
-
-    /// Modrinth's `index` value.
-    pub const fn api_value(self) -> &'static str {
-        match self {
-            Self::Relevance => "relevance",
-            Self::Downloads => "downloads",
-            Self::Follows => "follows",
-            Self::Newest => "newest",
-            Self::Updated => "updated",
-        }
-    }
-
-    /// Every order the control offers, in the reference's order.
-    pub const fn all() -> [Self; 5] {
-        [Self::Relevance, Self::Downloads, Self::Follows, Self::Newest, Self::Updated]
-    }
-}
-
 /// The label is what `pick_list` draws in the closed control and beside each
 /// entry, so the two can never disagree about what an order is called.
-impl std::fmt::Display for Sort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
-    }
-}
-
+#[cfg(test)]
 impl ContentType {
     /// Label shown in the Browse tab strip.
     ///
     /// "Packs" is capitalised in both entries because that is how the reference
     /// sets them; read off its tab strip, where OCR returned "Data Packs" whole
     /// and merged "ResourcePacks" out of the same line.
+    #[cfg(test)]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Modpacks => "Modpacks",
@@ -131,23 +89,8 @@ impl ContentType {
         }
     }
 
-    /// The glyph the Discover page draws in this type's card icon slot.
-    ///
-    /// The reference loads the *project's* own icon into that slot, which is a
-    /// network fetch per card this shell does not do yet; the type's glyph in the
-    /// same measured box is what it draws instead, so the cards are still
-    /// distinguishable at a glance. `REFERENCE.md` records the difference.
-    pub const fn page_glyph(self) -> &'static str {
-        match self {
-            Self::Modpacks => "cube",
-            Self::Mods => "shield",
-            Self::ResourcePacks => "image",
-            Self::DataPacks => "folder",
-            Self::Shaders => "bulb",
-        }
-    }
-
     /// Modrinth's `project_type` facet value.
+    #[cfg(test)]
     pub const fn api_value(self) -> &'static str {
         match self {
             Self::Mods => "mod",
@@ -188,6 +131,7 @@ impl ContentType {
 
 /// One search result (a superset of what the UI paints).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[cfg(test)]
 pub struct Hit {
     /// Project id (stable).
     #[serde(default)]
@@ -215,8 +159,10 @@ pub struct Hit {
     pub project_type: String,
 }
 
+#[cfg(test)]
 impl Hit {
     /// Stable identifier for follow-up calls.
+    #[cfg(test)]
     pub fn project_ref(&self) -> &str {
         if self.project_id.is_empty() {
             &self.slug
@@ -226,6 +172,7 @@ impl Hit {
     }
 
     /// `1.2M downloads` / `12,345 downloads`, compact for cards.
+    #[cfg(test)]
     pub fn downloads_label(&self) -> String {
         let n = self.downloads;
         if n >= 1_000_000_000 {
@@ -251,12 +198,14 @@ impl Hit {
 
 /// Search response envelope.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[cfg(test)]
 struct SearchEnvelope {
     #[serde(default)]
     hits: Vec<Hit>,
 }
 
 /// Parse a `GET /v2/search` body (pure; used by the tests).
+#[cfg(test)]
 pub fn parse_search(body: &str) -> Result<Vec<Hit>, String> {
     let envelope: SearchEnvelope =
         serde_json::from_str(body).map_err(|error| format!("unexpected search response: {error}"))?;
@@ -264,68 +213,13 @@ pub fn parse_search(body: &str) -> Result<Vec<Hit>, String> {
 }
 
 /// HTTP client used by every browse call.
+#[cfg(test)]
 pub fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .timeout(HTTP_TIMEOUT)
         .user_agent(USER_AGENT)
         .build()
         .map_err(|error| format!("cannot build an HTTP client: {error}"))
-}
-
-fn get_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
-    let response = client
-        .get(url)
-        .header("Accept", "application/json")
-        .send()
-        .map_err(|error| format!("request to {url} failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("{url} returned HTTP {status}"));
-    }
-    response.text().map_err(|error| format!("reading {url} failed: {error}"))
-}
-
-/// Search Modrinth for one of the launcher's content tabs.
-pub fn search_typed(
-    client: &reqwest::blocking::Client,
-    query: &str,
-    content_type: ContentType,
-) -> Result<Vec<Hit>, String> {
-    search_sorted(client, query, content_type, Sort::Relevance)
-}
-
-/// The same search, in the order Discover's Sort control asked for.
-///
-/// One implementation rather than two, because the only difference is the URL:
-/// the filtering, the type check and the limit are the parts that must not
-/// drift apart between the sorted and unsorted paths.
-pub fn search_sorted(
-    client: &reqwest::blocking::Client,
-    query: &str,
-    content_type: ContentType,
-    sort: Sort,
-) -> Result<Vec<Hit>, String> {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-    let body = get_text(
-        client,
-        &search_url_sorted(trimmed, content_type.api_value(), sort.api_value()),
-    )?;
-    let mut hits = parse_search(&body)?;
-    hits.retain(|hit| hit.project_type.eq_ignore_ascii_case(content_type.api_value()));
-    hits.truncate(SEARCH_LIMIT);
-    Ok(hits)
-}
-
-/// List a project's versions (newest first, as the API returns them).
-pub fn project_versions(
-    client: &reqwest::blocking::Client,
-    project: &str,
-) -> Result<Vec<ModrinthProjectVersion>, String> {
-    let body = get_text(client, &version_url(project))?;
-    serde_json::from_str(&body).map_err(|error| format!("unexpected version list: {error}"))
 }
 
 /// Choose the best version for an instance.
@@ -339,6 +233,7 @@ pub fn project_versions(
 ///    newest `alpha` — "newest" being API order, which is publish-date
 ///    descending. [`ModrinthProjectVersion`] carries no timestamp, so order is
 ///    the only ordering signal available.
+#[cfg(test)]
 pub fn pick_version<'a>(
     versions: &'a [ModrinthProjectVersion],
     game: &str,
@@ -369,6 +264,7 @@ pub fn pick_version<'a>(
 /// instance's version is how you end up refusing to install a 1.20.1 pack
 /// because 1.21 happens to be selected. Prism's list, in preference order:
 /// `release`, then `beta`, then `alpha`, in the API's publish-date order.
+#[cfg(test)]
 pub fn newest_version(versions: &[ModrinthProjectVersion]) -> Option<&ModrinthProjectVersion> {
     for kind in ["release", "beta", "alpha"] {
         if let Some(found) = versions
@@ -383,6 +279,7 @@ pub fn newest_version(versions: &[ModrinthProjectVersion]) -> Option<&ModrinthPr
 
 /// A file that was written into an instance.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub struct InstalledFile {
     /// File name as written.
     pub filename: String,
@@ -395,6 +292,7 @@ pub struct InstalledFile {
 }
 
 /// `sha1` hex digest, lowercase.
+#[cfg(test)]
 pub fn sha1_hex(bytes: &[u8]) -> String {
     let mut hasher = sha1::Sha1::new();
     hasher.update(bytes);
@@ -425,6 +323,7 @@ pub fn sha1_file(path: &Path) -> Result<String, String> {
 }
 
 /// Make an API-provided file name safe to write on Windows.
+#[cfg(test)]
 pub fn safe_file_name(name: &str) -> Result<String, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -441,6 +340,7 @@ pub fn safe_file_name(name: &str) -> Result<String, String> {
 }
 
 /// Verify downloaded bytes against a Modrinth `sha1` (and size when known).
+#[cfg(test)]
 pub fn verify_download(bytes: &[u8], expected_sha1: Option<&str>, expected_size: u64) -> Result<bool, String> {
     if expected_size > 0 && bytes.len() as u64 != expected_size {
         return Err(format!("size mismatch: expected {expected_size} bytes, got {}", bytes.len()));
@@ -458,6 +358,7 @@ pub fn verify_download(bytes: &[u8], expected_sha1: Option<&str>, expected_size:
 }
 
 /// Download a version's primary file into the selected content folder.
+#[cfg(test)]
 pub fn install_version(
     client: &reqwest::blocking::Client,
     target_dir: &Path,
@@ -491,122 +392,9 @@ pub fn install_version(
     Ok(InstalledFile { filename, path, bytes: bytes.len(), verified })
 }
 
-/// How many files one content install may write, dependencies included.
-///
-/// A bound rather than a policy: Modrinth's graph is user-generated and a cycle
-/// between two projects that both require each other is entirely possible. The
-/// `seen` set already stops a repeat; this stops a chain long enough to look
-/// like a hang. Sixteen covers a mod and its practical dependency set — Fabric
-/// API, a library, a config library, an API — several times over.
-pub const MAX_CONTENT_FILES: usize = 16;
-
-/// Content installed into an instance, dependencies included.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct InstalledContent {
-    /// Files written, the requested one first.
-    pub files: Vec<InstalledFile>,
-    /// Lines worth telling the user: dependencies that were skipped, and why.
-    pub notes: Vec<String>,
-}
-
-impl InstalledContent {
-    /// `3 files (2.1 MiB)` for a status line.
-    pub fn summary(&self) -> String {
-        let bytes: usize = self.files.iter().map(|file| file.bytes).sum();
-        let verified = self.files.iter().filter(|file| file.verified).count();
-        let note = if verified == self.files.len() {
-            "sha1 verified"
-        } else if verified == 0 {
-            "size checked"
-        } else {
-            "sha1 verified where published"
-        };
-        format!("{} file(s) ({}, {note})", self.files.len(), human_bytes(bytes as u64))
-    }
-}
-
-/// Install a version and the dependencies it requires.
-///
-/// Modrinth publishes a version's `dependencies` ([`ModrinthDependency`]) and
-/// this is the only thing that reads them. A `required` dependency that names a
-/// Modrinth project is resolved with the same rules as the requested file and
-/// installed too, and the walk continues into that dependency's own list. What does *not*
-/// happen is also deliberate: `optional` and `embedded` dependencies are left
-/// alone (installing an optional dependency changes what the user asked for),
-/// a dependency hosted off Modrinth is reported rather than guessed at, and a
-/// dependency that fails to download does not take the requested file down with
-/// it.
-///
-/// `seen` is keyed by project id, so two mods that both require Fabric API
-/// install it once, and a cycle terminates.
-pub fn install_with_dependencies(
-    client: &reqwest::blocking::Client,
-    target_dir: &Path,
-    version: &ModrinthProjectVersion,
-    game: &str,
-    loader: LoaderKind,
-    progress: &mut dyn FnMut(Progress),
-) -> Result<InstalledContent, String> {
-    let mut installed = InstalledContent::default();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut queue: Vec<(String, ModrinthProjectVersion)> =
-        vec![(version.project_id.clone(), version.clone())];
-    while let Some((project, version)) = queue.pop() {
-        let key = if project.is_empty() { version.id.clone() } else { project };
-        if !seen.insert(key) {
-            continue;
-        }
-        if installed.files.len() >= MAX_CONTENT_FILES {
-            installed.notes.push(format!(
-                "stopped after {MAX_CONTENT_FILES} files — install the remaining dependencies by name"
-            ));
-            break;
-        }
-        let requested = installed.files.is_empty();
-        progress(Progress::starting(format!("installing {}", version.name)));
-        match install_version(client, target_dir, &version) {
-            Ok(file) => installed.files.push(file),
-            // The file the user clicked is the reason for the install: its
-            // failure is the install's failure. A dependency's is not.
-            Err(error) if requested => return Err(error),
-            Err(error) => {
-                installed.notes.push(format!("{}: {error}", version.name));
-                continue;
-            }
-        }
-        for dependency in version.dependencies.iter().filter(|d| d.is_required()) {
-            let Some(project) = dependency.project() else {
-                installed.notes.push(format!(
-                    "{} also needs {} — it is not on Modrinth, so fetch it from where its author publishes it",
-                    version.name,
-                    dependency.file_name.as_deref().unwrap_or("a file")
-                ));
-                continue;
-            };
-            if seen.contains(project) {
-                continue;
-            }
-            let found = project_versions(client, project).and_then(|versions| {
-                pick_version(&versions, game, loader)
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "no build of {project} matches {} {game}",
-                            loader.label()
-                        )
-                    })
-            });
-            match found {
-                Ok(found) => queue.push((project.to_string(), found)),
-                Err(error) => installed.notes.push(format!("{} needs {project}: {error}", version.name)),
-            }
-        }
-    }
-    Ok(installed)
-}
-
 /// What fetching a pack's listed files came to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg(test)]
 pub struct PackFetch {
     /// Files downloaded this time.
     pub fetched: usize,
@@ -616,34 +404,6 @@ pub struct PackFetch {
     pub bytes: u64,
     /// One line per file that could not be installed.
     pub failed: Vec<String>,
-}
-
-impl PackFetch {
-    /// `18 files (121.4 MiB), 2 already present` for a status line.
-    pub fn summary(&self) -> String {
-        let mut out = format!("{} file(s)", self.fetched);
-        if self.bytes > 0 {
-            out.push_str(&format!(" ({})", human_bytes(self.bytes)));
-        }
-        if self.present > 0 {
-            out.push_str(&format!(", {} already present", self.present));
-        }
-        out
-    }
-}
-
-/// Human byte size (binary units), for a status line.
-pub fn human_bytes(bytes: u64) -> String {
-    let value = bytes as f64;
-    if bytes >= 1024 * 1024 * 1024 {
-        format!("{:.1} GiB", value / (1024.0 * 1024.0 * 1024.0))
-    } else if bytes >= 1024 * 1024 {
-        format!("{:.1} MiB", value / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.0} KiB", value / 1024.0)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 /// Download the files a pack's index lists into the instance it was imported
@@ -658,6 +418,7 @@ pub fn human_bytes(bytes: u64) -> String {
 ///
 /// A file the pack lists with several URLs gets its mirrors tried in order when
 /// the first one fails — that is what the list is for.
+#[cfg(test)]
 pub fn fetch_pack_files(
     fetcher: &(dyn Fetcher + Sync),
     root: &Path,
@@ -746,6 +507,7 @@ pub fn fetch_pack_files(
 }
 
 /// Fetch one URL with `fetcher`, writing it into `dest`.
+#[cfg(test)]
 fn fetch_one(fetcher: &(dyn Fetcher + Sync), url: &str, dest: &Path) -> Result<u64, String> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
@@ -768,6 +530,7 @@ fn fetch_one(fetcher: &(dyn Fetcher + Sync), url: &str, dest: &Path) -> Result<u
 }
 
 /// Check a fetched pack file against the `sha1` the pack published.
+#[cfg(test)]
 fn verify_pack_file(dest: &Path, file: &PackFile) -> Result<(), String> {
     let Some(expected) = file.sha1.as_deref().filter(|digest| !digest.is_empty()) else {
         return Ok(());
@@ -782,6 +545,7 @@ fn verify_pack_file(dest: &Path, file: &PackFile) -> Result<(), String> {
 
 /// A pack installed as a new instance, files and all.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub struct InstalledPack {
     /// The new instance's id (its folder name).
     pub id: String,
@@ -791,70 +555,12 @@ pub struct InstalledPack {
     pub skipped: Vec<String>,
 }
 
-/// Install a Modrinth modpack as a new instance.
-///
-/// The order is the only one that works: the `.mrpack` is fetched and cached,
-/// its plan is read, the archive is imported (overrides written, loader
-/// registered), and only then are the files the index lists downloaded into the
-/// new instance. Installing a pack by dropping its archive into `mods/` — which
-/// is what this used to do — left the game reading a zip as a broken mod and
-/// none of the pack present.
-///
-/// The archive stays in `<data root>/cache/packs/`: it is the only thing that
-/// knows what the pack contains, so a failed fetch can be retried and a repair
-/// has something to work from.
-pub fn install_pack(
-    client: &reqwest::blocking::Client,
-    paths: &palantir_core::paths::PalantirPaths,
-    version: &ModrinthProjectVersion,
-    name: &str,
-    progress: &mut dyn FnMut(Progress),
-) -> Result<InstalledPack, String> {
-    let file = version
-        .primary_file()
-        .ok_or_else(|| format!("{} has no downloadable file", version.name))?;
-    if file.url.is_empty() {
-        return Err(format!("{} publishes no direct download", version.name));
-    }
-    let filename = safe_file_name(&file.filename)?;
-    let cache_dir = paths.root.join("cache").join("packs");
-    palantir_core::util::ensure_dir(&cache_dir)
-        .map_err(|error| format!("creating {} failed: {error}", cache_dir.display()))?;
-    let archive = cache_dir.join(&filename);
-    progress(Progress::starting(format!("downloading {filename}")));
-    let mut response = client
-        .get(&file.url)
-        .send()
-        .map_err(|error| format!("downloading {filename} failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("downloading {filename} failed: HTTP {status}"));
-    }
-    {
-        let mut sink = std::fs::File::create(&archive)
-            .map_err(|error| format!("writing {} failed: {error}", archive.display()))?;
-        std::io::copy(&mut response, &mut sink)
-            .map_err(|error| format!("writing {} failed: {error}", archive.display()))?;
-    }
-    if let Some(expected) = file.sha1().filter(|digest| !digest.is_empty()) {
-        let actual = sha1_file(&archive)?;
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = std::fs::remove_file(&archive);
-            return Err(format!("sha1 mismatch for {filename}: packed {expected}, downloaded {actual}"));
-        }
-    }
-    // Read once and hand the same bytes to the plan and the import: a pack's
-    // overrides make it tens of megabytes, and neither call needs its own copy.
-    let bytes = std::fs::read(&archive)
-        .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
-    import_and_fetch(client, paths, &bytes, name, progress)
-}
-
 /// Install a pack that is already on disk (a dropped `.mrpack` or `.zip`).
 ///
 /// The same tail as [`install_pack`] without the download: the instance name is
 /// the archive's file stem, which is the only name available and the one the
 /// user would have typed.
+#[cfg(test)]
 pub fn install_pack_archive(
     client: &reqwest::blocking::Client,
     paths: &palantir_core::paths::PalantirPaths,
@@ -871,6 +577,7 @@ pub fn install_pack_archive(
 }
 
 /// Import pack bytes and fetch everything the index lists.
+#[cfg(test)]
 fn import_and_fetch(
     client: &reqwest::blocking::Client,
     paths: &palantir_core::paths::PalantirPaths,

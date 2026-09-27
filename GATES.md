@@ -1839,6 +1839,88 @@ flows so far landed.
 Re-running the push when the account can schedule jobs is the first thing to do
 with this tree.
 
+- [x] G89: what the deleted shell was the last caller of is gone, and the
+      generated table's allowance is its generator's to emit
+  CHECK: cargo test --workspace --all-targets --locked
+  EXPECT: test result: ok. 871 passed; 0 failed; 13 ignored
+  EVIDENCE: the transcript of these commands on the pushed tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    447 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    213 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+warning: `palantir-core` (lib test) generated 10 warnings
+warning: `palantir-core` (lib) generated 9 warnings (9 duplicates)
+warning: `palantir-core` (test "compat") generated 1 warning
+warning: `palantir-net` (lib test) generated 1 warning
+warning: `palantir-net` (lib) generated 1 warning (1 duplicate)
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings (2 duplicates)
+46 warnings where G88's run had 288, and not one of them a dead item:
+cargo clippy ... 2>&1 | grep -cE "never (used|read|constructed)" is 0
+
+$ python tools/gen_theme.py --check && python tools/gen_icons.py --check \
+    && python tools/gen_text.py --check
+CONFIRMED: theme generation is byte-identical
+CONFIRMED: icon generation is byte-identical
+CONFIRMED: text generation is byte-identical
+
+$ cargo build -p palantir-desktop --locked && target/debug/PalantirMC.exe --shot .scratch/after-prune.png
+exit 0, 1257x707, 1,903 distinct colours, and pixel-identical to the capture
+taken before this slice (`ImageChops.difference(...).getbbox()` is None)
+```
+
+  199 dead items were the delete's receipt -- G88 measured them, and this slice
+  is that list worked to zero. The rule it ran on is the one the lint states
+  rather than the one it looks like it states: an item whose only callers are
+  themselves dead is dead, so the list was taken twice -- once for the shipped
+  binary and once for the test build -- and every item was sorted by which of
+  the two still had a caller for it. Dead in both: deleted. Live only in the
+  tests: kept, with `#[cfg(test)]` on the item, because a test is a reader and
+  deleting what it reads would delete the record of what was measured. Dead
+  only in the tests: deleted, since nothing ships it and nothing reads it.
+  `never constructed` was the one report not acted on blind -- a type can be
+  reported that way while a live `impl` on it still compiles, and it is the
+  `impl` the build would miss.
+
+  The clearest shape of that decision is `theme.rs`, where 67 of the items
+  lived: the palette fields the old shell painted with -- the chrome, the
+  sidebar's wash, the modal's own surface -- and the painters that read them.
+  This shell's styles read the fields it kept, so those are dead in the binary;
+  the gate test that checks every field, dead or not, against the tokens it was
+  transcribed from is not, so the fields and their three constructors keep them
+  under `#[cfg(test)]`. 215 lines of marker went in for those and their like;
+  the slice is +378/-1,842 across 21 files.
+
+  One item could not be pruned by hand at all. `text_gen.rs` is generated and
+  `ci.yml` checks it byte for byte, so the allowance for its warnings has to be
+  the generator's: `tools/gen_text.py` now writes the `enum_variant_names`
+  allowance with the reason beside it (the reference's own keys really do end in
+  `key`), and the 53 single-character literals it emitted as `push_str` are
+  `push`. Re-running the generator leaves the file identical, which is what the
+  byte check asks.
+
+  Deliberately not done: the Prism-shaped `palantir-core` modules stay, because
+  every one of them still has a reader in this crate -- the flattening importer
+  that replaces them is the launch surface's work, not this slice's. And the 32
+  tests that left with their subjects (the modal's arrival, the version
+  catalog's list builders, the old shell's GPU report) are a loss of coverage in
+  one narrow sense and none at all in another: 903 tests to 871 is exactly those
+  32, and a test for code that is no longer there is not coverage.
+
+  The runner could not be the receipt again: the run for this slice's parent,
+  `36292014607`, died in three seconds with zero steps -- `recent account
+  payments have failed` -- so the transcript above is this machine's, run with
+  the flags `ci.yml` uses. Re-running the push when the account can schedule
+  jobs is still the first thing to do with this tree.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
