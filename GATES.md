@@ -2925,11 +2925,12 @@ article keys: ['date', 'link', 'summary', 'thumbnail', 'title']
   rebased against each other on the way in, and the counts above are the merged
   tree's, not either slice's alone.
 
-  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID` -- the same block as the ten before it, `Test workspace` dying in a few
-  seconds with zero steps and `recent account payments have failed or your spending
-  limit needs to be increased`, its dependants skipped rather than scheduled. The
-  transcripts above are this machine's, run with the flags `ci.yml` uses.
+  The runner could not be the receipt: this slice's push, `35b1aeb`, is run
+  `36335734138` -- four seconds, `Test workspace` and `Lint` failing with **zero
+  steps** and `The job was not started because recent account payments have failed
+  or your spending limit needs to be increased`, with `Build exe` and `Live
+  services` skipped rather than scheduled: the same block as the eleven before it.
+  The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
 
