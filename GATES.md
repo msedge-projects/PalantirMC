@@ -2012,10 +2012,11 @@ G89 took before this slice (`ImageChops.difference(...).getbbox()` is None)
   `drop(shell.render())` -- beside the capture above, which is the other half of
   the same claim: a plain run's surface is unchanged by any of it.
 
-  The runner could not be the receipt again: the push before this slice,
-  `1a3b367`, is run `36292534532`, three seconds with zero steps and the same
-  billing annotation. Re-running this push when the account can schedule jobs is
-  still the first thing to do with this tree.
+  The runner could not be the receipt again. The push before this slice,
+  `1a3b367`, is run `36292534532` -- three seconds, zero steps -- and this
+  slice's own push, `d166006`, is run `36295084058`, four seconds with zero steps
+  and the same billing annotation. Re-running those pushes when the account can
+  schedule jobs is still the first thing to do with this tree.
 
 ## What these gates cannot say
 
