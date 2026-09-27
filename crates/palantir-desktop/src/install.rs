@@ -30,8 +30,9 @@
 //!   land, because that is the directory `-Djava.library.path` points at.
 //!
 //! Everything here is testable without a network: [`plan`] and [`run`] take a
-//! [`Fetcher`], so tests hand them a map of canned bodies and assert on what
-//! ended up on disk.
+//! [`Wire`], so a test hands it the engine's own scripted server and asserts on
+//! what ended up on disk -- and on what was *asked for*, which is the half a
+//! hand-written stand-in for a downloader could never say.
 //!
 //! **Progress** reaches a caller through a [`Reporter`], which carries the two
 //! kinds of report a phase has: [`Reporter::log`] for the few lines worth
@@ -44,8 +45,7 @@ use std::time::{Duration, Instant};
 use palantir_core::assets::{object_cdn_path, object_relative_path, AssetIndex};
 use palantir_core::paths::PalantirPaths;
 use palantir_core::version::{LaunchProfile, Library, RuntimeContext};
-use palantir_net::download_many_with_progress;
-use palantir_net::meta::Fetcher;
+use crate::wire::{FileJob, Wire};
 
 /// Where Mojang serves asset objects from (hash-addressed, first two hex
 /// characters as the directory).
@@ -604,12 +604,7 @@ impl<'a> Reporter<'a> {
 /// says nothing between starting and finishing otherwise, and a silent screen
 /// is indistinguishable from a hang — which is how a resumable install gets
 /// killed by the person waiting for it.
-pub fn run(
-    plan: &InstallPlan,
-    fetcher: &(dyn Fetcher + Sync),
-    threads: usize,
-    reporter: &mut Reporter,
-) -> InstallReport {
+pub fn run(plan: &InstallPlan, wire: &Wire, threads: usize, reporter: &mut Reporter) -> InstallReport {
     let mut report = InstallReport {
         present: plan.present,
         problems: plan.problems.clone(),
@@ -617,33 +612,29 @@ pub fn run(
     };
     if !plan.jobs.is_empty() {
         reporter.log(format!("downloading {} file(s)…", plan.jobs.len()));
-        let jobs: Vec<(String, PathBuf)> = plan
+        let jobs: Vec<FileJob> = plan
             .jobs
             .iter()
-            .map(|job| (job.url.clone(), job.dest.clone()))
+            .map(|job| FileJob::new(&job.url, &job.dest, &job.sha1))
             .collect();
         let started = Instant::now();
         let bytes_before = report.bytes;
-        let results = download_with_progress(fetcher, &jobs, threads, "files", reporter);
-        for (index, (url, result)) in results.into_iter().enumerate() {
+        let results = download_with_progress(wire, &jobs, threads, "files", reporter);
+        for (index, result) in results.into_iter().enumerate() {
             let job = &plan.jobs[index];
+            // No digest check here any more: the transfer that wrote the file is
+            // the one that checks it, against whatever kind of digest the
+            // publisher stated, and it removes a mismatch *before* the rename.
+            // A file that reached `dest` at all is therefore the file the
+            // metadata described, and checking again here would read every
+            // downloaded byte a second time to answer a question that is settled.
             match result {
-                Ok(bytes) => match verify_download(&job.dest, &job.sha1) {
-                    Ok(()) => {
-                        report.downloaded += 1;
-                        report.bytes += bytes;
-                    }
-                    Err(reason) => {
-                        // A file that fails its digest is worse than no file:
-                        // remove it so the next run fetches it again instead of
-                        // trusting corrupt bytes.
-                        let _ = std::fs::remove_file(&job.dest);
-                        report.failed.push(format!("{}: {reason}", job.label));
-                    }
-                },
+                Ok(bytes) => {
+                    report.downloaded += 1;
+                    report.bytes += bytes;
+                }
                 Err(error) => report.failed.push(format!("{}: {error}", job.label)),
             }
-            let _ = url;
         }
         // `report.downloaded` is this phase's count, successes only: a file
         // that failed its digest is reported on its own line right after, and a
@@ -658,7 +649,7 @@ pub fn run(
     }
 
     if let Some(assets) = &plan.assets {
-        run_assets(assets, fetcher, threads, &mut report, reporter);
+        run_assets(assets, wire, threads, &mut report, reporter);
     }
 
     if !plan.natives.is_empty() {
@@ -719,24 +710,25 @@ fn phase_done_line(label: &str, files: usize, bytes: u64, elapsed: Duration) -> 
     )
 }
 
-/// Fetch every job in parallel, reporting progress while it works.
+/// Fetch every job over the engine's queue, reporting progress while it works.
 ///
-/// The downloads stay parallel inside [`download_many_with_progress`]; the
-/// reporting happens on this thread, once per finished file, so the reports
-/// reach `reporter` in order and need no locking. The first file and the last are
-/// always reported — the first says the phase is alive, the last that it is
-/// over — and the rest follow [`progress_step`].
+/// The parallelism is the engine's -- a fixed set of workers over one client,
+/// under the ceiling the whole process shares -- rather than a thread count
+/// chosen here. The reporting happens on this thread, once per finished file, so
+/// the reports reach `reporter` in order and need no locking. The first file and
+/// the last are always reported — the first says the phase is alive, the last
+/// that it is over — and the rest follow [`progress_step`].
 pub(crate) fn download_with_progress(
-    fetcher: &(dyn Fetcher + Sync),
-    jobs: &[(String, PathBuf)],
+    wire: &Wire,
+    jobs: &[FileJob],
     threads: usize,
     label: &str,
     reporter: &mut Reporter,
-) -> Vec<(String, Result<u64, palantir_net::Error>)> {
+) -> Vec<Result<u64, String>> {
     let total = jobs.len();
     let step = progress_step(total);
     let mut reported = 0usize;
-    download_many_with_progress(fetcher, jobs, threads.max(1), &mut |done, bytes| {
+    wire.files(jobs, threads, &mut |done, bytes| {
         if done == 1 || done == total || done - reported >= step {
             reported = done;
             reporter.report(Progress::new(label, done, total, bytes));
@@ -747,7 +739,7 @@ pub(crate) fn download_with_progress(
 /// Phase two: read the index and fetch the objects it names.
 fn run_assets(
     assets: &AssetPlan,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     threads: usize,
     report: &mut InstallReport,
     reporter: &mut Reporter,
@@ -773,12 +765,12 @@ fn run_assets(
             return;
         }
     };
-    let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+    let mut jobs: Vec<FileJob> = Vec::new();
     let mut labels: Vec<String> = Vec::new();
-    // Parallel to `jobs`: the digest each object has to hash to. An asset object
-    // is addressed *by* its digest, so this costs nothing to know and is the one
-    // check that catches a corrupted or half-written object.
-    let mut digests: Vec<String> = Vec::new();
+    // An asset object is addressed *by* its digest, so the check that catches a
+    // corrupted or half-written object costs nothing to state: the hash in the
+    // URL is the hash the file has to have, and the transfer verifies it before
+    // the file is renamed out of its part name.
     for (name, object) in &index.objects {
         if object.hash.len() < 2 {
             continue;
@@ -792,44 +784,29 @@ fn run_assets(
                 continue;
             }
         }
-        jobs.push((asset_object_url(&object.hash), dest));
+        jobs.push(FileJob::new(asset_object_url(&object.hash), dest, &object.hash));
         labels.push(name.clone());
-        digests.push(object.hash.to_ascii_lowercase());
     }
     if !jobs.is_empty() {
         reporter.log(format!("downloading {} asset object(s)…", jobs.len()));
         let started = Instant::now();
         let bytes_before = report.bytes;
         let objects_before = report.objects_downloaded;
-        let results = download_with_progress(fetcher, &jobs, threads, "asset objects", reporter);
-        for (index_in_jobs, (url, result)) in results.into_iter().enumerate() {
+        let results = download_with_progress(wire, &jobs, threads, "asset objects", reporter);
+        for (index_in_jobs, result) in results.into_iter().enumerate() {
+            // A digest mismatch is the transfer's own failure now: the object is
+            // named by its hash, the download was given that hash, and a file
+            // that did not hash to it never reached its destination. What is
+            // left for this loop is the bookkeeping.
             match result {
-                Ok(bytes) => match crate::browse::sha1_file(&jobs[index_in_jobs].1) {
-                    Ok(actual) if actual.eq_ignore_ascii_case(&digests[index_in_jobs]) => {
-                        report.objects_downloaded += 1;
-                        report.bytes += bytes;
-                    }
-                    Ok(actual) => {
-                        // The file is named after the digest it should have. A
-                        // mismatch means the bytes are not the object, and it is
-                        // deleted for the same reason a failed library digest
-                        // is: keeping it means every later launch trusts it,
-                        // because the present path checks size and not content.
-                        let _ = std::fs::remove_file(&jobs[index_in_jobs].1);
-                        report.failed.push(format!(
-                            "asset {}: sha1 mismatch: expected {}, got {actual}",
-                            labels[index_in_jobs], digests[index_in_jobs]
-                        ));
-                    }
-                    Err(reason) => report
-                        .failed
-                        .push(format!("asset {}: {reason}", labels[index_in_jobs])),
-                },
+                Ok(bytes) => {
+                    report.objects_downloaded += 1;
+                    report.bytes += bytes;
+                }
                 Err(error) => report
                     .failed
                     .push(format!("asset {}: {error}", labels[index_in_jobs])),
             }
-            let _ = url;
         }
         reporter.log(phase_done_line(
             "asset objects",
@@ -893,6 +870,14 @@ fn reconstruct(assets: &AssetPlan, index: &AssetIndex, reporter: &mut Reporter) 
 /// is accepted on the strength of having been written atomically by the
 /// downloader — there is nothing to compare it against, and hashing it would
 /// only prove it is not empty.
+/// Digest check for a file already on disk.
+///
+/// Test-only since the wire landed: the transfer verifies what it wrote, against
+/// whichever kind of digest the publisher stated, so nothing in the launcher
+/// reads a downloaded file back to check it any more. It stays because the tests
+/// below are how the rule itself -- an empty expectation means "do not check" --
+/// is written down, and a test is a reader.
+#[cfg(test)]
 pub fn verify_download(path: &Path, expected_sha1: &str) -> Result<(), String> {
     let expected = expected_sha1.trim().to_ascii_lowercase();
     if expected.is_empty() {
@@ -918,7 +903,7 @@ pub fn sha1_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use palantir_core::version::{LaunchProfile, Library};
-    use palantir_net::MapFetcher;
+    use crate::wire::Script;
     use serde_json::json;
 
     fn library_from(value: serde_json::Value) -> Library {
@@ -946,18 +931,14 @@ mod tests {
     }
 
     /// Run a plan and keep every line it wrote (the levels go nowhere).
-    fn run_lines(
-        plan: &InstallPlan,
-        fetcher: &(dyn Fetcher + Sync),
-        threads: usize,
-    ) -> (InstallReport, Vec<String>) {
+    fn run_lines(plan: &InstallPlan, wire: &Wire, threads: usize) -> (InstallReport, Vec<String>) {
         let mut lines: Vec<String> = Vec::new();
         // Each tap is bound inside the block that uses it, so the borrows end
         // with the block and the vectors can be read (and returned) afterwards.
         let report = {
             let mut collect = |line: String| lines.push(line);
             let mut reporter = Reporter::lines_only(&mut collect);
-            run(plan, fetcher, threads, &mut reporter)
+            run(plan, wire, threads, &mut reporter)
         };
         (report, lines)
     }
@@ -966,7 +947,7 @@ mod tests {
     /// asserts on the bar and on the log at once needs.
     fn run_both(
         plan: &InstallPlan,
-        fetcher: &(dyn Fetcher + Sync),
+        wire: &Wire,
         threads: usize,
     ) -> (InstallReport, Vec<String>, Vec<Progress>) {
         let mut lines: Vec<String> = Vec::new();
@@ -975,7 +956,7 @@ mod tests {
             let mut collect_line = |line: String| lines.push(line);
             let mut collect_level = |level: Progress| levels.push(level);
             let mut reporter = Reporter::new(&mut collect_line, &mut collect_level);
-            run(plan, fetcher, threads, &mut reporter)
+            run(plan, wire, threads, &mut reporter)
         };
         (report, lines, levels)
     }
@@ -1240,9 +1221,9 @@ mod tests {
         let plan = plan(&paths, &instance_root, &profile, &ctx);
         assert_eq!(plan.jobs.len(), 1);
 
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert(&plan.jobs[0].url, native_bytes.clone());
-        let (report, lines) = run_lines(&plan, &fetcher, 2);
+        let (report, lines) = run_lines(&plan, &fetcher.wire(), 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.downloaded, 1);
@@ -1270,12 +1251,20 @@ mod tests {
         })));
         let plan = plan(&paths, &paths.root, &profile, &ctx);
         assert_eq!(plan.jobs.len(), 1);
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert(&plan.jobs[0].url, b"a different file".to_vec());
 
-        let (report, _) = run_lines(&plan, &fetcher, 1);
+        let (report, _) = run_lines(&plan, &fetcher.wire(), 1);
         assert!(!report.is_complete());
-        assert!(report.failed[0].contains("sha1 mismatch"), "{:?}", report.failed);
+        // The words are the engine's now, and they are the better sentence: the
+        // transfer that wrote the part file names it, the digest it expected and
+        // the one it got.
+        assert!(report.failed[0].contains("hash mismatch"), "{:?}", report.failed);
+        assert!(
+            report.failed[0].contains(&sha1_hex(b"the real file")),
+            "and names the digest it expected: {:?}",
+            report.failed
+        );
         assert!(
             !plan.jobs[0].dest.exists(),
             "a file that failed its digest must not be left behind"
@@ -1346,11 +1335,11 @@ mod tests {
         assert!(plan.assets.is_some());
         assert!(plan.summary().contains("to download"));
 
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert(&plan.jobs[0].url, index_body.clone().into_bytes());
         fetcher.insert(&cdn_url(&click_hash), click.to_vec());
         fetcher.insert(&cdn_url(&meta_hash), meta.to_vec());
-        let (report, lines) = run_lines(&plan, &fetcher, 2);
+        let (report, lines) = run_lines(&plan, &fetcher.wire(), 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.downloaded, 1, "the index");
@@ -1389,16 +1378,16 @@ mod tests {
             known: true,
         });
         let plan = plan(&paths, &paths.root, &profile, &ctx);
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
         // Same length, different bytes: the case a size check cannot see.
         fetcher.insert(&cdn_url(&hash), b"wxyz".to_vec());
-        let (report, _) = run_lines(&plan, &fetcher, 1);
+        let (report, _) = run_lines(&plan, &fetcher.wire(), 1);
 
         assert!(!report.is_complete());
         assert_eq!(report.objects_downloaded, 0);
         assert!(
-            report.failed.iter().any(|line| line.contains("sha1 mismatch")),
+            report.failed.iter().any(|line| line.contains("hash mismatch")),
             "failures: {:?}",
             report.failed
         );
@@ -1423,16 +1412,16 @@ mod tests {
             id: "17".into(),
             known: true,
         });
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
         fetcher.insert(&cdn_url(&hash), body.to_vec());
 
         let first = plan(&paths, &paths.root, &profile, &ctx);
-        run_lines(&first, &fetcher, 1);
+        run_lines(&first, &fetcher.wire(), 1);
         let second = plan(&paths, &paths.root, &profile, &ctx);
         assert!(second.is_noop(), "jobs: {:?}", second.jobs);
         assert!(second.summary().contains("already installed"));
-        let (report, _) = run_lines(&second, &MapFetcher::new(), 1);
+        let (report, _) = run_lines(&second, &Script::new().wire(), 1);
         assert!(report.is_complete());
         assert_eq!(report.objects_downloaded, 0);
         assert_eq!(report.present, 2, "the index and the one object");
@@ -1447,7 +1436,7 @@ mod tests {
         profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo::bare("17"));
         let plan = plan(&paths, &paths.root, &profile, &ctx);
         assert!(plan.jobs.is_empty());
-        let (report, _) = run_lines(&plan, &MapFetcher::new(), 1);
+        let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
         assert!(report.problems.iter().any(|p| p.contains("no download URL")));
     }
 
@@ -1475,10 +1464,10 @@ mod tests {
         std::fs::create_dir_all(instance_root.join("minecraft")).unwrap();
 
         let plan = plan(&paths, &instance_root, &profile, &ctx);
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
         fetcher.insert(&cdn_url(&hash), body.to_vec());
-        let (report, lines) = run_lines(&plan, &fetcher, 1);
+        let (report, lines) = run_lines(&plan, &fetcher.wire(), 1);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         let reconstructed = instance_root.join("minecraft").join("resources").join("lang/en_US.lang");
@@ -1573,14 +1562,16 @@ mod tests {
     #[test]
     fn a_bulk_phase_reports_progress_without_narrating_every_file() {
         let dir = tempfile::tempdir().unwrap();
-        let mut fetcher = MapFetcher::new();
-        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+        let mut fetcher = Script::new();
+        // No digest: these are a phase's worth of files, and what this test is
+        // about is the reports, not the checking.
+        let mut jobs: Vec<FileJob> = Vec::new();
         const FILES: usize = 1000;
         const EACH: usize = 4096;
         for index in 0..FILES {
             let url = format!("https://cdn.invalid/object-{index:04}");
             fetcher.insert(&url, vec![b'x'; EACH]);
-            jobs.push((url, dir.path().join(format!("object-{index:04}"))));
+            jobs.push(FileJob::new(url, dir.path().join(format!("object-{index:04}")), ""));
         }
 
         let mut lines: Vec<String> = Vec::new();
@@ -1589,14 +1580,11 @@ mod tests {
             let mut collect_line = |line: String| lines.push(line);
             let mut collect_level = |level: Progress| levels.push(level);
             let mut reporter = Reporter::new(&mut collect_line, &mut collect_level);
-            download_with_progress(&fetcher, &jobs, 4, "files", &mut reporter)
+            download_with_progress(&fetcher.wire(), &jobs, 4, "files", &mut reporter)
         };
 
         assert_eq!(results.len(), FILES);
-        assert!(
-            results.iter().all(|(_, result)| result.is_ok()),
-            "every file arrived"
-        );
+        assert!(results.iter().all(Result::is_ok), "every file arrived");
         assert!(
             lines.is_empty(),
             "a bulk phase puts nothing on the console between starting and \
@@ -1687,7 +1675,7 @@ mod tests {
             id: "120".into(),
             known: true,
         });
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert(
             "https://piston-meta.mojang.com/120.json",
             index_body.into_bytes(),
@@ -1697,7 +1685,7 @@ mod tests {
         }
 
         let plan = plan(&paths, &paths.root, &profile, &ctx);
-        let (report, lines, levels) = run_both(&plan, &fetcher, 4);
+        let (report, lines, levels) = run_both(&plan, &fetcher.wire(), 4);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
         assert_eq!(report.objects_downloaded, OBJECTS);

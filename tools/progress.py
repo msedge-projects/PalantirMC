@@ -90,7 +90,7 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57)],  # the shell this rewrite replaces; G46b lives here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
     3: [(62, 65), (76, 77), (83, 83)],  # routes, scaffold, widgets; hover; themes; the panel
-    4: [(66, 75)],  # the engine, and the first page served by it
+    4: [(66, 75), (91, 91)],  # the engine; the first page on it; the launch's transfers
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
 
@@ -116,7 +116,8 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
         (
             "The desktop's other call sites on the engine.",
             2,
-            "browse.rs onto the engine, and launch.rs onto it",
+            "browse.rs's pack install onto the engine, and the metadata source "
+            "`resolve` reads",
         ),
     ],
 }
@@ -248,6 +249,38 @@ def code_size(root: Path) -> tuple[list[tuple[str, str, int, int]], tuple[int, i
     return rows, (hand_lines, hand_code, gen_lines, gen_code)
 
 
+def plan_totals(
+    stages: list[tuple[int, str, str]],
+    sized: dict[int, tuple[int, int]],
+    met_by_stage: dict[str, int],
+) -> dict[str, int | dict[int, float]]:
+    """The two headline numbers, and the per-stage percentages behind them.
+    
+    A function rather than a block inside `report`, because the dashboard asks
+    the same question and a page that computed its own answer could disagree
+    with the pane that was left open beside it.
+
+    The overall is the mean of the stage numbers, each stage weighted by what it
+    holds -- its met gates plus its open items -- so a stage with more of the
+    plan in it moves the number more. A done stage with no gates in the ledger
+    still happened, so it weighs one slice rather than none.
+    """
+    weights = {number: max(met + open, 1) for number, (met, open) in sized.items()}
+    percents = {
+        number: 100.0 if state == "done"
+        else 100.0 * sized[number][0] / (sized[number][0] + sized[number][1])
+        for number, _, state in stages
+    }
+    total_weight = sum(weights.values())
+    return {
+        "overall": round(sum(percents[number] * weights[number] for number in weights) / total_weight),
+        "percents": percents,
+        "met_total": sum(met for met, _ in sized.values()),
+        "slice_total": sum(met + open for met, open in sized.values()),
+        "met_before": met_by_stage.get("before", 0),
+    }
+
+
 def owner_of(gate_id: str) -> str | None:
     """The stage a gate belongs to, from its id."""
     number = int(re.match(r"G(\d+)", gate_id).group(1))
@@ -347,19 +380,10 @@ def report(root: Path) -> tuple[str, list[str]]:
         column = what if len(what) <= 52 else what[:49] + "..."
         out.append(f"{number:>5}  {column:<52}  {met:>4}  {open_estimate:>4}  {percent:>4}%")
 
-    # The overall is the mean of the stage numbers, each stage weighted by what
-    # it holds -- its met gates plus its open items -- so a stage with more of
-    # the plan in it moves the number more. A done stage with no gates in the
-    # ledger still happened, so it weighs one slice rather than none.
-    weights = {number: max(met + open_estimate, 1) for number, (met, open_estimate) in sized.items()}
-    percents = {
-        number: 100.0 if state == "done" else 100.0 * sized[number][0] / (sized[number][0] + sized[number][1])
-        for number, _, state in stages
-    }
-    total_weight = sum(weights.values())
-    overall = round(sum(percents[number] * weights[number] for number in weights) / total_weight)
-    met_total = sum(met for met, _ in sized.values())
-    slice_total = sum(met + open_estimate for met, open_estimate in sized.values())
+    totals = plan_totals(stages, sized, met_by_stage)
+    overall = totals["overall"]
+    met_total = totals["met_total"]
+    slice_total = totals["slice_total"]
     met_before = met_by_stage.get("before", 0)
     out.append("")
     out.append(f"overall: {overall}%  (the stage numbers above, weighted by what each stage holds)")

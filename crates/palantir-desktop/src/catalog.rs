@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use palantir_core::pack::Require;
 use palantir_core::resolve::VersionEntry;
-use palantir_net::meta::Fetcher;
+use crate::wire::Wire;
 use serde_json::Value;
 
 /// uid of the Minecraft component.
@@ -204,22 +204,25 @@ pub fn cache_paths(meta_dir: &Path, uid: &str) -> [PathBuf; 2] {
     [meta_dir.join(uid).join("index.json"), meta_dir.join(format!("{uid}.json"))]
 }
 
-/// Fetch a version list for `uid`: network first, cache second. Returns the
-/// parsed entries and whether the cache had to be used.
+/// Fetch a version list for `uid`: the wire first, the cache on disk second.
+///
+/// Returns the parsed entries and whether the *disk* copy had to be used —
+/// which is the flag a caller wants, because it is the one that means the
+/// service could not be reached at all. A hit in the engine's own TTL cache is
+/// an answer like any other and is not reported as a fallback.
 pub fn fetch_list(
     base_url: &str,
     meta_dir: &Path,
     uid: &str,
-    fetcher: &dyn Fetcher,
+    wire: &Wire,
 ) -> Result<(Vec<VersionEntry>, bool), String> {
     let url = list_url(base_url, uid);
-    let remote = fetcher.fetch(&url).and_then(|bytes| {
-        let parsed = parse_version_list(&bytes, &PathBuf::from(&url), uid)
-            .map_err(|detail| palantir_net::Error::format(&url, detail))?;
-        Ok((bytes, parsed))
+    let remote = wire.document(&url).and_then(|text| {
+        let parsed = parse_version_list(text.as_bytes(), &PathBuf::from(&url), uid)?;
+        Ok((text, parsed))
     });
     match remote {
-        Ok((bytes, parsed)) if !parsed.is_empty() => {
+        Ok((text, parsed)) if !parsed.is_empty() => {
             let cache = meta_dir.join(uid).join("index.json");
             // `atomic_write` writes beside its target, so on a fresh install —
             // where the cache folder does not exist yet — it must be created
@@ -227,7 +230,7 @@ pub fn fetch_list(
             if let Some(dir) = cache.parent() {
                 let _ = palantir_core::util::ensure_dir(dir);
             }
-            if let Err(error) = palantir_core::util::atomic_write(&cache, &bytes) {
+            if let Err(error) = palantir_core::util::atomic_write(&cache, text.as_bytes()) {
                 // A read-only cache is not fatal: the list is already parsed.
                 let _ = error;
             }

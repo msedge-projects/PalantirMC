@@ -2018,6 +2018,91 @@ G89 took before this slice (`ImageChops.difference(...).getbbox()` is None)
   and the same billing annotation. Re-running those pushes when the account can
   schedule jobs is still the first thing to do with this tree.
 
+- [x] G91: the launch's own downloads are the engine's queue, and the digest the
+      transfer checks is whatever kind the publisher stated
+  CHECK: cargo test --workspace --all-targets --locked
+  EXPECT: test result: ok. 879 passed; 0 failed; 13 ignored
+  EVIDENCE: the transcript of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    168 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    455 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    213 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 13 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, and the two crates this slice touched are where they were before it:
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings
+and not one of them a dead item:
+cargo clippy ... 2>&1 | grep -cE "never (used|read|constructed)" is 0
+
+$ python tools/gen_theme.py --check && python tools/gen_icons.py --check \
+    && python tools/gen_text.py --check
+CONFIRMED: theme generation is byte-identical
+CONFIRMED: icon generation is byte-identical
+CONFIRMED: text generation is byte-identical
+```
+
+  The launch path had a second way out of its own. `online_backend` handed the
+  worker an `OnlineMetaStore` and a `BlockingHttpFetcher`, the install phases
+  fetched through `download_many_with_progress`, and the Java runtime's list,
+  version file and manifest were read through the same fetcher -- so a launch's
+  downloads drew a ceiling the interface's requests knew nothing about,
+  restarted from zero after a dropped connection, could not be stopped from the
+  window that started them, and were checked by a digest comparison written in
+  the desktop after the fact. Three of those four are the engine's whole reason
+  for existing, and they were not reaching the one path that moves hundreds of
+  megabytes.
+
+  `wire.rs` is the crossing: one `Wire` per launch worker, holding the engine's
+  `HttpPool` under the process-wide ceiling, one `MetadataCache` in the
+  launcher's own `cache/meta`, and one `Backoff`. `Wire::document` reads a
+  document through the cache -- so a Java version file that has not changed costs
+  a revalidation rather than a download -- and `Wire::files` puts every file on a
+  `Scheduler` and drains its events, reporting each file as it lands. The install
+  and the Java runtime take that instead of a fetcher; nothing in the launch path
+  builds a client or a thread pool of its own any more.
+
+  The one change this needed from the engine is the reason it is a slice rather
+  than a substitution: `Download` carried `sha256: Option<String>`, and Mojang
+  addresses every library, every asset object and every Java file by its `sha1`.
+  A digest field that could only hold one kind meant the engine could not check
+  the files a launch fetches at all -- which is why the desktop was checking them
+  afterwards, reading every downloaded byte a second time. It is now
+  `Digest`, the type the content store is already keyed by, so
+  `Download::verified` takes whichever hex the publisher wrote and `finish`
+  verifies the part file with that kind before the rename. The post-hoc checks
+  went with the field: `install::verify_download` and `browse::sha1_file` are
+  `#[cfg(test)]` now, kept because their tests are where the rule they state is
+  written down.
+
+  A fixture had to change shape with them, and the shape is better. The install,
+  Java and launch tests used the crate's own `MapFetcher`, a hash map behind the
+  old `Fetcher` trait; they now drive the engine's `MapFetch`, which speaks the
+  offset contract. So the tests exercise the real queue, the real retry policy
+  and the real digest check, and the two that asserted a mismatch by its old
+  wording now assert the engine's -- which names the part file, the digest it
+  expected and the digest it got. One new test in `wire.rs` states the claim
+  itself: a 4096-byte body whose first 2048 bytes are already in the part file is
+  fetched as one 2048-byte ranged request, and the file that comes out hashes to
+  the whole thing.
+
+  Deliberately not in this slice, and named where the plan is: `browse.rs`'s pack
+  installer (test-only code that still holds its own client) and `resolve`'s
+  metadata, which still reads Prism's mirror. The second is a change of *which
+  service* is asked rather than of how the asking happens, and mixing it into a
+  slice about the asking would have made both halves harder to check.
+
+  The runner could not be the receipt again: the push for this slice is billed
+  like the three before it, with zero steps and the same annotation. Re-running
+  it when the account can schedule jobs is still the first thing to do with this
+  tree.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

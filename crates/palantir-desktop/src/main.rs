@@ -109,6 +109,9 @@ mod scroll;
 /// still needed — the native frame, and a `--shot` capture — are here.
 mod shell;
 mod store;
+/// The one way this launcher reaches the network: the engine's cache, its pool
+/// and its queue, as the launch path uses them.
+mod wire;
 /// The vocabulary the interface paints with: which token an ink is, and which
 /// face a piece of text is set in.
 ///

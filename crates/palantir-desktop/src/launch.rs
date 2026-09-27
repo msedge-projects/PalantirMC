@@ -46,7 +46,7 @@ use palantir_core::{
 #[cfg(test)]
 use palantir_core::resolve::OfflineMetaStore;
 use crate::model::SettingsModel;
-use palantir_net::meta::Fetcher;
+use crate::wire::Wire;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -539,17 +539,17 @@ pub fn prepare_auth(
 
 /// Resolve + install + plan a launch without starting anything.
 ///
-/// The metadata store and the HTTP fetcher are injected so this is testable
-/// offline: production passes an [`OnlineMetaStore`] (which caches what it
-/// fetches) and a [`palantir_net::BlockingHttpFetcher`], while tests pass an
-/// offline store and a map of canned bodies.
+/// The metadata store and the wire are injected so this is testable offline:
+/// production passes an [`OnlineMetaStore`] (which caches what it fetches) and a
+/// [`Wire`] over the engine's pool, while a test passes an offline store and a
+/// wire over the engine's own scripted server.
 pub fn prepare_launch(
     paths: &PalantirPaths,
     instance_id: &str,
     session: &launch::AuthSession,
     defaults: &LaunchDefaults,
     store: &mut dyn MetaStore,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     log: &mut dyn FnMut(String),
     progress: &mut dyn FnMut(install::Progress),
 ) -> LaunchReadiness {
@@ -624,7 +624,7 @@ pub fn prepare_launch(
     // ask for by accident.
     let report = {
         let mut reporter = install::Reporter::new(&mut *log, &mut *progress);
-        install::run(&install_plan, fetcher, install::DEFAULT_THREADS, &mut reporter)
+        install::run(&install_plan, wire, install::DEFAULT_THREADS, &mut reporter)
     };
     log(format!("install: {}", report.summary()));
     for failure in &report.failed {
@@ -716,7 +716,7 @@ pub fn prepare_launch(
             &defaults.java,
             &resolution.profile.compatible_java_majors,
             &resolution.profile.compatible_java_name,
-            fetcher,
+            wire,
             log,
             progress,
         ) {
@@ -1138,7 +1138,7 @@ fn pick_java(
     java: &JavaPrefs,
     want_majors: &[i64],
     want_name: &str,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     log: &mut dyn FnMut(String),
     progress: &mut dyn FnMut(install::Progress),
 ) -> Option<String> {
@@ -1204,7 +1204,7 @@ fn pick_java(
         java_runtime::ensure_runtime(
             paths,
             &request,
-            fetcher,
+            wire,
             java_runtime::DOWNLOAD_THREADS,
             &mut reporter,
         )
@@ -1345,11 +1345,21 @@ pub fn record_play_time(
     }
 }
 
-/// The metadata store and HTTP client a real launch uses.
-pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, palantir_net::BlockingHttpFetcher) {
+/// The metadata store and the wire a real launch uses.
+///
+/// The store is still the mirror `resolve` reads its version files through:
+/// moving that onto the engine as well is what the stage's open item has left,
+/// and it is a change of *which service* is asked rather than of how the asking
+/// happens.
+/// Everything the launch transfers goes over the wire: the client jar, the
+/// libraries, the asset objects, the Java runtime, and the documents the Java
+/// path reads on the way, all under one pool, one ceiling, one retry policy and
+/// one queue, with each file checked against the digest its publisher stated
+/// before the transfer renames it into place.
+pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, Wire) {
     (
         palantir_net::OnlineMetaStore::new(palantir_net::DEFAULT_META_BASE_URL, paths.meta_dir()),
-        palantir_net::BlockingHttpFetcher::new(Duration::from_secs(30)),
+        Wire::new(paths.meta_dir()),
     )
 }
 
@@ -1425,14 +1435,14 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<L
         }
         match prepared {
             Some(prepared) => {
-                let (mut store, fetcher) = online_backend(&paths);
+                let (mut store, wire) = online_backend(&paths);
                 prepare_launch(
                     &paths,
                     &params.instance_id,
                     &prepared.session,
                     &params.defaults,
                     &mut store,
-                    &fetcher,
+                    &wire,
                     &mut log,
                     &mut progress,
                 )
@@ -1980,7 +1990,8 @@ fn send_done(sender: &mut Sender<LaunchEvent>, run_id: u64, note: String) {
 mod tests {
     use super::*;
     use palantir_core::pack::Component;
-    use palantir_net::{MapFetcher, MapTransport, MicrosoftOAuth};
+    use crate::wire::Script;
+    use palantir_net::{MapTransport, MicrosoftOAuth};
 
     #[test]
     fn server_addresses_parse_with_default_port() {
@@ -2253,7 +2264,7 @@ mod tests {
             &java,
             &[21],
             "java-runtime-delta",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         )
@@ -2269,7 +2280,7 @@ mod tests {
             &java,
             &[17],
             "java-runtime-gamma",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         )
@@ -2293,7 +2304,7 @@ mod tests {
             &stale,
             &[21],
             "java-runtime-delta",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2596,7 +2607,7 @@ mod tests {
     fn prepare_launch_reports_missing_instance() {
         let (_dir, paths) = test_root();
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2604,7 +2615,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2621,7 +2632,7 @@ mod tests {
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Cold", "1.21.1").unwrap();
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2629,7 +2640,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2661,7 +2672,7 @@ mod tests {
         seed_library(paths.root.join("libraries").join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"));
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         // Levels as well as lines: this is the only path through
         // `prepare_launch` that reaches the install phase with nothing missing,
@@ -2675,7 +2686,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |level| levels.push(level),
         );
@@ -2742,7 +2753,7 @@ mod tests {
         };
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2750,7 +2761,7 @@ mod tests {
             &session(),
             &defaults,
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );

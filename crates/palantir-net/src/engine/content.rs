@@ -417,9 +417,9 @@ impl ContentStore {
             return Ok(Stored::AlreadyThere);
         }
         let staging = self.staging_path(digest);
-        // No digest on the `Download`: this store verifies with the caller's
-        // kind, and `fetch_to_file`'s own check is sha256-only. Two checks that
-        // disagree about the algorithm would be one check too many.
+        // No digest on the `Download`: this store verifies once, in `adopt`, with
+        // the kind its own key is made of. A check in the transfer as well would
+        // read every file twice to answer the same question.
         let download = Download::new(url, &staging);
         let downloaded = fetch_to_file(fetch, &download, cancel, backoff, sleep)?;
         if let Err(error) = self.adopt(digest, &staging) {

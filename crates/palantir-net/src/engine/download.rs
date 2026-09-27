@@ -35,8 +35,9 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::download::{part_path, verify_sha256};
+use crate::download::part_path;
 use crate::engine::cancel::Cancel;
+use crate::engine::content::Digest;
 use crate::engine::request::{Fetch, Outcome, Request};
 use crate::engine::retry::{is_retryable, Backoff};
 use crate::Error;
@@ -48,29 +49,60 @@ pub struct Download {
     pub url: String,
     /// Where it goes.
     pub dest: PathBuf,
-    /// The `sha256` it must have, when the source says.
+    /// The digest it must have, when the source says -- of whichever of the
+    /// three kinds the source published.
     ///
     /// Not optional in the sense of "nice to have": a download with a digest can
     /// be resumed, skipped when it is already there, and refused when it is
     /// wrong, and one without can do none of those things. Most of this
     /// launcher's downloads come from a publisher that states one.
-    pub sha256: Option<String>,
+    ///
+    /// A [`Digest`] rather than a `sha256` string, because the sources do not
+    /// agree on an algorithm: Mojang addresses every library and every asset
+    /// object by its `sha1`, Modrinth publishes a `sha256`, and this crate's
+    /// content store is keyed by whichever one the source named. What has to be
+    /// checked before a file is renamed into place -- *these are the bytes that
+    /// were asked for* -- is not a sha256-specific claim, and a field that could
+    /// only hold one kind meant every sha1-addressed file went unverified here
+    /// while the caller checked it again afterwards.
+    pub digest: Option<Digest>,
 }
 
 impl Download {
     /// A file to fetch, to be taken on trust.
     pub fn new(url: impl Into<String>, dest: impl Into<PathBuf>) -> Download {
-        Download { url: url.into(), dest: dest.into(), sha256: None }
+        Download { url: url.into(), dest: dest.into(), digest: None }
     }
 
     /// The same file, with the digest it must have.
+    ///
+    /// The hex is taken as any of the three kinds [`Digest::parse`] recognises,
+    /// so a caller holding Mojang's `sha1` does not have to care that Modrinth's
+    /// files carry a `sha256`. A hex that is not a digest leaves the download
+    /// unverified: there is nothing to compare against, and a caller that has to
+    /// *refuse* such a file rather than fetch it on trust checks with
+    /// [`Digest::parse`] itself -- which is what the desktop's wire does, because
+    /// there the hex comes from a pack's metadata rather than from this crate.
     pub fn verified(
         url: impl Into<String>,
         dest: impl Into<PathBuf>,
-        sha256: impl Into<String>,
+        hex: impl Into<String>,
     ) -> Download {
-        let sha256 = sha256.into().trim().to_ascii_lowercase();
-        Download { sha256: (!sha256.is_empty()).then_some(sha256), ..Download::new(url, dest) }
+        let hex = hex.into().trim().to_ascii_lowercase();
+        match Digest::parse(&hex) {
+            Ok(digest) => Download { digest: Some(digest), ..Download::new(url, dest) },
+            Err(_) => Download::new(url, dest),
+        }
+    }
+
+    /// The same file, with the digest it must have, already parsed.
+    pub fn checked(url: impl Into<String>, dest: impl Into<PathBuf>, digest: Digest) -> Download {
+        Download { digest: Some(digest), ..Download::new(url, dest) }
+    }
+
+    /// The digest this download was given, if it was given one.
+    pub fn digest(&self) -> Option<&Digest> {
+        self.digest.as_ref()
     }
 
     /// The part file this download works in.
@@ -84,10 +116,10 @@ impl Download {
     /// that skipped a file it could not check would be one that launches the
     /// wrong jar.
     pub fn satisfied(&self) -> bool {
-        let Some(expected) = &self.sha256 else {
+        let Some(expected) = &self.digest else {
             return false;
         };
-        self.dest.is_file() && verify_sha256(&self.dest, expected).is_ok()
+        self.dest.is_file() && expected.verify_file(&self.dest).is_ok()
     }
 }
 
@@ -242,8 +274,8 @@ fn fetch_whole(fetch: &dyn Fetch, download: &Download, cancel: &Cancel) -> Resul
 /// retry of a hash mismatch an actual second try.
 fn finish(download: &Download, done: Downloaded) -> Result<Downloaded, Error> {
     let part = download.part();
-    if let Some(expected) = &download.sha256 {
-        if let Err(error) = verify_sha256(&part, expected) {
+    if let Some(expected) = &download.digest {
+        if let Err(error) = expected.verify_file(&part) {
             let _ = std::fs::remove_file(&part);
             return Err(error);
         }

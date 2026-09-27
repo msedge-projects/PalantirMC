@@ -10,13 +10,17 @@
 //! URL building is shared with `palantir-net::modrinth`; parsing and selection
 //! are pure so the matching rules are unit-tested without a network.
 
-use std::path::Path;
-
-use sha1::Digest;
-
 // What the binary no longer needs is marked rather than deleted: the module's
 // request building and pack reading are what its tests cover, and the shell's
 // own Discover page asks `palantir-net` directly since the old shell went.
+//
+// `Path` and the hasher joined that list when the launch path moved onto the
+// engine's wire (G91): `sha1_file` is the pack installer's own check now, so
+// nothing this module compiles into the binary names either of them.
+#[cfg(test)]
+use std::path::Path;
+#[cfg(test)]
+use sha1::Digest;
 #[cfg(test)]
 use std::path::PathBuf;
 #[cfg(test)]
@@ -304,6 +308,10 @@ pub fn sha1_hex(bytes: &[u8]) -> String {
 /// Streamed rather than read whole: a modpack's files include 40 MB mod jars,
 /// and the digest is the only thing about them this launcher wants in memory.
 /// The 64 KiB window is the same one the downloader writes through.
+/// Test-only since the launch path moved onto the engine's queue: what is left
+/// in this module that hashes a file is the pack installer's own checker, which
+/// is where the rule about a mismatched jar is written down.
+#[cfg(test)]
 pub fn sha1_file(path: &Path) -> Result<String, String> {
     use std::io::Read as _;
     let mut file = std::fs::File::open(path)
