@@ -695,12 +695,28 @@ preference. `published_loader` answers `None` for `net.minecraftforge` and
 `engine::forge` calls `install` or builds an `InstallCtx` at all, so G100's
 processors are landed but *unreached from the interface*. Flipping the routing
 with the install still unreached would resolve the installer's own profile for
-an instance whose client jar has never been patched, which is the one order
-that breaks a launch; the install has to run first (at instance creation, with
-the patched client and its declared digests as the resume test), and the
-routing follows it. Until then the mirror's profile is what a Forge launch
-resolves, and it names the patched artifacts the install will produce -- which
-is exactly the difference G99's live test measured between the two files.
+an instance nothing has patched, which is the one order that breaks a launch;
+the install has to run first (with the patched client and its declared digests
+as the resume test), and the routing follows it.
+
+G107 measured what the mirror's profile actually is, because the claim above
+rested on an inference rather than on a document -- and the document changes
+the *reason* while keeping the order. Prism's Forge and NeoForge profiles name
+`io.github.zekerzhayard.forgewrapper.installer.Main` as their main class and
+ship the loader's own installer plus its tools in a second key,
+`mavenFiles`: they are **self-installing** at first launch, which is why the
+mirror answers those uids without any launcher-side pre-install. So a Forge
+instance is not "a profile whose patched client does not exist"; it is a
+profile that asks a wrapper to do the install on the first run. What *this*
+launcher does with that key is the finding that matters: `palantir-core`
+parses `mavenFiles` (Prism's own semantics -- merged, and deliberately not on
+the classpath) and `install::plan` fetches `libraries`, `native_libraries` and
+`main_jar`, so the installer jar ForgeWrapper needs is never fetched here.
+Whether the wrapper then fails or fetches it itself is not decidable from this
+tree; what is decidable is that the flip is the *only* path this launcher can
+finish, because the installer's own translated profile needs no wrapper and no
+`mavenFiles` at all -- its libraries are the real launcher stack and the patched
+client is a product G100's processors already produce and digest-check.
 
 ## Where the old sections went
 

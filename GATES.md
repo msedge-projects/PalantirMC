@@ -3523,6 +3523,97 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 503 filtered out; fi
   to be increased`, with `Live services` and `Build exe` skipped rather than
   scheduled.
 
+- [x] G107: what the mirror's Forge and NeoForge profiles actually are -- measured,
+  after the ledger claimed it from an inference
+  CHECK: grep -rn "mavenFiles\|maven_files" crates/
+         sed -n '247,251p' crates/palantir-desktop/src/install.rs
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: `palantir-core` is the only crate that names the key, and the install
+          plan fetches `libraries`, `native_libraries` and `main_jar` -- neither
+          list includes `maven_files`
+  EVIDENCE: the two documents, read whole (a browser fetch rather than the tree's
+            own client, because this is a measurement of somebody else's service):
+            `https://meta.prismlauncher.org/v1/net.minecraftforge/66.0.6.json` and
+            `https://meta.prismlauncher.org/v1/net.neoforged/21.1.172.json`. The
+            lines that matter, verbatim from each:
+
+```
+Forge 66.0.6, beside its 40-odd libraries:
+  "mainClass": "io.github.zekerzhayard.forgewrapper.installer.Main",
+  "mavenFiles": [ { "name": "net.minecraftforge:forge:26.3-66.0.6:installer",
+                    "url": ".../forge/26.3-66.0.6/forge-26.3-66.0.6-installer.jar" },
+                  { "name": "com.github.jponge:lzma-java:1.3" },
+                  { "name": "com.nothome:javaxdelta:2.0.1" },
+                  ... ]
+
+NeoForge 21.1.172, beside its 40-odd libraries:
+  "mainClass": "io.github.zekerzhayard.forgewrapper.installer.Main",
+  "minecraftArguments": "... --fml.neoForgeVersion 21.1.172 --fml.mcVersion 1.21.1
+                        --fml.neoFormVersion 20240808.144430 --launchTarget forgeclient",
+  "mavenFiles": [ { "name": "net.neoforged:neoforge:21.1.172:installer" },
+                  { "name": "net.neoforged:neoform:1.21.1-20240808.144430@zip" },
+                  { "name": "net.neoforged.installertools:binarypatcher:2.1.2:fatjar" },
+                  ... ]
+
+$ grep -rn "mavenFiles|maven_files" crates/
+crates/palantir-core/src/version/profile.rs:50:    pub maven_files: Vec<Library>,
+crates/palantir-core/src/version/profile.rs:132:        for maven in &file.maven_files {
+crates/palantir-core/src/version/profile.rs:193:        self.maven_files.push(maven.clone());
+crates/palantir-core/src/version/profile.rs:479:    fn maven_files_and_agents_skip_natives_and_inactive() {
+
+$ sed -n '247,251p' crates/palantir-desktop/src/install.rs
+    for library in profile
+        .libraries
+        .iter()
+        .chain(profile.native_libraries.iter())
+        .chain(profile.main_jar.iter())
+```
+
+  **What this corrects.** G99's note in `NEXT_STEPS.md` (and the commit that
+  carried it) said a Forge instance would resolve "a profile whose client jar was
+  never patched", which would break a launch. That was an inference from G99's own
+  measurement -- that the two files differ by exactly ForgeWrapper -- and not a
+  reading of the mirror's document. The document says something else, and the
+  difference matters for whoever takes the flip next.
+
+  **What the mirror's profiles are.** Both name
+  `io.github.zekerzhayard.forgewrapper.installer.Main` as their main class and
+  carry a second key beside `libraries`: `mavenFiles`, holding the loader's own
+  installer jar, the `neoform`/`installertools`/`binarypatcher` tools and the
+  launcher stack the wrapper re-launches into. They are **self-installing at first
+  launch** -- the wrapper is the installer -- which is exactly why the mirror can
+  answer `net.minecraftforge` and `net.neoforged` at all, and why
+  `published_loader` answering `None` for those uids is not itself a bug.
+
+  **The finding that matters here.** `install::plan` walks `libraries`,
+  `native_libraries` and `main_jar`. It does not walk `maven_files`, and nothing
+  outside `palantir-core`'s own merge names that key, so on a mirror-resolved Forge
+  or NeoForge instance the installer the wrapper is asked to run is never fetched
+  by this launcher. Whether the wrapper then fails or fetches the file itself is
+  **not** decidable from this tree -- the wrapper's Rust is not here either (G105:
+  no `src-tauri`, and this is a jar rather than a plugin) -- and that is the honest
+  edge of this measurement.
+
+  **What it settles.** The order named in `NEXT_STEPS.md` stands, and the *reason*
+  is now the stronger one: the flip is not merely the safer order, it is the only
+  end state this launcher can finish, because the installer's own translated profile
+  needs no wrapper and no `mavenFiles` at all -- its libraries are the real launcher
+  stack, and the patched client is the product G100's processors already produce and
+  digest-check. A slice that takes it runs the install first, with the patched client
+  and its declared digests as the resume test, and flips `published_loader`
+  afterwards; the live test that would prove it is the shape G100's own (a real
+  Forge and a real NeoForge client, both patched, ~218 s).
+
+  **What the gates say.** This slice is a measurement and a correction: no source
+  file changes, and the receipt is the two documents above plus the two document
+  tools. It proves nothing about a launch, and it deliberately does not touch the
+  routing -- the plan's own note that these two uids need a desktop-track decision
+  rather than an engine one still holds.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID`.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
