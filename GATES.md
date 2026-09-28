@@ -3791,6 +3791,146 @@ generated source: 89,448 lines, 4,114,561 bytes
   spending limit needs to be increased`, with `Live services` and `Build exe`
   skipped rather than scheduled.
 
+- [x] G108: the User profile page becomes real, off Modrinth's *published* API --
+  the header's four facts and the whole projects list, with the two halves that
+  need a session still named as absent
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         grep -c '^warning: ' .scratch/g108-cl.log
+         diff <(grep '^warning: ' .scratch/g106-cl.log | sort) \
+              <(grep '^warning: ' .scratch/g108-cl.log | sort)
+  EXPECT: 983 passed; 0 failed; 17 ignored, between the seven suites
+          exit 0 for clippy, with no warning this slice added
+          and the transactions these two documents are read by:
+          GET /v2/user/{id|username} and GET /v2/user/{id}/projects
+  EVIDENCE: the transcripts of these commands on this tree (`.scratch/g108-ws.log`,
+            `.scratch/g108-cl.log`):
+
+```
+$ cargo test --workspace --all-targets --locked ; echo $?
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    516 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    247 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 17 ignored  (palantir-net, tests/live.rs)
+0
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness ; echo $?
+0
+$ grep -c '^warning: ' .scratch/g108-cl.log
+42
+$ diff <(grep '^warning: ' .scratch/g106-cl.log | sort) <(grep '^warning: ' .scratch/g108-cl.log | sort)
+6,7c6,7
+< warning: `palantir-net` (lib test) generated 1 warning (1 duplicate)
+< warning: `palantir-net` (lib) generated 1 warning (run `cargo clippy --fix ...)
+---
+> warning: `palantir-net` (lib test) generated 1 warning (run `cargo clippy --fix ...)
+> warning: `palantir-net` (lib) generated 1 warning (1 duplicate)
+```
+
+  The only difference against the previous slice's clippy transcript is which of
+  the two *summary* lines carries `(1 duplicate)`: the same crate, the same single
+  warning, the same 42 lines. The lint itself is untouched, so this slice adds none.
+
+  **What this slice is.** G105 measured stage 3's four remaining surfaces and found
+  the profile page's *session-gated* half (collections, organizations) out of reach
+  and its `plugin:users|get_user_profile` route -- Labrinth's internal v3 user
+  service -- absent from this tree. What it also found is that Modrinth's
+  **published** v2 API answers the same account: `GET /v2/user/{id or username}`
+  returns `id`, `username`, `name`, `avatar_url`, `bio`, `created` and a role and
+  badge mask, and `GET /v2/user/{id}/projects` returns the projects that account
+  owns. This slice draws the page from those two documents instead of from a
+  placeholder, and the header's four facts are computed the way the reference
+  computes them: the project count and the *sum* of the projects' downloads are its
+  own `reduce` over the list (`:projects-count="projects.length"`,
+  `:downloads="sumDownloads"`), because the API publishes no total.
+
+  **What was measured, and where.** `user/modrinth` is the account whose document is
+  quoted in this slice's own fixture: id `2REoufqX`, `"name": null`, created
+  `2023-11-13T23:22:36.604990Z`, and `user/2REoufqX/projects` returns `[]` while
+  `user/jellysquid3/projects` returns real documents keyed by `id` (a search hit
+  keys the same field as `project_id`, which is why `ModrinthUserProject` is its own
+  type rather than a second reading of `ModrinthSearchHit`). Two things follow that
+  the code now says out loud:
+
+  * **`name` is nullable.** `#[serde(default)]` covers a field that is *absent*; it
+    does not cover one that is present and `null`, and the live document writes
+    `null` for an account with no display name. `modrinth::null_as_empty` is the
+    one-line deserializer for it, used on the two fields the service marks nullable
+    (`name` and a project's `icon_url`) and on no others -- defaulting a field that
+    the schema says is a string would be this launcher inventing a shape.
+  * **`name` and `username` are two strings.** `ModrinthUser::display_name` and
+    `has_separate_username` keep both: an account with no display name is drawn
+    once, by its handle, instead of twice with an `@` in front of the second.
+
+  **A duplicate type removed rather than added to.** The crate already had a
+  `ModrinthUser { username: String }` at `modrinth.rs:364` -- the member list's
+  cut-down user -- so this slice's first compile was `error[E0428]: the name
+  `ModrinthUser` is defined multiple times`. The fix is not a rename: a member
+  list's `user` *is* the whole user document, and every other field of it was being
+  dropped on purpose by nobody. The small type is gone and `ModrinthMember.user` is
+  the real one, which is a net smaller module and one fewer place a name is parsed
+  by a different struct than a profile's.
+
+  **The strip's order is the reference's third order.** A profile's filter tabs are
+  built from the types the user actually has (`catalogProjectTypes(projects)`) and
+  sorted by `sortProjectTypes`, which reads `PROJECT_TYPE_ORDER` from
+  `ui/src/utils/project-types.ts`: mods first, **modpacks fifth**. That is neither
+  `ProjectType::TABS`' order nor `ALL`'s, so `ProjectType::PROFILE_ORDER` is a third
+  table with the file quoted above it rather than a reuse of a wrong one.
+
+  **The strip's links are plural, and now parse.** `UserProfilePageLayout.vue`
+  builds each `href` as `` `${profilePath}/${projectType}s` `` -- `/user/x/mods`, not
+  `/user/x/mod`. Before this slice no profile *filter* link existed anywhere in this
+  tree, so the address grammar only ever saw the singular; a strip drawn from the
+  reference's own spelling would have produced links this launcher's own
+  `Address::parse` refuses (a link that does nothing when pressed).
+  `ProjectType::profile_token` writes the reference's spelling and
+  `from_profile_token` reads **both**, so this launcher's links and an address copied
+  out of the reference are the same page. `collections` -- the reference's fourth
+  link -- is still refused rather than guessed at, and a test says so.
+
+  **What the page asks, and what it keeps.** The page asks for a profile the way
+  Discover and the project page ask for theirs: one `Asked { user, round }` goes out
+  of `pages::user::State::opening`, the shell runs `Store::user` off the frame
+  thread, and the answer returns as `pages::Message::user_result`. `Store::user` is
+  three requests -- the profile by the *name* the address spells, the projects by
+  the **id** only that document carries, and the avatar over the engine's pool --
+  and the avatar's failure is not the page's: a machine with no connection still has
+  a name, a bio and a list, which is the same split `skin::Appearance::of` makes for
+  a doll. Selecting a filter is *not* a request: it is a navigation (`Open::User`),
+  and `Screen::retarget` follows the address with `State::filter`, so a filter press
+  redraws from the answer the page already holds and only a *different user* builds
+  a new page.
+
+  **Two smaller corrections the page carried.** The placeholder's refresh button was
+  labelled with `app.library.sort.label`, whose message is *"Sort by"* -- a control
+  that said it sorted the page it reloads. It is `button.refresh` (*"Refresh"*) now,
+  which is the reference's own label for it. And `Screen::view` no longer takes the
+  `Address`: the profile page was the last caller that wanted one, for the name in
+  its header, and the name now lives in the page's state because it is also what the
+  page *asks* by -- `update` is handed no address to ask with.
+
+  **What is still not here, named rather than drawn empty.** Collections and
+  organizations (the v3 user service, G105); the reader's-own empty sentence
+  (`State::empty_sentence(true)`), which needs a Modrinth account to compare the
+  profile's id against and is kept as the reference's copy with its unreachability
+  stated in the doc comment; the header's Edit and overflow actions (report, block,
+  copy id, copy permalink), all of which act on an account this launcher is not
+  signed in to; and the projects' icons, which would be one fetched and cached
+  picture per row -- the rows carry every *word* the service publishes (title,
+  summary, type tag, downloads, published date) and the page's one picture is the
+  avatar, which is what the reference's own web profile treats the same way.
+
+  **The runner could not be the receipt.** The push this slice ends with is the
+  eighteenth in the same block of refused runs -- zero steps, seconds, and `The job
+  was not started because recent account payments have failed or your spending limit
+  needs to be increased`, with `Live services` and `Build exe` skipped rather than
+  scheduled. Its id is recorded by the commit that follows this one. Nothing here was
+  measured on the runner; the numbers above are this machine's.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

@@ -39,9 +39,9 @@ use crate::engine::cancel::Cancel;
 use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
-    project_members_url, project_url, search_url_parts, version_url, ModrinthMember,
-    ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse, NewsArticle, NewsFeed,
-    NEWS_URL,
+    project_members_url, project_url, search_url_parts, user_projects_url, user_url, version_url,
+    ModrinthMember, ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse,
+    ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, NEWS_URL,
 };
 use crate::Error;
 
@@ -221,6 +221,38 @@ impl ModrinthApi {
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
+    /// One user's own profile document.
+    ///
+    /// The published API's half of what the reference's profile page draws -- its
+    /// plugin wraps Labrinth's v3 user service instead, which is a route outside the
+    /// published API. Believed for the project TTL: a bio and an avatar are edited
+    /// by hand on the same slow clock as a project description.
+    pub fn user(
+        &self,
+        user: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<ModrinthUser, Error> {
+        let url = user_url(user);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
+    /// Every project one user owns.
+    ///
+    /// A second request under its own URL, so a page that only draws the header never
+    /// pays for the list -- the same split [`Self::members`] makes for a project.
+    pub fn user_projects(
+        &self,
+        user: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<Vec<ModrinthUserProject>, Error> {
+        let url = user_projects_url(user);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
     /// Modrinth's news feed, newest first.
     ///
     /// The one document here that is not the API: the panel's news section is
@@ -343,6 +375,51 @@ mod tests {
         api.news(&Cancel::new(), &Backoff::with_attempts(1)).expect("again");
         assert_eq!(fetch.count(), 1, "a feed inside its belief costs nothing");
         assert_eq!(fetch.requests()[0].url, NEWS_URL);
+    }
+
+    /// The profile shape `GET /v2/user/{name}` answers with, and the two projects
+    /// `GET /v2/user/{id}/projects` answers for that account.
+    const USER_BODY: &str = r#"{
+        "id": "2REoufqX",
+        "username": "Modrinth",
+        "name": null,
+        "avatar_url": "https://cdn.modrinth.com/data/2REoufqX/abc_96.webp",
+        "bio": "An official user account of Modrinth.",
+        "created": "2023-11-13T23:22:36.604990Z"
+    }"#;
+
+    const USER_PROJECTS_BODY: &str = r#"[
+        {"id":"hEOCdOgW","slug":"phosphor","project_type":"mod","title":"Phosphor",
+         "description":"No-compromises lighting engine optimization mod","downloads":865848,
+         "icon_url":"https://cdn.modrinth.com/data/hEOCdOgW/abc.png"}
+    ]"#;
+
+    #[test]
+    fn a_profile_and_its_projects_are_two_cached_documents() {
+        let (api, fetch) = api("user", DEFAULT_TTL);
+        fetch.set_route(&user_url("2REoufqX"), Route::text(USER_BODY));
+        fetch.set_route(&user_projects_url("2REoufqX"), Route::text(USER_PROJECTS_BODY));
+
+        let user = api.user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("the profile");
+        assert_eq!(user.username, "Modrinth");
+        assert_eq!(user.display_name(), "Modrinth", "no display name means the username");
+        assert!(user.avatar_url.ends_with("abc_96.webp"));
+        assert_eq!(user.joined_label(), "November 13, 2023");
+        let projects = api
+            .user_projects("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the list");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].slug, "phosphor");
+        assert_eq!(projects[0].downloads, 865848);
+
+        // Two URLs, so a page that only draws the header never pays for the list.
+        // Asked twice, both come from the cache.
+        api.user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.user_projects("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        assert_eq!(fetch.count(), 2, "one request each, and neither twice");
+        let urls: Vec<String> = fetch.requests().iter().map(|r| r.url.clone()).collect();
+        assert!(urls.contains(&user_url("2REoufqX")));
+        assert!(urls.contains(&user_projects_url("2REoufqX")));
     }
 
     #[test]

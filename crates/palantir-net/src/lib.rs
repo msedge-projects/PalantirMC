@@ -70,8 +70,9 @@ pub use engine::{
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
-    ModrinthDependency, ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse,
-    ModrinthVersionFile, NewsArticle, NewsFeed, search_url, version_url, MODRINTH_BASE_URL,
+    date_label, search_url, user_projects_url, user_url, version_url, ModrinthDependency,
+    ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse, ModrinthUser,
+    ModrinthUserProject, ModrinthVersionFile, NewsArticle, NewsFeed, MODRINTH_BASE_URL,
     NEWS_PAGE_URL, NEWS_URL,
 };
 

@@ -84,6 +84,25 @@ impl ProjectType {
         ProjectType::Server,
     ];
 
+    /// The order a *profile's* filter strip sorts the types a user has into.
+    ///
+    /// A third order rather than a reuse of the two above, because the reference
+    /// has three and they disagree: `PROJECT_TYPE_ORDER` in
+    /// `ui/src/utils/project-types.ts` -- which is what a profile's `NavTabs` sorts
+    /// by (`sortProjectTypes`) -- puts mods first and modpacks fifth, where
+    /// Discover's `TABS` puts modpacks first. Its `collection` entry is not here: a
+    /// collection is not a project type in this tree, and the page that would offer
+    /// it cannot read one (see `pages::user`).
+    pub const PROFILE_ORDER: &'static [ProjectType] = &[
+        ProjectType::Mod,
+        ProjectType::ResourcePack,
+        ProjectType::Datapack,
+        ProjectType::Shader,
+        ProjectType::Modpack,
+        ProjectType::Plugin,
+        ProjectType::Server,
+    ];
+
     /// The token this kind is spelled with in a path.
     pub fn token(self) -> &'static str {
         match self {
@@ -170,6 +189,36 @@ impl ProjectType {
             _ => {}
         }
         ProjectType::ALL.iter().copied().find(|kind| kind.token() == token)
+    }
+
+    /// The token a *profile's* filter strip spells this kind with: `mods`,
+    /// `resourcepacks`, and so on.
+    ///
+    /// Plural, because that is how the reference writes its own profile links:
+    /// `UserProfilePageLayout.vue`'s `navLinks` build each `href` as
+    /// `` `${profilePath}/${projectType}s` ``. A link this launcher writes has to be
+    /// the one the reference writes -- a reader who copies a profile address out of
+    /// the reference and pastes it here should land on the same list -- so the
+    /// spelling lives here beside the singular [`Self::token`] rather than at the
+    /// call site, and [`Self::from_profile_token`] is its other half.
+    pub fn profile_token(self) -> String {
+        format!("{}s", self.token())
+    }
+
+    /// The kind a profile address's third segment names: either spelling.
+    ///
+    /// Both, because both exist in the reference's own tree: its profile strip
+    /// links to `/user/:user/mods` and its `routes.js` reads a project type out of
+    /// that segment with the singular parser. Accepting only one of the two would
+    /// make either this launcher's own links or the reference's addresses fail to
+    /// navigate, and the failure would be a link that does nothing.
+    ///
+    /// `collections` is refused rather than guessed at: it is a fourth link in the
+    /// reference's strip, and collections are not a project type here (see
+    /// [`Self::PROFILE_ORDER`]).
+    pub fn from_profile_token(token: &str) -> Option<ProjectType> {
+        Self::from_token(token)
+            .or_else(|| token.strip_suffix('s').and_then(Self::from_token))
     }
 }
 
@@ -376,7 +425,7 @@ impl Route {
             }
             [user, name, kind] if user == "user" => Some(Route::User {
                 user: name.clone(),
-                project_type: Some(ProjectType::from_token(kind)?),
+                project_type: Some(ProjectType::from_profile_token(kind)?),
             }),
             [project, id] if project == "project" => Some(Route::Project {
                 id: id.clone(),
@@ -929,9 +978,42 @@ mod tests {
         assert_eq!(
             ProjectType::from_token("minecraft_java_server"),
             Some(ProjectType::Server)
-        );
-        assert_eq!(ProjectType::from_token("shaders"), None);
+        );        assert_eq!(ProjectType::from_token("shaders"), None);
         assert_eq!(ProjectType::from_token(""), None);
+    }
+
+    #[test]
+    fn a_profile_address_takes_the_plural_the_reference_links_with() {
+        // The reference's own strip href, spelled `mods`; the singular is this
+        // tree's older spelling and still parses, because an address somebody
+        // already has must not stop working.
+        for kind in ProjectType::ALL {
+            assert_eq!(ProjectType::from_profile_token(&kind.profile_token()), Some(*kind));
+            assert_eq!(ProjectType::from_profile_token(kind.token()), Some(*kind));
+        }
+        assert_eq!(ProjectType::from_token("mods"), None, "the API's own spelling is singular");
+        // The reference's fourth link, which this tree has no page for: refused
+        // rather than read as some type called `collection`.
+        assert_eq!(ProjectType::from_profile_token("collections"), None);
+        assert_eq!(ProjectType::from_profile_token(""), None);
+        assert_eq!(ProjectType::from_profile_token("s"), None);
+        // And the addresses themselves, both ways round.
+        for path in [
+            "/user/jelly",
+            "/user/jelly/mods",
+            "/user/jelly/mod",
+            "/user/jelly/resourcepacks",
+            "/user/jelly/modpacks",
+        ] {
+            let address = Address::parse(path).unwrap_or_else(|| panic!("{path} is not a route"));
+            assert!(matches!(address.route, Route::User { .. }), "{path}");
+        }
+        assert_eq!(
+            Address::parse("/user/jelly/mods").map(|address| address.route),
+            Address::parse("/user/jelly/mod").map(|address| address.route),
+            "the two spellings are one page"
+        );
+        assert!(Address::parse("/user/jelly/collections").is_none());
     }
 
     #[test]

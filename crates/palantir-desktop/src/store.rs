@@ -57,6 +57,7 @@ use crate::mods::{self, ModEntry};
 use crate::page::Load;
 use crate::pages::discover::Hit;
 use crate::pages::project::Project;
+use crate::pages::user::Profile;
 use crate::route::ProjectType;
 use crate::skin::Appearance;
 use crate::wire::Wire;
@@ -728,6 +729,48 @@ impl Store {
             .versions(id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
         Ok(Project::from_api(&project, author_of(&members), &versions))
+    }
+
+    /// One user's profile: their own document, the projects they own, and their
+    /// avatar.
+    ///
+    /// **Blocking**, for [`Store::project`]'s reason, and three requests for the one
+    /// answer for the same reason Modrinth splits a project three ways: the profile
+    /// document is asked for by the *name* an address spells, and the projects are a
+    /// second endpoint keyed by the id only that document carries -- which is why
+    /// the id is read out of the first answer rather than guessed from the second.
+    /// A user who owns nothing is an empty list and a real profile, not a failure:
+    /// the reference draws its own empty sentence for that, and a launcher that
+    /// called it an error would show a broken page for every new account.
+    ///
+    /// The avatar's failure is deliberately *not* this call's failure, and the
+    /// profile carries the reason instead: an account on a machine with no
+    /// connection still has a name, a bio and a list of projects, and a picture is
+    /// the one thing here that is decoration (see [`Profile::of`]). An account with
+    /// no avatar at all is not asked for one and is not told about it either -- the
+    /// service publishes an empty `avatar_url` for it, not a missing one.
+    pub fn user(&self, username: &str) -> Result<Profile, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("This profile"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let user = api
+            .user(username, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let projects = api
+            .user_projects(&user.id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let avatar = if user.avatar_url.is_empty() {
+            Err("This account has no avatar.".to_string())
+        } else {
+            engine
+                .fetch()
+                .get(&Request::get(&user.avatar_url), &cancel)
+                .map_err(|error| format!("fetching the avatar failed: {error}"))
+        };
+        Ok(Profile::of(user, projects, avatar))
     }
 
     /// Install one project into one instance.

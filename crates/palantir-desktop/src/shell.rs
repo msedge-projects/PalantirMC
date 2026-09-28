@@ -67,7 +67,7 @@ use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
-use crate::pages::{self, discover, project, skins, Screen};
+use crate::pages::{self, discover, project, skins, user, Screen};
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
@@ -87,6 +87,12 @@ enum Asked {
     Search(discover::Asked),
     /// A project, as the project page describes it.
     Project(project::Asked),
+    /// A profile, as the user page describes it.
+    ///
+    /// The one request whose *address* is part of the question: a profile is read
+    /// by the name the reader navigated to, which is why the name travels with the
+    /// request rather than being read here.
+    User(user::Asked),
     /// The account's own appearance, as the Skins page describes it.
     ///
     /// The shortest of the three, and the only one the shell answers from the
@@ -1223,6 +1229,7 @@ impl Shell {
             return match asked {
                 Asked::Search(asked) => self.search(asked),
                 Asked::Project(asked) => self.project(asked),
+                Asked::User(asked) => self.user(asked),
                 Asked::Skins(asked) => self.skins(asked),
                 Asked::Wear(worn) => self.wear(worn),
             };
@@ -1540,6 +1547,14 @@ impl Shell {
                         let path = match open {
                             pages::Open::Instance(id) => format!("/instance/{id}"),
                             pages::Open::Project(id) => format!("/project/{id}"),
+                            // The one navigation that can carry a choice as well as
+                            // a name: a profile's filter strip is links in the
+                            // reference, so a chosen tab is a different address
+                            // rather than a different state.
+                            pages::Open::User { user, project_type } => match project_type {
+                                Some(kind) => format!("/user/{user}/{}", kind.profile_token()),
+                                None => format!("/user/{user}"),
+                            },
                         };
                         if let Some(address) = Address::parse(&path) {
                             self.go(address);
@@ -1548,6 +1563,7 @@ impl Shell {
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
+                    Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
                     Some(pages::Ask::Skins(asked)) => Some(Asked::Skins(asked)),
                     Some(pages::Ask::Wear(worn)) => Some(Asked::Wear(worn)),
                     Some(pages::Ask::Install(install)) => {
@@ -1939,6 +1955,7 @@ impl Shell {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
+            Some(pages::Ask::User(asked)) => self.user(asked),
             Some(pages::Ask::Skins(asked)) => self.skins(asked),
             // A navigation, a creation and a launch are not *owed*: nothing is
             // waiting for one, and the page that owes nothing says nothing. A
@@ -1958,6 +1975,21 @@ impl Shell {
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
+    }
+
+    /// Read one user's profile and bring the answer back as a page message.
+    ///
+    /// [`Shell::project`]'s twin, and blocking for the same reason: three requests
+    /// on the frame thread would be three dropped frames, and the engine's own cache
+    /// is what makes a second look at the same profile cost nothing. The name is
+    /// cloned rather than borrowed because the worker outlives this call.
+    fn user(&self, asked: user::Asked) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let username = asked.user.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.user(&username)),
+            move |result| Message::Screen(pages::Message::user_result(&asked, result)),
+        )
     }
 
     /// Read the account's own appearance and bring it back as a page message.
@@ -3181,7 +3213,7 @@ impl Shell {
         // The page speaks `pages::Message` and the shell speaks its own, so the
         // one that holds the page is the one that wraps it -- which is also what
         // keeps a page from being able to navigate on its own.
-        let body = container(self.screen.view(theme, &self.address, &self.store).map(Message::Screen))
+        let body = container(self.screen.view(theme, &self.store).map(Message::Screen))
             .width(Length::Fill)
             .height(Length::Fill);
         let elements: Vec<Element<Message>> = if self.panel_shown() {

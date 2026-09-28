@@ -92,6 +92,25 @@ pub fn version_url(project: &str) -> String {
     format!("{}/project/{}/version", MODRINTH_BASE_URL, percent_encode_path(project))
 }
 
+/// Read a string field that the service is allowed to publish as `null`.
+///
+/// `#[serde(default)]` covers a field that is *absent* from a document; it does
+/// not cover one that is present and `null`, and `null` is exactly how Modrinth
+/// writes an account with no display name -- measured on `/v2/user/modrinth`,
+/// whose `name` is `null` while its `username` is a string. Without this, one
+/// unset word would fail the parse of the whole profile. A `null` read through
+/// here becomes the empty string, which is what the reference draws anyway.
+///
+/// Only the fields known to be nullable use it. `username`, `id`, `bio` and the
+/// dates are strings in the service's own schema, and defaulting them to empty on
+/// a `null` would be this launcher inventing a shape the API does not have.
+fn null_as_empty<'de, D>(reader: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(<Option<String> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
+}
+
 /// A `GET /v2/search` response body (subset; unknown fields ignored).
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ModrinthSearchResponse {
@@ -346,6 +365,13 @@ pub struct ModrinthGalleryImage {
 }
 
 /// One `GET /v2/project/{id}/members` entry (subset).
+///
+/// The entry wraps the *whole* user document, not a cut-down one: this tree once
+/// had a second `ModrinthUser` holding nothing but `username`, which is the same
+/// document as [`ModrinthUser`] below with every other field dropped. Two types
+/// for one object is how a member's name and a profile's name end up parsed by
+/// different code; the member keeps the same type and reads the one field it
+/// draws.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ModrinthMember {
     /// The user on the team.
@@ -354,17 +380,6 @@ pub struct ModrinthMember {
     /// Their role: `Owner`, `Member`, and so on.
     #[serde(default)]
     pub role: String,
-}
-
-/// A user, as a member list names one.
-///
-/// The whole user object is much larger; the one field this launcher reads is
-/// the name a project page draws under the title.
-#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
-pub struct ModrinthUser {
-    /// Display name.
-    #[serde(default)]
-    pub username: String,
 }
 
 /// Modrinth's news feed: the one Modrinth document this launcher reads that is
@@ -444,18 +459,142 @@ impl NewsArticle {
     /// A date that cannot be read is drawn as it was published rather than as
     /// nothing: a wrong-looking date is a bug report, a missing one is silence.
     pub fn date_label(&self) -> String {
-        let date = self.date.get(..10).unwrap_or_default();
-        let mut parts = date.split('-');
-        let year = parts.next().and_then(|part| part.parse::<i32>().ok());
-        let month = parts.next().and_then(|part| part.parse::<usize>().ok());
-        let day = parts.next().and_then(|part| part.parse::<u32>().ok());
-        match (year, month, day) {
-            (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) => {
-                format!("{} {day}, {year}", MONTHS[month - 1])
-            }
-            _ => self.date.clone(),
+        date_label(&self.date)
+    }
+}
+
+/// The publication date as the reference draws it: `September 7, 2026`.
+///
+/// Read out of the ISO-8601 string's own first ten characters, which is the only
+/// part of it this needs; a time zone would move the *day* of an evening
+/// announcement, and the reference reads the same string the same way. A date that
+/// cannot be read comes back as it arrived rather than as nothing: a wrong-looking
+/// date is a bug report, a missing one is silence.
+///
+/// A free function because three documents now carry dates in the same shape -- an
+/// article's publication, a user's `created`, and a project's `published` -- and one
+/// formatter is what keeps them from drifting apart.
+pub fn date_label(iso: &str) -> String {
+    let date = iso.get(..10).unwrap_or_default();
+    let mut parts = date.split('-');
+    let year = parts.next().and_then(|part| part.parse::<i32>().ok());
+    let month = parts.next().and_then(|part| part.parse::<usize>().ok());
+    let day = parts.next().and_then(|part| part.parse::<u32>().ok());
+    match (year, month, day) {
+        (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) => {
+            format!("{} {day}, {year}", MONTHS[month - 1])
+        }
+        _ => iso.to_string(),
+    }
+}
+
+/// One user's profile, as Modrinth's own document writes it.
+///
+/// The reference's page draws this header through `plugin:users|get_user_profile`,
+/// which wraps Labrinth's *v3* user service -- a route outside Modrinth's published
+/// API. What is here is the **published** `/v2/user/{username}` document instead: the
+/// same account, the same fields, and the same URL the reference's own web client
+/// uses, which is why this launcher can draw a real profile without a Modrinth
+/// session. The v3-only halves of that page -- collections, organizations, anything
+/// that needs the reader to be signed in -- are the parts that stay named as absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthUser {
+    /// The account's id, which is what the projects list is asked for by.
+    #[serde(default)]
+    pub id: String,
+    /// The username, which is what `/user/:user` is matched against.
+    #[serde(default)]
+    pub username: String,
+    /// The display name, which is `null` for an account that has not set one.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub name: String,
+    /// Where the avatar is, if they have one.
+    #[serde(default)]
+    pub avatar_url: String,
+    /// Their own sentence about themselves, if they wrote one.
+    #[serde(default)]
+    pub bio: String,
+    /// When the account was created, in the API's ISO-8601 shape.
+    #[serde(default)]
+    pub created: String,
+}
+
+impl ModrinthUser {
+    /// The name to draw: the display name when there is one, the username otherwise.
+    ///
+    /// The reference draws both -- `name` as the heading and `@username` under it --
+    /// and an account with no display name has only the username to draw once.
+    pub fn display_name(&self) -> &str {
+        if self.name.trim().is_empty() {
+            &self.username
+        } else {
+            &self.name
         }
     }
+
+    /// Whether the display name is a second name rather than the username repeated.
+    ///
+    /// A heading that is the username and a line under it that is the same string
+    /// with an `@` in front is a line worth skipping.
+    pub fn has_separate_username(&self) -> bool {
+        !self.name.trim().is_empty() && !self.name.eq_ignore_ascii_case(&self.username)
+    }
+
+    /// When they joined, as the feed's dates are written.
+    pub fn joined_label(&self) -> String {
+        date_label(&self.created)
+    }
+}
+
+/// One project a user owns, as `/v2/user/{id}/projects` writes them.
+///
+/// The same documents a search returns, with one difference that matters: the
+/// project document keys its own id as `id`, where a search hit keys it as
+/// `project_id`. That is why this is its own type rather than a second alias on
+/// [`ModrinthSearchHit`] -- a struct that answers to two spellings of the same field
+/// would accept a document that has neither.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthUserProject {
+    /// The project's id.
+    #[serde(default)]
+    pub id: String,
+    /// Its URL slug, which is what a link to it is built from.
+    #[serde(default)]
+    pub slug: String,
+    /// Its title.
+    #[serde(default)]
+    pub title: String,
+    /// Its one-line summary.
+    #[serde(default)]
+    pub description: String,
+    /// When it was published.
+    #[serde(default)]
+    pub published: String,
+    /// Total downloads.
+    #[serde(default)]
+    pub downloads: u64,    /// Its icon, if it has one: `null` for a project that has not uploaded one,
+    /// which is the one field of this document the service marks nullable.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub icon_url: String,
+
+
+    /// Its type (`mod`, `modpack`, `resourcepack`, ...), as the document says.
+    #[serde(default)]
+    pub project_type: String,
+}
+
+/// The profile document for one user, by username or by id.
+///
+/// `/v2/user/{id|username}` answers either, which is what lets the projects list be
+/// asked for by id afterwards: a display name can change between two requests, an id
+/// cannot.
+pub fn user_url(user: &str) -> String {
+    format!("{MODRINTH_BASE_URL}/user/{}", percent_encode(user))
+}
+
+/// Every project one user owns.
+pub fn user_projects_url(user: &str) -> String {
+    format!("{MODRINTH_BASE_URL}/user/{}/projects", percent_encode(user))
 }
 
 /// Percent-encode a query string (RFC 3986 unreserved set left intact).
@@ -809,6 +948,86 @@ mod tests {
         };
         assert_eq!(f.sha512(), None);
         assert_eq!(f.sha1(), None);
+    }
+
+    #[test]
+    fn a_user_is_asked_for_by_name_and_their_projects_by_their_number() {
+        // `/v2/user/{id|username}` takes either, which is the whole reason the
+        // projects list can be asked for by the id the first answer gives: a
+        // display name can change between two requests, an id cannot.
+        assert_eq!(user_url("jellysquid3"), "https://api.modrinth.com/v2/user/jellysquid3");
+        assert_eq!(
+            user_projects_url("2REoufqX"),
+            "https://api.modrinth.com/v2/user/2REoufqX/projects"
+        );
+        // A name with a space in it is one path segment, not two.
+        assert!(user_url("a b").ends_with("/user/a%20b"));
+    }
+
+    #[test]
+    fn a_user_s_own_document_is_read_field_by_field() {
+        // The shape `GET /v2/user/Modrinth` answers with, trimmed: `name` is null
+        // for an account that has not set one, which is the case the header has to
+        // survive.
+        let body = r#"{
+            "id": "2REoufqX",
+            "username": "Modrinth",
+            "name": null,
+            "avatar_url": "https://cdn.modrinth.com/data/2REoufqX/abc_96.webp",
+            "bio": "An official user account of Modrinth.",
+            "created": "2023-11-13T23:22:36.604990Z",
+            "role": "admin",
+            "badges": 1
+        }"#;
+        let user: ModrinthUser = serde_json::from_str(body).expect("the profile");
+        assert_eq!(user.id, "2REoufqX");
+        assert_eq!(user.username, "Modrinth");
+        assert!(user.avatar_url.ends_with("abc_96.webp"));
+        // A profile with no display name is drawn under its username, and there is
+        // no second name to draw under that.
+        assert_eq!(user.display_name(), "Modrinth");
+        assert!(!user.has_separate_username());
+        assert_eq!(user.joined_label(), "November 13, 2023");
+        // A display name that *is* the username (in any case) is the same answer:
+        // one name rather than the same string twice.
+        let same: ModrinthUser =
+            serde_json::from_str(r#"{"username":"jellysquid3","name":"JellySquid3"}"#)
+                .expect("the profile");
+        assert!(!same.has_separate_username());
+        let named: ModrinthUser =
+            serde_json::from_str(r#"{"username":"jellysquid3","name":"Jelly"}"#)
+                .expect("the profile");
+        assert_eq!(named.display_name(), "Jelly");
+        assert!(named.has_separate_username());
+        // A date that cannot be read is drawn as it arrived rather than as nothing.
+        let odd: ModrinthUser = serde_json::from_str(r#"{"created":"sometime"}"#).expect("parsed");
+        assert_eq!(odd.joined_label(), "sometime");
+    }
+
+    #[test]
+    fn a_user_s_projects_are_the_documents_the_rest_of_the_api_writes() {
+        // Two entries out of `GET /v2/user/jellysquid3/projects`, with the fields
+        // this launcher draws and the key that makes them a type of their own: the
+        // id is `id` here and `project_id` in a search hit.
+        let body = r#"[
+            {"id":"hEOCdOgW","slug":"phosphor","project_type":"mod","title":"Phosphor",
+             "description":"No-compromises lighting engine optimization mod",
+             "published":"2021-01-03T00:58:54.900351Z","downloads":865848,
+             "icon_url":"https://cdn.modrinth.com/data/hEOCdOgW/abc.png"},
+            {"id":"AANobbMI","slug":"sodium","project_type":"mod","title":"Sodium",
+             "description":"Modern rendering engine","downloads":50000000}
+        ]"#;
+        let projects: Vec<ModrinthUserProject> = serde_json::from_str(body).expect("the list");
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].id, "hEOCdOgW");
+        assert_eq!(projects[0].slug, "phosphor");
+        assert_eq!(projects[0].downloads, 865848);
+        assert_eq!(date_label(&projects[0].published), "January 3, 2021");
+        // An entry with no icon is still an entry: the card says so rather than
+        // dropping a project the reader owns.
+        assert!(projects[1].icon_url.is_empty());
+        assert_eq!(projects[1].title, "Sodium");
+        assert!(serde_json::from_str::<Vec<ModrinthUserProject>>("[]").is_ok());
     }
 
     #[test]

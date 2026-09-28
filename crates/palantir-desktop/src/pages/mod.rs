@@ -92,6 +92,18 @@ pub enum Open {
     Instance(String),
     /// Show a project, at `/project/:id`.
     Project(String),
+    /// Show a profile, at `/user/:user/:projectType?`.
+    ///
+    /// The only navigation whose *address* carries a choice rather than a name: a
+    /// profile's filter strip is links in the reference, so choosing one is a move
+    /// to `/user/:user/:type` rather than a change of state, and the address stays
+    /// the one record of what is on screen.
+    User {
+        /// Whose profile.
+        user: String,
+        /// The project type the address names, if it names one.
+        project_type: Option<crate::route::ProjectType>,
+    },
 }
 
 /// Something a page asked for that only the shell can do.
@@ -114,6 +126,14 @@ pub enum Ask {
     /// One request rather than three because a project page draws all three at
     /// once, and three `Load`s for one page is three ways to be half drawn.
     Project(project::Asked),
+    /// Ask the store, through the engine, for one user's profile: their own
+    /// document and the projects they own.
+    ///
+    /// The same shape as [`Ask::Project`], and the same reason for one request
+    /// rather than two: the page draws the header and the list together, and a page
+    /// that could draw one of them first would draw a name over somebody else's
+    /// projects.
+    User(user::Asked),
     /// Read the account's own appearance for the Skins page: what it owns, and the
     /// skin in force drawn.
     ///
@@ -186,6 +206,21 @@ impl Message {
         })
     }
 
+    /// The message that carries a profile back to the page that asked for it.
+    ///
+    /// The same seam as [`Message::project_result`], for the same reason: the
+    /// answer's own type is the page's -- a profile is a document, a list and a
+    /// picture that the shell has never seen as a value -- so the shell hands it
+    /// over without naming any of it.
+    pub fn user_result(asked: &user::Asked, result: Result<user::Profile, String>) -> Message {
+        // Boxed here, at the one crossing between the store's answer and a page's
+        // message, so the page's own arms never box anything.
+        Message::User(user::Message::Found {
+            round: asked.round,
+            result: result.map(Box::new),
+        })
+    }
+
     /// The message that carries an account's appearance back to the Skins page.
     ///
     /// The same seam as [`Message::project_result`], and the reason it is a
@@ -237,7 +272,13 @@ impl Screen {
             Route::Skins => Screen::Skins(skins::State::default()),
             Route::Screenshots => Screen::Screenshots(screenshots::State::default()),
             Route::Servers | Route::Server { .. } => Screen::Servers(servers::State::default()),
-            Route::User { .. } => Screen::User(user::State::default()),
+            // The two parts of a profile's address are the page's own state rather
+            // than something the shell hands it at drawing time: a page that could
+            // not name the user it is about could not ask for their profile, and
+            // `update` sees no address.
+            Route::User { user, project_type } => {
+                Screen::User(user::State::new(user.clone(), *project_type))
+            }
         }
     }
 
@@ -257,6 +298,17 @@ impl Screen {
                     *state = project::State::new(id.clone(), tab.clone());
                 } else {
                     state.update(project::Message::Tab(tab.clone()));
+                }
+            }
+            (Screen::User(state), Route::User { user, project_type }) => {
+                if state.user != *user {
+                    *state = user::State::new(user.clone(), *project_type);
+                } else {
+                    // A filter is not a new document: the profile the page is
+                    // holding is the answer either way, so the strip's tabs move the
+                    // page without a request. A *different* user is a new page, and
+                    // is built above.
+                    state.filter(*project_type);
                 }
             }
             (Screen::Instance(state), Route::Instance { id, tab }) => {
@@ -339,9 +391,26 @@ impl Screen {
                     return Some(asked);
                 }
             }
+            // The profile page's two navigations, reported rather than applied:
+            // a project row opens a project, and a filter tab moves the address the
+            // list is filtered by. The page keeps nothing of either -- what it keeps
+            // is the *answer*, which is why a filter moves it without a request.
+            (Screen::User(_), Message::User(user::Message::Project(id))) => {
+                return Some(Ask::Open(Open::Project(id)))
+            }
+            (Screen::User(state), Message::User(user::Message::Filter(project_type))) => {
+                return Some(Ask::Open(Open::User {
+                    user: state.user.clone(),
+                    project_type,
+                }))
+            }
+            (Screen::User(state), Message::User(message)) => {
+                if let Some(asked) = state.update(message) {
+                    return Some(Ask::User(asked));
+                }
+            }
             (Screen::Screenshots(state), Message::Screenshots(message)) => state.update(message),
             (Screen::Servers(state), Message::Servers(message)) => state.update(message),
-            (Screen::User(state), Message::User(message)) => state.update(message),
             // A message for a page that is not on screen is dropped rather than
             // applied to the wrong one: the shell routes by what it is showing.
             _ => {}
@@ -362,6 +431,10 @@ impl Screen {
             // The page a window can open straight on -- `/skins` is on the rail --
             // so a reader who never presses anything still gets their own skin.
             Screen::Skins(state) => state.opening().map(Ask::Skins),
+            // A profile is a document the reader arrived at, so it is owed on
+            // arrival the same way a project's is: `/user/jelly` is a name and a
+            // list this page has nothing of until it asks.
+            Screen::User(state) => state.opening().map(Ask::User),
             _ => None,
         }
     }
@@ -403,12 +476,14 @@ impl Screen {
     }
 
     /// Draw the page on screen.
-    pub fn view<'a>(
-        &'a self,
-        theme: Gen,
-        address: &'a Address,
-        store: &'a Store,
-    ) -> Element<'a, Message> {
+    ///
+    /// No address: every page is built with what its address said when it was
+    /// built, and a page that read the route as it drew could show one thing while
+    /// [`Screen::retarget`] believed another. The profile page was the last caller
+    /// that needed one, for the name in its header, and it keeps the name in its own
+    /// state now -- because it is also what the page *asks* by, and `update` is
+    /// handed no address to ask with.
+    pub fn view<'a>(&'a self, theme: Gen, store: &'a Store) -> Element<'a, Message> {
         match self {
             Screen::Home(state) => home::view(theme, state, store).map(Message::Home),
             Screen::Discover(state) => discover::view(theme, state, store).map(Message::Discover),
@@ -419,16 +494,9 @@ impl Screen {
                 screenshots::view(theme, state, store).map(Message::Screenshots)
             }
             Screen::Servers(state) => servers::view(theme, state, store).map(Message::Servers),
-            Screen::User(state) => {
-                let name = match &address.route {
-                    Route::User { user, .. } => user.as_str(),
-                    _ => "",
-                };
-                user::view(theme, state, store, name).map(Message::User)
-            }
+            Screen::User(state) => user::view(theme, state, store).map(Message::User),
         }
     }
-
 }
 
 #[cfg(test)]
@@ -436,6 +504,7 @@ mod tests {
     use super::*;
     use crate::page::Load;
     use crate::route::{InstanceTab, ProjectTab, ProjectType, ServerTab};
+
 
     /// Every address the route table has a shape for.
     fn sample_addresses() -> Vec<&'static str> {
@@ -477,11 +546,11 @@ mod tests {
             let mut screen = Screen::at(&address);
             let store = Store::default();
             for theme in Gen::ALL {
-                drop(screen.view(*theme, &address, &store));
+                drop(screen.view(*theme, &store));
             }
             // And every page survives being pointed at its own address again.
             screen.retarget(&address);
-            drop(screen.view(Gen::Dark, &address, &store));
+            drop(screen.view(Gen::Dark, &store));
         }
     }
 
@@ -678,6 +747,91 @@ mod tests {
         };
         assert_eq!(state.notice.as_deref(), Some("no"));
         assert!(!state.wearing);
+    }
+
+    #[test]
+    fn a_profile_page_asks_for_the_user_its_address_names() {
+        // The third page that owes a request on arrival, and the first whose
+        // question is about somebody else: `/user/jelly` is a name this page has
+        // nothing of until it asks.
+        let store = Store::default();
+        let mut screen =
+            Screen::at(&Address::parse("/user/jelly").expect("a profile page"));
+        let Some(Ask::User(first)) = screen.opening() else {
+            panic!("a freshly drawn profile page owes a request");
+        };
+        assert_eq!(first.user, "jelly");
+        assert_eq!(first.round, 1);
+        assert_eq!(screen.opening(), None, "asked once, and the refresh button is what asks again");
+        // The answer comes back as a message of the page's own, built here and
+        // never named by the shell.
+        let message = Message::user_result(&first, Err("no such user".to_string()));
+        assert_eq!(screen.update(message, &store), None);
+        match &screen {
+            Screen::User(state) => assert_eq!(state.profile.failure(), Some("no such user")),
+            other => panic!("{other:?} is not a profile page"),
+        }
+    }
+
+    #[test]
+    fn a_profile_s_two_navigations_are_reported_rather_than_applied() {
+        // A project row opens a project, and a filter tab moves the *address* the
+        // list is filtered by -- which is what makes the strip's links and the
+        // route agree about what is on screen. Neither press changes the page here:
+        // what the page then keeps is the answer, and the address is the shell's.
+        let store = Store::default();
+        let mut screen = Screen::at(&Address::parse("/user/jelly").expect("a profile page"));
+        assert_eq!(
+            screen.update(
+                Message::User(user::Message::Project("AANobbMI".to_string())),
+                &store
+            ),
+            Some(Ask::Open(Open::Project("AANobbMI".to_string())))
+        );
+        assert_eq!(
+            screen.update(Message::User(user::Message::Filter(Some(ProjectType::Mod))), &store),
+            Some(Ask::Open(Open::User {
+                user: "jelly".to_string(),
+                project_type: Some(ProjectType::Mod),
+            }))
+        );
+        // The whole strip, back to everything.
+        assert_eq!(
+            screen.update(Message::User(user::Message::Filter(None)), &store),
+            Some(Ask::Open(Open::User { user: "jelly".to_string(), project_type: None }))
+        );
+        // And the page still believes the address it was built for, because
+        // following the move is `retarget`'s job rather than `update`'s.
+        match &screen {
+            Screen::User(state) => {
+                assert_eq!(state.user, "jelly");
+                assert_eq!(state.project_type, None);
+            }
+            other => panic!("{other:?} is not a profile page"),
+        }
+    }
+
+    #[test]
+    fn a_filter_moves_the_profile_page_and_another_user_rebuilds_it() {
+        // The profile page's half of the rule the instance page states below: a
+        // change of *question* keeps the page, and a change of *user* is a new one.
+        let mut screen = Screen::at(&Address::parse("/user/jelly").expect("a profile page"));
+        screen.retarget(&Address::parse("/user/jelly/mods").expect("a filter"));
+        match &screen {
+            Screen::User(state) => {
+                assert_eq!(state.user, "jelly");
+                assert_eq!(state.project_type, Some(ProjectType::Mod));
+            }
+            other => panic!("{other:?} is not a profile page"),
+        }
+        screen.retarget(&Address::parse("/user/jellysquid3").expect("another user"));
+        match &screen {
+            Screen::User(state) => {
+                assert_eq!(state.user, "jellysquid3");
+                assert_eq!(state.project_type, None);
+            }
+            other => panic!("{other:?} is not a profile page"),
+        }
     }
 
     #[test]

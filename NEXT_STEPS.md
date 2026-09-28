@@ -87,7 +87,7 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). Home is the welcome screen on a first run (G103), and the Skins page is the account's own: it draws the skins and capes Minecraft says it owns, read from that service (G104), and puts any of them on -- or takes a cape off -- with the same token a launch holds (G106), leaving one measurement of the reference's own arm-style test unclaimed (G105). The right panel draws four of its five sections now -- the getting-started checklist and the friends sentence a reader with no Modrinth session sees (G102), Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). What is not real yet is Servers with an instance's hosting half and the panel's fundraiser banner and the friends list's signed-in half -- all of them behind a Modrinth sign-in this launcher does not have, which G105 measured -- see "What stage 3 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). Home is the welcome screen on a first run (G103), and the Skins page is the account's own: it draws the skins and capes Minecraft says it owns, read from that service (G104), and puts any of them on -- or takes a cape off -- with the same token a launch holds (G106), leaving one measurement of the reference's own arm-style test unclaimed (G105). The right panel draws four of its five sections now -- the getting-started checklist and the friends sentence a reader with no Modrinth session sees (G102), Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). The profile page is real too, off Modrinth's own *published* API rather than the internal user service the reference reaches it through: the header's facts and the projects list are read, filtered and drawn (G108), with collections and organizations left named as absent because they need the sign-in. What is not real yet is Servers with an instance's hosting half and the panel's fundraiser banner and the friends list's signed-in half -- all of them behind a Modrinth sign-in this launcher does not have, which G105 measured -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **Done**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); the panel's news feed is a document on the same cache (G101); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95); and the two Forge-shaped loaders install from their own jars too -- each build's launch profile read out of its installer and translated the same way (G99), with the installer's own processors run at install time over the same queue, resume and digest check (G100) |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
@@ -361,6 +361,36 @@ comes back as a sentence in the slot every other failure goes, and a success com
 back as *silence plus a reload* rather than as invented copy: what changed is the
 document, so the document is what is read again.
 
+The **User profile page** is real (G108), and it is the one page of stage 3 whose
+data turned out to be reachable without a Modrinth session. G105 measured that the
+reference draws it through `plugin:users|get_user_profile`, which wraps Labrinth's
+*internal* v3 user service -- but Modrinth's **published** v2 API answers the same
+account: `GET /v2/user/{id or username}` returns the id, the username, a nullable
+display name, an avatar URL, a bio and a creation date, and
+`GET /v2/user/{id}/projects` returns the projects that account owns, keyed by `id`
+where a search hit keys the same field as `project_id`. Both are now read
+(`ModrinthApi::user`, `ModrinthApi::user_projects`), the page draws the header the
+reference's own computed properties produce -- the project count, the **sum** of
+the projects' downloads, and the join date, all arithmetic over the one list the
+service gives, because the API publishes no total -- and the list under it is the
+projects themselves, filtered by the type its address names. `Store::user` is three
+requests for that one answer (the profile by the name the address spells, the
+projects by the id only that document carries, the avatar over the engine's pool),
+and the avatar's failure is deliberately not the page's: a machine with no
+connection still has a name, a bio and a list, which is the split
+`skin::Appearance::of` already makes for a doll. Two things the page found are
+worth keeping: `name` is **nullable** in the live document (`user/modrinth`
+answers `"name": null`), which `#[serde(default)]` does not cover and
+`modrinth::null_as_empty` now does; and the strip of filters is the reference's
+*third* order -- `PROJECT_TYPE_ORDER` puts mods first and modpacks fifth, unlike
+Discover's tabs -- whose links the reference spells plural (`/user/x/mods`), so
+the address grammar now reads both spellings while `collections`, the fourth link,
+is still refused rather than guessed at. What is *not* here is every part of that
+page that needs the session G105 found missing: collections and organizations, the
+reader's-own empty sentence (which needs an account to compare the profile's id
+against), and the header's Edit and overflow actions. The page's one picture is the
+avatar; its rows carry every word the service publishes, and no icon.
+
 `pages/project.rs` is the second page to *ask* rather than draw a shape (G96),
 and the request seam now has two users rather than one: a page describes what to
 ask for out of `update` or `opening`, the shell carries it to the engine off the
@@ -536,8 +566,11 @@ What stage 3 does **not** have yet, named rather than implied:
   `plugin:mr-auth`; `plugin:users`, which is Labrinth's own user service behind
   those pages, is the third of the namespaces involved.
 
-  The one surface that measurement found *reachable* was the Skins page's writing
-  half, and G106 is that slice. What that leaves is a choice rather than a debt:
+  The surfaces that measurement found *reachable* were the Skins page's writing
+  half, which G106 took, and the profile page's published-API half, which G108 took:
+  the header's facts and the whole projects list are Modrinth's own v2 documents,
+  and only collections, organizations and the reader's-own state stay behind the
+  sign-in. What that leaves is a choice rather than a debt:
   the ledger's open stage-3 items now stand at two gates, both behind the same
   sign-in, and the alternative to them is a Modrinth path of this launcher's own --
   the app's own OAuth, then Labrinth with the token those `_internal` routes are
