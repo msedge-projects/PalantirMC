@@ -3939,6 +3939,181 @@ $ diff <(grep '^warning: ' .scratch/g106-cl.log | sort) <(grep '^warning: ' .scr
   conflict resolutions was a source file (`GATES.md` and `tools/progress.py` only,
   both merged by hand with both sides kept).
 
+- [x] G109: what a Modrinth session *is* here, measured -- the two published ways in, the
+  four surfaces each would reach, and where a token would have to live
+  CHECK: grep -rho "invoke('plugin:mr-auth|[a-z_]*'" vendor/modrinth-app/app-frontend/src | sort -u
+         grep -n "export type ModrinthCredentials" -A 6 vendor/modrinth-app/app-frontend/src/helpers/mr_auth.ts
+         grep -n "siteUrl\|labrinthBaseUrl\|archonBaseUrl" vendor/modrinth-app/app-frontend/src/config.ts
+         grep -rho "client\.labrinth\.[a-zA-Z0-9_]*\.[a-zA-Z0-9_]*" vendor/modrinth-app/{app-frontend,ui}/src | sed 's/\.[a-zA-Z0-9_]*$//' | sort -u
+         grep -rho "client\.archon\.[a-zA-Z0-9_]*\.[a-zA-Z0-9_]*" vendor/modrinth-app/{app-frontend,ui}/src | sed 's/\.[a-zA-Z0-9_]*$//' | sort -u
+         grep -rho "client\.archon\.[a-zA-Z0-9_.]*" vendor/modrinth-app/{app-frontend,ui}/src | sort -u | wc -l
+         grep -rn "campaign_internal\|users_v3.getAuthenticated\|friends_v3" vendor/modrinth-app/{app-frontend,ui}/src
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: seven `plugin:mr-auth` commands and the credential shape they return
+          three hosts, and every service namespace each host carries
+          16 Labrinth namespaces, 11 Archon ones and 67 distinct Archon methods
+          both document tools exit 0, with the two open stage-3 items still open
+  EVIDENCE: the transcripts of these commands on this tree, plus the two published
+            pages this slice needed and could not read from the tree (they are
+            cited by URL and quoted; nothing else here is external):
+
+```
+$ grep -rho "invoke('plugin:mr-auth|[a-z_]*'" vendor/modrinth-app/app-frontend/src | sort -u
+invoke('plugin:mr-auth|cancel_modrinth_login'
+invoke('plugin:mr-auth|get'
+invoke('plugin:mr-auth|get_all'
+invoke('plugin:mr-auth|logout'
+invoke('plugin:mr-auth|modrinth_login'
+invoke('plugin:mr-auth|remove_account'
+invoke('plugin:mr-auth|set_active'
+
+$ grep -n "export type ModrinthCredentials" -A 6 vendor/modrinth-app/app-frontend/src/helpers/mr_auth.ts
+8:export type ModrinthCredentials = {
+9-  session: string
+10-  expires: string
+11-  user_id: string
+12-  active: boolean
+13-}
+
+$ grep -n "siteUrl\|labrinthBaseUrl\|archonBaseUrl" vendor/modrinth-app/app-frontend/src/config.ts
+3: siteUrl            = 'https://modrinth.com'
+4: labrinthBaseUrl    = 'https://api.modrinth.com'
+7: archonBaseUrl      = 'https://archon.modrinth.com'
+10: sharedInstancesBaseUrl = 'https://shared-instances.modrinth.com'
+
+$ ... client.labrinth.<namespace> ... | sort -u
+client.labrinth.attribution_internal   client.labrinth.notifications_v2
+client.labrinth.billing_internal       client.labrinth.projects_v2
+client.labrinth.campaign_internal      client.labrinth.projects_v3
+client.labrinth.collections            client.labrinth.users_v2
+client.labrinth.content_v3             client.labrinth.users_v3
+client.labrinth.external_projects_internal   client.labrinth.versions_v2
+client.labrinth.friends_v3             client.labrinth.versions_v3
+client.labrinth.images_v3              client.labrinth.moderation_internal
+
+$ ... client.archon.<namespace> ... | sort -u
+client.archon.actions_v1        client.archon.options_v1
+client.archon.backups_queue_v1  client.archon.properties_v1
+client.archon.backups_v1        client.archon.server_users_v1
+client.archon.content_v1        client.archon.servers_v0
+client.archon.sockets           client.archon.servers_v1
+client.archon.sync
+
+$ ... client.archon.<method> ... | sort -u | wc -l
+67
+
+$ grep -rn "campaign_internal\|users_v3.getAuthenticated\|friends_v3" vendor/modrinth-app/{app-frontend,ui}/src
+app-frontend/src/App.vue:349:   queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
+app-frontend/src/pages/Skins.vue:272: queryFn: () => client.labrinth.users_v3.getAuthenticated(),
+app-frontend/src/components/ui/PrideFundraiserBanner.vue:15:
+                                queryFn: () => client.labrinth.campaign_internal.getPride26(),
+ui/src/layouts/wrapped/hosting/manage/[id]/access/access.vue:232:
+                                queryFn: () => client.labrinth.friends_v3.list(),
+
+app-frontend/src/pages/Servers.vue:26:
+                                queryFn: () => client.labrinth.billing_internal.getProducts(),
+
+$ sed -n '557,560p' ui/src/components/servers/ServerListing.vue
+        const fsAuth = await archon.servers_v0.getFilesystemAuth(props.server_id)
+$ grep -c "archon.sockets.on" ui/src/composables/server-context-runtime.ts
+5
+```
+
+  The two published pages, which are the only evidence here that is not the vendored
+  tree, and which this slice read because the tree cannot answer them:
+
+  * `https://docs.modrinth.com/api/` -- *"This API has two options for
+    authentication: personal access tokens and OAuth2. All tokens are tied to a
+    Modrinth user and use the Authorization header"*, with the header's shape
+    spelled out (`Authorization: mrp_RNtLRSPmGj2pd1v1ubi52nX7TJJM9sznrmwhAuj511oe4t1jAqAQ3D6Wc8Ic`),
+    the rule that a token is needed only for creating, modifying and private data,
+    a scope per request, 300 requests per minute per IP whether or not a token is
+    sent, and a mandatory unique `User-Agent`.
+  * `https://docs.modrinth.com/guide/oauth/` -- the authorizer is
+    `https://modrinth.com/auth/authorize`, the exchange is `POST
+    https://api.modrinth.com/_internal/oauth/token` with `application/x-www-form-urlencoded`
+    and the client secret in the `Authorization` header, the response is
+    `{access_token, token_type: "Bearer", expires_in}`, scope identifiers live in
+    `apps/labrinth/src/models/v3/pats.rs`, and it opens by saying *"If the only user
+    of the application is yourself, a personal access token (PAT) may be a better
+    fit."*
+
+  **What this corrects.** G105 recorded the profile page, the Servers page and the
+  panel's two sections as "behind a Modrinth sign-in this launcher does not have",
+  which is right, and then called the alternative "a slice of its own size" without
+  measuring the slice. Two things about that framing do not survive the reading.
+  First, `_internal` is not by itself a mark of unreachability: Modrinth's published
+  OAuth guide *documents* `api.modrinth.com/_internal/oauth/token` as the exchange a
+  third-party application is supposed to call. What is app-internal is the
+  **namespace** (`billing_internal`, `campaign_internal`, `attribution_internal`,
+  `moderation_internal`, `external_projects_internal`) and whether a user token is
+  scoped for it -- which the documentation says is a per-request scope question, so
+  a wrong scope answers 401 rather than 404. Second, "a slice" is the wrong unit for
+  the Servers half: that page's data is not Labrinth at all. It is **Archon**, a
+  second host (`https://archon.modrinth.com`) with eleven versioned namespaces and
+  67 distinct methods, a websocket (`archon.sockets.on` five times in one composable)
+  and an SFTP handoff (`servers_v0.getFilesystemAuth`) -- and `billing_internal.getProducts`
+  is only the price list beside it.
+
+  **What a session is, in the reference's own words.** `plugin:mr-auth` answers
+  `{session, expires, user_id, active}` and the frontend sends it as
+  `Authorization: Bearer <session>` (`App.vue:1591`) against `labrinthBaseUrl`, and
+  as the bare token in `App.vue:1336`'s session check against `/v2/user`. It is not
+  the Microsoft account and shares nothing with it: that one's token signs a launch,
+  this one authenticates Labrinth and Archon. The plugin's own Rust -- the OAuth
+  client id, the redirect URI, the scopes it asks for, the refresh -- is what is
+  **not** in this tree, so how the reference *obtains* the session is not
+  measurable here; how it *uses* one is.
+
+  **What each remaining surface would call.** Servers and an instance's hosting
+  half: the eleven Archon namespaces above plus `billing_internal.getProducts` for
+  the catalogue, i.e. not two slices' worth of work but a client of its own. The
+  panel's fundraiser banner: `campaign_internal.getPride26()`, one call. The friends
+  list's signed-in half: four `plugin:friends` commands in the reference, whose user
+  documents come from the *published* `users_v2.getMultiple` -- and Labrinth's own
+  `friends_v3.list()`/`add()` are what the hosting page's access tab uses, so a
+  session could reach the same data two ways. The profile page's own half: the
+  reader's own identity is `users_v3.getAuthenticated()`, which the app reads at
+  startup (`App.vue:349`) and again for the Skins page's Modrinth store
+  (`Skins.vue:272`) -- so the sentence this launcher's profile page cannot select
+  (`State::empty_sentence(true)`, G108) is one authenticated call away.
+
+  **Where a token would have to live.** Not in `accounts.json`: that file is
+  Prism's, it is read and written field by field so as not to sign a user out of the
+  other launcher (`crate::accounts` says why in its module docs), and Modrinth has
+  no meaning in Prism's schema. The launcher's own file is
+  `PalantirPaths::home`/`crate::prefs`, which is already written atomically and is
+  explicitly *not* the data root -- and a token there is a plaintext secret, which is
+  the cost that has to be named rather than discovered. The reference keeps its own
+  credentials in the plugin's store, which is another thing this tree cannot see.
+
+  **The decision this leaves, stated as three options rather than a recommendation.**
+  (A) An OAuth2 application of this launcher's own: register an application with
+  Modrinth (name, scopes, allowlisted redirect URIs -- a human step, and a client
+  secret this project would then have to hold), then a loopback listener, the
+  urlencoded exchange, a token store and a re-authorize path when `expires_in` runs
+  out; the published exchange has no refresh token, so "expired" means "authorize
+  again". (B) A personal access token the reader generates in their own settings and
+  pastes: no registration, no redirect, the documented `Authorization: mrp_…` header,
+  at the cost of a settings field and a secret in a file, and with the open question
+  this measurement cannot close -- whether Archon accepts the same token, since
+  Archon's own documentation is not in this tree and neither is the client code that
+  authenticates to it. (C) Leave all three surfaces recorded as out of reach, which
+  is what the ledger's two open stage-3 items already say.
+
+  **What this gate does not do.** It builds nothing and decides nothing: no source
+  file changes, an external reading of two published pages, and the plan's two
+  stage-3 items left open with their reasons intact. Its value is that whichever of
+  the three options a reader takes, the size of what follows is now a number -- 16
+  Labrinth namespaces, 11 Archon ones, 67 Archon methods, two plugin call sets --
+  rather than the phrase "a slice of its own size".
+
+  **The runner could not be the receipt.** This slice is documents and one reading
+  of two published pages, so its push is refused the same way every other one is --
+  the commit that follows this one records the run. Nothing here was measured on the
+  runner either, and nothing here needed to be: there is no code in it.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

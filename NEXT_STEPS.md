@@ -570,12 +570,21 @@ What stage 3 does **not** have yet, named rather than implied:
   half, which G106 took, and the profile page's published-API half, which G108 took:
   the header's facts and the whole projects list are Modrinth's own v2 documents,
   and only collections, organizations and the reader's-own state stay behind the
-  sign-in. What that leaves is a choice rather than a debt:
-  the ledger's open stage-3 items now stand at two gates, both behind the same
-  sign-in, and the alternative to them is a Modrinth path of this launcher's own --
-  the app's own OAuth, then Labrinth with the token those `_internal` routes are
-  called with -- which is a slice of its own size and would unlock both at once.
-  Nobody has to re-measure either way before starting. One measurement from G105 is
+  sign-in. What that leaves is a choice rather than a debt, and **G109 measured the
+  choice** rather than leaving it as a phrase. Modrinth publishes two ways in: a
+  personal access token (`Authorization: mrp_…`, one scope per request, no
+  registration) and OAuth2 (`https://modrinth.com/auth/authorize`, then a urlencoded
+  exchange at `POST api.modrinth.com/_internal/oauth/token` with a registered
+  application's client secret, answering `{access_token, token_type: "Bearer",
+  expires_in}` and no refresh token). Two corrections came with it: `_internal` is
+  not by itself a mark of unreachability -- the published guide *documents* that
+  exchange -- and the Servers half is not Labrinth at all but **Archon**, a second
+  host with eleven versioned namespaces, 67 distinct methods, a websocket and an
+  SFTP handoff, with `billing_internal.getProducts` only the price list beside it.
+  A token would live in this launcher's own file (`PalantirPaths::home`, beside
+  `prefs`), not in `accounts.json`, which is Prism's; and a token in a file is a
+  plaintext secret, which is part of the cost. Nobody has to re-measure either way
+  before starting, and the open stage-3 items stand at two gates as before. One measurement from G105 is
   still unclaimed and stays named here so it is not lost: `helpers/skins.ts`'
   `determineModelType` decides slim from classic by reading one 2x12 column of the
   arm at (54, 20) and asking whether any pixel in it is opaque -- the exact
