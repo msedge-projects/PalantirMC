@@ -3280,10 +3280,11 @@ an array of nested tuples, which is now a struct called `Paint`.
   no gate here has seen a real account: everything above is a fixture's answer, which
   is the same limit the live tests exist for.
 
-  The runner could not be the receipt either: this slice's push, `ad8249c`, is run
-  `RUN_ID` -- the same block as the fourteen before it, `Lint` and `Test workspace`
-  failing with zero steps and `The job was not started because recent account
-  payments have failed or your spending limit needs to be increased`, its dependants
+  The runner could not be the receipt either: this slice's push, `11bce05` -- which
+  also carried `ad8249c`, the slice itself -- is run `36437508333`, the same block as
+  the fourteen before it: `Lint` and `Test workspace` failed in 6 s with **zero
+  steps** and `The job was not started because recent account payments have failed or
+  your spending limit needs to be increased`, with `Live services` and `Build exe`
   skipped rather than scheduled. The transcripts above are this machine's, run with
   the flags `ci.yml` uses.
 
