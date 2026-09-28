@@ -3117,12 +3117,13 @@ one duplicate is attributed to, which moves between runs.
   hint's split. The others are the page's existing gates, which now run over the
   hero in all four themes.
 
-  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID` -- the same block as the thirteen before it, `Lint` and `Test
-  workspace` failing in a few seconds with zero steps and `The job was not started
+  The runner could not be the receipt: this slice's push, `0c19994` -- which also
+  carried `5462dfc`, the commit that deleted the window-opening test shim -- is run
+  `36430312498`, the same block as the thirteen before it: `Lint` and `Test
+  workspace` failed in 5 s with **zero steps** and `The job was not started
   because recent account payments have failed or your spending limit needs to be
-  increased`, its dependants skipped rather than scheduled. The transcripts above
-  are this machine's, run with the flags `ci.yml` uses.
+  increased`, with `Live services` and `Build exe` skipped rather than scheduled.
+  The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
 ## What these gates cannot say
 
