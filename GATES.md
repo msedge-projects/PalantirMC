@@ -3288,6 +3288,125 @@ an array of nested tuples, which is now a struct called `Paint`.
   skipped rather than scheduled. The transcripts above are this machine's, run with
   the flags `ci.yml` uses.
 
+- [x] G105: the four surfaces stage 3 left are measured -- two need a Modrinth
+  session, one is only unfinished, and the plan's last stage-3 item is decided
+  rather than implied
+  CHECK: grep -rho "invoke('plugin:[a-z-]*" vendor/modrinth-app/app-frontend/src vendor/modrinth-app/ui/src | sed "s/invoke('//" | sort -u | wc -l
+         ls vendor/modrinth-app/app-frontend/src-tauri
+         grep -rn "billing_internal\|campaign_internal" vendor/modrinth-app/app-frontend/src
+         grep -n "invoke('plugin:minecraft-skins" vendor/modrinth-app/app-frontend/src/helpers/skins.ts
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 21 plugin namespaces, the four below among them, and no `src-tauri`
+          directory at all -- so none of the Rust behind those calls is in this
+          tree; exactly the two `_internal` Labrinth routes named below; the
+          twelve `plugin:minecraft-skins` calls, of which the writing seven are
+          the ones left; both document tools exit 0, with the two open stage-3
+          items still open and saying why
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ grep -rho "invoke('plugin:[a-z-]*" vendor/modrinth-app/app-frontend/src vendor/modrinth-app/ui/src | sed "s/invoke('//" | sort -u | wc -l
+21
+$ grep -rho "invoke('plugin:[a-z-]*" vendor/modrinth-app/app-frontend/src vendor/modrinth-app/ui/src | sed "s/invoke('//" | sort -u | grep -E "skins|friends|users|mr-auth"
+plugin:friends
+plugin:minecraft-skins
+plugin:mr-auth
+plugin:users
+$ ls vendor/modrinth-app/app-frontend/src-tauri
+ls: cannot access 'vendor/modrinth-app/app-frontend/src-tauri': No such file or directory
+$ grep -rn "billing_internal\|campaign_internal" vendor/modrinth-app/app-frontend/src
+vendor/modrinth-app/app-frontend/src/pages/Servers.vue:26:	queryFn: () => client.labrinth.billing_internal.getProducts(),
+vendor/modrinth-app/app-frontend/src/components/ui/PrideFundraiserBanner.vue:15:	queryFn: () => client.labrinth.campaign_internal.getPride26(),
+$ grep -n "invoke('plugin:minecraft-skins" vendor/modrinth-app/app-frontend/src/helpers/skins.ts
+114:	return invoke('plugin:minecraft-skins|get_available_capes', {})
+118:	return invoke('plugin:minecraft-skins|get_available_skins', {})
+126:	return await invoke('plugin:minecraft-skins|add_and_equip_custom_skin', {
+134:	await invoke('plugin:minecraft-skins|equip_skin', {
+140:	await invoke('plugin:minecraft-skins|remove_custom_skin', {
+146:	await invoke('plugin:minecraft-skins|set_custom_skin_order', {
+158:	return await invoke('plugin:minecraft-skins|save_custom_skin', {
+174:	return invoke('plugin:minecraft-skins|normalize_skin_texture', { texture })
+178:	await invoke('plugin:minecraft-skins|unequip_skin')
+182:	await invoke('plugin:minecraft-skins|flush_pending_skin_change')
+186:	await invoke('plugin:minecraft-skins|flush_pending_skin_change_for_profile', {
+192:	const data = await invoke('plugin:minecraft-skins|get_dragged_skin_data', { path })
+$ python tools/progress.py --check
+$ echo $?
+0
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 106 gates, 6 stage cards and every subject as written
+$ echo $?
+0
+```
+
+  **No code in this slice, and that is the slice.** Stage 3's ledger has kept four
+  items open through G96-G104, and each was described the same way: a service this
+  launcher does not read. The plan's own note said they need a decision rather than
+  another slice, so this gate is the decision, and the measurement it rests on is
+  the paragraph above rather than any behaviour of this tree.
+
+  **What the tree can and cannot answer.** The reference's frontend calls **21**
+  plugin namespaces. Four of them are the surfaces in question --
+  `plugin:minecraft-skins`, `plugin:friends`, `plugin:mr-auth`, `plugin:users` --
+  and `app-frontend/src-tauri` is not vendored, so the Rust that answers any of
+  them is absent from this repository and cannot be read here at all. That is the
+  whole reason these four were never "one more slice": a plugin call is not an
+  HTTP endpoint that could be guessed from the frontend, it is a Rust command
+  whose implementation is the artifact. What the frontend *does* show is the
+  shape of each answer, and where the answer itself comes from when the plugin is
+  only a proxy.
+
+  **Two of the four are behind the app's own Modrinth session.** An instance's
+  hosting half and the Servers page are one service: `Servers.vue` asks
+  `client.labrinth.billing_internal.getProducts()` for the product list, through
+  the client the app injects with the reader's Modrinth token. The panel's
+  fundraiser banner is the same word twice: `client.labrinth.campaign_internal.getPride26()`.
+  `_internal` is the frontend's own naming for a route outside Modrinth's
+  published API, which is why neither appears in the public v2 documentation and
+  why guessing a shape for them would be invention rather than measurement. The
+  friends list's signed-in half is four `plugin:friends` calls behind
+  `plugin:mr-auth`'s seven, and `plugin:users` -- search, profile, projects,
+  organizations, preferences -- is Labrinth's user service wearing a plugin name.
+  This launcher has a Minecraft sign-in and no Modrinth one, so all three of these
+  are gated on a session this tree cannot make.
+
+  **One of the four is only unfinished, and it is the one worth taking.** The
+  Skins page's remaining half is `helpers/skins.ts`'s writing side:
+  `equip_skin`, `add_and_equip_custom_skin`, `remove_custom_skin`,
+  `set_custom_skin_order`, `save_custom_skin`, `unequip_skin` and
+  `normalize_skin_texture`. Every one of those is Minecraft's own skin service --
+  the document G104 already reads and the token a launch already holds -- plus a
+  store of the reader's own choices, which the plugin keeps for itself and any
+  launcher would have to keep for itself too (`source: 'custom' |
+  'custom_external'` against Mojang's `default`). So the gap there is a slice,
+  not an account. The same file hands over one measurement cheaply: `determineModelType`
+  answers slim-versus-classic from the arm column at (54, 20) -- x 54..55, y
+  20..31, opaque pixel or not -- which is a test `skin.rs`'s cutter is already
+  holding the pixels for. It is named here so the slice that takes the writing
+  half does not have to find it again.
+
+  **What this gate deliberately does not do.** It does not tick a stage-3 item
+  off: `tools/progress.py`'s two open entries stand, with their reasons rewritten
+  to say which of the four is reachable, and stage 3 stays at its 13 of 17. It
+  does not build the Modrinth OAuth path either, though that is the one move that
+  would unlock three surfaces at once, because it is a slice of its own size
+  (a device or web flow, a token store, and then Labrinth behind it) and it is
+  written into `NEXT_STEPS.md` as the alternative so a later session picks
+  between the two rather than re-measuring. And it does not write to anyone's
+  Minecraft account, which is what the skins writing half does and why that half
+  is a slice rather than a line here.
+
+  **What the gates do and do not say.** Nothing in this slice is a test: its
+  receipt is the transcripts above, which are measurements of the *reference*,
+  plus the two document tools, which fail if the ledger and the plan disagree.
+  It asserts no behaviour of this tree and changes none -- no source file is
+  touched -- so the suite's last numbers (G104's 958 passed, 0 failed, 17 ignored)
+  are still the suite's numbers.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID`, which is the same block as the fourteen before it, with zero steps.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

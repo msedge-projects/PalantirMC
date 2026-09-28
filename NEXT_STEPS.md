@@ -506,10 +506,37 @@ What stage 3 does **not** have yet, named rather than implied:
   the three fill. One third of it is real now: the Skins page reads what
   *Minecraft* publishes for the signed-in account -- the skins and capes it owns,
   and which of each is in force -- and cuts the skin in force into a front view it
-  draws (G104). What is still absent is that page's own library (Modrinth's
-  bundles, whose section headings it lists and cannot fill), its *equipping* half,
-  and the Servers page with an instance's hosting half, which are Modrinth's
-  service and not read here.
+  draws (G104).
+
+  G105 measured which of what is left is *reachable* and which is not, because
+  they are not the same kind of gap and the plan asked for that decision rather
+  than for another slice. Two of the four need the app's own Modrinth session,
+  which this launcher does not have. Modrinth **Hosting** and the **Servers** page
+  are one Labrinth service whose product list the frontend asks for as
+  `client.labrinth.billing_internal.getProducts()` -- `_internal`, outside
+  Modrinth's published API. The panel's **fundraiser banner** is the same word
+  again: `client.labrinth.campaign_internal.getPride26()`. And the friends list's
+  **signed-in half** is four `plugin:friends` calls that authenticate through
+  `plugin:mr-auth`; `plugin:users`, which is Labrinth's own user service behind
+  those pages, is the third of the namespaces involved. One is only *unfinished*:
+  the Skins page's writing half -- `equip_skin`, `add_and_equip_custom_skin`,
+  `remove_custom_skin`, `set_custom_skin_order`, `save_custom_skin`,
+  `unequip_skin`, `normalize_skin_texture` in `helpers/skins.ts` -- is Minecraft's
+  own skin service with the account's own token, the document G104 already reads,
+  plus a store of the reader's own choices the plugin keeps for itself. So it
+  needs a slice rather than an account. That same file also hands this tree a
+  measurement worth taking while it is here: `determineModelType` decides slim from
+  classic by reading one 2x12 column of the arm at (54, 20) and asking whether any
+  pixel in it is opaque -- the exact question the cutter in `skin.rs` is already
+  holding the pixels for.
+
+  What that leaves is a choice rather than a debt. The ledger's two open stage-3
+  items stay open and now say *why* each is open, and the one that is only
+  unfinished is the one a later slice should take. The alternative for the other
+  three is a Modrinth sign-in path of this launcher's own -- the app's own OAuth,
+  then Labrinth with the token those `_internal` routes are called with -- which is
+  a slice of its own size and would unlock all three at once. Nobody has to
+  re-measure either way before starting.
 * **The panel's other sections are not built.** The panel is no longer a wash
   (G83): Discover, a project and a profile force it on (`App.vue`'s
   `forceSidebar`), and it draws `app-sidebar`'s scroll region with four of its
@@ -649,6 +676,19 @@ than a translation. What still points at the mirror is the resolve-time
 routing for those two uids (`PublisherMeta` in the desktop crate): the engine
 reads and installs from the publishers now, and flipping that switch is the
 desktop track's line to move rather than this stage's.
+
+That line is two lines, not one, and the order between them is not a
+preference. `published_loader` answers `None` for `net.minecraftforge` and
+`net.neoforged` today, so the mirror resolves them -- and nothing outside
+`engine::forge` calls `install` or builds an `InstallCtx` at all, so G100's
+processors are landed but *unreached from the interface*. Flipping the routing
+with the install still unreached would resolve the installer's own profile for
+an instance whose client jar has never been patched, which is the one order
+that breaks a launch; the install has to run first (at instance creation, with
+the patched client and its declared digests as the resume test), and the
+routing follows it. Until then the mirror's profile is what a Forge launch
+resolves, and it names the patched artifacts the install will produce -- which
+is exactly the difference G99's live test measured between the two files.
 
 ## Where the old sections went
 
