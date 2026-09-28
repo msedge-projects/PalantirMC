@@ -446,30 +446,6 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
-/// Open `url` in the default browser (best effort).
-///
-/// Windows needs `cmd /C start` rather than `explorer.exe` for a URL: passing a
-/// URL to Explorer opens a *folder* search instead of the browser, which is the
-/// kind of "it did nothing" failure worth avoiding in a sign-in flow.
-#[cfg(test)]
-pub fn open_url(url: &str) -> Result<(), String> {
-    let result = if cfg!(windows) {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", url]);
-        // `start` still opens the browser without a console of its own.
-        hide_console(&mut command);
-        command.spawn()
-    } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(url).spawn()
-    } else {
-        Command::new("xdg-open").arg(url).spawn()
-    };
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("opening '{url}' failed: {e}")),
-    }
-}
-
 // ---- authentication -------------------------------------------------------
 
 /// Build the launch session for `account`, renewing Microsoft tokens when they
@@ -3042,16 +3018,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn open_url_reports_a_browser_it_cannot_launch() {
-        // A URL is only opened through the platform opener, which on every
-        // supported system is an absolute command; a nonsense URL still has to
-        // produce success from the spawn itself, so what is asserted here is
-        // that the call does not panic and reports a real error shape when it
-        // fails.
-        let result = open_url("not-a-url");
-        if let Err(message) = result {
-            assert!(message.contains("opening"), "got {message}");
-        }
-    }
 }

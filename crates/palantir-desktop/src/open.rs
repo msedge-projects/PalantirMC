@@ -131,8 +131,13 @@ mod tests {
 
     #[test]
     fn a_refused_link_says_so_instead_of_starting_something() {
-        // The failure path is the one a test can run without a browser: the URL is
-        // refused before any program is built.
+        // The failure path is the one a test can run without a browser, and these
+        // tests stop there: [`command_for`] is asserted as a value and [`url`] is
+        // only ever called with a URL it refuses. A test that *does* run the
+        // opener starts a real window on whoever ran `cargo test` -- `launch.rs`
+        // had a `#[cfg(test)]` shim that did exactly that with `not-a-url`, and
+        // every run of the suite popped Windows' "cannot find 'not-a-url'" dialog
+        // over whatever else the machine was doing.
         let error = url("file:///etc/passwd").expect_err("a local file is not a link");
         assert!(error.contains("is not a link this launcher will open"), "{error}");
         assert!(error.contains("file:///etc/passwd"), "the refusal quotes it: {error}");
