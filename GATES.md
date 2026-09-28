@@ -4561,6 +4561,111 @@ $ curl -H 'X-Panel-Version: …' https://archon.modrinth.com/…
   workspace suite and clippy have not been re-run since the locales slice was rebased
   under them.
 
+- [x] G112: a refusal keeps the service's own sentence, and the metadata store's
+  fetcher stops calling a 404 a transport failure (the two findings G110 and G111 named)
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         cargo test -p palantir-net --test live --locked -- --ignored \
+               a_real_refusal_carries_its_status_and_whatever_sentence_the_service_sent --nocapture
+         curl -sS -w '[%{http_code}] %{size_download} bytes' \
+              api.modrinth.com/v2/{user,tag/nonexistent-loader,project/sodium/version/999999999}
+         curl -sS -H 'X-Panel-Version: 1' archon.modrinth.com/v0/servers
+  EXPECT: the workspace suite green on the tree G108 left, then on this one
+          990 passed / 0 failed / 18 ignored, clippy exit 0 at the same 42 warnings
+          a 404 whose body carries JSON says so; one whose body is empty says only the code
+          Archon's two words `not found` arrive as the sentence
+  EVIDENCE: the runs on this tree, and the live test's own output, 2026-09-28:
+
+```
+# first, the debt G108's gate recorded: the merged tree, no slice on top
+cargo test --workspace --all-targets --locked
+  test result: ok. 177 passed; 0 failed; 0 ignored        (palantir-core)
+  test result: ok.   8 passed; 0 failed; 0 ignored        (palantir-core, integration)
+  test result: ok. 519 passed; 0 failed; 0 ignored        (palantir-desktop)
+  test result: ok.   4 passed; 0 failed; 0 ignored        (palantir-desktop, integration)
+  test result: ok.  31 passed; 0 failed; 0 ignored        (palantir-loader)
+  test result: ok. 247 passed; 0 failed; 0 ignored        (palantir-net)
+  test result: ok.   0 passed; 0 failed; 17 ignored       (palantir-net, live)
+exit 0 -> 986 passed / 0 failed / 17 ignored
+cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, 42 warning lines, the set identical to G106's
+
+# then the same two commands with the slice on disk
+cargo test --workspace --all-targets --locked
+exit 0 -> 990 passed / 0 failed / 18 ignored
+  (net 247 -> 251: the four new unit tests; live 17 -> 18: the one new live test)
+cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, 42 warning lines, the set identical again
+cargo clippy -p palantir-net --all-targets --locked -- -D clippy::correctness   # forced fresh
+exit 0 in 1m 28s -- "Checking palantir-net", 13 warning lines, no correctness denial
+
+# the live test, against both services, --nocapture
+json:       http error for https://api.modrinth.com/v2/tag/palantirmc-live-no-such-loader:
+            http status 404: the requested route does not exist
+empty body: http error for https://api.modrinth.com/v2/project/sodium/version/999999999:
+            http status 404
+archon:     http error for https://archon.modrinth.com/v0/servers:
+            http status 404: not found
+test result: ok. 1 passed; 0 failed; 0 ignored; 17 filtered out; finished in 1.64s
+
+# and the three bodies by hand, because the URLs were chosen from measurements
+/v2/user                                    401  150 bytes  {"error":"auth_error","description":
+     "flattening v2 not-found response","details":["authenticating API request","Authentication
+     method was not valid"]}
+/v2/tag/nonexistent-loader                  404   72 bytes  {"error":"not_found","description":
+     "the requested route does not exist"}
+/v2/project/sodium/version/999999999        404    0 bytes  (nothing at all)
+archon /v0/servers, X-Panel-Version: 1      404    9 bytes  not found
+```
+
+  **What changed, and why it is a slice rather than a tidy-up.** G110 and G111 each
+  ended by naming the same defect: the engine renders every refusal as
+  `http status <code>`, so Labrinth's "The provided client id was invalid" and
+  Archon's "you are not authorized to view this resource" both reach the reader as
+  `401`. A page shows that string -- `Store` maps every engine error with
+  `error.to_string()` -- so this is the reader-visible half of both findings.
+
+  `Error::status_with(url, status, sentence)` is the new constructor and
+  `Error::status` is now it with no sentence, which is why the old string is
+  byte-for-byte unchanged when a service sent nothing: every existing test and log
+  line still holds. The pool reads up to 4 KiB of the refusal's body in both places
+  a non-2xx becomes an error (`send`, which a whole-body read and a download both
+  go through, and the conditional read) and `failure_sentence` looks for
+  `description`, then `errorMessage`, then `error` -- the two measured shapes --
+  falling back to a short, readable, non-markup text body. `details` is deliberately
+  not read: it is Labrinth's internal chain, and on the one measured 401 that carries
+  it the summary above the chain says less than the chain does. A sentence is bounded
+  at 200 characters with an ellipsis, and markup, binary and over-long bodies are
+  refused rather than pasted into a notice.
+
+  **Two things the work turned up that the measurements had not.** First, **an empty
+  404 is real**: Labrinth answers a *matched* route with a missing resource
+  (`/project/sodium/version/999999999`) with `Content-Length: 0`, so "no sentence" is
+  an ordinary case and not a fallback for a broken body. The live test asserts exactly
+  that string, unchanged. Second, `BlockingHttpFetcher::get` -- the metadata store's
+  own fetcher, a second place in this crate where a non-2xx became an `Error::Http` --
+  was building it by hand as `Error::http(url, format!("http status {status}"))`,
+  which leaves `status: None`. A metadata 404 therefore arrived as a failure the retry
+  line could not tell from a dropped connection (`is_retryable` reads the field, and
+  `None` is retryable). It now uses the same two helpers and the same constructor, so
+  there is one answer in this crate to "what did the service say".
+
+  **The first version of the live test failed, and that is in here on purpose.** It
+  asked for a user name nobody holds and asserted a sentence arrived; the service
+  answered `404` with a zero-byte body, so the assertion was wrong about the service
+  rather than the code about the string. Measuring that URL (`curl` above) is what
+  turned the test into the three-shape one -- and into the finding that "no sentence"
+  has to be a *tested* outcome rather than an overlooked one.
+
+  **What this does not do.** It does not change any message this launcher writes for
+  itself, and it does not add Archon as a service: the live test spells out
+  `archon.modrinth.com` rather than reading a constant, because this crate has no
+  Archon base URL yet (G111 measured it as `https://archon.modrinth.com`), and the
+  header the test sends is written in the test. Nothing here covers Minecraft's
+  retry line, where `auth.rs` already reads `errorMessage` by hand in three places
+  and could now share this helper -- named as the obvious follow-through rather than
+  done, because a token-renewal path is the wrong place to refactor without a reason.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

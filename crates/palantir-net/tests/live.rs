@@ -1522,3 +1522,77 @@ fn forge_and_neoforge_processors_install_a_client() {
         );
     }
 }
+
+/// A refusal arrives with its status *and* whatever sentence the service sent.
+///
+/// The unit tests in `engine/http.rs` prove the three shapes are read out of a
+/// body. This is the half they cannot reach: the pool is the only place in this
+/// crate that speaks to a real socket, and the point of keeping the sentence is
+/// that it comes out of the same call a page's failure notice is built from.
+///
+/// The three URLs below are the three shapes, measured from this machine and
+/// chosen because they are stable rather than because they are pretty:
+/// Labrinth answers an unknown route with a JSON sentence, a *matched* route
+/// with a missing resource with no body at all, and Archon answers an unknown
+/// path with the two words `not found`. That last one is why the extraction
+/// falls through to plain text, and the empty one is why it tolerates nothing.
+/// Assertions are about shape -- a status in the field, a sentence that is not
+/// empty, no markup -- because Labrinth's words are its own to change.
+#[test]
+#[ignore]
+fn a_real_refusal_carries_its_status_and_whatever_sentence_the_service_sent() {
+    use palantir_net::{Cancel, Error, Fetch, HttpPool, Request, MODRINTH_BASE_URL};
+
+    /// Send `request` through the pool and expect the refusal it is about.
+    fn refusal(pool: &HttpPool, request: &Request) -> (Error, String) {
+        let error = pool.get(request, &Cancel::new()).expect_err("a refusal");
+        let rendered = error.to_string();
+        (error, rendered)
+    }
+
+    /// The status arrived in the field a retry policy reads, not only in the text.
+    fn refused_with(error: &Error, status: u16, name: &str) {
+        assert!(
+            matches!(error, Error::Http { status: Some(got), .. } if *got == status),
+            "{name}: expected a {status} in the status field, got {error:?}"
+        );
+    }
+
+    let pool = HttpPool::default();
+
+    // One: Labrinth's JSON sentence. A loader name no build uses.
+    let json = Request::get(format!("{MODRINTH_BASE_URL}/tag/palantirmc-live-no-such-loader"));
+    let (error, rendered) = refusal(&pool, &json);
+    refused_with(&error, 404, "json");
+    let sentence = rendered
+        .split_once("http status 404: ")
+        .map(|(_, sentence)| sentence.trim().to_string())
+        .unwrap_or_else(|| panic!("json: the status arrived with no sentence: {rendered}"));
+    assert!(!sentence.is_empty(), "json: an empty sentence is not one: {rendered}");
+    assert!(!sentence.contains('<'), "json: a page was pasted into a notice: {rendered}");
+    println!("json: {rendered}");
+
+    // Two: the same service, a matched route, a body of zero bytes. There is no
+    // sentence to keep here, and inventing one would be worse than saying the
+    // code -- so the string must be exactly what it was before this change.
+    let empty = Request::get(format!("{MODRINTH_BASE_URL}/project/sodium/version/999999999"));
+    let (error, rendered) = refusal(&pool, &empty);
+    refused_with(&error, 404, "empty body");
+    assert!(
+        rendered.ends_with("http status 404"),
+        "empty body: a body of nothing grew a sentence: {rendered}"
+    );
+    println!("empty body: {rendered}");
+
+    // Three: Archon, whose 404 is words rather than a document, and whose every
+    // request has to carry the version header first (G110, G111).
+    let archon = Request::get("https://archon.modrinth.com/v0/servers").header("X-Panel-Version", "1");
+    let (error, rendered) = refusal(&pool, &archon);
+    refused_with(&error, 404, "archon");
+    let sentence = rendered
+        .split_once("http status 404: ")
+        .map(|(_, sentence)| sentence.trim().to_string())
+        .unwrap_or_else(|| panic!("archon: the status arrived with no sentence: {rendered}"));
+    assert!(!sentence.is_empty(), "archon: an empty sentence is not one: {rendered}");
+    println!("archon: {rendered}");
+}

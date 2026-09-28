@@ -170,11 +170,25 @@ impl Error {
     /// cannot disagree, and so that every non-2xx in the engine reads the same
     /// way in a log.
     pub fn status(url: impl Into<String>, status: u16) -> Self {
-        Error::Http {
-            url: url.into(),
-            detail: format!("http status {status}"),
-            status: Some(status),
-        }
+        Error::status_with(url, status, None)
+    }
+
+    /// Build an HTTP error from a status code *and* whatever sentence the
+    /// service put in the body.
+    ///
+    /// The services in this launcher answer a refusal two ways: Minecraft sends
+    /// `{"errorMessage": …}`, and Modrinth's Labrinth and Archon send
+    /// `{"error": …, "description": …}` (measured, G110 and G111). The status
+    /// alone is the same `401` for every one of those, so a page that shows it
+    /// tells a reader less than the service was willing to say -- which is why
+    /// the sentence is kept when it exists and the old string is unchanged when
+    /// it does not.
+    pub fn status_with(url: impl Into<String>, status: u16, sentence: Option<&str>) -> Self {
+        let detail = match sentence {
+            Some(sentence) => format!("http status {status}: {sentence}"),
+            None => format!("http status {status}"),
+        };
+        Error::Http { url: url.into(), detail, status: Some(status) }
     }
 
     /// Wrap an [`std::io::Error`] with path context.

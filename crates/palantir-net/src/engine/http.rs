@@ -118,7 +118,12 @@ impl HttpPool {
         let (response, permit) = self.send_any(request)?;
         let status = response.status();
         if !status.is_success() {
-            return Err(Error::status(&request.url, status.as_u16()));
+            // The body is read here for one reason: it is the only place the
+            // service's own sentence lives. A download's 404 and a document's
+            // 401 are then told apart by what the service said rather than by
+            // the code alone.
+            let sentence = failure_sentence(&failure_body(response));
+            return Err(Error::status_with(&request.url, status.as_u16(), sentence.as_deref()));
         }
         Ok((response, permit))
     }
@@ -218,12 +223,94 @@ impl Fetch for HttpPool {
             return Ok(Response { body: Vec::new(), etag, not_modified: true });
         }
         if !status.is_success() {
-            return Err(Error::status(&request.url, status.as_u16()));
+            let sentence = failure_sentence(&failure_body(response));
+            return Err(Error::status_with(&request.url, status.as_u16(), sentence.as_deref()));
         }
         let mut body = Vec::new();
         self.drain(request, response, &mut body, cancel)?;
         Ok(Response { body, etag, not_modified: false })
     }
+}
+
+/// How much of a refusal's body is read to find its sentence.
+///
+/// A refusal is a small JSON document -- the largest measured is 150 bytes --
+/// and a service that answers with an HTML error page must not have that page
+/// read into memory, or into a notice, just to say what the status already says.
+/// 4 KiB is well past every measured body and far short of a page.
+const MAX_FAILURE_BODY: usize = 4 * 1024;
+
+/// How long a kept sentence may be.
+///
+/// It is bound for a UI notice rather than for the body: a service that answers
+/// with a paragraph is truncated here, and the status in front of it still says
+/// what the code was.
+const MAX_SENTENCE: usize = 200;
+
+/// Read up to [`MAX_FAILURE_BODY`] bytes of a response that is already a failure.
+///
+/// A body that cannot be read is not a second failure: the caller is about to be
+/// told about the status either way, and an `Error::io` here would replace the
+/// server's answer with the read error's.
+///
+/// `pub(crate)` because the metadata store's own fetcher reads a refusal the same
+/// way: it is the second place in this crate where a non-2xx becomes an
+/// [`Error`], and two answers to "what did the service say" is one too many.
+pub(crate) fn failure_body(response: reqwest::blocking::Response) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let mut reader = response.take(MAX_FAILURE_BODY as u64);
+    if reader.read_to_end(&mut buffer).is_err() {
+        return Vec::new();
+    }
+    buffer
+}
+
+/// The sentence a service put in its refusal's body, if it put one there.
+///
+/// Two shapes are measured (G110, G111): Modrinth's Labrinth and Archon answer
+/// `{"error": …, "description": …}` -- "The provided client id was invalid",
+/// "unsupported archon request version" -- and Minecraft answers
+/// `{"errorMessage": …}`. `description` comes first because it is the sentence
+/// written for a reader; `error` is a machine word (`auth_error`,
+/// `invalid_client`) and is kept only as a last resort; `details` is not read at
+/// all, because it is Labrinth's internal chain and on the one measured 401 that
+/// carries it the chain says more than the summary above it.
+///
+/// A body that is not JSON is still a sentence when it is short and readable:
+/// Archon's own 404 is the words `not found`. Markup, binary and anything longer
+/// than [`MAX_SENTENCE`] are refused rather than pasted in.
+pub(crate) fn failure_sentence(body: &[u8]) -> Option<String> {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        for key in ["description", "errorMessage", "error"] {
+            if let Some(text) = value.get(key).and_then(|value| value.as_str()) {
+                if let Some(sentence) = bounded(text) {
+                    return Some(sentence);
+                }
+            }
+        }
+        return None;
+    }
+    let text = std::str::from_utf8(body).ok()?;
+    bounded(text)
+}
+
+/// A service's own words, trimmed and bounded, or nothing if they are not words.
+fn bounded(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() || text.contains('<') {
+        // Markup is a page rather than a sentence, and the status beside it is a
+        // better thing to show a reader than the first line of an error page.
+        return None;
+    }
+    if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+        return None;
+    }
+    if text.chars().count() <= MAX_SENTENCE {
+        return Some(text.to_string());
+    }
+    let mut sentence: String = text.chars().take(MAX_SENTENCE).collect();
+    sentence.push('…');
+    Some(sentence)
 }
 
 #[cfg(test)]
@@ -237,6 +324,86 @@ mod tests {
         assert!(USER_AGENT.contains(env!("CARGO_PKG_VERSION")), "{USER_AGENT}");
         // Modrinth's guidelines: a client that names itself is answered.
         assert!(!USER_AGENT.contains(' '), "{USER_AGENT}");
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_service_s_own_sentence() {
+        // The four shapes measured against the live services (G110, G111), which
+        // is the whole reason this exists: the status is the same 401 for each.
+        let labrinth = br#"{"error":"invalid_client","description":"The provided client id was invalid"}"#;
+        assert_eq!(
+            failure_sentence(labrinth).as_deref(),
+            Some("The provided client id was invalid")
+        );
+
+        let minecraft = br#"{"errorMessage":"The access token is invalid"}"#;
+        assert_eq!(failure_sentence(minecraft).as_deref(), Some("The access token is invalid"));
+
+        // Archon refuses a request version by name and sends no description.
+        let archon = br#"{"error":"unsupported archon request version"}"#;
+        assert_eq!(
+            failure_sentence(archon).as_deref(),
+            Some("unsupported archon request version")
+        );
+
+        // And its 404 is plain words rather than a document.
+        assert_eq!(failure_sentence(b"not found").as_deref(), Some("not found"));
+    }
+
+    #[test]
+    fn details_is_not_the_sentence_and_a_kept_one_is_the_first_thing_written_for_a_reader() {
+        // Labrinth's `description` here is its internal summary; the array beside
+        // it is the chain. The summary is what a notice shows, short of reading
+        // Labrinth's own code to rank them, and this test is the record of that
+        // choice rather than a claim that the summary is a good sentence.
+        let body = br#"{"error":"auth_error","description":"flattening v2 not-found response","details":["authenticating API request","Authentication method was not valid"]}"#;
+        assert_eq!(failure_sentence(body).as_deref(), Some("flattening v2 not-found response"));
+        // A description that is present but empty falls through to the next key.
+        let empty = br#"{"error":"invalid_client","description":"   ","errorMessage":"say this"}"#;
+        assert_eq!(failure_sentence(empty).as_deref(), Some("say this"));
+    }
+
+    #[test]
+    fn a_body_that_is_not_a_sentence_is_left_out_rather_than_pasted_in() {
+        assert_eq!(failure_sentence(b""), None);
+        assert_eq!(failure_sentence(b"   \n"), None);
+        assert_eq!(failure_sentence(b"<html><body>502 Bad Gateway</body></html>"), None);
+        // Bytes that are not text at all, which a proxy can answer with.
+        assert_eq!(failure_sentence(&[0x00, 0xff, 0x10]), None);
+        // JSON with no string a reader can use.
+        assert_eq!(failure_sentence(br#"{"error":{"code":7}}"#), None);
+        assert_eq!(failure_sentence(b"[]"), None);
+
+        // Two hundred characters are kept; the next one is truncated, so a
+        // paragraph-long internal description cannot fill a notice.
+        let long = "a".repeat(MAX_SENTENCE);
+        assert_eq!(failure_sentence(long.as_bytes()).map(|s| s.chars().count()), Some(MAX_SENTENCE));
+        let longer = "a".repeat(MAX_SENTENCE + 1);
+        let got = failure_sentence(longer.as_bytes()).expect("still a sentence");
+        assert_eq!(got.chars().count(), MAX_SENTENCE + 1, "the ellipsis is the extra one");
+        assert!(got.ends_with('…'), "{got}");
+    }
+
+    #[test]
+    fn the_status_and_the_sentence_are_one_line_and_the_bare_string_is_unchanged() {
+        // Nothing else in the tree moves: without a sentence this is the exact
+        // string every assertion above and every log line already holds.
+        let bare = Error::status("https://example.invalid/x", 404).to_string();
+        assert!(bare.ends_with("http status 404"), "{bare}");
+
+        let said = Error::status_with(
+            "https://example.invalid/x",
+            401,
+            Some("you are not authorized to view this resource"),
+        )
+        .to_string();
+        assert!(said.contains("http status 401: you are not authorized to view this resource"), "{said}");
+
+        // And the field a retry policy reads is untouched by the sentence.
+        match Error::status_with("https://example.invalid/x", 503, Some("down for maintenance")) {
+            Error::Http { status, .. } => assert_eq!(status, Some(503)),
+            other => panic!("a 503 is an HTTP failure: {other:?}"),
+        }
     }
 
     #[test]
