@@ -4110,9 +4110,12 @@ $ grep -c "archon.sockets.on" ui/src/composables/server-context-runtime.ts
   rather than the phrase "a slice of its own size".
 
   **The runner could not be the receipt.** This slice is documents and one reading
-  of two published pages, so its push is refused the same way every other one is --
-  the commit that follows this one records the run. Nothing here was measured on the
-  runner either, and nothing here needed to be: there is no code in it.
+  of two published pages, so its push is refused the same way every other one is:
+  run `36452778337`, `Lint` failed in 4 s and `Test workspace` in 3 s with **zero
+  steps** and the same billing annotation, `Live services` and `Build exe` skipped.
+  Nothing here was measured on the runner, and nothing here needed to be -- there is
+  no code in it, and the only checks this slice owes are the two document tools,
+  which exit 0 at 111 gates.
 
 ## What these gates cannot say
 
