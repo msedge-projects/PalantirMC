@@ -3784,11 +3784,12 @@ generated source: 89,448 lines, 4,114,561 bytes
   have made the table agree with clippy instead of with the reference, which is
   the wrong way round.
 
-  The runner could not be the receipt either: this slice's push, `RUN_PLACEHOLDER`,
-  is run `RUN_ID_PLACEHOLDER`, which is the same block as the eighteen before it --
-  zero steps and `The job was not started because recent account payments have
-  failed or your spending limit needs to be increased`, with `Live services` and
-  `Build exe` skipped rather than scheduled.
+  The runner could not be the receipt either: this slice's push, `22176da`, is run
+  `36447139380`, one of the 74 pushes since `36038333030` that have died the same
+  way -- `Lint` and `Test workspace` failed in 2 s and 3 s with **zero steps** and
+  `The job was not started because recent account payments have failed or your
+  spending limit needs to be increased`, with `Live services` and `Build exe`
+  skipped rather than scheduled.
 
 ## What these gates cannot say
 
