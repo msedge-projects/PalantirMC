@@ -123,6 +123,13 @@ mod scroll;
 /// flag and its `PalantirApp` state are gone, and the parts of it the product
 /// still needed — the native frame, and a `--shot` capture — are here.
 mod shell;
+/// A Minecraft skin as a picture: the texture's own layout, cut into the front
+/// view the Skins page draws.
+///
+/// Its own module rather than a corner of that page, because the arithmetic is
+/// the format's rather than the page's -- and because it is the one place this
+/// launcher draws something a *service* published rather than something it drew.
+mod skin;
 mod store;
 /// The one way this launcher reaches the network: the engine's cache, its pool
 /// and its queue, as the launch path uses them.

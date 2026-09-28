@@ -7,14 +7,17 @@
 //! around it, with the sentence that says where the rest comes from rather than a
 //! grid of empty boxes.
 
-use iced::widget::{column, row, Space};
+use iced::widget::{column, image, row, text, Space};
 use iced::{Alignment, Element, Length};
 
-use crate::page::{self, GAP, ROW_GAP};
+use crate::icon;
+use crate::icons_gen::Glyph;
+use crate::page::{self, Load, GAP, ROW_GAP};
+use crate::skin::Appearance;
 use crate::store::Store;
-use crate::style::INK_SECONDARY;
+use crate::style::{INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
-use crate::theme_gen::{self, Theme as Gen};
+use crate::theme_gen::{self, Ink, Theme as Gen};
 use crate::ui;
 
 /// The reference's bundled sections, in its own order.
@@ -95,6 +98,18 @@ impl Section {
     }
 }
 
+/// The request the page makes: read the account's own appearance.
+///
+/// Nothing but the round travels. *Which* account is the shell's to know -- it is
+/// the one a launch would sign in as, and a page has never seen an account file or
+/// a token -- so what a page asks is the question, and the shell is what can answer
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    /// Which request this is, counting from one.
+    pub round: u64,
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -104,6 +119,18 @@ pub enum Message {
     AddSkin,
     /// The selected skin was asked to be applied to the account.
     Apply,
+    /// The account's own appearance arrived.
+    ///
+    /// Boxed at the crossing, for the reason `project::Message::Found` is: this is
+    /// the one variant that is a page's worth of data beside a dozen unit ones, and
+    /// boxing it here keeps the page's own arms from boxing anything.
+    Found {
+        /// Which request this answers, so an answer to a question the page has
+        /// replaced is dropped rather than drawn.
+        round: u64,
+        /// The account's appearance, or why it could not be read.
+        result: Result<Box<Appearance>, String>,
+    },
     /// The pointer entered or left one of the page's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     Hover {
@@ -122,6 +149,15 @@ crate::hovered!(Message);
 const ADD_KEY: &str = "skins:add";
 const APPLY_KEY: &str = "skins:apply";
 
+/// The front view's own size on the page: the texture's 16x32 at six times, which
+/// is as large as the reference draws its model and the only kind of size that
+/// does not blur a face that is eight pixels wide.
+const DOLL_WIDTH: f32 = 96.0;
+const DOLL_HEIGHT: f32 = 192.0;
+
+/// The mark beside the skin or cape that is in force.
+const WORN_MARK: f32 = 14.0;
+
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
 pub struct State {
@@ -129,11 +165,18 @@ pub struct State {
     pub open: Option<usize>,
     /// The last thing the page could not do, shown rather than swallowed.
     pub notice: Option<String>,
+    /// The account's own appearance: what Minecraft says it owns, and the skin in
+    /// force cut into a front view. A `Load`, because it is a service's answer and
+    /// the page is drawn before it arrives.
+    pub appearance: Load<Appearance>,
+    /// Which request the page is waiting for, so an answer to a question it has
+    /// replaced is dropped rather than drawn.
+    round: u64,
 }
 
 impl State {
-    /// Apply a message.
-    pub fn update(&mut self, message: Message) {
+    /// Apply a message, reporting anything only the shell can do.
+    pub fn update(&mut self, message: Message) -> Option<Asked> {
         match message {
             Message::Select(section) => {
                 let index = Section::ALL.iter().position(|candidate| *candidate == section);
@@ -145,12 +188,41 @@ impl State {
             Message::Apply => {
                 self.notice = Some(crate::store::not_implemented("Applying a skin"));
             }
+            Message::Found { round, result } => {
+                if round == self.round {
+                    self.appearance = match result {
+                        Ok(appearance) => Load::Ready(*appearance),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+            }
             Message::Hover { key, over, hover } => crate::ui::pointer_with(
                 key,
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
         }
+        None
+    }
+
+    /// The request the page owes because nothing has been asked for yet.
+    ///
+    /// The reference reads the account's skins as the page mounts; this is the
+    /// same rule stated where the shell can see it, so a window opened straight on
+    /// `/skins` draws the account's own skins rather than an empty gallery.
+    pub fn opening(&mut self) -> Option<Asked> {
+        if self.appearance == Load::Idle {
+            Some(self.ask())
+        } else {
+            None
+        }
+    }
+
+    /// Bump the round, mark the page as waiting, and describe the request.
+    fn ask(&mut self) -> Asked {
+        self.round += 1;
+        self.appearance = Load::Loading;
+        Asked { round: self.round }
     }
 }
 
@@ -175,15 +247,18 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             .push(ui::button(theme, APPLY_KEY, Key::AppSkinsApplyButton, ui::Kind::Colored, Message::Apply))
             .into(),
     );
+    // The account's own appearance, which is what this page is for: the skin in
+    // force drawn, and the two lists Minecraft publishes. The reference renders its
+    // model through a plugin this tree does not have -- see [`crate::skin`] for what
+    // is drawn instead and what that costs -- but the *lists* are the same service's
+    // answer here as there.
+    blocks.push(page::draw(theme, &state.appearance, "your skins", |appearance| {
+        account_block(theme, appearance)
+    }));
     // The sections, each a card that opens and closes. The skins inside them come
-    // from the skin store; the sentence says so once, at the top, rather than once
-    // per card.
-    blocks.push(ui::admonition(
-        theme,
-        ui::Severity::Info,
-        Key::AppSkinsPreviewingBadge.message(),
-        &crate::store::not_implemented("The skin previews"),
-    ));
+    // from Modrinth's own skin store, which is a service answer this launcher has
+    // not been given: the sentence is inside the card that would draw them rather
+    // than over the account's own skins above.
     let mut sections = column![].spacing(GAP).width(Length::Fill);
     for (index, section) in Section::ALL.iter().enumerate() {
         let open = state.open == Some(index);
@@ -225,6 +300,141 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     page::body(blocks, GAP)
 }
 
+/// The account's own appearance, as the page draws it.
+///
+/// Two halves that come from different places and meet here: the *picture*, which is
+/// this launcher's own arithmetic over a texture (see [`crate::skin`]), and the two
+/// lists, which are Minecraft's own document. A skin whose texture would not come
+/// back is not a failure of the page -- the account still owns every skin it owns --
+/// so the reason is drawn where the picture would be and the lists are drawn
+/// underneath it.
+fn account_block<'a>(theme: Gen, appearance: &'a Appearance) -> Element<'a, Message> {
+    let doll: Element<'a, Message> = match &appearance.front {
+        Some(front) => image(front.handle())
+            .width(Length::Fixed(DOLL_WIDTH))
+            .height(Length::Fixed(DOLL_HEIGHT))
+            .into(),
+        None => text(
+            appearance
+                .note
+                .clone()
+                .unwrap_or_else(|| crate::store::not_implemented("This skin")),
+        )
+        .size(14.0)
+        .font(crate::style::medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .into(),
+    };
+    let hero = row![]
+        .spacing(GAP)
+        .align_items(Alignment::Center)
+        .push(doll)
+        .push(
+            column![]
+                .spacing(ROW_GAP)
+                .push(
+                    text(appearance.username.clone())
+                        .size(20.0)
+                        .font(crate::style::semibold())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                )
+                .push(caption(theme, &wearing_line(appearance))),
+        );
+    // Named rather than inferred, for the same reason `owned_row`'s is: `card`
+    // takes `impl Into<Element>`.
+    let hero: Element<'a, Message> = hero.into();
+    let mut blocks: Vec<Element<'a, Message>> = vec![ui::card(theme, hero)];
+
+    // The account's own skins. Minecraft's document names each one by its id and
+    // its variant and nothing else -- the reference's names come from the bundles
+    // *it* ships, and this launcher has none of those -- so a row says which
+    // variant it is and whether it is the one in force.
+    blocks.push(heading(theme, Key::AppSkinsSectionSavedSkins.message()));
+    for skin in &appearance.skins {
+        blocks.push(owned_row(theme, &variant_label(&skin.variant), skin.equipped()));
+    }
+    blocks.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
+    if appearance.capes.is_empty() {
+        blocks.push(caption(theme, Key::AppSkinsModalNoneCapeOption.message()));
+    }
+    for cape in &appearance.capes {
+        let name = if cape.alias.is_empty() { cape.id.as_str() } else { cape.alias.as_str() };
+        // One answer for which cape is in force rather than each row's own state:
+        // asked once, the rows and the hero block cannot disagree about it.
+        let worn = appearance.equipped_cape().is_some_and(|worn| worn.id == cape.id);
+        blocks.push(owned_row(theme, name, worn));
+    }
+    column(blocks).spacing(GAP).width(Length::Fill).into()
+}
+
+/// One thing the account owns: what it is called, and the mark when it is worn.
+///
+/// The mark is the reference's own `CheckIcon`, in the accent ink rather than a word
+/// this launcher would have had to invent: the document says `ACTIVE`, and a reader
+/// who sees the check on the skin the page is drawing above knows which is which.
+fn owned_row<'a>(theme: Gen, name: &str, worn: bool) -> Element<'a, Message> {
+    let ink = if worn { INK_CONTRAST } else { INK_SECONDARY };
+    let mut line = row![]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center)
+        .push(
+            text(name.to_string())
+                .size(14.0)
+                .font(crate::style::medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, ink))),
+        )
+        .push(Space::with_width(Length::Fill));
+    if worn {
+        line = line.push(icon::icon(
+            Glyph::Check,
+            WORN_MARK,
+            theme_gen::ink(theme, Ink::AccentContrast),
+        ));
+    }
+    // Named rather than inferred: `ui::card` takes `impl Into<Element>`, and an
+    // `into()` inside that is a conversion with two possible targets.
+    let row: Element<'a, Message> = line.into();
+    ui::card(theme, row)
+}
+
+/// A heading inside the account's block: the reference's section titles.
+fn heading<'a>(theme: Gen, label: &str) -> Element<'a, Message> {
+    text(label.to_string())
+        .size(16.0)
+        .font(crate::style::semibold())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .into()
+}
+
+/// A line of prose under something, in the panel's own secondary ink.
+fn caption<'a>(theme: Gen, line: &str) -> Element<'a, Message> {
+    text(line.to_string())
+        .size(13.0)
+        .font(crate::style::medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .into()
+}
+
+/// The one sentence about the skin in force, from the document's own vocabulary.
+fn wearing_line(appearance: &Appearance) -> String {
+    match appearance.equipped() {
+        Some(skin) => format!("Wearing the {} skin", variant_label(&skin.variant).to_lowercase()),
+        None => "Minecraft does not say which skin is in force.".to_string(),
+    }
+}
+
+/// `CLASSIC` and `SLIM` as a reader reads them.
+///
+/// The document's words are the format's; the reference's are the modal's own two
+/// arm-style labels, and they are the same two things.
+fn variant_label(variant: &str) -> String {
+    if variant.eq_ignore_ascii_case("SLIM") {
+        Key::AppSkinsModalArmStyleSlim.message().to_string()
+    } else {
+        Key::AppSkinsModalArmStyleWide.message().to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +472,31 @@ mod tests {
     }
 
     #[test]
+    fn the_page_asks_once_and_keeps_the_answer_that_answers_it() {
+        let mut state = State::default();
+        assert_eq!(state.appearance, Load::Idle, "nothing asked for yet");
+        let asked = state.opening().expect("a first request");
+        assert_eq!(asked.round, 1);
+        assert_eq!(state.appearance, Load::Loading, "and it is waiting on it");
+        assert!(state.opening().is_none(), "asked once, not once per frame");
+        // An answer to a question the page has replaced is dropped rather than
+        // drawn: the round travels with it, which is what makes that decidable.
+        assert!(state.update(Message::Found { round: 0, result: Err("old".into()) }).is_none());
+        assert_eq!(state.appearance, Load::Loading, "so the stale one is not drawn");
+        // The answer that does answer it becomes the page's own state, and a
+        // failure stays a sentence rather than becoming an empty gallery.
+        let appearance = crate::skin::Appearance::of(
+            "Steve",
+            palantir_net::MinecraftSkins::default(),
+            Err("the network is down".into()),
+        );
+        state.update(Message::Found { round: asked.round, result: Ok(Box::new(appearance)) });
+        assert!(matches!(state.appearance, Load::Ready(_)));
+        state.update(Message::Found { round: asked.round, result: Err("signed out".into()) });
+        assert_eq!(state.appearance, Load::Failed("signed out".into()));
+    }
+
+    #[test]
     fn the_two_things_this_page_cannot_do_yet_say_so() {
         let mut state = State::default();
         state.update(Message::AddSkin);
@@ -275,10 +510,37 @@ mod tests {
         let store = Store::default();
         for theme in Gen::ALL {
             for open in [None, Some(0), Some(12)] {
-                let state = State { open, notice: None };
+                let state = State { open, ..State::default() };
                 drop(view(*theme, &state, &store));
             }
-            let state = State { open: None, notice: Some("x".into()) };
+            let state = State { notice: Some("x".into()), ..State::default() };
+            drop(view(*theme, &state, &store));
+            // And with an account's appearance in hand, which is the shape the page
+            // is drawn in after the answer arrives -- including the one where the
+            // picture could not be made.
+            let appearance = crate::skin::Appearance::of(
+                "Steve",
+                palantir_net::MinecraftSkins {
+                    skins: vec![palantir_net::MinecraftSkin {
+                        id: "skin-1".into(),
+                        state: "ACTIVE".into(),
+                        url: "http://textures.minecraft.net/texture/aaa".into(),
+                        variant: "SLIM".into(),
+                    }],
+                    capes: vec![palantir_net::MinecraftCape {
+                        id: "cape-1".into(),
+                        state: "ACTIVE".into(),
+                        url: "http://textures.minecraft.net/texture/ccc".into(),
+                        alias: "Migrator".into(),
+                    }],
+                },
+                Err("the network is down".into()),
+            );
+            let state = State {
+                open: None,
+                appearance: Load::Ready(appearance),
+                ..State::default()
+            };
             drop(view(*theme, &state, &store));
         }
     }

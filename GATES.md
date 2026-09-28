@@ -3196,6 +3196,92 @@ one duplicate is attributed to, which moves between runs.
   increased`, with `Live services` and `Build exe` skipped rather than scheduled.
   The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
+- [x] G104: the Skins page draws the account's own skins, read from Minecraft's
+      own service
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 950 passed; 0 failed; 16 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    500 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    230 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; 42 warnings between the crates, the same count and the same list as the
+slice before -- `grep -E "^warning: "` over the two runs, sorted and diffed, are
+the same 42 lines apart from which compilation unit the one duplicate is
+attributed to -- none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0. The first clippy run of this
+slice was 43: `clippy::type_complexity` was right about a test fixture written as
+an array of nested tuples, which is now a struct called `Paint`.
+```
+
+  The Skins page was the largest surface in this stage whose data is *not* a
+  Modrinth answer, and the measurement that says so is the reason it could be
+  built at all. `pages/Skins.vue` draws through `plugin:minecraft-skins`, whose
+  Rust is not vendored here; what the plugin wraps is Minecraft's own document,
+  `api.minecraftservices.com/minecraft/profile` -- the same URL `palantir-net`'s
+  sign-in already reads for the account's uuid and name -- and that document lists
+  the skins and capes the account owns with the `ACTIVE` one marked. So the page is
+  drawn from a publisher's own service, and the two lists are only as far away as
+  the token the launcher already holds.
+
+  **The picture is this launcher's own arithmetic, and what that costs is written
+  where it is drawn.** The reference renders a lit 3D model that turns; iced has an
+  `image` widget, so `crate::skin` cuts the texture's documented layout into a front
+  view -- the head's 8x8 front at `(8, 8)`, the body's 8x12 at `(20, 20)`, the arms
+  at `(44, 20)` and `(36, 52)`, the legs at `(4, 20)` and `(20, 52)` -- and lays the
+  six parts beside each other as a paper doll. A 64x32 legacy texture is read by
+  mirroring the right limbs into the left slots, which is what Minecraft itself does
+  with one arm's and one leg's worth of pixels, and the gate checks the *flip* rather
+  than the colour: the right arm's last column is the left arm's first. Three
+  departures are named in the module -- no rotation or lighting, no second layer
+  (hat, jacket, sleeves, trousers), four-pixel arms for both variants -- and the
+  fourth is the page's own: a skin is listed by its `variant` because the document
+  names each one by id and nothing else, while the reference's names come from the
+  bundles it ships.
+
+  **The seam is the project page's, one variant wider.** `Ask::Skins` carries a
+  round and nothing else: which account is the one a launch would sign in as, and
+  the token it carries, are the shell's own -- a page has never seen an account file
+  -- and an offline account is answered with a sentence rather than a request,
+  because there is no skins service for one to ask. The page owes the request as it
+  opens (`opening`), so a window opened straight on `/skins` draws the reader's own
+  skin rather than an empty gallery, and the round travelling with the answer is what
+  drops a reply to a question the page has replaced.
+
+  **One thing is deliberately not drawn.** Applying a skin is a write to the
+  reader's own Minecraft account, and it is not this slice: the button says the flow
+  is not built rather than pretending, which is the same rule the checklist's third
+  step follows. The sections above the account's own lists are still Modrinth's
+  bundles and still say so; `NEXT_STEPS.md`'s bullet names all three of the parts
+  that are left.
+
+  **What the gates do and do not say.** The document's own half is gated against a
+  scripted transport (`the_profile_document_says_which_skin_the_account_is_wearing`,
+  `an_account_with_nothing_to_wear_says_so_rather_than_the_first_skin`,
+  `a_profileless_account_has_nothing_to_wear_either`), the cut is gated against real
+  PNGs built pixel by pixel in the test, and the appearance's own seam
+  (`skin::Appearance::of`) is gated for both ways a picture can be missing. What is
+  *not* gated is the texture's fetch over the engine -- it needs a live service -- and
+  no gate here has seen a real account: everything above is a fixture's answer, which
+  is the same limit the live tests exist for.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID` -- the same block as the fourteen before it, `Lint` and `Test workspace`
+  failing with zero steps and `The job was not started because recent account
+  payments have failed or your spending limit needs to be increased`, its dependants
+  skipped rather than scheduled. The transcripts above are this machine's, run with
+  the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

@@ -67,7 +67,7 @@ use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
-use crate::pages::{self, discover, project, Screen};
+use crate::pages::{self, discover, project, skins, Screen};
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
@@ -87,6 +87,13 @@ enum Asked {
     Search(discover::Asked),
     /// A project, as the project page describes it.
     Project(project::Asked),
+    /// The account's own appearance, as the Skins page describes it.
+    ///
+    /// The shortest of the three, and the only one the shell answers from the
+    /// *launcher's* own files rather than from the network alone: which account is
+    /// the one a launch would sign in as, and the token that account carries, are
+    /// both in the accounts store this shell owns.
+    Skins(skins::Asked),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1209,6 +1216,7 @@ impl Shell {
             return match asked {
                 Asked::Search(asked) => self.search(asked),
                 Asked::Project(asked) => self.project(asked),
+                Asked::Skins(asked) => self.skins(asked),
             };
         }
         // A create and an import are not a page's requests and do not go through
@@ -1532,6 +1540,7 @@ impl Shell {
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
+                    Some(pages::Ask::Skins(asked)) => Some(Asked::Skins(asked)),
                     Some(pages::Ask::Install(install)) => {
                         // The dialog is opened rather than a transfer started: the
                         // missing half of the request is *which instance*, and only
@@ -1921,6 +1930,7 @@ impl Shell {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
+            Some(pages::Ask::Skins(asked)) => self.skins(asked),
             // A navigation, a creation and a launch are not *owed*: nothing is
             // waiting for one, and the page that owes nothing says nothing. A
             // launch in particular is a button's doing rather than a page's
@@ -1938,6 +1948,30 @@ impl Shell {
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
+    }
+
+    /// Read the account's own appearance and bring it back as a page message.
+    ///
+    /// Three things in one trip, off the frame thread for the other requests'
+    /// reason: which account this launcher would sign in as -- the shell's own
+    /// selection, read here rather than by the page -- its game token, and then the
+    /// store's two reads behind that. An account with no Microsoft session is
+    /// answered with a sentence instead of a request, because an offline account has
+    /// no skins service to ask: that is the reference's own gate, where a reader who
+    /// is not signed into Minecraft is told to sign in rather than shown an empty
+    /// gallery.
+    fn skins(&self, asked: skins::Asked) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let account = self.account();
+        iced::Command::perform(
+            crate::store::off_thread(move || match account.access_token.as_deref() {
+                Some(token) => store.appearance(&account.username, token),
+                None => Err(
+                    "Sign in to a Microsoft account to see the skins it owns.".to_string(),
+                ),
+            }),
+            move |result| Message::Screen(pages::Message::skins_result(&asked, result)),
+        )
     }
 
     /// Read the news feed and bring the answer back as a shell message.

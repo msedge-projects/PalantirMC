@@ -49,8 +49,9 @@ pub mod modrinth;
 
 pub use auth::{
     msa_auth_session, xsts_message, AuthError, BlockingHttpTransport, DeviceCodeResponse,
-    HttpTransport, HttpResponse, MapTransport, MinecraftSession, MicrosoftAuth, MicrosoftOAuth,
-    MsaToken, OfflineSession, PollOutcome, DEFAULT_MICROSOFT_CLIENT_ID,
+    HttpTransport, HttpResponse, MapTransport, MinecraftCape, MinecraftSession, MinecraftSkin,
+    MinecraftSkins, MicrosoftAuth, MicrosoftOAuth, MsaToken, OfflineSession, PollOutcome,
+    DEFAULT_MICROSOFT_CLIENT_ID,
 };
 pub use download::{
     download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,

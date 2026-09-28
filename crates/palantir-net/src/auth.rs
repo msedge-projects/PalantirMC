@@ -558,6 +558,98 @@ pub struct GameToken {
     pub expires_in: i64,
 }
 
+/// One skin an account owns, as Minecraft's own profile document lists it.
+///
+/// The reference reads this list through a Tauri plugin
+/// (`plugin:minecraft-skins|get_available_skins`) whose Rust is not in this tree,
+/// and what the plugin is a wrapper around is this: the `skins` array of
+/// `api.minecraftservices.com/minecraft/profile`, one entry per skin the account
+/// owns, with the `state` saying which of them is in force. `url` is on
+/// `textures.minecraft.net` and is the PNG a page can draw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinecraftSkin {
+    /// The skin's own id, which is what equipping one names.
+    pub id: String,
+    /// `ACTIVE` for the skin in force, `INACTIVE` for the rest.
+    pub state: String,
+    /// The texture's URL: a 64x64 modern PNG, or a legacy 64x32 one.
+    pub url: String,
+    /// `CLASSIC` or `SLIM`, the two arm widths Minecraft draws.
+    pub variant: String,
+}
+
+impl MinecraftSkin {
+    /// Whether this is the skin the account is wearing.
+    ///
+    /// Case-insensitive because the state is a service's own word rather than a
+    /// type: an answer of `active` is the same answer.
+    pub fn equipped(&self) -> bool {
+        self.state.eq_ignore_ascii_case("ACTIVE")
+    }
+}
+
+/// One cape an account owns, from the same document's `capes` array.
+///
+/// A cape is the same kind of thing a skin is -- a texture on
+/// `textures.minecraft.net` with a state -- and differs in the one way a reader
+/// notices: it has an `alias`, which is the name Minecraft shows it under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinecraftCape {
+    /// The cape's own id, which is what equipping one names.
+    pub id: String,
+    /// `ACTIVE` for the cape in force, `INACTIVE` for the rest.
+    pub state: String,
+    /// The texture's URL.
+    pub url: String,
+    /// What Minecraft calls it: `Migrator`, `MineCon2015`, `PurpleHeart`, and so
+    /// on. Empty when the document does not name one.
+    pub alias: String,
+}
+
+impl MinecraftCape {
+    /// Whether this is the cape the account is wearing.
+    pub fn equipped(&self) -> bool {
+        self.state.eq_ignore_ascii_case("ACTIVE")
+    }
+}
+
+/// What an account's own profile document says about its appearance.
+///
+/// Both lists come out of the one request [`MicrosoftAuth::profile`] already
+/// makes, and that is the reason this is a read of the *profile* rather than of a
+/// skins endpoint: `api.minecraftservices.com/minecraft/profile` is the document
+/// Minecraft itself publishes for an account, and the reference's plugin calls
+/// are wrappers around it. A document with neither key is an account that owns
+/// nothing yet, which is [`MinecraftSkins::default`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MinecraftSkins {
+    /// The skins the account owns, in the order Minecraft lists them.
+    pub skins: Vec<MinecraftSkin>,
+    /// The capes it owns.
+    pub capes: Vec<MinecraftCape>,
+}
+
+impl MinecraftSkins {
+    /// The skin the account is wearing, if it wears one.
+    ///
+    /// `None` rather than the first entry: a document with no `ACTIVE` skin is a
+    /// document that does not say, and the page says that rather than drawing a
+    /// skin that is not in force.
+    pub fn equipped(&self) -> Option<&MinecraftSkin> {
+        self.skins.iter().find(|skin| skin.equipped())
+    }
+
+    /// The cape the account is wearing, if it wears one.
+    pub fn equipped_cape(&self) -> Option<&MinecraftCape> {
+        self.capes.iter().find(|cape| cape.equipped())
+    }
+
+    /// Whether this account owns nothing to draw.
+    pub fn is_empty(&self) -> bool {
+        self.skins.is_empty() && self.capes.is_empty()
+    }
+}
+
 /// Drives the Microsoft login chain.
 ///
 /// Owns a transport and the client id/scope; one instance can serve a
@@ -869,6 +961,33 @@ impl MicrosoftAuth {
     /// no Java profile yet, which Prism reports as "Account has no Minecraft
     /// profile" and which the launcher shows as an account that cannot play.
     pub fn profile(&self, game_access_token: &str) -> Result<(String, String), AuthError> {
+        let value = self.profile_document(game_access_token)?;
+        let uuid = string_field(&value, "id")
+            .ok_or_else(|| AuthError::Protocol("the profile reply had no 'id'".into()))?;
+        let name = string_field(&value, "name")
+            .ok_or_else(|| AuthError::Protocol("the profile reply had no 'name'".into()))?;
+        Ok((uuid, name))
+    }
+
+    /// The skins and capes the account owns, from the same document.
+    ///
+    /// The reference's Skins page is drawn from this: the `ACTIVE` skin is the
+    /// one in force, the rest are the account's own library, and the capes are
+    /// the same shape. A profile with no Minecraft account behind it is the same
+    /// sentence [`Self::profile`] gives rather than an empty list, because an
+    /// account that cannot play has nothing to wear either.
+    pub fn skins(&self, game_access_token: &str) -> Result<MinecraftSkins, AuthError> {
+        let value = self.profile_document(game_access_token)?;
+        Ok(MinecraftSkins { skins: skin_list(&value), capes: cape_list(&value) })
+    }
+
+    /// The profile document itself, which both readers above share.
+    ///
+    /// One GET and one set of failure rules, because the uuid, the name and what
+    /// the account wears all arrive in the same answer: two requests would be two
+    /// chances to disagree about which account is signed in. A 404 is its own
+    /// answer rather than a transport failure, for [`Self::profile`]'s reason.
+    fn profile_document(&self, game_access_token: &str) -> Result<serde_json::Value, AuthError> {
         let bearer = format!("Bearer {game_access_token}");
         let response = self
             .transport
@@ -889,12 +1008,50 @@ impl MicrosoftAuth {
                 response.status
             )));
         }
-        let uuid = string_field(&value, "id")
-            .ok_or_else(|| AuthError::Protocol("the profile reply had no 'id'".into()))?;
-        let name = string_field(&value, "name")
-            .ok_or_else(|| AuthError::Protocol("the profile reply had no 'name'".into()))?;
-        Ok((uuid, name))
+        Ok(value)
     }
+}
+
+/// The `skins` array of a profile document, as entries a page can draw.
+///
+/// An entry with no `url` is dropped rather than kept and drawn as a broken
+/// card: the URL is the whole of what there is to draw, so an entry without one
+/// is an entry that can only say so. Everything else is defaulted -- an older
+/// account's answer has no `variant` -- because a missing key in a service's
+/// document is not a reason to refuse the skin beside it.
+fn skin_list(value: &serde_json::Value) -> Vec<MinecraftSkin> {
+    let Some(entries) = value.get("skins").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            Some(MinecraftSkin {
+                url: string_field(entry, "url")?,
+                id: string_field(entry, "id").unwrap_or_default(),
+                state: string_field(entry, "state").unwrap_or_default(),
+                variant: string_field(entry, "variant").unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// The `capes` array of a profile document, read by the same rules.
+fn cape_list(value: &serde_json::Value) -> Vec<MinecraftCape> {
+    let Some(entries) = value.get("capes").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            Some(MinecraftCape {
+                url: string_field(entry, "url")?,
+                id: string_field(entry, "id").unwrap_or_default(),
+                state: string_field(entry, "state").unwrap_or_default(),
+                alias: string_field(entry, "alias").unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 fn parse_object(url: &str, response: &HttpResponse) -> Result<serde_json::Value, AuthError> {
@@ -1317,6 +1474,69 @@ mod tests {
         transport.insert_get(MINECRAFT_PROFILE_URL, 200, r#"{"id":"abc"}"#);
         let err = flow(&transport).profile("game-token").unwrap_err();
         assert!(matches!(err, AuthError::Protocol(_)), "got {err:?}");
+    }
+
+    /// A profile document with the appearance half filled in: three skins the
+    /// account owns (the third naming no texture at all), two capes, and one of
+    /// each in force.
+    const DRESSED_PROFILE: &str = r#"{
+        "id": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
+        "name": "Steve",
+        "skins": [
+            {"id": "skin-1", "state": "ACTIVE", "url": "http://textures.minecraft.net/texture/aaa", "variant": "CLASSIC"},
+            {"id": "skin-2", "state": "INACTIVE", "url": "http://textures.minecraft.net/texture/bbb", "variant": "SLIM"},
+            {"id": "skin-3", "state": "INACTIVE"}
+        ],
+        "capes": [
+            {"id": "cape-1", "state": "INACTIVE", "url": "http://textures.minecraft.net/texture/ccc", "alias": "Migrator"},
+            {"id": "cape-2", "state": "ACTIVE", "url": "http://textures.minecraft.net/texture/ddd", "alias": "MineCon2015"}
+        ]
+    }"#;
+
+    #[test]
+    fn the_profile_document_says_which_skin_the_account_is_wearing() {
+        let mut transport = full_chain_transport();
+        transport.insert_get(MINECRAFT_PROFILE_URL, 200, DRESSED_PROFILE);
+        let auth = flow(&transport);
+        let skins = auth.skins("game-token").expect("the appearance");
+        // Three entries, two of them drawable: the third names no texture, and an
+        // entry with nothing to fetch is a row that could only say so.
+        assert_eq!(skins.skins.len(), 2);
+        assert_eq!(skins.skins[0].id, "skin-1");
+        assert_eq!(skins.skins[0].variant, "CLASSIC");
+        assert_eq!(skins.skins[1].variant, "SLIM");
+        assert_eq!(skins.equipped().map(|skin| skin.id.as_str()), Some("skin-1"));
+        assert_eq!(skins.capes.len(), 2);
+        assert_eq!(skins.equipped_cape().map(|cape| cape.alias.as_str()), Some("MineCon2015"));
+        assert!(!skins.is_empty());
+        // The same document still answers what a launch asks -- it is the same
+        // request -- so two readers cannot disagree about which account is in.
+        let (uuid, name) = auth.profile("game-token").expect("the profile");
+        assert_eq!(name, "Steve");
+        assert_eq!(uuid, "1a2b3c4d5e6f708192a3b4c5d6e7f809");
+    }
+
+    #[test]
+    fn an_account_with_nothing_to_wear_says_so_rather_than_the_first_skin() {
+        // The fixture the chain already carries: an empty `skins` array and no
+        // `capes` key at all.
+        let skins = flow(&full_chain_transport()).skins("game-token").expect("the appearance");
+        assert!(skins.is_empty());
+        assert!(skins.equipped().is_none(), "nothing active means nothing drawn");
+        assert!(skins.equipped_cape().is_none());
+        // A document that names neither key is the same answer, not a refusal.
+        let mut transport = full_chain_transport();
+        transport.insert_get(MINECRAFT_PROFILE_URL, 200, r#"{"id":"abc","name":"Steve"}"#);
+        assert!(flow(&transport).skins("game-token").expect("the appearance").is_empty());
+    }
+
+    #[test]
+    fn a_profileless_account_has_nothing_to_wear_either() {
+        let mut transport = full_chain_transport();
+        transport.insert_get(MINECRAFT_PROFILE_URL, 404, r#"{"path":"/minecraft/profile"}"#);
+        let err = flow(&transport).skins("game-token").unwrap_err();
+        assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
+        assert!(err.to_string().contains("no Minecraft: Java Edition profile"));
     }
 
     #[test]

@@ -89,7 +89,7 @@ OPEN_ITEM = re.compile(r"^(?:\* |\d+\. )\*\*(.+?)\*\*")
 GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
-    3: [(62, 65), (76, 77), (83, 83), (96, 98), (101, 103)],  # routes, scaffold, widgets; hover; themes; the panel; the project page's own documents and its installs; the panel's news feed and its checklist with the friends sentence beside it, and Home's welcome screen as the page (G99-G100, the Forge installers, are stage 4's)
+    3: [(62, 65), (76, 77), (83, 83), (96, 98), (101, 104)],  # routes, scaffold, widgets; hover; themes; the panel; the project page's own documents and its installs; the panel's news feed and its checklist with the friends sentence beside it, Home's welcome screen as the page, and the Skins page's read of the account's own skins (G99-G100, the Forge installers and their processors, are stage 4's)
     4: [(66, 75), (91, 91), (93, 95), (99, 100)],  # the engine; the first page on it; the launch's and a pack's transfers; the loaders' own profiles and Minecraft's own file; the Forge-shaped installers' own metadata and their processors (G92 is the dashboard, owned by `before`)
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
@@ -103,8 +103,10 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
         (
             "Skins, Servers and the hosting half of an instance are not real.",
             3,
-            "the Skins page, the Servers page and an instance's own hosting "
-            "half, each of which is a service this launcher does not read yet",
+            "the Skins page's *equipping* half and Modrinth's own skin library, "
+            "whose sections it lists and cannot fill, plus the Servers page and an "
+            "instance's own hosting half -- three service answers this launcher "
+            "does not read yet, after G104 drew the account's own skins",
         ),
         (
             "The panel's other sections are not built.",

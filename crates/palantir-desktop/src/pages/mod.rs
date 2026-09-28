@@ -23,6 +23,7 @@ pub mod user;
 use iced::Element;
 
 use crate::route::{Address, Route};
+use crate::skin::Appearance;
 use crate::store::Store;
 use crate::theme_gen::Theme as Gen;
 
@@ -113,6 +114,13 @@ pub enum Ask {
     /// One request rather than three because a project page draws all three at
     /// once, and three `Load`s for one page is three ways to be half drawn.
     Project(project::Asked),
+    /// Read the account's own appearance for the Skins page: what it owns, and the
+    /// skin in force drawn.
+    ///
+    /// The same shape as the two above, and the one where *which account* is most
+    /// clearly the shell's: a page has never seen an account file, a selection or a
+    /// token, and the shell reads all three from the launcher's own store.
+    Skins(skins::Asked),
     /// Put a project into one of the launcher's instances.
     ///
     /// The same shape as the other asks, pointed at a file instead of a page: the
@@ -166,6 +174,18 @@ impl Message {
         // message, so the page's own arms never box anything (see
         // `project::Message::Found`).
         Message::Project(project::Message::Found {
+            round: asked.round,
+            result: result.map(Box::new),
+        })
+    }
+
+    /// The message that carries an account's appearance back to the Skins page.
+    ///
+    /// The same seam as [`Message::project_result`], and the reason it is a
+    /// function: the answer's own type is the page's, and the shell has never seen
+    /// one. It hands over what the store said and names nothing else.
+    pub fn skins_result(asked: &skins::Asked, result: Result<Appearance, String>) -> Message {
+        Message::Skins(skins::Message::Found {
             round: asked.round,
             result: result.map(Box::new),
         })
@@ -290,7 +310,15 @@ impl Screen {
                     return Some(asked);
                 }
             }
-            (Screen::Skins(state), Message::Skins(message)) => state.update(message),
+            (Screen::Skins(state), Message::Skins(message)) => {
+                // The third page that asks for something, and the first whose
+                // question is about the *reader* rather than about a document: the
+                // shell runs it and the answer comes back turns later, exactly as
+                // Discover's and the project page's do.
+                if let Some(asked) = state.update(message) {
+                    return Some(Ask::Skins(asked));
+                }
+            }
             (Screen::Screenshots(state), Message::Screenshots(message)) => state.update(message),
             (Screen::Servers(state), Message::Servers(message)) => state.update(message),
             (Screen::User(state), Message::User(message)) => state.update(message),
@@ -311,6 +339,9 @@ impl Screen {
         match self {
             Screen::Discover(state) => state.opening().map(Ask::Search),
             Screen::Project(state) => state.opening().map(Ask::Project),
+            // The page a window can open straight on -- `/skins` is on the rail --
+            // so a reader who never presses anything still gets their own skin.
+            Screen::Skins(state) => state.opening().map(Ask::Skins),
             _ => None,
         }
     }
@@ -593,8 +624,16 @@ mod tests {
             other => panic!("{other:?} is not discover"),
         }
         // And the same request on a page that is not Discover is not a request.
+        // The Skins page owes one of its own now (G104), which is a *different*
+        // ask rather than this one -- and a Discover message is still dropped
+        // there rather than applied.
         let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
-        assert_eq!(skins.opening(), None);
+        assert!(matches!(skins.opening(), Some(Ask::Skins(_))));
+        assert_eq!(
+            skins.update(Message::Discover(discover::Message::Search), &store),
+            None,
+            "a message meant for another page is not a request from this one"
+        );
     }
 
     #[test]

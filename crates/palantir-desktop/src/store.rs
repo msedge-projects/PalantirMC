@@ -43,13 +43,13 @@ use std::sync::Arc;
 use palantir_core::paths::PalantirPaths;
 use palantir_net::engine::{
     Backoff, Build as LoaderBuildSource, Cancel, Fetch, HttpPool, Loader, LoaderMeta, Manifest,
-    MetadataCache, ModrinthApi, PistonMeta,
+    MetadataCache, ModrinthApi, PistonMeta, Request,
 };
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::modrinth::{ModrinthMember, NewsArticle};
-use palantir_net::{DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL};
-
-use crate::catalog::LoaderKind;
+use palantir_net::{
+    MinecraftSkins, MicrosoftAuth, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
+};    use crate::catalog::LoaderKind;
 use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
@@ -57,6 +57,7 @@ use crate::page::Load;
 use crate::pages::discover::Hit;
 use crate::pages::project::Project;
 use crate::route::ProjectType;
+use crate::skin::Appearance;
 use crate::wire::Wire;
 
 /// What the interface knows, and how it came to know it.
@@ -626,6 +627,64 @@ impl Store {
             .api()
             .news(&cancel, &backoff)
             .map_err(|error| error.to_string())
+    }
+
+    /// The account's own appearance, ready for the Skins page to draw.
+    ///
+    /// Two reads in one place: Minecraft's profile document -- which skins and
+    /// capes the account owns, and which of them is in force -- and then the
+    /// texture of the skin in force, over the engine's own pool. The reference's
+    /// Skins page is the same document through a Tauri plugin this tree does not
+    /// have; see [`crate::skin`] for what is drawn from it and what that costs.
+    ///
+    /// The texture's failure is deliberately *not* this call's failure: an account
+    /// on a machine with no connection still owns every skin it owns, and a page
+    /// that threw the lists away because a picture would not come back would be
+    /// showing less than it knows. [`Appearance::of`] is where that split is made.
+    ///
+    /// **Blocking**, like every network call here, so the shell runs it off the
+    /// frame thread. The auth path owns its transport the way a launch's does: this
+    /// launcher has one `MicrosoftAuth`, and the alternative would be a second place
+    /// that knows how to talk to Microsoft.
+    pub fn appearance(&self, username: &str, token: &str) -> Result<Appearance, String> {
+        let owned = self.skins(token)?;
+        // Which skin is in force is the document's own answer, and a document that
+        // does not name one is a reason rather than an empty picture: the page
+        // says so instead of drawing the first skin in the list.
+        let texture = match owned.equipped() {
+            Some(skin) => self.skin_texture(&skin.url),
+            None => Err("Minecraft does not say which skin is in force.".to_string()),
+        };
+        Ok(Appearance::of(username, owned, texture))
+    }
+
+    /// The skins and capes the account a launch would sign in as owns.
+    ///
+    /// `palantir_net`'s read of Minecraft's own profile document, in the crate that
+    /// already signs this launcher in: the token is the account's game token, which
+    /// is the same one `--accessToken` carries into the game.
+    pub fn skins(&self, token: &str) -> Result<MinecraftSkins, String> {
+        MicrosoftAuth::with_public_client_id()
+            .skins(token)
+            .map_err(|error| error.to_string())
+    }
+
+    /// One skin texture, as the bytes of the PNG it is.
+    ///
+    /// Over the engine's pool, for [`Self::news`]'s reason: every request this
+    /// launcher makes goes through the one client and the one ceiling, and a texture
+    /// is a request like any other. Deliberately *not* through the metadata cache: a
+    /// texture is a file rather than a document, nothing here revalidates it, and
+    /// what names it is a URL the account's own document handed out a moment ago.
+    pub fn skin_texture(&self, url: &str) -> Result<Vec<u8>, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("This skin's texture"));
+        };
+        let cancel = Cancel::new();
+        engine
+            .fetch()
+            .get(&Request::get(url), &cancel)
+            .map_err(|error| format!("fetching the skin's texture failed: {error}"))
     }
 
     /// Read one project: its own document, its team, and its versions.
