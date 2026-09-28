@@ -3924,12 +3924,20 @@ $ diff <(grep '^warning: ' .scratch/g106-cl.log | sort) <(grep '^warning: ' .scr
   summary, type tag, downloads, published date) and the page's one picture is the
   avatar, which is what the reference's own web profile treats the same way.
 
-  **The runner could not be the receipt.** The push this slice ends with is the
-  eighteenth in the same block of refused runs -- zero steps, seconds, and `The job
-  was not started because recent account payments have failed or your spending limit
-  needs to be increased`, with `Live services` and `Build exe` skipped rather than
-  scheduled. Its id is recorded by the commit that follows this one. Nothing here was
-  measured on the runner; the numbers above are this machine's.
+  **The runner could not be the receipt.** This slice's push is run `36452089947`,
+  one more in the block G120 counted: `Test workspace` failed in 3 s and `Lint` in
+  2 s with **zero steps** and `The job was not started because recent account
+  payments have failed or your spending limit needs to be increased`, with `Live
+  services` and `Build exe` skipped rather than scheduled. Nothing here was measured
+  on the runner; the numbers above are this machine's.
+
+  **And they are this machine's *before* the rebase.** The push had to be rebased
+  onto G120's locales slice, and the two suites were not run again after it -- the
+  counts above are 983 passed and 42 clippy warnings on the tree as this slice left
+  it, not on the merged tree, which carries G120's own tests as well. Re-running
+  them is the first thing a later reader of this entry should do; nothing in the
+  conflict resolutions was a source file (`GATES.md` and `tools/progress.py` only,
+  both merged by hand with both sides kept).
 
 ## What these gates cannot say
 
