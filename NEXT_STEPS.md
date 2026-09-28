@@ -621,6 +621,41 @@ What stage 3 does **not** have yet, named rather than implied:
   this launcher has not been given -- and the friends list's *signed-in* half,
   which is Modrinth's authenticated friends API and needs the sign-in flow.
 
+**The one decision those items are waiting on**, so that it is a choice and not a
+phrase: whether this launcher holds a Modrinth credential at all. G109 measured the two
+published ways to get one, G110 checked them against the live service, and G111 read
+the client's own `AuthFeature` -- which sends a **single** token as
+`Authorization: Bearer …` to Labrinth *and* Archon, with no notion of which kind it is.
+So the choice is only about where the token comes from:
+
+* *A personal access token* — created on modrinth.com, `mrp_…`, one scope per
+  request, no application to register, no redirect URI, no exchange, nothing to
+  refresh. Modrinth's own guide recommends it when the tool is for one person.
+* *OAuth2* — an application registered in somebody's name (client id, secret,
+  allowlisted redirect URIs), the browser round trip, then a urlencoded exchange at
+  `POST api.modrinth.com/_internal/oauth/token` that answers
+  `{access_token, token_type, expires_in}` and **no refresh token** -- so an expired
+  token means the browser flow again.
+
+Either way the cost is the same two things: a secret in a file in this launcher's own
+home (`PalantirPaths::home`, beside `prefs`; not `accounts.json`, which is Prism's),
+plaintext unless OS protection is added on top, and requests made in the reader's name
+-- friends, a server list, a world download, an SFTP credential roll. What it unlocks
+is the three open items above plus the profile page's own two tabs (collections,
+organizations) and its "this is you" state; what needs nothing is everything else the
+launcher already does.
+
+**The recommendation is the personal access token first**, because it is the smaller
+and the reversible step: the code path is identical either way, so an OAuth flow later
+would replace only where the token comes from, and nothing is registered in anyone's
+name in the meantime. A first slice would be small and provable: a `ModrinthAuth` in
+`palantir-net` holding the secret behind the `HttpTransport` the Minecraft side
+already uses, one `Authorization: Bearer` header on the engine's requests plus
+`X-Panel-Version: 1` on Archon's, a field for it on the panel's accounts card, and one
+live test that proves `/v1/servers` answers with it and 401s without. Until this is
+answered the three items stay open on purpose, because a credential store is not
+something to ship by approximation.
+
 **The interface can be more than English now** (G120), and the number that decided
 its shape was measured rather than guessed. `tools/gen_text.py` compiles the
 reference's English; `tools/gen_locale.py` compiles the other locales and imports
