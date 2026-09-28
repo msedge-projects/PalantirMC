@@ -4399,6 +4399,13 @@ $ curl -H 'X-Panel-Version: …' https://archon.modrinth.com/…
   401s above are "no token", not "wrong kind of token" -- and that still needs an
   account, which this launcher has none of.
 
+  **The push.** `7925681`; run `36454610897` is the billing block again -- zero steps
+  on `Test workspace` and `Lint`, `Live services` and `Build exe` skipped, the same
+  annotation as every push since G101. No build was run for this gate either, since
+  upstream reads and live probes compile nothing, so G108's debt still stands: the
+  workspace suite and clippy have not been re-run since the locales slice was rebased
+  under them.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
