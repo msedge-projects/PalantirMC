@@ -64,11 +64,20 @@ REPO = Path(__file__).resolve().parents[1]
 # somebody else's lines, or the same lines twice.
 CODE_DIRS = ("crates", "tools", ".github")
 CODE_SKIP = {"target", "dist", ".scratch", ".git", "vendor"}
-# The four files a tool writes. They are ours in the sense that this repository
-# commits them, and not ours in the sense the count is for: 44,000 of the
-# desktop's lines are icons and copy compiled out of the reference, and a total
-# that hid that would make the hand-written tree look four times its size.
-GENERATED = ("icons_gen.rs", "text_gen.rs", "theme_gen.rs", "theme_tokens.rs")
+# The five files a tool writes. They are ours in the sense that this repository
+# commits them, and not ours in the sense the count is for: most of the desktop
+# crate's lines are icons or copy compiled out of the reference, and a total that
+# hid that would make the hand-written tree look several times its size. The
+# newest of them is `locale_gen.rs` (G120/G121): one sparse table per locale,
+# 89,459 lines, which this tuple did not know about until the locales' ledger and
+# so counted as hand-written in the two commits before it.
+GENERATED = (
+    "icons_gen.rs",
+    "locale_gen.rs",
+    "text_gen.rs",
+    "theme_gen.rs",
+    "theme_tokens.rs",
+)
 
 # `- [x] G83: the right panel draws ...`, and the same with an empty box.
 GATE = re.compile(r"^- \[([x ])\] (G\d+[a-z]?): (.*)$")
@@ -415,7 +424,7 @@ def report(root: Path) -> tuple[str, list[str]]:
     )
     out.append(
         f"  {'of which generated':<24}  {gen_lines:>8,}  {gen_code:>8,}  "
-        "icons_gen.rs, text_gen.rs, theme_gen.rs, theme_tokens.rs",
+        "icons_gen.rs, locale_gen.rs, text_gen.rs, theme_gen.rs, theme_tokens.rs",
     )
     return "\n".join(out) + "\n", []
 
