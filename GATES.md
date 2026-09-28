@@ -3611,8 +3611,11 @@ $ sed -n '247,251p' crates/palantir-desktop/src/install.rs
   routing -- the plan's own note that these two uids need a desktop-track decision
   rather than an engine one still holds.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID`.
+  The runner could not be the receipt either: this slice's push, `50fd8cc`, is run
+  `36441309064`, which is the same block as the sixteen before it -- zero steps and
+  `The job was not started because recent account payments have failed or your
+  spending limit needs to be increased`, with `Live services` and `Build exe`
+  skipped rather than scheduled.
 
 ## What these gates cannot say
 
