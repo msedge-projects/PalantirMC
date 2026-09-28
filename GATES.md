@@ -4402,11 +4402,15 @@ $ grep -c 'locale.rs\|text.rs\|button_text' .scratch/g121-clippy.log
   times. What the diff shows is that paragraph and the re-ending to LF, which is the
   convention `.gitattributes` states for this tree.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_PLACEHOLDER`,
-  is run `RUN_ID_PLACEHOLDER`, which is the same block as the nineteen before it --
-  zero steps and `The job was not started because recent account payments have
-  failed or your spending limit needs to be increased`, with `Live services` and
-  `Build exe` skipped rather than scheduled.
+  The runner could not be the receipt either: this slice's push, `f152d94`, is run
+  `36459102045`, the 81st consecutive failure on this branch since `36038333030` and
+  the same block as the 80 before it -- `Test workspace` and `Lint` each failed with
+  **zero steps** in 3 s (`17:34:39Z` to `17:34:42Z`) on
+  `The job was not started because recent account payments have failed or your
+  spending limit needs to be increased`, with `Live services` and `Build exe`
+  skipped rather than scheduled. So this slice's receipt is the local run transcribed
+  above: the same compiler and the same flags, but not the clean checkout `AGENTS.md`
+  calls the authority, and nothing here should be read as "CI passed".
 
 - [x] G111: what the api-client says Archon and a node are, read from upstream, the
   request-call count the registry holds, and the correction it makes to G110
