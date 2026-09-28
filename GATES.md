@@ -3404,8 +3404,12 @@ $ echo $?
   touched -- so the suite's last numbers (G104's 958 passed, 0 failed, 17 ignored)
   are still the suite's numbers.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID`, which is the same block as the fourteen before it, with zero steps.
+  The runner could not be the receipt either: this slice's push, `2da9f1e`, is run
+  `36438186250`, which is the same block as the fourteen before it -- `Test
+  workspace` and `Lint` failed in 3 s and 2 s with **zero steps**, and `The job was
+  not started because recent account payments have failed or your spending limit
+  needs to be increased`, with `Live services` and `Build exe` skipped rather than
+  scheduled.
 
 ## What these gates cannot say
 
