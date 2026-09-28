@@ -4257,6 +4257,148 @@ $ curl -X POST -d 'grant_type=authorization_code&code=x&client_id=x' \
   `cargo test --workspace --all-targets --locked` and clippy on this tree is the
   first step of the next compiled slice, before its own numbers are trusted.
 
+- [x] G111: what the api-client says Archon and a node are, read from upstream, the
+  request-call count the registry holds, and the correction it makes to G110
+  CHECK: curl -sS -A PalantirMC/0.1.0-g111-measurement \
+              "https://api.github.com/repos/modrinth/code/contents/packages/api-client/src[/modules[/archon]]?ref=8966b5e"
+         curl -sS "https://api.github.com/repos/modrinth/code/git/trees/74f004c7ae39d37f82fc79c0a930d91d626acc03?recursive=1"
+         curl -sS -O "https://raw.githubusercontent.com/modrinth/code/8966b5e/packages/api-client/src/{types/client.ts,features/auth.ts,features/panel-version.ts,features/node-auth.ts,core/abstract-module.ts,utils/jwt-retry.ts,utils/node-url.ts}"
+         curl -sS -O "…/src/modules/archon/{actions,backups,backups-queue,content,options,properties,server-users}/{v1}.ts" \
+                    "…/src/modules/archon/{nodes,servers,transfers}/{internal}.ts" "…/src/modules/archon/{notices,servers}/v0.ts" "…/src/modules/archon/servers/v1.ts"
+         python -c "re.findall(r'client\\.request', open(f).read())"      # per module, and the total
+         curl -A PalantirMC/0.1.0-g111-measurement -o /dev/null -w '%{http_code}' \
+              api.modrinth.com/v2/user/modrinth [-H 'X-Panel-Version: 1|99']
+         curl -H 'X-Panel-Version: {1,99}' https://archon.modrinth.com/{,*v1*}{v1/servers,v1/regions}
+  EXPECT: three base URLs, the sentinel header a constant sent to two of them, one token
+          13 Archon modules and 84 request calls behind them, and 3 version segments
+          Labrinth answers 200 whatever the header says; Archon refuses the wrong value
+          a node's own auth, and the one Archon route that needs no token at all
+  EVIDENCE: the upstream files (they are in `.scratch/g111-*.ts`, which is ignored)
+            and the transcript of the live probes, 2026-09-28:
+
+```
+# packages/api-client/src — the package `app-frontend/package.json` names as
+# "@modrinth/api-client": "workspace:^" and this tree does not vendor
+https://api.github.com/repos/modrinth/code/contents/packages/api-client/src?ref=8966b5e2e7951e83651fbebbf2fb6d7608a94a33
+  core/  features/  modules/  platform/  state/  tests/  types/  utils/  index.ts
+  core/: abstract-client.ts abstract-feature.ts abstract-module.ts abstract-sync.ts
+         abstract-upload-client.ts abstract-websocket.ts errors.ts
+  features/: auth.ts circuit-breaker.ts node-auth.ts panel-version.ts retry.ts verbose-logging.ts
+
+$ python -c '...'    # the file trees under modules/, and modules/archon
+modules/: archon/ iso3166/ kyros/ labrinth/ launcher-meta/ mclogs/ paper/ purpur/
+          shared-instances/ index.ts types.ts
+modules/archon/: actions/ backups/ backups-queue/ content/ nodes/ notices/ options/
+                 properties/ server-users/ servers/ transfers/ index.ts types.ts
+modules/kyros/:  content/ files/ logs/ upload-sessions/ types.ts
+
+$ python -c '...'    # `client.request` calls per Archon module file, and the methods
+  actions-v1          1 calls  GET                    35 lines
+  backups-queue-v1   10 calls  DELETE,GET,POST       113
+  backups-v1          7 calls  DELETE,GET,PATCH,POST 113
+  content-v1         19 calls  GET,POST              290
+  nodes-internal      1 calls  GET                    20
+  notices-v0          6 calls  DELETE,GET,PATCH,POST,PUT 98
+  options-v1          2 calls  GET,PATCH              37
+  properties-v1       2 calls  GET,PATCH              40
+  server-users-v1     5 calls  DELETE,GET,PATCH,POST  83
+  servers-internal    1 calls  GET                    23
+  transfers-internal  4 calls  GET,POST               84
+  servers-v0         19 calls  DELETE,GET,POST,PUT   321
+  servers-v1          7 calls  DELETE,GET,POST       102
+  total 84 calls in 13 modules (58 in the 11 above + 19 + 7)
+
+$ grep -rho "client\.archon\.[a-zA-Z0-9_]*\.[a-zA-Z0-9_]*" vendor/… | sort -u | wc -l
+65          # two-name call sites in the vendored frontend; 67 by G109's deeper pattern
+
+$ curl -o /dev/null -w '%{http_code}' api.modrinth.com/v2/user/modrinth
+no header 200    X-Panel-Version: 1 200    X-Panel-Version: 99 200
+
+$ curl -H 'X-Panel-Version: …' https://archon.modrinth.com/…
+/v0/servers  no header   426 {"error":"unsupported archon request version"}
+/v0/servers  version 1   404 not found
+/v0/servers  version 99  426 {"error":"unsupported archon request version"}
+/v1/servers  version 1   401 {"error":"unauthorized","description":"you are not authorized to view this resource"}
+/v1/regions  version 1   200 [{"shortcode":"au-syd","countrycode":"au","display_name":"Sydney, Australia",
+                             "lat":-33.903355933,"lon":151.19163831,"zone":"nodes.modrinth.com",
+                             "bucket_regions":["australia-southeast"],"internal":false,
+                             "backup_anchor_hour":0}, {"shortcode":"us-vin", …}]
+```
+
+  **The client's own contract, in its own words.** `types/client.ts` names three
+  hosts, not two: Labrinth defaults to `https://api.modrinth.com`, Archon to
+  `https://archon.modrinth.com`, and a third to
+  `https://shared-instances.modrinth.com`, with a `timeout` of 10000 ms, an
+  `archonSentryCapture` that attaches `modrinth-sentry-capture: 1`, and
+  `features?: AbstractFeature[]` as the only way auth gets in. `features/auth.ts`
+  is that one way: a single `token` -- static string or async provider -- written as
+  `Authorization: Bearer <token>` (prefix and header name are configurable), skipped
+  when the header is already set or the request sets `skipAuth`. **Nothing in it
+  distinguishes a personal access token from an OAuth access token, and nothing
+  distinguishes Labrinth from Archon** -- the same feature object stamps whatever the
+  client sends. So G109's open question stays open on the server side, but it is no
+  longer a question about the client: this launcher would hold one secret and send it
+  to both hosts, which is exactly what a personal access token would need to be
+  accepted for.
+
+  **The version header is a client stamp, not an Archon rule -- correcting G110.**
+  `features/panel-version.ts` is eighteen lines: `export const PANEL_VERSION = 1`, and
+  `shouldApply` returns true when `context.options.api` is `'labrinth'` **or**
+  `'archon'`. Measured against both services: Labrinth answers 200 to no header, to
+  `1` and to `99`, so it ignores the value entirely; Archon answers 426 to no header
+  and to `99`, 404 to `1` on `/v0/servers`, 401 to `1` on `/v1/servers`. G110 said the
+  header is "what Archon wants before anything else", which is true of Archon but
+  mistaken about why: it is the client telling the service *which contract this panel
+  speaks*, the same header going to both, and only one of the two services acting on
+  it. The number is a constant 1, so a Rust client sends `X-Panel-Version: 1` on every
+  Archon request and nothing on Labrinth's unless it wants to.
+
+  **Archon is thirteen modules, not eleven, and its surface is 84 request calls.**
+  G109 counted eleven namespaces and 67 methods out of the *vendored frontend's* call
+  sites (`client.archon.*`, which the two-name pattern counts as 65 and the deeper one
+  as 67). The registry is the API's own answer: `modules/index.ts` maps thirteen
+  `archon_*` keys -- eleven of them `_v1`/`_v0`/`_internal` by name -- to module
+  classes, and `modules/archon/index.ts` re-exports only six groups (actions, backups,
+  backups-queue, content, properties, servers), leaving nodes, notices, options,
+  server-users and transfers reachable through the registry without being part of the
+  package's public surface. Counting `client.request` in the thirteen module files
+  gives **84 calls**, the largest being content (19) and the servers pair (19 + 7).
+  Servers exist at **two versions at once** -- `servers/v0` (19 calls: `/servers`,
+  `/servers/:id`, `/stock`, `/servers/:id/{fs,ws}` answering a JWT and a websocket
+  auth, `power`, `reinstall`, `reinstallFromMrpack`, `name`, four `/allocations` verbs,
+  `/subdomains/:s/isavailable`, `/subdomain`, `/startup`, `/notices/:id/dismiss`) and
+  `servers/v1` (7: list, get, `select-download`, `regions`, `flows/intro` DELETE,
+  `worlds/:wid/onboard` POST, `sftp/roll` POST) -- and the version segment is per
+  request, not per module: `/v0`, `/v1` or `/_internal`.
+
+  **A node is a fourth thing.** `features/node-auth.ts` and `modules/kyros/`
+  (content, files, logs, upload-sessions) are the file half of a hosted server: a
+  per-server JWT from `/v0/servers/:id/fs`, written into the same `Authorization`
+  header, against a *node* host (`node-xyz.modrinth.com/modrinth/v0/fs`, whose base URL
+  `utils/node-url.ts` recovers by stripping `/modrinth/v{n}/fs` and defaulting to
+  https), with a 401 loop that refreshes and retries three times and a `wss://`
+  rewrite for the websocket. `utils/jwt-retry.ts` is the one-shot version of the same
+  idea: on 401 call `refreshToken()`, retry once.
+
+  **And one Archon route answers a stranger.** `/v1/regions` is marked `skipAuth: true`
+  in `servers/v1.ts` and it is true on the wire: no token, no account, 200 with real
+  bodies -- Sydney and Vint Hill so far, each with `shortcode`, `countrycode`,
+  `display_name`, `lat`/`lon`, `zone` (`nodes.modrinth.com`), GCP `bucket_regions`,
+  an `internal` flag and `backup_anchor_hour`. It is the first byte of Archon this
+  launcher can read today, and it is also the honest shape of everything else: 401
+  `{"error":"unauthorized","description":"you are not authorized to view this
+  resource"}` -- Labrinth's error shape again, so G110's finding two covers Archon too,
+  and the engine's `HTTP <status>` would drop Archon's own sentence as well.
+
+  **What this settles and what it does not.** The Servers page's own data stays behind
+  a token: `/v1/servers` is per-account and answers 401 without one. What is settled is
+  the contract a Rust client would have to speak, its size (84 calls across 13 modules,
+  three version segments, a fourth node host with a JWT of its own), and that the
+  first step is derivable without an account. What is not settled is whether a `mrp_`
+  personal access token is accepted by Archon or by the `_internal` namespaces -- both
+  401s above are "no token", not "wrong kind of token" -- and that still needs an
+  account, which this launcher has none of.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
