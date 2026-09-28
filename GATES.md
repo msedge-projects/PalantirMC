@@ -3516,8 +3516,12 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 503 filtered out; fi
   the service accept one. That is the honest limit of this slice, and it is the same
   limit G104's read carries.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
-  `RUN_ID`, which is the same block as the fifteen before it.
+  The runner could not be the receipt either: this slice's push, `5fbc3bf`, is run
+  `36440609824`, which is the same block as the fifteen before it -- `Test
+  workspace` and `Lint` failed in 6 s with **zero steps** and `The job was not
+  started because recent account payments have failed or your spending limit needs
+  to be increased`, with `Live services` and `Build exe` skipped rather than
+  scheduled.
 
 ## What these gates cannot say
 
