@@ -4570,8 +4570,9 @@ $ curl -H 'X-Panel-Version: …' https://archon.modrinth.com/…
          curl -sS -w '[%{http_code}] %{size_download} bytes' \
               api.modrinth.com/v2/{user,tag/nonexistent-loader,project/sodium/version/999999999}
          curl -sS -H 'X-Panel-Version: 1' archon.modrinth.com/v0/servers
-  EXPECT: the workspace suite green on the tree G108 left, then on this one
-          990 passed / 0 failed / 18 ignored, clippy exit 0 at the same 42 warnings
+  EXPECT: the workspace suite green on the tree G108 left, then on this one, then
+          on the merged tree: 986, 990 and 1008 passed, 0 failed in all three
+          clippy exit 0 every time, at the same 42 warnings
           a 404 whose body carries JSON says so; one whose body is empty says only the code
           Archon's two words `not found` arrive as the sentence
   EVIDENCE: the runs on this tree, and the live test's own output, 2026-09-28:
@@ -4656,6 +4657,19 @@ archon /v0/servers, X-Panel-Version: 1      404    9 bytes  not found
   rather than the code about the string. Measuring that URL (`curl` above) is what
   turned the test into the three-shape one -- and into the finding that "no sentence"
   has to be a *tested* outcome rather than an overlooked one.
+
+  **The merged tree's own numbers, because the two runs above predate a rebase.**
+  The three locale slices landed on `rewrite-modrinth-native` while this slice was
+  being written, so the push had to be rebased onto them; the conflicts were in
+  `NEXT_STEPS.md` and `tools/progress.py` only (the locale work had reflowed the
+  plan document from end to end, so all of it conflicted and the resolution was
+  their version plus this slice's two paragraphs), and no source file conflicted.
+  The suite and clippy were then re-run on the tree as it stands -- `b8a76b2`:
+  `cargo test --workspace --all-targets --locked` exit 0, **1008 passed / 0 failed /
+  18 ignored** (the desktop's own 519 grew to 537 with the locale tests, and net is
+  251) and `cargo clippy --workspace --all-targets --locked -- -D clippy::correctness`
+  exit 0 at 42 warnings whose texts are identical to G106's. That is the number this
+  gate's push is behind; the 986 and 990 above are the two states before the merge.
 
   **What this does not do.** It does not change any message this launcher writes for
   itself, and it does not add Archon as a service: the live test spells out
