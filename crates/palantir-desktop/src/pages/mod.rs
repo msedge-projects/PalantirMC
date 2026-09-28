@@ -121,6 +121,13 @@ pub enum Ask {
     /// clearly the shell's: a page has never seen an account file, a selection or a
     /// token, and the shell reads all three from the launcher's own store.
     Skins(skins::Asked),
+    /// Change what the account is wearing: put one of its own skins or capes on,
+    /// or take it off.
+    ///
+    /// The write half of [`Ask::Skins`] and the same shape, because it is the same
+    /// secret: *which* account and *which* token the change is made with are the
+    /// shell's, and a page that could make it would have to hold both.
+    Wear(skins::Wear),
     /// Put a project into one of the launcher's instances.
     ///
     /// The same shape as the other asks, pointed at a file instead of a page: the
@@ -189,6 +196,16 @@ impl Message {
             round: asked.round,
             result: result.map(Box::new),
         })
+    }
+
+    /// The message that carries a change's outcome back to the Skins page.
+    ///
+    /// [`Message::skins_result`]'s twin, and the one place a page's *write* is
+    /// answered: the same seam, handed a `Result` with nothing in it on success,
+    /// because what changed is the document the page reloads rather than a value
+    /// this carries.
+    pub fn skin_worn(worn: &skins::Wear, result: Result<(), String>) -> Message {
+        Message::Skins(skins::Message::Applied { round: worn.round, result })
     }
 
     /// The message that carries an install's outcome back to the page whose button
@@ -314,9 +331,12 @@ impl Screen {
                 // The third page that asks for something, and the first whose
                 // question is about the *reader* rather than about a document: the
                 // shell runs it and the answer comes back turns later, exactly as
-                // Discover's and the project page's do.
+                // Discover's and the project page's do. It answers with an `Ask` of
+                // its own for the project page's reason: this page has two kinds of
+                // request now -- read the account's appearance, and change what it
+                // wears -- and only one of them is a question.
                 if let Some(asked) = state.update(message) {
-                    return Some(Ask::Skins(asked));
+                    return Some(asked);
                 }
             }
             (Screen::Screenshots(state), Message::Screenshots(message)) => state.update(message),
@@ -634,6 +654,30 @@ mod tests {
             None,
             "a message meant for another page is not a request from this one"
         );
+    }
+
+    #[test]
+    fn a_change_to_what_is_worn_leaves_the_page_and_its_answer_comes_back_to_it() {
+        // The one write a page can ask for: the *change* is the page's value, the
+        // request is the shell's, and the outcome comes back as the page's own
+        // message built here rather than named by the shell.
+        let store = Store::default();
+        let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
+        let change = palantir_net::SkinChange::Cape { id: "cape-1".to_string() };
+        let Some(Ask::Wear(worn)) =
+            skins.update(Message::Skins(skins::Message::Wear(change.clone())), &store)
+        else {
+            panic!("the press leaves the page as a request for the shell");
+        };
+        assert_eq!(worn.change, change);
+        // A refusal lands on the page that asked, as a sentence, and the page is
+        // ready to press again.
+        assert_eq!(skins.update(Message::skin_worn(&worn, Err("no".to_string())), &store), None);
+        let Screen::Skins(state) = &skins else {
+            panic!("still the skins page");
+        };
+        assert_eq!(state.notice.as_deref(), Some("no"));
+        assert!(!state.wearing);
     }
 
     #[test]

@@ -87,7 +87,7 @@ and `python tools/dashboard.py --check` is what keeps it carrying every gate
 | 0 | Prune what nothing references, and reorganize the documents | **Done** |
 | 1 | The generated design system: `tools/gen_theme.py` compiles the reference's CSS custom properties, Tailwind's default theme and the component transition blocks into a `theme_gen.rs` the shell paints from, plus a motion table; `tools/gen_icons.py` compiles the 313 vendored SVGs into strokeable geometry | **Done** |
 | 2 | The shell rebuilt on the reference's own information architecture: rail, head, page pane, right panel, a `Route` tree with children, Settings as a modal | **Done**: the `Route` tree, the tween engine, the icon widget, the copy, the colour theme and the shell itself are in, it can launch an instance (G81), and **it is what a plain run gets**: the shell it replaces asks for itself with `--classic` (G82). Its right panel draws its first section now (G83); the rest of the panel's sections are service answers and are named in "What stage 3 has landed so far" |
-| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). Home is the welcome screen on a first run (G103), and the Skins page draws the account's own skins, read from Minecraft's own service (G104). The right panel draws four of its five sections now -- the getting-started checklist and the friends sentence a reader with no Modrinth session sees (G102), Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). What is not real yet is the rest of the Skins page -- Modrinth's own skin library and applying a skin -- and Servers with an instance's hosting half, plus the panel's fundraiser banner -- see "What stage 3 has landed so far" |
+| 3 | Pages, in the reference's order: instance pages first, then project, Home, Discover's six tabs, Skins, Screenshots, Servers, User | **In progress**: all eight page modules are in and the pane draws them instead of the placeholder; their controls tween their hover off the shell's own interaction clock (G76), Settings offers the reference's colour themes (G77), and the right panel's first section -- *Playing as* and its accounts card -- is drawn (G83). Two pages ask the engine now: Discover's search (G75) and the project page's own document, team and version list (G96), and that page's Install button is real: it installs the version that matches an instance the reader picks (G97), and for a pack it makes the instance itself (G98). Home is the welcome screen on a first run (G103), and the Skins page is the account's own: it draws the skins and capes Minecraft says it owns, read from that service (G104), and puts any of them on -- or takes a cape off -- with the same token a launch holds (G106), leaving one measurement of the reference's own arm-style test unclaimed (G105). The right panel draws four of its five sections now -- the getting-started checklist and the friends sentence a reader with no Modrinth session sees (G102), Modrinth's news feed, four articles and the link to the rest, with the opener those links needed (G101). What is not real yet is Servers with an instance's hosting half and the panel's fundraiser banner and the friends list's signed-in half -- all of them behind a Modrinth sign-in this launcher does not have, which G105 measured -- see "What stage 3 has landed so far" |
 | 4 | The backend engine: one pooled client, a scheduler, resumable and cancellable downloads, one TTL'd metadata store, a hash-keyed content store, Modrinth's metadata | **Done**: one client with one ceiling, one retry policy, cancellable and resumable transfers, a work queue where every job reports, a metadata cache that revalidates instead of re-downloading, a content store where a file that is already here is never fetched twice, Mojang's piston metadata read directly and checked against its own digests, and Modrinth's API on the same cache and ceiling are all in and gated (G66-G74). Discover's search is the first page served by it (G75); and the *launch* is on it too -- every library, asset object and Java runtime it fetches goes over the engine's own queue, resume, digest check and ceiling (G91), as do a modpack's own file list (G93), an installed project's own file (G97) and a pack's own archive (G98); the panel's news feed is a document on the same cache (G101); and the metadata a *launch* resolves through is the publishers' own: Fabric's and Quilt's launch profiles, read per game version over the same cache and client (G94), and Minecraft's own version file, read from piston and translated into the shape this launcher's model resolves (G95); and the two Forge-shaped loaders install from their own jars too -- each build's launch profile read out of its installer and translated the same way (G99), with the installer's own processors run at install time over the same queue, resume and digest check (G100) |
 | 5 | Instances in our own format, with importers for the popular launchers | **In progress**: an instance can be created from the library or the rail's `+` and the reader lands in it (G78), for any version Mojang publishes rather than only the current one -- the dialog's picker lists them, searchable, with the snapshots behind its own footer (G80); the welcome screen's import button lists what the other launchers on this machine hold and brings one in (G79); and Play launches: the page reports it, the shell builds the run from the launcher's own files, the worker installs, signs in and spawns the game, its facts come back as `LaunchEvent`s, and the header follows the run from *Starting* to *Stop* and back (G81); the reference's custom-setup step draws its own modloader chips and the loader-version row, and what they choose is written into the instance's pack profile (G84-G85); a run is watchable from *any* page through the action bar's chip, its level and its stop control (G86); and the shell this one replaces is **deleted** -- `app.rs`, its glyphs, its settings page and the carved Prism art -- with Windows' own frame handling and the `--shot` capture it owned now this shell's (G88), and nothing the deleted shell was the last caller of was left behind (G89). **Done**: the launch surface closed the stage -- the bar watches several runs at once through a popover over every one of them, and the download manager's job list is every job rather than the run's own (G90) |
 
@@ -351,9 +351,15 @@ are named in that module -- no rotation or lighting, no second layer (hat, jacke
 sleeves, trousers), and four-pixel arms for both variants -- and two more in the
 page: the account's skins are listed by their *variant* because Minecraft's document
 names each one by its id and nothing else, and the sections above them are still
-Modrinth's bundles, whose skins are not here. What is deliberately *not* drawn is the
-half that changes anything: applying a skin is a write this slice does not make, so
-the button says so rather than pretending.
+Modrinth's bundles, whose skins are not here. The half that changes anything landed
+next as G106, and the seam it widened is the same one: a page's *write* is the same
+kind of value `Ask::Skins` is -- `Ask::Wear` carries a round and one
+`palantir_net::SkinChange`, and the account and token stay the shell's, because a
+page that could make the request would have to hold both. The page refuses a second
+press while the first is in flight (the rows draw their Apply unusable), a failure
+comes back as a sentence in the slot every other failure goes, and a success comes
+back as *silence plus a reload* rather than as invented copy: what changed is the
+document, so the document is what is read again.
 
 `pages/project.rs` is the second page to *ask* rather than draw a shape (G96),
 and the request seam now has two users rather than one: a page describes what to
@@ -496,17 +502,27 @@ Three things about the pages are decisions worth keeping:
 
 What stage 3 does **not** have yet, named rather than implied:
 
-* **Skins, Servers and the hosting half of an instance are not real.** They say
-  so out loud, and a server project is the one kind the Install button still
-  refuses -- it has no folder to land in and it is not a pack, which is the letter
-  of `ProjectType::target_folder`'s rule. The control *states* they will be asked
-  with are live, which is the part that makes the request a one-line change rather
-  than a page rewrite -- and what the project page's slice (G96) turned out to be:
+* **Servers and the hosting half of an instance are not real.** They say so out
+  loud, and a server project is the one kind the Install button still refuses -- it
+  has no folder to land in and it is not a pack, which is the letter of
+  `ProjectType::target_folder`'s rule. The control *states* they will be asked with
+  are live, which is the part that makes the request a one-line change rather than
+  a page rewrite -- and what the project page's slice (G96) turned out to be:
   Modrinth splits one project three ways, and the page was already the one `Load`
-  the three fill. One third of it is real now: the Skins page reads what
-  *Minecraft* publishes for the signed-in account -- the skins and capes it owns,
-  and which of each is in force -- and cuts the skin in force into a front view it
-  draws (G104).
+  the three fill.
+
+  The **Skins** third of this item is finished, and it took two slices. G104 read
+  what *Minecraft* publishes for the signed-in account -- the skins and capes it
+  owns, and which of each is in force -- and cut the skin in force into a front
+  view it draws. G106 is the writing half: a row's Apply puts that skin or cape on
+  the account through Minecraft's own skin service (`POST …/profile/skins`,
+  `DELETE …/skins/active`, `PUT` and `DELETE …/capes/active`), with the same game
+  token the launch already holds, and the page reloads the document afterwards so
+  the check moves to the row that is now in force. What is deliberately *not* built
+  is the reference's file upload, which is a dialog and a multipart body, and its
+  edit modal, which is where `unequip_skin` is reached from -- the client can take
+  a skin off and the control that would ask for it is the modal this page does not
+  have. Both are named on the page rather than approximated.
 
   G105 measured which of what is left is *reachable* and which is not, because
   they are not the same kind of gap and the plan asked for that decision rather
@@ -518,25 +534,21 @@ What stage 3 does **not** have yet, named rather than implied:
   again: `client.labrinth.campaign_internal.getPride26()`. And the friends list's
   **signed-in half** is four `plugin:friends` calls that authenticate through
   `plugin:mr-auth`; `plugin:users`, which is Labrinth's own user service behind
-  those pages, is the third of the namespaces involved. One is only *unfinished*:
-  the Skins page's writing half -- `equip_skin`, `add_and_equip_custom_skin`,
-  `remove_custom_skin`, `set_custom_skin_order`, `save_custom_skin`,
-  `unequip_skin`, `normalize_skin_texture` in `helpers/skins.ts` -- is Minecraft's
-  own skin service with the account's own token, the document G104 already reads,
-  plus a store of the reader's own choices the plugin keeps for itself. So it
-  needs a slice rather than an account. That same file also hands this tree a
-  measurement worth taking while it is here: `determineModelType` decides slim from
-  classic by reading one 2x12 column of the arm at (54, 20) and asking whether any
-  pixel in it is opaque -- the exact question the cutter in `skin.rs` is already
-  holding the pixels for.
+  those pages, is the third of the namespaces involved.
 
-  What that leaves is a choice rather than a debt. The ledger's two open stage-3
-  items stay open and now say *why* each is open, and the one that is only
-  unfinished is the one a later slice should take. The alternative for the other
-  three is a Modrinth sign-in path of this launcher's own -- the app's own OAuth,
-  then Labrinth with the token those `_internal` routes are called with -- which is
-  a slice of its own size and would unlock all three at once. Nobody has to
-  re-measure either way before starting.
+  The one surface that measurement found *reachable* was the Skins page's writing
+  half, and G106 is that slice. What that leaves is a choice rather than a debt:
+  the ledger's open stage-3 items now stand at two gates, both behind the same
+  sign-in, and the alternative to them is a Modrinth path of this launcher's own --
+  the app's own OAuth, then Labrinth with the token those `_internal` routes are
+  called with -- which is a slice of its own size and would unlock both at once.
+  Nobody has to re-measure either way before starting. One measurement from G105 is
+  still unclaimed and stays named here so it is not lost: `helpers/skins.ts`'
+  `determineModelType` decides slim from classic by reading one 2x12 column of the
+  arm at (54, 20) and asking whether any pixel in it is opaque -- the exact
+  question the cutter in `skin.rs` is already holding the pixels for, and the one
+  thing that would let a row say which arm style it is without the document having
+  to.
 * **The panel's other sections are not built.** The panel is no longer a wash
   (G83): Discover, a project and a profile force it on (`App.vue`'s
   `forceSidebar`), and it draws `app-sidebar`'s scroll region with four of its

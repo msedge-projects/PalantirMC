@@ -94,6 +94,13 @@ enum Asked {
     /// the one a launch would sign in as, and the token that account carries, are
     /// both in the accounts store this shell owns.
     Skins(skins::Asked),
+    /// A change to what the account wears, as the Skins page describes it.
+    ///
+    /// The only *write* a page can ask for, and the reason it is here rather than
+    /// on the page: it is made with the account's own game token against
+    /// Minecraft's skin service, and both the account and its token are the
+    /// shell's.
+    Wear(skins::Wear),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1217,6 +1224,7 @@ impl Shell {
                 Asked::Search(asked) => self.search(asked),
                 Asked::Project(asked) => self.project(asked),
                 Asked::Skins(asked) => self.skins(asked),
+                Asked::Wear(worn) => self.wear(worn),
             };
         }
         // A create and an import are not a page's requests and do not go through
@@ -1541,6 +1549,7 @@ impl Shell {
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::Skins(asked)) => Some(Asked::Skins(asked)),
+                    Some(pages::Ask::Wear(worn)) => Some(Asked::Wear(worn)),
                     Some(pages::Ask::Install(install)) => {
                         // The dialog is opened rather than a transfer started: the
                         // missing half of the request is *which instance*, and only
@@ -1944,7 +1953,8 @@ impl Shell {
                 | pages::Ask::Create
                 | pages::Ask::Import
                 | pages::Ask::Play(_)
-                | pages::Ask::Stop(_),
+                | pages::Ask::Stop(_)
+                | pages::Ask::Wear(_),
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
@@ -1971,6 +1981,30 @@ impl Shell {
                 ),
             }),
             move |result| Message::Screen(pages::Message::skins_result(&asked, result)),
+        )
+    }
+
+    /// Change what the account is wearing, and bring the outcome back as a page
+    /// message.
+    ///
+    /// Off the frame thread for [`Shell::skins`]'s reason, and the same account and
+    /// token as that read: it is a write to the reader's own Minecraft account, made
+    /// through the service that owns it, so an account with no Microsoft session is
+    /// answered with the same sentence the read is rather than with a request that
+    /// has no token to carry. What the *change* is -- which skin, which cape, or
+    /// taking one off -- is the page's to describe, and it arrives here as a value.
+    fn wear(&self, worn: skins::Wear) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let account = self.account();
+        let change = worn.change.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || match account.access_token.as_deref() {
+                Some(token) => store.wear(token, change),
+                None => Err(
+                    "Sign in to a Microsoft account to change what it wears.".to_string(),
+                ),
+            }),
+            move |result| Message::Screen(pages::Message::skin_worn(&worn, result)),
         )
     }
 

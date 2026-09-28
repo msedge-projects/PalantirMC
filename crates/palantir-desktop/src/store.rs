@@ -48,8 +48,9 @@ use palantir_net::engine::{
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::modrinth::{ModrinthMember, NewsArticle};
 use palantir_net::{
-    MinecraftSkins, MicrosoftAuth, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
-};    use crate::catalog::LoaderKind;
+    MinecraftSkins, MicrosoftAuth, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
+};
+use crate::catalog::LoaderKind;
 use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
@@ -666,6 +667,20 @@ impl Store {
     pub fn skins(&self, token: &str) -> Result<MinecraftSkins, String> {
         MicrosoftAuth::with_public_client_id()
             .skins(token)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Change what the account is wearing, through Minecraft's own skin service.
+    ///
+    /// The write half of [`Self::appearance`], and the same account and token: what
+    /// the page drew a moment ago is what this changes, which is why the two share a
+    /// caller rather than a client of their own. The change names something the
+    /// account already owns, so there is no upload here -- see [`SkinChange`].
+    ///
+    /// **Blocking**, for [`Self::appearance`]'s reason.
+    pub fn wear(&self, token: &str, change: SkinChange) -> Result<(), String> {
+        MicrosoftAuth::with_public_client_id()
+            .wear(token, change)
             .map_err(|error| error.to_string())
     }
 

@@ -3411,6 +3411,114 @@ $ echo $?
   needs to be increased`, with `Live services` and `Build exe` skipped rather than
   scheduled.
 
+- [x] G106: the Skins page's writing half -- a row's Apply puts one of the
+  account's own skins or capes on, through Minecraft's own skin service
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         cargo test -p palantir-net --lib --locked wearing_a_skin_posts_the_variant_the_service_asks_for_and_the_texture_it_is
+         cargo test -p palantir-desktop --locked --bin PalantirMC wearing_something_is_one_request_and_the_second_press_is_not_a_second_write
+  EXPECT: 967 passed; 0 failed; 17 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+          the four named tests pass, each in isolation
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    504 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    243 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 17 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+$ echo $?
+0
+$ grep -c '^warning: ' .scratch/g106-cl.log
+42
+$ diff <(grep '^warning: ' .scratch/g104-cl.log | sort) <(grep '^warning: ' .scratch/g106-cl.log | sort) && echo IDENTICAL
+IDENTICAL
+
+$ cargo test -p palantir-net --lib --locked wearing_a_skin_posts_the_variant_the_service_asks_for_and_the_texture_it_is
+test auth::tests::wearing_a_skin_posts_the_variant_the_service_asks_for_and_the_texture_it_is ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 242 filtered out; finished in 0.00s
+
+$ cargo test -p palantir-desktop --locked --bin PalantirMC wearing_something_is_one_request_and_the_second_press_is_not_a_second_write
+test pages::skins::tests::wearing_something_is_one_request_and_the_second_press_is_not_a_second_write ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 503 filtered out; finished in 0.00s
+```
+
+  **What this slice is, and where it came from.** G105 measured stage 3's four
+  remaining surfaces and found exactly one that was *unfinished* rather than out of
+  reach: the Skins page's writing half. This is that slice, and it is the last item
+  of the plan's own list that can be taken without a Modrinth account.
+
+  **The service's shape, named rather than guessed.** The reference's plugin Rust is
+  not in this tree (G105: no `src-tauri`), so what its `plugin:minecraft-skins`
+  calls *do* had to be read from the service's own protocol rather than from a
+  vendored caller. The four requests are `POST
+  api.minecraftservices.com/minecraft/profile/skins` with `{"variant":..,"url":..}`,
+  `DELETE …/profile/skins/active`, `PUT …/profile/capes/active` with
+  `{"capeId":..}`, and `DELETE …/profile/capes/active` -- cross-checked against two
+  independent public implementations of the same API (the wiki.vg-documented shape
+  as implemented by `minecraft-launcher-core-node`'s `mojang.ts`, whose
+  `setSkin`/`resetSkin`/`showCape`/`hideCape` are these four requests down to the
+  verb and the body). The provenance is written here because it is weaker evidence
+  than the rest of this file: every other service claim in the ledger quotes a
+  vendored call site, and this one cannot.
+
+  **Where the split falls, and why.** `palantir_net::MicrosoftAuth::wear` is one
+  entry point over four methods, and `SkinChange` is the type a caller describes the
+  change with: which verb, which URL and whether there is a body are the module's
+  business, so no caller can misspell `PUT` or forget that the cape endpoint takes
+  an id rather than a texture. A change names only things the account already owns,
+  which is why no variant of that type *can* upload. Above it, `Store::wear` is the
+  same pass-through `Store::skins` is, and the page's own `Wear` carries a round so
+  an answer can be matched to the change waiting for it -- the same seam `Ask::Skins`
+  uses, one step further out, and the only place a page can ask for a *write*.
+
+  **What the page does with it.** Each row that is not already in force gets the
+  reference's own Apply (`AppSkinsApplyButton`), and the cape list gets the
+  reference's `AppSkinsModalNoneCapeOption` row to take one off. The rule is a
+  function (`wear_skin`/`wear_cape`) rather than a condition inside the drawing, so
+  the gate can read it: nothing for a skin already worn, nothing for the cape
+  already on, and nothing at all while a change is in flight -- a second press would
+  be a second write to the reader's own account. A failure comes back as a sentence
+  in the slot every other failure this page has goes; a success comes back as
+  **silence plus a reload**, because what changed is Minecraft's document and the
+  check moving to the new row is a better confirmation than anything this launcher
+  could write about it. The header keeps the reference's Add button and loses its
+  Apply: that one acts on the reference's preview panel, which renders a *candidate*
+  skin, and this page has no such panel -- the doll draws what is in force -- so an
+  Apply there would be a button with nothing to act on. One control dropped with
+  its reason recorded, rather than a control that lies.
+
+  **What is deliberately not built.** Three things, named on the page rather than
+  approximated. The file upload (`add_and_equip_custom_skin`, `save_custom_skin`,
+  `normalize_skin_texture`) is a file dialog and a multipart body, and the plugin's
+  local store of the reader's own picks (`source: 'custom' | 'custom_external'`)
+  is what the reference's Saved-skins sections are drawn from -- neither is here, and
+  the page says so where the button is. `unequip_skin` is *implemented* in the client
+  (`SkinChange::NoSkin`) and has no control: the reference reaches it from its edit
+  modal, and that modal -- which is also where a skin's arm style is chosen by hand
+  -- is not this page. And the sections above the account's lists are still
+  Modrinth's bundles, which are service answers G105 found out of reach.
+
+  **What the gates do and do not say.** Everything here is offline: the four
+  requests are gated against a scripted transport that now records bodies as well as
+  URLs (`MapTransport::bodies`), including the two refusals that matter -- a 401
+  reads as *sign in again* rather than as a transport failure, and any other non-2xx
+  carries the service's own `errorMessage`, which is what a reader can act on. The
+  page's rules, the round-matching and the one-write-at-a-time guard are gated
+  directly. What is **not** gated is a real write: exercising it would change the
+  appearance of a real account, so no test does it, and nothing here has ever seen
+  the service accept one. That is the honest limit of this slice, and it is the same
+  limit G104's read carries.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID`, which is the same block as the fifteen before it.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

@@ -79,6 +79,31 @@ pub const MINECRAFT_ENTITLEMENTS_URL: &str =
 /// Minecraft profile endpoint (`MinecraftProfileStep`).
 pub const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
+/// Minecraft's skin service: a POST here puts a skin on the account.
+///
+/// The same host as the profile document, because it is the same service: what
+/// the document *lists* is what a POST here changes. A body of
+/// `{"variant":..,"url":..}` puts the texture the URL names on the account and
+/// makes it the active one; a 200 answers with the new profile document.
+pub const MINECRAFT_SKINS_URL: &str =
+    "https://api.minecraftservices.com/minecraft/profile/skins";
+
+/// The account's active skin, which a DELETE clears.
+///
+/// Clearing it is Minecraft's own `unequip`: the account goes back to the default
+/// skin its name hashes to, which is what the reference's `unequip_skin` does.
+pub const MINECRAFT_ACTIVE_SKIN_URL: &str =
+    "https://api.minecraftservices.com/minecraft/profile/skins/active";
+
+/// The account's active cape: a PUT with `{"capeId":..}` chooses one, a DELETE
+/// hides it.
+///
+/// The id is the one the profile document's `capes[]` entries carry, which is why
+/// the choice is expressed as an id rather than a URL: a cape is not uploaded, it
+/// is *selected* from what the account already owns.
+pub const MINECRAFT_ACTIVE_CAPE_URL: &str =
+    "https://api.minecraftservices.com/minecraft/profile/capes/active";
+
 /// Per-request timeout the live transport enforces.
 pub const DEFAULT_AUTH_TIMEOUT_SECS: u64 = 30;
 
@@ -235,12 +260,12 @@ impl HttpResponse {
     }
 }
 
-/// The three requests the login chain makes.
+/// The requests the login chain and the skin service make.
 ///
 /// Behind a trait so the whole flow can be exercised against recorded bodies:
 /// the interesting behaviour is the *rules* (which poll result means "wait",
-/// which `XErr` means "no Xbox profile"), and those are exactly the parts a
-/// live tenant makes untestable.
+/// which `XErr` means "no Xbox profile", which status means the skin service
+/// refused), and those are exactly the parts a live tenant makes untestable.
 pub trait HttpTransport: Sync {
     /// `application/x-www-form-urlencoded` POST.
     fn post_form(&self, url: &str, form: &[(&str, &str)]) -> crate::Result<HttpResponse>;
@@ -251,6 +276,22 @@ pub trait HttpTransport: Sync {
         body: &str,
         headers: &[(&str, &str)],
     ) -> crate::Result<HttpResponse>;
+    /// JSON PUT with explicit headers.
+    ///
+    /// The method the cape service asks for: choosing a cape is `PUT
+    /// …/capes/active` with `{"capeId":..}`, where a POST is the skin service's
+    /// own verb and would be the wrong request against this URL.
+    fn put_json(
+        &self,
+        url: &str,
+        body: &str,
+        headers: &[(&str, &str)],
+    ) -> crate::Result<HttpResponse>;
+    /// DELETE with explicit headers and no body.
+    ///
+    /// Both "clear" operations -- no active skin, no active cape -- are this
+    /// verb against the `/active` URL, and neither takes a body.
+    fn delete(&self, url: &str, headers: &[(&str, &str)]) -> crate::Result<HttpResponse>;
     /// GET with explicit headers.
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> crate::Result<HttpResponse>;
 }
@@ -324,6 +365,34 @@ impl HttpTransport for BlockingHttpTransport {
         self.finish(url, response)
     }
 
+    fn put_json(
+        &self,
+        url: &str,
+        body: &str,
+        headers: &[(&str, &str)],
+    ) -> crate::Result<HttpResponse> {
+        let mut request = self
+            .client
+            .put(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .timeout(self.timeout);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        self.finish(url, response)
+    }
+
+    fn delete(&self, url: &str, headers: &[(&str, &str)]) -> crate::Result<HttpResponse> {
+        let mut request = self.client.delete(url).timeout(self.timeout);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        self.finish(url, response)
+    }
+
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> crate::Result<HttpResponse> {
         let mut request = self.client.get(url).timeout(self.timeout);
         for (name, value) in headers {
@@ -341,6 +410,10 @@ enum Method {
     Form,
     /// JSON POST.
     Json,
+    /// JSON PUT.
+    Put,
+    /// DELETE.
+    Delete,
     /// GET.
     Get,
 }
@@ -354,6 +427,7 @@ enum Method {
 pub struct MapTransport {
     map: HashMap<(Method, String), HttpResponse>,
     seen: Arc<Mutex<Vec<(Method, String)>>>,
+    sent: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl MapTransport {
@@ -378,6 +452,22 @@ impl MapTransport {
         );
     }
 
+    /// Record a JSON-PUT response.
+    pub fn insert_put(&mut self, url: &str, status: u16, body: &str) {
+        self.map.insert(
+            (Method::Put, url.to_string()),
+            HttpResponse { status, body: body.to_string() },
+        );
+    }
+
+    /// Record a DELETE response.
+    pub fn insert_delete(&mut self, url: &str, status: u16, body: &str) {
+        self.map.insert(
+            (Method::Delete, url.to_string()),
+            HttpResponse { status, body: body.to_string() },
+        );
+    }
+
     /// Record a GET response.
     pub fn insert_get(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
@@ -397,6 +487,18 @@ impl MapTransport {
             .lock()
             .map(|seen| seen.iter().map(|(_, url)| url.clone()).collect())
             .unwrap_or_default()
+    }
+
+    /// The bodies sent so far, with the URL each went to, in order.
+    ///
+    /// Only the requests that *have* a body are logged: a GET and a DELETE send
+    /// nothing, and an empty string per one of those would make a test that asks
+    /// "what did the write send" count reads it did not make. The methods are not
+    /// part of this: what a test asserts about a write is the URL and the JSON, and
+    /// which verb carried them is asserted by the request being answered at all -- a
+    /// POST canned for the cape URL would not answer the PUT that asks for it.
+    pub fn bodies(&self) -> Vec<(String, String)> {
+        self.sent.lock().map(|sent| sent.clone()).unwrap_or_default()
     }
 
     /// Find the canned response for `method` + `url`.
@@ -436,14 +538,33 @@ impl HttpTransport for MapTransport {
     fn post_json(
         &self,
         url: &str,
-        _body: &str,
+        body: &str,
         _headers: &[(&str, &str)],
     ) -> crate::Result<HttpResponse> {
+        if let Ok(mut sent) = self.sent.lock() {
+            sent.push((url.to_string(), body.to_string()));
+        }
         self.lookup(Method::Json, url)
     }
 
     fn get(&self, url: &str, _headers: &[(&str, &str)]) -> crate::Result<HttpResponse> {
         self.lookup(Method::Get, url)
+    }
+
+    fn put_json(
+        &self,
+        url: &str,
+        body: &str,
+        _headers: &[(&str, &str)],
+    ) -> crate::Result<HttpResponse> {
+        if let Ok(mut sent) = self.sent.lock() {
+            sent.push((url.to_string(), body.to_string()));
+        }
+        self.lookup(Method::Put, url)
+    }
+
+    fn delete(&self, url: &str, _headers: &[(&str, &str)]) -> crate::Result<HttpResponse> {
+        self.lookup(Method::Delete, url)
     }
 }
 
@@ -611,6 +732,51 @@ impl MinecraftCape {
     pub fn equipped(&self) -> bool {
         self.state.eq_ignore_ascii_case("ACTIVE")
     }
+}
+
+/// One change to what an account is wearing.
+///
+/// The four things Minecraft's skin service can be told, as one type, because a
+/// page reports a change rather than a request: which verb, which URL and whether
+/// there is a body are this module's business, and a caller that had to name a
+/// method and a path itself would be a second place that knows the service.
+///
+/// Everything here names something the account *already owns* -- a texture URL and a
+/// variant out of its own profile document, or a cape's id -- so no variant of this
+/// type can upload anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkinChange {
+    /// Put one of the account's own skins on, named by the texture it is.
+    Skin {
+        /// The document's own word for the arm style (`CLASSIC` or `SLIM`).
+        variant: String,
+        /// The texture URL the document lists for that skin.
+        url: String,
+    },
+    /// Take the active skin off and go back to Minecraft's default.
+    NoSkin,
+    /// Put one of the account's own capes on, named by its id.
+    Cape {
+        /// The `id` the document's `capes[]` entry carries.
+        id: String,
+    },
+    /// Hide the cape that is on.
+    NoCape,
+}
+
+/// The HTTP verb one write takes.
+///
+/// Private, and three variants rather than a string: a caller inside this module
+/// cannot misspell `PUT`, and the public surface says `/active` and `capeId`
+/// instead of a method and a path.
+#[derive(Debug, Clone, Copy)]
+enum Verb {
+    /// The skin service's own verb for putting a skin on.
+    Post,
+    /// Choosing a cape.
+    Put,
+    /// Either "clear" operation.
+    Delete,
 }
 
 /// What an account's own profile document says about its appearance.
@@ -979,6 +1145,114 @@ impl MicrosoftAuth {
     pub fn skins(&self, game_access_token: &str) -> Result<MinecraftSkins, AuthError> {
         let value = self.profile_document(game_access_token)?;
         Ok(MinecraftSkins { skins: skin_list(&value), capes: cape_list(&value) })
+    }
+
+    /// Change what the account is wearing, through Minecraft's own skin service.
+    ///
+    /// One entry point for the four writes because they share everything that is
+    /// worth getting right: the same host, the same bearer, the same reading of a
+    /// refusal, and the same rule that the service's error message is what the
+    /// user is shown. Each is one request and no retry of its own -- the caller
+    /// holds the ceiling, as it does for every request in this crate.
+    ///
+    /// The texture URL is the one the account's own profile document names, so an
+    /// account can only put on something it already owns: there is no upload path
+    /// here, which is the honest limit of this call rather than an omission.
+    pub fn wear(&self, game_access_token: &str, change: SkinChange) -> Result<(), AuthError> {
+        match change {
+            SkinChange::Skin { variant, url } => self.wear_skin(game_access_token, &variant, &url),
+            SkinChange::NoSkin => self.bare_skin(game_access_token),
+            SkinChange::Cape { id } => self.wear_cape(game_access_token, &id),
+            SkinChange::NoCape => self.hide_cape(game_access_token),
+        }
+    }
+
+    /// Put one of the account's own skins on and make it the active one.
+    ///
+    /// `variant` is the document's own word for the arm style (`CLASSIC` or
+    /// `SLIM`), and the service takes it lower-cased. A document that names
+    /// neither -- an older account's answer has no `variant` at all -- is put on as
+    /// classic, which is the arm style Minecraft itself falls back to; refusing it
+    /// would refuse to wear a skin the account owns over a missing key.
+    pub fn wear_skin(
+        &self,
+        game_access_token: &str,
+        variant: &str,
+        texture_url: &str,
+    ) -> Result<(), AuthError> {
+        if texture_url.trim().is_empty() {
+            return Err(AuthError::Protocol(
+                "a skin cannot be worn without naming its texture".to_string(),
+            ));
+        }
+        let variant = if variant.eq_ignore_ascii_case("slim") { "slim" } else { "classic" };
+        let body = serde_json::json!({ "variant": variant, "url": texture_url }).to_string();
+        self.change(MINECRAFT_SKINS_URL, Verb::Post, &body, game_access_token)
+    }
+
+    /// Take the active skin off, which is `unequip_skin` in the reference.
+    ///
+    /// The account goes back to the default skin its name hashes to. Deliberately
+    /// *not* "wear the first skin the document lists": the service's own answer to
+    /// "nothing active" is the default, and guessing another skin would be this
+    /// launcher deciding something Minecraft has a rule for.
+    pub fn bare_skin(&self, game_access_token: &str) -> Result<(), AuthError> {
+        self.change(MINECRAFT_ACTIVE_SKIN_URL, Verb::Delete, "", game_access_token)
+    }
+
+    /// Put on one of the account's own capes, named by the document's own id.
+    pub fn wear_cape(&self, game_access_token: &str, cape_id: &str) -> Result<(), AuthError> {
+        if cape_id.trim().is_empty() {
+            return Err(AuthError::Protocol(
+                "a cape cannot be worn without naming its id".to_string(),
+            ));
+        }
+        let body = serde_json::json!({ "capeId": cape_id }).to_string();
+        self.change(MINECRAFT_ACTIVE_CAPE_URL, Verb::Put, &body, game_access_token)
+    }
+
+    /// Hide the cape that is on, without giving up owning it.
+    pub fn hide_cape(&self, game_access_token: &str) -> Result<(), AuthError> {
+        self.change(MINECRAFT_ACTIVE_CAPE_URL, Verb::Delete, "", game_access_token)
+    }
+
+    /// One write to the skin service, and the one reading of its answers.
+    ///
+    /// Three statuses mean three different things and only one is a transport
+    /// failure: 401 is a session the service no longer accepts, a 2xx is the
+    /// change, and anything else carries the service's own `errorMessage` -- which
+    /// is what the user is shown, because "Minecraft refused this: <its reason>"
+    /// is the answer and a status number is not.
+    fn change(
+        &self,
+        url: &str,
+        verb: Verb,
+        body: &str,
+        game_access_token: &str,
+    ) -> Result<(), AuthError> {
+        let bearer = format!("Bearer {game_access_token}");
+        let headers: [(&str, &str); 2] =
+            [("Accept", "application/json"), ("Authorization", &bearer)];
+        let response = match verb {
+            Verb::Post => self.transport.post_json(url, body, &headers),
+            Verb::Put => self.transport.put_json(url, body, &headers),
+            Verb::Delete => self.transport.delete(url, &headers),
+        }
+        .map_err(|e| AuthError::Transport(e.to_string()))?;
+        if response.status == 401 {
+            return Err(AuthError::Account(
+                "Minecraft no longer accepts this session: sign in again to change what the account wears."
+                    .to_string(),
+            ));
+        }
+        if response.is_success() {
+            return Ok(());
+        }
+        let reason = serde_json::from_str::<serde_json::Value>(&response.body)
+            .ok()
+            .and_then(|value| string_field(&value, "errorMessage"))
+            .unwrap_or_else(|| format!("HTTP {}", response.status));
+        Err(AuthError::Account(format!("Minecraft refused the change: {reason}")))
     }
 
     /// The profile document itself, which both readers above share.
@@ -1537,6 +1811,134 @@ mod tests {
         let err = flow(&transport).skins("game-token").unwrap_err();
         assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
         assert!(err.to_string().contains("no Minecraft: Java Edition profile"));
+    }
+
+    /// The four writes against one transport, with the service answering each
+    /// canned request 2xx: what is asserted is the request itself, which is the
+    /// half of a write a fixture can hold.
+    fn change(transport: &MapTransport, change: SkinChange) -> Result<(), AuthError> {
+        flow(transport).wear("game-token", change)
+    }
+
+    #[test]
+    fn wearing_a_skin_posts_the_variant_the_service_asks_for_and_the_texture_it_is() {
+        // The document says `SLIM`; the service's body is lower case. Both the
+        // URL and the JSON are asserted, because a POST that sent the wrong arm
+        // style would change the account's body and look like success.
+        let mut transport = full_chain_transport();
+        transport.insert_json(MINECRAFT_SKINS_URL, 200, DRESSED_PROFILE);
+        change(
+            &transport,
+            SkinChange::Skin {
+                variant: "SLIM".to_string(),
+                url: "http://textures.minecraft.net/texture/bbb".to_string(),
+            },
+        )
+        .expect("the skin is worn");
+        assert_eq!(transport.bodies().len(), 1, "one write, and it is the skin's");
+        let (url, body) = transport.bodies().remove(0);
+        assert_eq!(url, MINECRAFT_SKINS_URL);
+        assert!(body.contains("\"variant\":\"slim\""), "got {body}");
+        assert!(body.contains("texture/bbb"), "got {body}");
+        // And a variant the document does not name is put on as classic rather
+        // than refused: an older account's answer has no `variant` at all.
+        let mut transport = full_chain_transport();
+        transport.insert_json(MINECRAFT_SKINS_URL, 200, DRESSED_PROFILE);
+        change(
+            &transport,
+            SkinChange::Skin {
+                variant: String::new(),
+                url: "http://textures.minecraft.net/texture/aaa".to_string(),
+            },
+        )
+        .expect("the skin is worn");
+        let (_, body) = transport.bodies().remove(0);
+        assert!(body.contains("\"variant\":\"classic\""), "got {body}");
+    }
+
+    #[test]
+    fn a_skin_named_with_no_texture_is_refused_before_any_request_is_made() {
+        // The one thing this pair of calls cannot do is invent a texture, so an
+        // empty URL is a protocol problem *here* rather than a request the service
+        // would answer with a 400 the reader would have to read.
+        let transport = full_chain_transport();
+        let err = change(
+            &transport,
+            SkinChange::Skin { variant: "CLASSIC".to_string(), url: String::new() },
+        )
+        .unwrap_err();
+        assert!(matches!(err, AuthError::Protocol(_)), "got {err:?}");
+        assert!(transport.requested().is_empty(), "nothing was sent");
+        let err = change(&transport, SkinChange::Cape { id: "  ".to_string() }).unwrap_err();
+        assert!(matches!(err, AuthError::Protocol(_)), "got {err:?}");
+        assert!(transport.requested().is_empty());
+    }
+
+    #[test]
+    fn taking_the_skin_off_and_hiding_the_cape_are_deletes_of_what_is_active() {
+        let mut transport = full_chain_transport();
+        transport.insert_delete(MINECRAFT_ACTIVE_SKIN_URL, 204, "");
+        transport.insert_delete(MINECRAFT_ACTIVE_CAPE_URL, 204, "");
+        change(&transport, SkinChange::NoSkin).expect("the skin is off");
+        change(&transport, SkinChange::NoCape).expect("the cape is hidden");
+        assert_eq!(
+            transport.requested(),
+            vec![MINECRAFT_ACTIVE_SKIN_URL.to_string(), MINECRAFT_ACTIVE_CAPE_URL.to_string()]
+        );
+        assert!(transport.bodies().is_empty(), "a clear sends no body");
+    }
+
+    #[test]
+    fn a_cape_is_chosen_by_the_id_the_document_gave_it() {
+        // The choice is an id rather than a URL because a cape is selected from
+        // what the account owns, not uploaded -- so a PUT carrying the wrong shape
+        // would be a request the service cannot read at all.
+        let mut transport = full_chain_transport();
+        transport.insert_put(MINECRAFT_ACTIVE_CAPE_URL, 200, DRESSED_PROFILE);
+        change(&transport, SkinChange::Cape { id: "cape-1".to_string() }).expect("the cape is on");
+        let (url, body) = transport.bodies().remove(0);
+        assert_eq!(url, MINECRAFT_ACTIVE_CAPE_URL);
+        assert_eq!(body, r#"{"capeId":"cape-1"}"#);
+    }
+
+    #[test]
+    fn the_skin_service_s_own_reason_is_what_the_reader_is_told() {
+        // 401 is a session the service no longer accepts, and it is *not* a
+        // transport failure: signing in again is the fix, so retrying is not.
+        let mut transport = full_chain_transport();
+        transport.insert_json(MINECRAFT_SKINS_URL, 401, "");
+        let err = change(
+            &transport,
+            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+        )
+        .unwrap_err();
+        assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
+        assert!(err.to_string().contains("sign in again"), "got {err}");
+        assert!(!err.retryable());
+        // Any other refusal carries the service's own sentence, which is the
+        // thing a reader can act on; a status number on its own is not.
+        let mut transport = full_chain_transport();
+        transport.insert_json(
+            MINECRAFT_SKINS_URL,
+            400,
+            r#"{"errorMessage":"The texture is not a valid skin"}"#,
+        );
+        let err = change(
+            &transport,
+            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a valid skin"), "got {err}");
+        // And a refusal with no sentence at all still says which status refused
+        // it, rather than reporting success.
+        let mut transport = full_chain_transport();
+        transport.insert_json(MINECRAFT_SKINS_URL, 500, "not json");
+        let err = change(
+            &transport,
+            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("HTTP 500"), "got {err}");
     }
 
     #[test]
