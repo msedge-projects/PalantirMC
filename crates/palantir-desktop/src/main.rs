@@ -54,6 +54,16 @@ mod install;
 mod instances;
 mod java_runtime;
 mod launch;
+/// The reference client's other 33 locale trees, compiled by
+/// `tools/gen_locale.py` into sparse `(index, template)` tables.
+///
+/// Not `cfg(test)`, for the same reason [`text_gen`] is not: this is where a
+/// translated string comes from once the language setting is anything but
+/// English. A key a table does not carry falls back to [`text_gen`], which is
+/// what the reference's own `fallbackLocale: 'en-US'` does. The gate is the
+/// command -- `python tools/gen_locale.py --check` -- rather than a test,
+/// because what it compares is this file against the locales it came from.
+mod locale_gen;
 /// The view-model whose two readers are left: the instance list `instances.rs` is
 /// built from, and the override-gated settings `launch.rs` resolves a run with.
 ///

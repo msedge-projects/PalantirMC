@@ -125,6 +125,13 @@ jobs:
       - name: String table regeneration
         run: python tools/gen_text.py --check
 
+      # And the same for the other 33 locale trees, which are compiled into the
+      # sparse tables the language setting reads from. Same argument as the
+      # English table above; the generator refuses a locale whose ICU it cannot
+      # render rather than emitting a message that would be filled in wrongly.
+      - name: Locale table regeneration
+        run: python tools/gen_locale.py --check
+
       # This tree has never been run through rustfmt, so formatting reports
       # rather than blocks. Remove `continue-on-error` once `cargo fmt --all`
       # has been committed and reviewed.

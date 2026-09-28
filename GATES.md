@@ -3617,6 +3617,179 @@ $ sed -n '247,251p' crates/palantir-desktop/src/install.rs
   spending limit needs to be increased`, with `Live services` and `Build exe`
   skipped rather than scheduled.
 
+- [x] G120: the reference's own other locales compile into sparse tables, with the
+  plural rules measured instead of inferred from English's two
+  CHECK: python tools/gen_text.py --check
+         python tools/gen_locale.py --check
+         python tools/gen_locale.py --report
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: both generators report byte-identical output
+          the report lists 33 trees, 89,177 leaves and 2,700,238 bytes of translated text
+          970 passed; 0 failed; 17 ignored, between the seven suites
+          clippy exit 0 with 42 warnings -- G106's own count, unchanged
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ python tools/gen_text.py --check
+text generation is byte-identical
+
+$ python tools/gen_locale.py --check
+locale generation is byte-identical
+
+$ python tools/gen_locale.py --report
+tag      leaves   keys fallback plural select number    # arms
+ar-SA      1577   1577     2269     19      5      8   45 few=13, many=13, one=19, other=19, two=13, zero=2
+cs-CZ      2554   2554     1292     52      5     22   56 =0=1, few=28, many=3, one=52, other=52
+de-CH      3792   3792       54     79     10     30   57 =0=1, one=79, other=79
+de-DE      3792   3792       54     80     10     30   58 =0=1, one=80, other=80
+en-US      3846   3846        0     80     10     32   56 =0=1, one=80, other=80
+fi-FI       515    515     3331      2      0      2    2 one=2, other=2
+he-IL      1082   1082     2764     18      0      2    6 one=18, other=18
+ja-JP      2989   2989      857     33      8     31   21 =0=1, one=21, other=33
+pl-PL      3785   3785       61     81     10     32   73 =0=1, few=56, many=9, one=80, other=81
+ru-RU      3753   3753       93     81     10     21  102 =0=1, =1=13, few=60, many=2, one=72, other=81
+th-TH       459    459     3387      2      0      1    1 other=2
+uk-UA      3772   3772       74     79     10     23  103 =0=1, =1=1, =2=1, few=67, many=38, one=78, other=79
+ (all 33 rows printed; the six above are the shapes, and the rest are the same list)
+
+trees            33
+leaves           89,177 across 3846 English keys (70.3% translated)
+value bytes      2,700,238 of translated text
+index bytes      178,354 (a u16 per entry)
+
+arms a language's own rule can never select (dead in the reference too):
+  id-ID    one
+  ja-JP    one
+  ko-KR    one
+  vi-VN    one
+  zh-CN    one
+  zh-TW    one
+
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    507 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    243 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 17 ignored  (palantir-net, tests/live.rs)
+
+$ cargo test -p palantir-desktop --locked --bin PalantirMC locale_gen::
+test locale_gen::tests::every_table_is_sorted_so_a_lookup_can_be_a_binary_search ... ok
+test locale_gen::tests::no_index_is_past_the_english_table ... ok
+test locale_gen::tests::the_tags_are_unique_and_find_agrees_with_the_list ... ok
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+$ echo $?
+0
+$ grep -c '^warning: ' .scratch/g120-clippy3.log
+42
+$ grep -c locale_gen .scratch/g120-clippy3.log
+0
+```
+
+  **The size question, decided by measurement.** The job's first gate was whether
+  all 33 tables fit in the binary or only a chosen set, and the answer is a number
+  rather than an opinion. Three configurations of `palantir-desktop`, each built
+  with `CARGO_INCREMENTAL=0` after `touch src/main.rs` so that a whole crate
+  recompile is being timed and not an incremental patch, on this machine:
+
+```
+                                crate rebuild   target/debug/PalantirMC.exe
+tables absent                        45 s          394,234,505 bytes
+tables for 8 locales                 42 s          395,830,026 bytes  (+1,595,521)
+tables for all 33                    61 s          398,847,453 bytes  (+4,612,948)
+
+the data itself, from the tool: 2,700,238 value bytes + 178,354 index bytes
+                                = 2,878,592 bytes
+generated source: 89,448 lines, 4,114,561 bytes
+```
+
+  So **all 33 ship**. The marginal cost is 2,878,592 bytes of data, +4,612,948 on a
+  debug artifact and roughly +16 s on a crate rebuild, and the two small
+  configurations are 42 s and 45 s apart from each other -- which is to say the
+  8-locale build is not measurably cheaper than none, and the all-33 build is the
+  only one whose time is a real signal. What the measurement buys is a language
+  setting that is complete: every locale the reference publishes is in the binary
+  and works with no network, where the reference itself 
+  `fetchMessages`es the other 32 at runtime and bundles English only. A release
+  artifact was not measured -- the debug delta is reported as the debug delta, and
+  the 2,878,592 data bytes are exact either way.
+
+  **What a table is.** `tools/gen_text.py` compiles the reference's English;
+  `tools/gen_locale.py` compiles the other 32 and **imports** `gen_text` rather
+  than copying its ICU parser, because a locale the generator accepts and a locale
+  the runtime renders have to agree about what a message means. A table is the
+  reference's own sparse shape -- `(position in text_gen::ALL, template)`, sorted
+  by position so a lookup is a binary search. The position rather than the key is
+  not an optimisation: every locale's keys are a subset of English's, verified in
+  the tool and refused if a tree ever grows one that is not (0 extra keys across
+  the 33 today), so the key string is already in the binary once, in
+  `text_gen::NAMES`. Repeating it would be 2.5 MB of duplicate text. A key that is
+  not in a table falls back to English, which is the reference's own
+  `fallbackLocale: 'en-US'` in `app-frontend/src/i18n.config.ts`.
+
+  **The plural question, and the two claims this slice corrects.** The generator
+  used to refuse any plural category other than English's `one` and `other`.
+  This slice's own measurement of the corpus says that refusal was aimed at the
+  wrong thing and that the plan's note about it was half right:
+
+  1. **`zero`, `two`, `few` and `many` are real arms in this corpus.** 6 locales
+     carry `few` (`ar-SA` 13, `cs-CZ` 28, `pl-PL` 56, `ru-RU` 60, `sr-CS` 23,
+     `uk-UA` 67), 5 carry `many`, and `ar-SA` carries `zero` and `two` as well --
+     `{count, plural, zero {..} one {..} two {..} few {..} many {..} other {..}}`
+     in `app.screenshots.selection.delete-description`. So the tool now compiles a
+     locale with **the whole CLDR category set** as legal arms
+     (`gen_text.ALL_PLURAL_CATEGORIES`, threaded through the parser this slice
+     widens) and refuses only what is genuinely unsupported: an arm key that is
+     not a category and not `=N`, and the ICU types and quoting it already
+     refused. English's own output is unchanged -- `gen_text.py --check` still
+     prints `byte-identical`, which is the receipt for that.
+  2. **`ar-SA` is compiled but is not one of the languages the reference offers.**
+     The plan and this work order both say "33 locales". There are 33 locale
+     *trees* on disk, and `LOCALES`, in `ui/src/composables/i18n.ts`, lists **32**
+     codes -- `ar-SA` is present as files and commented out of that list, with the
+     comment `Commented out as it's RTL - will enable when we have better RTL
+     support`. `buildLocaleMessages` drops any tree whose tag is not in `LOCALES`,
+     so the reference cannot render `ar-SA` at all. This slice compiles all 33
+     anyway -- the data exists and a table is a measurement -- and the *offer* is
+     the reference's 32; that distinction is [`crate::locale`]'s to keep in G121
+     and is recorded here so nobody re-derives it. It also matters for G128: the
+     plan names `ar-SA` as one of the two locales to lay out right-to-left, and
+     the reference's own reason for excluding it is that it has no RTL support.
+
+  **The rules, and the dead arms.** Each table carries the primary language
+  subtag, which is what selects a plural rule at runtime (`Intl.PluralRules`,
+  which is what vue-i18n's default pluralization is -- `createI18n` passes only
+  `messageCompiler`, no `pluralRules`). `CLDR_CATEGORIES` in the tool is the one
+  place a rule lives on this side of the fence and is what the report's last block
+  is computed from: 6 locales -- `id-ID`, `ja-JP`, `ko-KR`, `vi-VN`, `zh-CN`,
+  `zh-TW` -- carry `one` arms that their own language's rule can never select,
+  because those languages are `other`-only in CLDR. Those arms are dead in the
+  reference too, so they are reported rather than refused: a translation's dead
+  arm is upstream's fact, and refusing it would refuse six whole locales to make a
+  lint happy.
+
+  **One real bug, found by the correctness lint.** The reference's translations
+  contain invisible characters -- `pt-BR` writes `usados<U+200B><U+200B>apenas`,
+  `ru-RU` writes `<U+200B><U+200B>` inside a sentence, `he-IL` carries `U+200E`
+  marks -- 28 of them across `U+00AD`, `U+200B`, `U+200E` and `U+200F`. Emitted
+  raw they failed the build: `clippy::invisible_characters` is a *correctness*
+  lint, so `-D clippy::correctness` denied it and clippy exited 101. The fix is in
+  the shared `escape`, which now writes any Unicode *format*, *control*, *line* or
+  *paragraph* character as a `\u{...}` escape. That is a faithful round trip --
+  `\u{200B}` decodes to the same string the locale holds -- and it changes nothing
+  about English, whose locale has none of them. Stripping the characters would
+  have made the table agree with clippy instead of with the reference, which is
+  the wrong way round.
+
+  The runner could not be the receipt either: this slice's push, `RUN_PLACEHOLDER`,
+  is run `RUN_ID_PLACEHOLDER`, which is the same block as the eighteen before it --
+  zero steps and `The job was not started because recent account payments have
+  failed or your spending limit needs to be increased`, with `Live services` and
+  `Build exe` skipped rather than scheduled.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

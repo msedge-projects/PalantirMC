@@ -560,6 +560,32 @@ What stage 3 does **not** have yet, named rather than implied:
   this launcher has not been given -- and the friends list's *signed-in* half,
   which is Modrinth's authenticated friends API and needs the sign-in flow.
 
+**The interface can be more than English now** (G120), and the number that decided
+its shape was measured rather than guessed. `tools/gen_text.py` compiles the
+reference's English; `tools/gen_locale.py` compiles the other locales and imports
+that tool's ICU parser rather than copying it, because a locale the generator
+accepts and a locale the runtime renders have to agree about what a message means.
+The corpus is 89,177 leaves across the 33 trees -- 2,700,238 bytes of translated
+text, against 33 x 3846 = 126,918 slots, so 70.3% translated -- and shipping all of
+it costs 2,878,592 bytes of data, +4,612,948 bytes on the debug artifact and about
++16s on a crate rebuild, so all 33 tables ship. A table is the reference's own
+sparse shape, `(position in text_gen::ALL, template)`: every locale's keys are a
+subset of English's (checked, and refused otherwise), so the key string is already
+in the binary once, and a key a table does not carry falls back to English -- which
+is the reference's own `fallbackLocale: 'en-US'`. Two claims came out of the slice
+corrected. The plural refusal was aimed at the wrong thing: `zero`, `two`, `few`
+and `many` are real arms here (6 locales carry `few`, 5 carry `many`, and `ar-SA`
+carries all six), so the generator now compiles a locale with the whole CLDR
+category set and reports which arms a language's own rule can never select --
+`id-ID`, `ja-JP`, `ko-KR`, `vi-VN`, `zh-CN` and `zh-TW` carry `one` arms that
+`Intl.PluralRules` resolves as `other`. And **33 trees is 32 offered languages**:
+the reference's own `LOCALES` lists 32 codes and has `ar-SA` commented out as RTL,
+so the language setting G121 adds offers the reference's 32 while the table for the
+33rd is compiled anyway. One real bug the correctness lint caught: the translations
+contain 28 invisible characters (`U+200B`, `U+200E`, `U+200F`, `U+00AD`), which
+`clippy::invisible_characters` denies; the shared `escape` now writes them as
+`\u{...}`, a faithful round trip that leaves English byte-identical.
+
 Two gaps that were on this list are closed and stay named here so the next reader
 knows when: the controls tween their hover off the same clock the rail's plate
 uses (G76), and Settings offers the reference's colour themes and keeps the one

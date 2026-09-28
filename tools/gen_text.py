@@ -65,6 +65,7 @@ import json
 import pathlib
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -74,8 +75,17 @@ SOURCES = [
 ]
 OUTPUT = pathlib.Path("crates/palantir-desktop/src/text_gen.rs")
 
-# The plural categories English has a rule for. Anything else is refused.
+# The plural categories English has a rule for. Anything else is refused by
+# default, which is what keeps this tool's English output the same as it was
+# before there was a `tools/gen_locale.py`: that file is checked against this
+# one, so widening the default would silently change 3846 generated helpers.
+#
+# The whole CLDR category set is named beside it because the other 32 locales
+# need it -- `zero`, `two`, `few` and `many` are real arms in `ar-SA`, `pl-PL`,
+# `ru-RU`, `cs-CZ` and `sr-CS` -- and a locale is compiled with that language's
+# own set rather than English's. See `tools/gen_locale.py`.
 PLURAL_CATEGORIES = {"one", "other"}
+ALL_PLURAL_CATEGORIES = {"zero", "one", "two", "few", "many", "other"}
 
 RUST_KEYWORDS = {
     "as", "async", "await", "box", "break", "const", "continue", "crate", "dyn",
@@ -223,7 +233,7 @@ def split_top_level(text: str, on: str = ",") -> list:
     return parts
 
 
-def parse_arms(body: str, in_plural: bool, counts: Counts) -> tuple:
+def parse_arms(body: str, in_plural: bool, counts: Counts, allowed=PLURAL_CATEGORIES) -> tuple:
     """Read `key {body} key {body} ...`, in the order the reference writes them.
 
     A *plural*'s arms are the categories, so anything but `one`, `other` and `=N`
@@ -244,16 +254,16 @@ def parse_arms(body: str, in_plural: bool, counts: Counts) -> tuple:
         key = body[index:brace].strip()
         if not key:
             raise Refused(f"an arm with no key in {body!r}")
-        if in_plural and key != "other" and not key.startswith("=") and key not in PLURAL_CATEGORIES:
+        if in_plural and key != "other" and not key.startswith("=") and key not in allowed:
             raise Refused(f"the plural category {key!r}")
         inner, index = read_braces(body, brace)
-        arms.append((key, tuple(parse_nodes(inner, in_plural, counts))))
+        arms.append((key, tuple(parse_nodes(inner, in_plural, counts, allowed))))
     if not arms or arms[-1][0] != "other":
         raise Refused(f"an arm list without an `other` in {body!r}")
     return tuple(arms)
 
 
-def parse_placeholder(inner: str, in_plural: bool, counts: Counts):
+def parse_placeholder(inner: str, in_plural: bool, counts: Counts, allowed=PLURAL_CATEGORIES):
     parts = [part.strip() for part in split_top_level(inner)]
     name = parts[0]
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
@@ -269,12 +279,12 @@ def parse_placeholder(inner: str, in_plural: bool, counts: Counts):
             raise Refused("`selectordinal`")
         counts.node(kind)
         body = ",".join(parts[2:]) if len(parts) > 2 else ""
-        arms = parse_arms(body, in_plural=kind == "plural", counts=counts)
+        arms = parse_arms(body, in_plural=kind == "plural", counts=counts, allowed=allowed)
         return Plural(name, arms) if kind == "plural" else Select(name, arms)
     raise Refused(f"the ICU type {kind!r}")
 
 
-def parse_nodes(message: str, in_plural: bool, counts: Counts) -> list:
+def parse_nodes(message: str, in_plural: bool, counts: Counts, allowed=PLURAL_CATEGORIES) -> list:
     """Parse a message (or an arm's body) into nodes."""
     nodes: list = []
     index, length = 0, len(message)
@@ -310,7 +320,7 @@ def parse_nodes(message: str, in_plural: bool, counts: Counts) -> list:
         if character == "{":
             flush()
             inner, index = read_braces(message, index)
-            nodes.append(parse_placeholder(inner, in_plural, counts))
+            nodes.append(parse_placeholder(inner, in_plural, counts, allowed))
             continue
         literal += character
         index += 1
@@ -336,8 +346,8 @@ def annotate_hashes(nodes: list, plural: str) -> list:
     return result
 
 
-def parse_message(counts: Counts, template: str) -> list:
-    return annotate_hashes(parse_nodes(template, False, counts), "")
+def parse_message(counts: Counts, template: str, allowed=PLURAL_CATEGORIES) -> list:
+    return annotate_hashes(parse_nodes(template, False, counts, allowed), "")
 
 
 # ---- Naming --------------------------------------------------------------
@@ -374,10 +384,39 @@ def argument(name: str) -> str:
 
 
 def escape(text: str) -> str:
-    """A Rust string literal holding `text`."""
-    out = text.replace("\\", "\\\\").replace('"', '\\"')
-    out = out.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-    return f'"{out}"'
+    r"""A Rust string literal holding `text`.
+
+    Characters in the Unicode *format* and *control* categories are written as
+    `\u{...}` escapes even though Rust would accept them raw. English's own
+    locale has none, so this changes nothing about `text_gen.rs` -- but the
+    reference's translations do, and every one of them is invisible: `pt-BR`
+    writes `usados \u{200b}\u{200b}apenas` and `ru-RU` writes `\u{200b}\u{200b}`
+    inside a sentence, which is a Crowdin artifact rather than a word break.
+    Emitted raw they make the source of `locale_gen.rs` contain characters no
+    editor shows, and `clippy::invisible_characters` -- a *correctness* lint, so
+    `-D clippy::correctness` denies it -- fails the build over them.
+
+    The escape is a faithful round trip: `\u{200b}` decodes to the same string
+    the locale holds. Stripping the character instead would make the table agree
+    with clippy rather than with the reference, which is the wrong way round.
+    """
+    out = []
+    for character in text:
+        if character == "\\":
+            out.append("\\\\")
+        elif character == '"':
+            out.append('\\"')
+        elif character == "\n":
+            out.append("\\n")
+        elif character == "\r":
+            out.append("\\r")
+        elif character == "\t":
+            out.append("\\t")
+        elif unicodedata.category(character) in {"Cf", "Cc", "Zl", "Zp"}:
+            out.append(f"\\u{{{ord(character):X}}}")
+        else:
+            out.append(character)
+    return '"' + "".join(out) + '"'
 
 
 def rust_char(char: str) -> str:
