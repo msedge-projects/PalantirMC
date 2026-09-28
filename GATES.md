@@ -4117,6 +4117,134 @@ $ grep -c "archon.sockets.on" ui/src/composables/server-context-runtime.ts
   no code in it, and the only checks this slice owes are the two document tools,
   which exit 0 at 111 gates.
 
+- [x] G110: the profile page's two documents are checked against the live service, and
+  the three things that turned up while checking them are written down
+  CHECK: curl -sS -H "User-Agent: PalantirMC/0.1.0-g110-measurement" \
+              -o .scratch/g110-<name>.json -w '%{http_code}' \
+              https://api.modrinth.com/v2/user/{modrinth,jellysquid3,2REoufqX/projects,jellysquid3/projects,}
+         python -c "json.load(open(...))"                      # the fields the page reads
+         curl -sS -H 'X-Panel-Version: 1' https://archon.modrinth.com/
+         curl -sS -X POST -d 'grant_type=authorization_code&code=x&client_id=x' \
+              https://api.modrinth.com/_internal/oauth/token
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 200 for the four documents, 401 for the reader's-own route without a token
+          `name` null on **both** accounts, not only the official one
+          the projects list keyed `id`, with every field the row draws
+          a client id, not a token, is what OAuth's exchange asks for
+          and Archon: 426 for every path, 200 once `X-Panel-Version: 1` is sent
+  EVIDENCE: the transcript of these requests from this machine, 2026-09-28 (the
+            bodies are in `.scratch/g110-*.json`, which is ignored):
+
+```
+$ curl -H "User-Agent: PalantirMC/0.1.0-g110-measurement" -w '%{http_code}' ...
+200  https://api.modrinth.com/v2/user/modrinth
+200  https://api.modrinth.com/v2/user/jellysquid3
+200  https://api.modrinth.com/v2/user/2REoufqX/projects
+200  https://api.modrinth.com/v2/user/jellysquid3/projects
+401  https://api.modrinth.com/v2/user
+
+$ python -c '...'          # the fields G108 reads, out of the live documents
+== user/modrinth   keys: auth_providers, avatar_url, badges, bio, created, email,
+                        email_verified, github_id, has_password, has_totp, id,
+                        name, payout_data, role, username
+   id 2REoufqX  username Modrinth  name None  role admin  badges 1
+   avatar_url https://cdn.modrinth.com/data/2REoufqX/...96.webp
+   bio "An official user account of Modrinth. support@modrinth.com"
+   created 2023-11-13T23:22:36.604990Z
+   email None  email_verified None  payout_data None  github_id None
+   has_password None  has_totp None  auth_providers None
+== user/jellysquid3  id TEZXhE2U  username jellysquid3  name None  role developer
+   badges 0  bio "Professional idiot at day, maniac programmer by night."
+   created 2021-01-03T00:49:18.373336Z
+== user/jellysquid3/projects  4 entries, all project_type "mod", keyed id
+   Sodium, Hydrogen, Lithium, Phosphor
+   first: id AANobbMI  slug sodium  title Sodium  downloads 232693403
+          icon_url .../AANobbMI/...96.webp  published 2021-01-03T00:53:34.185936Z
+   38 keys, the whole project document; no null icon_url in any of the 4
+   sum(downloads) 364662512
+== user/2REoufqX/projects  []
+== /v2/user (no token)  401
+   {"error":"auth_error","description":"flattening v2 not-found response",
+    "details":["authenticating API request","Authentication method was not valid"]}
+
+$ curl -H 'X-Panel-Version: 1' https://archon.modrinth.com/
+200
+modrinth/archon 0.1.1 (eecc398) [build]
+compiled 23 minutes ago
+
+$ curl https://archon.modrinth.com/v0/servers          # no version header
+426  {"error":"unsupported archon request version"}
+$ curl -H 'X-Panel-Version: 1' https://archon.modrinth.com/v0/servers
+404  not found
+
+$ curl -X POST -d 'grant_type=authorization_code&code=x&client_id=x' \
+       https://api.modrinth.com/_internal/oauth/token
+400  {"error":"invalid_client","description":"The provided client id was invalid"}
+```
+
+  **What this closes.** G108's own limit, stated in its gate: *"The live tests are
+  the ones that would prove the two new documents against the service."* They still
+  are -- `palantir-net/tests/live.rs` has no profile test yet -- but the documents
+  themselves are now measured by hand against the live API, field by field, and
+  they are what the code parses: the same `id`, `username`, `name`, `avatar_url`,
+  `bio`, `created`, and the projects list keyed `id` with `project_type`, `title`,
+  `description`, `downloads`, `icon_url` and `published`. Two details are stronger
+  than the fixtures they were written from: **`name` is null on an ordinary account
+  too** (`jellysquid3`, role `developer`), so the nullable field is not a quirk of
+  the official one; and the sum the header draws is real arithmetic over a real
+  list -- 364,662,512 downloads across Sodium, Lithium, Phosphor and Caffeine.
+
+  **Finding one: the private fields are present and null.** The published user
+  document carries `email`, `email_verified`, `payout_data`, `github_id`,
+  `has_password`, `has_totp` and `auth_providers` -- and every one of them is `null`
+  for a read with no token. That is a third reason `null_as_empty` exists rather
+  than a `#[serde(default)]` alone, and it is also the answer to a question the page
+  never asks: a profile's `role` *is* public (`admin`, `developer`), so "is this
+  profile the reader's own?" cannot be answered from it. Only a token answers that.
+
+  **Finding two: Labrinth's errors do not look like Minecraft's.** This service
+  answers `{"error", "description", "details"}` where the skin service G106 writes
+  answers `{"errorMessage": ...}`. The engine surfaces `HTTP <status>` for both, so
+  a refused Modrinth request currently loses Labrinth's own sentence -- "The
+  provided client id was invalid" above -- and keeps only the number. Nothing here
+  changes that; it is a one-line improvement in the error path, named so it is not
+  rediscovered.
+
+  **Finding three, and the correction to G109.** G109 asked whether Archon accepts a
+  personal access token and could not answer it from the tree or the published
+  pages. The first thing Archon wants is not a token at all: **every** path answers
+  `426 unsupported archon request version` -- with or without a `Bearer` header --
+  until the request carries `X-Panel-Version: 1`, and then the root answers
+  `modrinth/archon 0.1.1 (eecc398) [build]`, a sibling of Labrinth identifying itself
+  the same way. The header comes from the api-client's `panel-version.ts`, which is
+  the point: **the package that would answer the rest is not vendored here.**
+  `app-frontend`'s `package.json` names `"@modrinth/api-client": "workspace:^"`, and
+  `UPSTREAM.md` records the copy as `app-frontend`, `ui`, `assets` and
+  `tooling-config` -- so the client's `src/modules/{archon,iso3166,kyros,labrinth,launcher-meta,mclogs,paper,purpur,shared-instances}`
+  is one directory upstream (`modrinth/code`, the same commit `8966b5e`) and not in
+  this tree. It is where the base URLs, the auth feature
+  (`new AuthFeature({ token: ... })`), the version segment
+  (`/_internal`, `/v{n}`, `'/v0'`) and every Archon path are written down. Reading it
+  from upstream to write this gate is what makes the Archon half of the Servers
+  item measurable at all; **vendoring it the way the frontend was vendored** is a
+  decision for whoever takes that item next, and it is a smaller decision than the
+  sign-in one.
+
+  **And the exchange route is live.** `POST api.modrinth.com/_internal/oauth/token`
+  with a form body and no client secret answers `400 invalid_client` -- not 404 --
+  so the guide's exchange is deployed and the thing it gates on is a registered
+  application's credentials. That is as far as a measurement without an account can
+  go, and it is one step further than G109 left it (G109: the route is documented;
+  G110: the route answers).
+
+  **What this does not settle.** Whether a personal access token is accepted by
+  Archon, and by the `_internal` namespaces, is still unmeasured: a token is
+  somebody's account, and nothing in this ledger has ever used one. Every request
+  above is unauthenticated, from a launcher that stores no Modrinth credentials.
+  The profile page's reader's-own half stays out of reach for the same reason, and
+  the number of requests this machine made to measure all of it is eleven.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
