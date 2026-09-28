@@ -4245,6 +4245,18 @@ $ curl -X POST -d 'grant_type=authorization_code&code=x&client_id=x' \
   The profile page's reader's-own half stays out of reach for the same reason, and
   the number of requests this machine made to measure all of it is eleven.
 
+  **The push.** No build was run for this gate, because the machine was busy at the
+  user's request: everything above is tree reads, live reads and the two document
+  tools (`progress.py --check` / `dashboard.py --check` exit 0 at 112 gates).
+  `1bc507e` pushed; run `36453808658` is the same billing block as G101-G109 --
+  `Test workspace` 3 s and `Lint` 2 s, zero steps, `Live services` and
+  `Build exe` skipped, annotation *"The job was not started because recent account
+  payments have failed or your spending limit needs to be increased"*. Which means
+  G108's caveat still stands and is the one thing owed: the workspace suite has not
+  been re-run since the G120 locales slice was rebased under it, so re-running
+  `cargo test --workspace --all-targets --locked` and clippy on this tree is the
+  first step of the next compiled slice, before its own numbers are trusted.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
