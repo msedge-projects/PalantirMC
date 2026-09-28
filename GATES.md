@@ -3200,9 +3200,14 @@ one duplicate is attributed to, which moves between runs.
       own service
   CHECK: cargo test --workspace --all-targets --locked
          cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
-  EXPECT: test result: ok. 950 passed; 0 failed; 16 ignored, between the seven suites
+  EXPECT: test result: ok. 958 passed; 0 failed; 17 ignored, between the seven suites
           exit 0 for clippy, with no warning in a line this slice added
-  EVIDENCE: the transcripts of these commands on this tree:
+  EVIDENCE: the transcripts of these commands on this tree -- the *merged* one,
+            after G99's and G100's commits landed under this slice. Their own
+            entries above carry the counts of the trees they were measured on
+            (928 passed with 16 ignored); this slice adds three document tests to
+            `palantir-net`'s suite and eight to the desktop's, and G100's own live
+            test is the seventeenth `#[ignore]`:
 
 ```
 $ cargo test --workspace --all-targets --locked
@@ -3211,8 +3216,8 @@ $ cargo test --workspace --all-targets --locked
     500 passed; 0 failed  (palantir-desktop, bin)
       4 passed; 0 failed  (palantir-desktop, tests/native.rs)
      31 passed; 0 failed  (palantir-loader, lib)
-    230 passed; 0 failed  (palantir-net, lib)
-      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+    238 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 17 ignored  (palantir-net, tests/live.rs)
 
 $ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
 exit 0; 42 warnings between the crates, the same count and the same list as the
@@ -3275,7 +3280,7 @@ an array of nested tuples, which is now a struct called `Paint`.
   no gate here has seen a real account: everything above is a fixture's answer, which
   is the same limit the live tests exist for.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_SHA`, is run
+  The runner could not be the receipt either: this slice's push, `ad8249c`, is run
   `RUN_ID` -- the same block as the fourteen before it, `Lint` and `Test workspace`
   failing with zero steps and `The job was not started because recent account
   payments have failed or your spending limit needs to be increased`, its dependants
