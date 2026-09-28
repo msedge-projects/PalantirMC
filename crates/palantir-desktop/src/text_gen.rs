@@ -19291,8 +19291,15 @@ impl Key {
     /// For a string with ICU markers this is the *template*, which is what the
     /// locale holds and what the helper beside this table fills in. Both are
     /// generated from the same leaf, and a test asserts they are.
+    ///
+    /// The language in force wins when it has this key, which is the setting
+    /// rather than the table: `tools/gen_locale.py` compiles the other locales
+    /// and [`crate::locale`] decides which one is read. English is what this
+    /// returns for English itself and for any key a locale falls back on, so a
+    /// caller that draws a label needs no second code path.
     pub fn message(self) -> &'static str {
-        MESSAGES[self as usize]
+        let index = self as usize;
+        crate::locale::translated(index).unwrap_or(MESSAGES[index])
     }
 }
 
@@ -19310,7 +19317,17 @@ pub fn from_name(name: &str) -> Option<Key> {
 /// ```text
 /// Created by {user}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn affiliate_createdby(user: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AffiliateCreatedBy,
+        &[("user", text::Value::text(user))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Created by ");
     out.push_str(user);
@@ -19322,7 +19339,17 @@ pub fn affiliate_createdby(user: &str) -> String {
 /// ```text
 /// Downloading Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_action_bar_downloading_java(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppActionBarDownloadingJava,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Downloading Java ");
     out.push_str(version);
@@ -19334,7 +19361,17 @@ pub fn app_action_bar_downloading_java(version: &str) -> String {
 /// ```text
 /// Add to {instanceName}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_browse_add_to_instance_name(instance_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppBrowseAddToInstanceName,
+        &[("instanceName", text::Value::text(instance_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Add to ");
     out.push_str(instance_name);
@@ -19346,7 +19383,17 @@ pub fn app_browse_add_to_instance_name(instance_name: &str) -> String {
 /// ```text
 /// Discover {projectType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_browse_discover_project_type(project_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppBrowseDiscoverProjectType,
+        &[("projectType", text::Value::text(project_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Discover ");
     out.push_str(project_type);
@@ -19358,7 +19405,17 @@ pub fn app_browse_discover_project_type(project_type: &str) -> String {
 /// ```text
 /// No available versions match {compatibilityLabel}. Select a version to install anyway. Dependencies will not be installed automatically.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_content_install_no_compatible_versions(compatibility_label: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppContentInstallNoCompatibleVersions,
+        &[("compatibilityLabel", text::Value::text(compatibility_label))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("No available versions match ");
     out.push_str(compatibility_label);
@@ -19371,7 +19428,17 @@ pub fn app_content_install_no_compatible_versions(compatibility_label: &str) -> 
 /// ```text
 /// {name} was exported successfully.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_export_modal_export_complete_description(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppExportModalExportCompleteDescription,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(name);
     out.push_str(" was exported successfully.");
@@ -19383,7 +19450,17 @@ pub fn app_export_modal_export_complete_description(name: &str) -> String {
 /// ```text
 /// Downloading Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_install_phase_preparing_java_downloading(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstallPhasePreparingJavaDownloading,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Downloading Java ");
     out.push_str(version);
@@ -19395,7 +19472,17 @@ pub fn app_install_phase_preparing_java_downloading(version: &str) -> String {
 /// ```text
 /// Extracting Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_install_phase_preparing_java_extracting(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstallPhasePreparingJavaExtracting,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Extracting Java ");
     out.push_str(version);
@@ -19407,7 +19494,17 @@ pub fn app_install_phase_preparing_java_extracting(version: &str) -> String {
 /// ```text
 /// Fetching Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_install_phase_preparing_java_fetching_metadata(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstallPhasePreparingJavaFetchingMetadata,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Fetching Java ");
     out.push_str(version);
@@ -19419,7 +19516,17 @@ pub fn app_install_phase_preparing_java_fetching_metadata(version: &str) -> Stri
 /// ```text
 /// Preparing Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_install_phase_preparing_java_resolving(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstallPhasePreparingJavaResolving,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Preparing Java ");
     out.push_str(version);
@@ -19431,7 +19538,17 @@ pub fn app_install_phase_preparing_java_resolving(version: &str) -> String {
 /// ```text
 /// Validating Java {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_install_phase_preparing_java_validating(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstallPhasePreparingJavaValidating,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Validating Java ");
     out.push_str(version);
@@ -19443,7 +19560,17 @@ pub fn app_install_phase_preparing_java_validating(version: &str) -> String {
 /// ```text
 /// Played {relativeTime}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_card_played(relative_time: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceCardPlayed,
+        &[("relativeTime", text::Value::text(relative_time))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Played ");
     out.push_str(relative_time);
@@ -19455,7 +19582,17 @@ pub fn app_instance_card_played(relative_time: &str) -> String {
 /// ```text
 /// All data for these {count} instances will be permanently deleted, including their worlds, configs, and all installed content.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_confirm_delete_bulk_admonition_body(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceConfirmDeleteBulkAdmonitionBody,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("All data for these ");
     out.push_str(count);
@@ -19468,7 +19605,17 @@ pub fn app_instance_confirm_delete_bulk_admonition_body(count: &str) -> String {
 /// ```text
 /// Delete {count} instances
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_confirm_delete_bulk_delete_button(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceConfirmDeleteBulkDeleteButton,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(count);
@@ -19481,7 +19628,17 @@ pub fn app_instance_confirm_delete_bulk_delete_button(count: &str) -> String {
 /// ```text
 /// Delete {count} instances
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_confirm_delete_bulk_header(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceConfirmDeleteBulkHeader,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(count);
@@ -19494,8 +19651,18 @@ pub fn app_instance_confirm_delete_bulk_header(count: &str) -> String {
 /// ```text
 /// {count, plural, one {Instance} other {Instances ({count})}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_confirm_delete_instances_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppInstanceConfirmDeleteInstancesLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Instance");
@@ -19512,7 +19679,17 @@ pub fn app_instance_confirm_delete_instances_label<'count>(count: impl Into<text
 /// ```text
 /// This modpack is already installed in the <bold>{instanceName}</bold> instance. Are you sure you want to duplicate it?
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_modpack_already_installed_body(instance_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceModpackAlreadyInstalledBody,
+        &[("instanceName", text::Value::text(instance_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This modpack is already installed in the <bold>");
     out.push_str(instance_name);
@@ -19525,7 +19702,17 @@ pub fn app_instance_modpack_already_installed_body(instance_name: &str) -> Strin
 /// ```text
 /// Downloading {current, number}/{total, number} projects...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_mods_bulk_update_downloading_projects(current: u64, total: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceModsBulkUpdateDownloadingProjects,
+        &[("current", text::Value::number(current)), ("total", text::Value::number(total))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Downloading ");
     out.push_str(&text::number(current));
@@ -19540,7 +19727,17 @@ pub fn app_instance_mods_bulk_update_downloading_projects(current: u64, total: u
 /// ```text
 /// "{name}" was added
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_mods_project_was_added(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceModsProjectWasAdded,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push('"');
     out.push_str(name);
@@ -19553,7 +19750,17 @@ pub fn app_instance_mods_project_was_added(name: &str) -> String {
 /// ```text
 /// {count} projects were added
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_mods_projects_were_added(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceModsProjectsWereAdded,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" projects were added");
@@ -19565,7 +19772,17 @@ pub fn app_instance_mods_projects_were_added(count: &str) -> String {
 /// ```text
 /// Share {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_share_invite_modal_heading(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceShareInviteModalHeading,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Share ");
     out.push_str(name);
@@ -19577,7 +19794,17 @@ pub fn app_instance_share_invite_modal_heading(name: &str) -> String {
 /// ```text
 /// This instance has reached the {limit}-user limit.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_share_invite_modal_user_limit_reached(limit: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceShareInviteModalUserLimitReached,
+        &[("limit", text::Value::text(limit))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This instance has reached the ");
     out.push_str(limit);
@@ -19590,7 +19817,17 @@ pub fn app_instance_share_invite_modal_user_limit_reached(limit: &str) -> String
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_share_remove_user_modal_user_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceShareRemoveUserModalUserAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -19602,7 +19839,17 @@ pub fn app_instance_share_remove_user_modal_user_avatar_alt(username: &str) -> S
 /// ```text
 /// If you revoke {username}'s access to this shared instance, you'll need to invite them again before they can receive updates.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_share_remove_user_modal_warning_body(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceShareRemoveUserModalWarningBody,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("If you revoke ");
     out.push_str(username);
@@ -19615,7 +19862,17 @@ pub fn app_instance_share_remove_user_modal_warning_body(username: &str) -> Stri
 /// ```text
 /// This shared instance is already installed as <bold>{instanceName}</bold>. Are you sure you want to install another copy?
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_shared_instance_already_installed_body(instance_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceSharedInstanceAlreadyInstalledBody,
+        &[("instanceName", text::Value::text(instance_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This shared instance is already installed as <bold>");
     out.push_str(instance_name);
@@ -19628,7 +19885,17 @@ pub fn app_instance_shared_instance_already_installed_body(instance_name: &str) 
 /// ```text
 /// Deleting {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_worlds_delete_world_modal_warning_header(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceWorldsDeleteWorldModalWarningHeader,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(name);
@@ -19640,7 +19907,17 @@ pub fn app_instance_worlds_delete_world_modal_warning_header(name: &str) -> Stri
 /// ```text
 /// Removing {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_worlds_remove_server_modal_warning_header(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceWorldsRemoveServerModalWarningHeader,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Removing ");
     out.push_str(name);
@@ -19652,7 +19929,17 @@ pub fn app_instance_worlds_remove_server_modal_warning_header(name: &str) -> Str
 /// ```text
 /// Search {count} worlds...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_instance_worlds_search_worlds_placeholder(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppInstanceWorldsSearchWorldsPlaceholder,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(count);
@@ -19665,7 +19952,17 @@ pub fn app_instance_worlds_search_worlds_placeholder(count: &str) -> String {
 /// ```text
 /// Add instances to "{groupName}"
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_group_instances_modal_title(group_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibraryGroupInstancesModalTitle,
+        &[("groupName", text::Value::text(group_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Add instances to \"");
     out.push_str(group_name);
@@ -19678,7 +19975,17 @@ pub fn app_library_group_instances_modal_title(group_name: &str) -> String {
 /// ```text
 /// Group names cannot be longer than {maxLength} characters.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_group_name_too_long(max_length: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibraryGroupNameTooLong,
+        &[("maxLength", text::Value::text(max_length))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Group names cannot be longer than ");
     out.push_str(max_length);
@@ -19691,7 +19998,17 @@ pub fn app_library_group_name_too_long(max_length: &str) -> String {
 /// ```text
 /// Deselect {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_instance_deselect_with_name(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibraryInstanceDeselectWithName,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deselect ");
     out.push_str(name);
@@ -19703,7 +20020,17 @@ pub fn app_library_instance_deselect_with_name(name: &str) -> String {
 /// ```text
 /// Open {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_instance_open_with_name(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibraryInstanceOpenWithName,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Open ");
     out.push_str(name);
@@ -19715,7 +20042,17 @@ pub fn app_library_instance_open_with_name(name: &str) -> String {
 /// ```text
 /// Select {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_instance_select_with_name(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibraryInstanceSelectWithName,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select ");
     out.push_str(name);
@@ -19727,7 +20064,17 @@ pub fn app_library_instance_select_with_name(name: &str) -> String {
 /// ```text
 /// {count} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_library_selection_selected_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppLibrarySelectionSelectedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" selected");
@@ -19739,7 +20086,17 @@ pub fn app_library_selection_selected_count(count: &str) -> String {
 /// ```text
 /// This invite was created by <creator>{username}</creator>, not Modrinth. Only accept invites from people you trust.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_modal_install_to_play_invite_warning_with_creator(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppModalInstallToPlayInviteWarningWithCreator,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This invite was created by <creator>");
     out.push_str(username);
@@ -19752,8 +20109,18 @@ pub fn app_modal_install_to_play_invite_warning_with_creator(username: &str) -> 
 /// ```text
 /// {count, plural, one {# mod} other {# mods}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_modal_install_to_play_mod_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppModalInstallToPlayModCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -19770,7 +20137,17 @@ pub fn app_modal_install_to_play_mod_count<'count>(count: impl Into<text::Plural
 /// ```text
 /// An update is required to play {name}. Please update to latest version to launch the game.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_modal_update_to_play_update_required_description(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppModalUpdateToPlayUpdateRequiredDescription,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("An update is required to play ");
     out.push_str(name);
@@ -19783,7 +20160,17 @@ pub fn app_modal_update_to_play_update_required_description(name: &str) -> Strin
 /// ```text
 /// Permanently delete {name}? This action cannot be undone.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_delete_description(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsDeleteDescription,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Permanently delete ");
     out.push_str(name);
@@ -19796,7 +20183,17 @@ pub fn app_screenshots_delete_description(name: &str) -> String {
 /// ```text
 /// Deselect {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_deselect(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsDeselect,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deselect ");
     out.push_str(name);
@@ -19808,7 +20205,17 @@ pub fn app_screenshots_deselect(name: &str) -> String {
 /// ```text
 /// {instance} · {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_preview_instance_and_date(instance: &str, date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsPreviewInstanceAndDate,
+        &[("instance", text::Value::text(instance)), ("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(instance);
     out.push_str(" · ");
@@ -19821,7 +20228,17 @@ pub fn app_screenshots_preview_instance_and_date(instance: &str, date: &str) -> 
 /// ```text
 /// Select {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_select(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsSelect,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select ");
     out.push_str(name);
@@ -19833,8 +20250,18 @@ pub fn app_screenshots_select(name: &str) -> String {
 /// ```text
 /// Delete {count, plural, one {# screenshot} other {# screenshots}}? This action cannot be undone.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_selection_delete_description<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsSelectionDeleteDescription,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     if count.is("one") {
@@ -19853,8 +20280,18 @@ pub fn app_screenshots_selection_delete_description<'count>(count: impl Into<tex
 /// ```text
 /// {count, plural, one {# screenshot deleted} other {# screenshots deleted}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_selection_delete_success<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsSelectionDeleteSuccess,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -19871,7 +20308,17 @@ pub fn app_screenshots_selection_delete_success<'count>(count: impl Into<text::P
 /// ```text
 /// {instance} screenshots.zip
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_selection_instance_export_filename(instance: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsSelectionInstanceExportFilename,
+        &[("instance", text::Value::text(instance))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(instance);
     out.push_str(" screenshots.zip");
@@ -19883,7 +20330,17 @@ pub fn app_screenshots_selection_instance_export_filename(instance: &str) -> Str
 /// ```text
 /// {count} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_screenshots_selection_selected_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppScreenshotsSelectionSelectedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" selected");
@@ -19895,7 +20352,17 @@ pub fn app_screenshots_selection_selected_count(count: &str) -> String {
 /// ```text
 /// Modrinth App {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_app_version(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsAppVersion,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Modrinth App ");
     out.push_str(version);
@@ -19907,7 +20374,17 @@ pub fn app_settings_app_version(version: &str) -> String {
 /// ```text
 /// Downloading v{version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_downloading(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsDownloading,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Downloading v");
     out.push_str(version);
@@ -19919,7 +20396,17 @@ pub fn app_settings_downloading(version: &str) -> String {
 /// ```text
 /// {setting} is now bound to {binding}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_assigned_status(setting: &str, binding: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindAssignedStatus,
+        &[("setting", text::Value::text(setting)), ("binding", text::Value::text(binding))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(setting);
     out.push_str(" is now bound to ");
@@ -19933,7 +20420,17 @@ pub fn app_settings_game_options_keybind_assigned_status(setting: &str, binding:
 /// ```text
 /// {setting}: {binding}. Activate to change the binding.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_change(setting: &str, binding: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindChange,
+        &[("setting", text::Value::text(setting)), ("binding", text::Value::text(binding))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(setting);
     out.push_str(": ");
@@ -19947,7 +20444,17 @@ pub fn app_settings_game_options_keybind_change(setting: &str, binding: &str) ->
 /// ```text
 /// This is already used by {settings}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_conflict_description(settings: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindConflictDescription,
+        &[("settings", text::Value::text(settings))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This is already used by ");
     out.push_str(settings);
@@ -19960,7 +20467,17 @@ pub fn app_settings_game_options_keybind_conflict_description(settings: &str) ->
 /// ```text
 /// Numpad {key}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_key_keypad_key(key: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindKeyKeypadKey,
+        &[("key", text::Value::text(key))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Numpad ");
     out.push_str(key);
@@ -19972,7 +20489,17 @@ pub fn app_settings_game_options_keybind_key_keypad_key(key: &str) -> String {
 /// ```text
 /// Mouse {button}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_mouse_button(button: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindMouseButton,
+        &[("button", text::Value::text(button))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Mouse ");
     out.push_str(button);
@@ -19984,7 +20511,17 @@ pub fn app_settings_game_options_keybind_mouse_button(button: &str) -> String {
 /// ```text
 /// {setting}: listening for a key or mouse button. Press Escape to clear this binding.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_recording_label(setting: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindRecordingLabel,
+        &[("setting", text::Value::text(setting))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(setting);
     out.push_str(": listening for a key or mouse button. Press Escape to clear this binding.");
@@ -19996,7 +20533,17 @@ pub fn app_settings_game_options_keybind_recording_label(setting: &str) -> Strin
 /// ```text
 /// Scancode {code}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_game_options_keybind_scancode(code: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsGameOptionsKeybindScancode,
+        &[("code", text::Value::text(code))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Scancode ");
     out.push_str(code);
@@ -20008,7 +20555,17 @@ pub fn app_settings_game_options_keybind_scancode(code: &str) -> String {
 /// ```text
 /// Java {version, number} location
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_java_installations_location_title(version: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsJavaInstallationsLocationTitle,
+        &[("version", text::Value::number(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Java ");
     out.push_str(&text::number(version));
@@ -20021,7 +20578,17 @@ pub fn app_settings_java_installations_location_title(version: u64) -> String {
 /// ```text
 /// Freed {size} of disk space.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_resource_management_store_cleared(size: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsResourceManagementStoreCleared,
+        &[("size", text::Value::text(size))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Freed ");
     out.push_str(size);
@@ -20034,8 +20601,18 @@ pub fn app_settings_resource_management_store_cleared(size: &str) -> String {
 /// ```text
 /// View {count, plural, one {# issue} other {# issues}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_resource_management_store_issues<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppSettingsResourceManagementStoreIssues,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("View ");
     if count.is("one") {
@@ -20053,7 +20630,17 @@ pub fn app_settings_resource_management_store_issues<'count>(count: impl Into<te
 /// ```text
 /// {size} stored
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_resource_management_store_total(size: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsResourceManagementStoreTotal,
+        &[("size", text::Value::text(size))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(size);
     out.push_str(" stored");
@@ -20065,9 +20652,19 @@ pub fn app_settings_resource_management_store_total(size: &str) -> String {
 /// ```text
 /// Checked {checked, plural, one {# file} other {# files}} and made {repaired, plural, one {# repair} other {# repairs}}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_resource_management_store_verification_result<'checked, 'repaired>(checked: impl Into<text::Plural<'checked>>, repaired: impl Into<text::Plural<'repaired>>) -> String {
     let checked = checked.into();
     let repaired = repaired.into();
+    if let Some(localized) = text::render(
+        Key::AppSettingsResourceManagementStoreVerificationResult,
+        &[("checked", text::Value::plural(checked)), ("repaired", text::Value::plural(repaired))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Checked ");
     if checked.is("one") {
@@ -20094,7 +20691,17 @@ pub fn app_settings_resource_management_store_verification_result<'checked, 'rep
 /// ```text
 /// Sync {setting} across instances
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_synced_options_game_settings_sync_setting(setting: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsSyncedOptionsGameSettingsSyncSetting,
+        &[("setting", text::Value::text(setting))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Sync ");
     out.push_str(setting);
@@ -20107,7 +20714,17 @@ pub fn app_settings_synced_options_game_settings_sync_setting(setting: &str) -> 
 /// ```text
 /// Stop syncing {setting} across instances
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_synced_options_game_settings_unsync_setting(setting: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsSyncedOptionsGameSettingsUnsyncSetting,
+        &[("setting", text::Value::text(setting))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Stop syncing ");
     out.push_str(setting);
@@ -20120,8 +20737,18 @@ pub fn app_settings_synced_options_game_settings_unsync_setting(setting: &str) -
 /// ```text
 /// {count, plural, one {# server} other {# servers}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_synced_options_multiplayer_servers_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppSettingsSyncedOptionsMultiplayerServersCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -20138,7 +20765,17 @@ pub fn app_settings_synced_options_multiplayer_servers_count<'count>(count: impl
 /// ```text
 /// {count, number} online
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_synced_options_multiplayer_servers_players_online(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSettingsSyncedOptionsMultiplayerServersPlayersOnline,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" online");
@@ -20150,8 +20787,18 @@ pub fn app_settings_synced_options_multiplayer_servers_players_online(count: u64
 /// ```text
 /// Search {count, number} {count, plural, one {synced server} other {synced servers}}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_settings_synced_options_multiplayer_servers_search<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppSettingsSyncedOptionsMultiplayerServersSearch,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.grouped());
@@ -20170,7 +20817,17 @@ pub fn app_settings_synced_options_multiplayer_servers_search<'count>(count: imp
 /// ```text
 /// This skin uses features from the {ears} mod
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_skins_ears_feature_notice(ears: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppSkinsEarsFeatureNotice,
+        &[("ears", text::Value::text(ears))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This skin uses features from the ");
     out.push_str(ears);
@@ -20183,8 +20840,18 @@ pub fn app_skins_ears_feature_notice(ears: &str) -> String {
 /// ```text
 /// You can remove {count, plural, one {it} other {them}} from just this instance or from all synced instances. Removing {count, plural, one {it} other {them}} from only this instance will enable overrides, and this instance will no longer receive synced resource pack changes.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_synced_content_delete_resource_pack_description<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppSyncedContentDeleteResourcePackDescription,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("You can remove ");
     if count.is("one") {
@@ -20207,8 +20874,18 @@ pub fn app_synced_content_delete_resource_pack_description<'count>(count: impl I
 /// ```text
 /// {count, plural, one {This resource pack is synced} other {These resource packs are synced}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_synced_content_delete_resource_pack_header<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::AppSyncedContentDeleteResourcePackHeader,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("This resource pack is synced");
@@ -20223,7 +20900,17 @@ pub fn app_synced_content_delete_resource_pack_header<'count>(count: impl Into<t
 /// ```text
 /// Modrinth App v{version} has finished downloading. Reload to update now, or automatically when you close Modrinth App.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_update_popup_body_download_complete(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppUpdatePopupBodyDownloadComplete,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Modrinth App v");
     out.push_str(version);
@@ -20236,7 +20923,17 @@ pub fn app_update_popup_body_download_complete(version: &str) -> String {
 /// ```text
 /// Modrinth App v{version} is available. Use your package manager to update for the latest features and fixes!
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_update_popup_body_linux(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppUpdatePopupBodyLinux,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Modrinth App v");
     out.push_str(version);
@@ -20249,7 +20946,17 @@ pub fn app_update_popup_body_linux(version: &str) -> String {
 /// ```text
 /// Modrinth App v{version} is available now! Since you're on a metered network, we didn't automatically download it.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_update_popup_body_metered(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppUpdatePopupBodyMetered,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Modrinth App v");
     out.push_str(version);
@@ -20262,7 +20969,17 @@ pub fn app_update_popup_body_metered(version: &str) -> String {
 /// ```text
 /// Download ({size})
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_update_popup_download(size: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppUpdatePopupDownload,
+        &[("size", text::Value::text(size))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Download (");
     out.push_str(size);
@@ -20275,7 +20992,17 @@ pub fn app_update_popup_download(size: &str) -> String {
 /// ```text
 /// Version {version} was successfully installed!
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_update_complete_toast_title(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppUpdateCompleteToastTitle,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Version ");
     out.push_str(version);
@@ -20288,7 +21015,17 @@ pub fn app_update_complete_toast_title(version: &str) -> String {
 /// ```text
 /// Incompatible version {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_world_world_item_incompatible_version(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppWorldWorldItemIncompatibleVersion,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Incompatible version ");
     out.push_str(version);
@@ -20300,7 +21037,17 @@ pub fn app_world_world_item_incompatible_version(version: &str) -> String {
 /// ```text
 /// {count} online
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn app_world_world_item_players_online(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::AppWorldWorldItemPlayersOnline,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" online");
@@ -20312,7 +21059,17 @@ pub fn app_world_world_item_players_online(count: &str) -> String {
 /// ```text
 /// {sharedCpus} Shared CPUs
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_cpus(shared_cpus: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalCpus,
+        &[("sharedCpus", text::Value::text(shared_cpus))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(shared_cpus);
     out.push_str(" Shared CPUs");
@@ -20324,7 +21081,17 @@ pub fn billing_resubscribe_modal_cpus(shared_cpus: &str) -> String {
 /// ```text
 /// You are about to resubscribe to <server-name>{serverName}</server-name>. Your subscription will be reactivated and your server will continue running without interruption.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_description(server_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalDescription,
+        &[("serverName", text::Value::text(server_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("You are about to resubscribe to <server-name>");
     out.push_str(server_name);
@@ -20337,7 +21104,17 @@ pub fn billing_resubscribe_modal_description(server_name: &str) -> String {
 /// ```text
 /// {intervalOption, select, fiveDays {/5 days} monthly {/month} quarterly {/quarter} yearly {/year} other {{interval}}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_interval(interval_option: &str, interval: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalInterval,
+        &[("intervalOption", text::Value::text(interval_option)), ("interval", text::Value::text(interval))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match interval_option {
         "fiveDays" => {
@@ -20364,7 +21141,17 @@ pub fn billing_resubscribe_modal_interval(interval_option: &str, interval: &str)
 /// ```text
 /// Your next charge will be on <charge-date>{date}</charge-date>.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_next_charge(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalNextCharge,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your next charge will be on <charge-date>");
     out.push_str(date);
@@ -20377,7 +21164,17 @@ pub fn billing_resubscribe_modal_next_charge(date: &str) -> String {
 /// ```text
 /// {ramGb} GB RAM
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_ram(ram_gb: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalRam,
+        &[("ramGb", text::Value::text(ram_gb))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(ram_gb);
     out.push_str(" GB RAM");
@@ -20389,7 +21186,17 @@ pub fn billing_resubscribe_modal_ram(ram_gb: &str) -> String {
 /// ```text
 /// {storageGb} GB Storage
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn billing_resubscribe_modal_storage(storage_gb: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BillingResubscribeModalStorage,
+        &[("storageGb", text::Value::text(storage_gb))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(storage_gb);
     out.push_str(" GB Storage");
@@ -20401,7 +21208,17 @@ pub fn billing_resubscribe_modal_storage(storage_gb: &str) -> String {
 /// ```text
 /// Search {projectType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn browse_search_placeholder(project_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::BrowseSearchPlaceholder,
+        &[("projectType", text::Value::text(project_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(project_type);
@@ -20414,8 +21231,18 @@ pub fn browse_search_placeholder(project_type: &str) -> String {
 /// ```text
 /// Install {count, plural, one {# project} other {# projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn browse_selected_projects_floating_bar_install<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::BrowseSelectedProjectsFloatingBarInstall,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Install ");
     if count.is("one") {
@@ -20433,8 +21260,18 @@ pub fn browse_selected_projects_floating_bar_install<'count>(count: impl Into<te
 /// ```text
 /// {count, plural, one {# project selected} other {# projects selected}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn browse_selected_projects_floating_bar_selected_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::BrowseSelectedProjectsFloatingBarSelectedCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -20451,8 +21288,18 @@ pub fn browse_selected_projects_floating_bar_selected_count<'count>(count: impl 
 /// ```text
 /// You have selected {count, plural, one {# project} other {# projects}} to install. Install them now or go back without installing them.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn browse_selected_projects_leave_modal_admonition_body<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::BrowseSelectedProjectsLeaveModalAdmonitionBody,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("You have selected ");
     if count.is("one") {
@@ -20471,8 +21318,18 @@ pub fn browse_selected_projects_leave_modal_admonition_body<'count>(count: impl 
 /// ```text
 /// {count, plural, one {# project} other {# projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn collection_widget_project_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::CollectionWidgetProjectCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -20489,8 +21346,18 @@ pub fn collection_widget_project_count<'count>(count: impl Into<text::Plural<'co
 /// ```text
 /// {count, plural, one {item} other {items}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_type_item_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentTypeItemLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("item");
@@ -20505,7 +21372,17 @@ pub fn content_type_item_lowercase<'count>(count: impl Into<text::Plural<'count>
 /// ```text
 /// Select {project}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_card_select_project(project: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentCardSelectProject,
+        &[("project", text::Value::text(project))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select ");
     out.push_str(project);
@@ -20517,8 +21394,18 @@ pub fn content_card_select_project(project: &str) -> String {
 /// ```text
 /// Are you sure you want to update {count, plural, one {# project} other {# projects}} to their latest compatible version? It's recommended to update content one-by-one.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_bulk_update_admonition_body<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentConfirmBulkUpdateAdmonitionBody,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Are you sure you want to update ");
     if count.is("one") {
@@ -20537,8 +21424,18 @@ pub fn content_confirm_bulk_update_admonition_body<'count>(count: impl Into<text
 /// ```text
 /// Update {count, plural, one {# project} other {# projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_bulk_update_update_button<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentConfirmBulkUpdateUpdateButton,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Update ");
     if count.is("one") {
@@ -20556,7 +21453,17 @@ pub fn content_confirm_bulk_update_update_button<'count>(count: impl Into<text::
 /// ```text
 /// Delete {count, number} {itemType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_deletion_delete_button(count: u64, item_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmDeletionDeleteButton,
+        &[("count", text::Value::number(count)), ("itemType", text::Value::text(item_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(&text::number(count));
@@ -20570,7 +21477,17 @@ pub fn content_confirm_deletion_delete_button(count: u64, item_type: &str) -> St
 /// ```text
 /// Delete {itemType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_deletion_header(item_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmDeletionHeader,
+        &[("itemType", text::Value::text(item_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(item_type);
@@ -20582,7 +21499,17 @@ pub fn content_confirm_deletion_header(item_type: &str) -> String {
 /// ```text
 /// Disable {itemType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_disable_header(item_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmDisableHeader,
+        &[("itemType", text::Value::text(item_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Disable ");
     out.push_str(item_type);
@@ -20594,7 +21521,17 @@ pub fn content_confirm_disable_header(item_type: &str) -> String {
 /// ```text
 /// {action, select, downgrade {Downgrading} other {Updating}} may cause compatibility issues. Mods or content you added on top of the modpack will be kept, but may not be compatible with the new version.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_modpack_update_admonition_body(action: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmModpackUpdateAdmonitionBody,
+        &[("action", text::Value::text(action))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match action {
         "downgrade" => {
@@ -20613,7 +21550,17 @@ pub fn content_confirm_modpack_update_admonition_body(action: &str) -> String {
 /// ```text
 /// {action, select, downgrade {Downgrade} other {Update}} warning
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_modpack_update_admonition_header(action: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmModpackUpdateAdmonitionHeader,
+        &[("action", text::Value::text(action))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match action {
         "downgrade" => {
@@ -20632,7 +21579,17 @@ pub fn content_confirm_modpack_update_admonition_header(action: &str) -> String 
 /// ```text
 /// {action, select, downgrade {Downgrade} other {Update}} modpack
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_modpack_update_confirm_button(action: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmModpackUpdateConfirmButton,
+        &[("action", text::Value::text(action))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match action {
         "downgrade" => {
@@ -20651,7 +21608,17 @@ pub fn content_confirm_modpack_update_confirm_button(action: &str) -> String {
 /// ```text
 /// {action, select, downgrade {Downgrade} other {Update}} modpack
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_confirm_modpack_update_header(action: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentConfirmModpackUpdateHeader,
+        &[("action", text::Value::text(action))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match action {
         "downgrade" => {
@@ -20670,8 +21637,18 @@ pub fn content_confirm_modpack_update_header(action: &str) -> String {
 /// ```text
 /// Affected {count, plural, one {project} other {projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_dependency_warning_affected_dependents_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentDependencyWarningAffectedDependentsLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Affected ");
     if count.is("one") {
@@ -20687,7 +21664,17 @@ pub fn content_dependency_warning_affected_dependents_label<'count>(count: impl 
 /// ```text
 /// Some selected projects are installed as dependencies. Deleting them may break your {context} or stop dependent content from loading correctly.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_dependency_warning_bulk_admonition_body(context: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDependencyWarningBulkAdmonitionBody,
+        &[("context", text::Value::text(context))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Some selected projects are installed as dependencies. Deleting them may break your ");
     out.push_str(context);
@@ -20700,7 +21687,17 @@ pub fn content_dependency_warning_bulk_admonition_body(context: &str) -> String 
 /// ```text
 /// Delete {count, number} {itemType} anyway
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_dependency_warning_delete_many_anyway_button(count: u64, item_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDependencyWarningDeleteManyAnywayButton,
+        &[("count", text::Value::number(count)), ("itemType", text::Value::text(item_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(&text::number(count));
@@ -20715,7 +21712,17 @@ pub fn content_dependency_warning_delete_many_anyway_button(count: u64, item_typ
 /// ```text
 /// Your {context} may crash, refuse to start, or behave unexpectedly
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_dependency_warning_effect_instance(context: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDependencyWarningEffectInstance,
+        &[("context", text::Value::text(context))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your ");
     out.push_str(context);
@@ -20728,7 +21735,17 @@ pub fn content_dependency_warning_effect_instance(context: &str) -> String {
 /// ```text
 /// {project} is installed as a dependency. Deleting it may break your {context} or stop dependent content from loading correctly.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_dependency_warning_single_admonition_body(project: &str, context: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDependencyWarningSingleAdmonitionBody,
+        &[("project", text::Value::text(project)), ("context", text::Value::text(context))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(project);
     out.push_str(" is installed as a dependency. Deleting it may break your ");
@@ -20742,7 +21759,17 @@ pub fn content_dependency_warning_single_admonition_body(project: &str, context:
 /// ```text
 /// {count} added
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_diff_modal_added_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDiffModalAddedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" added");
@@ -20754,8 +21781,18 @@ pub fn content_diff_modal_added_count(count: &str) -> String {
 /// ```text
 /// {count, plural, one {# file} other {# files}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_diff_modal_file_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentDiffModalFileCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -20772,7 +21809,17 @@ pub fn content_diff_modal_file_count<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count} removed
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_diff_modal_removed_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDiffModalRemovedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" removed");
@@ -20784,7 +21831,17 @@ pub fn content_diff_modal_removed_count(count: &str) -> String {
 /// ```text
 /// {count} removed (disabled)
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_diff_modal_removed_disabled_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDiffModalRemovedDisabledCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" removed (disabled)");
@@ -20796,7 +21853,17 @@ pub fn content_diff_modal_removed_disabled_count(count: &str) -> String {
 /// ```text
 /// {count} updated
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_diff_modal_updated_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentDiffModalUpdatedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" updated");
@@ -20808,7 +21875,17 @@ pub fn content_diff_modal_updated_count(count: &str) -> String {
 /// ```text
 /// We recommend creating a backup before proceeding so you can restore your {type} if anything breaks.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_inline_backup_warning_body(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentInlineBackupWarningBody,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("We recommend creating a backup before proceeding so you can restore your ");
     out.push_str(type_arg);
@@ -20821,7 +21898,17 @@ pub fn content_inline_backup_warning_body(type_arg: &str) -> String {
 /// ```text
 /// Synced {time}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_managed_card_synced(time: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentManagedCardSynced,
+        &[("time", text::Value::text(time))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Synced ");
     out.push_str(time);
@@ -20833,7 +21920,17 @@ pub fn content_managed_card_synced(time: &str) -> String {
 /// ```text
 /// Updated {time}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_managed_card_updated(time: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentManagedCardUpdated,
+        &[("time", text::Value::text(time))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updated ");
     out.push_str(time);
@@ -20845,7 +21942,17 @@ pub fn content_managed_card_updated(time: &str) -> String {
 /// ```text
 /// Browse or upload {contentType} to get started
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_page_layout_empty_hint(content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentPageLayoutEmptyHint,
+        &[("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Browse or upload ");
     out.push_str(content_type);
@@ -20858,8 +21965,18 @@ pub fn content_page_layout_empty_hint(content_type: &str) -> String {
 /// ```text
 /// {count, plural, one {# author} other {# authors}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_page_layout_filter_author_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ContentPageLayoutFilterAuthorCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -20876,7 +21993,17 @@ pub fn content_page_layout_filter_author_count<'count>(count: impl Into<text::Pl
 /// ```text
 /// Search {count, number} {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_page_layout_search_placeholder(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentPageLayoutSearchPlaceholder,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&text::number(count));
@@ -20891,7 +22018,17 @@ pub fn content_page_layout_search_placeholder(count: u64, content_type: &str) ->
 /// ```text
 /// Sort by {mode}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_page_layout_sort_label(mode: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentPageLayoutSortLabel,
+        &[("mode", text::Value::text(mode))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Sort by ");
     out.push_str(mode);
@@ -20903,7 +22040,17 @@ pub fn content_page_layout_sort_label(mode: &str) -> String {
 /// ```text
 /// Deleting {progress}/{total} {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_deleting(progress: &str, total: &str, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDeleting,
+        &[("progress", text::Value::text(progress)), ("total", text::Value::text(total)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(progress);
@@ -20920,7 +22067,17 @@ pub fn content_selection_bar_bulk_deleting(progress: &str, total: &str, content_
 /// ```text
 /// Deleting {count, number} {contentType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_deleting_count(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDeletingCount,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(&text::number(count));
@@ -20934,7 +22091,17 @@ pub fn content_selection_bar_bulk_deleting_count(count: u64, content_type: &str)
 /// ```text
 /// Deleting {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_deleting_waiting(content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDeletingWaiting,
+        &[("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting ");
     out.push_str(content_type);
@@ -20947,7 +22114,17 @@ pub fn content_selection_bar_bulk_deleting_waiting(content_type: &str) -> String
 /// ```text
 /// Disabling {progress}/{total} {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_disabling(progress: &str, total: &str, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDisabling,
+        &[("progress", text::Value::text(progress)), ("total", text::Value::text(total)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Disabling ");
     out.push_str(progress);
@@ -20964,7 +22141,17 @@ pub fn content_selection_bar_bulk_disabling(progress: &str, total: &str, content
 /// ```text
 /// Disabling {count, number} {contentType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_disabling_count(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDisablingCount,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Disabling ");
     out.push_str(&text::number(count));
@@ -20978,7 +22165,17 @@ pub fn content_selection_bar_bulk_disabling_count(count: u64, content_type: &str
 /// ```text
 /// Disabling {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_disabling_waiting(content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkDisablingWaiting,
+        &[("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Disabling ");
     out.push_str(content_type);
@@ -20991,7 +22188,17 @@ pub fn content_selection_bar_bulk_disabling_waiting(content_type: &str) -> Strin
 /// ```text
 /// Enabling {progress}/{total} {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_enabling(progress: &str, total: &str, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkEnabling,
+        &[("progress", text::Value::text(progress)), ("total", text::Value::text(total)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Enabling ");
     out.push_str(progress);
@@ -21008,7 +22215,17 @@ pub fn content_selection_bar_bulk_enabling(progress: &str, total: &str, content_
 /// ```text
 /// Enabling {count, number} {contentType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_enabling_count(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkEnablingCount,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Enabling ");
     out.push_str(&text::number(count));
@@ -21022,7 +22239,17 @@ pub fn content_selection_bar_bulk_enabling_count(count: u64, content_type: &str)
 /// ```text
 /// Enabling {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_enabling_waiting(content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkEnablingWaiting,
+        &[("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Enabling ");
     out.push_str(content_type);
@@ -21035,7 +22262,17 @@ pub fn content_selection_bar_bulk_enabling_waiting(content_type: &str) -> String
 /// ```text
 /// Updating {progress}/{total} {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_updating(progress: &str, total: &str, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkUpdating,
+        &[("progress", text::Value::text(progress)), ("total", text::Value::text(total)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updating ");
     out.push_str(progress);
@@ -21052,7 +22289,17 @@ pub fn content_selection_bar_bulk_updating(progress: &str, total: &str, content_
 /// ```text
 /// Updating {count, number} {contentType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_updating_count(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkUpdatingCount,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updating ");
     out.push_str(&text::number(count));
@@ -21066,7 +22313,17 @@ pub fn content_selection_bar_bulk_updating_count(count: u64, content_type: &str)
 /// ```text
 /// Updating {contentType}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_bulk_updating_waiting(content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarBulkUpdatingWaiting,
+        &[("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updating ");
     out.push_str(content_type);
@@ -21079,7 +22336,17 @@ pub fn content_selection_bar_bulk_updating_waiting(content_type: &str) -> String
 /// ```text
 /// {count, number} {contentType} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_selected_count(count: u64, content_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarSelectedCount,
+        &[("count", text::Value::number(count)), ("contentType", text::Value::text(content_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push(' ');
@@ -21093,7 +22360,17 @@ pub fn content_selection_bar_selected_count(count: u64, content_type: &str) -> S
 /// ```text
 /// {count, number} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_selection_bar_selected_count_simple(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSelectionBarSelectedCountSimple,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" selected");
@@ -21105,7 +22382,17 @@ pub fn content_selection_bar_selected_count_simple(count: u64) -> String {
 /// ```text
 /// Delete {count, number} projects anyway
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_shared_instance_delete_many_button(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSharedInstanceDeleteManyButton,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(&text::number(count));
@@ -21118,7 +22405,17 @@ pub fn content_shared_instance_delete_many_button(count: u64) -> String {
 /// ```text
 /// Disable {count, number} projects anyway
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn content_shared_instance_disable_many_button(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ContentSharedInstanceDisableManyButton,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Disable ");
     out.push_str(&text::number(count));
@@ -21131,8 +22428,18 @@ pub fn content_shared_instance_disable_many_button(count: u64) -> String {
 /// ```text
 /// Import {count, plural, one {# instance} other {# instances}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn creation_flow_button_import_instances<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::CreationFlowButtonImportInstances,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Import ");
     if count.is("one") {
@@ -21150,7 +22457,17 @@ pub fn creation_flow_button_import_instances<'count>(count: impl Into<text::Plur
 /// ```text
 /// Custom ({pathName})
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn creation_flow_modal_import_instance_custom_launcher_name(path_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::CreationFlowModalImportInstanceCustomLauncherName,
+        &[("pathName", text::Value::text(path_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Custom (");
     out.push_str(path_name);
@@ -21163,8 +22480,18 @@ pub fn creation_flow_modal_import_instance_custom_launcher_name(path_name: &str)
 /// ```text
 /// {count, plural, one {Add file} other {Add files}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_add_files_modal_confirm<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardAddFilesModalConfirm,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Add file");
@@ -21179,8 +22506,18 @@ pub fn external_files_permissions_card_add_files_modal_confirm<'count>(count: im
 /// ```text
 /// {count, plural, one {# file selected} other {# files selected}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_add_files_modal_selected_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardAddFilesModalSelectedCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -21197,7 +22534,17 @@ pub fn external_files_permissions_card_add_files_modal_selected_count<'count>(co
 /// ```text
 /// Proof screenshot {n}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_editor_proof_image_alt(n: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardEditorProofImageAlt,
+        &[("n", text::Value::text(n))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Proof screenshot ");
     out.push_str(n);
@@ -21209,7 +22556,17 @@ pub fn external_files_permissions_card_editor_proof_image_alt(n: &str) -> String
 /// ```text
 /// Attribution group {id}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_fallback_group_title(id: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardFallbackGroupTitle,
+        &[("id", text::Value::text(id))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Attribution group ");
     out.push_str(id);
@@ -21221,8 +22578,18 @@ pub fn external_files_permissions_card_fallback_group_title(id: &str) -> String 
 /// ```text
 /// {count, plural, one {# file} other {# files}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_file_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardFileCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -21239,8 +22606,18 @@ pub fn external_files_permissions_card_file_count<'count>(count: impl Into<text:
 /// ```text
 /// Included in {count, plural, one {# version} other {# versions}}:
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_included_in_versions<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardIncludedInVersions,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Included in ");
     if count.is("one") {
@@ -21259,7 +22636,17 @@ pub fn external_files_permissions_card_included_in_versions<'count>(count: impl 
 /// ```text
 /// Last updated on {date} by {user}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_last_updated(date: &str, user: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardLastUpdated,
+        &[("date", text::Value::text(date)), ("user", text::Value::text(user))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Last updated on ");
     out.push_str(date);
@@ -21273,7 +22660,17 @@ pub fn external_files_permissions_card_last_updated(date: &str, user: &str) -> S
 /// ```text
 /// Proof screenshot {n}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_proof_image_alt(n: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardProofImageAlt,
+        &[("n", text::Value::text(n))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Proof screenshot ");
     out.push_str(n);
@@ -21285,7 +22682,17 @@ pub fn external_files_permissions_card_proof_image_alt(n: &str) -> String {
 /// ```text
 /// Delete {title}?
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_remove_group_confirmation_title(title: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardRemoveGroupConfirmationTitle,
+        &[("title", text::Value::text(title))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     out.push_str(title);
@@ -21298,7 +22705,17 @@ pub fn external_files_permissions_card_remove_group_confirmation_title(title: &s
 /// ```text
 /// {filename} + {count} more
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn external_files_permissions_card_unnamed_multi_group_title(filename: &str, count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ExternalFilesPermissionsCardUnnamedMultiGroupTitle,
+        &[("filename", text::Value::text(filename)), ("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(filename);
     out.push_str(" + ");
@@ -21312,7 +22729,17 @@ pub fn external_files_permissions_card_unnamed_multi_group_title(filename: &str,
 /// ```text
 /// File {filename} is too big. The maximum file size is {maxSize}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn file_button_file_too_large_description(filename: &str, max_size: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FileButtonFileTooLargeDescription,
+        &[("filename", text::Value::text(filename)), ("maxSize", text::Value::text(max_size))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("File ");
     out.push_str(filename);
@@ -21327,7 +22754,17 @@ pub fn file_button_file_too_large_description(filename: &str, max_size: &str) ->
 /// ```text
 /// Will overwrite <file-path>{path}</file-path>
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_conflict_modal_overwrite_file_label(path: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesConflictModalOverwriteFileLabel,
+        &[("path", text::Value::text(path))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Will overwrite <file-path>");
     out.push_str(path);
@@ -21340,7 +22777,17 @@ pub fn files_conflict_modal_overwrite_file_label(path: &str) -> String {
 /// ```text
 /// The following {count} files already exist on your server, and will be overwritten if you proceed with extraction.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_conflict_modal_overwrite_warning(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesConflictModalOverwriteWarning,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("The following ");
     out.push_str(count);
@@ -21353,7 +22800,17 @@ pub fn files_conflict_modal_overwrite_warning(count: &str) -> String {
 /// ```text
 /// {count} overwritten
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_conflict_modal_overwritten_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesConflictModalOverwrittenCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" overwritten");
@@ -21365,7 +22822,17 @@ pub fn files_conflict_modal_overwritten_count(count: &str) -> String {
 /// ```text
 /// Create {type}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_create_modal_create_button(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesCreateModalCreateButton,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Create ");
     out.push_str(type_arg);
@@ -21377,7 +22844,17 @@ pub fn files_create_modal_create_button(type_arg: &str) -> String {
 /// ```text
 /// Create a {type}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_create_modal_header(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesCreateModalHeader,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Create a ");
     out.push_str(type_arg);
@@ -21389,7 +22866,17 @@ pub fn files_create_modal_header(type_arg: &str) -> String {
 /// ```text
 /// Deleting "{name}"
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_delete_modal_deleting_name(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesDeleteModalDeletingName,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting \"");
     out.push_str(name);
@@ -21402,7 +22889,17 @@ pub fn files_delete_modal_deleting_name(name: &str) -> String {
 /// ```text
 /// {current} of {total}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_editor_find_match_count(current: &str, total: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesEditorFindMatchCount,
+        &[("current", text::Value::text(current)), ("total", text::Value::text(total))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(current);
     out.push_str(" of ");
@@ -21415,7 +22912,17 @@ pub fn files_editor_find_match_count(current: &str, total: &str) -> String {
 /// ```text
 /// Image too large to view (max {maxDimension}x{maxDimension} pixels)
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_image_viewer_image_too_large(max_dimension: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesImageViewerImageTooLarge,
+        &[("maxDimension", text::Value::text(max_dimension))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Image too large to view (max ");
     out.push_str(max_dimension);
@@ -21430,7 +22937,17 @@ pub fn files_image_viewer_image_too_large(max_dimension: &str) -> String {
 /// ```text
 /// {count} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_layout_selected_count(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesLayoutSelectedCount,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push_str(" selected");
@@ -21442,7 +22959,17 @@ pub fn files_layout_selected_count(count: &str) -> String {
 /// ```text
 /// Move {type}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_move_modal_header(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesMoveModalHeader,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Move ");
     out.push_str(type_arg);
@@ -21454,7 +22981,17 @@ pub fn files_move_modal_header(type_arg: &str) -> String {
 /// ```text
 /// {progress}% compressed
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_compressed(progress: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsCompressed,
+        &[("progress", text::Value::text(progress))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(progress);
     out.push_str("% compressed");
@@ -21466,7 +23003,17 @@ pub fn files_operations_compressed(progress: &str) -> String {
 /// ```text
 /// Creating {source}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_compressing(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsCompressing,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Creating ");
     out.push_str(source);
@@ -21478,7 +23025,17 @@ pub fn files_operations_compressing(source: &str) -> String {
 /// ```text
 /// Creating {source} finished
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_compressing_completed(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsCompressingCompleted,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Creating ");
     out.push_str(source);
@@ -21491,7 +23048,17 @@ pub fn files_operations_compressing_completed(source: &str) -> String {
 /// ```text
 /// Creating {source} failed
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_compressing_failed(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsCompressingFailed,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Creating ");
     out.push_str(source);
@@ -21504,7 +23071,17 @@ pub fn files_operations_compressing_failed(source: &str) -> String {
 /// ```text
 /// Current file: {file}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_current_file(file: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsCurrentFile,
+        &[("file", text::Value::text(file))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Current file: ");
     out.push_str(file);
@@ -21516,7 +23093,17 @@ pub fn files_operations_current_file(file: &str) -> String {
 /// ```text
 /// {size} extracted
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_extracted(size: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsExtracted,
+        &[("size", text::Value::text(size))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(size);
     out.push_str(" extracted");
@@ -21528,7 +23115,17 @@ pub fn files_operations_extracted(size: &str) -> String {
 /// ```text
 /// Extracting {source}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_extracting(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsExtracting,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Extracting ");
     out.push_str(source);
@@ -21540,7 +23137,17 @@ pub fn files_operations_extracting(source: &str) -> String {
 /// ```text
 /// Extracting {source} finished
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_extracting_completed(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsExtractingCompleted,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Extracting ");
     out.push_str(source);
@@ -21553,7 +23160,17 @@ pub fn files_operations_extracting_completed(source: &str) -> String {
 /// ```text
 /// Extracting {source} failed
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_operations_extracting_failed(source: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesOperationsExtractingFailed,
+        &[("source", text::Value::text(source))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Extracting ");
     out.push_str(source);
@@ -21566,7 +23183,17 @@ pub fn files_operations_extracting_failed(source: &str) -> String {
 /// ```text
 /// Rename {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_rename_modal_header(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesRenameModalHeader,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Rename ");
     out.push_str(name);
@@ -21578,8 +23205,18 @@ pub fn files_rename_modal_header(name: &str) -> String {
 /// ```text
 /// {count, plural, one {# item} other {# items}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_row_item_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::FilesRowItemCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -21596,7 +23233,17 @@ pub fn files_row_item_count<'count>(count: impl Into<text::Plural<'count>>) -> S
 /// ```text
 /// Failed - {error}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_upload_dropdown_failed_generic(error: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesUploadDropdownFailedGeneric,
+        &[("error", text::Value::text(error))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed - ");
     out.push_str(error);
@@ -21608,7 +23255,17 @@ pub fn files_upload_dropdown_failed_generic(error: &str) -> String {
 /// ```text
 /// Failed to upload {fileName}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_upload_dropdown_failed_to_upload(file_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesUploadDropdownFailedToUpload,
+        &[("fileName", text::Value::text(file_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to upload ");
     out.push_str(file_name);
@@ -21620,7 +23277,17 @@ pub fn files_upload_dropdown_failed_to_upload(file_name: &str) -> String {
 /// ```text
 /// {fileType} uploads
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_upload_dropdown_file_uploads(file_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesUploadDropdownFileUploads,
+        &[("fileType", text::Value::text(file_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(file_type);
     out.push_str(" uploads");
@@ -21632,7 +23299,17 @@ pub fn files_upload_dropdown_file_uploads(file_type: &str) -> String {
 /// ```text
 ///  - {count} left
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_upload_dropdown_uploads_left(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesUploadDropdownUploadsLeft,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(" - ");
     out.push_str(count);
@@ -21645,7 +23322,17 @@ pub fn files_upload_dropdown_uploads_left(count: &str) -> String {
 /// ```text
 /// Drop {type} here to upload
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn files_upload_drag_and_drop_drop_to_upload(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilesUploadDragAndDropDropToUpload,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Drop ");
     out.push_str(type_arg);
@@ -21658,7 +23345,17 @@ pub fn files_upload_drag_and_drop_drop_to_upload(type_arg: &str) -> String {
 /// ```text
 /// Clear {name} filter
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn filter_bar_clear_named_filter(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FilterBarClearNamedFilter,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Clear ");
     out.push_str(name);
@@ -21671,8 +23368,18 @@ pub fn filter_bar_clear_named_filter(name: &str) -> String {
 /// ```text
 /// {count, plural, one {# byte} other {# bytes}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn format_bytes_0<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::FormatBytes0,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -21689,7 +23396,17 @@ pub fn format_bytes_0<'count>(count: impl Into<text::Plural<'count>>) -> String 
 /// ```text
 /// {count, number} KiB
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn format_bytes_1(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::FormatBytes1,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" KiB");
@@ -21701,7 +23418,17 @@ pub fn format_bytes_1(count: u64) -> String {
 /// ```text
 /// {count, number} MiB
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn format_bytes_2(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::FormatBytes2,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" MiB");
@@ -21713,7 +23440,17 @@ pub fn format_bytes_2(count: u64) -> String {
 /// ```text
 /// {count, number} GiB
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn format_bytes_3(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::FormatBytes3,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" GiB");
@@ -21725,7 +23462,17 @@ pub fn format_bytes_3(count: u64) -> String {
 /// ```text
 /// {count, number} TiB
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn format_bytes_4(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::FormatBytes4,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" TiB");
@@ -21737,8 +23484,18 @@ pub fn format_bytes_4(count: u64) -> String {
 /// ```text
 /// {count} friend {count, plural, one {request} other {requests}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn friends_action_view_friend_requests<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::FriendsActionViewFriendRequests,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&count.bare());
     out.push_str(" friend ");
@@ -21755,7 +23512,17 @@ pub fn friends_action_view_friend_requests<'count>(count: impl Into<text::Plural
 /// ```text
 /// No friends matching ''{query}''
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn friends_no_friends_match(query: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FriendsNoFriendsMatch,
+        &[("query", text::Value::text(query))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("No friends matching '");
     out.push_str(query);
@@ -21768,7 +23535,17 @@ pub fn friends_no_friends_match(query: &str) -> String {
 /// ```text
 /// {title} - {count}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn friends_section_heading(title: &str, count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::FriendsSectionHeading,
+        &[("title", text::Value::text(title)), ("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(title);
     out.push_str(" - ");
@@ -21781,7 +23558,17 @@ pub fn friends_section_heading(title: &str, count: &str) -> String {
 /// ```text
 /// Failed to toggle {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_content_failed_to_toggle(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingContentFailedToToggle,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to toggle ");
     out.push_str(name);
@@ -21793,7 +23580,17 @@ pub fn hosting_content_failed_to_toggle(name: &str) -> String {
 /// ```text
 /// {loader, select, null {Loader} other {{loader}}} version
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_loader_loader_version(loader: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingLoaderLoaderVersion,
+        &[("loader", text::Value::text(loader))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     match loader {
         "null" => {
@@ -21812,7 +23609,17 @@ pub fn hosting_loader_loader_version(loader: &str) -> String {
 /// ```text
 /// Bursts up to {cpus} CPUs
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_specs_burst(cpus: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingSpecsBurst,
+        &[("cpus", text::Value::text(cpus))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Bursts up to ");
     out.push_str(cpus);
@@ -21825,7 +23632,17 @@ pub fn hosting_specs_burst(cpus: &str) -> String {
 /// ```text
 /// {ram} GB RAM
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_specs_gb_ram(ram: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingSpecsGbRam,
+        &[("ram", text::Value::text(ram))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(ram);
     out.push_str(" GB RAM");
@@ -21837,7 +23654,17 @@ pub fn hosting_specs_gb_ram(ram: &str) -> String {
 /// ```text
 /// {storage} GB Storage
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_specs_gb_storage(storage: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingSpecsGbStorage,
+        &[("storage", text::Value::text(storage))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(storage);
     out.push_str(" GB Storage");
@@ -21849,7 +23676,17 @@ pub fn hosting_specs_gb_storage(storage: &str) -> String {
 /// ```text
 /// {cpus} Shared CPUs
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn hosting_specs_shared_cpus(cpus: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::HostingSpecsSharedCpus,
+        &[("cpus", text::Value::text(cpus))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(cpus);
     out.push_str(" Shared CPUs");
@@ -21861,7 +23698,17 @@ pub fn hosting_specs_shared_cpus(cpus: &str) -> String {
 /// ```text
 /// {width} × {height} px
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn image_viewer_editor_crop_dimensions(width: &str, height: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ImageViewerEditorCropDimensions,
+        &[("width", text::Value::text(width)), ("height", text::Value::text(height))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(width);
     out.push_str(" × ");
@@ -21875,7 +23722,17 @@ pub fn image_viewer_editor_crop_dimensions(width: &str, height: &str) -> String 
 /// ```text
 /// Select {loader} version
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_aria_select_loader_version(loader: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsAriaSelectLoaderVersion,
+        &[("loader", text::Value::text(loader))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select ");
     out.push_str(loader);
@@ -21888,7 +23745,17 @@ pub fn installation_settings_aria_select_loader_version(loader: &str) -> String 
 /// ```text
 /// Changing to {gameVersion} will modify the following content on your server.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_confirm_version_change_description(game_version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsConfirmVersionChangeDescription,
+        &[("gameVersion", text::Value::text(game_version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Changing to ");
     out.push_str(game_version);
@@ -21901,7 +23768,17 @@ pub fn installation_settings_confirm_version_change_description(game_version: &s
 /// ```text
 /// Linked {projectType}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_linked_instance_title(project_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsLinkedInstanceTitle,
+        &[("projectType", text::Value::text(project_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Linked ");
     out.push_str(project_type);
@@ -21913,7 +23790,17 @@ pub fn installation_settings_linked_instance_title(project_type: &str) -> String
 /// ```text
 /// {loader} version
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_loader_version(loader: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsLoaderVersion,
+        &[("loader", text::Value::text(loader))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(loader);
     out.push_str(" version");
@@ -21925,7 +23812,17 @@ pub fn installation_settings_loader_version(loader: &str) -> String {
 /// ```text
 /// Re-installing the modpack resets the {type} content to its original state, removing any mods or content you have added.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_reinstall_modpack_description(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsReinstallModpackDescription,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Re-installing the modpack resets the ");
     out.push_str(type_arg);
@@ -21938,7 +23835,17 @@ pub fn installation_settings_reinstall_modpack_description(type_arg: &str) -> St
 /// ```text
 /// Unlinking permanently disconnects this {type} from the {projectType} project, allowing you to change the loader and Minecraft version, but you won't receive future updates.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn installation_settings_unlink_description(type_arg: &str, project_type: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstallationSettingsUnlinkDescription,
+        &[("type", text::Value::text(type_arg)), ("projectType", text::Value::text(project_type))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Unlinking permanently disconnects this ");
     out.push_str(type_arg);
@@ -21953,7 +23860,17 @@ pub fn installation_settings_unlink_description(type_arg: &str, project_type: &s
 /// ```text
 /// Repair {type}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_confirm_repair_header(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceConfirmRepairHeader,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Repair ");
     out.push_str(type_arg);
@@ -21965,7 +23882,17 @@ pub fn instance_confirm_repair_header(type_arg: &str) -> String {
 /// ```text
 /// Adding files ({completed}/{total})
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_files_adding_files(completed: &str, total: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceFilesAddingFiles,
+        &[("completed", text::Value::text(completed)), ("total", text::Value::text(total))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Adding files (");
     out.push_str(completed);
@@ -21980,7 +23907,17 @@ pub fn instance_files_adding_files(completed: &str, total: &str) -> String {
 /// ```text
 /// Revoke invite {code}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_settings_sharing_active_invites_revoke_with_code(code: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceSettingsSharingActiveInvitesRevokeWithCode,
+        &[("code", text::Value::text(code))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Revoke invite ");
     out.push_str(code);
@@ -21992,7 +23929,17 @@ pub fn instance_settings_sharing_active_invites_revoke_with_code(code: &str) -> 
 /// ```text
 /// The invite link <monospace>{code}</monospace> will stop working immediately. People who already joined will keep access.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_settings_sharing_revoke_invite_admonition_body(code: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceSettingsSharingRevokeInviteAdmonitionBody,
+        &[("code", text::Value::text(code))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("The invite link <monospace>");
     out.push_str(code);
@@ -22005,7 +23952,17 @@ pub fn instance_settings_sharing_revoke_invite_admonition_body(code: &str) -> St
 /// ```text
 /// {loader} version
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_settings_tabs_installation_loader_version(loader: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceSettingsTabsInstallationLoaderVersion,
+        &[("loader", text::Value::text(loader))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(loader);
     out.push_str(" version");
@@ -22017,7 +23974,17 @@ pub fn instance_settings_tabs_installation_loader_version(loader: &str) -> Strin
 /// ```text
 /// {instance} and your synced version have different creative hotbars. Choose which one to use across your instances.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instance_settings_tabs_synced_options_hotbars_conflict_description(instance: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstanceSettingsTabsSyncedOptionsHotbarsConflictDescription,
+        &[("instance", text::Value::text(instance))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(instance);
     out.push_str(" and your synced version have different creative hotbars. Choose which one to use across your instances.");
@@ -22029,8 +23996,18 @@ pub fn instance_settings_tabs_synced_options_hotbars_conflict_description(instan
 /// ```text
 /// {count} compatible {count, plural, one {instance} other {instances}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_content_install_compatible_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::InstancesContentInstallCompatibleCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&count.bare());
     out.push_str(" compatible ");
@@ -22047,8 +24024,18 @@ pub fn instances_content_install_compatible_count<'count>(count: impl Into<text:
 /// ```text
 /// Search {count, number} {count, plural, one {project} other {projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_managed_content_modal_search_placeholder<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::InstancesManagedContentModalSearchPlaceholder,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.grouped());
@@ -22066,7 +24053,17 @@ pub fn instances_managed_content_modal_search_placeholder<'count>(count: impl In
 /// ```text
 /// Downgrade to {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_updater_modal_downgrade_to(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstancesUpdaterModalDowngradeTo,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Downgrade to ");
     out.push_str(version);
@@ -22078,7 +24075,17 @@ pub fn instances_updater_modal_downgrade_to(version: &str) -> String {
 /// ```text
 /// {version} is not marked as compatible with this installation. It may fail to launch or behave unexpectedly.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_updater_modal_incompatible_update_description(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstancesUpdaterModalIncompatibleUpdateDescription,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(version);
     out.push_str(" is not marked as compatible with this installation. It may fail to launch or behave unexpectedly.");
@@ -22090,7 +24097,17 @@ pub fn instances_updater_modal_incompatible_update_description(version: &str) ->
 /// ```text
 /// Switch to {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_updater_modal_switch_to(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstancesUpdaterModalSwitchTo,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Switch to ");
     out.push_str(version);
@@ -22102,7 +24119,17 @@ pub fn instances_updater_modal_switch_to(version: &str) -> String {
 /// ```text
 /// Update to {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn instances_updater_modal_update_to(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::InstancesUpdaterModalUpdateTo,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Update to ");
     out.push_str(version);
@@ -22114,7 +24141,17 @@ pub fn instances_updater_modal_update_to(version: &str) -> String {
 /// ```text
 /// {amount} available.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn label_available(amount: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::LabelAvailable,
+        &[("amount", text::Value::text(amount))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(amount);
     out.push_str(" available.");
@@ -22126,7 +24163,17 @@ pub fn label_available(amount: &str) -> String {
 /// ```text
 /// Created {ago}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn label_created_ago(ago: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::LabelCreatedAgo,
+        &[("ago", text::Value::text(ago))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Created ");
     out.push_str(ago);
@@ -22138,7 +24185,17 @@ pub fn label_created_ago(ago: &str) -> String {
 /// ```text
 /// Played {ago}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn label_played(ago: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::LabelPlayed,
+        &[("ago", text::Value::text(ago))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Played ");
     out.push_str(ago);
@@ -22150,7 +24207,17 @@ pub fn label_played(ago: &str) -> String {
 /// ```text
 /// {currentLength}/{maxLength}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn markdown_editor_max_length_value(current_length: &str, max_length: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::MarkdownEditorMaxLengthValue,
+        &[("currentLength", text::Value::text(current_length)), ("maxLength", text::Value::text(max_length))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(current_length);
     out.push('/');
@@ -22163,7 +24230,17 @@ pub fn markdown_editor_max_length_value(current_length: &str, max_length: &str) 
 /// ```text
 /// <actor>{actor}</actor> sent you a friend request.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn notifications_friend_request_body(actor: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::NotificationsFriendRequestBody,
+        &[("actor", text::Value::text(actor))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("<actor>");
     out.push_str(actor);
@@ -22176,7 +24253,17 @@ pub fn notifications_friend_request_body(actor: &str) -> String {
 /// ```text
 /// <actor>{actor}</actor> invited you to <entity>{entity}</entity> instance.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn notifications_instance_invite_body(actor: &str, entity: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::NotificationsInstanceInviteBody,
+        &[("actor", text::Value::text(actor)), ("entity", text::Value::text(entity))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("<actor>");
     out.push_str(actor);
@@ -22191,7 +24278,17 @@ pub fn notifications_instance_invite_body(actor: &str, entity: &str) -> String {
 /// ```text
 /// <actor>{actor}</actor> invited you to manage the server <entity>{entity}</entity>.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn notifications_server_invite_body(actor: &str, entity: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::NotificationsServerInviteBody,
+        &[("actor", text::Value::text(actor)), ("entity", text::Value::text(entity))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("<actor>");
     out.push_str(actor);
@@ -22206,7 +24303,17 @@ pub fn notifications_server_invite_body(actor: &str, entity: &str) -> String {
 /// ```text
 /// A {type}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn omorphia_component_environment_indicator_label_type(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::OmorphiaComponentEnvironmentIndicatorLabelType,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("A ");
     out.push_str(type_arg);
@@ -22218,7 +24325,17 @@ pub fn omorphia_component_environment_indicator_label_type(type_arg: &str) -> St
 /// ```text
 /// {card_brand} ending in {last_four}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn payment_method_card_display(card_brand: &str, last_four: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::PaymentMethodCardDisplay,
+        &[("card_brand", text::Value::text(card_brand)), ("last_four", text::Value::text(last_four))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(card_brand);
     out.push_str(" ending in ");
@@ -22231,7 +24348,17 @@ pub fn payment_method_card_display(card_brand: &str, last_four: &str) -> String 
 /// ```text
 /// {username} will not be able to send you friend requests, invite you to shared instances or invite you to Modrinth Hosting servers.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_block_user_admonition_body(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProfileBlockUserAdmonitionBody,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str(" will not be able to send you friend requests, invite you to shared instances or invite you to Modrinth Hosting servers.");
@@ -22243,7 +24370,17 @@ pub fn profile_block_user_admonition_body(username: &str) -> String {
 /// ```text
 /// {username} has been blocked.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_block_user_success_description(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProfileBlockUserSuccessDescription,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str(" has been blocked.");
@@ -22255,7 +24392,17 @@ pub fn profile_block_user_success_description(username: &str) -> String {
 /// ```text
 /// Block {username}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_block_user_title(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProfileBlockUserTitle,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Block ");
     out.push_str(username);
@@ -22267,8 +24414,18 @@ pub fn profile_block_user_title(username: &str) -> String {
 /// ```text
 /// {count, plural, one {# project} other {# projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_collection_projects_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProfileCollectionProjectsCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -22285,8 +24442,18 @@ pub fn profile_collection_projects_count<'count>(count: impl Into<text::Plural<'
 /// ```text
 /// {count, plural, one {download} other {downloads}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_label_download_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProfileLabelDownloadCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("download");
@@ -22301,8 +24468,18 @@ pub fn profile_label_download_count<'count>(count: impl Into<text::Plural<'count
 /// ```text
 /// {count, plural, one {project} other {projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_label_project_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProfileLabelProjectCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("project");
@@ -22317,7 +24494,17 @@ pub fn profile_label_project_count<'count>(count: impl Into<text::Plural<'count>
 /// ```text
 /// {username} has been unblocked.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn profile_unblock_user_success_description(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProfileUnblockUserSuccessDescription,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str(" has been unblocked.");
@@ -22329,7 +24516,17 @@ pub fn profile_unblock_user_success_description(username: &str) -> String {
 /// ```text
 /// Published {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_card_date_published_tooltip(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectCardDatePublishedTooltip,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Published ");
     out.push_str(date);
@@ -22341,7 +24538,17 @@ pub fn project_card_date_published_tooltip(date: &str) -> String {
 /// ```text
 /// Updated {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_card_date_updated_tooltip(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectCardDateUpdatedTooltip,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updated ");
     out.push_str(date);
@@ -22353,8 +24560,18 @@ pub fn project_card_date_updated_tooltip(date: &str) -> String {
 /// ```text
 /// {count, plural, one {Data Pack} other {Data Packs}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_datapack_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeDatapackCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Data Pack");
@@ -22369,8 +24586,18 @@ pub fn project_type_datapack_capital<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count, plural, one {data pack} other {data packs}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_datapack_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeDatapackLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("data pack");
@@ -22385,8 +24612,18 @@ pub fn project_type_datapack_lowercase<'count>(count: impl Into<text::Plural<'co
 /// ```text
 /// {count, plural, one {Mod} other {Mods}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_mod_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeModCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Mod");
@@ -22401,8 +24638,18 @@ pub fn project_type_mod_capital<'count>(count: impl Into<text::Plural<'count>>) 
 /// ```text
 /// {count, plural, one {mod} other {mods}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_mod_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeModLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("mod");
@@ -22417,8 +24664,18 @@ pub fn project_type_mod_lowercase<'count>(count: impl Into<text::Plural<'count>>
 /// ```text
 /// {count, plural, one {Modpack} other {Modpacks}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_modpack_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeModpackCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Modpack");
@@ -22433,8 +24690,18 @@ pub fn project_type_modpack_capital<'count>(count: impl Into<text::Plural<'count
 /// ```text
 /// {count, plural, one {modpack} other {modpacks}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_modpack_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeModpackLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("modpack");
@@ -22449,8 +24716,18 @@ pub fn project_type_modpack_lowercase<'count>(count: impl Into<text::Plural<'cou
 /// ```text
 /// {count, plural, one {Plugin} other {Plugins}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_plugin_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypePluginCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Plugin");
@@ -22465,8 +24742,18 @@ pub fn project_type_plugin_capital<'count>(count: impl Into<text::Plural<'count>
 /// ```text
 /// {count, plural, one {plugin} other {plugins}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_plugin_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypePluginLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("plugin");
@@ -22481,8 +24768,18 @@ pub fn project_type_plugin_lowercase<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count, plural, one {Project} other {Projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_project_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeProjectCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Project");
@@ -22497,8 +24794,18 @@ pub fn project_type_project_capital<'count>(count: impl Into<text::Plural<'count
 /// ```text
 /// {count, plural, one {project} other {projects}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_project_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeProjectLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("project");
@@ -22513,8 +24820,18 @@ pub fn project_type_project_lowercase<'count>(count: impl Into<text::Plural<'cou
 /// ```text
 /// {count, plural, one {Resource Pack} other {Resource Packs}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_resourcepack_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeResourcepackCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Resource Pack");
@@ -22529,8 +24846,18 @@ pub fn project_type_resourcepack_capital<'count>(count: impl Into<text::Plural<'
 /// ```text
 /// {count, plural, one {resource pack} other {resource packs}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_resourcepack_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeResourcepackLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("resource pack");
@@ -22545,8 +24872,18 @@ pub fn project_type_resourcepack_lowercase<'count>(count: impl Into<text::Plural
 /// ```text
 /// {count, plural, one {Server} other {Servers}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_server_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeServerCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Server");
@@ -22561,8 +24898,18 @@ pub fn project_type_server_capital<'count>(count: impl Into<text::Plural<'count>
 /// ```text
 /// {count, plural, one {server} other {servers}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_server_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeServerLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("server");
@@ -22577,8 +24924,18 @@ pub fn project_type_server_lowercase<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count, plural, one {Shader} other {Shaders}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_shader_capital<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeShaderCapital,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Shader");
@@ -22593,8 +24950,18 @@ pub fn project_type_shader_capital<'count>(count: impl Into<text::Plural<'count>
 /// ```text
 /// {count, plural, one {shader} other {shaders}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_type_shader_lowercase<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectTypeShaderLowercase,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("shader");
@@ -22609,8 +24976,18 @@ pub fn project_type_shader_lowercase<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count, plural, one {Platform} other {Platforms}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_compatibility_platforms_plural<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectAboutCompatibilityPlatformsPlural,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Platform");
@@ -22625,7 +25002,17 @@ pub fn project_about_compatibility_platforms_plural<'count>(count: impl Into<tex
 /// ```text
 /// Created {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_details_created(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectAboutDetailsCreated,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Created ");
     out.push_str(date);
@@ -22637,7 +25024,17 @@ pub fn project_about_details_created(date: &str) -> String {
 /// ```text
 /// Licensed {license}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_details_licensed(license: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectAboutDetailsLicensed,
+        &[("license", text::Value::text(license))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Licensed ");
     out.push_str(license);
@@ -22649,7 +25046,17 @@ pub fn project_about_details_licensed(license: &str) -> String {
 /// ```text
 /// Published {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_details_published(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectAboutDetailsPublished,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Published ");
     out.push_str(date);
@@ -22661,7 +25068,17 @@ pub fn project_about_details_published(date: &str) -> String {
 /// ```text
 /// Submitted {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_details_submitted(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectAboutDetailsSubmitted,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Submitted ");
     out.push_str(date);
@@ -22673,7 +25090,17 @@ pub fn project_about_details_submitted(date: &str) -> String {
 /// ```text
 /// Updated {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_about_details_updated(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectAboutDetailsUpdated,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Updated ");
     out.push_str(date);
@@ -22685,7 +25112,17 @@ pub fn project_about_details_updated(date: &str) -> String {
 /// ```text
 /// Contains AI-generated {types}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_disclosure_ai_generated_content_title(types: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectDisclosureAiGeneratedContentTitle,
+        &[("types", text::Value::text(types))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Contains AI-generated ");
     out.push_str(types);
@@ -22697,7 +25134,17 @@ pub fn project_disclosure_ai_generated_content_title(types: &str) -> String {
 /// ```text
 /// Show {count} more
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_disclosure_derivative_work_show_more(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectDisclosureDerivativeWorkShowMore,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Show ");
     out.push_str(count);
@@ -22710,7 +25157,17 @@ pub fn project_disclosure_derivative_work_show_more(count: &str) -> String {
 /// ```text
 /// Contains {consent, select, opt_in {opt-in telemetry} opt_out {opt-out telemetry} always_active {always-active telemetry} other {telemetry}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_disclosure_telemetry_title(consent: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectDisclosureTelemetryTitle,
+        &[("consent", text::Value::text(consent))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Contains ");
     match consent {
@@ -22735,8 +25192,18 @@ pub fn project_disclosure_telemetry_title(consent: &str) -> String {
 /// ```text
 /// {count, number} {count, plural, one {download} other {downloads}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_download_count_tooltip<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectDownloadCountTooltip,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&count.grouped());
     out.push(' ');
@@ -22753,8 +25220,18 @@ pub fn project_download_count_tooltip<'count>(count: impl Into<text::Plural<'cou
 /// ```text
 /// {count, number} {count, plural, one {follower} other {followers}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_follower_count_tooltip<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectFollowerCountTooltip,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&count.grouped());
     out.push(' ');
@@ -22771,7 +25248,17 @@ pub fn project_follower_count_tooltip<'count>(count: impl Into<text::Plural<'cou
 /// ```text
 /// {count, number} online
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_online_player_count(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectOnlinePlayerCount,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" online");
@@ -22783,8 +25270,18 @@ pub fn project_online_player_count(count: u64) -> String {
 /// ```text
 /// {count} {countPlural, plural, one {player} other {players}} online
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_online_player_count_tooltip<'count_plural>(count: &str, count_plural: impl Into<text::Plural<'count_plural>>) -> String {
     let count_plural = count_plural.into();
+    if let Some(localized) = text::render(
+        Key::ProjectOnlinePlayerCountTooltip,
+        &[("count", text::Value::text(count)), ("countPlural", text::Value::plural(count_plural))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push(' ');
@@ -22802,8 +25299,18 @@ pub fn project_online_player_count_tooltip<'count_plural>(count: &str, count_plu
 /// ```text
 /// {count} {countPlural, plural, one {recent play} other {recent plays}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_recent_plays<'count_plural>(count: &str, count_plural: impl Into<text::Plural<'count_plural>>) -> String {
     let count_plural = count_plural.into();
+    if let Some(localized) = text::render(
+        Key::ProjectRecentPlays,
+        &[("count", text::Value::text(count)), ("countPlural", text::Value::plural(count_plural))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push(' ');
@@ -22820,8 +25327,18 @@ pub fn project_recent_plays<'count_plural>(count: &str, count_plural: impl Into<
 /// ```text
 /// {count} {countPlural, plural, one {recent play} other {recent plays}} from Modrinth in the past 2 weeks
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_recent_plays_tooltip<'count_plural>(count: &str, count_plural: impl Into<text::Plural<'count_plural>>) -> String {
     let count_plural = count_plural.into();
+    if let Some(localized) = text::render(
+        Key::ProjectRecentPlaysTooltip,
+        &[("count", text::Value::text(count)), ("countPlural", text::Value::plural(count_plural))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(count);
     out.push(' ');
@@ -22839,7 +25356,17 @@ pub fn project_recent_plays_tooltip<'count_plural>(count: &str, count_plural: im
 /// ```text
 /// {ping, number} ms
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_server_ping_ms(ping: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectServerPingMs,
+        &[("ping", text::Value::number(ping))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(ping));
     out.push_str(" ms");
@@ -22851,7 +25378,17 @@ pub fn project_server_ping_ms(ping: u64) -> String {
 /// ```text
 /// Server hosted in {regionName}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_server_region_tooltip(region_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectServerRegionTooltip,
+        &[("regionName", text::Value::text(region_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Server hosted in ");
     out.push_str(region_name);
@@ -22863,7 +25400,17 @@ pub fn project_server_region_tooltip(region_name: &str) -> String {
 /// ```text
 /// {title}: {description}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_settings_environment_suboption_accessibility_option_label(title: &str, description: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectSettingsEnvironmentSuboptionAccessibilityOptionLabel,
+        &[("title", text::Value::text(title)), ("description", text::Value::text(description))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(title);
     out.push_str(": ");
@@ -22876,7 +25423,17 @@ pub fn project_settings_environment_suboption_accessibility_option_label(title: 
 /// ```text
 /// Suboptions of {option}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_settings_environment_suboption_accessibility_suboption_group_label(option: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectSettingsEnvironmentSuboptionAccessibilitySuboptionGroupLabel,
+        &[("option", text::Value::text(option))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Suboptions of ");
     out.push_str(option);
@@ -22888,8 +25445,18 @@ pub fn project_settings_environment_suboption_accessibility_suboption_group_labe
 /// ```text
 /// {count, plural, one {download} other {downloads}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_stats_downloads_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectStatsDownloadsLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("download");
@@ -22904,8 +25471,18 @@ pub fn project_stats_downloads_label<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {count, plural, one {follower} other {followers}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_stats_followers_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ProjectStatsFollowersLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("follower");
@@ -22920,7 +25497,17 @@ pub fn project_stats_followers_label<'count>(count: impl Into<text::Plural<'coun
 /// ```text
 /// {title} will not receive any further updates unless the author decides to unarchive the project.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_status_archived_body(title: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectStatusArchivedBody,
+        &[("title", text::Value::text(title))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(title);
     out.push_str(" will not receive any further updates unless the author decides to unarchive the project.");
@@ -22932,7 +25519,17 @@ pub fn project_status_archived_body(title: &str) -> String {
 /// ```text
 /// {title} has been archived
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_status_archived_header(title: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectStatusArchivedHeader,
+        &[("title", text::Value::text(title))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(title);
     out.push_str(" has been archived");
@@ -22944,7 +25541,17 @@ pub fn project_status_archived_header(title: &str) -> String {
 /// ```text
 /// {count, number} selected
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_versions_filter_selected_count(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectVersionsFilterSelectedCount,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(count));
     out.push_str(" selected");
@@ -22956,7 +25563,17 @@ pub fn project_versions_filter_selected_count(count: u64) -> String {
 /// ```text
 /// Toggle filter for {filter}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn project_versions_filter_toggle_tooltip(filter: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ProjectVersionsFilterToggleTooltip,
+        &[("filter", text::Value::text(filter))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Toggle filter for ");
     out.push_str(filter);
@@ -22968,7 +25585,17 @@ pub fn project_versions_filter_toggle_tooltip(filter: &str) -> String {
 /// ```text
 /// Depends on: {project}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_dependent_project(project: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterDependentProject,
+        &[("project", text::Value::text(project))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Depends on: ");
     out.push_str(project);
@@ -22980,7 +25607,17 @@ pub fn search_filter_dependent_project(project: &str) -> String {
 /// ```text
 /// Excludes: {projects}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_excluded_projects(projects: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterExcludedProjects,
+        &[("projects", text::Value::text(projects))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Excludes: ");
     out.push_str(projects);
@@ -22992,7 +25629,17 @@ pub fn search_filter_excluded_projects(projects: &str) -> String {
 /// ```text
 /// Remove {project}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_included_content_remove_project(project: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterIncludedContentRemoveProject,
+        &[("project", text::Value::text(project))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Remove ");
     out.push_str(project);
@@ -23004,7 +25651,17 @@ pub fn search_filter_included_content_remove_project(project: &str) -> String {
 /// ```text
 /// Includes: {projects}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_included_projects(projects: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterIncludedProjects,
+        &[("projects", text::Value::text(projects))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Includes: ");
     out.push_str(projects);
@@ -23016,7 +25673,17 @@ pub fn search_filter_included_projects(projects: &str) -> String {
 /// ```text
 /// {type} is locked
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_locked_default_title(type_arg: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterLockedDefaultTitle,
+        &[("type", text::Value::text(type_arg))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(type_arg);
     out.push_str(" is locked");
@@ -23028,7 +25695,17 @@ pub fn search_filter_locked_default_title(type_arg: &str) -> String {
 /// ```text
 /// AI {usage}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn search_filter_type_advanced_disclosure_ai_content_usage(usage: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SearchFilterTypeAdvancedDisclosureAiContentUsage,
+        &[("usage", text::Value::text(usage))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("AI ");
     out.push_str(usage);
@@ -23040,7 +25717,17 @@ pub fn search_filter_type_advanced_disclosure_ai_content_usage(usage: &str) -> S
 /// ```text
 /// Revoked the invite for {target}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_notification_invite_cancelled_text(target: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageNotificationInviteCancelledText,
+        &[("target", text::Value::text(target))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Revoked the invite for ");
     out.push_str(target);
@@ -23053,7 +25740,17 @@ pub fn servers_access_page_notification_invite_cancelled_text(target: &str) -> S
 /// ```text
 /// Sent another invite to {target}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_notification_invite_resent_text(target: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageNotificationInviteResentText,
+        &[("target", text::Value::text(target))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Sent another invite to ");
     out.push_str(target);
@@ -23066,7 +25763,17 @@ pub fn servers_access_page_notification_invite_resent_text(target: &str) -> Stri
 /// ```text
 /// Invited {target} as {role}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_notification_invite_sent_text(target: &str, role: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageNotificationInviteSentText,
+        &[("target", text::Value::text(target)), ("role", text::Value::text(role))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Invited ");
     out.push_str(target);
@@ -23081,7 +25788,17 @@ pub fn servers_access_page_notification_invite_sent_text(target: &str, role: &st
 /// ```text
 /// Revoked access for {target}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_notification_member_removed_text(target: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageNotificationMemberRemovedText,
+        &[("target", text::Value::text(target))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Revoked access for ");
     out.push_str(target);
@@ -23094,7 +25811,17 @@ pub fn servers_access_page_notification_member_removed_text(target: &str) -> Str
 /// ```text
 /// Role: {role}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_role_filter_selected(role: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageRoleFilterSelected,
+        &[("role", text::Value::text(role))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Role: ");
     out.push_str(role);
@@ -23106,8 +25833,18 @@ pub fn servers_access_page_role_filter_selected(role: &str) -> String {
 /// ```text
 /// Search {count} {count, plural, one {user} other {users}}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_page_search_users_placeholder<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersAccessPageSearchUsersPlaceholder,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.bare());
@@ -23126,7 +25863,17 @@ pub fn servers_access_page_search_users_placeholder<'count>(count: impl Into<tex
 /// ```text
 /// Resend in {seconds}s
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_table_action_resend_invite_cooldown(seconds: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessTableActionResendInviteCooldown,
+        &[("seconds", text::Value::text(seconds))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Resend in ");
     out.push_str(seconds);
@@ -23139,7 +25886,17 @@ pub fn servers_access_table_action_resend_invite_cooldown(seconds: &str) -> Stri
 /// ```text
 /// Actions for {username}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_table_member_actions_label(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessTableMemberActionsLabel,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Actions for ");
     out.push_str(username);
@@ -23151,7 +25908,17 @@ pub fn servers_access_table_member_actions_label(username: &str) -> String {
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_access_table_user_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAccessTableUserAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23163,7 +25930,17 @@ pub fn servers_access_table_user_avatar_alt(username: &str) -> String {
 /// ```text
 /// +{count, number}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_entity_list_hidden_count(count: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventEntityListHiddenCount,
+        &[("count", text::Value::number(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push('+');
     out.push_str(&text::number(count));
@@ -23175,8 +25952,18 @@ pub fn servers_audit_log_event_entity_list_hidden_count(count: u64) -> String {
 /// ```text
 /// {count, plural, one {# CPU} other {# CPUs}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_server_plan_cpu<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventServerPlanCpu,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -23193,7 +25980,17 @@ pub fn servers_audit_log_event_server_plan_cpu<'count>(count: impl Into<text::Pl
 /// ```text
 /// {amount, number} GB RAM
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_server_plan_ram_gb(amount: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventServerPlanRamGb,
+        &[("amount", text::Value::number(amount))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(amount));
     out.push_str(" GB RAM");
@@ -23205,7 +26002,17 @@ pub fn servers_audit_log_event_server_plan_ram_gb(amount: u64) -> String {
 /// ```text
 /// {amount, number} MB RAM
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_server_plan_ram_mb(amount: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventServerPlanRamMb,
+        &[("amount", text::Value::number(amount))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(amount));
     out.push_str(" MB RAM");
@@ -23217,7 +26024,17 @@ pub fn servers_audit_log_event_server_plan_ram_mb(amount: u64) -> String {
 /// ```text
 /// {amount, number} GB storage
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_server_plan_storage_gb(amount: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventServerPlanStorageGb,
+        &[("amount", text::Value::number(amount))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(amount));
     out.push_str(" GB storage");
@@ -23229,7 +26046,17 @@ pub fn servers_audit_log_event_server_plan_storage_gb(amount: u64) -> String {
 /// ```text
 /// {amount, number} MB storage
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_server_plan_storage_mb(amount: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventServerPlanStorageMb,
+        &[("amount", text::Value::number(amount))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(&text::number(amount));
     out.push_str(" MB storage");
@@ -23241,7 +26068,17 @@ pub fn servers_audit_log_event_server_plan_storage_mb(amount: u64) -> String {
 /// ```text
 /// Invited <target-user></target-user> with <permission-label>{permissions}</permission-label>
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_user_invited_with_permissions(permissions: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventUserInvitedWithPermissions,
+        &[("permissions", text::Value::text(permissions))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Invited <target-user></target-user> with <permission-label>");
     out.push_str(permissions);
@@ -23254,7 +26091,17 @@ pub fn servers_audit_log_event_user_invited_with_permissions(permissions: &str) 
 /// ```text
 /// Changed permissions for <target-user></target-user> to <permission-label>{permissions}</permission-label>
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_event_user_permission_modified_with_permissions(permissions: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogEventUserPermissionModifiedWithPermissions,
+        &[("permissions", text::Value::text(permissions))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Changed permissions for <target-user></target-user> to <permission-label>");
     out.push_str(permissions);
@@ -23267,7 +26114,17 @@ pub fn servers_audit_log_event_user_permission_modified_with_permissions(permiss
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_audit_log_user_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersAuditLogUserAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23279,7 +26136,17 @@ pub fn servers_audit_log_user_avatar_alt(username: &str) -> String {
 /// ```text
 /// Backup {backupName} was cancelled.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_backup_cancelled_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionBackupCancelledDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Backup ");
     out.push_str(backup_name);
@@ -23292,7 +26159,17 @@ pub fn servers_backups_admonition_backup_cancelled_description(backup_name: &str
 /// ```text
 /// {backupName} finished successfully.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_backup_completed_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionBackupCompletedDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(backup_name);
     out.push_str(" finished successfully.");
@@ -23304,7 +26181,17 @@ pub fn servers_backups_admonition_backup_completed_description(backup_name: &str
 /// ```text
 /// Something went wrong while creating {backupName}. Please try again or contact support if the issue continues.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_backup_failed_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionBackupFailedDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Something went wrong while creating ");
     out.push_str(backup_name);
@@ -23317,7 +26204,17 @@ pub fn servers_backups_admonition_backup_failed_description(backup_name: &str) -
 /// ```text
 /// {backupName} is queued and will start shortly.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_backup_queued_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionBackupQueuedDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(backup_name);
     out.push_str(" is queued and will start shortly.");
@@ -23329,7 +26226,17 @@ pub fn servers_backups_admonition_backup_queued_description(backup_name: &str) -
 /// ```text
 /// Creating {backupName} timed out. You can try again or contact support if the issue continues.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_backup_timed_out_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionBackupTimedOutDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Creating ");
     out.push_str(backup_name);
@@ -23342,7 +26249,17 @@ pub fn servers_backups_admonition_backup_timed_out_description(backup_name: &str
 /// ```text
 /// Saving world data and server configuration for {backupName}. This can take a few minutes.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_creating_backup_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionCreatingBackupDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Saving world data and server configuration for ");
     out.push_str(backup_name);
@@ -23355,7 +26272,17 @@ pub fn servers_backups_admonition_creating_backup_description(backup_name: &str)
 /// ```text
 /// Restoring from {backupName} was cancelled.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restore_cancelled_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoreCancelledDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Restoring from ");
     out.push_str(backup_name);
@@ -23368,7 +26295,17 @@ pub fn servers_backups_admonition_restore_cancelled_description(backup_name: &st
 /// ```text
 /// Something went wrong while restoring from {backupName}. Please try again or contact support if the issue continues.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restore_failed_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoreFailedDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Something went wrong while restoring from ");
     out.push_str(backup_name);
@@ -23381,7 +26318,17 @@ pub fn servers_backups_admonition_restore_failed_description(backup_name: &str) 
 /// ```text
 /// Restoring from {backupName} is queued and will start shortly.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restore_queued_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoreQueuedDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Restoring from ");
     out.push_str(backup_name);
@@ -23394,7 +26341,17 @@ pub fn servers_backups_admonition_restore_queued_description(backup_name: &str) 
 /// ```text
 /// Your server has been restored to {backupName} and is ready to start.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restore_successful_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoreSuccessfulDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your server has been restored to ");
     out.push_str(backup_name);
@@ -23407,7 +26364,17 @@ pub fn servers_backups_admonition_restore_successful_description(backup_name: &s
 /// ```text
 /// Restoring from {backupName} timed out. You can try again or contact support if the issue continues.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restore_timed_out_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoreTimedOutDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Restoring from ");
     out.push_str(backup_name);
@@ -23420,7 +26387,17 @@ pub fn servers_backups_admonition_restore_timed_out_description(backup_name: &st
 /// ```text
 /// Restoring your server from {backupName}. This may take a couple of minutes.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_admonition_restoring_backup_description(backup_name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsAdmonitionRestoringBackupDescription,
+        &[("backupName", text::Value::text(backup_name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Restoring your server from ");
     out.push_str(backup_name);
@@ -23433,8 +26410,18 @@ pub fn servers_backups_admonition_restoring_backup_description(backup_name: &str
 /// ```text
 /// {count, plural, one {Bulk actions for one selected backup} other {Bulk actions for # selected backups}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_bulk_bar_aria_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsBulkBarAriaLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Bulk actions for one selected backup");
@@ -23451,8 +26438,18 @@ pub fn servers_backups_bulk_bar_aria_label<'count>(count: impl Into<text::Plural
 /// ```text
 /// Deleting {total, plural, one {# backup} other {# backups}}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_bulk_bar_deleting<'total>(total: impl Into<text::Plural<'total>>) -> String {
     let total = total.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsBulkBarDeleting,
+        &[("total", text::Value::plural(total))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Deleting ");
     if total.is("one") {
@@ -23471,8 +26468,18 @@ pub fn servers_backups_bulk_bar_deleting<'total>(total: impl Into<text::Plural<'
 /// ```text
 /// {count, plural, one {# backup selected} other {# backups selected}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_bulk_bar_selected_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsBulkBarSelectedCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -23489,8 +26496,18 @@ pub fn servers_backups_bulk_bar_selected_count<'count>(count: impl Into<text::Pl
 /// ```text
 /// Once deleted, {count, plural, one {this backup cannot} other {these backups cannot}} be recovered. Deletion is permanent.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_delete_modal_admonition_body<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsDeleteModalAdmonitionBody,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Once deleted, ");
     if count.is("one") {
@@ -23507,8 +26524,18 @@ pub fn servers_backups_delete_modal_admonition_body<'count>(count: impl Into<tex
 /// ```text
 /// {count, plural, one {Backup} other {Backups ({count})}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_delete_modal_backups_label<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsDeleteModalBackupsLabel,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str("Backup");
@@ -23525,8 +26552,18 @@ pub fn servers_backups_delete_modal_backups_label<'count>(count: impl Into<text:
 /// ```text
 /// Delete {count, plural, one {backup} other {# backups}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_delete_modal_confirm<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsDeleteModalConfirm,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     if count.is("one") {
@@ -23543,8 +26580,18 @@ pub fn servers_backups_delete_modal_confirm<'count>(count: impl Into<text::Plura
 /// ```text
 /// Delete {count, plural, one {backup} other {backups}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_delete_modal_header<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersBackupsDeleteModalHeader,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Delete ");
     if count.is("one") {
@@ -23560,7 +26607,17 @@ pub fn servers_backups_delete_modal_header<'count>(count: impl Into<text::Plural
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_item_creator_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsItemCreatorAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23572,7 +26629,17 @@ pub fn servers_backups_item_creator_avatar_alt(username: &str) -> String {
 /// ```text
 /// Select backup {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_backups_select_backup_aria(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersBackupsSelectBackupAria,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select backup ");
     out.push_str(name);
@@ -23584,7 +26651,17 @@ pub fn servers_backups_select_backup_aria(name: &str) -> String {
 /// ```text
 /// Created {destination}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_files_zip_created_description(destination: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersFilesZipCreatedDescription,
+        &[("destination", text::Value::text(destination))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Created ");
     out.push_str(destination);
@@ -23596,7 +26673,17 @@ pub fn servers_files_zip_created_description(destination: &str) -> String {
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_grant_access_modal_suggestion_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersGrantAccessModalSuggestionAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23608,7 +26695,17 @@ pub fn servers_grant_access_modal_suggestion_avatar_alt(username: &str) -> Strin
 /// ```text
 /// Failed to install {filename}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_error_header_local_modpack(filename: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerErrorHeaderLocalModpack,
+        &[("filename", text::Value::text(filename))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to install ");
     out.push_str(filename);
@@ -23620,7 +26717,17 @@ pub fn servers_installing_banner_error_header_local_modpack(filename: &str) -> S
 /// ```text
 /// Failed to install Minecraft {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_error_header_minecraft(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerErrorHeaderMinecraft,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to install Minecraft ");
     out.push_str(version);
@@ -23632,7 +26739,17 @@ pub fn servers_installing_banner_error_header_minecraft(version: &str) -> String
 /// ```text
 /// Failed to install {loader} {loaderVersion} for Minecraft {gameVersion}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_error_header_platform(loader: &str, loader_version: &str, game_version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerErrorHeaderPlatform,
+        &[("loader", text::Value::text(loader)), ("loaderVersion", text::Value::text(loader_version)), ("gameVersion", text::Value::text(game_version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to install ");
     out.push_str(loader);
@@ -23648,7 +26765,17 @@ pub fn servers_installing_banner_error_header_platform(loader: &str, loader_vers
 /// ```text
 /// Failed to install {loader} for Minecraft {gameVersion}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_error_header_platform_without_version(loader: &str, game_version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerErrorHeaderPlatformWithoutVersion,
+        &[("loader", text::Value::text(loader)), ("gameVersion", text::Value::text(game_version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Failed to install ");
     out.push_str(loader);
@@ -23662,7 +26789,17 @@ pub fn servers_installing_banner_error_header_platform_without_version(loader: &
 /// ```text
 /// Installing {filename}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_installing_local_modpack(filename: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerInstallingLocalModpack,
+        &[("filename", text::Value::text(filename))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Installing ");
     out.push_str(filename);
@@ -23674,7 +26811,17 @@ pub fn servers_installing_banner_installing_local_modpack(filename: &str) -> Str
 /// ```text
 /// Installing Minecraft {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_installing_minecraft(version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerInstallingMinecraft,
+        &[("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Installing Minecraft ");
     out.push_str(version);
@@ -23686,7 +26833,17 @@ pub fn servers_installing_banner_installing_minecraft(version: &str) -> String {
 /// ```text
 /// Installing {loader} for Minecraft {version}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_installing_banner_installing_platform(loader: &str, version: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersInstallingBannerInstallingPlatform,
+        &[("loader", text::Value::text(loader)), ("version", text::Value::text(version))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Installing ");
     out.push_str(loader);
@@ -23700,8 +26857,18 @@ pub fn servers_installing_banner_installing_platform(loader: &str, version: &str
 /// ```text
 /// Your files will be kept for <days-remaining>{daysRemaining} more {daysRemaining, plural, one {day} other {days}}</days-remaining>. Contact support to download the files before they are deleted.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_notice_files_kept_for_download<'days_remaining>(days_remaining: impl Into<text::Plural<'days_remaining>>) -> String {
     let days_remaining = days_remaining.into();
+    if let Some(localized) = text::render(
+        Key::ServersListingNoticeFilesKeptForDownload,
+        &[("daysRemaining", text::Value::plural(days_remaining))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your files will be kept for <days-remaining>");
     out.push_str(&days_remaining.bare());
@@ -23720,7 +26887,17 @@ pub fn servers_listing_notice_files_kept_for_download<'days_remaining>(days_rema
 /// ```text
 /// Your server will {verb, select, downgrade {downgrade} other {upgrade}} to the {planSize} Plan on <date>{formattedDate}</date>.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_notice_pending_change(verb: &str, plan_size: &str, formatted_date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingNoticePendingChange,
+        &[("verb", text::Value::text(verb)), ("planSize", text::Value::text(plan_size)), ("formattedDate", text::Value::text(formatted_date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your server will ");
     match verb {
@@ -23744,7 +26921,17 @@ pub fn servers_listing_notice_pending_change(verb: &str, plan_size: &str, format
 /// ```text
 /// Your subscription was cancelled on <date>{formattedDate}</date>.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_notice_subscription_cancelled_on_date(formatted_date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingNoticeSubscriptionCancelledOnDate,
+        &[("formattedDate", text::Value::text(formatted_date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your subscription was cancelled on <date>");
     out.push_str(formatted_date);
@@ -23757,7 +26944,17 @@ pub fn servers_listing_notice_subscription_cancelled_on_date(formatted_date: &st
 /// ```text
 /// Your subscription was cancelled on <date>{formattedDate}</date> due to payment failure. 
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_notice_subscription_cancelled_payment_failed_on_date(formatted_date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingNoticeSubscriptionCancelledPaymentFailedOnDate,
+        &[("formattedDate", text::Value::text(formatted_date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your subscription was cancelled on <date>");
     out.push_str(formatted_date);
@@ -23770,7 +26967,17 @@ pub fn servers_listing_notice_subscription_cancelled_payment_failed_on_date(form
 /// ```text
 /// Your subscription is set to cancel on <date>{formattedDate}</date>. 
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_notice_subscription_set_to_cancel_on_date(formatted_date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingNoticeSubscriptionSetToCancelOnDate,
+        &[("formattedDate", text::Value::text(formatted_date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your subscription is set to cancel on <date>");
     out.push_str(formatted_date);
@@ -23783,7 +26990,17 @@ pub fn servers_listing_notice_subscription_set_to_cancel_on_date(formatted_date:
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_owner_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingOwnerAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23795,7 +27012,17 @@ pub fn servers_listing_owner_avatar_alt(username: &str) -> String {
 /// ```text
 /// Owned by {username}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_owner_tooltip(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingOwnerTooltip,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Owned by ");
     out.push_str(username);
@@ -23807,7 +27034,17 @@ pub fn servers_listing_owner_tooltip(username: &str) -> String {
 /// ```text
 /// Using {projectTitle}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_listing_using_project_label(project_title: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersListingUsingProjectLabel,
+        &[("projectTitle", text::Value::text(project_title))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Using ");
     out.push_str(project_title);
@@ -23819,8 +27056,18 @@ pub fn servers_listing_using_project_label(project_title: &str) -> String {
 /// ```text
 /// Search {count} {count, plural, one {server} other {servers}}...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_manage_search_placeholder<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::ServersManageSearchPlaceholder,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Search ");
     out.push_str(&count.bare());
@@ -23839,11 +27086,21 @@ pub fn servers_manage_search_placeholder<'count>(count: impl Into<text::Plural<'
 /// ```text
 /// <days-count>{days}</days-count> {days, plural, one {day} other {days}} <hours-count>{hours}</hours-count> {hours, plural, one {hour} other {hours}} <minutes-count>{minutes}</minutes-count> {minutes, plural, one {minute} other {minutes}} <seconds-count>{seconds}</seconds-count> {seconds, plural, one {second} other {seconds}} remaining...
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_medal_listing_countdown_remaining<'days, 'hours, 'minutes, 'seconds>(days: impl Into<text::Plural<'days>>, hours: impl Into<text::Plural<'hours>>, minutes: impl Into<text::Plural<'minutes>>, seconds: impl Into<text::Plural<'seconds>>) -> String {
     let days = days.into();
     let hours = hours.into();
     let minutes = minutes.into();
     let seconds = seconds.into();
+    if let Some(localized) = text::render(
+        Key::ServersMedalListingCountdownRemaining,
+        &[("days", text::Value::plural(days)), ("hours", text::Value::plural(hours)), ("minutes", text::Value::plural(minutes)), ("seconds", text::Value::plural(seconds))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("<days-count>");
     out.push_str(&days.bare());
@@ -23886,7 +27143,17 @@ pub fn servers_medal_listing_countdown_remaining<'days, 'hours, 'minutes, 'secon
 /// ```text
 /// Your server has been suspended: {reason}. Please update your billing information or contact Modrinth Support for more information.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_medal_listing_notice_suspended_with_reason(reason: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersMedalListingNoticeSuspendedWithReason,
+        &[("reason", text::Value::text(reason))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your server has been suspended: ");
     out.push_str(reason);
@@ -23899,7 +27166,17 @@ pub fn servers_medal_listing_notice_suspended_with_reason(reason: &str) -> Strin
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_medal_listing_owner_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersMedalListingOwnerAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -23911,7 +27188,17 @@ pub fn servers_medal_listing_owner_avatar_alt(username: &str) -> String {
 /// ```text
 /// Owned by {username}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_medal_listing_owner_tooltip(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersMedalListingOwnerTooltip,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Owned by ");
     out.push_str(username);
@@ -23923,7 +27210,17 @@ pub fn servers_medal_listing_owner_tooltip(username: &str) -> String {
 /// ```text
 /// Using {projectTitle}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_medal_listing_using_project_label(project_title: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersMedalListingUsingProjectLabel,
+        &[("projectTitle", text::Value::text(project_title))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Using ");
     out.push_str(project_title);
@@ -23935,7 +27232,17 @@ pub fn servers_medal_listing_using_project_label(project_title: &str) -> String 
 /// ```text
 /// billed {interval, select, monthly {monthly} quarterly {quarterly} yearly {yearly} other {{interval}}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_purchase_step_plan_billed(interval: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersPurchaseStepPlanBilled,
+        &[("interval", text::Value::text(interval))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("billed ");
     match interval {
@@ -23960,7 +27267,17 @@ pub fn servers_purchase_step_plan_billed(interval: &str) -> String {
 /// ```text
 /// Added {time}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_remove_access_modal_added_label(time: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersRemoveAccessModalAddedLabel,
+        &[("time", text::Value::text(time))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Added ");
     out.push_str(time);
@@ -23972,7 +27289,17 @@ pub fn servers_remove_access_modal_added_label(time: &str) -> String {
 /// ```text
 /// If you revoke this invite, {username} will need a new invitation before they can join this server.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_remove_access_modal_cancel_warning_body(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersRemoveAccessModalCancelWarningBody,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("If you revoke this invite, ");
     out.push_str(username);
@@ -23985,7 +27312,17 @@ pub fn servers_remove_access_modal_cancel_warning_body(username: &str) -> String
 /// ```text
 /// Invited {time}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_remove_access_modal_invited_label(time: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersRemoveAccessModalInvitedLabel,
+        &[("time", text::Value::text(time))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Invited ");
     out.push_str(time);
@@ -23997,7 +27334,17 @@ pub fn servers_remove_access_modal_invited_label(time: &str) -> String {
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_remove_access_modal_user_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersRemoveAccessModalUserAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -24009,7 +27356,17 @@ pub fn servers_remove_access_modal_user_avatar_alt(username: &str) -> String {
 /// ```text
 /// Uploading ({percent, number}%)
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn servers_setup_onboarding_uploading_progress(percent: u64) -> String {
+    if let Some(localized) = text::render(
+        Key::ServersSetupOnboardingUploadingProgress,
+        &[("percent", text::Value::number(percent))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Uploading (");
     out.push_str(&text::number(percent));
@@ -24022,7 +27379,17 @@ pub fn servers_setup_onboarding_uploading_progress(percent: u64) -> String {
 /// ```text
 /// About {percentage}% of the Modrinth App is available in this language.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_coverage_app_tooltip(percentage: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageCoverageAppTooltip,
+        &[("percentage", text::Value::text(percentage))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("About ");
     out.push_str(percentage);
@@ -24035,7 +27402,17 @@ pub fn settings_language_coverage_app_tooltip(percentage: &str) -> String {
 /// ```text
 /// {percentage}% supported
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_coverage_label(percentage: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageCoverageLabel,
+        &[("percentage", text::Value::text(percentage))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(percentage);
     out.push_str("% supported");
@@ -24047,7 +27424,17 @@ pub fn settings_language_coverage_label(percentage: &str) -> String {
 /// ```text
 /// About {percentage}% of the website is available in this language.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_coverage_website_tooltip(percentage: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageCoverageWebsiteTooltip,
+        &[("percentage", text::Value::text(percentage))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("About ");
     out.push_str(percentage);
@@ -24060,7 +27447,17 @@ pub fn settings_language_coverage_website_tooltip(percentage: &str) -> String {
 /// ```text
 /// Choose your preferred language for the {platform}. Translations are contributed by volunteers <crowdin-link>on Crowdin</crowdin-link>.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_description(platform: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageDescription,
+        &[("platform", text::Value::text(platform))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Choose your preferred language for the ");
     out.push_str(platform);
@@ -24073,8 +27470,18 @@ pub fn settings_language_description(platform: &str) -> String {
 /// ```text
 /// {matches, plural, =0 {No languages match} one {# language matches} other {# languages match}} your search.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_languages_search_results_announcement<'matches>(matches: impl Into<text::Plural<'matches>>) -> String {
     let matches = matches.into();
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageLanguagesSearchResultsAnnouncement,
+        &[("matches", text::Value::plural(matches))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if matches.is("=0") {
         out.push_str("No languages match");
@@ -24094,7 +27501,17 @@ pub fn settings_language_languages_search_results_announcement<'matches>(matches
 /// ```text
 /// Changing the {platform} language may cause some content to appear in English if a translation is not available. The {platform} is not yet fully translated, so some content may remain in English for certain languages.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_language_warning(platform: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsLanguageWarning,
+        &[("platform", text::Value::text(platform))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Changing the ");
     out.push_str(platform);
@@ -24109,7 +27526,17 @@ pub fn settings_language_warning(platform: &str) -> String {
 /// ```text
 /// Unblock {username}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_social_blocked_users_unblock_user(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsSocialBlockedUsersUnblockUser,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Unblock ");
     out.push_str(username);
@@ -24121,7 +27548,17 @@ pub fn settings_social_blocked_users_unblock_user(username: &str) -> String {
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn settings_social_blocked_users_user_avatar(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SettingsSocialBlockedUsersUserAvatar,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -24133,7 +27570,17 @@ pub fn settings_social_blocked_users_user_avatar(username: &str) -> String {
 /// ```text
 /// {username}'s avatar
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn sharing_invite_players_modal_avatar_alt(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SharingInvitePlayersModalAvatarAlt,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str("'s avatar");
@@ -24145,7 +27592,17 @@ pub fn sharing_invite_players_modal_avatar_alt(username: &str) -> String {
 /// ```text
 /// Custom: {date}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn sharing_invite_players_modal_custom_expiry_value(date: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SharingInvitePlayersModalCustomExpiryValue,
+        &[("date", text::Value::text(date))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Custom: ");
     out.push_str(date);
@@ -24157,7 +27614,17 @@ pub fn sharing_invite_players_modal_custom_expiry_value(date: &str) -> String {
 /// ```text
 /// Your friends - {count}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn sharing_invite_players_modal_friends_heading(count: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SharingInvitePlayersModalFriendsHeading,
+        &[("count", text::Value::text(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your friends - ");
     out.push_str(count);
@@ -24169,7 +27636,17 @@ pub fn sharing_invite_players_modal_friends_heading(count: &str) -> String {
 /// ```text
 /// Your invite link expires in {duration}.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn sharing_invite_players_modal_invite_expiry_description(duration: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SharingInvitePlayersModalInviteExpiryDescription,
+        &[("duration", text::Value::text(duration))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Your invite link expires in ");
     out.push_str(duration);
@@ -24182,7 +27659,17 @@ pub fn sharing_invite_players_modal_invite_expiry_description(duration: &str) ->
 /// ```text
 /// {username} needs to accept your friend request first
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn sharing_invite_players_modal_requested_tooltip(username: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SharingInvitePlayersModalRequestedTooltip,
+        &[("username", text::Value::text(username))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(username);
     out.push_str(" needs to accept your friend request first");
@@ -24194,7 +27681,17 @@ pub fn sharing_invite_players_modal_requested_tooltip(username: &str) -> String 
 /// ```text
 /// Select {name}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn skins_select_named(name: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::SkinsSelectNamed,
+        &[("name", text::Value::text(name))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("Select ");
     out.push_str(name);
@@ -24206,8 +27703,18 @@ pub fn skins_select_named(name: &str) -> String {
 /// ```text
 /// In the last {amount} {unit, select, hours {{amount, plural, one {hour} other {hours}}} days {{amount, plural, one {day} other {days}}} weeks {{amount, plural, one {week} other {weeks}}} months {{amount, plural, one {month} other {months}}} other {days}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn time_frame_picker_last_timeframe<'amount>(amount: impl Into<text::Plural<'amount>>, unit: &str) -> String {
     let amount = amount.into();
+    if let Some(localized) = text::render(
+        Key::TimeFramePickerLastTimeframe,
+        &[("amount", text::Value::plural(amount)), ("unit", text::Value::text(unit))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("In the last ");
     out.push_str(&amount.bare());
@@ -24253,8 +27760,18 @@ pub fn time_frame_picker_last_timeframe<'amount>(amount: impl Into<text::Plural<
 /// ```text
 /// {count, plural, one {# alert} other {# alerts}}
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn ui_stacked_admonitions_alert_count<'count>(count: impl Into<text::Plural<'count>>) -> String {
     let count = count.into();
+    if let Some(localized) = text::render(
+        Key::UiStackedAdmonitionsAlertCount,
+        &[("count", text::Value::plural(count))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     if count.is("one") {
         out.push_str(&count.grouped());
@@ -24271,7 +27788,17 @@ pub fn ui_stacked_admonitions_alert_count<'count>(count: impl Into<text::Plural<
 /// ```text
 /// This user's projects have collectively achieved {download_sum} downloads.
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn user_profile_badge_downloads_about_1(download_sum: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::UserProfileBadgeDownloadsAbout1,
+        &[("download_sum", text::Value::text(download_sum))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str("This user's projects have collectively achieved ");
     out.push_str(download_sum);
@@ -24284,7 +27811,17 @@ pub fn user_profile_badge_downloads_about_1(download_sum: &str) -> String {
 /// ```text
 /// {download_sum} Downloads
 /// ```
+///
+/// The language in force is read first, when its table carries this key and its
+/// template is one [`crate::text`] can fill in. What follows is English, which is
+/// also what runs for English itself.
 pub fn user_profile_badge_downloads_name(download_sum: &str) -> String {
+    if let Some(localized) = text::render(
+        Key::UserProfileBadgeDownloadsName,
+        &[("download_sum", text::Value::text(download_sum))],
+    ) {
+        return localized;
+    }
     let mut out = String::new();
     out.push_str(download_sum);
     out.push_str(" Downloads");

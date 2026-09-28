@@ -323,6 +323,17 @@ def emit(tag_sources, english_keys, counts_by_tag, refused):
     header.append("    pub language: &'static str,")
     header.append("    /// Whether the reference declares this locale `dir: 'rtl'`.")
     header.append("    pub rtl: bool,")
+    header.append("    /// The position in [`crate::text_gen::ALL`] of the reference's own name")
+    header.append("    /// for this language (`locale.<tag>`).")
+    header.append("    ///")
+    header.append("    /// Resolved here rather than at runtime because the lookup is a scan of")
+    header.append("    /// 3,846 keys and the label is drawn for every offered language at once.")
+    header.append("    /// It resolves for every one of the 32 offered codes today -- the English")
+    header.append("    /// locale carries all 32 `locale.*` names -- so `None` is a guard for a")
+    header.append("    /// tree that grows a code upstream has not named yet, and a name that is")
+    header.append("    /// missing is answered with the tag rather than with one this launcher")
+    header.append("    /// invents.")
+    header.append("    pub label: Option<u16>,")
     header.append("    /// `(position in text_gen::ALL, this locale's template)`, sorted by position.")
     header.append("    pub entries: &'static [(u16, &'static str)],")
     header.append("}")
@@ -332,8 +343,15 @@ def emit(tag_sources, english_keys, counts_by_tag, refused):
         constant = tag.replace("-", "_").upper()
         language = language_of(tag)
         rtl = "true" if tag in RTL else "false"
+        # The reference's own name for the language, which every one of the 32
+        # offered codes has -- `locale.<tag>` is a key in the English locale, so
+        # this is a position rather than a string. A tag with no name would be
+        # `None`, which is a guard rather than a case today.
+        named = index.get(f"locale.{tag}")
+        label = f"Some({named})" if named is not None else "None"
         table_rows.append(
-            f'    Locale {{ tag: "{tag}", language: "{language}", rtl: {rtl}, entries: &{constant} }},'
+            f'    Locale {{ tag: "{tag}", language: "{language}", rtl: {rtl}, '
+            f"label: {label}, entries: &{constant} }},"
         )
     header.append("/// Every locale tree on disk, by tag.")
     header.append("///")
@@ -435,7 +453,15 @@ def report(tag_sources, english_keys, counts_by_tag, refused) -> str:
     out.append(f"index bytes      {total_leaves * 2:,} (a u16 per entry)")
     if refused:
         out.append("")
-        out.append("arms a language's own rule can never select (dead in the reference too):")
+        # The category *set* rather than the integer rule: this catches an arm a
+        # language has no rule for at all, and it does not catch the two arms that
+        # belong to a language's *fractional* rule -- Czech `many` and Polish
+        # `other` -- because those categories are legitimately in the set. The
+        # integer-level version of this measurement is a test in `crate::locale`,
+        # which is where the rule lives, and the two belong together.
+        out.append(
+            "arms outside the language's CLDR category set (unselectable for every count):"
+        )
         for tag, dead in refused:
             out.append(f"  {tag:8} {', '.join(dead)}")
     return "\n".join(out) + "\n"

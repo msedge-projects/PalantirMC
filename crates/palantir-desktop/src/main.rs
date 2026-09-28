@@ -54,6 +54,15 @@ mod install;
 mod instances;
 mod java_runtime;
 mod launch;
+/// The language the interface is in: the tag, the table behind it, the fallback
+/// when the table has nothing to say, and the writing direction.
+///
+/// It is what makes [`text_gen`]'s `Key::message` read a language rather than
+/// always English, and it is where the CLDR plural rule lives -- the runtime half
+/// of the table `tools/gen_locale.py` compiles against. The choice is persisted by
+/// [`prefs`], which has carried a `locale` field since before there was a table
+/// for it to name.
+mod locale;
 /// The reference client's other 33 locale trees, compiled by
 /// `tools/gen_locale.py` into sparse `(index, template)` tables.
 ///

@@ -424,6 +424,33 @@ pub fn button<'a, Message: Clone + Hovered + 'a>(
     button_or(theme, key, label, kind, Some(on_press))
 }
 
+/// A button whose label is a string rather than a generated key.
+///
+/// `Button.vue` labels a control with a message, and every other button in this
+/// launcher has a [`Key`] behind its words. The language row is the one caller
+/// that cannot promise one: [`crate::locale::label`] resolves the reference's own
+/// `locale.<tag>` name for all 32 offered codes today, but the resolver is an
+/// `Option` because the list is the vendored tree's and a code upstream adds
+/// without a name must still draw. A missing name becomes its tag, and a tag is
+/// not a key -- so the label is a string here, which is the whole of why this
+/// constructor exists.
+pub fn button_text<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    label: &str,
+    kind: Kind,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let label = label.to_string();
+    button_face(theme, key, kind, Length::Shrink, Some(on_press), move |ink| {
+        text(label.clone())
+            .size(14.0)
+            .font(heading())
+            .style(iced::theme::Text::Color(ink))
+            .into()
+    })
+}
+
 /// A button that can be unusable, which is `on_press: None`.
 ///
 /// The reference has no disabled *button*: `Button.vue` always takes an action,

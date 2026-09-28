@@ -757,6 +757,13 @@ pub enum Message {
     Rail(Rail),
     /// A colour theme was chosen in Settings.
     ColorTheme(ColorTheme),
+    /// A language was chosen in Settings, by its BCP-47 tag.
+    ///
+    /// The tag rather than a type: the offer is the reference's own list of codes
+    /// ([`crate::locale::OFFERED`]) and the tables are keyed by them, so a tag is
+    /// what both sides already name a language with. An unknown one resolves to
+    /// English in [`crate::locale::set`] rather than being refused here.
+    Locale(&'static str),
     /// A control drawn by the shell itself published a pointer crossing.
     ///
     /// The rail has its own tween and its own message ([`Message::Hover`]); the
@@ -1001,6 +1008,29 @@ impl Shell {
     fn choose_theme(&mut self, choice: ColorTheme) {
         self.prefs.color_theme = choice.id().to_string();
         self.theme = generated_theme(choice, crate::theme::os_prefers_light());
+        if let Some(home) = &self.home {
+            let _ = crate::prefs::save(home, &self.prefs);
+        }
+    }
+
+    /// Take a language: the module, the setting, and the file.
+    ///
+    /// The same shape as [`Shell::choose_theme`], for the same reason: what is in
+    /// force changes now and the file is written so the next launch starts in it. A
+    /// language is *not* re-rendered from a stored table the way a theme is -- the
+    /// tables are all in the binary and [`crate::locale`] is what reads one -- so
+    /// there is nothing to recompute here, only to record and to redraw.
+    ///
+    /// English is stored as the empty string rather than as `"en-US"`, which is
+    /// [`crate::prefs`]'s own rule: a setting nobody changed is not written, and
+    /// "no language chosen" has to read as the default rather than as a choice.
+    fn choose_locale(&mut self, tag: &'static str) {
+        crate::locale::set(tag);
+        self.prefs.locale = if tag == crate::locale::ENGLISH {
+            None
+        } else {
+            Some(tag.to_string())
+        };
         if let Some(home) = &self.home {
             let _ = crate::prefs::save(home, &self.prefs);
         }
@@ -1302,6 +1332,10 @@ impl Shell {
             }
             Message::ColorTheme(choice) => {
                 self.choose_theme(choice);
+                None
+            }
+            Message::Locale(tag) => {
+                self.choose_locale(tag);
                 None
             }
             Message::InstallInto(instance) => {
@@ -4042,6 +4076,47 @@ impl Shell {
         grid.into()
     }
 
+    /// The languages Settings offers, by the reference's own list.
+    ///
+    /// Two readings of "the reference's own list" are in play and only one is
+    /// offered: [`crate::locale::OFFERED`] is its `LOCALES`, 32 codes, and
+    /// `ar-SA` -- which has a compiled table -- is not one of them, because the
+    /// reference comments it out as RTL. Each button is labelled with the
+    /// reference's own `locale.<tag>` name in the language in force, which is how
+    /// the app spells a language to somebody who does not read English.
+    ///
+    /// Four to a row and no search field: the reference's language *page* has a
+    /// search box, a category list and a site/app platform switch, and this is a
+    /// section of a modal, so what is here is the list of languages and nothing
+    /// about its chrome. That is named in the gate rather than implied.
+    fn language_options(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let current = crate::locale::tag();
+        let mut grid = column![].spacing(ROW_GAP);
+        for chunk in crate::locale::OFFERED.chunks(4) {
+            let mut row_of_languages = row![].spacing(ROW_GAP);
+            // Destructured to `&'static str` rather than left as `&&str`: the
+            // message carries a tag by value and a label is a `&str`.
+            for &tag in chunk {
+                let key = crate::ui::scoped("settings:locale", tag);
+                let kind = if tag == current {
+                    crate::ui::Kind::Colored
+                } else {
+                    crate::ui::Kind::Standard
+                };
+                row_of_languages = row_of_languages.push(crate::ui::button_text(
+                    theme,
+                    key,
+                    &crate::locale::label(tag),
+                    kind,
+                    Message::Locale(tag),
+                ));
+            }
+            grid = grid.push(row_of_languages);
+        }
+        grid.into()
+    }
+
     /// The dialog's frame: the same width, padding, surface and close button
     /// whichever modal it holds.
     fn dialog<'a>(
@@ -4090,6 +4165,35 @@ impl Shell {
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             )
             .push(self.theme_options());
+        // The language section. The reference keeps Appearance and Language as two
+        // settings *pages*; this launcher's Settings is a modal, so the second one
+        // is a section of the first rather than a page this shell does not have.
+        // What it takes from that page is the part that changes the interface --
+        // the list of languages -- and not its search field, its category list or
+        // its site/app switch, which are named in the gate.
+        body = body
+            .push(Space::with_height(8.0))
+            .push(
+                text(Key::SettingsLanguageTitle.message())
+                    .size(20.0)
+                    .font(heading())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            // The reference's own sentence about falling back, with the platform
+            // it names filled in from its own word for the app. It is the right
+            // warning here for a reason worth writing down: this launcher now
+            // ships every locale the reference has, and a language is still
+            // *partly* translated -- `ar-SA` carries 1,577 of 3,846 keys -- so
+            // the sentence is about this launcher's behaviour, not a leftover.
+            .push(
+                text(crate::text_gen::settings_language_warning(
+                    Key::SettingsLanguagePlatformApp.message(),
+                ))
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            )
+            .push(self.language_options());
         if let Some(warning) = &self.accounts_warning {
             // A warning rather than a failure: the launcher works, and what the
             // reader needs to know is that it does not know which account was
@@ -5404,6 +5508,13 @@ impl iced::Application for Shell {
         // folder and holds no instances.
         let paths = palantir_core::paths::PalantirPaths::detect();
         let prefs = crate::prefs::load(&home);
+        // The language goes in force before the first frame, for the same reason
+        // the theme is resolved here rather than when the pane is opened: a window
+        // that painted English and then became German would flash a language the
+        // reader did not choose. An empty tag is the setting nobody changed, and
+        // an unknown one is a file from a future build; `locale::set` answers both
+        // with English, so the fallback is in one place rather than two.
+        crate::locale::set(prefs.locale.as_deref().unwrap_or_default());
         let theme = generated_theme(prefs.theme(), crate::native::system_prefers_light());
         let settings = RailSettings {
             hide_sidebar: prefs.hide_right_sidebar,
@@ -6811,6 +6922,37 @@ mod tests {
         press(&mut shell, Message::ColorTheme(ColorTheme::Retro));
         assert_eq!(shell.theme, Gen::Retro);
         assert!(ColorTheme::options(false, shell.prefs.theme()).contains(&ColorTheme::Retro));
+        // A test has no home, so nothing was written to anyone's preferences.
+        assert!(shell.home.is_none());
+    }
+
+    #[test]
+    fn the_settings_modal_offers_the_languages_and_takes_one() {
+        // The settings row the locale module has been waiting for: the
+        // reference's own 32 codes, offered, taken, and recorded.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::Settings));
+        assert_eq!(crate::locale::OFFERED.len(), 32);
+        assert!(
+            !crate::locale::OFFERED.contains(&"ar-SA"),
+            "the reference comments ar-SA out as RTL, so this launcher does not offer it"
+        );
+        // Every option is a control the kit builds, which is what `render`
+        // proves: a button the kit cannot build is a modal that panics.
+        drop(shell.render());
+        press(&mut shell, Message::Locale("de-DE"));
+        assert_eq!(crate::locale::tag(), "de-DE");
+        assert_eq!(shell.prefs.locale.as_deref(), Some("de-DE"));
+        // The language is not a redraw of a table the way a theme is: it is in
+        // force the moment it is taken, and the next frame is the proof.
+        drop(shell.render());
+        assert_eq!(Key::SettingsLanguageTitle.message(), "Sprache");
+        // English is stored as the empty string rather than as "en-US", because
+        // the preferences file is the diff from the defaults.
+        press(&mut shell, Message::Locale(crate::locale::ENGLISH));
+        assert_eq!(crate::locale::tag(), crate::locale::ENGLISH);
+        assert_eq!(shell.prefs.locale, None);
+        assert_eq!(Key::SettingsLanguageTitle.message(), "Language");
         // A test has no home, so nothing was written to anyone's preferences.
         assert!(shell.home.is_none());
     }

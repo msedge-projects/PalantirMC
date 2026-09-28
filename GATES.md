@@ -4256,6 +4256,157 @@ $ curl -X POST -d 'grant_type=authorization_code&code=x&client_id=x' \
   been re-run since the G120 locales slice was rebased under it, so re-running
   `cargo test --workspace --all-targets --locked` and clippy on this tree is the
   first step of the next compiled slice, before its own numbers are trusted.
+- [x] G121: the language setting -- the module that reads a table, the fallback, the
+  direction, the Settings row, and a renderer that never touches English
+  CHECK: python tools/gen_text.py --check
+         python tools/gen_locale.py --check
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: both generators report byte-identical output
+          1004 passed; 0 failed; 17 ignored, between the seven suites
+          clippy exit 0 with 42 warnings -- G120's own count, unchanged, and none
+          of them in `locale.rs`, in `text.rs` or about `button_text`
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ python tools/gen_text.py --check
+text generation is byte-identical
+
+$ python tools/gen_locale.py --check
+locale generation is byte-identical
+
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    537 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    247 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 17 ignored  (palantir-net, tests/live.rs)
+
+$ cargo test -p palantir-desktop --locked --bin PalantirMC -- locale:: text::
+test locale::tests::a_chosen_tag_survives_and_names_its_own_table ... ok
+test locale::tests::a_fractional_category_is_not_produced_for_an_integer_count ... ok
+test locale::tests::english_is_the_default_and_an_unknown_tag_opens_as_it ... ok
+test locale::tests::a_translated_key_is_the_locale_s_own_sentence ... ok
+test locale::tests::a_key_a_locale_does_not_carry_falls_back_and_a_key_it_does_does_not ... ok
+test locale::tests::every_category_the_rule_produces_is_one_the_generator_compiles_against ... ok
+test locale::tests::the_language_in_force_is_the_one_the_rule_reads ... ok
+test locale::tests::a_language_is_labelled_with_the_reference_s_own_name ... ok
+test locale::tests::the_offer_is_the_reference_s_own_list_and_ar_sa_is_not_in_it ... ok
+test locale::tests::the_direction_is_the_reference_s_own_field ... ok
+test locale::tests::the_plural_rule_is_each_language_s_own ... ok
+test text::tests::a_key_a_locale_does_not_carry_renders_english ... ok
+test locale::tests::numbers_are_grouped_the_way_each_language_groups_them ... ok
+test text::tests::a_number_is_grouped_by_threes_from_the_right ... ok
+test text::tests::a_category_is_its_own_answer ... ok
+test text::tests::an_exact_arm_matches_the_number_and_nothing_else ... ok
+test text::tests::english_never_goes_through_the_locale_renderer ... ok
+test text::tests::a_tagged_message_splits_around_its_slot ... ok
+test text::tests::the_english_rule_is_one_for_one_and_other_for_everything_else ... ok
+test text::tests::the_two_renderings_differ_for_a_number_and_agree_for_a_category ... ok
+test text::tests::a_category_the_caller_chose_is_not_pluralized_again ... ok
+test text::tests::a_locale_s_own_plural_arms_are_the_ones_that_render ... ok
+test text::tests::every_offered_language_renders_every_shape_without_a_brace_left_in_it ... ok
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 514 filtered out; finished in 5.23s
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+$ echo $?
+0
+$ grep -c '^warning: ' .scratch/g121-clippy.log
+42
+$ grep -c 'locale.rs\|text.rs\|button_text' .scratch/g121-clippy.log
+0
+```
+
+  The eighteen tests this slice adds are twelve in `locale`, five in `text` and one
+  in `shell` -- the Settings row's own, which the filter above does not name. On this
+  slice's own base the suite went from G120's 970 to 988 and the desktop binary from
+  507 to 525. The transcript above is the **merged** tree instead, because the rebase
+  put the profile page, the session measurement and the live check under this slice:
+  their 16 tests -- twelve in the desktop binary and four in `palantir-net` -- are
+  the difference, 988 + 16 = 1004, and 525 + 12 = 537.
+
+  **The claim this slice is built on.** English is **not** rendered through the new
+  renderer. `text::render` returns `None` whenever the language in force is English
+  or the locale does not carry the key, and every generated helper runs the code
+  the generator wrote when it does. So the 3,846 sentences this launcher draws today
+  are the same code paths they were before this slice, and a second language is an
+  addition rather than a rewrite of what an English reader sees. A test holds the
+  hardest version of that: with English in force, `render` is `None` even when given
+  arguments.
+
+  **What is in the module.** `locale.rs` is the tag, the sparse-table lookup, the
+  fallback, the direction of the table in force, the reference's own 32-code offer,
+  and the CLDR plural rule -- the runtime half of the table `tools/gen_locale.py`
+  compiles against. The choice is ambient and **per thread**: iced runs
+  `update`/`view` on the thread that started the `Application`, so one window has
+  one value, and the reason for the thread-local is the test suite rather than the
+  window -- a process-wide value would let one test's `set("de-DE")` put German in
+  force for a render test running beside it, and a suite that fails depending on
+  how a runner scheduled two threads is worse than no test. `prefs.rs` already had
+  `locale: Option<String>` -- it was declared before there was a table to name -- so
+  this slice reads and writes a field that existed; English is stored as the empty
+  string because the preferences file is the diff from the defaults.
+
+  **The renderer, and the two things it does not do.** `text::render` walks a
+  locale's template in one recursive pass -- no AST, because an arm's body is a
+  slice of the same string -- and fills in `{name}`, `{name, number}`, plural arms
+  with `#`, and selects, with each argument carried by *kind* rather than as a
+  string (a locale may write `{count, number}` where English writes `{count}`). Two
+  limits are real and are recorded rather than approximated:
+
+  1. **Number grouping is each language's own; digit shapes are not.** A `#` or a
+     `{count, number}` groups with the language's separator -- `1.234` in German
+     and Portuguese, a no-break space in Russian, Polish and French, a comma in
+     English and the CJK languages -- but every digit is a Western one. The
+     reference's `Intl.NumberFormat('ar-SA')` writes 1,234 as `١٬٢٣٤`, and this
+     renderer writes `1,234`, so an Arabic sentence here carries Arabic words with
+     Western numerals. The reason is proportion, not impossibility: 32 messages
+     carry a typed number and the difference only shows at four digits and above,
+     and a digit-shape table is one nobody in this slice measured.
+  2. **French's separator is the ordinary no-break space.** Modern CLDR uses a
+     *narrow* one for French, so a grouped French number here may differ from a
+     browser's by that one code point.
+
+  **One correction, and one refinement of G120.** The correction: this slice first
+  recorded that the English locale names only 31 of the 32 offered codes and that
+  `es-419` was the one it did not. That was wrong, and it was a grep pattern rather
+  than the data -- `"locale\.[a-zA-Z-]+"` does not match a digit, so `es-419` was
+  invisible to the search and visible to the compiler. All 32 `locale.*` names
+  exist, `label` resolves every offered code, and the `Option` in the generated
+  table is a guard for a future code rather than a case today. The refinement:
+  `gen_locale.py --report` lists the arms a language's *category set* does not
+  contain, which cannot see that Czech `many` and Polish `other` belong to those
+  languages' **fractional** rules (`v != 0`). Every count this launcher passes to a
+  rule is an integer, so those two arms are unreachable here -- and unreachable in
+  the reference for the same reason, since `Intl.PluralRules` is handed the same
+  integers. The report's own label was reworded to say what it computes, and the
+  integer-level version is a test in `locale`.
+
+  **What is deliberately not built.** The reference's language *page* has a search
+  field, a category list and a site/app platform switch; this launcher's Settings is
+  a modal, so what it offers is the list of languages and the reference's own
+  warning sentence, and not that chrome. And nothing lays out from the direction
+  flag yet: `Direction` and `is_rtl` are `#[allow(dead_code)]` with the reason at
+  the definition, because G128 is what mirrors the shell on them.
+
+  **One thing two rebases did to a document.** This slice's diff to `NEXT_STEPS.md`
+  is 977 lines and one paragraph of it is new content. That file is stored with LF
+  here -- LF at `a4b5725`, and this clone checks out CRLF because `core.autocrlf` is
+  on -- but the commits landed under this slice from `1bc507e` to `568be5d` stored it
+  with CRLF, one of them with a stray `\r` inside a sentence (`is\r\r\n  still
+  unclaimed`). A conflict on every line of a document is an ending conflict rather
+  than a content one, so each was resolved as a three-way merge against the real base
+  with the three copies normalised to LF first; the content merged cleanly both
+  times. What the diff shows is that paragraph and the re-ending to LF, which is the
+  convention `.gitattributes` states for this tree.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_PLACEHOLDER`,
+  is run `RUN_ID_PLACEHOLDER`, which is the same block as the nineteen before it --
+  zero steps and `The job was not started because recent account payments have
+  failed or your spending limit needs to be increased`, with `Live services` and
+  `Build exe` skipped rather than scheduled.
 
 - [x] G111: what the api-client says Archon and a node are, read from upstream, the
   request-call count the registry holds, and the correction it makes to G110

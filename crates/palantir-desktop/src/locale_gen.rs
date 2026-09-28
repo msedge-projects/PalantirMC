@@ -44,6 +44,17 @@ pub struct Locale {
     pub language: &'static str,
     /// Whether the reference declares this locale `dir: 'rtl'`.
     pub rtl: bool,
+    /// The position in [`crate::text_gen::ALL`] of the reference's own name
+    /// for this language (`locale.<tag>`).
+    ///
+    /// Resolved here rather than at runtime because the lookup is a scan of
+    /// 3,846 keys and the label is drawn for every offered language at once.
+    /// It resolves for every one of the 32 offered codes today -- the English
+    /// locale carries all 32 `locale.*` names -- so `None` is a guard for a
+    /// tree that grows a code upstream has not named yet, and a name that is
+    /// missing is answered with the tag rather than with one this launcher
+    /// invents.
+    pub label: Option<u16>,
     /// `(position in text_gen::ALL, this locale's template)`, sorted by position.
     pub entries: &'static [(u16, &'static str)],
 }
@@ -54,39 +65,39 @@ pub struct Locale {
 /// reference's: `LOCALES`' own order is [`crate::locale::OFFERED`], and the two
 /// are different lists for a reason -- this one is data, that one is the offer.
 pub static ALL: [Locale; 33] = [
-    Locale { tag: "ar-SA", language: "ar", rtl: true, entries: &AR_SA },
-    Locale { tag: "cs-CZ", language: "cs", rtl: false, entries: &CS_CZ },
-    Locale { tag: "da-DK", language: "da", rtl: false, entries: &DA_DK },
-    Locale { tag: "de-CH", language: "de", rtl: false, entries: &DE_CH },
-    Locale { tag: "de-DE", language: "de", rtl: false, entries: &DE_DE },
-    Locale { tag: "en-US", language: "en", rtl: false, entries: &EN_US },
-    Locale { tag: "es-419", language: "es", rtl: false, entries: &ES_419 },
-    Locale { tag: "es-ES", language: "es", rtl: false, entries: &ES_ES },
-    Locale { tag: "fi-FI", language: "fi", rtl: false, entries: &FI_FI },
-    Locale { tag: "fil-PH", language: "fil", rtl: false, entries: &FIL_PH },
-    Locale { tag: "fr-FR", language: "fr", rtl: false, entries: &FR_FR },
-    Locale { tag: "he-IL", language: "he", rtl: true, entries: &HE_IL },
-    Locale { tag: "hu-HU", language: "hu", rtl: false, entries: &HU_HU },
-    Locale { tag: "id-ID", language: "id", rtl: false, entries: &ID_ID },
-    Locale { tag: "it-IT", language: "it", rtl: false, entries: &IT_IT },
-    Locale { tag: "ja-JP", language: "ja", rtl: false, entries: &JA_JP },
-    Locale { tag: "ko-KR", language: "ko", rtl: false, entries: &KO_KR },
-    Locale { tag: "ms-MY", language: "ms", rtl: false, entries: &MS_MY },
-    Locale { tag: "nl-NL", language: "nl", rtl: false, entries: &NL_NL },
-    Locale { tag: "no-NO", language: "no", rtl: false, entries: &NO_NO },
-    Locale { tag: "pl-PL", language: "pl", rtl: false, entries: &PL_PL },
-    Locale { tag: "pt-BR", language: "pt", rtl: false, entries: &PT_BR },
-    Locale { tag: "pt-PT", language: "pt", rtl: false, entries: &PT_PT },
-    Locale { tag: "ro-RO", language: "ro", rtl: false, entries: &RO_RO },
-    Locale { tag: "ru-RU", language: "ru", rtl: false, entries: &RU_RU },
-    Locale { tag: "sr-CS", language: "sr", rtl: false, entries: &SR_CS },
-    Locale { tag: "sv-SE", language: "sv", rtl: false, entries: &SV_SE },
-    Locale { tag: "th-TH", language: "th", rtl: false, entries: &TH_TH },
-    Locale { tag: "tr-TR", language: "tr", rtl: false, entries: &TR_TR },
-    Locale { tag: "uk-UA", language: "uk", rtl: false, entries: &UK_UA },
-    Locale { tag: "vi-VN", language: "vi", rtl: false, entries: &VI_VN },
-    Locale { tag: "zh-CN", language: "zh", rtl: false, entries: &ZH_CN },
-    Locale { tag: "zh-TW", language: "zh", rtl: false, entries: &ZH_TW },
+    Locale { tag: "ar-SA", language: "ar", rtl: true, label: None, entries: &AR_SA },
+    Locale { tag: "cs-CZ", language: "cs", rtl: false, label: Some(2411), entries: &CS_CZ },
+    Locale { tag: "da-DK", language: "da", rtl: false, label: Some(2412), entries: &DA_DK },
+    Locale { tag: "de-CH", language: "de", rtl: false, label: Some(2413), entries: &DE_CH },
+    Locale { tag: "de-DE", language: "de", rtl: false, label: Some(2414), entries: &DE_DE },
+    Locale { tag: "en-US", language: "en", rtl: false, label: Some(2415), entries: &EN_US },
+    Locale { tag: "es-419", language: "es", rtl: false, label: Some(2416), entries: &ES_419 },
+    Locale { tag: "es-ES", language: "es", rtl: false, label: Some(2417), entries: &ES_ES },
+    Locale { tag: "fi-FI", language: "fi", rtl: false, label: Some(2418), entries: &FI_FI },
+    Locale { tag: "fil-PH", language: "fil", rtl: false, label: Some(2419), entries: &FIL_PH },
+    Locale { tag: "fr-FR", language: "fr", rtl: false, label: Some(2420), entries: &FR_FR },
+    Locale { tag: "he-IL", language: "he", rtl: true, label: Some(2421), entries: &HE_IL },
+    Locale { tag: "hu-HU", language: "hu", rtl: false, label: Some(2422), entries: &HU_HU },
+    Locale { tag: "id-ID", language: "id", rtl: false, label: Some(2423), entries: &ID_ID },
+    Locale { tag: "it-IT", language: "it", rtl: false, label: Some(2424), entries: &IT_IT },
+    Locale { tag: "ja-JP", language: "ja", rtl: false, label: Some(2425), entries: &JA_JP },
+    Locale { tag: "ko-KR", language: "ko", rtl: false, label: Some(2426), entries: &KO_KR },
+    Locale { tag: "ms-MY", language: "ms", rtl: false, label: Some(2427), entries: &MS_MY },
+    Locale { tag: "nl-NL", language: "nl", rtl: false, label: Some(2428), entries: &NL_NL },
+    Locale { tag: "no-NO", language: "no", rtl: false, label: Some(2429), entries: &NO_NO },
+    Locale { tag: "pl-PL", language: "pl", rtl: false, label: Some(2430), entries: &PL_PL },
+    Locale { tag: "pt-BR", language: "pt", rtl: false, label: Some(2431), entries: &PT_BR },
+    Locale { tag: "pt-PT", language: "pt", rtl: false, label: Some(2432), entries: &PT_PT },
+    Locale { tag: "ro-RO", language: "ro", rtl: false, label: Some(2433), entries: &RO_RO },
+    Locale { tag: "ru-RU", language: "ru", rtl: false, label: Some(2434), entries: &RU_RU },
+    Locale { tag: "sr-CS", language: "sr", rtl: false, label: Some(2435), entries: &SR_CS },
+    Locale { tag: "sv-SE", language: "sv", rtl: false, label: Some(2436), entries: &SV_SE },
+    Locale { tag: "th-TH", language: "th", rtl: false, label: Some(2437), entries: &TH_TH },
+    Locale { tag: "tr-TR", language: "tr", rtl: false, label: Some(2438), entries: &TR_TR },
+    Locale { tag: "uk-UA", language: "uk", rtl: false, label: Some(2439), entries: &UK_UA },
+    Locale { tag: "vi-VN", language: "vi", rtl: false, label: Some(2440), entries: &VI_VN },
+    Locale { tag: "zh-CN", language: "zh", rtl: false, label: Some(2441), entries: &ZH_CN },
+    Locale { tag: "zh-TW", language: "zh", rtl: false, label: Some(2442), entries: &ZH_TW },
 ];
 
 /// The locale a tag names, if this build has one.

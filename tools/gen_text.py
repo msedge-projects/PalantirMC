@@ -578,12 +578,36 @@ def emit_helper(key: str, template: str, nodes: list, counts: Counts) -> str:
         "/// ```text",
         f"/// {template}",
         "/// ```",
+        "///",
+        "/// The language in force is read first, when its table carries this key and its",
+        "/// template is one [`crate::text`] can fill in. What follows is English, which is",
+        "/// also what runs for English itself.",
         f"pub fn {function_name(key)}{generics}({parameters}) -> String {{",
     ]
     for name, p in uses.items():
         if p.kind == "plural":
             binding = argument(name)
             lines.append(f"    let {binding} = {binding}.into();")
+    # The locale's own sentence, before the English one. Each argument is handed
+    # over by *kind* rather than as a string, because a locale may use it
+    # differently from English -- `pt-BR` writes `{count, number}` where English
+    # writes `{count}` -- and the renderer has to know which it is.
+    arguments = []
+    for name, p in uses.items():
+        binding = argument(name)
+        if p.kind == "plural":
+            arguments.append(f'("{name}", text::Value::plural({binding}))')
+        elif p.kind == "number":
+            arguments.append(f'("{name}", text::Value::number({binding}))')
+        else:
+            arguments.append(f'("{name}", text::Value::text({binding}))')
+    if arguments:
+        lines.append("    if let Some(localized) = text::render(")
+        lines.append(f"        Key::{type_name(key)},")
+        lines.append(f"        &[{', '.join(arguments)}],")
+        lines.append("    ) {")
+        lines.append("        return localized;")
+        lines.append("    }")
     lines.append("    let mut out = String::new();")
     emit_nodes(nodes, uses, lines, "    ")
     lines.append("    out")
@@ -725,8 +749,15 @@ def emit(messages: dict, counts: Counts) -> str:
     lines.append("    /// For a string with ICU markers this is the *template*, which is what the")
     lines.append("    /// locale holds and what the helper beside this table fills in. Both are")
     lines.append("    /// generated from the same leaf, and a test asserts they are.")
+    lines.append("    ///")
+    lines.append("    /// The language in force wins when it has this key, which is the setting")
+    lines.append("    /// rather than the table: `tools/gen_locale.py` compiles the other locales")
+    lines.append("    /// and [`crate::locale`] decides which one is read. English is what this")
+    lines.append("    /// returns for English itself and for any key a locale falls back on, so a")
+    lines.append("    /// caller that draws a label needs no second code path.")
     lines.append("    pub fn message(self) -> &'static str {")
-    lines.append("        MESSAGES[self as usize]")
+    lines.append("        let index = self as usize;")
+    lines.append("        crate::locale::translated(index).unwrap_or(MESSAGES[index])")
     lines.append("    }")
     lines.append("}")
     lines.append("")

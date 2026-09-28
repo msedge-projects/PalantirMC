@@ -69,10 +69,10 @@ The workspace is now three crates plus the shell:
 | `palantir-loader` | Forge, Fabric, NeoForge, Quilt, and modpack archives. |
 | `palantir-desktop` | The window: shell, pages, engine glue, platform code, and `model.rs` -- the view-model that used to be `palantir-gui`, moved here with the crate retired. |
 
-Backend suites as run against this tree: `palantir-core` 168 plus 8,
-`palantir-loader` 31, `palantir-net` 213, with 13 live tests ignored by design --
-879 in the workspace, of which the desktop crate's 455 plus its 4 native tests
-are 459. Which binary each number belongs to is written out in
+Backend suites as run against this tree: `palantir-core` 177 plus 8,
+`palantir-loader` 31, `palantir-net` 247, with 17 live tests ignored by design --
+1004 in the workspace, of which the desktop crate's 537 plus its 4 native tests
+are 541. Which binary each number belongs to is written out in
 [`GATES.md`](GATES.md), because a bare list of numbers is how the earlier version
 of this paragraph managed to mislabel three of them. The same numbers are on a
 page as well as in a table: `python tools/progress.py --dashboard` writes the
@@ -603,7 +603,7 @@ What stage 3 does **not** have yet, named rather than implied:
   fourth host for a hosted server's files, and exactly one Archon route that answers a
   stranger (`/v1/regions`). So the Servers item's page data is still behind a token,
   but its first step is no longer a guess: the contract is measured, and reading it
-  needed no account. One measurement from G105 is
+  needed no account. One measurement from G105 is
   still unclaimed and stays named here so it is not lost: `helpers/skins.ts`'
   `determineModelType` decides slim from classic by reading one 2x12 column of the
   arm at (54, 20) and asking whether any pixel in it is opaque -- the exact
@@ -681,6 +681,34 @@ so the language setting G121 adds offers the reference's 32 while the table for 
 contain 28 invisible characters (`U+200B`, `U+200E`, `U+200F`, `U+00AD`), which
 `clippy::invisible_characters` denies; the shared `escape` now writes them as
 `\u{...}`, a faithful round trip that leaves English byte-identical.
+
+**The language setting is real now** (G121): the tables G120 compiled are read by
+`locale.rs`, and the choice is offered in Settings and remembered. `locale` is the
+runtime -- the tag, the table lookup, the fallback, the direction and the CLDR
+plural rule -- and the choice is ambient but **per thread**: iced runs an
+`Application`'s `update` and `view` on the thread that started it, so one window
+sees one value, and a suite whose tests share a process does not have one test's
+German in force for the render test beside it. A key a locale does not carry reads
+English, which is the reference's own `fallbackLocale: 'en-US'`; `lookup` returns
+`None` rather than English's string so that the *English path is the code the
+generator wrote*, not a second renderer that aims to agree with it, and that is
+the property the gate holds hardest. `text.rs` gained the other half: an ICU
+walker that fills a locale's template in -- `{name}`, `{name, number}`, plural arms
+with `#`, and selects -- with each generated helper trying it first and falling
+back when it declines. `prefs.rs` had carried a `locale: Option<String>` since
+before there was a table for it to name, so persistence needed nothing new; the
+Settings modal gained the reference's own language section, labelled with the
+reference's 32 `locale.<tag>` names (all 32 exist, including `es-419` -- an earlier
+note in this slice said 31, which was a grep pattern that did not match digits).
+Two limits are written into the code rather than implied: the renderer groups
+numbers with each language's own separator (`1.234` in German, a non-breaking
+space in Russian, the narrow one French actually wants is the one case that may
+differ by a code point), and it does **not** substitute digit shapes, so Arabic
+sentences carry Western numerals where the reference's `Intl.NumberFormat` uses
+Arabic-Indic ones. G120's own report is refined by one of the new tests too: its
+dead-arm list compares against a language's CLDR *category set*, which cannot see
+that Czech `many` and Polish `other` are fractional arms unreachable for the
+integer counts this launcher ever passes.
 
 Two gaps that were on this list are closed and stay named here so the next reader
 knows when: the controls tween their hover off the same clock the rail's plate
