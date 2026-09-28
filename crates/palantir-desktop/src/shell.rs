@@ -3215,6 +3215,42 @@ impl Shell {
         .into()
     }
 
+    /// Whether Home is drawing the reference's welcome screen.
+    ///
+    /// The first run's page, and the only screen this shell listens for the
+    /// quick-create key on. `Index.vue`'s gate is `isReady && !hasCreatedInstance`
+    /// and this is the same reading as [`Self::keys`]'s, in one place so that the
+    /// hint under the button and the key it names cannot come apart: Home, no
+    /// dialog over it, and nothing to play yet.
+    fn welcome_shown(&self) -> bool {
+        self.address.route == route::Route::Home
+            && self.modal.is_none()
+            && pages::home::first_run(self.store.instances())
+    }
+
+    /// The welcome screen's quick-create key: `n`.
+    ///
+    /// Built only while that screen is up, which is how the reference's
+    /// `event.target` guard is kept: its listener is a window-wide `keydown` and
+    /// stands down when the event came from an `INPUT`, a `TEXTAREA`, a `SELECT`
+    /// or anything editable. iced hands a subscription the key and the modifiers
+    /// and nothing about who had the focus, so the guard here is the screen
+    /// instead -- the one screen in this shell with no text field on it -- plus
+    /// [`Self::welcome_shown`]'s "no dialog", which is where every text field this
+    /// shell can draw over Home lives.
+    ///
+    /// [`iced::keyboard::on_key_press`] takes a function pointer rather than a
+    /// closure, so the guard cannot live inside it: it decides whether there is a
+    /// subscription at all.
+    fn quick_create(&self) -> Subscription<Message> {
+        if !self.welcome_shown() {
+            return Subscription::none();
+        }
+        iced::keyboard::on_key_press(|key, modifiers| {
+            quick_create_press(&key, modifiers).then_some(Message::OpenCreate)
+        })
+    }
+
     /// Whether this launcher holds an account a launch would sign in as.
     ///
     /// The checklist's `has_logged_into_minecraft`, and the *Playing as*
@@ -4886,6 +4922,24 @@ const MAX_NEWS: usize = 4;
 /// The link note's dismiss button.
 const LINK_NOTE_DISMISS: &str = "shell:link-note:dismiss";
 
+/// Whether a key press is the welcome screen's quick-create key.
+///
+/// `WelcomeScreen.vue`'s own guard, in its own words: `event.key.toLowerCase()
+/// !== 'n'` returns early, as do `metaKey`, `ctrlKey` and `altKey`. Shift is
+/// deliberately *not* one of them -- the reference lower-cases the key before
+/// comparing, so `Shift+N` opens the creation flow there too, and the comparison
+/// here is case-insensitive for the same reason. The two guards that are not here
+/// are the event's target and `navigator.onLine`: the first is replaced by the
+/// subscription existing only while the screen with no text field is up, and the
+/// second by nothing at all, because this launcher has no online signal anywhere
+/// and an offline reader meets the flow's own failure where the flow asks.
+fn quick_create_press(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> bool {
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return false;
+    }
+    matches!(key, iced::keyboard::Key::Character(text) if text.eq_ignore_ascii_case("n"))
+}
+
 /// A crossing published by one of the card's own surfaces.
 ///
 /// The kit's controls publish [`Message::Control`] with no hover end, and the
@@ -5312,7 +5366,13 @@ impl iced::Application for Shell {
         // what keeps an idle window -- and a launcher with nothing running -- from
         // waking anything up.
         let frames = if self.animating() { self.frames() } else { Subscription::none() };
-        Subscription::batch([frames, self.launching(), window_state(), self.capture()])
+        Subscription::batch([
+            frames,
+            self.launching(),
+            self.quick_create(),
+            window_state(),
+            self.capture(),
+        ])
     }
 }
 
@@ -6768,6 +6828,44 @@ mod tests {
         press(&mut shell, Message::SelectAccount("nobody".into()));
         press(&mut shell, Message::RemoveAccount("nobody".into()));
         assert!(shell.accounts_note.is_none());
+    }
+
+    #[test]
+    fn the_quick_create_key_is_the_reference_s_and_only_on_its_own_screen() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+        let lower = Key::Character("n".into());
+        assert!(quick_create_press(&lower, Modifiers::default()));
+        // Shift is not one of the reference's guards: it compares the lower-cased
+        // key, so `Shift+N` opens the creation flow there too.
+        assert!(quick_create_press(&Key::Character("N".into()), Modifiers::SHIFT));
+        for modifiers in [Modifiers::CTRL, Modifiers::ALT, Modifiers::LOGO] {
+            assert!(!quick_create_press(&lower, modifiers), "{modifiers:?}");
+        }
+        // Anything that is not the letter, including a named key that happens to
+        // start with it.
+        assert!(!quick_create_press(&Key::Character("m".into()), Modifiers::default()));
+        assert!(!quick_create_press(&Key::Character("".into()), Modifiers::default()));
+        assert!(!quick_create_press(&Key::Named(Named::Enter), Modifiers::default()));
+
+        // And the screen's own gate: Home with nothing to play and no dialog over
+        // it. The subscription is built from this, so a key that arrives on any
+        // other page never reaches the guard above.
+        let mut shell = shell_with_home("welcome-keys");
+        assert!(shell.welcome_shown(), "a first run on Home");
+        // The creation dialog is what the key opens, and while it is up the key is
+        // no longer listened for -- which is also what keeps its own name field
+        // from re-opening it.
+        press(&mut shell, Message::OpenCreate);
+        assert_eq!(shell.modal, Some(Modal::Create));
+        assert!(!shell.welcome_shown());
+        press(&mut shell, Message::CloseModal);
+        assert!(shell.welcome_shown());
+        // A launcher with an instance is not on the welcome screen, and neither is
+        // one that is not on Home.
+        assert!(!shell_with_instance("welcome-keys-instance").welcome_shown());
+        let mut elsewhere = shell_with_home("welcome-keys-route");
+        elsewhere.address = Address::at(route::Route::Skins);
+        assert!(!elsewhere.welcome_shown());
     }
 
     #[test]

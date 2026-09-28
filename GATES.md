@@ -3027,6 +3027,103 @@ right, so the arm is what changed rather than the count.
   increased`, with `Live services` and `Build exe` skipped rather than scheduled.
   The transcripts above are this machine's, run with the flags `ci.yml` uses.
 
+- [x] G103: Home draws the reference's welcome screen as the whole page
+  CHECK: cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: test result: ok. 939 passed; 0 failed; 16 ignored, between the seven suites
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    492 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop, tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    227 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 16 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0; 42 warnings between the crates, the same count and the same list as the
+slice before -- `palantir-core` (lib) 9, its `compat` test 1 and its lib test 10;
+`palantir-net` 1 and 1 duplicate; `palantir-desktop` (bin) 3 and (bin test) 21 --
+none of them in a line this slice added, and
+`grep -cE "never (used|read|constructed)"` is 0. The list *is* the slice
+before's: `grep -E "^warning: "` over this run's clippy log and over G102's,
+sorted and diffed, are the same 42 lines apart from which compilation unit the
+one duplicate is attributed to, which moves between runs.
+```
+
+  The bin suite is one test shorter than G102's 493 because the commit before this
+  one deleted `launch.rs`'s `#[cfg(test)]` `open_url` and the one test that called
+  it: that test really spawned `cmd /C start` with `not-a-url`, and every run of
+  the suite popped Windows' "cannot find 'not-a-url'" dialog over the desktop.
+
+  Home's first state, and it is the whole page rather than a card in an empty
+  library. `Index.vue` draws `WelcomeScreen` `v-if="isReady &&
+  !hasCreatedInstance"` and the library `v-else-if="isReady"`; what Home drew
+  before this was the same component's copy inside a card, in the middle of a page
+  that still had a toolbar and a search field over it. The page is now the
+  reference's own arrangement -- `flex flex-col min-h-full px-6 pb-6 pt-16`, a
+  hero centred in what is left and the import block at the foot, the hero's icon
+  at `size-[6.25rem]`, the title at `text-2xl font-semibold` (which is
+  `page::title`'s own size) over the description at `text-base`, and a `w-72`
+  column of the create button and the hint -- and the gate is one place rather
+  than two: `Load::Empty` and `Ready(vec![])` are the same answer, because the
+  store's own `reload` says an empty library is `Empty`. That one place is
+  `pages::home::first_run`, and the shell's subscription reads it too, so the page
+  the reader is on and the key that is listened for cannot come apart.
+
+  **Three departures, each written down where it is drawn.** The hero's icon is
+  this launcher's own art: the reference's is
+  `assets/welcome/modrinth-social-icon.png` and the vendored `assets/` holds
+  `branding/` and `external/` and no `welcome/`, so the picture is not in this tree
+  and the logo the rail already draws is drawn here rather than a borrowed one
+  standing in for it. The **dot pattern** behind the hero is not drawn: it is an
+  absolutely-positioned decorative block the reference puts *behind* the icon and
+  the title, and iced 0.12 has no overlay widget -- a `Column` places its children
+  one after another -- so a pattern here could only be above or below the hero.
+  And **neither button is ever disabled**: the reference draws both
+  `:disabled="offline"` from `navigator.onLine`, and this launcher has no online
+  signal anywhere; what an offline reader meets instead is the flow's own failure,
+  said where the flow asks for something over the network.
+
+  **A bug the layout work surfaced.** The hint is
+  `Press <shortcut>N</shortcut> to quick create an instance`, the generated table
+  keeps that markup verbatim -- it has to, the tag's *name* is the slot a component
+  fills -- and this page drew the string whole, so the first reader of the first
+  run saw the tags. It is split by G102's `text::tagged` now and the slot is the
+  reference's own chip: `h-5 min-w-5 rounded-md border-surface-5 bg-button-bg px-1
+  text-xs`, the radius from the theme's `--radius-md` (0.75rem, which is what
+  Tailwind's `rounded-md` resolves to in the reference's own sheet).
+
+  **And the key it names is real now.** `WelcomeScreen.vue` listens on the window
+  for `n`: lower-cased before comparing, with no `metaKey`, `ctrlKey` or `altKey`
+  -- Shift is deliberately not one of its guards, so `Shift+N` opens the creation
+  flow there too -- while standing down for an event that came from an input and
+  for `navigator.onLine` being false. iced 0.12's
+  `iced::keyboard::on_key_press` hands a subscription the key and the modifiers
+  and nothing about who had the focus, so the focus guard is the *screen* instead:
+  the subscription exists only while the welcome screen is up, which is the one
+  screen in this shell with no text field on it, and only while no dialog is over
+  it -- which is also where every text field this shell can draw over Home lives.
+  That is also what makes the repeat harmless: a held key's first press opens the
+  dialog, and the subscription is gone before the second arrives.
+
+  Three tests, and one of them is the guard itself: the key table (`n` and `N`,
+  the three modifiers that stop it, and keys that are not the letter), the screen's
+  own gate read through `view` on a scratch root that answers `Empty`, and the
+  hint's split. The others are the page's existing gates, which now run over the
+  hero in all four themes.
+
+  The runner could not be the receipt: this slice's push, `PUSH_SHA`, is run
+  `RUN_ID` -- the same block as the thirteen before it, `Lint` and `Test
+  workspace` failing in a few seconds with zero steps and `The job was not started
+  because recent account payments have failed or your spending limit needs to be
+  increased`, its dependants skipped rather than scheduled. The transcripts above
+  are this machine's, run with the flags `ci.yml` uses.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

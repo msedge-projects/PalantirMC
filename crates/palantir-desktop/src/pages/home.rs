@@ -26,8 +26,8 @@
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
-use iced::widget::{column, mouse_area, row, text, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{column, container, image, mouse_area, row, text, Space};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Theme};
 
 use crate::icon;
 use crate::icons_gen::Glyph;
@@ -36,7 +36,7 @@ use crate::page::{self, Load, GAP, GRID_GAP, ROW_GAP};
 use crate::store::Store;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
-use crate::theme_gen::{self, Theme as Gen};
+use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 // `Hovered` is in scope for the instance cards below: a card names its own
 // crossing rather than going through one of the kit's controls.
 use crate::ui::{self, Hovered};
@@ -214,6 +214,22 @@ impl State {
     }
 }
 
+/// `Index.vue`'s own gate, in one place: `v-if="isReady && !hasCreatedInstance"`.
+///
+/// [`Load::Empty`] is the store saying "read, and there is nothing to play", and
+/// `Ready` with an empty list is the same answer from a library built by hand:
+/// both are the first run. The shell reads this same function for the quick-create
+/// key, so the page drawn and the key listened for cannot come apart. Every other
+/// state is not the first run: `Idle` and `Loading` are a page that has not
+/// answered yet, and `Failed` is the not-implemented page's own.
+pub(crate) fn first_run(instances: &Load<Vec<InstanceCard>>) -> bool {
+    match instances {
+        Load::Empty => true,
+        Load::Ready(cards) => cards.is_empty(),
+        _ => false,
+    }
+}
+
 /// Draw Home.
 pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
     let mut blocks: Vec<Element<'a, Message>> = Vec::new();
@@ -228,13 +244,13 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             Message::DismissNotice,
         ));
     }
+    if first_run(store.instances()) {
+        // The welcome screen's two buttons are the only way out of it, and there
+        // is nothing else on the page: no toolbar, no search, nothing to sort.
+        blocks.push(welcome(theme));
+        return page::body(blocks, GAP);
+    }
     match store.instances() {
-        // The first run: the reference's welcome screen, whose two buttons are the
-        // only way out of it.
-        Load::Empty => {
-            blocks.push(welcome(theme));
-            page::body(blocks, GAP)
-        }
         Load::Ready(cards) => {
             let visible = state.visible(cards);
             blocks.push(header(theme, state));
@@ -286,28 +302,175 @@ fn header<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .into()
 }
 
-/// The reference's welcome screen.
+/// The welcome screen's own numbers, all out of `WelcomeScreen.vue`: the hero's
+/// icon at `size-[6.25rem]`, the column under it at `w-72`, `gap-6` between the
+/// hero's parts and `gap-4` inside the column, `gap-2` in the title's own block,
+/// the shortcut chip's `h-5`, and the page's own `px-6 pb-6 pt-16`.
+const WELCOME_ART: f32 = 100.0;
+const WELCOME_COLUMN: f32 = 288.0;
+const HERO_GAP: f32 = 24.0;
+const WELCOME_GAP: f32 = 16.0;
+const TITLE_GAP: f32 = 8.0;
+const WELCOME_TOP: f32 = 64.0;
+const WELCOME_SIDE: f32 = 24.0;
+const SHORTCUT_HEIGHT: f32 = 20.0;
+
+/// The reference's welcome screen: the whole page on a first run, not a card in
+/// the middle of an empty library.
+///
+/// `WelcomeScreen.vue`, drawn by `pages/Index.vue` as
+/// `v-if="isReady && !hasCreatedInstance"`: `flex flex-col min-h-full px-6 pb-6
+/// pt-16`, a hero centred in what is left and a foot block under it. The hero is
+/// the icon, a `gap-2` column of the title (`text-2xl font-semibold`, which is
+/// [`page::title`]'s own size) and the description at `text-base`, and then a
+/// `w-72` column of the create button and the quick-create hint. The foot is
+/// *Escaping another launcher?* over the import button.
+///
+/// Three things here are this launcher's rather than the reference's, each
+/// written down rather than approximated:
+///
+/// * **The hero's icon is this launcher's own art.** The reference's is
+///   `assets/welcome/modrinth-social-icon.png`, and the vendored `assets/` holds
+///   `branding/` and `external/` and no `welcome/`: the picture is not in this
+///   tree, so the logo the rail already draws is drawn here rather than a
+///   borrowed one standing in for it.
+/// * **The dot pattern behind the hero is not drawn.** It is an
+///   absolutely-positioned decorative block that the reference draws *behind* the
+///   icon and the title, and iced 0.12 has no overlay widget -- a `Column` places
+///   its children one after another, so a pattern here could only be above or
+///   below the hero rather than under it. It is texture with no state behind it,
+///   so what the page loses is a grid of dots.
+/// * **Neither button is ever disabled.** The reference draws both
+///   `:disabled="offline"` from `navigator.onLine`, and this launcher has no online
+///   signal anywhere: what an offline launcher finds instead is the flow's own
+///   failure, said where the flow asks for something over the network.
 fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
-    ui::card(
-        theme,
-        column![]
-            .spacing(GAP)
-            .align_items(Alignment::Center)
-            .push(page::title(theme, Key::AppWelcomeScreenTitle))
-            .push(ui::paragraph(theme, Key::AppWelcomeScreenDescription.message()))
-            .push(
-                row![]
-                    .spacing(ROW_GAP)
-                    .push(ui::button(theme, WELCOME_CREATE_KEY, Key::AppWelcomeScreenCreateInstance, ui::Kind::Colored, Message::CreateInstance))
-                    .push(ui::button(theme, WELCOME_IMPORT_KEY, Key::AppWelcomeScreenImportFromLauncher, ui::Kind::Standard, Message::ImportFromLauncher)),
-            )
-            .push(
-                text(Key::AppWelcomeScreenQuickCreateHint.message())
-                    .size(13.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-            ),
+    let hero = column![]
+        .width(Length::Fill)
+        .align_items(Alignment::Center)
+        .spacing(HERO_GAP)
+        .push(image(crate::brand::logo_handle()).height(Length::Fixed(WELCOME_ART)))
+        .push(
+            column![]
+                .align_items(Alignment::Center)
+                .spacing(TITLE_GAP)
+                .push(page::title(theme, Key::AppWelcomeScreenTitle))
+                .push(
+                    text(Key::AppWelcomeScreenDescription.message())
+                        .size(16.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                ),
+        )
+        .push(
+            column![]
+                .width(Length::Fixed(WELCOME_COLUMN))
+                .align_items(Alignment::Center)
+                .spacing(WELCOME_GAP)
+                .push(ui::button_with_icon(
+                    theme,
+                    WELCOME_CREATE_KEY,
+                    Glyph::Plus,
+                    Key::AppWelcomeScreenCreateInstance,
+                    ui::Kind::Colored,
+                    Length::Fill,
+                    Some(Message::CreateInstance),
+                ))
+                .push(quick_create_hint(theme)),
+        );
+    let foot = column![]
+        .width(Length::Fill)
+        .align_items(Alignment::Center)
+        .spacing(WELCOME_GAP)
+        .push(
+            text(Key::AppWelcomeScreenImportPrompt.message())
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        )
+        .push(ui::button_with_icon(
+            theme,
+            WELCOME_IMPORT_KEY,
+            Glyph::Import,
+            Key::AppWelcomeScreenImportFromLauncher,
+            ui::Kind::Standard,
+            Length::Shrink,
+            Some(Message::ImportFromLauncher),
+        ));
+    column![]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: WELCOME_TOP,
+            bottom: WELCOME_SIDE,
+            left: WELCOME_SIDE,
+            right: WELCOME_SIDE,
+        })
+        // `justify-center` on the column that holds the hero: what is left of the
+        // page after the padding and the foot is the hero's box, and the hero sits
+        // in the middle of it.
+        .push(container(hero).width(Length::Fill).height(Length::Fill).center_y())
+        .push(foot)
+        .into()
+}
+
+/// The quick-create hint, with its `<shortcut>` slot drawn as the chip it is.
+///
+/// `WelcomeScreen.vue`'s `Press <shortcut>N</shortcut> to quick create an
+/// instance`, whose markup the generated table keeps verbatim -- the tag's *name*
+/// is the slot the component fills -- so the sentence is split by
+/// [`crate::text::tagged`] and the slot becomes the reference's own chip: `h-5
+/// min-w-5 rounded-md border-surface-5 bg-button-bg px-1 text-xs`. A version of
+/// this screen that drew the string whole was in this tree before this, and it
+/// showed the tags to the first reader of the first run.
+fn quick_create_hint<'a>(theme: Gen) -> Element<'a, Message> {
+    let sentence = Key::AppWelcomeScreenQuickCreateHint.message();
+    let Some((before, slot, after)) = crate::text::tagged(sentence, "shortcut") else {
+        // No slot: a message the table is no longer tagged with is drawn whole
+        // rather than with an invented chip.
+        return hint_run(theme, sentence);
+    };
+    row![]
+        .align_items(Alignment::Center)
+        .spacing(4.0)
+        .push(hint_run(theme, before))
+        .push(shortcut_chip(theme, slot))
+        .push(hint_run(theme, after))
+        .into()
+}
+
+/// One run of the hint's prose: the reference's `text-sm leading-5
+/// text-secondary`.
+fn hint_run<'a>(theme: Gen, run: &str) -> Element<'a, Message> {
+    text(run.to_string())
+        .size(14.0)
+        .font(medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .into()
+}
+
+/// The `<shortcut>` slot: a key, in the reference's chip.
+fn shortcut_chip<'a>(theme: Gen, key: &str) -> Element<'a, Message> {
+    container(
+        text(key.to_string())
+            .size(12.0)
+            .font(medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
     )
+    .height(Length::Fixed(SHORTCUT_HEIGHT))
+    .padding(Padding { top: 0.0, bottom: 0.0, left: 4.0, right: 4.0 })
+    .center_x()
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: theme_gen::span(Span::RadiusMd).into(),
+        },
+        ..container::Appearance::default()
+    })
+    .into()
 }
 
 /// One instance, as the library draws it: its plate, its name, and what it is.
@@ -526,6 +689,57 @@ mod tests {
                 state.visible(&cards).iter().map(|card| card.id.as_str()).collect::<Vec<_>>(),
                 vec!["atm", "sodium", "vanilla"]
             );
+        }
+    }
+
+    #[test]
+    fn the_welcome_screen_s_hint_splits_its_shortcut_out_of_the_sentence() {
+        // The table keeps the markup verbatim, and the `<shortcut>` slot is the
+        // chip the reference draws. A screen that drew the string whole -- which is
+        // what this page did until now -- showed `<shortcut>N</shortcut>` to the
+        // first reader of the first run.
+        let sentence = Key::AppWelcomeScreenQuickCreateHint.message();
+        let (before, slot, after) = crate::text::tagged(sentence, "shortcut").expect("a slot");
+        assert_eq!((before, slot, after), ("Press ", "N", " to quick create an instance"));
+        // Together they are the sentence without its markup, which is also what
+        // `text::tagged`'s own gate asserts; here it is the screen's copy that is
+        // being held to it.
+        assert_eq!(format!("{before}{slot}{after}").matches("<").count(), 0);
+        assert_eq!(Key::AppWelcomeScreenImportPrompt.message(), "Escaping another launcher?");
+        for theme in Gen::ALL {
+            drop(welcome(*theme));
+        }
+    }
+
+    #[test]
+    fn a_launcher_with_no_instances_at_all_draws_the_welcome_screen() {
+        // The gate on its own, over every state a store can be in: this is the
+        // whole of `Index.vue`'s own `isReady && !hasCreatedInstance` as this page
+        // reads it, and the shell reads the same function for its quick-create key.
+        assert!(first_run(&Load::Empty), "read, and there is nothing to play");
+        assert!(first_run(&Load::Ready(Vec::new())), "the same answer by hand");
+        assert!(!first_run(&Load::Ready(sample())), "a library with instances in it");
+        assert!(!first_run(&Load::Idle), "a page that has not asked yet");
+        assert!(!first_run(&Load::Loading));
+        assert!(!first_run(&Load::Failed("no".to_string())));
+
+        // And the page it produces, over a root that really does answer `Empty`:
+        // every theme draws it without the toolbar, the search field or a card.
+        let root = std::env::temp_dir().join("palantirmc-home-welcome").join("first-run");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch root");
+        let store = Store::load(&palantir_core::paths::PalantirPaths::at(root));
+        assert!(
+            matches!(store.instances(), Load::Empty),
+            "nothing to find on a scratch root"
+        );
+        let state = State::default();
+        for theme in Gen::ALL {
+            drop(view(*theme, &state, &store));
+            // The other side of the gate, drawn the way the page draws it: a test
+            // cannot make a `Store` hold cards without a filesystem, so the card's
+            // page goes through the same body the library arm builds.
+            drop(library_view(*theme, &state, &sample()));
         }
     }
 
