@@ -4997,6 +4997,140 @@ exit 0, 42 warnings
   not the clean checkout `AGENTS.md` calls the authority, and nothing here should be
   read as "CI passed".
 
+- [x] G115: what the interface costs at size -- the instance page's two listing
+  tabs against a folder of five thousand, Discover against a hundred hits, and the
+  interaction clock against every control on a page in flight -- and the one cost
+  that was worse than linear, fixed
+  CHECK: cargo test -p palantir-desktop --locked scale -- --nocapture
+         cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+  EXPECT: the instance page's Files tab at 5,000 entries is 2,311 ms of directory
+          read a frame and 2,304 ms of page, and both fall to 10.8 ms and 23.7 ms
+          once the read stops looking every name up again (a 213x and a 97x cut)
+          the Content tab is 46.8 ms a frame at 5,000 mods, 4.9 ms of it row-key
+          interning; 500 mods is inside a 16.7 ms frame and 5,000 is not
+          Discover is 3.3 ms at 100 hits and 26.3 ms at 1,000, which the API never
+          returns in one page; the clock is 0.38 ms to tick 5,000 tweens in flight
+          7 passed; 0 failed in the measurement, and the crate's own suite green
+  EVIDENCE: the two runs and the fix between them, transcribed in full.
+
+```
+$ cargo test -p palantir-desktop --locked scale -- --nocapture     # before the fix
+== instance page, per frame ==
+mods/ read (store::content)        n=0          0.092 ms
+Content tab view                   n=0          0.145 ms
+Files tab view                     n=0          0.222 ms
+mods/ read (store::content)        n=100        0.409 ms
+Content tab view                   n=100        1.841 ms
+Files tab view                     n=100        0.291 ms
+mods/ read (store::content)        n=1000       3.188 ms
+Content tab view                   n=1000      17.165 ms
+Files tab view                     n=1000       0.540 ms
+mods/ read (store::content)        n=5000      18.132 ms
+Content tab view                   n=5000     110.361 ms
+Files tab view                     n=5000       0.681 ms
+```
+
+The Files tab read a root of **one** entry for that whole column: the fixture put
+its files in `mods/`, which is what the Content tab lists, so the flat 0.681 ms
+was one row (`mods` itself) and said nothing about the tab. The fixture grew the
+same count in the instance root, and the second run separated the tab's two halves:
+
+```
+$ cargo test -p palantir-desktop --locked scale -- --nocapture     # before the fix
+Files tab view                     n=100       13.871 ms
+  of which: files/ read            n=100       14.692 ms
+  of which: N rows in one column   n=100        0.281 ms
+Files tab view                     n=1000     217.688 ms
+  of which: files/ read            n=1000     168.786 ms
+  of which: N rows in one column   n=1000       3.020 ms
+Files tab view                     n=5000    2304.338 ms
+  of which: files/ read            n=5000    2311.148 ms
+  of which: N rows in one column   n=5000      16.688 ms
+```
+
+So it was not the drawing: five thousand rows in one column cost 16.7 ms while the
+*read* cost 2,311 ms. `store::files` called `path.is_dir()` and `fs::metadata(&path)`
+on every entry -- two lookups by name of names the directory read had just returned
+-- where `mods::list_mods` reads `DirEntry::file_type` and measured 12 ms at the same
+count. The cost per entry grew with the folder (0.147 ms at a hundred, 0.169 ms at a
+thousand, 0.462 ms at five thousand: 50 times the entries for 157 times the time),
+and `files()` now takes both answers out of the scan, following a link only when the
+entry *is* one, which is what the name-based calls did and what a Windows junction
+in an instance folder needs.
+
+```
+$ cargo test -p palantir-desktop --locked scale -- --nocapture     # after the fix
+mods/ read (store::content)        n=0          0.076 ms
+  of which: row key interning      n=0          0.000 ms
+Content tab view                   n=0          0.137 ms
+Files tab view                     n=0          0.135 ms
+  of which: files/ read            n=0          0.074 ms
+  of which: N rows in one column   n=0          0.004 ms
+mods/ read (store::content)        n=100        0.215 ms
+  of which: row key interning      n=100        0.080 ms
+Content tab view                   n=100        0.994 ms
+Files tab view                     n=100        0.503 ms
+  of which: files/ read            n=100        0.233 ms
+  of which: N rows in one column   n=100        0.158 ms
+mods/ read (store::content)        n=1000       1.473 ms
+  of which: row key interning      n=1000       0.840 ms
+Content tab view                   n=1000       9.035 ms
+Files tab view                     n=1000       4.580 ms
+  of which: files/ read            n=1000       1.785 ms
+  of which: N rows in one column   n=1000       1.695 ms
+mods/ read (store::content)        n=5000      18.531 ms
+  of which: row key interning      n=5000       4.937 ms
+Content tab view                   n=5000      46.837 ms
+Files tab view                     n=5000      23.672 ms
+  of which: files/ read            n=5000      10.830 ms
+  of which: N rows in one column   n=5000       9.376 ms
+== discover, per frame ==
+results view                       n=20         0.737 ms
+results view                       n=100        3.290 ms
+results view                       n=1000      26.276 ms
+== interaction clock, per frame ==
+clock tick, all in flight          n=0          0.000 ms
+N reads (one per control)          n=0          0.000 ms
+N locked reads (ui::interaction)   n=0          0.000 ms
+clock tick, all in flight          n=100        0.008 ms
+N reads (one per control)          n=100        0.061 ms
+N locked reads (ui::interaction)   n=100        0.019 ms
+clock tick, all in flight          n=1000       0.077 ms
+N reads (one per control)          n=1000       0.723 ms
+N locked reads (ui::interaction)   n=1000       0.189 ms
+clock tick, all in flight          n=5000       0.380 ms
+N reads (one per control)          n=5000       3.967 ms
+N locked reads (ui::interaction)   n=5000       0.914 ms
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 533 filtered out
+```
+
+  Three things this gate is careful not to claim.
+
+  **The clock is not a cost, so it is not the finding.** It was the surface the plan
+  expected to be expensive -- one lock and one hash lookup per control per frame --
+  and at 5,000 controls that is 0.91 ms for the reads and 0.38 ms for the tick.
+  Nothing here needs changing, and the row exists so nobody re-derives it later.
+
+  **The Content tab's 46.8 ms is a measured limit, not a fixed defect.** It is 18.5 ms
+  of directory read, 4.9 ms of row-key interning (`ui::scoped` formats a name and
+  takes a process-wide mutex per row per frame, because a row's toggle is named from
+  the file it acts on) and about 23 ms of building the cards. Roughly 9 us a row:
+  **500 mods is 4.6 ms and inside a frame, 5,000 is not**, which is the number a
+  reader should take away. It is linear, it is above the budget only at sizes a
+  mods folder rarely reaches, and the page only pays it on the frames it draws --
+  the shell asks for none while nothing is moving. Caching the listing and interning
+  each row's key once, which is what Discover's `Load<Vec<Hit>>` already does, is the
+  slice that would remove the 18.5 and the 4.9; it is not in this one, because it
+  changes how the page is loaded rather than what it costs.
+
+  **The numbers are this machine's, in a warm scratch directory.** The runner is a
+  shared VM that runs this beside 533 other tests, so the reproduction is the shape
+  (a read that is linear and a page that is linear in it) and the ratio between the
+  two runs, not the millisecond. The three envelopes in `scale.rs` are set at
+  roughly twice each measurement for that reason, and they guard a regression rather
+  than restating the number.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

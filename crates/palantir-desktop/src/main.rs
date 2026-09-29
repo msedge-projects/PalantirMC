@@ -132,6 +132,13 @@ mod reference_vocabulary;
 /// Accounts and About on the rail; the reference keeps the first four inside
 /// an instance and Settings in a modal, and this is the module that says so.
 mod route;
+/// What the interface costs at size: the instance page's tabs against a `mods/`
+/// folder of thousands, Discover against a hundred hits, and the interaction
+/// clock against every control on a page. Compiled for tests only -- it builds
+/// fixtures and asserts an envelope, and the shell never reads a number out of
+/// it. The numbers themselves are recorded in `GATES.md`.
+#[cfg(test)]
+mod scale;
 mod screenshots;
 mod scroll;
 /// The shell: the rail, the head, the page pane, the right panel and Settings as

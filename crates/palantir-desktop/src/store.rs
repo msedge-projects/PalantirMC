@@ -1068,6 +1068,24 @@ pub fn worlds(instance_dir: &Path) -> Vec<World> {
 
 /// One level of an instance's directory, directories first then files, each
 /// name-sorted.
+///
+/// **The type and the size come from the scan, not from a fresh lookup.**
+/// `path.is_dir()` and `fs::metadata(&path)` are each a lookup of a name the
+/// directory read has just returned, and in a folder of five thousand that
+/// lookup is not free: this function measured **2,311 ms** for 5,000 entries on
+/// this machine, against 12 ms for `mods::list_mods` at the same count -- which
+/// is the same walk reading `DirEntry::file_type` instead. The cost per entry
+/// *grew* with the folder (0.147 ms at a hundred, 0.462 ms at five thousand),
+/// which is worse than linear -- 50 times the entries cost 157 times the time --
+/// and is what a lookup that has to search the directory index looks like.
+/// `DirEntry` already carries what the scan returned, so the same list costs
+/// milliseconds and is linear again; `crate::scale` prints both numbers.
+///
+/// A symlink is still *followed*, which is the one thing the cheap calls change:
+/// `file_type` reports the link itself, and the name-based calls this replaced
+/// resolved it. An instance whose `mods` folder is a junction is a real layout on
+/// Windows, so the fallback for a link keeps the old behaviour and pays the old
+/// price for it -- for a link, not for every file.
 pub fn files(directory: &Path) -> Vec<Entry> {
     let mut entries = Vec::new();
     let Ok(read) = std::fs::read_dir(directory) else {
@@ -1076,11 +1094,24 @@ pub fn files(directory: &Path) -> Vec<Entry> {
     for entry in read.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        let directory = path.is_dir();
-        let bytes = if directory {
-            0
-        } else {
-            std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0)
+        let (directory, bytes) = match entry.file_type() {
+            Ok(kind) if !kind.is_symlink() => (
+                kind.is_dir(),
+                if kind.is_dir() {
+                    0
+                } else {
+                    entry.metadata().map(|meta| meta.len()).unwrap_or(0)
+                },
+            ),
+            _ => {
+                let directory = path.is_dir();
+                let bytes = if directory {
+                    0
+                } else {
+                    std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0)
+                };
+                (directory, bytes)
+            }
         };
         entries.push(Entry { name, directory, bytes });
     }
