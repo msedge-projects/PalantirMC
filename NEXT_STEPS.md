@@ -23,8 +23,8 @@ its page layout, not its icons.
 ## Where it stands
 
 Runs in which jobs actually executed. The first three carry stages 0 and 1; the
-last is the first since G101 that could run at all, and it carries stages 2, 3 and
-4 as far as they have gone:
+rest carry stages 2, 3 and 4 as far as they have gone, on the public mirror --
+which is the only remote whose runner starts a job:
 
 | Run | Commit | What it proved |
 | --- | --- | --- |
@@ -34,6 +34,8 @@ last is the first since G101 that could run at all, and it carries stages 2, 3 a
 | 36579946549 | `a6bc372` | The tree on a runner: 1008 tests, 18 live tests against the services, both Windows exes built and staged -- the first artifact either workflow has produced |
 | 36599941647 | `4327f40` | The measurement slice on the pull-request path: `Test workspace` and `Lint` green in 3m23s, with `Live services` and `Build exe` skipped rather than scheduled, which is that path's own rule |
 | 36600372776 | `4327f40` | The same commit through all five jobs: 1011 passed / 0 failed and 18 ignored in the workspace run, the live suite 18 passed / 0 failed in 109.66s, and both Windows exes staged (msvc 5,483,872 B, gnu 5,553,494 B) |
+| 36606649491 | `6663b18` | The upload slice (G123) on the pull-request path: `Test workspace` and `Lint` green in 2m10s, `Live services` and `Build exe` skipped by that path's own rule, and the runner's own workspace rows adding to 1027 passed / 0 failed / 18 ignored -- the same total this machine measured |
+| 36607101415 | `6663b18` | The same commit through all five, green in 7m38s: `Test workspace` 2m6s, `Lint` 2m15s, the live suite 18 passed / 0 failed in 103.92s, and both Windows exes staged (msvc 5,496,795 B, gnu 5,564,353 B) |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next

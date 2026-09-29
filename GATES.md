@@ -5373,10 +5373,22 @@ CONFIRMED: the page carries all 120 gates, 6 stage cards and every subject as wr
   the same test. A test that failed and was corrected is worth more here than one that
   was never written.
 
-  The runner is the receipt for this one, and the run-record commit after it is where
-  the run's own numbers land -- unlike every gate since G101, whose pushes got zero
-  steps on `origin`. This slice's push is on the public mirror, where the same workflow
-  actually runs; see the next commit in this branch for the id, the jobs and the counts.
+  **The runner is the receipt this time.** `origin` still cannot schedule a job, so
+  this slice's push went to the public mirror as well, and there the same workflow runs.
+  `36606649491` is this commit through the *pull-request* path: `Test workspace` green in
+  2m6s and `Lint` in 1m33s, with `Live services` and `Build exe` skipped rather than
+  scheduled, which is that path's own rule. `36607101415` is the same commit dispatched
+  through all five (`gh workflow run ci.yml --repo msedge-projects/PalantirMC --ref
+  rewrite-modrinth-native`) and green in 7m38s: the live suite 18 passed / 0 failed in
+  103.92s, and both Windows exes staged (msvc 5,496,795 B, gnu 5,564,353 B). The
+  runner's workspace rows are 177 + 8 + 552 + 4 + 31 + 255 passed, 0 failed, 18 ignored --
+  **1027, the same total this machine measured**, which is what makes the two receipts one
+  claim rather than two numbers that happen to agree. Its desktop suite ran the same 552
+  names in 9.45s against this machine's 78.36s, and that gap is the machine rather than
+  the tests: this checkout was sharing a CPU with another agent's build at the time. The
+  push to `origin` is
+  `36606628779`, failed in 5s with zero steps and the same billing message as the 90
+  before it -- recorded rather than counted.
 
 ## What these gates cannot say
 
