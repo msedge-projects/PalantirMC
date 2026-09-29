@@ -67,7 +67,7 @@ use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
-use crate::pages::{self, discover, project, skins, user, Screen};
+use crate::pages::{self, discover, instance, project, skins, user, Screen};
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
@@ -127,6 +127,14 @@ enum Asked {
     /// [`Asked::Wear`] makes. The page has no part in any of the three, which is why it
     /// asks for the round rather than describing a change.
     AddSkin(skins::Add),
+    /// One tab's own listing, as the instance page describes it.
+    ///
+    /// The only read here that is not about a *document*: it is a folder on this
+    /// machine, and it is asked for through the shell so it happens once per tab
+    /// rather than once per frame. A page that read it while drawing made every
+    /// frame a directory walk -- `crate::scale` measured the Files tab at 2,304 ms
+    /// of frame at five thousand entries before this moved.
+    Instance(instance::Asked),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1278,6 +1286,7 @@ impl Shell {
         if let Some(asked) = self.act(message) {
             return match asked {
                 Asked::Search(asked) => self.search(asked),
+                Asked::Instance(asked) => self.instance(asked),
                 Asked::Project(asked) => self.project(asked),
                 Asked::User(asked) => self.user(asked),
                 Asked::Skins(asked) => self.skins(asked),
@@ -1617,6 +1626,7 @@ impl Shell {
                         None
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
+                    Some(pages::Ask::Instance(asked)) => Some(Asked::Instance(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
                     Some(pages::Ask::Skins(asked)) => Some(Asked::Skins(asked)),
@@ -2013,6 +2023,7 @@ impl Shell {
     fn opening_command(&mut self) -> iced::Command<Message> {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
+            Some(pages::Ask::Instance(asked)) => self.instance(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
             Some(pages::Ask::User(asked)) => self.user(asked),
             Some(pages::Ask::Skins(asked)) => self.skins(asked),
@@ -2073,6 +2084,23 @@ impl Shell {
                 ),
             }),
             move |result| Message::Screen(pages::Message::skins_result(&asked, result)),
+        )
+    }
+
+    /// Read one tab's own listing and bring it back as a page message.
+    ///
+    /// [`Shell::search`]'s twin, and blocking for [`Shell::project`]'s reason: the
+    /// read is a directory walk plus a widget's worth of work per row, which on the
+    /// frame thread would be a dropped frame for every entry -- the measurement in
+    /// `crate::scale` is what says so. The directory is resolved here, on the frame
+    /// thread, because turning an instance id into a folder is the store's own and
+    /// costs nothing to ask.
+    fn instance(&self, asked: instance::Asked) -> iced::Command<Message> {
+        let directory = self.store.instance_dir(&asked.id);
+        let tab = asked.tab.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store::listing(&directory, &tab)),
+            move |listing| Message::Screen(pages::Message::instance_result(&asked, listing)),
         )
     }
 

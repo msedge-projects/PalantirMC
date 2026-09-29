@@ -157,44 +157,73 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
         });
         row("mods/ read (store::content)", n, read);
 
-        // What the Content tab spends its time on, in the two pieces the view is
-        // made of. `ui::scoped` interns a control's name in a process-wide table
-        // behind a mutex, and the Content tab names every row's toggle from the
-        // file it acts on -- so this is one lock, one `format!` and one hash
-        // lookup *per row per frame*, which is the part a fix would remove.
+        // Where the Content tab's cost sits now, in the two places it is paid.
+        // The read and the row names are both charged when the tab is *entered*:
+        // `store::listing` is the load, and `ui::scoped` -- a process-wide table
+        // behind a mutex, formatting a name per row -- is called as the answer
+        // arrives rather than on every frame the rows are drawn. The frame pays
+        // for the rows alone, which is the row below the two above it.
+        let read = median_ms(5, || {
+            // `let _ =` because the answer is a `Result` and this is the one place
+            // it is deliberately dropped: the row is about the time the read takes,
+            // and the answer itself is put through the page below.
+            let _ = std::hint::black_box(store::listing(&directory, &InstanceTab::Content));
+        });
+        row("Content: the read (once a tab)", n, read);
+
         let mods = store::content(&directory);
         let intern = median_ms(5, || {
             for entry in &mods {
-                std::hint::black_box(crate::ui::scoped("instance:content:toggle", &entry.file_name));
+                std::hint::black_box(crate::ui::scoped(
+                    "instance:content:toggle",
+                    &entry.file_name,
+                ));
             }
         });
-        row("  of which: row key interning", n, intern);
+        row("Content: the row names (once a tab)", n, intern);
 
-        let state = crate::pages::instance::State::new(id.clone(), InstanceTab::Content);
+        // Drawn as the shell draws it: the listing was read when the tab was
+        // entered, and the page's body is handed nothing but the state. What this
+        // row measures is therefore the frame's whole cost, which is the number
+        // the budget is about.
+        let mut state = crate::pages::instance::State::new(id.clone(), InstanceTab::Content);
+        let _ = state.update(
+            crate::pages::instance::Message::Listed {
+                round: 0,
+                listing: store::listing(&directory, &InstanceTab::Content),
+            },
+            &store,
+        );
         let content = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
             std::hint::black_box(crate::pages::instance::view(theme, &state, &store));
         });
-        row("Content tab view", n, content);
+        row("Content tab view (listing loaded)", n, content);
 
-        let files_state = crate::pages::instance::State::new(id.clone(), InstanceTab::Files);
+        let mut files_state = crate::pages::instance::State::new(id.clone(), InstanceTab::Files);
+        let _ = files_state.update(
+            crate::pages::instance::Message::Listed {
+                round: 0,
+                listing: store::listing(&directory, &InstanceTab::Files),
+            },
+            &store,
+        );
         // The Files tab's own listing is the root's `n` config files plus the
         // `mods` directory above them, which is the one entry the count does not
         // account for and the reason this row is `n` and not `n + 1`.
         let files = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
             std::hint::black_box(crate::pages::instance::view(theme, &files_state, &store));
         });
-        row("Files tab view", n, files);
+        row("Files tab view (listing loaded)", n, files);
 
-        // The Files tab at five thousand entries is a second a frame, and the
-        // Content tab at the same count is a tenth of that. The two differ in one
-        // thing: Content builds a card *per row* and Files builds one card around a
-        // column of every row. These two rows measure the halves apart, so the
-        // finding names the culprit instead of the tab.
+        // The read this tab pays once when it is entered, and the rows it draws --
+        // measured apart because they are where a fix has to choose between. The
+        // tab that was a second a frame at five thousand entries was paying
+        // almost all of it here, in the first row.
         let entries = store::files(&directory);
         let read = median_ms(5, || {
-            std::hint::black_box(store::files(&directory));
+            let _ = std::hint::black_box(store::listing(&directory, &InstanceTab::Files));
         });
-        row("  of which: files/ read", n, read);
+        row("Files: the read (once a tab)", n, read);
         let built = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
             // The message type is named because nothing in this closure tells the
             // compiler which page's `Element` these rows are for -- the real view

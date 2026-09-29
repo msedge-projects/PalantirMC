@@ -5390,6 +5390,95 @@ CONFIRMED: the page carries all 120 gates, 6 stage cards and every subject as wr
   `36606628779`, failed in 5s with zero steps and the same billing message as the 90
   before it -- recorded rather than counted.
 
+- [x] G116: the instance page's listing is a load rather than a draw -- every tab's
+  own folder is read once, off the frame thread, when the tab is entered, and the
+  view draws a state it was handed instead of walking a directory
+  CHECK: cargo test -p palantir-desktop --locked -- --nocapture
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+  EXPECT: the Content tab's frame at 5,000 mods falls from 46.8 ms to 32.0 ms and the
+          Files tab's from 23.7 ms to 12.0 ms, because the 8.0 ms read and the 5.4 ms
+          of row names are paid once per tab entry instead of per frame (Files: 8.9 ms)
+          at 500 rows the page is about 3 ms and inside a 16.7 ms frame; at 5,000 it is
+          32.0 ms and is not, which is the drawing of 5,000 cards and nothing else
+          546 passed; 0 failed; 0 ignored, and clippy exit 0, adding no warning
+  EVIDENCE: the table this slice's own measurement prints, and the arms of it that
+  moved.
+
+```
+$ cargo test -p palantir-desktop --locked -- --nocapture          # after this slice
+== instance page, per frame ==
+Content: the read (once a tab)      n=0          0.130 ms
+Content: the row names (once a tab) n=0          0.000 ms
+Content tab view (listing loaded)   n=0          0.056 ms
+Files tab view (listing loaded)     n=0          0.055 ms
+Files: the read (once a tab)        n=0          0.110 ms
+  of which: N rows in one column    n=0          0.004 ms
+Content: the read (once a tab)      n=100        0.394 ms
+Content: the row names (once a tab) n=100        0.167 ms
+Content tab view (listing loaded)   n=100        1.130 ms
+Files tab view (listing loaded)     n=100        0.450 ms
+Files: the read (once a tab)        n=100        0.465 ms
+  of which: N rows in one column    n=100        0.277 ms
+Content: the read (once a tab)      n=1000       1.451 ms
+Content: the row names (once a tab) n=1000       0.803 ms
+Content tab view (listing loaded)   n=1000       7.728 ms
+Files tab view (listing loaded)     n=1000       2.370 ms
+Files: the read (once a tab)        n=1000       1.872 ms
+  of which: N rows in one column    n=1000       1.728 ms
+Content: the read (once a tab)      n=5000       7.985 ms
+Content: the row names (once a tab) n=5000       5.408 ms
+Content tab view (listing loaded)   n=5000      31.971 ms
+Files tab view (listing loaded)     n=5000      12.034 ms
+Files: the read (once a tab)        n=5000       8.947 ms
+  of which: N rows in one column    n=5000       8.646 ms
+test result: ok. 546 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+  **What the shape of the change is.** `pages::instance::Asked` is the page's
+  request and `pages::Ask::Instance` is how the shell receives it; the shell resolves
+  the instance id to a directory on the frame thread -- that is a field read, not a
+  walk -- and makes the read in `store::off_thread`, the same worker Discover's
+  search uses, and the answer comes back through
+  `pages::Message::instance_result` as `instance::Message::Listed`. The page's round
+  is the guard Discover's is: a read the reader has replaced, because they pressed
+  another tab, is dropped rather than drawn under the new tab's heading. The listing
+  is `store::Listing`, five variants rather than a `Vec<String>`, because a row is
+  not a name: the Content tab draws an enabled state and a toggle per row, the Files
+  tab a glyph and a size, the Worlds tab whether a world has ever been opened.
+
+  **A tab owes its read rather than asking for it, which is why the round moves on
+  the ask.** `State::opening` answers "idle, and this tab has a listing", and
+  `Shell::opening_command` runs at the end of every update -- so a tab change marks
+  the listing idle and the shell answers it on the *same* turn, with no signature
+  change to `Screen::retarget`, the seam that deliberately reads no disk. The test
+  for the stale answer had to be written against that ordering: a slow Content read
+  can only arrive after the Files read has been asked for, so the test asks for Files
+  first and delivers Content's answer into that. The first version of the test
+  asserted the stale answer changed nothing while the page was still in the previous
+  round, which cannot happen -- it failed, which is how the ordering got written
+  down.
+
+  **What is left here is drawing, and the honest number is where it crosses.** At
+  5,000 mods the Content tab is 32.0 ms a frame, about 23 ms of it building 5,000
+  cards and 9 ms the rows themselves; there is nothing left in the read path to
+  remove. Roughly 6 us a row puts **500 mods at about 3 ms and 5,000 at 32.0 ms**, so
+  the page is inside a frame for the sizes an instance actually reaches and is not at
+  the size the plan named -- what would move that number is virtualizing the list,
+  which changes what the tab draws rather than when it reads. The clock and Discover
+  are unchanged by this slice and still measured: 0.46 ms to tick 5,000 tweens, 4.4 ms
+  for a hundred result cards and 42.4 ms for a thousand, which the API never returns
+  in one page.
+
+  **The compiler is part of the receipt.** `body` and `listing_body` take no `Store`:
+  the signature of the function that draws a tab has nothing in it that can read a
+  disk, so the property cannot come back by accident the way it arrived. What a
+  signature cannot say, the page's tests do: a tab is read once and a tab change asks
+  again, a stale answer is dropped and the fresh one lands, a toggle asks for a fresh
+  listing, an empty listing is `Load::Empty` rather than `Ready(vec![])` (so the empty
+  arm draws the reference's own card), every loaded row keeps its own clock name
+  across a reload, and all six tabs draw in all five load states under all four
+  themes.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

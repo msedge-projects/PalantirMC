@@ -189,6 +189,14 @@ pub enum Ask {
     /// flag: the reference's header emits `play` and `stop` as two events, and a
     /// page that cannot tell them apart cannot draw two buttons.
     Stop(String),
+    /// Read one tab's own listing: an instance's mods, its files, its worlds, its
+    /// screenshots, or the tail of its newest log.
+    ///
+    /// Not a document and not a request to a service -- the fifth kind, and the
+    /// one that is about a page's own *cost*: these reads belong where they can
+    /// happen once per tab rather than once per frame, and the frame thread is the
+    /// one place they cannot. `crate::scale` has what reading them there cost.
+    Instance(instance::Asked),
 }
 
 impl Message {
@@ -200,6 +208,19 @@ impl Message {
     /// request.
     pub fn search_result(asked: &discover::Asked, result: Result<Vec<discover::Hit>, String>) -> Message {
         Message::Discover(discover::Message::Found { round: asked.round, result })
+    }
+
+    /// The message that carries one tab's listing back to the instance page.
+    ///
+    /// The same seam as [`Message::search_result`], and the answer's own type is
+    /// the page's for the same reason: the shell has never seen a listing, and the
+    /// round it was read in travels with it so the page can drop an answer to a tab
+    /// the reader has left.
+    pub fn instance_result(
+        asked: &instance::Asked,
+        listing: Result<crate::store::Listing, String>,
+    ) -> Message {
+        Message::Instance(instance::Message::Listed { round: asked.round, listing })
     }
 
     /// The message that carries a project answer back to the page that asked.
@@ -455,6 +476,12 @@ impl Screen {
             // arrival the same way a project's is: `/user/jelly` is a name and a
             // list this page has nothing of until it asks.
             Screen::User(state) => state.opening().map(Ask::User),
+            // An instance's tab is a listing rather than a document: what the
+            // reader arrived at is a folder, and the page has nothing of it until
+            // it asks. A tab change lands here too -- `retarget` marks the listing
+            // idle and the shell asks on the same turn -- which is why this is the
+            // page's own `opening` rather than a request the tab press sends.
+            Screen::Instance(state) => state.opening().map(Ask::Instance),
             _ => None,
         }
     }

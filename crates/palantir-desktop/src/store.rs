@@ -55,6 +55,7 @@ use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
+use crate::route::InstanceTab;
 use crate::pages::discover::Hit;
 use crate::pages::project::Project;
 use crate::pages::user::Profile;
@@ -1034,6 +1035,86 @@ pub struct Entry {
     pub directory: bool,
     /// Size in bytes, zero for a directory.
     pub bytes: u64,
+}
+
+/// How many lines of an instance's newest log the Logs tab draws.
+///
+/// The same 500 the interface asked for when it read the tail on every frame.
+pub const LOG_TAIL_LINES: usize = 500;
+
+/// One tab's own listing, as the shell's worker hands it back to the page.
+///
+/// **This is the answer to "read the page's data", and it exists because those
+/// reads used to happen where the page was drawn.** A view is called once per
+/// frame, so a view that walked a directory made the frame cost a directory walk:
+/// `crate::scale` measured the Files tab at 2,304 ms of frame at five thousand
+/// entries, and the Content tab at 46.8 ms -- 18.5 ms of it the read and 4.9 ms
+/// the per-row clock name -- after that read was made linear. The read is a load
+/// now, made once when a tab is entered and off the frame thread, so the view
+/// only ever draws what is already here.
+///
+/// Five variants rather than a `Vec<String>`: a row is not a name. The Content
+/// tab draws an enabled state and a toggle per row, the Files tab a glyph and a
+/// size, the Worlds tab whether a world has been played, the Screenshots tab a
+/// name, and the Logs tab one block of monospace. Flattening those into strings
+/// would put each tab's own decision back in the view, which is the thing being
+/// taken out of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Listing {
+    /// The instance's `mods/`, as [`content`] reads it.
+    Content(Vec<ModEntry>),
+    /// One level of the instance's directory, as [`files`] reads it.
+    Files(Vec<Entry>),
+    /// The instance's `saves/`, as [`worlds`] reads it.
+    Worlds(Vec<World>),
+    /// The names in `screenshots/`, as [`screenshots`] reads them.
+    Screenshots(Vec<String>),
+    /// The last [`LOG_TAIL_LINES`] lines of the newest log, or nothing.
+    Log(String),
+}
+
+impl Listing {
+    /// Whether the tab that asked for this has nothing to draw.
+    ///
+    /// Asked here rather than by the view, because the view's four states are
+    /// [`crate::page::Load`]'s: an answer with no rows in it is `Load::Empty`,
+    /// which draws the reference's own "there is nothing here" card, and a page
+    /// that had to look inside its data to tell the two apart would eventually
+    /// draw the wrong one.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Listing::Content(rows) => rows.is_empty(),
+            Listing::Files(rows) => rows.is_empty(),
+            Listing::Worlds(rows) => rows.is_empty(),
+            Listing::Screenshots(names) => names.is_empty(),
+            Listing::Log(tail) => tail.is_empty(),
+        }
+    }
+}
+
+/// Read one tab's own listing.
+///
+/// Takes a directory rather than an instance id because that is what the readers
+/// below it take, and because the shell is the one that knows how an id becomes a
+/// directory ([`Store::instance_dir`]). The `Share` tab answers with a sentence:
+/// it is a service's page with no local listing to read, and its card says so
+/// rather than pretending to be empty.
+pub fn listing(instance_dir: &Path, tab: &InstanceTab) -> Result<Listing, String> {
+    Ok(match tab {
+        InstanceTab::Content | InstanceTab::ContentFilter(_) => {
+            Listing::Content(content(instance_dir))
+        }
+        InstanceTab::Files => Listing::Files(files(instance_dir)),
+        InstanceTab::Worlds => Listing::Worlds(worlds(instance_dir)),
+        InstanceTab::Screenshots => Listing::Screenshots(screenshots(instance_dir)),
+        // A missing log is an empty one rather than a failure: an instance that
+        // has never been launched has no log, which is the same thing to the tab
+        // that draws it.
+        InstanceTab::Logs => {
+            Listing::Log(log_tail(instance_dir, LOG_TAIL_LINES).unwrap_or_default())
+        }
+        InstanceTab::Share => return Err(not_implemented("Sharing an instance")),
+    })
 }
 
 /// The instances' mods, from the same reader the old interface uses.
