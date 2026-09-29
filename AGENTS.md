@@ -159,7 +159,41 @@ Co-Authored-By: Codebuff <noreply@codebuff.com>
   launcher and code taken under MIT both carry their notice in the source and
   in the binary's About page.
 
-## 6. Report progress as you go
+## 6. Never idle through a long command
+
+The session is billed by wall-clock time, not by tokens, so the most expensive
+thing an agent can do in this tree is wait. A full workspace run is minutes of
+one core; watching it pass, or watching it fail slowly, spends those minutes on
+nothing at all. There is no saving in the wait.
+
+So when a command is expected to take longer than about a minute, start it and
+start something else in the same breath — write the next slice, draft the doc
+paragraph, review the diff just written, read the code the next change touches.
+Concretely:
+
+- **Start it detached, check it at a boundary.**
+  `nohup <cmd> > .scratch/<name>.log 2>&1 & echo $? > .scratch/<name>.exit`,
+  then poll the `.exit` file after a real piece of work lands instead of
+  blocking the turn on it.
+- **Let the runner do the heavy compiling.** The full workspace test, the
+  clippy sweep and the release build are what the mirror exists for (§2); a
+  targeted `cargo test -p <the crate you changed> --locked` is the local
+  iteration loop. Two agents share one machine and contend for the same cores,
+  while a pushed run compiles beside both of them — so push earlier than feels
+  natural and keep working through it.
+- **`gh run watch` is a last step, not a way to pass time.** Poll
+  `gh run list --repo msedge-projects/PalantirMC --limit 3` at slice
+  boundaries, and only block once there is genuinely nothing left that does not
+  depend on the answer.
+- **Never run a heavy build and a heavy build at once on this machine.** A
+  second `cargo` invocation on the same target directory waits on the first
+  one's file locks and burns both sessions; queue it or push it instead.
+
+This is the same rule as §1 read from the machine's side: the runner is the
+only compiler that matters and it costs no local clock. Local CPU is for the
+narrow check that tells you whether to push yet.
+
+## 7. Report progress as you go
 
 The user watches a live transcript and has asked for the state of the work
 without having to ask for it. Report at these points, in two or three lines:
