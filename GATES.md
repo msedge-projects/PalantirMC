@@ -3284,6 +3284,14 @@ an array of nested tuples, which is now a struct called `Paint`.
   no gate here has seen a real account: everything above is a fixture's answer, which
   is the same limit the live tests exist for.
 
+  **The count moved with the rebase, and the transcript above is the merged tree's.**
+  G122 was first measured on a tree whose `palantir-net` suite ran 247 tests with 17
+  ignored, which is the 1004 this entry carried; the commits it was rebased onto --
+  G112-G114, the engine's own error path keeping the service's sentence, and the two
+  mirror assertions -- add four of that crate's tests and one live case, so the
+  numbers above are 251, 18 and **1008**. Clippy is the same tree either way: exit 0
+  at 42 warnings, the baseline this branch has carried since the locales slice.
+
   The runner could not be the receipt either: this slice's push, `11bce05` -- which
   also carried `ad8249c`, the slice itself -- is run `36437508333`, the same block as
   the fourteen before it: `Lint` and `Test workspace` failed in 6 s with **zero
@@ -4854,6 +4862,131 @@ meta.prismlauncher.org/v1/net.minecraft/1.21.1.json: assetIndex.sha1 de573f83...
   the run does say is that the suite is green from a vantage point whose revision
   of asset index 17 differed from this machine's an hour earlier -- and that the
   disagreement is real is measured above, not assumed.
+- [x] G122: the ledger the compiled locales are read through -- what each of the
+  other 32 carries against English's 3,846 names, how much of it falls back to
+  English, and which plural arms the language's own rule can never select
+  CHECK: python tools/gen_locale.py --report
+         python tools/gen_locale.py --check
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: 33 trees carrying 89,177 of a possible 126,918 locale-key pairs (70.3%)
+          sparsest translation th-TH at 459 keys (11.9%), fullest de-CH at 3,792 (98.6%)
+          37,741 pairs (29.7%) read English's sentence; 244 names are in all 32
+          six locales carry an `one` arm their own CLDR rule can never select
+          1008 passed; 0 failed; 18 ignored, and clippy exit 0 at 42 warnings
+  EVIDENCE: the tool's own ledger, in full, and the transcripts of the other three:
+
+```
+$ python tools/gen_locale.py --report
+tag        keys  cover fallback plural select number    # arms
+ar-SA      1577  41.0%     2269     19      5      8   45 few(13), many(13), one(19), other(19), two(13), zero(2)
+cs-CZ      2554  66.4%     1292     52      5     22   56 =0(1), few(28), many(3), one(52), other(52)
+da-DK      1133  29.5%     2713     25      0     11   14 =0(1), one(25), other(25)
+de-CH      3792  98.6%       54     79     10     30   57 =0(1), one(79), other(79)
+de-DE      3792  98.6%       54     80     10     30   58 =0(1), one(80), other(80)
+en-US      3846 100.0%        0     80     10     32   56 =0(1), one(80), other(80)
+es-419     3775  98.2%       71     82     10     28   54 =0(1), one(82), other(82)
+es-ES      3765  97.9%       81     81     10     31   56 =0(1), one(81), other(81)
+fi-FI       515  13.4%     3331      2      0      2    2 one(2), other(2)
+fil-PH     1122  29.2%     2724     30      1      4    6 =0(1), one(30), other(30)
+fr-FR      3484  90.6%      362     74      9     30   48 =0(1), one(74), other(74)
+he-IL      1082  28.1%     2764     18      0      2    6 one(18), other(18)
+hu-HU      3784  98.4%       62     26     10     32   13 =0(1), one(25), other(26)
+id-ID      1230  32.0%     2616     28      5      8    9 =0(1), one(3), other(28)
+it-IT      3767  97.9%       79     57     10     34   45 =0(1), one(57), other(57)
+ja-JP      2989  77.7%      857     33      8     31   21 =0(1), one(21), other(33)
+ko-KR      2923  76.0%      923     57      9     28   23 =0(1), one(30), other(57)
+ms-MY      2300  59.8%     1546     49      9     15   14 =0(1), other(49)
+nl-NL      3654  95.0%      192     74     10     28   52 =0(1), one(74), other(74)
+no-NO      1110  28.9%     2736     27      3     12   16 =0(1), one(27), other(27)
+pl-PL      3785  98.4%       61     81     10     32   73 =0(1), few(56), many(9), one(80), other(81)
+pt-BR      3792  98.6%       54     82     10     28   61 =0(10), one(82), other(82)
+pt-PT      1275  33.2%     2571     27      4      5    8 =0(1), one(27), other(27)
+ro-RO      1397  36.3%     2449     35      1     15   16 =0(1), one(35), other(35)
+ru-RU      3753  97.6%       93     81     10     21  102 =0(1), =1(13), few(60), many(2), one(72), other(81)
+sr-CS      2412  62.7%     1434     65     10     25   58 =0(1), few(23), one(65), other(65)
+sv-SE      3302  85.9%      544     67      9     32   47 =0(1), one(66), other(67)
+th-TH       459  11.9%     3387      2      0      1    1 other(2)
+tr-TR      3445  89.6%      401     43      7     30   46 =0(1), one(43), other(43)
+uk-UA      3772  98.1%       74     79     10     23  103 =0(1), =1(1), =2(1), few(67), many(38), one(78), other(79)
+vi-VN      2050  53.3%     1796     54      9     17   14 =0(1), one(5), other(54)
+zh-CN      3749  97.5%       97     70     10     32   28 =0(1), one(21), other(69)
+zh-TW      3792  98.6%       54     75     10     32   26 =0(1), =1(2), one(3), other(75)
+
+trees            33: the reference's own 32 offered codes, plus ar-SA, which its list comments out
+keys             3,846 English names; the trees carry 89,177 of a possible 126,918 (70.3% translated)
+coverage         over the translations: sparsest th-TH at 459 (11.9%), fullest de-CH at 3,792 (98.6%)
+fallback pairs   37,741 of 126,918 locale-key pairs (29.7%) read English's sentence
+names in all 32 244 of the 3,846; the other 3,602 are missing from at least one translation
+value bytes      2,700,238 of translated text
+index bytes      178,354 (a u16 per entry)
+
+arms outside the language's CLDR category set (unselectable for every count):
+  id-ID    one
+  ja-JP    one
+  ko-KR    one
+  vi-VN    one
+  zh-CN    one
+  zh-TW    one
+
+$ python tools/gen_locale.py --check
+locale generation is byte-identical
+
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    537 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    251 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 18 ignored  (palantir-net, tests/live.rs)
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, 42 warnings
+```
+
+  **What the numbers say, and what they do not.** 70.3% of the locale-key pairs this
+  launcher could carry are translated, and the 29.7% that are not are not a rounding
+  error: they are what a reader of Thai (11.9% covered) or Finnish (13.4%) sees, which
+  is English with the occasional translated sentence in it. That is the honest shape
+  of the reference's own corpus, measured against the reference's own English -- and
+  it is a *coverage* number, not a quality claim: 3,792 keys carried says nothing
+  about how well they are carried, and this gate does not read a translation.
+
+  The comparison that matters is with what the reference does: it bundles English and
+  **fetches** the other 32 from its CDN at runtime with `fallbackLocale: 'en-US'`, so
+  a reader who is offline is back to English while a reader here is not. Compiling
+  them in is what makes the coverage above real rather than conditional, and its cost
+  is the 2,700,238 bytes of the tables plus 178,354 bytes of index in the binary.
+
+  Three smaller things this ledger is the record for. **244 names are carried by all
+  32 translations** and 3,602 are missing from at least one, which is why the
+  fallback is per key and not per language: a partly translated tree is a mixture,
+  and `locale::lookup` returning `None` for the untranslated half is what keeps the
+  English path the generator's own code rather than a second renderer.
+
+  **Six locales carry an `one` arm no rule of theirs can select** -- `id-ID`, `ja-JP`,
+  `ko-KR`, `vi-VN`, `zh-CN`, `zh-TW` are languages whose CLDR category set is
+  `other` alone, and their translations still say `one(...)` because the reference's
+  own files do. That is dead in the reference too: `Intl.PluralRules('ja-JP')`
+  answers `other` for every number, so the arm is unreachable on both sides. The
+  generator reports it rather than refusing the tree, because a translator's
+  `one` is not a defect -- it is a category the language does not have.
+
+  **`ru-RU` and `uk-UA` are the two trees that use explicit arms** (`=0`, `=1`,
+  sometimes `=2`) and the two heaviest users of `#` (102 and 103), which is what a
+  language with `few`/`many` and an `11`-in-every-hundred rule looks like when it is
+  translated carefully. `pt-BR` is the only tree with a two-digit `=0` count (10).
+
+  **One correction to G120's own report.** Its table printed a `keys` column that was
+  `leaves` a second time -- one leaf per key, so the two were always equal -- which
+  meant the row said nothing about coverage, the one thing the ledger exists to say.
+  The column is now the coverage share, the arm counts print as `=0(2)` rather than
+  `=0=2`, and the totals gained the fallback-pair and all-32 counts above. The
+  generated table is unchanged by all of it: `--check` still prints byte-identical.
+
+  The runner could not be the receipt either: this slice's push, `PUSH_PLACEHOLDER`,
+  is run `RUN_ID_PLACEHOLDER`.
 
 ## What these gates cannot say
 

@@ -423,11 +423,25 @@ def emit(tag_sources, english_keys, counts_by_tag, refused):
 def report(tag_sources, english_keys, counts_by_tag, refused) -> str:
     out: list = []
     english = set(english_keys)
-    out.append(f"{'tag':8} {'leaves':>6} {'keys':>6} {'fallback':>8} {'plural':>6} "
+    names = len(english_keys)
+    pairs = len(tag_sources) * names
+    out.append(f"{'tag':8} {'keys':>6} {'cover':>6} {'fallback':>8} {'plural':>6} "
                f"{'select':>6} {'number':>6} {'#':>4} arms")
-    total_leaves = total_bytes = 0
+    total_leaves = total_bytes = total_fallback = 0
+    # The extremes are over the trees that are *translations*: English is the
+    # source, so counting it would report 100% as the fullest tree every run.
+    sparsest: tuple = ("", names)
+    fullest: tuple = ("", 0)
+    # The keys every translation carries: the rest of English is reached by a
+    # fallback in at least one language, and the complement of this set is the
+    # English a translation never replaces anywhere.
+    everywhere = None
     for tag, messages in tag_sources:
         counts = counts_by_tag[tag]
+        # One leaf per key: an arm is a branch of the same template, not a table
+        # entry of its own, so `len(messages)` *is* the key count. The column that
+        # used to sit beside it printed this number a second time, which is what
+        # "keys" is for and what the coverage share needs.
         leaves = len(messages)
         arms = arms_used(messages)
         keys = set(messages)
@@ -435,20 +449,36 @@ def report(tag_sources, english_keys, counts_by_tag, refused) -> str:
         value_bytes = sum(len(text.encode("utf-8")) for text in messages.values())
         total_leaves += leaves
         total_bytes += value_bytes
+        total_fallback += fallback
+        if tag != "en-US":
+            if leaves < sparsest[1]:
+                sparsest = (tag, leaves)
+            if leaves > fullest[1]:
+                fullest = (tag, leaves)
+            everywhere = keys if everywhere is None else (everywhere & keys)
         plural = sum(1 for text in messages.values() if ", plural," in text)
         select = sum(1 for text in messages.values() if ", select," in text)
         number = sum(1 for text in messages.values() if ", number" in text)
         hashes = sum(
             1 for text in messages.values() if ", plural," in text and "#" in text
         )
-        shown = ", ".join(f"{key}={count}" for key, count in sorted(arms.items()))
-        out.append(f"{tag:8} {leaves:>6} {leaves:>6} {fallback:>8} "
+        # `=0(2)` rather than `=0=2`: an explicit arm's key already carries a `=`.
+        shown = ", ".join(f"{key}({count})" for key, count in sorted(arms.items()))
+        out.append(f"{tag:8} {leaves:>6} {100 * leaves / names:>5.1f}% {fallback:>8} "
                    f"{counts.nodes['plural']:>6} {counts.nodes['select']:>6} "
                    f"{counts.nodes['number']:>6} {counts.hashes:>4} {shown}")
     out.append("")
-    out.append(f"trees            {len(tag_sources)}")
-    out.append(f"leaves           {total_leaves:,} across {len(english_keys)} English keys "
-               f"({100 * total_leaves / (len(tag_sources) * len(english_keys)):.1f}% translated)")
+    out.append(f"trees            {len(tag_sources)}: the reference's own 32 offered codes, "
+               "plus ar-SA, which its list comments out")
+    out.append(f"keys             {names:,} English names; the trees carry {total_leaves:,} "
+               f"of a possible {pairs:,} ({100 * total_leaves / pairs:.1f}% translated)")
+    out.append(f"coverage         over the translations: sparsest {sparsest[0]} at "
+               f"{sparsest[1]:,} ({100 * sparsest[1] / names:.1f}%), fullest "
+               f"{fullest[0]} at {fullest[1]:,} ({100 * fullest[1] / names:.1f}%)")
+    out.append(f"fallback pairs   {total_fallback:,} of {pairs:,} locale-key pairs "
+               f"({100 * total_fallback / pairs:.1f}%) read English's sentence")
+    out.append(f"names in all 32 {len(everywhere or ()):,} of the {names:,}; the other "
+               f"{names - len(everywhere or ()):,} are missing from at least one translation")
     out.append(f"value bytes      {total_bytes:,} of translated text")
     out.append(f"index bytes      {total_leaves * 2:,} (a u16 per entry)")
     if refused:
