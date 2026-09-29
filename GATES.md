@@ -4985,8 +4985,17 @@ exit 0, 42 warnings
   `=0=2`, and the totals gained the fallback-pair and all-32 counts above. The
   generated table is unchanged by all of it: `--check` still prints byte-identical.
 
-  The runner could not be the receipt either: this slice's push, `PUSH_PLACEHOLDER`,
-  is run `RUN_ID_PLACEHOLDER`.
+  The runner could not be the receipt either: this slice's push, `19b44d2`, is run
+  `36584261515`, the same block as the 90 before it -- `Lint` failed in 2 s
+  (`14:39:10Z` to `14:39:12Z`) and `Test workspace` in 3 s (`14:39:10Z` to
+  `14:39:13Z`), each with **zero steps**, on `The job was not started because recent
+  account payments have failed or your spending limit needs to be increased`, with
+  `Live services` and `Build exe` skipped rather than scheduled. That is the 91st
+  consecutive failure counting from `36038333030`, and the branch's run list holds
+  93 runs of which every one failed, so this slice's receipt is the local run
+  transcribed above: the same compiler and the same flags on this same commit, but
+  not the clean checkout `AGENTS.md` calls the authority, and nothing here should be
+  read as "CI passed".
 
 ## What these gates cannot say
 
