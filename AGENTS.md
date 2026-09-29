@@ -6,9 +6,13 @@ than preferences; the first one is the reason this file exists.
 ## 1. Push every change. Always.
 
 **A change that exists only on this machine has not happened.** Finish every
-task with a commit on `master` and `git push origin master`, without asking
-first and without leaving the work uncommitted for a later session to
-rediscover.
+task with a commit, pushed to both remotes, without asking first and without
+leaving the work uncommitted for a later session to rediscover:
+
+```
+git push origin <branch>   # MSedgeMC/PalantirMC, private, the working record
+git push public <branch>   # msedge-projects/PalantirMC, public, where CI runs
+```
 
 The reason is not tidiness, it is the delivery path. GitHub Actions *is* the
 release build (`NEXT_STEPS.md` G4): `master` is where tests, lint, the live
@@ -17,12 +21,35 @@ them. Nothing local is ever the artifact — `dist/` is git-ignored staging for 
 file CI produced. So work that is not pushed has not been tested by the only
 compiler that matters and cannot be downloaded by anyone.
 
+**Why there are two remotes.** The account behind `origin` ran out of Actions
+minutes: every push to it from G101 onwards produced a zero-step run reading
+`recent account payments have failed or your spending limit needs to be
+increased`, and the push that carried G112 produced no run at all. Actions
+minutes are free for public repositories on standard runners, and the `package`
+job is Windows-only, billed at twice a Linux minute wherever minutes are
+charged. So the tree is mirrored to `public`, where the same workflows run for
+free and the artifacts come from. The mirror is one-way in practice: it is
+never edited, never merged, and the working record stays on `origin`.
+
+**A push schedules nothing without an open pull request.** `ci.yml` narrows
+`push` to `master` and carries every other branch through `pull_request`, so
+the mirror holds a draft PR (`msedge-projects/PalantirMC#1`) from the working
+branch into its own `master`: each push re-runs CI under that PR. The private
+repository's PR (`MSedgeMC/PalantirMC#10`) still exists and still collects runs
+that cannot start.
+
 What that means in practice:
 
 - Commit as part of the change, not as a favour; one concern per commit.
 - Push at the end of the task, then **confirm the run went green**:
-  `gh run list --limit 3` and `gh run watch <id>`. `gh` is authenticated as
-  `MSedgeMC` for this repository.
+  `gh run list --repo msedge-projects/PalantirMC --limit 3` and
+  `gh run watch <id> --repo msedge-projects/PalantirMC`.
+- The two accounts are held by per-remote credential helpers in `.git/config`
+  (`gh auth token -u <account>`), so pushing needs no account switching and the
+  active `gh` account does not matter for a push. It does matter for `gh api`
+  calls against a private repository: `gh auth switch -u MSedgeMC` first.
+- `AGENTS.md`'s rules apply to both remotes. In particular a `v*` tag publishes
+  a Release wherever it is pushed, and on the mirror that Release is public.
 - When a run is red, fix forward with another commit. Do not amend or
   force-push a commit that is already on the remote — the runner's answer is
   the record of what failed.
@@ -33,17 +60,24 @@ What that means in practice:
 
 ## 2. Where the exe comes from
 
+Every row below describes the **public mirror**, because that is the only
+remote whose runs start. Name it with `--repo msedge-projects/PalantirMC` on
+every `gh run` and `gh workflow` command; the private remote answers but its
+jobs never leave the queue.
+
 | Trigger | Workflow | What it produces |
 | --- | --- | --- |
-| Push to `master` | `.github/workflows/ci.yml` | `test`, `lint`, `live`, then the `package` job builds both Windows targets and uploads `palantirmc-x86_64-pc-windows-msvc` / `-gnu` artifacts (14 days) |
-| Tag `v*` | `.github/workflows/release.yml` | `guard` checks the tag against `Cargo.toml`, `build` retests and rebuilds, `publish` attaches both exes, `.sha256` sidecars and zips to a Release |
+| Push to the mirror's PR branch | `.github/workflows/ci.yml` | `test`, `lint`, `live`, then the `package` job builds both Windows targets and uploads `palantirmc-x86_64-pc-windows-msvc` / `-gnu` artifacts (14 days) |
+| Push to the mirror's `master` | `.github/workflows/ci.yml` | the same list, without needing a PR — but this path has not been exercised: the mirror's own creation push produced no run at all, the same silence G112's push got (`GATES.md`) |
+| Tag `v*` | `.github/workflows/release.yml` | `guard` checks the tag against `Cargo.toml`, `build` retests and rebuilds, `publish` attaches both exes, `.sha256` sidecars, zips and `LICENSE` to a **public** Release |
 | `workflow_dispatch` | either | Re-run without a new commit; `release.yml` needs an existing tag |
 
 To get a fresh build locally, do not compile one by hand and call it current:
 push, then
 
 ```
-gh run download <run-id> -n palantirmc-x86_64-pc-windows-msvc -D dist/
+gh run download <run-id> --repo msedge-projects/PalantirMC \
+  -n palantirmc-x86_64-pc-windows-msvc -D dist/
 ```
 
 CI's artifact is the authority; a local `cargo build` is a convenience that has
