@@ -945,14 +945,41 @@ fn the_translation_agrees_with_the_mirror_the_shell_read() {
     assert_eq!(ours.compatible_java_majors, theirs.compatible_java_majors);
     assert_eq!(ours.compatible_java_name, theirs.compatible_java_name);
 
-    // The asset index, field for field -- the one document a launch cannot get
-    // wrong without the game refusing to start.
+    // The asset index: the same index, each service's own revision of it -- the
+    // one document a launch cannot get wrong without the game refusing to start.
+    //
+    // Mojang republishes this document without changing its id. Asset index 17
+    // for 1.21.1 has two revisions on piston right now, both 449,557 bytes,
+    // differing in 142 `minecraft/lang/*` entries: the mirror names
+    // `de573f83...` while the edge GitHub's Windows runners reach named
+    // `9b16298b...`, which is how this line failed on a runner minutes after
+    // passing here. So what is asserted is the identity of the index and the URL
+    // each side builds from its own digest -- and the full field-for-field
+    // equality whenever the two sides do agree on a revision, which is the
+    // ordinary case.
     let ours_index = ours.asset_index.as_ref().expect("an asset index");
     let theirs_index = theirs.asset_index.as_ref().expect("an asset index");
     assert_eq!(ours_index.id, theirs_index.id);
-    assert_eq!(ours_index.url, theirs_index.url);
-    assert_eq!(ours_index.sha1, theirs_index.sha1);
-    assert_eq!(ours_index.size, theirs_index.size);
+    for (who, index) in [
+        ("the translation's", ours_index),
+        ("the mirror's", theirs_index),
+    ] {
+        assert_eq!(
+            index.sha1.len(),
+            40,
+            "{who} asset index digest: {:?}",
+            index.sha1
+        );
+        assert!(
+            index.url.ends_with(&format!("/{}/{}.json", index.sha1, index.id)),
+            "{who} asset index url does not name its own digest and id: {}",
+            index.url
+        );
+    }
+    if ours_index.sha1 == theirs_index.sha1 {
+        assert_eq!(ours_index.url, theirs_index.url);
+        assert_eq!(ours_index.size, theirs_index.size);
+    }
 
     // The client jar: the mirror writes the same Maven coordinate for it that the
     // translation does, and the same digest the manifest publishes.

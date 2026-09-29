@@ -4781,6 +4781,62 @@ exit 0, 42 warning lines, the same set as G106's
   explain why the mirror's creation push produced no run object where G112's push
   produced none either -- both are recorded as unread rather than as understood.
 
+- [x] G114: a live assertion stops pinning a third party's revision of a
+  document the third party republishes
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+         curl -sS https://piston-meta.mojang.com/mc/game/version_manifest_v2.json
+         # then the two revisions of asset index 17 that the failure named
+  EXPECT: 18 live tests pass, none ignored, with both services naming the same
+          index id and each naming its own digest in the URL it serves
+  EVIDENCE: the runner that found it -- `36578642829`, job `Live services`,
+            2026-09-29 -- and the two revisions, measured here:
+
+```
+# the runner, minutes after the same suite was green here
+the_translation_agrees_with_the_mirror_the_shell_read: assertion `left == right` failed
+  left: "https://piston-meta.mojang.com/v1/packages/9b16298b1dc0697878cec88bb2d96168f5239e4f/17.json"
+ right: "https://piston-meta.mojang.com/v1/packages/de573f83da62843433ec9951c66feec7ed0a60a1/17.json"
+test result: FAILED. 17 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 127.68s
+
+# both of those revisions answer, and both are the same size
+$ GET /v1/packages/de573f83.../17.json   -> 200  449557 bytes
+$ GET /v1/packages/9b16298b.../17.json   -> 200  449557 bytes
+  objects: 3911 in both; 0 keys only in one; 142 objects differ
+    minecraft/lang/ig_ng.json  hash 7f80ca07... size 585152 -> 1dea0eae... 586816
+    minecraft/lang/en_ud.json  hash b7b1291c... size 699325 -> 01b420d5... 699586
+    minecraft/lang/ta_in.json  hash aee0e985... size 847089 -> a3e6e61b... 847331
+
+# which side each service named, in the same hour
+piston 1.21.1 version file, from here:  assetIndex.sha1 de573f83...
+meta.prismlauncher.org/v1/net.minecraft/1.21.1.json: assetIndex.sha1 de573f83...
+```
+
+  **What the assertion was claiming.** Asset index 17 for 1.21.1 has two
+  revisions on piston and they are both live: same 3,911 objects, same 449,557
+  bytes, 142 `minecraft/lang/*` entries re-hashed between them. Mojang republished
+  the index, Prism's mirror still names the older digest, and the edge GitHub's
+  Windows runners reach named the newer one -- so a line asserting that two
+  independent services agree about `sha1`, `url` and `size` was asserting Mojang's
+  publishing schedule, which no launcher can keep. It is not flakiness in the
+  pejorative sense: the value is stable on each service and moves when an upstream
+  republishes, which makes it exactly the kind of claim this test file's own header
+  tells its authors not to write.
+
+  **What it asserts now.** The identity of the index (`id`), and for each side
+  that its `url` names its own digest and id -- `.../packages/<sha1>/<id>.json`,
+  with a 40-character digest -- which is the claim about *this* launcher: that it
+  passes the index through without rebuilding it. The field-for-field equality is
+  kept, but conditional on the two sides agreeing about a revision, which is the
+  ordinary case and the one a local run sees today.
+
+  **The receipt for the other branch is the next dispatch, and that is deliberate.**
+  A divergent-revision run cannot be produced on demand from here, because this
+  machine's path to both services currently resolves to the same older revision;
+  faking it would mean a fixture, and a fixture is the thing live tests exist to
+  replace. If the runner still sees `9b16298b...` when the next dispatch runs, that
+  run is what says the tolerant branch works; if it does not, the branch is
+  unexercised and stays that way in this record rather than being called covered.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

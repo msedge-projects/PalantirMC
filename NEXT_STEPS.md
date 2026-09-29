@@ -74,9 +74,12 @@ G101, and the paragraph stays as the record of what was true before it.
 `live` and `package` are gated on `github.event_name != 'pull_request'`, so a
 branch push runs `test` and `lint` only. The exes and the service checks come from
 a `workflow_dispatch` of `ci.yml` on the mirror -- `36575592704` was the first,
-and both Windows targets built in it -- and that run is also what found G113: a
-live test that had been red since `PackProfile::vanilla` changed shape, sitting in
-the one job no `pull_request` run executes.
+and both Windows targets built in it -- and the job no `pull_request` run executes
+is what has found both of the defects that were hiding in it: G113, a live test
+red since `PackProfile::vanilla` changed shape, and G114, an assertion that
+compared two services' *revisions* of asset index 17 rather than the index itself.
+The second is the sharper lesson: it was green here minutes before it was red
+there, and the difference was which edge of Mojang's CDN answered.
 
 Stage 0 is done. Three workspace members left because nothing reaches them
 (`crates/nbt`, `crates/schema`, `crates/palantir-cli`), and with them the
