@@ -144,9 +144,12 @@ gates are environment-dependent and what a green run means for each.
 
 ## Licence and attribution
 
-PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. It vendors the
-Modrinth App source (GPL-3.0, pinned in `vendor/modrinth-app/UPSTREAM.md`) as a
-read-only measurement reference — never compiled, never shipped. Full notices:
-`THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
+PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. The full text is
+`LICENSE`, and `release.yml` copies that file into the release folder, so every
+Release attaches the terms beside each exe and its `.sha256` sidecar — the zips are
+compressed from the exes *before* that copy, so the text travels next to them
+rather than inside. It vendors the Modrinth App source (GPL-3.0, pinned in
+`vendor/modrinth-app/UPSTREAM.md`) as a read-only measurement reference — never
+compiled, never shipped. Full notices: `THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
 GPL-3.0 grants rights in the code and not in the identity: this launcher draws
 its own mark in the same slots.
