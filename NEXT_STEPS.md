@@ -54,6 +54,30 @@ and the same flags, but it is not a clean checkout and it is not the authority
 with `workflow_dispatch` and watched to green, and until then nothing here should
 be read as "CI passed".
 
+**The mirror answered that, on 2026-09-29.** The block was a billing state on the
+account that owns `origin`, and Actions minutes are free for public repositories
+on standard GitHub-hosted runners -- which is also why the Windows-only `package`
+job, billed at twice a Linux minute wherever minutes are charged, was the most
+expensive part of the problem. The tree is now mirrored to
+`msedge-projects/PalantirMC`, public, and the workflows run there under a draft PR
+into that repository's own `master`: a branch push schedules nothing by itself,
+because `ci.yml` narrows `push` to `master`. `AGENTS.md` §1 and §2 name both
+remotes and what each is for.
+
+The first run that started carries this tree and reports **1008 passed / 0 failed
+/ 18 ignored** -- `palantir-core` 177 + 8, `palantir-desktop` 537 + 4,
+`palantir-loader` 31, `palantir-net` 251, 18 live tests ignored by design -- which
+is, test binary for test binary, the number the machine here measured for the same
+tree. That is the receipt the paragraph above has been saying was missing since
+G101, and the paragraph stays as the record of what was true before it.
+
+`live` and `package` are gated on `github.event_name != 'pull_request'`, so a
+branch push runs `test` and `lint` only. The exes and the service checks come from
+a `workflow_dispatch` of `ci.yml` on the mirror -- `36575592704` was the first,
+and both Windows targets built in it -- and that run is also what found G113: a
+live test that had been red since `PackProfile::vanilla` changed shape, sitting in
+the one job no `pull_request` run executes.
+
 Stage 0 is done. Three workspace members left because nothing reaches them
 (`crates/nbt`, `crates/schema`, `crates/palantir-cli`), and with them the
 PandoraLauncher notice they were the only reason for: `Cargo.lock` went from 553

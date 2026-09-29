@@ -21,7 +21,7 @@
 //! it instead of reading it.
 
 use palantir_core::instance::Instance;
-use palantir_core::pack::PackProfile;
+use palantir_core::pack::{Component, PackProfile};
 use palantir_core::resolve::{resolve, MetaStore};
 use palantir_core::version::{ProblemSeverity, RuntimeContext};
 use palantir_net::{
@@ -102,13 +102,39 @@ fn newest_fabric_pair(store: &mut OnlineMetaStore) -> (String, String) {
     panic!("none of the twelve newest Minecraft releases has Fabric mappings on the service");
 }
 
+/// How many `org.lwjgl` jars a resolution puts on the classpath.
+///
+/// The count is what says whether naming the `org.lwjgl3` slot in the profile
+/// changes anything: the store below answers from Prism's mirror, whose
+/// `net.minecraft` file carries no LWJGL entries and requires the slot instead,
+/// so the same slot has to be resolved either way -- added by the resolver when
+/// the profile does not name it, loaded from the profile when it does.
+fn lwjgl_jars(resolution: &palantir_core::resolve::Resolution) -> usize {
+    resolution
+        .profile
+        .libraries
+        .iter()
+        .filter(|lib| lib.name.group() == "org.lwjgl")
+        .count()
+}
+
 /// Instance creation and instance loading, end to end, against the service the
 /// launcher actually uses.
 ///
-/// This is the test the version-fill rule exists for: `Instance::create` writes
-/// an `org.lwjgl3` slot with no version, and resolution has to work out that it
-/// means the version `net.minecraft` requires. Before that rule, this instance
-/// could not resolve and so could not launch.
+/// Two shapes, because the same slot reaches the profile two ways. What
+/// `Instance::create` writes is one `net.minecraft` component
+/// (`PackProfile::vanilla`), and the `org.lwjgl3` slot the mirror's file
+/// requires is added by the resolver. What an instance written by Prism -- or by
+/// a build of this launcher from before it read the mirror -- carries is that
+/// slot beside it with no version on it, and it has to be filled from the
+/// requirement that names it rather than looked up as `<uid>/.json`, which is
+/// not a URL. Either way the classpath has to be the same: one LWJGL.
+///
+/// The second half is written by hand because the first half is no longer what
+/// `create` does. Until 2026-09-29 this test asserted the older premise -- that
+/// `create` itself writes the versionless slot -- and it went red when that
+/// changed without anyone seeing it: `pull_request` runs skip `live`, so the only
+/// run that could have said so is the one `workflow_dispatch` starts.
 #[test]
 #[ignore = "live: reaches the metadata service"]
 fn a_created_instance_resolves_against_the_live_service() {
@@ -116,12 +142,15 @@ fn a_created_instance_resolves_against_the_live_service() {
     let instance = fresh_instance(tmp.path(), "Live Vanilla");
 
     let profile = PackProfile::load(&instance.mmc_pack_path()).expect("reading mmc-pack.json");
-    assert!(
-        profile
-            .components()
-            .iter()
-            .any(|c| c.uid == "org.lwjgl3" && c.version.is_empty()),
-        "the instance no longer carries the versionless LWJGL slot this test is about"
+    let created: Vec<String> = profile
+        .components()
+        .iter()
+        .map(|c| format!("{}@{}", c.uid, c.version))
+        .collect();
+    assert_eq!(
+        created,
+        vec![format!("net.minecraft@{GAME}")],
+        "create no longer writes the single versioned slot this test is about"
     );
 
     let resolution = resolve_against_the_live_service(tmp.path(), &instance);
@@ -147,23 +176,11 @@ fn a_created_instance_resolves_against_the_live_service() {
         assets.url
     );
 
-    // The slot nobody versioned was resolved from the requirement naming it.
-    let lwjgl = resolution
-        .components
-        .iter()
-        .find(|c| c.uid == "org.lwjgl3")
-        .expect("org.lwjgl3 vanished from the resolution");
+    // LWJGL arrives even though nothing in the profile names it: the mirror's
+    // `net.minecraft` requires the slot, and the resolver adds it.
+    let without_the_slot = lwjgl_jars(&resolution);
     assert!(
-        lwjgl.version.starts_with("3."),
-        "LWJGL3 resolved to {:?}",
-        lwjgl.version
-    );
-    assert!(
-        resolution
-            .profile
-            .libraries
-            .iter()
-            .any(|lib| lib.name.group().contains("lwjgl")),
+        without_the_slot > 0,
         "no LWJGL library reached the classpath"
     );
     // LWJGL 3 ships its natives as separate rule-gated artifacts rather than as
@@ -181,6 +198,40 @@ fn a_created_instance_resolves_against_the_live_service() {
         resolution.profile.compatible_java_majors.contains(&21),
         "Java majors resolved: {:?}",
         resolution.profile.compatible_java_majors
+    );
+
+    // The shape Prism writes: the same versionless slot, named in the profile
+    // before resolution instead of added by it.
+    let path = instance.mmc_pack_path();
+    let mut prisms = PackProfile::load(&path).expect("reading mmc-pack.json");
+    prisms.append(Component {
+        uid: "org.lwjgl3".into(),
+        version: String::new(),
+        ..Default::default()
+    });
+    prisms.save(&path).expect("writing mmc-pack.json");
+
+    let resolution = resolve_against_the_live_service(tmp.path(), &instance);
+    assert_eq!(
+        resolution.severity(),
+        ProblemSeverity::None,
+        "the versionless slot made the instance unresolvable: {:?}",
+        resolution.problems
+    );
+    let slot = resolution
+        .components
+        .iter()
+        .find(|c| c.uid == "org.lwjgl3")
+        .expect("the versionless slot vanished from the resolution");
+    assert!(
+        slot.version.starts_with("3."),
+        "the versionless slot resolved to {:?}",
+        slot.version
+    );
+    assert_eq!(
+        lwjgl_jars(&resolution),
+        without_the_slot,
+        "naming the slot in the profile changed what reaches the classpath"
     );
 }
 

@@ -1756,7 +1756,9 @@ needs to be increased`. So no job ran, in either workflow, and there is no
 `test result` line from a runner to quote for any of them. The ids are written
 out because a blocked run is a fact about the account and not a verdict on the
 tree, and the only way a later reader can tell the two apart is if both are named
-the same way. The commands `ci.yml` runs were run here
+the same way. **The block ended on 2026-09-29**: the tree gained a public mirror,
+`36574682807` is the first run since G101 with `test result` lines in it, and
+G113 is what the first run that could execute a job found. The commands `ci.yml` runs were run here
 instead, with the same flags, on the tree that was pushed:
 
 ```
@@ -4695,6 +4697,89 @@ archon /v0/servers, X-Panel-Version: 1      404    9 bytes  not found
   tree, and none will until the account can schedule jobs again. That is the same
   block G105's decision note already names, and it is what the mirror in that note is
   for.
+
+- [x] G113: the live suite is green against the service again, with the stale
+  premise that made it red written out of it
+  CHECK: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+  EXPECT: all 18 live tests pass, none ignored, in about five minutes against the
+          real services
+          the workspace suite green at 1008 passed / 0 failed / 18 ignored, clippy
+          exit 0 at the same 42 warnings
+  EVIDENCE: the runner that found it -- `36575592704`, job `Live services`,
+            2026-09-29 -- and the local runs after the fix:
+
+```
+# the first dispatch run on the public mirror, before anything was changed
+---- a_created_instance_resolves_against_the_live_service stdout ----
+thread 'a_created_instance_resolves_against_the_live_service' (4244) panicked at
+  crates\palantir-net\tests\live.rs:119:5:
+the instance no longer carries the versionless LWJGL slot this test is about
+test result: FAILED. 17 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 82.86s
+
+# the same test here, on the same tree -- so not a service that was slow or
+# unreachable: it is over in 0.08 s, before a single request is made
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.08s
+
+# after the fix
+cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 285.15s
+exit 0
+cargo test --workspace --all-targets --locked
+exit 0 -> 1008 passed / 0 failed / 18 ignored
+cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+exit 0, 42 warning lines, the same set as G106's
+```
+
+  **What was red, and why nobody could see it.** The first `workflow_dispatch` on
+  the public mirror is the first run since G101 in which a job actually executed,
+  and it reported `Live services` red: 17 of the 18 live tests passed and
+  `a_created_instance_resolves_against_the_live_service` panicked on its first
+  assertion. Every other live test was green, which is what makes the second
+  measurement the important one -- the same test here fails in **0.08 seconds**,
+  before a request is made -- so the service was not the variable. The premise was.
+
+  `Instance::create` reaches `PackProfile::vanilla`, and that function stopped
+  writing a second component: piston keeps the LWJGL entries inside
+  `net.minecraft` itself, so a reader of piston has nothing to put in an
+  `org.lwjgl3` slot, and the comment where the code does it says exactly that.
+  This test was written before the change and asserts the shape the launcher no
+  longer writes. It went red at that change and stayed red, because `live` is
+  gated on `github.event_name != 'pull_request'`: the job runs on a tag, on a
+  `master` push or on a dispatch, and none of those had started since G101. **A job
+  that never runs does not go red, it goes unread** -- which is the gap this gate
+  closes rather than a fault in the test's design.
+
+  **What it asserts now.** Three things, in the order they matter. That `create`
+  writes exactly one component, `net.minecraft@<version>`, so a change to that
+  shape fails here rather than quietly in the field. That resolution against the
+  live service carries the instance the rest of the way regardless: main class,
+  an asset index with a 40-character digest, LWJGL libraries *and* the natives
+  this host can run, Java 21 among the compatible majors. And that the same
+  instance carrying Prism's versionless `org.lwjgl3` slot -- the shape every
+  instance already on disk has -- resolves that slot to a `3.`-something and puts
+  **the same 32 `org.lwjgl` jars** on the classpath, so naming the slot cannot
+  double it.
+
+  **Two things the first attempt got wrong, recorded because they cost an hour.**
+  The store is `meta.prismlauncher.org/v1` (`DEFAULT_META_BASE_URL`), not piston:
+  its `net.minecraft` file carries *no* LWJGL entries and requires `org.lwjgl3`,
+  so the slot is filled from that requirement (measured: `3.3.3`) and never
+  reaches the `carried_elsewhere` path at all. That path is piston's, it has unit
+  coverage in `resolve.rs`, and no live test with this store can reach it; the
+  first version of this fix asserted it and the run answered in its own words --
+  `disabled=false version="3.3.3"`. The second is that the job this was found in
+  is in the same run as the release build: `package` built **both** Windows
+  targets green there, `x86_64-pc-windows-msvc` and `x86_64-pc-windows-gnu`, so
+  the mirror is not only a test runner, it is the delivery path G4 names.
+
+  **What this does not do.** It does not put the live suite in front of a pull
+  request, which costs about five minutes of runner per push and is not yet worth
+  it; it does not add a piston-shaped live test, because a live test cannot choose
+  its store's shape and the unit test already covers that half; and it does not
+  explain why the mirror's creation push produced no run object where G112's push
+  produced none either -- both are recorded as unread rather than as understood.
 
 ## What these gates cannot say
 
