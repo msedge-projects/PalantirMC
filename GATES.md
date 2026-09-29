@@ -5014,6 +5014,16 @@ exit 0, 42 warnings
           7 passed; 0 failed in the measurement, and the crate's own suite green
   EVIDENCE: the two runs and the fix between them, transcribed in full.
 
+  The runner's own receipt of this commit is different from the local one and is
+  worth separating: on the pull-request path `36599941647` ran `Test workspace` and
+  `Lint` and skipped `Live services` and `Build exe` by its own rule, and a
+  dispatch of the same commit, `36600372776`, ran all five -- **1011 passed / 0
+  failed** and 18 ignored across the workspace suites (177 + 8 + 540 + 4 + 31 +
+  251, the three measurement tests being the difference from G122's 1008), the live
+  suite 18 passed / 0 failed in 109.66 s, and both Windows exes built and staged
+  (msvc 5,483,872 B, gnu 5,553,494 B). The numbers below are this machine's; those
+  are the runner's, on a shared VM with no warm scratch directory.
+
 ```
 $ cargo test -p palantir-desktop --locked scale -- --nocapture     # before the fix
 == instance page, per frame ==
