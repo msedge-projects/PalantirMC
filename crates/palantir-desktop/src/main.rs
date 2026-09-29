@@ -115,6 +115,12 @@ mod page;
 /// and reports the things only the shell can do (opening an instance, opening a
 /// project) rather than performing them -- see `pages::Open`.
 mod pages;
+/// The file picker: the one place this launcher asks Windows for a path rather than
+/// scanning for one.
+///
+/// One caller -- adding a skin from a file -- and a Win32 call rather than a new
+/// dependency: see the module's own note for what that costs and why it is worth it.
+mod pick;
 mod prefs;
 /// The token gate: the reference's own source, compared with what this shell
 /// paints. Compiled for tests only -- it reads files, and the shell never does.

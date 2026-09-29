@@ -8,14 +8,19 @@
 //! grid of empty boxes.
 //!
 //! What *is* real is the account's own half: the skins and capes Minecraft says it
-//! owns, the skin in force cut into a front view (G104), and -- since G106 -- the
-//! ability to put any of them on. That last one is a *write* to the reader's own
-//! Minecraft account, so every button that can make one says what it will do, and
-//! the two things that cannot be done from here say so instead of pretending:
-//! adding a skin from a file, which needs a file dialog and a multipart upload, and
-//! the reference's edit modal, which is where its own `unequip_skin` is reached
-//! from -- the client can take a skin off (see `palantir_net::SkinChange`), and the
-//! modal that would let a reader ask for it is not built.
+//! owns, the skin in force cut into a front view (G104), the ability to put any of
+//! them on (G106), and -- since G123 -- the ability to add one from a file: the
+//! header's Add opens the launcher's own file dialog, the chosen texture is padded to
+//! the 64x64 the service takes and its arm style is read from its own pixels, and the
+//! upload is one multipart write (`crate::pick`, `crate::skin`, `Ask::AddSkin`).
+//!
+//! Three of those are a *write* to the reader's own Minecraft account -- putting a skin
+//! on, putting a cape on, and adding the file -- so what a press will do is written
+//! where the press is. Two things the reference has are still not here, and this page
+//! says so rather than drawing a control that lies: its edit modal, which is where its
+//! own `unequip_skin` is reached from (the client *can* take a skin off -- see
+//! `palantir_net::SkinChange` -- and no control asks for it), and the store of the
+//! skins a reader has added, which its Saved skins sections are drawn from.
 
 use iced::widget::{column, image, row, text, Space};
 use iced::{Alignment, Element, Length};
@@ -137,6 +142,38 @@ pub struct Wear {
     pub change: SkinChange,
 }
 
+/// The request that opens the launcher's file dialog and uploads what it returns.
+///
+/// The third shape in this file, and the one where the page has the least: the path
+/// comes from a dialog and the bytes from a file, so neither is a page's to describe --
+/// what travels is the round and nothing else, and the change is built where the file
+/// is read. The round is here for [`Wear`]'s reason: the answer has to be matchable to
+/// the press that is waiting for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Add {
+    /// Which request this is, counting from one, beside the reads' and writes' own
+    /// counters.
+    pub round: u64,
+}
+
+/// What came of asking the reader for a file.
+///
+/// Three answers rather than a `Result`, because a cancel is not a failure: a reader
+/// who opened the dialog and changed their mind is a finished interaction, and a page
+/// that apologised for it would be apologising for nothing. The third is not the
+/// reader's doing either -- a build with no picker in it -- which is why it is its own
+/// arm rather than a sentence in the second's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Picked {
+    /// The reader closed the dialog without choosing anything.
+    Cancelled,
+    /// A texture was chosen and the account wears it -- or would not, with the
+    /// reason the service gave.
+    Done(Result<(), String>),
+    /// This machine has no dialog to open at all.
+    NoPicker(String),
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -144,6 +181,14 @@ pub enum Message {
     Select(Section),
     /// The page was asked to add a skin from a file.
     AddSkin,
+    /// What came of asking the reader for a file.
+    Added {
+        /// Which request this answers, so an answer to one the page has replaced is
+        /// dropped rather than drawn.
+        round: u64,
+        /// The reader's answer, or the machine's.
+        picked: Picked,
+    },
     /// The reader asked to put something the account owns on -- or take it off.
     Wear(SkinChange),
     /// The shell's answer to a change: which change it answers, and what happened.
@@ -235,7 +280,34 @@ impl State {
                 self.open = if self.open == index { None } else { index };
             }
             Message::AddSkin => {
-                self.notice = Some(crate::store::not_implemented("Adding a skin"));
+                // One at a time, like a row's Apply and for a stronger reason: the
+                // dialog this opens is modal, so a second press would be a second
+                // dialog behind the first.
+                if !self.wearing {
+                    self.wearing = true;
+                    self.notice = None;
+                    let round = self.round + 1;
+                    self.round = round;
+                    return Some(Ask::AddSkin(Add { round }));
+                }
+            }
+            Message::Added { round, picked } => {
+                if round == self.round {
+                    self.wearing = false;
+                    match picked {
+                        // The reader changed their mind: the press is finished and
+                        // there is nothing to say about it.
+                        Picked::Cancelled => {}
+                        // A texture that went up reloads the lists, for the reason a
+                        // change that worked does: what changed is the document, and
+                        // the new row is a better confirmation than a sentence about
+                        // it would be.
+                        Picked::Done(Ok(())) => return Some(Ask::Skins(self.ask())),
+                        Picked::Done(Err(reason)) | Picked::NoPicker(reason) => {
+                            self.notice = Some(reason)
+                        }
+                    }
+                }
             }
             Message::Wear(change) => {
                 // The sentence about the last thing this page could not do is about
@@ -322,9 +394,19 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             // preview panel -- a candidate skin is never rendered here, because
             // the doll draws what Minecraft says is in force -- so the Apply that
             // wears something lives on the row that *is* something, and the header
-            // keeps the one control that is about the page rather than about a
-            // skin (G106).
-            .push(ui::button(theme, ADD_KEY, Key::AppSkinsAddButton, ui::Kind::Standard, Message::AddSkin))
+            // keeps the one control that is about the page rather than about a skin:
+            // Add, which since G123 opens this launcher's own file dialog, pads what
+            // it returns to the shape the service takes and uploads it (G106).
+            .push(ui::button_or(
+                theme,
+                ADD_KEY,
+                Key::AppSkinsAddButton,
+                ui::Kind::Standard,
+                // Unusable while a change is in flight, like the rows' Apply: this
+                // one opens a modal dialog, and what it uploads afterwards is a
+                // write to the reader's own account.
+                (!state.wearing).then_some(Message::AddSkin),
+            ))
             .into(),
     );
     // The account's own appearance, which is what this page is for: the skin in
@@ -645,13 +727,86 @@ mod tests {
     }
 
     #[test]
-    fn the_one_thing_this_page_cannot_do_yet_says_so() {
-        // Adding a skin from a file is a file dialog and a multipart upload, and
-        // neither is here; the page says which rather than drawing a button that
-        // would do nothing.
+    fn adding_a_skin_asks_the_shell_for_a_file_and_takes_one_at_a_time() {
+        // The page's half of an upload: one request, carrying the round, and no
+        // second one while the first is out. The dialog is the shell's (`Add`), and
+        // what the reader chose never passes through here -- only the round does.
         let mut state = State::default();
-        assert_eq!(state.update(Message::AddSkin), None, "nothing for the shell to do");
-        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
+        let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
+            panic!("the press asks the shell for a file");
+        };
+        assert_eq!(add.round, 1);
+        assert!(state.wearing, "and the page waits on it");
+        assert_eq!(state.notice, None);
+        assert_eq!(state.update(Message::AddSkin), None, "and a second press is dropped");
+        assert!(state.wearing);
+    }
+
+    #[test]
+    fn the_three_answers_to_that_request_draw_three_different_pages() {
+        // Cancelled: the press is finished and nothing is said. Failed: a sentence in
+        // the slot every other failure goes. No picker: also a sentence, and a
+        // different one -- the reader did nothing wrong.
+        let mut state = State::default();
+        let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
+            panic!("the press asks the shell for a file");
+        };
+        assert_eq!(
+            state.update(Message::Added { round: add.round, picked: Picked::Cancelled }),
+            None,
+            "a cancel asks for nothing"
+        );
+        assert!(!state.wearing);
+        assert_eq!(state.notice, None, "and says nothing");
+
+        let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
+            panic!("asked again");
+        };
+        assert_eq!(
+            state.update(Message::Added {
+                round: add.round,
+                picked: Picked::Done(Err("Minecraft refused the change: not a skin".to_string())),
+            }),
+            None
+        );
+        assert!(!state.wearing);
+        assert!(state.notice.as_deref().unwrap_or_default().contains("not a skin"));
+
+        let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
+            panic!("asked a third time");
+        };
+        state.update(Message::Added {
+            round: add.round,
+            picked: Picked::NoPicker("This build has no file picker".to_string()),
+        });
+        assert!(!state.wearing);
+        assert!(state.notice.as_deref().unwrap_or_default().contains("no file picker"));
+    }
+
+    #[test]
+    fn an_upload_that_worked_reloads_the_lists_and_a_stale_answer_is_dropped() {
+        // The same rule a successful wear follows, from the same place: what changed is
+        // Minecraft's document, so the document is what is read again.
+        let mut state = State::default();
+        let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
+            panic!("the press asks the shell for a file");
+        };
+        // An answer to a request the page has replaced is dropped: the round is what
+        // makes that decidable.
+        assert_eq!(
+            state.update(Message::Added { round: 0, picked: Picked::Cancelled }),
+            None
+        );
+        assert!(state.wearing, "so the page is still waiting");
+        let Some(Ask::Skins(asked)) = state
+            .update(Message::Added { round: add.round, picked: Picked::Done(Ok(())) })
+        else {
+            panic!("an upload that worked reloads");
+        };
+        assert_eq!(asked.round, add.round + 1);
+        assert_eq!(state.appearance, Load::Loading);
+        assert!(!state.wearing, "the request is finished even while the read is out");
+        assert_eq!(state.notice, None, "a success is not a sentence");
     }
 
     #[test]

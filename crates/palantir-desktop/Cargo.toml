@@ -72,10 +72,17 @@ zip = "0.6"
 # window: the shell asks Windows for the system light/dark preference (so the
 # color theme can follow the OS) and for its own version string, both of which
 # live in the registry and both of which iced has no API for.
+#
+# `Win32_UI_Controls_Dialogs` is the file picker (`crate::pick`):
+# `GetOpenFileNameW` and the `OPENFILENAMEW` struct it takes. One more module of
+# a crate already linked above, where the modern picker would mean the COM
+# features and the object lifetime that comes with them -- the trade is written
+# out in that module's documentation rather than left to be discovered.
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_Registry",
+    "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",

@@ -148,6 +148,17 @@ pub enum Ask {
     /// secret: *which* account and *which* token the change is made with are the
     /// shell's, and a page that could make it would have to hold both.
     Wear(skins::Wear),
+    /// Add a skin from a file: open the launcher's own picker, read what it returns,
+    /// and upload it as the account's skin.
+    ///
+    /// The first ask that is neither a question nor a change the page can describe, and
+    /// the reason it exists as its own shape: what a reader picks is a *path*, and the
+    /// bytes behind it are not a page's to hold -- a page has never read a file in this
+    /// tree, for the same reason it has never held a token. So the page asks for the
+    /// dialog and reports the round; the file, the padding and the upload are the
+    /// shell's, and `crate::pick` says why the dialog has to be opened on the thread the
+    /// window lives on.
+    AddSkin(skins::Add),
     /// Put a project into one of the launcher's instances.
     ///
     /// The same shape as the other asks, pointed at a file instead of a page: the
@@ -241,6 +252,15 @@ impl Message {
     /// this carries.
     pub fn skin_worn(worn: &skins::Wear, result: Result<(), String>) -> Message {
         Message::Skins(skins::Message::Applied { round: worn.round, result })
+    }
+
+    /// The message that carries the file picker's outcome back to the Skins page.
+    ///
+    /// [`Message::skin_worn`]'s twin, and the one crossing where the answer is not a
+    /// `Result`: a reader who closed the dialog chose nothing rather than failed at
+    /// something, and `skins::Picked` is the type that says so.
+    pub fn skin_added(add: &skins::Add, picked: skins::Picked) -> Message {
+        Message::Skins(skins::Message::Added { round: add.round, picked })
     }
 
     /// The message that carries an install's outcome back to the page whose button

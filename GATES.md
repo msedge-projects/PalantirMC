@@ -5141,6 +5141,243 @@ test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 533 filtered out
   roughly twice each measurement for that reason, and they guard a regression rather
   than restating the number.
 
+- [x] G123: a texture the reader picks becomes the account's skin -- the launcher's
+  first file dialog, the padding to the shape the service takes, the arm style read
+  from the texture's own pixels, and the multipart body all of it arrives in
+  CHECK: cargo test -p palantir-net --lib --locked
+         cargo check -p palantir-desktop --locked --all-targets
+         cargo test -p palantir-desktop --locked --bin PalantirMC
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 255 passed, 0 failed in palantir-net's own suite, up from 251
+          exit 0 for the type check of the desktop crate, with no warning in a line
+             this slice added -- which is what compiles the Win32 call and the flow
+          552 passed, 0 failed in the desktop binary's suite
+          1027 passed, 0 failed, 18 ignored between the seven suites, which is the
+             merged tree: this slice's commit sits on G115's, and G115's three
+             `scale.rs` tests are what makes the desktop suite 552 rather than the
+             549 this slice measured before the merge
+          exit 0 for clippy, with no warning in a line this slice added
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo test -p palantir-net --lib --locked
+test auth::tests::the_upload_body_is_the_two_parts_the_service_reads ... ok
+test auth::tests::the_file_name_in_the_part_is_a_name_and_cannot_end_the_header_line ... ok
+test auth::tests::an_upload_posts_the_multipart_body_to_the_skin_service ... ok
+test auth::tests::an_upload_with_no_texture_is_refused_before_any_request_is_made ... ok
+test result: ok. 255 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.82s
+
+$ cargo check -p palantir-desktop --locked --all-targets
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-jobs\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 52s
+$ echo $?
+0
+
+$ cargo test -p palantir-desktop --locked --bin PalantirMC
+test pages::skins::tests::adding_a_skin_asks_the_shell_for_a_file_and_takes_one_at_a_time ... ok
+test pages::skins::tests::an_upload_that_worked_reloads_the_lists_and_a_stale_answer_is_dropped ... ok
+test pages::skins::tests::the_three_answers_to_that_request_draw_three_different_pages ... ok
+test pick::tests::a_cancel_is_an_empty_buffer_and_a_choice_is_read_to_its_nul ... ok
+test pick::tests::a_file_that_is_readable_is_read_and_one_over_the_ceiling_is_refused_by_size ... ok
+test pick::tests::the_ceiling_is_the_one_the_message_names ... ok
+test pick::tests::the_filter_is_one_entry_and_a_double_nul ... ok
+test skin::tests::a_legacy_texture_is_padded_to_the_modern_shape_with_both_left_limbs_filled ... ok
+test skin::tests::a_modern_texture_comes_back_pixel_for_pixel ... ok
+test skin::tests::a_normalised_legacy_texture_draws_the_same_doll_as_the_legacy_one ... ok
+test skin::tests::a_texture_of_neither_shape_is_refused_by_the_upload_path_too ... ok
+test skin::tests::the_arm_style_is_read_from_the_two_columns_the_reference_reads ... ok
+test skin::tests::the_left_limbs_are_the_right_ones_mirrored_rather_than_copied ... ok
+
+test result: ok. 552 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 78.36s
+
+$ cargo test --workspace --all-targets --locked
+    177 passed; 0 failed  (palantir-core, lib)
+      8 passed; 0 failed  (palantir-core, tests/compat.rs)
+    552 passed; 0 failed  (palantir-desktop, bin)
+      4 passed; 0 failed  (palantir-desktop/tests/native.rs)
+     31 passed; 0 failed  (palantir-loader, lib)
+    255 passed; 0 failed  (palantir-net, lib)
+      0 passed; 0 failed; 18 ignored  (palantir-net, tests/live.rs)
+exit 0 -> 1027 passed / 0 failed / 18 ignored
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 32s
+$ echo $?
+0
+$ grep -c '^warning: ' .scratch/g123-clippy-merged.log
+42
+$ diff <(grep '^warning: ' .scratch/g122-clippy-rebased.log | sort) \
+       <(grep '^warning: ' .scratch/g123-clippy-merged.log | sort)
+# nothing is printed: the 42 warnings on the merged tree are the same set this
+# branch carried before the slice -- G115's own code added none -- and three
+# warnings from this slice's first draft were fixed rather than shipped
+# (`manual_char_comparison`, `type_complexity` twice)
+
+$ python tools/progress.py --check
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 120 gates, 6 stage cards and every subject as written
+```
+
+  **Every number above was re-measured after the rebase, and the merge is why.** This
+  slice's commit sits on G115's, which landed while G123 was being written, so the
+  branch was rebased before the push and three documents conflicted where both sides had
+  edited the same lines: `GATES.md` keeps G115's entry and then this one, `NEXT_STEPS.md`'s
+  stage-3 row took this slice's wording plus G115's cost clause, and `tools/progress.py`'s
+  stage-3 line carries both ranges. Nothing in the transcripts is carried over from the
+  tree the slice was written on -- the only count that moved is the desktop suite's,
+  because G115's three `scale.rs` tests are in it (549 -> 552, and 1024 -> 1027 in the
+  workspace).
+
+  **What this slice is, and where it came from.** G106 built the Skins page's writing
+  half and ended by naming what it deliberately did not: the reference's file upload,
+  which is a dialog and a multipart body. G105 had already measured the one piece of
+  it that is not plumbing -- the reference's own arm-style test,
+  `helpers/skins.ts`'s `determineModelType`, which answers slim or classic from the
+  two columns at (54, 20), 2 wide by 12 tall -- and left it *unclaimed* rather than
+  spent. This slice takes both: the picker, the transform, the arm style and the body.
+
+  **The picker is Win32, and that is a decision rather than an accident.** A file
+  dialog is the one thing this launcher has never had: the import flow *scans* the
+  places other launchers keep their instances in, which works because there is one
+  right answer to find, and a skin is wherever the reader saved it. The obvious
+  implementation is a crate (`rfd`), which would be the first new dependency of this
+  rewrite and would need its licence checked and a line in
+  `THIRD_PARTY_NOTICES.md`. `GetOpenFileNameW` needs one more *module* of a crate the
+  window code already links (`windows-sys`, already in `Cargo.lock`, already in the
+  binary, already noticed), so no new crate enters the build and no new licence
+  question is opened; `cargo test --locked` passing is the proof that the lock file
+  did not move (`git status` in this slice's commit shows `Cargo.lock` untouched). The
+  cost is the pre-Vista dialog rather than the COM `IFileOpenDialog` Windows draws for
+  its own apps, and it is written in the module rather than left to be noticed. The
+  call is the one part of this slice that cannot be tested -- a modal OS window, and a
+  test that opened one would be waiting for a mouse -- so everything around it is a
+  function with no `cfg`: the filter (whose double NUL is the terminator, and a filter
+  missing one is a dialog with no file types at all), the buffer read (which stops at
+  the first NUL, and answers "cancelled" for the empty string the dialog leaves
+  behind), and the ceiling.
+
+  **The transform, and the test that justifies it.** The service takes one shape --
+  64x64 -- and a reader's file may be a 64x32 texture from before 1.8. Padding is not
+  decoration: the modern layout's left arm and left leg boxes have no legacy
+  counterpart, so a padded canvas with them left transparent is a player with two
+  right limbs. The fill is the right limb's own box copied *face by face* -- each of
+  its four four-column faces mirrored within its own columns -- rather than one flip of
+  all sixteen, which would put the right arm's right face where its front belongs.
+  That reasoning is worth exactly as much as the test that holds it: the front view
+  cut from a legacy texture (which reads the right limbs *through* `PARTS`' mirrored
+  stand-ins) is asserted equal, pixel for pixel, to the front view cut from the
+  normalised one -- so the drawing half and the upload half of this module cannot
+  drift apart, and the direction of the mirror is pinned by a property rather than by
+  a sentence. It is a stronger receipt than the four-colour arm test beside it, which
+  names 10/20/30/40 in both directions.
+
+  The reference reaches this transform through its plugin's `normalize_skin_texture`,
+  whose Rust is not in this tree (G105). This launcher's name for it is
+  `skin::prepare`, which is that transform **and** the arm-style read in one decode,
+  and it is one public function rather than two for a reason worth naming: the decode
+  is the expensive part, both answers come out of the same image, and a second public
+  function that only this module's tests called would be dead code in the binary -- a
+  warning this tree counts, and a sign that the function has no caller rather than
+  that it is useful. The departure is the *shape* of the call, not the arithmetic.
+
+  **The arm style, which is G105's unclaimed measurement.** `determineModelType` reads
+  2x12 pixels at (54, 20) and calls any paint there classic. Read against the format:
+  that rectangle is the last two columns of the right arm's **back** face. A classic
+  arm's faces are four pixels wide, so those columns are skin; a slim arm's are three
+  -- its box packs as right 40..43, front 44..46, left 47..50, back 51..53 -- so the
+  box's last two columns are padding in one and paint in the other. The tests paint
+  the whole arm *except* those two columns and get slim, paint one pixel of the twelve
+  and get classic, and record the consequence that surprises a reader: the page's own
+  test texture paints the arm's *front* face and is therefore slim, because the front
+  is not what the reference reads. The same test also settles that the *format* does
+  not decide the model -- a legacy 64x32 whose arm box is painted the way a real one's
+  is (all sixteen columns) reads classic through the same two columns -- which is the
+  one place the padding and the detector could have disagreed. One thing the reference
+  does with this answer that this launcher does not is *keep* it: it calls the detector
+  only for skins whose document says `UNKNOWN` and caches the result. Here the answer
+  is used once, at the moment of upload, and never written down -- nothing in this
+  launcher stores a texture, so there is nothing to be wrong about later (that store is
+  G124's).
+
+  **The body.** `palantir_net::skin_upload_body` builds the `multipart/form-data` body
+  -- a `variant` field, then a `file` part with its own `image/png` content type, then
+  the closing delimiter -- and the transport grows one method (`post_multipart`) that
+  puts those bytes on the wire under the `Content-Type` the body itself names, so
+  header and delimiters cannot disagree. The double grows `insert_multipart` and its
+  own log (`uploads()`), kept apart from `bodies()` on purpose: a multipart body is
+  bytes, and a test asking what an upload sent through a `String` would be checking a
+  lossy copy of the thing it means to check. The private `Verb` enum changed shape for
+  this: it carries the body now (`Post(json)`, `Put(json)`, `Upload(body)`, `Delete`),
+  which is what stops a DELETE being handed an empty string it does not send. Two
+  choices in the body are worth naming. The boundary is a **constant that is checked
+  against the bytes it delimits** rather than a random string: RFC 2046 asks for a
+  boundary that does not occur in the content, a random one satisfies that almost
+  always and can never be asserted to -- every test would read "the same body,
+  whatever the boundary turned out to be" -- while a constant plus a walk to the first
+  numbered variant that is absent both satisfies it and lets the gate spell the whole
+  body out. The walk is exercised rather than argued: the gate's own test feeds the
+  builder a texture containing the constant and asserts that it moves to `…Boundary1`,
+  and another containing both to `…Boundary2`. And the file part's name is reduced
+  (`file_part_name`): the name comes from a file dialog, so a quote or a newline in it
+  would end the header line early and leave the rest of the body as bytes the service
+  would read as a part of its own; a name that reduces to nothing becomes `skin.png`,
+  because a part with an empty filename is a request the service refuses and nothing
+  this launcher could say afterwards would explain why.
+
+  **The flow, and the split.** `Ask::AddSkin` is the third kind of ask: not a question
+  and not a change a page can describe, because what the reader picks is a path and the
+  bytes behind it are not a page's to hold -- a page has never read a file in this tree,
+  for the same reason it has never held a token. So the page asks for the dialog and
+  carries the round; the shell opens it **on the frame thread** (a dialog owned by a
+  window is modal to that window's thread and to nothing else), reads the file and pads
+  it there, and sends only the upload off the thread, through the same account and the
+  same `Store::wear` a row's Apply uses -- the upload is one more `SkinChange`, so no
+  store method was added for it. The answer comes back through one seam with three
+  arms: **cancelled** (the press is over and nothing is said -- a reader who changed
+  their mind did not fail at anything), **done** (the service's own sentence on
+  failure; silence plus a reload on success, exactly as G106's writes behave, because
+  what changed is the document), and **no picker** (a sentence for a build that has no
+  dialog, which is not the reader's fault and not the file's). The header's Add is
+  drawn unusable while any of this is in flight, which is the same one-write-at-a-time
+  rule the rows follow and a stronger one here: a second press would be a second modal
+  dialog behind the first.
+
+  **What this slice does not prove.** There is no live upload and there cannot be: it
+  would change the appearance of a real account, so no test does it, which is the same
+  limit G104's read and G106's write carry. The dialog itself is not gated -- the
+  module says which parts are and why the call cannot be -- so the `GetOpenFileNameW`
+  invocation is reasoned from the API's own contract rather than exercised, and a
+  wrong flag there would be a runtime surprise rather than a test failure. The bytes
+  are the transform's receipt, not the service's: the service's own acceptance of a
+  padded legacy texture is unverified, and the reference's plugin Rust is not in this
+  tree (G105), so "the bytes this launcher sends" and "the bytes the reference sends"
+  are not compared anywhere -- what is compared is this launcher's own two readings of
+  the format. And the reference's *other* way in -- dropping a file on the page
+  (`get_dragged_skin_data`) -- has no equivalent here: iced 0.12 delivers no file-drop
+  event, so the picker is the only door, and that is a platform limit rather than an
+  omission.
+
+  **One correction to something already in the ledger.** `NEXT_STEPS.md`'s stage table
+  carried a stray row after stage 3's -- a bare ` -- see "What stage 3 has landed so
+  far" |` continuation line, left by a rebase and rendering as a table row with one
+  cell -- and the desktop prose still said the Skins page deliberately had no file
+  upload. Both are fixed in this slice's commit rather than left for a later reader to
+  triage. A third, found by writing this entry: the arm-style test first asserted that
+  a legacy texture reads *classic* because the format has no slim variant, and the run
+  proved the assertion wrong in the useful direction -- the detector reads pixels, and
+  the test texture paints only the arm's front face, so it answers slim. The test now
+  asserts what its pixels say, and the painted-legacy case is a separate assertion in
+  the same test. A test that failed and was corrected is worth more here than one that
+  was never written.
+
+  The runner is the receipt for this one, and the run-record commit after it is where
+  the run's own numbers land -- unlike every gate since G101, whose pushes got zero
+  steps on `origin`. This slice's push is on the public mirror, where the same workflow
+  actually runs; see the next commit in this branch for the id, the jobs and the counts.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

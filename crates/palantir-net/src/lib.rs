@@ -48,10 +48,11 @@ pub mod meta;
 pub mod modrinth;
 
 pub use auth::{
-    msa_auth_session, xsts_message, AuthError, BlockingHttpTransport, DeviceCodeResponse,
-    HttpTransport, HttpResponse, MapTransport, MinecraftCape, MinecraftSession, MinecraftSkin,
-    MinecraftSkins, MicrosoftAuth, MicrosoftOAuth, MsaToken, OfflineSession, PollOutcome,
-    SkinChange, DEFAULT_MICROSOFT_CLIENT_ID,
+    file_part_name, msa_auth_session, skin_upload_body, xsts_message, AuthError,
+    BlockingHttpTransport, DeviceCodeResponse, HttpTransport, HttpResponse, MapTransport,
+    MinecraftCape, MinecraftSession, MinecraftSkin, MinecraftSkins, MicrosoftAuth,
+    MicrosoftOAuth, MsaToken, MultipartBody, OfflineSession, PollOutcome, SkinChange,
+    DEFAULT_MICROSOFT_CLIENT_ID,
 };
 pub use download::{
     download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,

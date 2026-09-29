@@ -284,8 +284,11 @@ pub fn beyond_every_monitor_x() -> f32 {
 /// dragging a frame works), and the foreground window at that moment is not
 /// necessarily ours. The process check means a failed walk does nothing rather
 /// than resizing someone else's window.
+///
+/// `pub(crate)` for [`crate::pick`]'s one use: a file dialog wants this window as its
+/// owner, or it opens unowned and can end up behind the launcher it belongs to.
 #[cfg(windows)]
-fn own_hwnd() -> Option<isize> {
+pub(crate) fn own_hwnd() -> Option<isize> {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindow, GetWindowThreadProcessId, IsWindowVisible, GW_OWNER,
@@ -813,8 +816,12 @@ const PERSONALIZE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes
 const CURRENT_VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
 /// A UTF-16, NUL-terminated copy of `text` for the `...W` Win32 entry points.
+///
+/// Shared with [`crate::pick`], which is the other module that hands a string to
+/// Windows: the file dialog takes its title, its filter and its default suffix in the
+/// same shape these calls do.
 #[cfg(windows)]
-fn wide(text: &str) -> Vec<u16> {
+pub(crate) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 

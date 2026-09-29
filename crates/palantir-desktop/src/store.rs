@@ -675,8 +675,11 @@ impl Store {
     ///
     /// The write half of [`Self::appearance`], and the same account and token: what
     /// the page drew a moment ago is what this changes, which is why the two share a
-    /// caller rather than a client of their own. The change names something the
-    /// account already owns, so there is no upload here -- see [`SkinChange`].
+    /// caller rather than a client of their own. Four of the five changes name
+    /// something the account already owns; the fifth *uploads* the bytes behind one
+    /// ([`SkinChange::Upload`]), which the desktop has already read, padded and turned
+    /// into a PNG by the time a change reaches here -- so this stays one pass-through
+    /// rather than growing a second parameter for a file.
     ///
     /// **Blocking**, for [`Self::appearance`]'s reason.
     pub fn wear(&self, token: &str, change: SkinChange) -> Result<(), String> {

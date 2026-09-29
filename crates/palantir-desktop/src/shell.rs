@@ -74,6 +74,19 @@ use crate::store::{self, Engine, Store};
 use crate::ui::Hovered;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
 
+/// What asking the reader for a file left to do.
+///
+/// Two things, and the second is not an error path: a dialog that was cancelled, a
+/// file that could not be read, bytes that are not a skin and a build with no picker
+/// all end the interaction with nothing to send, and what the page needs is the answer
+/// rather than a request. `skins::Picked` is where that distinction is a type.
+enum Choice {
+    /// A texture to upload.
+    Upload(palantir_net::SkinChange),
+    /// Nothing to send, and this is what the page is told.
+    Answered(skins::Picked),
+}
+
 /// A request a turn left for this shell to run off the frame thread.
 ///
 /// [`Shell::act`]'s answer was `Option<discover::Asked>` while Discover was the
@@ -107,6 +120,13 @@ enum Asked {
     /// Minecraft's skin service, and both the account and its token are the
     /// shell's.
     Wear(skins::Wear),
+    /// Add a skin from a file the reader picks, as the Skins page describes it.
+    ///
+    /// The one ask that is not a request at all: it is a dialog, a read and a padding
+    /// *here*, on the frame thread the window lives on, followed by the same write
+    /// [`Asked::Wear`] makes. The page has no part in any of the three, which is why it
+    /// asks for the round rather than describing a change.
+    AddSkin(skins::Add),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1262,6 +1282,7 @@ impl Shell {
                 Asked::User(asked) => self.user(asked),
                 Asked::Skins(asked) => self.skins(asked),
                 Asked::Wear(worn) => self.wear(worn),
+                Asked::AddSkin(add) => self.add_skin(add),
             };
         }
         // A create and an import are not a page's requests and do not go through
@@ -1600,6 +1621,10 @@ impl Shell {
                     Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
                     Some(pages::Ask::Skins(asked)) => Some(Asked::Skins(asked)),
                     Some(pages::Ask::Wear(worn)) => Some(Asked::Wear(worn)),
+                    // A file dialog is not *owed* by a page's arrival, so it is not in
+                    // `opening`'s match above: what this does is ask the reader for a
+                    // file they already decided to add.
+                    Some(pages::Ask::AddSkin(add)) => Some(Asked::AddSkin(add)),
                     Some(pages::Ask::Install(install)) => {
                         // The dialog is opened rather than a transfer started: the
                         // missing half of the request is *which instance*, and only
@@ -2005,7 +2030,8 @@ impl Shell {
                 | pages::Ask::Import
                 | pages::Ask::Play(_)
                 | pages::Ask::Stop(_)
-                | pages::Ask::Wear(_),
+                | pages::Ask::Wear(_)
+                | pages::Ask::AddSkin(_),
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
@@ -2072,6 +2098,88 @@ impl Shell {
             }),
             move |result| Message::Screen(pages::Message::skin_worn(&worn, result)),
         )
+    }
+
+    /// Add a skin from a file the reader picks, and bring the outcome back as a page
+    /// message.
+    ///
+    /// The flow is split over two threads, and the split is not a preference. The
+    /// dialog is opened *here*, on the frame thread, because `GetOpenFileNameW` is
+    /// modal to the window it is given and this launcher's window belongs to this
+    /// thread -- see [`crate::pick`], which is where that is argued and where the one
+    /// untestable call in this flow lives. Reading the few kilobytes it returned and
+    /// padding them to the shape the service takes happen on the same thread, since
+    /// they are arithmetic over a 64x64 image and a crossing would cost more than they
+    /// do. The *upload* is a request to Mojang, and that goes off the frame thread for
+    /// [`Shell::wear`]'s reason, with the same account, the same token and the same
+    /// sentence for an account that has neither.
+    ///
+    /// Both halves of the answer travel the same way, including the ones with nothing
+    /// to send: a cancel, an unreadable file and a machine with no picker are all
+    /// `skins::Picked` values that reach the page through one seam, and the page is
+    /// what decides that one of them is not a failure.
+    fn add_skin(&self, add: skins::Add) -> iced::Command<Message> {
+        let choice = match crate::pick::choose(Key::AppSkinsAddButton.message()) {
+            // No dialog on this machine: the page is told that instead of being left
+            // waiting on a picker that will never open.
+            Err(reason) => Choice::Answered(skins::Picked::NoPicker(reason)),
+            Ok(None) => Choice::Answered(skins::Picked::Cancelled),
+            Ok(Some(path)) => match self.read_skin(&path) {
+                Err(reason) => Choice::Answered(skins::Picked::Done(Err(reason))),
+                Ok(change) => Choice::Upload(change),
+            },
+        };
+        let store = self.store.clone();
+        let account = self.account();
+        iced::Command::perform(
+            // One future for both outcomes, so the page has one seam rather than two
+            // kinds of message. Only the upload blocks, and only the upload goes to a
+            // worker thread: the answered cases resolve here, and the *upload* is
+            // awaited inside the same future through [`crate::store::off_thread`], which
+            // is what every other request in this shell does with the same two lines.
+            async move {
+                match choice {
+                    Choice::Answered(picked) => picked,
+                    Choice::Upload(change) => skins::Picked::Done(
+                        crate::store::off_thread(move || match account.access_token.as_deref() {
+                            Some(token) => store.wear(token, change),
+                            None => Err(
+                                "Sign in to a Microsoft account to add a skin.".to_string(),
+                            ),
+                        })
+                        .await,
+                    ),
+                }
+            },
+            move |picked| Message::Screen(pages::Message::skin_added(&add, picked)),
+        )
+    }
+
+    /// The change a chosen file *is*: read it, read its arm style out of its own
+    /// pixels, and pad it to the 64x64 the service takes.
+    ///
+    /// Its own function because it is the testable half of the flow: it takes a path,
+    /// and a test can write one. The two refusals are named where they are made -- a
+    /// file that cannot be read (too big included, which `pick::read` answers) and bytes
+    /// that are not a texture of either shape -- and neither is the reference's own
+    /// sentence: its nearest one is `app.skins.dropped-file-error.text`, which is about a
+    /// file *dropped* on the page, and this flow has no drop in it. The reader's file
+    /// name travels as the part's name and is reduced on the wire (`file_part_name`),
+    /// because a value that came from a dialog is not one a header line can trust.
+    fn read_skin(&self, path: &std::path::Path) -> Result<palantir_net::SkinChange, String> {
+        let bytes = crate::pick::read(path)?;
+        let prepared = crate::skin::prepare(&bytes).ok_or_else(|| {
+            "That file is not a Minecraft skin: a skin is a 64x64 or 64x32 PNG.".to_string()
+        })?;
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(palantir_net::SkinChange::Upload {
+            variant: prepared.model.variant().to_string(),
+            file_name,
+            texture: prepared.png,
+        })
     }
 
     /// Read the news feed and bring the answer back as a shell message.
