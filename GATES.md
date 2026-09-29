@@ -1747,7 +1747,9 @@ Every push of stages 2, 3 and 4 went to a runner that could not schedule a job.
 At the time of writing, one per commit from `82232f9` onwards —
 `36033443993`, `36038333030`, `36143868395`, `36152873678`, `36156018946`,
 `36158909795`, `36159099493`, `36162312983`, `36162426595`, `36165962973`,
-`36241262447`, `36242305444`, `36254170068`, and every push adds one — each died
+`36241262447`, `36242305444`, `36254170068`, and every push adds one — until
+G112's push, which added nothing at all: the API reports `total_count 0` for its
+SHA, a second shape of the same block. Each died
 in three to six seconds with zero steps and
 the same annotation: `recent account payments have failed or your spending limit
 needs to be increased`. So no job ran, in either workflow, and there is no
@@ -4679,6 +4681,20 @@ archon /v0/servers, X-Panel-Version: 1      404    9 bytes  not found
   retry line, where `auth.rs` already reads `errorMessage` by hand in three places
   and could now share this helper -- named as the obvious follow-through rather than
   done, because a token-renewal path is the wrong place to refactor without a reason.
+
+  **The push, and a new shape of it.** `b8a76b2`, and this time there is no run to
+  point at: `gh api repos/MSedgeMC/PalantirMC/actions/runs?head_sha=b8a76b2...`
+  answers `total_count 0`, where every push since G101 had at least produced a
+  zero-step run to record. The newest run the PR holds is `36464361134` (`35ccb46`,
+  the recording commit, created 18:19:18Z, `failure` in 5 s), and it is the same
+  sentence again -- `The job was not started because recent account payments have
+  failed or your spending limit needs to be increased` on both `Test workspace` and
+  `Lint`, with `Build exe (${{ matrix.target }})` and `Live services` skipped at 0 s.
+  A push that is not scheduled at all is one step past a run that starts nothing, and
+  it is why this gate's numbers are the local suite's alone: no runner has seen this
+  tree, and none will until the account can schedule jobs again. That is the same
+  block G105's decision note already names, and it is what the mirror in that note is
+  for.
 
 ## What these gates cannot say
 
