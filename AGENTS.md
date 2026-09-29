@@ -77,8 +77,22 @@ push, then
 
 ```
 gh run download <run-id> --repo msedge-projects/PalantirMC \
-  -n palantirmc-x86_64-pc-windows-msvc -D dist/
+  -n palantirmc-x86_64-pc-windows-msvc -D dist/msvc
+gh run download <run-id> --repo msedge-projects/PalantirMC \
+  -n palantirmc-x86_64-pc-windows-gnu  -D dist/gnu
 ```
+
+Both artifacts contain a file called `PalantirMC.exe`, so one directory cannot
+hold both: the second download fails with `error extracting "PalantirMC.exe":
+The file exists` and leaves the first target's exe in place, which reads as a
+successful download of the wrong binary. The `.sha256` beside each one is what
+tells them apart.
+
+Each artifact is staged by the `package` job only after
+`.github/scripts/check_exe.py` has read the import table of that exact file, and
+that gate is why the MSVC target is compiled with `+crt-static`: a build that
+imports `VCRUNTIME140.dll` does not start on a clean Windows. The artifact is the
+expected binary, not just a build of it.
 
 CI's artifact is the authority; a local `cargo build` is a convenience that has
 already been wrong once about what the runner accepts.

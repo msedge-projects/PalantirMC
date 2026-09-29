@@ -4837,6 +4837,24 @@ meta.prismlauncher.org/v1/net.minecraft/1.21.1.json: assetIndex.sha1 de573f83...
   run is what says the tolerant branch works; if it does not, the branch is
   unexercised and stays that way in this record rather than being called covered.
 
+  **The push, and the first fully green run in this document.** `a6bc372` went to
+  both remotes: the PR run it opened is `36579945260` (`test` and `lint`,
+  success), and the dispatch that carries all four jobs is `36579946549` --
+  `Test workspace` success, `Lint` success, `Live services` success at **18
+  passed / 0 failed / 0 ignored in 99.78 s**, and both `Build exe` targets success.
+  That is the first run since G101 in which every job that was scheduled did the
+  work and passed, and the first time either workflow has produced an artifact:
+  msvc 5,483,966 bytes and gnu 5,553,430 bytes as uploaded, 13,682,688 and
+  13,950,976 uncompressed, the first with `PalantirMC.exe 603eb275...` matching the
+  sidecar written beside it.
+
+  Which of this gate's two branches the runner took cannot be read from the log,
+  because a passing assertion prints nothing: either its edge of piston agreed
+  with the mirror this time, or it disagreed and the tolerant branch held. What
+  the run does say is that the suite is green from a vantage point whose revision
+  of asset index 17 differed from this machine's an hour earlier -- and that the
+  disagreement is real is measured above, not assumed.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

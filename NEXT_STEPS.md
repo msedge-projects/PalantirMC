@@ -22,13 +22,16 @@ its page layout, not its icons.
 
 ## Where it stands
 
-Two runs carry stages 0 and 1, both all five jobs green:
+Runs in which jobs actually executed. The first three carry stages 0 and 1; the
+last is the first since G101 that could run at all, and it carries stages 2, 3 and
+4 as far as they have gone:
 
 | Run | Commit | What it proved |
 | --- | --- | --- |
 | 36020421890 | `2361cc3` | The prune builds and tests where it matters, with three workspace members gone |
 | 36022495155 | `28d9d4d` | The design system regenerates byte-identically, quoted from the log: `theme generation is byte-identical` |
 | 36027116004 | `f8c77e8` | Same for the icon set: `icon generation is byte-identical` |
+| 36579946549 | `a6bc372` | The tree on a runner: 1008 tests, 18 live tests against the services, both Windows exes built and staged -- the first artifact either workflow has produced |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
