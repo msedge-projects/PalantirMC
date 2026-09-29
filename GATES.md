@@ -5402,7 +5402,10 @@ CONFIRMED: the page carries all 120 gates, 6 stage cards and every subject as wr
           32.0 ms and is not, which is the drawing of 5,000 cards and nothing else
           546 passed; 0 failed; 0 ignored, and clippy exit 0, adding no warning
   EVIDENCE: the table this slice's own measurement prints, and the arms of it that
-  moved.
+  moved. The runner agrees with this machine where the two can be compared: run
+  `36610530981` on `a7cc615` is 1033 passed / 0 failed and 18 ignored across the
+  workspace suites, this slice's six tests among them, on a tree that also carries
+  the Skins picker's own slice.
 
 ```
 $ cargo test -p palantir-desktop --locked -- --nocapture          # after this slice

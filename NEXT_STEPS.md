@@ -34,6 +34,7 @@ last is the first since G101 that could run at all, and it carries stages 2, 3 a
 | 36579946549 | `a6bc372` | The tree on a runner: 1008 tests, 18 live tests against the services, both Windows exes built and staged -- the first artifact either workflow has produced |
 | 36599941647 | `4327f40` | The measurement slice on the pull-request path: `Test workspace` and `Lint` green in 3m23s, with `Live services` and `Build exe` skipped rather than scheduled, which is that path's own rule |
 | 36600372776 | `4327f40` | The same commit through all five jobs: 1011 passed / 0 failed and 18 ignored in the workspace run, the live suite 18 passed / 0 failed in 109.66s, and both Windows exes staged (msvc 5,483,872 B, gnu 5,553,494 B) |
+| 36610530981 | `a7cc615` | The rebased tree, carrying the instance listing's load and the Skins picker both: 1033 passed / 0 failed and 18 ignored on the runner (177 + 8 + 558 + 4 + 31 + 255), with `Live services` and `Build exe` skipped by the pull-request path's own rule |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
