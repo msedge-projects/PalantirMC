@@ -7289,6 +7289,17 @@ CONFIRMED: the page carries all 135 gates, 6 stage cards and every subject as wr
   a newly added skin, and it means an order is not a preference that survives an
   add.
 
+  **The runner agrees with this machine, and this is the run that closes the
+  plan.** Run `36752220208` on `405e127` -- the push's own pull-request run -- is
+  `Lint` and `Test workspace` green in 1m20s and 3m0s at 1109 passed / 0 failed
+  and 19 ignored (177 + 8 + 631 + 4 + 33 + 258, the desktop crate's 631 being
+  G133's 626 plus this slice's five), with the live suite and both exes skipped by
+  that path's own rule. Run `36752224487` on the
+  same commit -- asked for by dispatch -- is all five jobs: the same 1109 passed /
+  0 failed and 19 ignored in the workspace run, `Lint` green in 1m53s, the live
+  suite 19 passed / 0 failed in 140.96s, and both Windows exes staged (msvc
+  5,579,978 B, gnu 5,650,941 B).
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
