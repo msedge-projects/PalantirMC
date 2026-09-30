@@ -466,12 +466,12 @@ mod tests {
         let jar = forge_jar("net.minecraftforge.bootstrap.ForgeBootstrap", build);
         let mut script = Script::new();
         script.insert(&url, jar.clone());
-        script.insert_str(&format!("{url}.sha1"), &Digest::sha1(&jar).hex().to_string());
+        script.insert_str(format!("{url}.sha1"), Digest::sha1(&jar).hex());
         let wire = script.wire();
         let mut store = PublisherMeta::over(
             &wire,
             "https://mirror.invalid/v1",
-            &std::env::temp_dir().join("palantirmc-meta-forge"),
+            std::env::temp_dir().join("palantirmc-meta-forge"),
             Some("1.21.1".to_string()),
         );
         assert_eq!(store.source("net.minecraftforge"), Source::Publisher(Loader::Forge));
