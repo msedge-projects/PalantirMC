@@ -5933,6 +5933,17 @@ CONFIRMED: the page carries all 124 gates, 6 stage cards and every subject as wr
   but what its buttons *do* to a real account is the same thing G106's rows do: a
   request this launcher's client already builds.
 
+  **The runner agrees with this machine.** Run `36681338042` on `52da5df` is this
+  slice's pull-request path: `Lint` and `Test workspace` green in 1m39s and 2m07s
+  -- 1060 passed / 0 failed and 18 ignored across the workspace suites (177 + 8 +
+  585 + 4 + 31 + 255), this slice's 19 among the desktop crate's 585 -- with
+  `Live services` and `Build exe` skipped by that path's own rule. Run `36681579461`
+  is the same commit through all five jobs: the same 1060 passed / 0 failed and 18
+  ignored, the live suite 18 passed / 0 failed in 109.71s, both Windows exes staged
+  (msvc 5,514,809 B, gnu 5,585,298 B), and clippy's 42 warning lines the same set
+  this machine printed, because the two `Lint` jobs run the same
+  `cargo clippy --workspace --all-targets --locked` command.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
