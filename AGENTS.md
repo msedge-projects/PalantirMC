@@ -32,11 +32,13 @@ free and the artifacts come from. The mirror is one-way in practice: it is
 never edited, never merged, and the working record stays on `origin`.
 
 **A push schedules nothing without an open pull request.** `ci.yml` narrows
-`push` to `master` and carries every other branch through `pull_request`, so
-the mirror holds a draft PR (`msedge-projects/PalantirMC#1`) from the working
-branch into its own `master`: each push re-runs CI under that PR. The private
-repository's PR (`MSedgeMC/PalantirMC#10`) still exists and still collects runs
-that cannot start.
+`push` to `master` and carries every other branch through `pull_request`: the
+mirror's PR (`msedge-projects/PalantirMC#1`) is what made every push on the
+working branch run, and it was merged on 2026-09-30 when that branch landed, so
+a branch today needs a pull request of its own -- or the work goes to `master`,
+whose pushes run. The private repository's PR (`MSedgeMC/PalantirMC#10`) was
+closed by the same landing and, like every other run on that remote, never
+started.
 
 What that means in practice:
 
@@ -68,27 +70,29 @@ jobs never leave the queue.
 | Trigger | Workflow | What it produces |
 | --- | --- | --- |
 | Push to the mirror's PR branch | `.github/workflows/ci.yml` | `test`, `lint`, `live`, then the `package` job builds both Windows targets and uploads `palantirmc-x86_64-pc-windows-msvc` / `-gnu` artifacts (14 days) |
-| Push to the mirror's `master` | `.github/workflows/ci.yml` | the same list, without needing a PR — but no `ci.yml` run has ever carried `master`, so this row describes an intention rather than a thing that has happened; see below |
+| Push to the mirror's `master` | `.github/workflows/ci.yml` | the same list, without needing a PR — answered on 2026-09-30 by the landing that carried the rewrite there: `36756417601`, all five jobs, the first `ci.yml` run a push to `master` has ever scheduled |
 | Tag `v*` | `.github/workflows/release.yml` | `guard` checks the tag against `Cargo.toml`, `build` retests and rebuilds, `publish` attaches both exes, `.sha256` sidecars, zips and `LICENSE` to a **public** Release |
 | `workflow_dispatch` | either | Re-run without a new commit; `release.yml` needs an existing tag |
 
-The `master` row is the one with no receipt, and that is now a measurement rather
-than a silence: `gh run list --branch master` returns exactly two runs,
-`36574518355` and `36574524609`, and both are **Dependabot Updates** rather than
+The `master` row was the one with no receipt, and the way that silence read is
+still worth keeping: `gh run list --branch master` returned exactly two runs,
+`36574518355` and `36574524609`, and both were **Dependabot Updates** rather than
 this repository's `ci.yml`. Filtering a run list by branch cannot tell the two
 apart — read the workflow name, or a green `master` will look like this
-workflow having run there. The silence that first made the row doubtful is not
-explained by the `paths-ignore` above either: a filter gives up and the workflow
-runs once a push is bigger than 300 files, and the creation push carried the
-whole tree, so it should have started one. The row stays open.
+workflow having run there. The creation push's silence is still not explained by
+the `paths-ignore`: a filter gives up and the workflow runs once a push is bigger
+than 300 files, and that push carried the whole tree. The row is answered now: the
+landing pushed `cccbfc9` to `master` on 2026-09-30 and `ci.yml` ran from it —
+`36756417601` — which is the first time a push to `master` has scheduled anything.
 
-Do not close it by fast-forwarding `master` to the working branch. That push puts
-the pull request's own head commits into its base, and GitHub reads commits in
-the base as the change having landed and closes the pull request for it — and
-that request is the only reason a push to any other branch starts anything here,
-because `push` is narrowed to `master`. The mirror would then be as silent as the
-private remote, with the last slices still to land. To run the jobs against the
-master tree without moving a pointer, ask for them instead:
+Do not fast-forward `master` to the working branch while that branch still has
+slices to land. That push puts the pull request's own head commits into its base,
+and GitHub reads commits in the base as the change having landed and closes the
+request for it — and while the request is the only reason a push to any other
+branch starts anything here, the mirror goes as silent as the private remote with
+the last slices still to land. Land it deliberately instead, the way the 2026-09-30
+merge did. To run the jobs against the master tree without moving a pointer, ask
+for them:
 
 ```
 gh workflow run ci.yml --repo msedge-projects/PalantirMC --ref master

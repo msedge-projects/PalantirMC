@@ -7291,14 +7291,33 @@ CONFIRMED: the page carries all 135 gates, 6 stage cards and every subject as wr
 
   **The runner agrees with this machine, and this is the run that closes the
   plan.** Run `36752220208` on `405e127` -- the push's own pull-request run -- is
-  `Lint` and `Test workspace` green in 1m20s and 3m0s at 1109 passed / 0 failed
+  `Lint` and `Test workspace` green in 1m20s and 3m0s at 1111 passed / 0 failed
   and 19 ignored (177 + 8 + 631 + 4 + 33 + 258, the desktop crate's 631 being
   G133's 626 plus this slice's five), with the live suite and both exes skipped by
   that path's own rule. Run `36752224487` on the
-  same commit -- asked for by dispatch -- is all five jobs: the same 1109 passed /
+  same commit -- asked for by dispatch -- is all five jobs: the same 1111 passed /
   0 failed and 19 ignored in the workspace run, `Lint` green in 1m53s, the live
   suite 19 passed / 0 failed in 140.96s, and both Windows exes staged (msvc
-  5,579,978 B, gnu 5,650,941 B).
+  5,579,978 B, gnu 5,650,941 B). Both of those totals were first written down as
+  1109; the six lines sum to 1111, and the tip's own run (`36753247156`) is where
+  it was read back, so the number is corrected against the log rather than
+  carried forward.
+
+  **The tree those runs read is what `master` builds now.** The branch merged on
+  2026-09-30 as `cccbfc9` -- parents `aa39351` (the master it was 143 commits
+  ahead of) and `58f3265` (the tip these paragraphs end on) -- so the merged tree
+  is the tip's tree, and the merge push is run `36756417601`: the first `ci.yml`
+  run a push to `master` has ever scheduled, `Lint` green in 2m24s, `Test
+  workspace` green in 3m1s at 1111 passed / 0 failed and 19 ignored, the live
+  suite 19 passed / 0 failed in 124.87s, and both Windows exes staged -- 13,898,240
+  B (msvc) and 14,173,184 B (gnu) of the exe itself, read back from the downloaded
+  artifacts and matching their `.sha256` sidecars. Before the merge the same
+  five-job path was asked for on `master` itself (`36755302728`, at `aa39351`):
+  `Lint` green in 2m51s, `Test workspace` green in 5m53s and `Live services` green
+  in 1m26s, with both
+  exe jobs left *cancelled* rather than failed -- the landing push superseded
+  them, same run group and `concurrency: cancel-in-progress`, and a cancelled job
+  is not a passing one.
 
 ## What these gates cannot say
 
