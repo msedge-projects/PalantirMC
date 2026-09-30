@@ -6479,3 +6479,86 @@ dashboard exit=0
   + 258, the desktop crate's 600 being this machine's own count to the test), the
   live suite 19 passed / 0 failed in 188.28s, and both Windows exes staged (msvc
   5,552,485 B, gnu 5,620,320 B).
+- [x] G130: the one pack shape where the mirror answers for the two Forge-shaped
+  uids is named rather than silent -- a pack that names the loader and no game
+  version, which is a launch whose own install cannot be matched to anything
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 602 passed; 0 failed in the desktop crate's own run, its two new tests
+          among them, with `tests/native.rs`'s four beside it
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0
+  EVIDENCE: the transcripts below, from this machine and from the runner.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (C:/PalantirMC/target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 602 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 34.89s
+     Running tests\native.rs (C:/PalantirMC/target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-loader\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.11s
+desktop=0
+
+$ python tools/progress.py --check
+progress exit=0
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 129 gates, 6 stage cards and every subject as written
+dashboard exit=0
+```
+
+  **What was there was a silence, not a wrong answer.** `meta.rs` answers
+  `Source::Publisher` for the two uids only when the instance names a game version,
+  and that is deliberate: a loader's profile URL *is* the game version, so a URL
+  built out of a version nobody could read would be a launch failing on a question
+  the user never asked. A pack with the uid and no `net.minecraft` component
+  therefore resolves the mirror's ForgeWrapper document, whose job is to run the
+  installer's processors at launch -- the work G119 moved to preparation. G119's
+  entry named that shape and did not test it; the naming is this slice.
+
+  **Two questions, one rule behind them.** `forge_shaped` answered "no" for two
+  different packs: vanilla, Fabric or Quilt, which need no install step at all, and
+  a Forge-shaped pack whose game version is missing, which is the one where the
+  mirror comes back. The second needed its own name, so `shaped_component` is the
+  rule -- enabled, a Forge-shaped uid, a build to install -- and both questions
+  read it: `forge_shaped` is it plus the game version, `named_shaped` is it alone.
+  A launch asks both, before the resolve, and says what it found:
+  `this instance names Forge but no Minecraft version, so its installer cannot be
+  matched to a game: the mirror's wrapper document answers for it, and the install
+  runs at launch instead — add a 'net.minecraft' component to run it here`
+
+  **What the test reads.** The pack is the loader alone -- no `net.minecraft`
+  component at all -- and the wrapper's own document is cached where the mirror
+  would serve it from, so an offline store can answer. Two tests: the module one
+  pins the two questions apart (the same pack is `None` for `forge_shaped` and
+  `Some(Forge)` for `named_shaped`, and vanilla, Fabric and a disabled component
+  answer `None` to both), and the launch one asks `prepare_launch` to prepare that
+  pack and reads three things: the sentence is in the log, the level an install
+  announces itself with never arrives -- nothing of this launcher's own ran -- and
+  the launch stops where the fixture leaves it, at a Java placeholder rather than at
+  a service. Which is the point: what is being tested is what the launch *says*,
+  not what it spawns.
+
+  **What this cannot say.**
+- **The pack itself is still not launchable, and this slice does not pretend
+  otherwise.** A profile with no `net.minecraft` component has no game profile,
+  no client jar and no assets, so the resolve after this sentence is a document
+  about a version of Minecraft the instance does not name. What the sentence fixes
+  is that a reader can tell that from the log instead of from a launch that dies.
+- **The wrapper's own document is not re-measured here.** Its shape -- a main class
+  of ForgeWrapper's, its own jar in `mavenFiles` rather than `libraries`, which
+  `install::plan` never walks -- is G107's measurement, and nothing here changes or
+  re-tests it: no live launch of such a pack was run, and whether the wrapper can
+  fetch what it needs after this launcher's plan is exactly what G107 raised.
+- **No path here reads the game version out of the loader's build.** Prism spells
+  a Forge component `1.21.1-52.1.0`, which carries the game in front of the build,
+  and reading it there is the obvious repair. It was not done because it does not
+  repair anything: the same pack names no `net.minecraft` component, so there is no
+  game profile for that version to resolve, and a guess would move the failure one
+  step later -- to a client jar or an asset index nobody can fetch -- while making
+  the launcher claim it knew which game this was.

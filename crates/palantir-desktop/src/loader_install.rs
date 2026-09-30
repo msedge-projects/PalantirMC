@@ -43,19 +43,27 @@ pub struct LoaderJob {
 impl LoaderJob {
     /// How the loader is named in a log line.
     pub fn label(&self) -> &'static str {
-        match self.loader {
-            Loader::Forge => "Forge",
-            Loader::NeoForge => "NeoForge",
-            // The constructor only ever builds these two. The other arms are
-            // named rather than folded into one: a loader this module was not
-            // built for should read as itself in a log.
-            Loader::Fabric => "Fabric",
-            Loader::Quilt => "Quilt",
-        }
+        label(self.loader)
     }
 }
 
-/// Which Forge-shaped loader `profile` names, if any.
+/// How a loader is named in a log line, for the callers that hold a [`Loader`]
+/// and no job -- a pack whose installer cannot be asked for is still a pack that
+/// names one, and the sentence about it should name it the same way.
+pub fn label(loader: Loader) -> &'static str {
+    match loader {
+        Loader::Forge => "Forge",
+        Loader::NeoForge => "NeoForge",
+        // The constructor only ever builds these two. The other arms are named
+        // rather than folded into one: a loader this module was not built for
+        // should read as itself in a log.
+        Loader::Fabric => "Fabric",
+        Loader::Quilt => "Quilt",
+    }
+}
+
+/// Which Forge-shaped loader `profile` names, if any, and everything an install
+/// needs.
 ///
 /// `None` for vanilla, Fabric and Quilt -- their resolve needs no install step --
 /// and for a loader component that is disabled, or one whose pack names no
@@ -63,11 +71,38 @@ impl LoaderJob {
 /// an empty build is skipped for the same reason `instances::create` refuses
 /// one: there is nothing to install and a URL built out of nothing is not a
 /// question worth asking a service.
+///
+/// The two "no" answers are not the same question, which is why
+/// [`named_shaped`] answers the other one: a pack that names a loader and no
+/// game version is a launch whose resolve takes the mirror's document instead of
+/// this module (see `crate::launch`).
 pub fn forge_shaped(profile: &PackProfile) -> Option<LoaderJob> {
+    let (loader, build) = shaped_component(profile)?;
     let game = profile
         .get("net.minecraft")
         .map(|component| component.version.trim().to_string())
         .filter(|version| !version.is_empty())?;
+    Some(LoaderJob { loader, game, build })
+}
+
+/// The Forge-shaped loader `profile` names, whether or not the pack names a game
+/// version for its installer to be matched against.
+///
+/// This is the question a launch asks before it resolves: naming one of the two
+/// uids is what decides *who answers* for it, and a pack with the uid and no
+/// `net.minecraft` component -- an imported profile, or one edited by hand -- is
+/// the shape where this launcher cannot ask a publisher for anything and the
+/// mirror answers again.
+pub fn named_shaped(profile: &PackProfile) -> Option<Loader> {
+    shaped_component(profile).map(|(loader, _)| loader)
+}
+
+/// The loader a pack asks for and the build it names, or `None` when it asks for
+/// neither.
+///
+/// One rule behind both questions above, so that "is a loader named" and "can an
+/// installer be asked for it" cannot come apart.
+fn shaped_component(profile: &PackProfile) -> Option<(Loader, String)> {
     for component in profile.components() {
         if !component.is_enabled() {
             continue;
@@ -81,7 +116,7 @@ pub fn forge_shaped(profile: &PackProfile) -> Option<LoaderJob> {
         if build.is_empty() {
             continue;
         }
-        return Some(LoaderJob { loader, game, build });
+        return Some((loader, build));
     }
     None
 }
@@ -267,6 +302,41 @@ mod tests {
         let profile = PackProfile::from_text(text, &PathBuf::from("mmc-pack.json"))
             .expect("a pack profile");
         assert_eq!(forge_shaped(&profile), None);
+    }
+
+    /// The two questions `forge_shaped` answers "no" to are different, and this
+    /// pack is the one that separates them: it names a loader whose installer
+    /// this launcher cannot be asked for, which is what the launch has to say out
+    /// loud rather than resolving the mirror's wrapper in silence.
+    #[test]
+    fn a_pack_that_names_a_loader_without_a_game_version_still_says_which_one() {
+        let forge = pack(&[("net.minecraftforge", "52.1.0")]);
+        assert_eq!(forge_shaped(&forge), None);
+        assert_eq!(named_shaped(&forge), Some(Loader::Forge));
+
+        let neo = pack(&[("net.neoforged", "21.1.172")]);
+        assert_eq!(named_shaped(&neo), Some(Loader::NeoForge));
+
+        // Vanilla and the two document loaders name neither uid ...
+        assert_eq!(named_shaped(&pack(&[("net.minecraft", "1.21.1")])), None);
+        assert_eq!(
+            named_shaped(&pack(&[
+                ("net.minecraft", "1.21.1"),
+                ("net.fabricmc.fabric-loader", "0.19.5"),
+            ])),
+            None
+        );
+
+        // ... and a component that is disabled is not a loader this instance is
+        // asking for, whichever of the two questions is asked.
+        let text = r#"{"formatVersion":1,"components":[
+            {"uid":"net.minecraft","version":"1.21.1"},
+            {"uid":"net.minecraftforge","version":"52.1.0","disabled":true}
+        ]}"#;
+        let disabled = PackProfile::from_text(text, &PathBuf::from("mmc-pack.json"))
+            .expect("a pack profile");
+        assert_eq!(named_shaped(&disabled), None);
+        assert_eq!(forge_shaped(&disabled), None);
     }
 
     /// The plumbing the launch depends on, without a network: the install reads

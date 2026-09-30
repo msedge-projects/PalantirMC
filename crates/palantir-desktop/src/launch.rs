@@ -561,6 +561,25 @@ pub fn prepare_launch(
         }
     };
 
+    // A pack can name one of the two uids without naming a Minecraft version --
+    // an imported profile, or one edited by hand -- and then there is nothing for
+    // an installer URL to be matched against: the resolve takes the mirror's
+    // ForgeWrapper document instead of the publisher's, and the install this
+    // launcher runs at preparation moves back to launch time, inside the wrapper
+    // (G107). Say which document answers, because the alternative is a reader
+    // watching a wrapper do a job this launcher does itself once the pack names
+    // its game (G130). The job is worked out here rather than beside the install
+    // so that the question is asked once.
+    let job = loader_install::forge_shaped(&profile);
+    if job.is_none() {
+        if let Some(loader) = loader_install::named_shaped(&profile) {
+            log(format!(
+                "this instance names {} but no Minecraft version, so its installer cannot be matched to a game: the mirror's wrapper document answers for it, and the install runs at launch instead — add a 'net.minecraft' component to run it here",
+                loader_install::label(loader)
+            ));
+        }
+    }
+
     let ctx = RuntimeContext::current_host();
     let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
         Ok(resolution) => resolution,
@@ -604,7 +623,6 @@ pub fn prepare_launch(
     // processors need an older Java used to fail at the install while the spawn
     // beside it would have picked a runtime that fits. One function answers the
     // question for both, so the install and the spawn cannot drift apart.
-    let job = loader_install::forge_shaped(&profile);
     let install_java = match &job {
         Some(_) => {
             match choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress) {
@@ -2904,6 +2922,87 @@ mod tests {
         // a processor chain does -- that is the live test's measurement.
         assert!(matches!(readiness, LaunchReadiness::Blocked));
         assert!(text.contains("not launching"), "got: {text}");
+    }
+
+    /// A pack that names Forge without naming a game version cannot ask an
+    /// installer anything, and the launch says which document answers instead of
+    /// resolving the mirror's wrapper in silence: naming the loader is what
+    /// decides who answers for it (G130), and without a game this launcher is not
+    /// one of the candidates.
+    #[test]
+    fn a_forge_pack_with_no_game_version_names_the_document_that_answers() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Nogame", "1.21.1").unwrap();
+        // The pack names the loader alone -- no `net.minecraft` component at all,
+        // which is a profile edited by hand or imported from one.
+        let mut pack = PackProfile::default();
+        pack.append(Component {
+            uid: "net.minecraftforge".into(),
+            version: "52.1.0".into(),
+            important: true,
+            ..Default::default()
+        });
+        pack.save(&instance.mmc_pack_path()).unwrap();
+        // What the mirror serves for this uid is the wrapper's document: a main
+        // class of the wrapper's and no library list an install could read.
+        write_meta(
+            &paths,
+            "net.minecraftforge",
+            "52.1.0",
+            serde_json::json!({
+                "uid": "net.minecraftforge",
+                "version": "52.1.0",
+                "order": 0,
+                "mainClass": "io.github.zekerzhayard.forgewrapper.installer.Main",
+                "libraries": []
+            }),
+        );
+
+        // A Java the settings name, so the test does not scan this machine: the
+        // launch stops at the probe, which is not what this test is about.
+        let jdks = tempfile::tempdir().unwrap();
+        let default_java = fake_java_home(jdks.path(), "jdk21", "21.0.6");
+        let defaults = LaunchDefaults {
+            java: JavaPrefs { default_path: default_java, ..JavaPrefs::default() },
+            ..LaunchDefaults::default()
+        };
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = Script::new();
+        let mut lines = Vec::new();
+        let mut levels: Vec<install::Progress> = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &defaults,
+            &mut store,
+            &fetcher.wire(),
+            &mut |line| lines.push(line),
+            &mut |level| levels.push(level),
+        );
+        let text = lines.join("
+");
+        assert!(
+            text.contains("names Forge but no Minecraft version"),
+            "the fallback has to be named: {text}"
+        );
+        assert!(
+            text.contains("the mirror's wrapper document answers for it"),
+            "and it has to say which document answers: {text}"
+        );
+        assert!(
+            text.contains("add a 'net.minecraft' component"),
+            "and what the reader can do about it: {text}"
+        );
+        // Nothing installed the loader here: the level the install announces
+        // itself with never arrives, because this launch has no game to match an
+        // installer against.
+        assert!(
+            levels.iter().all(|level| !level.label.starts_with("installing")),
+            "this launch must not have installed anything: {levels:?}"
+        );
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
     }
 
     /// Write a version file into the metadata cache for `uid`/`version`.
