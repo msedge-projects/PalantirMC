@@ -51,6 +51,7 @@ mod icon;
 /// bitmaps went with the shell they were drawn in.
 mod icons_gen;
 mod install;
+mod instance_settings;
 mod instances;
 mod java_runtime;
 mod launch;

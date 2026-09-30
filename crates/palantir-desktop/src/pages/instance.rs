@@ -56,6 +56,8 @@ pub enum Message {
     Tab(InstanceTab),
     /// The instance was asked to be launched.
     Play,
+    /// The header's settings control: open this instance's own settings.
+    Settings,
     /// The running instance was asked to stop.
     Stop,
     /// An instance's mod was enabled or disabled.
@@ -149,6 +151,8 @@ const PLAY_KEY: &str = "instance:play";
 /// same button in a different state and therefore a control of its own on the
 /// clock.
 const STOP_KEY: &str = "instance:stop";
+/// The header's gear, which opens the instance-settings modal.
+const SETTINGS_KEY: &str = "instance:settings";
 
 /// What the page asks the shell for: one tab's own read.
 ///
@@ -331,6 +335,10 @@ impl State {
                 self.keys.clear();
             }
             Message::Play => return Some(Ask::Play(self.id.clone())),
+            // The modal is the shell's, so the page reports the press rather than
+            // opening anything: the read behind it is this instance's file, which
+            // a page has never touched.
+            Message::Settings => return Some(Ask::InstanceSettings(self.id.clone())),
             Message::Stop => return Some(Ask::Stop(self.id.clone())),
             Message::ToggleContent { file_name, enabled } => {
                 let directory = store.instance_dir(&self.id).join("mods");
@@ -489,6 +497,16 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             .spacing(GAP)
             .align_items(Alignment::Center)
             .push(details.width(Length::Fill))
+            // The reference's own gear in the instance header, which is where a
+            // reader looks for an instance's settings; the modal it opens is the
+            // shell's (see [`crate::instance_settings`]).
+            .push(ui::icon_button(
+                theme,
+                SETTINGS_KEY,
+                Glyph::Settings,
+                ui::CONTROL_ICON,
+                Message::Settings,
+            ))
             .push(launch_control(theme, store.launch_state(&state.id))),
     )
 }
@@ -1136,6 +1154,18 @@ mod tests {
         assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
         assert_eq!(state.update(Message::Tab(InstanceTab::Logs), &store), None);
         assert_eq!(state.tab, InstanceTab::Logs);
+    }
+
+    #[test]
+    fn the_header_s_gear_reports_the_instance_rather_than_opening_the_modal() {
+        // The modal, the read behind it and the write are the shell's -- the
+        // page's whole part is the press, exactly as it is for Play.
+        let store = store_at("instance-settings-ask");
+        let mut state = State::new("atm".to_string(), InstanceTab::Content);
+        assert_eq!(
+            state.update(Message::Settings, &store),
+            Some(Ask::InstanceSettings("atm".to_string()))
+        );
     }
 
     #[test]

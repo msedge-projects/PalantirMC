@@ -9,6 +9,7 @@
 //! | [`search`] | `base/inputs/Input.vue`: a 20px `text-secondary opacity-60` icon, value `text-primary`, placeholder `text-secondary`, focus `text-contrast` |
 //! | [`select`] | `base/Combobox.vue`: `rounded-xl`, a `font-medium text-primary` prefix, the value, and a chevron |
 //! | [`button`] | `base/buttons/Button.vue`: `text-sm font-bold text-secondary`, colour per type |
+//! | [`switch`] | `base/Toggle.vue`: a 48x24 rounded track with a `--surface-5` hairline, `bg-brand` on and `bg-button-bg` off, and a 16px knob inset 4px from the edge it sits on |
 //!
 //! Two of these are *readings* rather than quotations, and say so where they are
 //! written: the input's own wrapper classes come from a shared style that is not in
@@ -386,6 +387,74 @@ pub fn select<'a, Message: 'a>(
         .push(icon::icon(Glyph::ChevronDown, 16.0, theme_gen::ink(theme, INK_SECONDARY)));
     let framed = framed(theme, body);
     container(framed).width(Length::Fixed(width)).into()
+}
+
+/// A switch: the reference's `base/Toggle.vue`, at its own 48x24.
+///
+/// `Toggle.vue` is a `role="switch"` button drawing a 48x24 rounded track with a
+/// hairline in `--surface-5`, `--color-brand` behind the knob when it is on and
+/// `--color-button-bg` when it is off, and a 16px knob inset 4px from the edge it
+/// sits on (`bg-black/90` on, `--text-secondary` off). It is a `mouse_area` here
+/// rather than a `Button`, because iced's button brings a frame of its own to a
+/// drawing that is already a frame.
+///
+/// What it does not draw is the reference's two transitions: its 200ms knob
+/// travel, and the knob growing under the pointer. Both are motion this kit has
+/// no value tween for yet -- the interaction clock carries hover *filters*, not
+/// positions -- so the knob is drawn where it is and the switch is read at the
+/// moment it is pressed rather than watched. That is a departure with a reason,
+/// and the first caller that wants a moving switch should spend the tween here.
+pub fn switch<'a, Message: Clone + 'a>(
+    theme: Gen,
+    on: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    const TRACK_W: f32 = 48.0;
+    const TRACK_H: f32 = 24.0;
+    const KNOB: f32 = 16.0;
+    const INSET: f32 = 4.0;
+    let knob_ink = if on {
+        // `bg-black/90`, which is a colour rather than a token: the reference
+        // paints the knob with a literal translucent black on both themes it
+        // travels across.
+        Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 }
+    } else {
+        theme_gen::ink(theme, INK_SECONDARY)
+    };
+    let knob = container(Space::new(Length::Fixed(KNOB), Length::Fixed(KNOB))).style(
+        move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(knob_ink)),
+            border: Border { radius: (KNOB / 2.0).into(), ..Border::default() },
+            ..container::Appearance::default()
+        },
+    );
+    let mut track = row![]
+        .align_items(Alignment::Center)
+        .width(Length::Fixed(TRACK_W))
+        .height(Length::Fixed(TRACK_H))
+        .padding(Padding { top: INSET, bottom: INSET, left: INSET, right: INSET });
+    track = if on {
+        track.push(Space::with_width(Length::Fill)).push(knob)
+    } else {
+        track.push(knob).push(Space::with_width(Length::Fill))
+    };
+    let track = container(track).style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(if on {
+            theme_gen::ink(theme, Ink::Brand)
+        } else {
+            theme_gen::ink(theme, Ink::ButtonBg)
+        })),
+        border: Border {
+            radius: (TRACK_H / 2.0).into(),
+            width: 1.0,
+            color: theme_gen::ink(theme, Ink::Surface5),
+        },
+        ..container::Appearance::default()
+    });
+    mouse_area(track)
+        .interaction(Interaction::Pointer)
+        .on_press(on_press)
+        .into()
 }
 
 /// What kind of button this is, by the reference's own `type` prop.

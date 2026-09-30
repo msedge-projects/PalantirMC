@@ -776,6 +776,9 @@ pub enum Modal {
         /// be offered: it becomes an instance of its own instead.
         pack: bool,
     },
+    /// One instance's own settings, read back for the form the instance page's
+    /// gear opens (see [`crate::instance_settings`]).
+    InstanceSettings(Box<crate::instance_settings::State>),
 }
 
 /// Everything the shell can be told.
@@ -878,6 +881,8 @@ pub enum Message {
     /// now -- the chip's own, which stops the instance it names, and one per row
     /// of the popover, which stops that row's.
     StopRun(String),
+    /// The instance-settings modal's own controls, and its save.
+    InstanceSettings(crate::instance_settings::Message),
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
     /// The name in the creation dialog changed.
@@ -1668,6 +1673,12 @@ impl Shell {
                         self.open_import();
                         None
                     }
+                    // The instance page's gear: the modal is the shell's, and so
+                    // is the read behind it.
+                    Some(pages::Ask::InstanceSettings(id)) => {
+                        self.open_instance_settings(&id);
+                        None
+                    }
                     // The two that start and stop a game rather than a request:
                     // neither answers with one, so `None` -- what the shell owes
                     // the page afterwards travels as a launch event instead.
@@ -1681,6 +1692,16 @@ impl Shell {
                     }
                     None => None,
                 }
+            }
+            Message::InstanceSettings(message) => {
+                // Saving is the one message here the form cannot act on: the write
+                // is the store's, and the store is the shell's.
+                if let crate::instance_settings::Message::Save = message {
+                    self.save_instance_settings();
+                } else if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    state.update(message);
+                }
+                None
             }
             Message::Sidebar(shown) => {
                 self.sidebar = shown;
@@ -1805,6 +1826,51 @@ impl Shell {
             // Handled before this, in `handle`: they are the messages whose
             // answer is a command rather than a request.
             Message::Minimize | Message::ToggleMaximize | Message::Close => None,
+        }
+    }
+
+    /// Open the settings modal for one instance.
+    ///
+    /// The read is synchronous -- the instance's `instance.cfg` and this
+    /// launcher's own preferences are two small files -- and it happens here
+    /// rather than in the form, because a form that invented a heap for an
+    /// instance it could not read would be exactly the failure [`crate::store`]
+    /// exists to prevent. A read that fails opens the modal with the sentence
+    /// alone (see [`crate::instance_settings::State::failed`]).
+    fn open_instance_settings(&mut self, id: &str) {
+        let name = self
+            .store
+            .instance(id)
+            .ready()
+            .map(|card| card.name.clone())
+            .unwrap_or_else(|| id.to_string());
+        let state = match self.store.instance_settings(id) {
+            Ok(settings) => crate::instance_settings::State::new(id.to_string(), name, &settings),
+            Err(problem) => crate::instance_settings::State::failed(id.to_string(), name, problem),
+        };
+        self.modal = Some(Modal::InstanceSettings(Box::new(state)));
+    }
+
+    /// Write what the instance-settings form holds, and close it when the write
+    /// lands.
+    ///
+    /// A refusal -- a field that is not a number, or a heap the store will not
+    /// write -- stays in the form's own sentence rather than being dropped: the
+    /// modal remains up with what the reader typed still in it.
+    fn save_instance_settings(&mut self) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        let edit = match state.edit() {
+            Ok(edit) => edit,
+            Err(problem) => {
+                state.error = Some(problem);
+                return;
+            }
+        };
+        match self.store.save_instance_settings(&state.id, &edit) {
+            Ok(()) => self.modal = None,
+            Err(problem) => state.error = Some(problem),
         }
     }
 
@@ -2057,12 +2123,15 @@ impl Shell {
             // arrival, and starting a game because a window opened on its page
             // would be a launcher that plays by itself.
             // An install is not *owed* either: nothing is waiting for one, and the
-            // dialog it opens is a press away.
+            // dialog it opens is a press away. The instance settings modal is the
+            // same shape: the gear is a press, and the shell already has the
+            // store to read it from.
             Some(
                 pages::Ask::Open(_)
                 | pages::Ask::Install(_)
                 | pages::Ask::Create
                 | pages::Ask::Import
+                | pages::Ask::InstanceSettings(_)
                 | pages::Ask::Play(_)
                 | pages::Ask::Stop(_)
                 | pages::Ask::Wear(_)
@@ -4397,6 +4466,12 @@ impl Shell {
         title: Key,
         body: Element<'a, Message>,
     ) -> Element<'a, Message> {
+        self.dialog_titled(title.message(), body)
+    }
+
+    /// The same frame for a title this shell built rather than a key: the
+    /// instance-settings modal names the instance it is about.
+    fn dialog_titled<'a>(&'a self, title: &str, body: Element<'a, Message>) -> Element<'a, Message> {
         let theme = self.theme;
         container(
             column![]
@@ -4405,7 +4480,7 @@ impl Shell {
                     row![]
                         .align_items(Alignment::Center)
                         .push(
-                            text(title.message())
+                            text(title.to_string())
                                 .size(20.0)
                                 .font(heading())
                                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
@@ -5215,6 +5290,10 @@ impl Shell {
             Some(Modal::Install { project, title, pack }) => {
                 self.install_dialog(project, title, *pack)
             }
+            Some(Modal::InstanceSettings(state)) => self.dialog_titled(
+                &format!("{} · {}", state.name, Key::LabelSettings.message()),
+                crate::instance_settings::view(self.theme, state).map(Message::InstanceSettings),
+            ),
             // The layer is only drawn while a modal is up, and Settings is the one
             // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
@@ -8128,6 +8207,82 @@ mod tests {
         // the page rather than a flag on this shell.
         press(&mut shell, Message::CloseModal);
         assert!(shell.screen.skins_edit().is_none(), "the scrim closed it");
+    }
+
+    #[test]
+    fn the_instance_gear_opens_its_settings_and_save_writes_them() {
+        // The whole path of one press: the page reports the gear, the shell reads
+        // the instance and opens the form, and Save writes the file a launch
+        // reads. This is the write side `model.rs` said belonged to a page that
+        // had not arrived.
+        let mut shell = shell_with_instance("settings");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the gear opens the instance-settings modal");
+        };
+        assert_eq!(state.id, "atm10");
+        assert_eq!(state.name, "atm10", "the dialog is titled by the instance it is about");
+        assert!(state.loaded, "the read landed, so the form has values under it");
+
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::OverrideMemory(true)),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::MemoryMin("2048".into())),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::MemoryMax("4096".into())),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Save),
+        );
+        assert!(shell.modal.is_none(), "a landed save closes the modal");
+        let written = shell.store.instance_settings("atm10").expect("read back");
+        assert!(written.override_memory);
+        assert_eq!((written.memory_min, written.memory_max), (2048, 4096));
+        drop(shell.render());
+    }
+
+    #[test]
+    fn a_heap_that_cannot_be_written_keeps_the_modal_up_with_its_sentence() {
+        // A refusal is a sentence in the form rather than a closed modal: the
+        // reader keeps what they typed, and the instance file is not written.
+        let mut shell = shell_with_instance("settings-refusal");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::OverrideMemory(true)),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::MemoryMin("twelve".into())),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Save),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal stays up");
+        };
+        let problem = state.error.as_deref().expect("a sentence");
+        assert!(problem.contains("twelve"), "{problem}");
+        assert!(
+            !shell.store.instance_settings("atm10").expect("read back").override_memory,
+            "nothing was written"
+        );
+        drop(shell.render());
     }
 }
 

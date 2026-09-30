@@ -102,7 +102,7 @@ OPEN_ITEM = re.compile(r"^(?:\* |\d+\. )\*\*(.+?)\*\*")
 GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     "before": [(1, 57), (92, 92)],  # the shell this rewrite replaces, and the dashboard; G46b is here too
     2: [(58, 61), (82, 82)],  # navigation, easing, copy, native; the switch
-    3: [(62, 65), (76, 77), (83, 83), (96, 98), (101, 111), (115, 118), (120, 124)],  # routes, scaffold, widgets; hover; themes; the panel; the project page's own documents and its installs; the panel's news feed and its checklist with the friends sentence beside it, Home's welcome screen as the page, the Skins page's read of the account's own skins and its write half, the measurement of what the four surfaces left need, the profile page read off Modrinth's published API, the measurement of what a Modrinth session is and would reach, the check of that page's two documents against the live service, and the reading of the api-client that writes the Servers API down; the reference's own locales -- their compiled tables, the setting that reads one, and the ledger of what the other 32 carry against English (G120-G122); the Skins page's upload half -- the picker, the padding to 64x64, the arm style read from the texture's own pixels, the multipart body and the flow that joins them (G123), and the store the reader's own additions are kept in with the editor that changes one -- arm style, cape, the Ears notice and the way to take a skin off (G124); and what the interface costs at size, which is the pages' own per-frame cost and is why it is stage 3's rather than the shell's -- its worst number was the instance page's Files tab, the one read that turned out to be worse than linear fixed (G115) the page's whole listing taken out of the draw path afterwards (G116) and the tab body windowed so that a frame draws the rows on screen rather than the folder (G117); and the decision that stops the four Modrinth *account* surfaces from being owed at all -- Hosting and its billing, the Share tab, the skin store and the signed-in friends half are dropped rather than deferred, with the sentence on each of them saying which service it is (G118) (G99-G100, the Forge installers and their processors, are stage 4's)
+    3: [(62, 65), (76, 77), (83, 83), (96, 98), (101, 111), (115, 118), (120, 124), (125, 125)],  # routes, scaffold, widgets; hover; themes; the panel; the project page's own documents and its installs; the panel's news feed and its checklist with the friends sentence beside it, Home's welcome screen as the page, the Skins page's read of the account's own skins and its write half, the measurement of what the four surfaces left need, the profile page read off Modrinth's published API, the measurement of what a Modrinth session is and would reach, the check of that page's two documents against the live service, and the reading of the api-client that writes the Servers API down; the reference's own locales -- their compiled tables, the setting that reads one, and the ledger of what the other 32 carry against English (G120-G122); the Skins page's upload half -- the picker, the padding to 64x64, the arm style read from the texture's own pixels, the multipart body and the flow that joins them (G123), and the store the reader's own additions are kept in with the editor that changes one -- arm style, cape, the Ears notice and the way to take a skin off (G124); the instance settings modal's own settings half -- the heap, the Java path and the JVM arguments an instance *file* already holds, read back into controls behind the reference's own override switches and written on save, which is the write side `model.rs` inherited without a control (G125); and what the interface costs at size, which is the pages' own per-frame cost and is why it is stage 3's rather than the shell's -- its worst number was the instance page's Files tab, the one read that turned out to be worse than linear fixed (G115) the page's whole listing taken out of the draw path afterwards (G116) and the tab body windowed so that a frame draws the rows on screen rather than the folder (G117); and the decision that stops the four Modrinth *account* surfaces from being owed at all -- Hosting and its billing, the Share tab, the skin store and the signed-in friends half are dropped rather than deferred, with the sentence on each of them saying which service it is (G118) (G99-G100, the Forge installers and their processors, are stage 4's)
     4: [(66, 75), (91, 91), (93, 95), (99, 100), (107, 107), (112, 114)],  # the engine; the first page on it; the launch's and a pack's transfers; the loaders' own profiles and Minecraft's own file; the Forge-shaped installers' own metadata and their processors; the measurement of what the mirror serves for those two uids instead of them; and the engine's own error path keeping the service's sentence beside the status (G92 is the dashboard, owned by `before`)
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
@@ -123,16 +123,17 @@ SLICE_HOURS = (2.0, 3.0)
 OPEN: dict[int, list[tuple[str, int, tuple[float, float], str]]] = {
     3: [
         (
-            "The instance-settings page is not built.",
+            "The instance-settings modal's installation half is not built.",
             1,
-            (3.0, 5.0),
-            "the reference's `InstanceSettingsModal`: the settings an instance file "
-            "already holds (memory, Java, the game arguments, the loader, the "
-            "version) read back into controls and written on save, which is the "
-            "write side of the settings model `model.rs` inherited from "
-            "`palantir-gui`. It needs no third party, which is why it is one of the "
-            "two items stage 3 still owes after G118 dropped the four Modrinth "
-            "account surfaces",
+            (2.0, 3.0),
+            "the tab beside G125's: the game version, the loader and the loader's "
+            "own build, whose values come from a service -- so writing one is an "
+            "install rather than a write onto the instance file -- where G125 "
+            "landed the settings an instance file already holds (the heap, the "
+            "Java path and the JVM arguments, each behind the reference's own "
+            "override switch) and the write side `model.rs` inherited. It needs no "
+            "third party, and the sync-override and sharing tabs beside it are the "
+            "account services G118 dropped",
         ),
         (
             "The Skins page's edit half is not built.",

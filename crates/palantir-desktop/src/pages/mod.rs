@@ -183,6 +183,13 @@ pub enum Ask {
     /// could create an instance would have to know where instances live, which
     /// is what [`crate::store`] is for.
     Create,
+    /// Open one instance's own settings.
+    ///
+    /// [`Ask::Create`]'s shape pointed at a file that already exists: the button
+    /// is the instance page's header, and the form, the read and the write are the
+    /// shell's -- a page that could write an instance's own settings would have to
+    /// know [`crate::store`] and the override gates behind it.
+    InstanceSettings(String),
     /// Open the creation flow's import step, for the same reasons and off the same
     /// button on the welcome screen.
     Import,

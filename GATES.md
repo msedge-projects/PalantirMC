@@ -5944,6 +5944,99 @@ CONFIRMED: the page carries all 124 gates, 6 stage cards and every subject as wr
   this machine printed, because the two `Lint` jobs run the same
   `cargo clippy --workspace --all-targets --locked` command.
 
+- [x] G125: an instance's own settings have controls -- the heap, the Java path
+  and the JVM arguments, each behind the reference's own override switch, read back
+  from the instance file and written on save
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py
+         python tools/dashboard.py --check
+  EXPECT: the instance page's gear reports `Ask::InstanceSettings(id)` rather than
+          opening the modal itself, and the shell opens it from the store's own
+          read, so an instance that overrides nothing shows the launcher's numbers
+          with its switches off
+          Save writes through `Instance::save`, and a switch turned off *removes*
+          `OverrideJavaLocation`, `OverrideMemory` and `OverrideJavaArgs` rather
+          than writing zeroes: off is "use the launcher's own setting", which is
+          what the read that filled the form meant by it
+          a heap under 128 MiB or a maximum below its minimum is the store's
+          refusal, and the modal stays up with the sentence in it
+          594 passed; 0 failed; 0 ignored, and clippy exit 0 with no new warning in
+          the files this slice touched
+          the instance-settings item on the plan's stage-3 open list narrows to the
+          installation tab of the same modal, whose values come from a service --
+          stage 3 reads 31 met / 2 open (94%), the other open item being the Skins
+          page's edit half -- and both document tools exit 0 at 125 gates
+  EVIDENCE: the transcripts below, and the three reasons the form differs from the
+  reference's, each of them recorded where it is drawn rather than assumed.
+
+```
+$ cargo test -p palantir-desktop --locked
+running 594 tests
+test result: ok. 594 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 176.45s
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-desktop` (bin "PalantirMC") 3 warnings and its test build 21,
+the counts G118 recorded and G124 carried, and none of them pointing at
+instance_settings.rs, ui.rs, store.rs, shell.rs or the page module this slice
+touched -- so the 24 lines are the same set, and the slice added none
+
+$ python tools/progress.py
+stage 3  Pages, in the reference's order: instance pages f...    31     2    94%
+
+overall: 97%  (the stage numbers above, weighted by what each stage holds)
+slices:  66 of 68 met in stages 0-5; 59 more gates are the shell this rewrite replaces
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as written
+```
+
+  **What this is, and where the reference keeps it.** `model.rs` inherited a settings
+  *reader* from `palantir-gui` -- the override-gate semantics Prism keeps
+  (`JavaPath`/`OverrideJavaLocation`, `JvmArgs`/`OverrideJavaArgs`,
+  `MinMemAlloc`/`MaxMemAlloc`/`OverrideMemory`) -- and the note it left behind says
+  the write side belongs to the page that never arrived. The reference keeps it in
+  `InstanceSettingsModal`, whose Java tab is
+  `components/settings-modal/java-settings.vue`: a `Toggle` and its controls per
+  setting, writing on every change. This slice is that tab as a modal of this
+  shell's own: `crate::instance_settings` is the form, `store::InstanceSettings` is
+  the value it reads and writes, and the instance page's header grows the reference's
+  gear, which reports the instance rather than opening anything.
+
+  **The three deliberate differences, and the price of each.** The reference writes
+  on every change (`watch` on each ref); this form has a Save button, because the
+  write here is a file write through `Instance::save` and a form that wrote per
+  keystroke would write a half-typed heap -- `20` on the way to `2048`, which the
+  store's own floor would refuse -- so the controls are buffers, and Save is where
+  they become a value. The reference's memory control is a slider over the machine's
+  RAM, and this kit has no slider: the two numbers the instance file actually holds
+  are edited as fields, which is also what Prism's own pane shows, so the form edits
+  the thing it writes rather than a shape of it. And the reference has no Save, no
+  fields and no labels -- its own copy names the tab and the override, not the
+  minimum and the maximum -- so the two field labels are this module's words, saying
+  `MiB` because Prism's keys are megabytes by name and mebibytes by value.
+
+  **The switch is the reference's `Toggle`, drawn rather than imported**
+  (`ui::switch`): a 48x24 track, `bg-brand` under a 16px knob when on and
+  `--button-bg` when off, the knob `bg-black/90` on -- a literal rather than a
+  token, because the reference paints it with one on both themes it travels across --
+  inset 4px from the track's edge, over a `--surface-5` hairline. What is *not*
+  drawn is the knob's 200ms travel: the reference animates it with a CSS transition
+  and this kit's clock carries hover tweens, so the knob is placed where the switch
+  is rather than tweened across. A press is one frame's difference, and that is
+  recorded here instead of implied.
+
+  **What is not this half, and what is not a gate.** The installation tab beside the
+  Java one -- game version, loader, loader build -- reads a service and its write is
+  an install, so it stays the plan's open item, named in
+  `crate::instance_settings`'s module doc and in the plan's own list. The reference's
+  sync-override and sharing tabs are the Modrinth account surfaces G118 dropped. And
+  the read the modal shows is the store's `instance_settings`, which is the *values
+  in force*: an instance that overrides nothing draws the launcher's own prefs with
+  the switch off, because that is what a launch would use.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

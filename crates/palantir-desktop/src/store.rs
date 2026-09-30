@@ -40,7 +40,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use palantir_core::instance::Instance;
 use palantir_core::paths::PalantirPaths;
+use palantir_core::settings::Settings;
 use palantir_net::engine::{
     Backoff, Build as LoaderBuildSource, Cancel, Fetch, HttpPool, Loader, LoaderMeta, Manifest,
     MetadataCache, ModrinthApi, PistonMeta, Request,
@@ -283,6 +285,50 @@ pub enum Outcome {
         /// The line the page shows.
         line: String,
     },
+}
+
+/// One instance's own settings, as the settings modal reads and writes them.
+///
+/// The values are the ones a *launch* would use rather than the instance file's
+/// raw contents: where an override gate is on the instance's own number is shown,
+/// and where it is off the value in force is this launcher's own
+/// ([`crate::prefs`]), which is the rule `launch::heap_for_launch` already obeys.
+/// The gates travel with the values because the modal draws them as switches,
+/// and a switch drawn from a missing value would be a guess about the file.
+///
+/// The strings are what the reader typed, not split or normalized: this is the
+/// value a form holds, and `save_instance_settings` is where it becomes a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceSettings {
+    /// The Java this instance runs with, when it overrides the launcher's.
+    pub java_path: String,
+    /// Whether the instance's own Java is what a launch uses.
+    pub override_java: bool,
+    /// Heap floor, in MiB.
+    pub memory_min: i64,
+    /// Heap ceiling, in MiB.
+    pub memory_max: i64,
+    /// Whether the instance's own heap is what a launch uses.
+    pub override_memory: bool,
+    /// Extra JVM arguments, in the one string the file holds.
+    pub jvm_args: String,
+    /// Whether the instance's own JVM arguments are what a launch uses.
+    pub override_java_args: bool,
+}
+
+/// Set a string setting behind its instance override gate, or take both away.
+///
+/// A blank string is not a value here: an empty Java path or argument string is
+/// the same answer as the gate being off, so both keys go rather than a gate
+/// pointing at nothing.
+fn set_gated_string(settings: &mut Settings, gate: &str, key: &str, on: bool, value: &str) {
+    if on && !value.is_empty() {
+        settings.set_bool(gate, true);
+        settings.set_str(key, value);
+    } else {
+        settings.set_bool(gate, false);
+        settings.remove(key);
+    }
 }
 
 // ---- The launcher's own files, and the way out to a service ----------------
@@ -577,6 +623,113 @@ impl Store {
     /// rather than read from a directory, which is how the tests build one.
     pub fn paths(&self) -> Option<&PalantirPaths> {
         self.paths.as_ref()
+    }
+
+    /// One instance's own settings, read back for the settings modal.
+    ///
+    /// A read of two small files (its `instance.cfg` and this launcher's own
+    /// preferences), which is why it is synchronous where a page's tab listing is
+    /// not: the shell asks for it once, when the modal opens.
+    pub fn instance_settings(&self, id: &str) -> Result<InstanceSettings, String> {
+        let instance = Instance::open(&self.instance_dir(id))
+            .map_err(|error| format!("cannot open '{id}': {error}"))?;
+        let settings = instance.settings();
+        let defaults = self.launch_defaults();
+        let override_memory = settings.get_bool("OverrideMemory", false);
+        let override_java = settings.get_bool("OverrideJavaLocation", false);
+        let override_java_args = settings.get_bool("OverrideJavaArgs", false);
+        Ok(InstanceSettings {
+            java_path: if override_java {
+                settings.get_str("JavaPath", "")
+            } else {
+                defaults.java.default_binary().unwrap_or_default().to_string()
+            },
+            override_java,
+            memory_min: if override_memory {
+                settings.get_i64("MinMemAlloc", defaults.min_mem_mib)
+            } else {
+                defaults.min_mem_mib
+            },
+            memory_max: if override_memory {
+                settings.get_i64("MaxMemAlloc", defaults.max_mem_mib)
+            } else {
+                defaults.max_mem_mib
+            },
+            override_memory,
+            // There are no launcher-wide JVM arguments to fall back to
+            // (`launch::LaunchDefaults` holds Java and the two numbers and
+            // nothing else), so an instance that does not override them runs
+            // with none -- and the field draws empty rather than showing a
+            // string a launch would drop on the floor.
+            jvm_args: if override_java_args {
+                settings.get_str("JvmArgs", "")
+            } else {
+                String::new()
+            },
+            override_java_args,
+        })
+    }
+
+    /// The numbers and the Java an instance inherits while it does not override
+    /// them: this launcher's own preferences, read the way a launch reads them.
+    fn launch_defaults(&self) -> crate::launch::LaunchDefaults {
+        match &self.paths {
+            Some(paths) => crate::launch::LaunchDefaults::from_prefs(&crate::prefs::load(paths)),
+            None => crate::launch::LaunchDefaults::default(),
+        }
+    }
+
+    /// Write one instance's own settings back to its file.
+    ///
+    /// A gate that is off *takes the instance's key away* rather than leaving
+    /// the number in the file: the modal reads the value in force back every time
+    /// it opens, so a stale number would be a value nothing reads and nothing
+    /// shows. A heap that cannot be one -- below the game's own floor, or upside
+    /// down -- is a sentence returned to the form rather than a written line.
+    pub fn save_instance_settings(&self, id: &str, edit: &InstanceSettings) -> Result<(), String> {
+        if edit.override_memory {
+            let floor = palantir_core::settings::defaults::MIN_MEM_ALLOC;
+            if edit.memory_min < floor {
+                return Err(format!(
+                    "the minimum heap is {} MiB; {floor} MiB is the floor",
+                    edit.memory_min
+                ));
+            }
+            if edit.memory_max < edit.memory_min {
+                return Err(format!(
+                    "the maximum heap ({} MiB) is below the minimum ({} MiB)",
+                    edit.memory_max, edit.memory_min
+                ));
+            }
+        }
+        let mut instance = Instance::open(&self.instance_dir(id))
+            .map_err(|error| format!("cannot open '{id}': {error}"))?;
+        let settings = instance.settings_mut();
+        set_gated_string(
+            settings,
+            "OverrideJavaLocation",
+            "JavaPath",
+            edit.override_java,
+            edit.java_path.trim(),
+        );
+        set_gated_string(
+            settings,
+            "OverrideJavaArgs",
+            "JvmArgs",
+            edit.override_java_args,
+            edit.jvm_args.trim(),
+        );
+        settings.set_bool("OverrideMemory", edit.override_memory);
+        if edit.override_memory {
+            settings.set_i64("MinMemAlloc", edit.memory_min);
+            settings.set_i64("MaxMemAlloc", edit.memory_max);
+        } else {
+            settings.remove("MinMemAlloc");
+            settings.remove("MaxMemAlloc");
+        }
+        instance
+            .save()
+            .map_err(|error| format!("saving '{id}' failed: {error}"))
     }
 
     /// The reason a page's data is not here yet.
@@ -2095,5 +2248,87 @@ mod tests {
         assert_eq!(bytes_label(5 * 1024_u64.pow(4)), "5.0 TiB");
         // Past the last unit it stays in it rather than inventing one.
         assert!(bytes_label(u64::MAX).ends_with("TiB"));
+    }
+
+    #[test]
+    fn instance_settings_come_back_the_way_they_went_in() {
+        // One round trip through the door the modal uses, with every gate on: the
+        // value read back has to be the value a launch would use, or the form is
+        // showing the reader numbers nobody else believes.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("settings-round-trip", fetch);
+        let fresh = store.instance_settings("atm10").expect("the settings");
+        assert!(!fresh.override_memory && !fresh.override_java && !fresh.override_java_args);
+        assert!(fresh.memory_min > 0 && fresh.memory_max >= fresh.memory_min,
+            "an instance that overrides nothing still shows a heap: {fresh:?}");
+
+        let edit = InstanceSettings {
+            java_path: "C:/jdk21/bin/javaw.exe".to_string(),
+            override_java: true,
+            memory_min: 2048,
+            memory_max: 8192,
+            override_memory: true,
+            jvm_args: "-XX:+UseG1GC".to_string(),
+            override_java_args: true,
+        };
+        store.save_instance_settings("atm10", &edit).expect("a save");
+        assert_eq!(store.instance_settings("atm10").expect("read back"), edit);
+    }
+
+    #[test]
+    fn a_gate_that_is_off_takes_the_instance_s_own_key_out_of_the_file() {
+        // Turning an override off is not "write the launcher's number and mark it
+        // unchecked": it is "this instance has no opinion", and the file has to
+        // say that rather than hold a number nothing reads.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("settings-gates", fetch);
+        let on = InstanceSettings {
+            java_path: "C:/jdk21/bin/javaw.exe".to_string(),
+            override_java: true,
+            memory_min: 2048,
+            memory_max: 8192,
+            override_memory: true,
+            jvm_args: "-XX:+UseG1GC".to_string(),
+            override_java_args: true,
+        };
+        store.save_instance_settings("atm10", &on).expect("a save with every gate on");
+        let off = InstanceSettings {
+            override_java: false,
+            override_memory: false,
+            override_java_args: false,
+            ..on.clone()
+        };
+        store.save_instance_settings("atm10", &off).expect("a save with every gate off");
+
+        let file = std::fs::read_to_string(store.instance_dir("atm10").join("instance.cfg"))
+            .expect("the instance file");
+        for key in ["JavaPath", "MinMemAlloc", "MaxMemAlloc", "JvmArgs"] {
+            assert!(!file.contains(key), "{key} is still in the file:\n{file}");
+        }
+        let back = store.instance_settings("atm10").expect("read back");
+        assert!(!back.override_memory && !back.override_java && !back.override_java_args);
+        assert_ne!(back.memory_max, 8192, "the launcher's own ceiling is what is in force now");
+    }
+
+    #[test]
+    fn a_heap_that_cannot_be_one_is_a_sentence_rather_than_a_written_line() {
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("settings-heaps", fetch);
+        let mut edit = store.instance_settings("atm10").expect("the settings");
+        edit.override_memory = true;
+
+        edit.memory_min = 64;
+        edit.memory_max = 4096;
+        let below = store.save_instance_settings("atm10", &edit).expect_err("under the floor");
+        assert!(below.contains("floor"), "{below}");
+
+        edit.memory_min = 4096;
+        edit.memory_max = 2048;
+        let upside_down = store.save_instance_settings("atm10", &edit).expect_err("upside down");
+        assert!(upside_down.contains("below the minimum"), "{upside_down}");
+
+        // Neither refusal wrote anything: the file still says what it said.
+        let back = store.instance_settings("atm10").expect("read back");
+        assert!(!back.override_memory);
     }
 }
