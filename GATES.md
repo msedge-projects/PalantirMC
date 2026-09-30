@@ -7180,6 +7180,18 @@ desktop=0
   what the tests observe is that state. A drawn control that lost its handler for
   another reason would not be caught by these tests.
 
+  **The runner agrees with this machine, and it had to: this slice's tests are
+  nine of the 1106.** Run `36747603784` on `95db936` -- the push's own
+  pull-request run -- is `Lint` and `Test workspace` green in 1m22s and 2m3s at
+  1106 passed / 0 failed and 19 ignored (177 + 8 + 626 + 4 + 33 + 258, the
+  desktop crate's 626 being this machine's own count to the test and
+  `palantir-loader`'s 33 being its 31 plus this slice's two), with the live suite
+  and both exes skipped by that path's own rule. Run `36747814283` on the same
+  commit -- asked for by dispatch -- is all five jobs: the same 1106 passed / 0
+  failed and 19 ignored in the workspace run, `Lint` green in 2m8s, the live
+  suite 19 passed / 0 failed in 129.02s, and both Windows exes staged (msvc
+  5,579,551 B, gnu 5,648,751 B).
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
