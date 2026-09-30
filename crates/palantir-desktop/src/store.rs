@@ -49,7 +49,7 @@ use palantir_net::engine::{
     MetadataCache, ModrinthApi, PistonMeta, Request,
 };
 use palantir_net::engine::Search as ApiSearch;
-use palantir_net::modrinth::{ModrinthMember, NewsArticle};
+use palantir_net::modrinth::{ModrinthMember, ModrinthProject, ModrinthProjectVersion, NewsArticle};
 use palantir_net::{
     MinecraftSkins, MicrosoftAuth, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
 };
@@ -1405,6 +1405,189 @@ impl Store {
         // happens to find (G131).
         let defaults = self.launch_defaults();
         crate::launch::repair_instance(paths, instance_id, &defaults, &mut store, &wire, &mut quiet)
+    }
+
+    /// Lay the pack this instance came from over it again.
+    ///
+    /// The reference's *Re-install modpack* (`installation-settings.vue`'s
+    /// `reinstallModpack`, which is `update_repair_modrinth` for a pack the service
+    /// knows and a file picker for one imported from disk): the version the link
+    /// names is fetched again -- through the launcher's own cache, where a pack
+    /// archive is filed by digest, so a second press costs a read rather than 300
+    /// MB -- and laid over the instance by [`crate::install::reapply_pack`].
+    ///
+    /// **Blocking**, for a repair's reason and a longer one: a cached archive
+    /// read, an unpack, and however many files the pack lists.
+    ///
+    /// The sentence is [`crate::install::PackReapply::summary`]'s, and it counts
+    /// files rather than promising the reference's own reset of the instance's
+    /// content, because this launcher's install path deletes nothing: what the
+    /// reader added to the instance stays where it is.
+    pub fn reinstall_modpack(&self, instance_id: &str) -> Result<String, String> {
+        let (paths, engine) = self.pack_engine("Re-installing a modpack")?;
+        let link = self.instance_link(instance_id)?.ok_or_else(|| {
+            "this instance is not linked to a modpack, so there is nothing to re-install"
+                .to_string()
+        })?;
+        let (project, version) = self.linked_version(&link, "Re-installing a modpack")?;
+        let wire = Wire::over(paths.meta_dir(), engine.fetch());
+        let archive =
+            install::fetch_pack_archive(&wire, &paths.meta_dir().join("packs"), &version)?;
+        let instance = Instance::open(&self.instance_dir(instance_id))
+            .map_err(|error| format!("cannot open instance '{instance_id}': {error}"))?;
+        let reapply = install::reapply_pack(&wire, &instance, &archive, &mut |_| {})?;
+        Ok(reapply.summary(&project.title, version.version_number.as_str()))
+    }
+
+    /// The versions of the linked pack this instance could take instead.
+    ///
+    /// The filter is the reference's own: its `ContentUpdaterModal` is given the
+    /// instance's `current-game-version` and `current-loader` and lists only the
+    /// versions that name them. The pair is read from the instance's own
+    /// `mmc-pack.json` rather than from anything a page holds, because the page's
+    /// form may be holding edits that have not been saved.
+    ///
+    /// An instance with no link answers with the empty list rather than a refusal:
+    /// the list is drawn inside the card that only a linked instance has, so there
+    /// is no page that can ask this question and then have to draw the refusal.
+    pub fn pack_versions(&self, instance_id: &str) -> Result<Vec<PackVersion>, String> {
+        let Some(link) = self.instance_link(instance_id)? else {
+            return Ok(Vec::new());
+        };
+        let (_, engine) = self.pack_engine("The versions of a modpack")?;
+        let installation = self.instance_installation(instance_id)?;
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let versions = engine
+            .api()
+            .versions(&link.project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        Ok(install::versions_for(
+            &versions,
+            installation.game_version.as_str(),
+            installation.platform.modrinth_name(),
+        )
+        .into_iter()
+        .map(|version| PackVersion {
+            id: version.id.clone(),
+            number: version_number(version),
+        })
+        .collect())
+    }
+
+    /// Lay another version of the linked pack over the instance, and remember it.
+    ///
+    /// One version of one project, so the link is rewritten in the same call the
+    /// files land: an instance that had taken a new version and still pointed at
+    /// the old one would draw the old number over files the new one wrote.
+    ///
+    /// **Blocking**, for [`Store::reinstall_modpack`]'s reason.
+    pub fn change_pack_version(
+        &self,
+        instance_id: &str,
+        version_id: &str,
+    ) -> Result<String, String> {
+        let (paths, engine) = self.pack_engine("Changing a modpack's version")?;
+        let link = self.instance_link(instance_id)?.ok_or_else(|| {
+            "this instance is not linked to a modpack, so there is no other version to take"
+                .to_string()
+        })?;
+        // A link with the version the reader pressed, read through the same helper
+        // the re-install uses: the project document names the pack and the version
+        // is where the archive comes from, and a version the author has deleted is
+        // a refusal with a sentence rather than a silent nothing.
+        let wanted = InstanceLink {
+            project_id: link.project_id.clone(),
+            version_id: version_id.to_string(),
+        };
+        let (project, version) = self.linked_version(&wanted, "Changing a modpack's version")?;
+        let wire = Wire::over(paths.meta_dir(), engine.fetch());
+        let archive =
+            install::fetch_pack_archive(&wire, &paths.meta_dir().join("packs"), &version)?;
+        let instance = Instance::open(&self.instance_dir(instance_id))
+            .map_err(|error| format!("cannot open instance '{instance_id}': {error}"))?;
+        let reapply = install::reapply_pack(&wire, &instance, &archive, &mut |_| {})?;
+        let summary = reapply.summary(&project.title, version.version_number.as_str());
+        // The link follows the files, and a link that would not write is not an
+        // install that failed -- the files are on disk and the instance is playable
+        // -- so the reason travels in the sentence, the way [`Store::install_pack`]
+        // does it.
+        match self.save_instance_link(instance_id, &wanted) {
+            Ok(()) => Ok(summary),
+            Err(error) => Ok(format!("{summary} (the link could not be updated: {error})")),
+        }
+    }
+
+    /// The paths and the way out, for the operations that need both.
+    ///
+    /// One place for the two refusals, because the pack actions all ask the same
+    /// question first and a store with no launcher behind it has to answer each of
+    /// them with its own word rather than with an empty answer.
+    fn pack_engine(&self, what: &str) -> Result<(&PalantirPaths, &Engine), String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented(what));
+        };
+        let Some(paths) = &self.paths else {
+            return Err(not_implemented(what));
+        };
+        Ok((paths, engine))
+    }
+
+    /// The project and the version a link names, read from the service.
+    ///
+    /// One helper for the two actions that need both, and the reason each of them
+    /// is a request rather than a guess: the project document is the name the card
+    /// draws beside the sentence, and the version is where the archive comes from.
+    /// A version the author has deleted is a refusal with a sentence -- the pack is
+    /// still installed, but there is nothing left to lay over it.
+    fn linked_version(
+        &self,
+        link: &InstanceLink,
+        what: &str,
+    ) -> Result<(ModrinthProject, ModrinthProjectVersion), String> {
+        let (_, engine) = self.pack_engine(what)?;
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let project = api
+            .project(&link.project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let versions = api
+            .versions(&link.project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let version = versions
+            .into_iter()
+            .find(|version| version.id == link.version_id)
+            .ok_or_else(|| {
+                format!(
+                    "{} no longer publishes the version this instance came from",
+                    project.title
+                )
+            })?;
+        Ok((project, version))
+    }
+}
+
+/// One version of a linked pack, as the *Change version* list draws it.
+///
+/// Two fields rather than the API's whole `ModrinthProjectVersion`: the list needs
+/// something to press (`id`) and something to read (`number`), and a page holding
+/// a service type is a page that could ask the service itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackVersion {
+    /// The version's id, which is what a press installs.
+    pub id: String,
+    /// The number the author gave it (`1.6.1`), or its name when there is none.
+    pub number: String,
+}
+
+/// What a version is called on a card: its number, or its name when the author
+/// gave it none.
+fn version_number(version: &ModrinthProjectVersion) -> String {
+    if version.version_number.trim().is_empty() {
+        version.name.clone()
+    } else {
+        version.version_number.clone()
     }
 }
 

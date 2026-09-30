@@ -76,6 +76,7 @@ use crate::icons_gen::Glyph;
 use crate::page::Load;
 use crate::store::{
     GameVersion, InstanceInstallation, InstanceLink, InstanceSettings, LinkedModpack, LoaderBuild,
+    PackVersion,
 };
 use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
@@ -96,6 +97,12 @@ const UNLINK_KEY: &str = "instance-settings:unlink";
 /// changed under the pointer.
 const REPAIR_KEY: &str = "instance-settings:repair";
 const REPAIRING_KEY: &str = "instance-settings:repairing";
+/// The modpack actions' controls, named the way the repair button's are: one name
+/// per word, because each changes its label under a pointer that is still on it.
+const REINSTALL_KEY: &str = "instance-settings:reinstall";
+const REINSTALLING_KEY: &str = "instance-settings:reinstalling";
+/// The pack-version list's repeating rows, scoped by the version they carry.
+const PACK_VERSION_ROW: &str = "instance-settings:pack-version";
 /// The game-version list's footer toggle, which has two names rather than one:
 /// its word changes with the state it flips, and a hover must not carry across a
 /// control whose label changed under the pointer. The creation dialog's picker
@@ -175,6 +182,19 @@ pub enum Message {
     /// which is the longest thing this launcher does that is not a launch, and it
     /// cannot run on the frame thread.
     Repair,
+    /// The reader asked for the linked modpack to be laid over the instance
+    /// again.
+    ///
+    /// The shell's, for [`Message::Repair`]'s reason: it re-fetches the pack's
+    /// archive and fetches every file its index lists, which is a network's worth
+    /// of work and cannot run on the frame thread.
+    ReinstallModpack,
+    /// The reader asked for one version of the linked modpack to be laid over the
+    /// instance, in place of the one it came from.
+    ///
+    /// The shell's, for [`Message::ReinstallModpack`]'s reason exactly: the only
+    /// difference between the two is which version's archive is fetched.
+    ChangeVersion(String),
     /// The pointer entered or left one of the form's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     ///
@@ -262,6 +282,26 @@ pub struct State {
     /// beside a sentence because the three states it can be in are this enum's
     /// three, and the section draws each of them differently.
     pub repair: Load<String>,
+    /// What laying the linked modpack over the instance again came to, or the
+    /// reason it could not finish.
+    ///
+    /// The same three states as [`State::repair`] and for the same reason:
+    /// `Loading` *is* the busy state, drawn as the button under the reference's
+    /// own word for the wait.
+    pub reinstall: Load<String>,
+    /// What taking another version of the linked modpack came to, or the reason it
+    /// could not finish.
+    ///
+    /// The list's own answer rather than the card's, because the reader pressed a
+    /// row and the sentence has to say which version came of it.
+    pub change: Load<String>,
+    /// The versions of the linked pack that fit this instance, newest first, or
+    /// the reason the list could not be read.
+    ///
+    /// Read when the modal opens rather than behind a button that reveals it: the
+    /// list is what the section is, and a press that only showed it would be a
+    /// state of its own for something the reader opened this tab to see.
+    pub pack_versions: Load<Vec<PackVersion>>,
     /// The last refusal, in the reader's words, or `None` while nothing failed.
     pub error: Option<String>,
 }
@@ -303,6 +343,9 @@ impl State {
             link,
             modpack: Load::Idle,
             repair: Load::Idle,
+            reinstall: Load::Idle,
+            change: Load::Idle,
+            pack_versions: Load::Idle,
             error: None,
         }
     }
@@ -337,6 +380,9 @@ impl State {
             link: Load::Idle,
             modpack: Load::Idle,
             repair: Load::Idle,
+            reinstall: Load::Idle,
+            change: Load::Idle,
+            pack_versions: Load::Idle,
             error: Some(problem),
         }
     }
@@ -390,9 +436,15 @@ impl State {
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
-            // See `Message::Save`, `Message::SaveInstallation`, `Message::Unlink`
-            // and `Message::Repair`: the shell is the one that acts on them.
-            Message::Save | Message::SaveInstallation | Message::Unlink | Message::Repair => {}
+            // See `Message::Save`, `Message::SaveInstallation`, `Message::Unlink`,
+            // `Message::Repair`, `Message::ReinstallModpack` and
+            // `Message::ChangeVersion`: the shell is the one that acts on them.
+            Message::Save
+            | Message::SaveInstallation
+            | Message::Unlink
+            | Message::Repair
+            | Message::ReinstallModpack
+            | Message::ChangeVersion(_) => {}
         }
     }
 
@@ -483,6 +535,22 @@ impl State {
         }
         match &self.link {
             Load::Ready(link) => Some(link.project_id.clone()),
+            _ => None,
+        }
+    }
+
+    /// The instance whose linked pack's other versions the shell should read.
+    ///
+    /// Only on the installation tab, and only once: [`Load::Idle`] is what stops
+    /// a second request per frame, exactly as it does for the card. An instance
+    /// that names no pack has no versions to list, so `Idle` stays in place and
+    /// nobody is asked.
+    pub fn needs_pack_versions(&self) -> Option<String> {
+        if !self.loaded || self.tab != Tab::Installation || self.pack_versions != Load::Idle {
+            return None;
+        }
+        match &self.link {
+            Load::Ready(_) => Some(self.id.clone()),
             _ => None,
         }
     }
@@ -603,10 +671,16 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
     // than what it runs.
     match &state.link {
         Load::Ready(_) => {
+            // The three actions the reference puts in this panel, in its own order:
+            // another version of the pack, the pack again, then the instance's own
+            // files -- and *Unlink* last, because it is the one that takes the link
+            // away and nothing else.
             body = body
                 .push(modpack_card(theme, state))
-                .push(unlink_section(theme))
-                .push(repair_section(theme, state));
+                .push(change_version_section(theme, state))
+                .push(reinstall_section(theme, state))
+                .push(repair_section(theme, state))
+                .push(unlink_section(theme));
         }
         // The file that says what this instance came from is there and cannot be
         // read. A sentence where the card would be rather than no card at all:
@@ -850,6 +924,141 @@ fn repair_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     ui::card(theme, section)
 }
 
+/// The way to take another version of the linked pack.
+///
+/// The heading is the reference's own *Change version* (`button.change-version`),
+/// and what is under it is the list its own update modal draws: the versions of
+/// this pack that fit this instance -- the same game version, the same loader,
+/// newest first -- with the one the instance came from marked, and a press laying
+/// that version over the instance. The reference opens a modal over the modal and
+/// asks again in a confirmation; this kit draws the list in the card and the press
+/// is the confirmation, the way *Repair* and *Unlink* already are.
+fn change_version_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let mut section = column![]
+        .spacing(8.0)
+        .push(section_heading(theme, Key::ButtonChangeVersion.message()))
+        .push(pack_version_list(theme, state));
+    match &state.change {
+        Load::Ready(line) => section = section.push(paragraph(theme, line)),
+        Load::Failed(reason) => section = section.push(paragraph_ink(theme, reason, Ink::Red)),
+        // Neither asked for, a version being laid over (the rows not pressing is
+        // that state's whole drawing), or a state this form was never given.
+        Load::Idle | Load::Loading | Load::Empty => {}
+    }
+    ui::card(theme, section)
+}
+
+/// The linked pack's versions that fit this instance, as pressable rows.
+fn pack_version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let current = match &state.link {
+        Load::Ready(link) => Some(link.version_id.clone()),
+        _ => None,
+    };
+    let versions = match &state.pack_versions {
+        Load::Idle | Load::Loading => {
+            return paragraph(theme, Key::LabelLoading.message());
+        }
+        Load::Failed(reason) => return paragraph_ink(theme, reason, Ink::Red),
+        Load::Empty => {
+            return paragraph(
+                theme,
+                Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+            );
+        }
+        Load::Ready(versions) => versions,
+    };
+    if versions.is_empty() {
+        // A linked pack whose fitting versions are none: the game version or the
+        // loader moved and the author has published nothing for the pair. The
+        // reference draws the same sentence for an empty list.
+        return paragraph(
+            theme,
+            Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message(),
+        );
+    }
+    // A press is in flight, so no row presses: the same rule the buttons above
+    // follow, one list down. The rows stay drawn, so the list does not change
+    // height under the pointer that is already on one of them.
+    let busy = state.change == Load::Loading;
+    let items: Vec<Element<'_, Message>> = versions
+        .iter()
+        .map(|version| {
+            let key = ui::scoped(PACK_VERSION_ROW, &version.id);
+            let chosen = current.as_deref() == Some(version.id.as_str());
+            let on_press = match busy {
+                true => None,
+                false => Some(Message::ChangeVersion(version.id.clone())),
+            };
+            choice_row_or(theme, key, version.number.clone(), chosen, on_press)
+        })
+        .collect();
+    scrollable(column(items).width(Length::Fill))
+        .height(Length::Fixed(LIST_HEIGHT))
+        .into()
+}
+
+/// The way to lay the linked pack over this instance again.
+///
+/// The heading and the button are the reference's own
+/// (`installation-settings.reinstall-modpack.title`, `button.reinstall-modpack`,
+/// with `installation-settings.reinstalling-modpack` for the wait, which is this
+/// kit's *Reinstalling modpack* in the reference's own word). The sentence under
+/// the button is **this launcher's own**, and it is the one place a modpack action
+/// says something different on purpose: the reference's own sentence says that
+/// re-installing "resets the {type} content to its original state, removing any
+/// mods or content you have added", while the install path here deletes nothing --
+/// the reader's worlds, their configs and the mods they added are theirs, which is
+/// the property *Repair instance* already keeps (G130). A button that promised the
+/// reset and did not do it would be worse than one that promises what it does.
+fn reinstall_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let button = if state.reinstall == Load::Loading {
+        // The press is gone while the pack is laid over, for the repair button's
+        // reason: a second press would start a second fetch of the same archive.
+        ui::button_or(
+            theme,
+            REINSTALLING_KEY,
+            Key::InstallationSettingsReinstallingModpack,
+            ui::Kind::Standard,
+            None,
+        )
+    } else {
+        ui::button(
+            theme,
+            REINSTALL_KEY,
+            Key::ButtonReinstallModpack,
+            ui::Kind::Standard,
+            Message::ReinstallModpack,
+        )
+    };
+    let mut section = column![]
+        .spacing(8.0)
+        .push(section_heading(
+            theme,
+            Key::InstallationSettingsReinstallModpackTitle.message(),
+        ))
+        .push(row![button])
+        .push(paragraph(theme, REINSTALL_SENTENCE));
+    match &state.reinstall {
+        Load::Ready(line) => section = section.push(paragraph(theme, line)),
+        Load::Failed(reason) => section = section.push(paragraph_ink(theme, reason, Ink::Red)),
+        Load::Idle | Load::Loading | Load::Empty => {}
+    }
+    ui::card(theme, section)
+}
+
+/// What re-applying a pack does here, in this launcher's words rather than the
+/// reference's.
+///
+/// The reference's `installation-settings.reinstall-modpack.description` promises
+/// a reset -- content added on top of the pack is removed -- and this launcher's
+/// install path does not do that, deliberately: nothing it installs ever deletes,
+/// which is what makes *Repair instance* safe to press on an instance that is
+/// merely suspect. Saying so is the difference between a button that does less
+/// than the reference's and a button that lies.
+const REINSTALL_SENTENCE: &str =
+    "The modpack's files and its overrides are put back over the instance. Nothing is removed: the \
+     mods, configs and worlds you added stay where they are.";
+
 /// The sentence under the installation Save: what a version or platform change
 /// costs, which is a download at the next launch rather than now.
 const SAVE_INSTALLS_NOTE: &str =
@@ -1010,6 +1219,22 @@ fn choice_row<'a>(
     chosen: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
+    choice_row_or(theme, key, label, chosen, Some(on_press))
+}
+
+/// A row that is drawn whether or not there is a press behind it.
+///
+/// [`ui::button_or`]'s shape for the list-shaped control: a version row with no
+/// press is what a list looks like while another press is in flight, and the row
+/// stays drawn so the list does not change height under the pointer that is
+/// already on one of them.
+fn choice_row_or<'a>(
+    theme: Gen,
+    key: &'static str,
+    label: String,
+    chosen: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     let (factor, _) = ui::interaction(key);
     let ink = if chosen { INK_CONTRAST } else { INK_SECONDARY };
     let plate = chosen.then(|| theme_gen::ink(theme, Ink::ButtonBg));
@@ -1029,12 +1254,14 @@ fn choice_row<'a>(
         border: Border { radius: 8.0.into(), ..Border::default() },
         ..container::Appearance::default()
     });
-    mouse_area(row)
+    let mut area = mouse_area(row)
         .interaction(Interaction::Pointer)
         .on_enter(Hovered::hover(key, true))
-        .on_exit(Hovered::hover(key, false))
-        .on_press(on_press)
-        .into()
+        .on_exit(Hovered::hover(key, false));
+    if let Some(message) = on_press {
+        area = area.on_press(message);
+    }
+    area.into()
 }
 
 /// A pressable row's stable name: one per value, from the value itself.
@@ -1246,6 +1473,39 @@ mod tests {
     }
 
     #[test]
+    fn a_linked_instance_asks_for_the_packs_other_versions_and_settles_after_the_answer() {
+        // The *Change version* list is read from the shell once, the way the
+        // card's name is: the same tab gate, the same one-request rule, and no
+        // question at all for an instance that came from nothing.
+        let mut plain = state();
+        plain.update(Message::Tab(Tab::Installation));
+        assert_eq!(plain.needs_pack_versions(), None, "no pack, no versions");
+
+        let mut linked = linked_state();
+        assert_eq!(
+            linked.needs_pack_versions(),
+            None,
+            "the Java half draws no list, so opening on it asks nothing"
+        );
+        linked.update(Message::Tab(Tab::Installation));
+        assert_eq!(linked.needs_pack_versions(), Some("cobblemon".to_string()));
+        // One answer arrives and the question is not asked again: the three
+        // lists keep the same rule, and an *empty* answer is an answer.
+        linked.pack_versions = Load::Ready(vec![PackVersion {
+            id: "pack-2".to_string(),
+            number: "1.6.2".to_string(),
+        }]);
+        assert_eq!(linked.needs_pack_versions(), None);
+        linked.pack_versions = Load::Empty;
+        assert_eq!(linked.pack_versions, Load::Empty);
+        assert_eq!(
+            linked.needs_pack_versions(),
+            None,
+            "a pack with no fitting version is not asked about twice"
+        );
+    }
+
+    #[test]
     fn the_pack_caption_says_what_the_service_gave_and_nothing_more() {
         // The reference puts the author and the version number on one line with a
         // middot between them, and both halves can be missing: a team read that
@@ -1293,6 +1553,33 @@ mod tests {
     }
 
     #[test]
+    fn the_reinstall_section_wears_the_reference_own_words_and_this_launchers_sentence() {
+        // The heading, the button in both of its states and the wait are the
+        // reference's own; the sentence under the button is deliberately not,
+        // because the reference promises a reset -- content added on top of the
+        // pack is removed -- and this launcher's install path deletes nothing.
+        assert_eq!(
+            Key::InstallationSettingsReinstallModpackTitle.message(),
+            "Re-install modpack"
+        );
+        assert_eq!(Key::ButtonReinstallModpack.message(), "Re-install modpack");
+        assert_eq!(
+            Key::InstallationSettingsReinstallingModpack.message(),
+            "Reinstalling modpack"
+        );
+        assert_eq!(Key::ButtonChangeVersion.message(), "Change version");
+        assert!(!REINSTALL_SENTENCE.contains('{'), "{REINSTALL_SENTENCE}");
+        assert!(
+            REINSTALL_SENTENCE.contains("Nothing is removed"),
+            "the one place this launcher answers the reference's reset: {REINSTALL_SENTENCE}"
+        );
+        assert!(
+            REINSTALL_SENTENCE.contains("stay where they are"),
+            "and it says what does not happen to the reader's own files: {REINSTALL_SENTENCE}"
+        );
+    }
+
+    #[test]
     fn the_form_does_not_start_a_repair_itself() {
         // `Message::Repair` is the shell's -- the check is a minute of blocking
         // work and a window that ran it would stop drawing -- so the form's own
@@ -1311,6 +1598,29 @@ mod tests {
                 version_id: "pack-1".to_string(),
             }),
             "the link is still what the card is drawn from"
+        );
+    }
+
+    #[test]
+    fn the_form_does_not_start_the_two_pack_actions_either() {
+        // Both of them fetch an archive and lay it over the instance, so both
+        // are the shell's, for the repair's reason: the form's own update leaves
+        // no mark, and `Load::Loading` is set by the shell when it raises the
+        // request. A version press that moved the form itself would be two
+        // owners of one busy state.
+        let mut state = linked_state();
+        state.update(Message::ReinstallModpack);
+        state.update(Message::ChangeVersion("pack-2".to_string()));
+        assert_eq!(state.reinstall, Load::Idle);
+        assert_eq!(state.change, Load::Idle);
+        assert_eq!(state.error, None);
+        assert_eq!(
+            state.link,
+            Load::Ready(InstanceLink {
+                project_id: "cobblemon".to_string(),
+                version_id: "pack-1".to_string(),
+            }),
+            "a press the shell has not answered yet moves no link"
         );
     }
 

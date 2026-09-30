@@ -7042,6 +7042,143 @@ dashboard exit=0
   machine's own count to the test and this slice's two among them), the live suite
   19 passed / 0 failed in 162.69s, and both Windows exes staged (msvc 5,552,801 B,
   gnu 5,620,593 B).
+- [x] G133: the installation tab's last two pack actions -- *Re-install modpack*,
+  which lays the version the link names over the instance again, and *Change
+  version*, the reference's *Swap*, which lays another of the pack's fitting
+  versions over it and rewrites the link -- with nothing deleted in either
+  CHECK: cargo test -p palantir-desktop -p palantir-loader -p palantir-net --locked
+         cargo clippy -p palantir-desktop -p palantir-loader --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 626 passed; 0 failed in the desktop crate's own run, this slice's seven
+          among them, with `tests/native.rs`'s four beside it
+          33 passed in `palantir-loader` with this slice's two among them, and 258
+          passed / 19 ignored in `palantir-net`, which this slice does not touch
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0
+  EVIDENCE: the transcripts below, then the runner paragraph at the end.
+
+```
+$ cargo test -p palantir-desktop -p palantir-loader -p palantir-net --locked
+     Running unittests src\main.rs (target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 626 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 104.11s
+     Running tests\native.rs (target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.71s
+     Running unittests src\lib.rs (target\debug\deps\palantir_loader-90f8af26aa0e06e6.exe)
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s
+     Running unittests src\lib.rs (target\debug\deps\palantir_net-9940f1d373b486bf.exe)
+test result: ok. 258 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.34s
+     Running tests\live.rs (target\debug\deps\live-7c8aaafe0774708e.exe)
+test result: ok. 0 passed; 0 failed; 19 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+tests driving the slice, from the same run:
+test install::tests::only_the_pack_versions_that_fit_the_instance_are_offered ... ok
+test install::tests::re_applying_a_pack_lays_its_files_over_an_instance_and_deletes_nothing ... ok
+test instance_settings::tests::a_linked_instance_asks_for_the_packs_other_versions_and_settles_after_the_answer ... ok
+test instance_settings::tests::the_form_does_not_start_the_two_pack_actions_either ... ok
+test instance_settings::tests::the_reinstall_section_wears_the_reference_own_words_and_this_launchers_sentence ... ok
+test shell::tests::a_version_change_rewrites_the_link_and_re_reads_the_card_and_the_list ... ok
+test shell::tests::pressing_reinstall_marks_the_form_busy_and_the_sentence_stays_on_it ... ok
+test modpack::tests::applying_a_pack_over_an_instance_keeps_what_the_reader_added ... ok
+test modpack::tests::applying_a_curseforge_archive_is_refused_because_its_files_cannot_be_fetched ... ok
+
+$ cargo clippy -p palantir-desktop -p palantir-loader --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\PalantirMC\crates\palantir-desktop)
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 04s
+desktop=0
+```
+
+  **One operation, two buttons.** Both actions are `crate::install::reapply_pack`:
+  the linked version's `.mrpack` is read out of the launcher's own cache (filed by
+  digest under `cache/meta/packs`, so a second press costs a read rather than 300
+  MB), its `overrides/` tree is written over the instance root with its loader
+  registered in the instance's profile, and every file its index lists is fetched
+  -- or left alone when what is already at that path is the right size, which is
+  the rule every other install in this launcher keeps. *Re-install modpack* does
+  that for the version the link names; *Change version* does it for another
+  version of the same project and then calls `save_instance_link`, so the card and
+  the list's mark move with the files. A link that would not write does not fail
+  the install -- the files are on disk and the instance is playable -- so its
+  reason is appended to the sentence, the way `Store::install_pack` does it.
+
+  **The loader grew the half that creates nothing.** `palantir_loader::apply_mrpack`
+  is `import_mrpack` minus the instance: it requires `modrinth.index.json`, reads
+  the plan, writes the `overrides/` tree over an instance that already exists and
+  registers the loader components -- and it takes an `Instance` rather than an
+  instances directory, so there is nowhere for it to make one by accident. A
+  CurseForge archive is refused by name: its files are project/file id pairs that
+  resolve only through the CurseForge API, and a re-install that read one would put
+  back the overrides and none of the mods. Nothing in this crate fetches, which is
+  why the caller -- `reapply_pack`, over the engine's own wire -- owns the
+  transfers, exactly as `import_and_fetch` does for a fresh install.
+
+  **The one place this launcher answers the reference differently, on purpose.**
+  The reference's *Re-install modpack* says it "resets the {type} content to its
+  original state, removing any mods or content you have added", and its install
+  path clears the pack's own folders first. This launcher's install path deletes
+  nothing, anywhere, which is what makes *Repair instance* safe to press on an
+  instance that is merely suspect -- a reader's worlds, their configs and the mods
+  they added are theirs, and a button that can take them away is a button that has
+  to be sure. So the sentence under the button is this launcher's own: "The
+  modpack's files and its overrides are put back over the instance. Nothing is
+  removed: the mods, configs and worlds you added stay where they are." The
+  heading, the button and the wait are the reference's own keys
+  (`installation-settings.reinstall-modpack.title`, `button.reinstall-modpack`,
+  `installation-settings.reinstalling-modpack`); only the description is not, and
+  a button that promised the reset and did not do it would be worse than one that
+  promises what it does.
+
+  **The version list is the reference's own filter, read off the profile.** Its
+  `ContentUpdaterModal` is handed the instance's `current-game-version` and
+  `current-loader` and lists only the versions that name them; this launcher reads
+  the same pair out of the instance's `mmc-pack.json` rather than out of the form,
+  because the form may be holding edits that have not been saved. `versions_for`
+  keeps the API's order (publish-date descending), drops a version with no file,
+  and treats `vanilla` and an empty loader as the same question -- the game version
+  alone -- because a plain instance has no loader to match. The row for the version
+  the link names is marked, and while a change is in flight the rows draw without a
+  press, so the list cannot start a second install under the pointer that is
+  already on a row.
+
+  **What the shell owns, and what the tests read.** The two presses are the
+  shell's, for *Repair*'s reason: the form marks itself busy in the frame the
+  pointer is in (`Load::Loading`, which is the button under the reference's word
+  for the wait) and writes the instance -- and, for a change, the version -- into a
+  flag `handle` turns into an off-thread command. The answers land on the modal.
+  `Message::VersionChanged` is the one that does more than land: it re-reads the
+  link *off the disk*, and re-asks for the card and the list, because a card naming
+  the old version over files the new one wrote is the one thing this answer could
+  get wrong. The shell test checks the pair that travels, the second press that is
+  dropped while the first is out, and the two re-reads; the installation-form test
+  checks that neither message moves the form by itself; the loader test lays a pack
+  over an instance that already has a world, a config and a mod in it and asserts
+  all three are still there afterwards.
+
+  **What this cannot say.**
+- **No gate re-applies a real pack off the network.** The whole path is driven
+  over the scripted wire and an archive built in memory; what a live Modrinth
+  archive does when laid over an instance is what the live suite would have to
+  test, and it does not have such a test. The tests do assert the fetch and the
+  resume case (a second pass transfers nothing), which is the part a live run
+  would be measuring.
+- **The local-file re-install the reference offers for an imported pack is not
+  here.** Its `reinstallModpack` falls back to a file picker when the instance did
+  not come from the service; this launcher's button re-applies the version the
+  link names, and an instance with no link has no button to press. A picker that
+  laid an arbitrary archive over an instance is a different decision than this
+  slice made.
+- **A version change does not change what the instance *is*.** The game version
+  is never touched by this button, and a chosen pack version that names a
+  different loader build moves that component (`register_loaders`) without asking
+  -- the filter matches the loader's *name*, not its build, which is the
+  reference's rule too.
+- **The rows' not-pressing state is read from the code, not drawn.** No gate in
+  this tree renders an element tree, so "a row under a change in flight has no
+  press" is what `pack_version_list` does with `state.change == Load::Loading`;
+  what the tests observe is that state. A drawn control that lost its handler for
+  another reason would not be caught by these tests.
 
 ## What these gates cannot say
 

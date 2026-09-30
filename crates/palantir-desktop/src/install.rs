@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use palantir_core::assets::{object_cdn_path, object_relative_path, AssetIndex};
+use palantir_core::instance::Instance;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::version::{LaunchProfile, Library, RuntimeContext};
 use crate::wire::{FileJob, Wire};
@@ -1295,6 +1296,106 @@ impl InstalledPack {
     }
 }
 
+/// What laying a pack over an instance that already exists came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackReapply {
+    /// What the pack's own files came to.
+    pub fetch: PackFetch,
+    /// Entries the pack listed that were not installed, with the reason.
+    pub skipped: Vec<String>,
+}
+
+impl PackReapply {
+    /// The sentence the card draws once the pack has been laid over the instance.
+    ///
+    /// A repair's shape ([`crate::launch::repair_instance`]'s line), because the
+    /// reader asked the same kind of question: how many files the pack brought,
+    /// how many of them this run had to fetch, and the bytes that was. A failure
+    /// names the first file it happened to, for a pack with one dead URL.
+    pub fn summary(&self, project: &str, version: &str) -> String {
+        let files = self.fetch.fetched + self.fetch.present;
+        let megabytes = self.fetch.bytes as f64 / (1024.0 * 1024.0);
+        let mut line = format!(
+            "Re-applied {project} {version}: {files} file(s), {} fetched again ({megabytes:.1} MB)",
+            self.fetch.fetched
+        );
+        if let Some(first) = self.fetch.failed.first() {
+            line.push_str(&format!(
+                "; {} could not be fetched, starting with: {first}",
+                self.fetch.failed.len()
+            ));
+        }
+        if !self.skipped.is_empty() {
+            line.push_str(&format!(", {} entries are not installable", self.skipped.len()));
+        }
+        line
+    }
+}
+
+/// Lay a pack archive over an instance that already exists, and fetch what it
+/// lists.
+///
+/// The other shape of a pack install: [`install_pack_archive`] makes an instance
+/// *out of* an archive, while this one lays an archive *over* an instance that is
+/// already there -- the same index read, the same `overrides/` tree, the same
+/// digest-checked transfers, with the instance root as the destination instead of
+/// one that was just created. It is what the installation tab's *Re-install
+/// modpack* and *Change version* both do.
+///
+/// What it is not is the reference's own reset: nothing here deletes, so a file
+/// the previous version of the pack wrote and this one does not list stays where
+/// it is -- which is why the card's sentence is this launcher's own rather than
+/// the reference's `reinstall-modpack.description`. The reason is
+/// [`crate::launch::repair_instance`]'s, said once more where it applies: a
+/// reader's worlds, their configs and the mods they added are theirs, and a button
+/// that can take them away is a button that has to be sure (G133).
+///
+/// **Blocking**, like every other install: the shell runs it off the frame thread.
+pub fn reapply_pack(
+    wire: &Wire,
+    instance: &Instance,
+    archive: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<PackReapply, String> {
+    let bytes = std::fs::read(archive)
+        .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
+    let plan = palantir_loader::apply_mrpack(bytes.as_slice(), instance)
+        .map_err(|error| format!("that archive is not a readable pack: {error}"))?;
+    let fetch = fetch_pack_files(wire, instance.root(), &plan.files, DEFAULT_THREADS, progress);
+    Ok(PackReapply { fetch, skipped: plan.skipped })
+}
+
+/// The versions of a pack that fit the instance they would be laid over.
+///
+/// The rule the reference's own *Change version* opens with: its
+/// `ContentUpdaterModal` is handed the instance's `current-game-version` and
+/// `current-loader` and lists the versions of the linked project that name them,
+/// so a version of another game version or loader is not offered. Laying one over
+/// would change what the instance *is*, which is the installation form's own job
+/// rather than this button's.
+///
+/// The API's order is kept, which is publish-date descending, so the newest
+/// fitting version is the first row. A version with no file is dropped for
+/// [`preferred_version`]'s reason: it cannot be laid over anything.
+pub fn versions_for<'a>(
+    versions: &'a [palantir_net::modrinth::ModrinthProjectVersion],
+    game: &str,
+    loader: &str,
+) -> Vec<&'a palantir_net::modrinth::ModrinthProjectVersion> {
+    // A plain instance has no loader to match, and its API name is `vanilla`
+    // rather than a name any pack publishes -- so both spell the same question:
+    // the game version alone decides.
+    let plain = loader.is_empty() || loader == "vanilla";
+    versions
+        .iter()
+        .filter(|candidate| {
+            candidate.primary_file().is_some()
+                && candidate.game_versions.iter().any(|listed| listed == game)
+                && (plain || candidate.loaders.iter().any(|name| name == loader))
+        })
+        .collect()
+}
+
 /// Fetch a pack's archive into the launcher's cache and answer where it landed.
 ///
 /// The archive *is* the pack's primary file, so this is [`install_file`] with a
@@ -1694,6 +1795,121 @@ mod tests {
         let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
         assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
         assert!(pack.contains("1.21.4"), "pack: {pack}");
+    }
+
+    #[test]
+    fn re_applying_a_pack_lays_its_files_over_an_instance_and_deletes_nothing() {
+        // The G133 tail without a network: an instance that already holds the
+        // reader's own files, a pack laid over it that names one remote file and
+        // one override, and the promise the card's sentence makes -- the pack's
+        // files are back, the reader's are untouched, and a second press fetches
+        // nothing because what it lists is already right.
+        let (dir, paths) = test_paths();
+        let mod_bytes = b"mod jar";
+        let index = serde_json::json!({
+            "formatVersion": 1,
+            "game": "minecraft",
+            "versionId": "1.6.1",
+            "name": "Cobblemon",
+            "files": [{
+                "path": "mods/cobblemon.jar",
+                "hashes": { "sha1": sha1_hex(mod_bytes) },
+                "downloads": ["https://cdn.example.invalid/cobblemon.jar"],
+                "fileSize": mod_bytes.len(),
+            }],
+            "dependencies": { "minecraft": "1.21.4", "fabric-loader": "0.16.9" },
+        });
+        let archive = pack_zip(&index, "overrides/config/cobblemon.json", b"{}");
+        let instance =
+            Instance::create(&paths.instances_dir(), "Cobblemon", "1.21.4").expect("an instance");
+        let root = instance.root().to_path_buf();
+        std::fs::create_dir_all(root.join("mods")).unwrap();
+        std::fs::create_dir_all(root.join("saves").join("world")).unwrap();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
+        std::fs::write(root.join("saves").join("world").join("level.dat"), b"my world")
+            .unwrap();
+        std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
+        // What the pack's previous version wrote under the same name.
+        std::fs::write(root.join("config").join("cobblemon.json"), b"old").unwrap();
+
+        let mut script = Script::new();
+        script.insert("https://cdn.example.invalid/cobblemon.jar", mod_bytes.to_vec());
+        let wire = script.wire();
+        let mut reports = 0usize;
+        let reapply =
+            reapply_pack(&wire, &instance, &write_archive(&dir, &archive), &mut |_| reports += 1)
+                .expect("the pack is laid over the instance");
+        assert_eq!(reapply.fetch.fetched, 1);
+        assert_eq!(reapply.fetch.failed.len(), 0);
+        assert!(reapply.skipped.is_empty(), "{:?}", reapply.skipped);
+        assert_eq!(
+            reapply.summary("Cobblemon", "1.6.1"),
+            "Re-applied Cobblemon 1.6.1: 1 file(s), 1 fetched again (0.0 MB)"
+        );
+        assert!(reports > 0, "the bar hears about the phase");
+        assert_eq!(
+            std::fs::read(root.join("mods").join("cobblemon.jar")).unwrap(),
+            mod_bytes
+        );
+        assert_eq!(
+            std::fs::read(root.join("config").join("cobblemon.json")).unwrap(),
+            b"{}",
+            "an override of the same name is replaced"
+        );
+        assert!(root.join("mods").join("manual.jar").is_file());
+        assert!(root.join("saves").join("world").join("level.dat").is_file());
+        assert!(root.join("config").join("left-behind.cfg").is_file());
+        let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).unwrap_or_default();
+        assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
+
+        // A second press: the file is where it belongs and the right size, so
+        // nothing is transferred and the sentence says so.
+        let again =
+            reapply_pack(&wire, &instance, &write_archive(&dir, &archive), &mut |_| {}).unwrap();
+        assert_eq!(again.fetch.fetched, 0);
+        assert_eq!(again.fetch.present, 1);
+        assert_eq!(
+            again.summary("Cobblemon", "1.6.1"),
+            "Re-applied Cobblemon 1.6.1: 1 file(s), 0 fetched again (0.0 MB)"
+        );
+    }
+
+    #[test]
+    fn only_the_pack_versions_that_fit_the_instance_are_offered() {
+        // The reference's `ContentUpdaterModal` rule, which is what the
+        // *Change version* list draws: the pack's versions that name this game
+        // version and this loader, in the API's publish-date order, and never one
+        // with no file to lay over.
+        let versions = vec![
+            published("newest", &["1.21.4"], &["fabric"], true),
+            published("other-game", &["1.21.1"], &["fabric"], true),
+            published("other-loader", &["1.21.4"], &["neoforge"], true),
+            published("no-file", &["1.21.4"], &["fabric"], false),
+            published("older", &["1.21.4"], &["fabric"], true),
+        ];
+        let fitting: Vec<&str> = versions_for(&versions, "1.21.4", "fabric")
+            .iter()
+            .map(|version| version.name.as_str())
+            .collect();
+        assert_eq!(fitting, vec!["newest", "older"], "the API's order is kept");
+
+        // A plain instance has no loader to match, and `vanilla` is the API's
+        // own name for it: the game version alone decides.
+        let plain: Vec<&str> = versions_for(&versions, "1.21.4", "vanilla")
+            .iter()
+            .map(|version| version.name.as_str())
+            .collect();
+        assert_eq!(plain, vec!["newest", "other-loader", "older"]);
+        assert_eq!(
+            versions_for(&versions, "1.21.4", "").len(),
+            plain.len(),
+            "an empty loader is the same question as vanilla"
+        );
+        assert!(
+            versions_for(&versions, "1.20.1", "fabric").is_empty(),
+            "a version list for another game version offers nothing"
+        );
     }
 
     /// A `.mrpack` in memory: the index, one overrides file, nothing else.

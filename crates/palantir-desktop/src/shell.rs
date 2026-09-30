@@ -435,6 +435,25 @@ pub struct Shell {
     /// must land nowhere -- while the repair itself happened either way, which is
     /// why nothing here cancels it.
     installation_repair_requested: Option<String>,
+    /// The instance whose pack versions the installation tab's *Change version*
+    /// list is waiting for.
+    ///
+    /// An id rather than a flag, for the modpack request's reason: the link can be
+    /// taken away, or moved to another version, while the request is out, and a
+    /// list about an instance the reader has left must land nowhere.
+    installation_pack_versions_requested: Option<String>,
+    /// The instance whose linked pack the reader asked to have laid over it again.
+    ///
+    /// An id rather than a flag, for the repair request's reason: the modal can be
+    /// closed while the pack is being fetched, and the pack lands either way.
+    installation_reinstall_requested: Option<String>,
+    /// The instance and the version of a *Change version* press: which instance the
+    /// archive is laid over, and which version's archive it is.
+    ///
+    /// A pair rather than one id, because the question is about both -- and because
+    /// the link the modal holds may already have moved by the time the answer
+    /// lands.
+    installation_change_requested: Option<(String, String)>,
     /// The launches in flight, one per instance, oldest first.
     ///
     /// A list rather than the single run this shell used to hold: the reference
@@ -820,6 +839,10 @@ enum InstallationNeed {
     /// The project's id rather than the instance's, because that is what the
     /// service is asked about.
     Modpack(String),
+    /// The versions of one instance's linked pack that fit it, for the same tab's
+    /// *Change version* list. The instance's id rather than the project's, because
+    /// the filter is the instance's own game version and loader.
+    PackVersions(String),
 }
 
 /// Everything the shell can be told.
@@ -943,6 +966,23 @@ pub enum Message {
     /// that was closed while the check ran has nowhere to draw a sentence about an
     /// instance the reader has left.
     Repaired(Result<String, String>),
+    /// The versions of the linked pack that fit this instance, read for the same
+    /// tab's *Change version* list.
+    ///
+    /// The modal's own field, landed like [`Message::Modpack`]'s card: an empty
+    /// answer is a pack that publishes nothing for the game version and loader this
+    /// instance is.
+    PackVersions(Result<Vec<store::PackVersion>, String>),
+    /// The installation tab's *Re-install modpack*, over: the linked version was
+    /// laid over the instance again, and the sentence is what that came to.
+    ///
+    /// Landed on the modal for [`Message::Repaired`]'s reason: a pack being laid
+    /// over is that form's action, and a modal closed while it ran has nowhere to
+    /// draw a sentence about an instance the reader has left.
+    Reinstalled(Result<String, String>),
+    /// The same tab's *Change version*, over: the version the reader pressed was
+    /// laid over the instance, and the sentence is what that came to.
+    VersionChanged(Result<String, String>),
     /// One platform's builds at one game version, read for the same tab. The
     /// question travels back with the answer, for [`Message::LoaderBuilds`]'s
     /// reason: the reader can move to another version while it is out.
@@ -1064,6 +1104,9 @@ impl Shell {
             installation_builds_requested: None,
             installation_modpack_requested: None,
             installation_repair_requested: None,
+            installation_pack_versions_requested: None,
+            installation_reinstall_requested: None,
+            installation_change_requested: None,
             runs: Vec::new(),
             next_run_id: 0,
             accounts: None,
@@ -1433,6 +1476,15 @@ impl Shell {
         if let Some(instance) = self.installation_repair_requested.take() {
             installation.push(self.installation_repair_command(&instance));
         }
+        if let Some(instance) = self.installation_pack_versions_requested.take() {
+            installation.push(self.installation_pack_versions_command(&instance));
+        }
+        if let Some(instance) = self.installation_reinstall_requested.take() {
+            installation.push(self.installation_reinstall_command(&instance));
+        }
+        if let Some((instance, version)) = self.installation_change_requested.take() {
+            installation.push(self.installation_change_command(&instance, &version));
+        }
         if !installation.is_empty() {
             return iced::Command::batch(installation);
         }
@@ -1683,6 +1735,63 @@ impl Shell {
                 }
                 None
             }
+            Message::PackVersions(result) => {
+                // The list, landed on the modal like the two lists beside it. An
+                // empty answer is `Empty`, which draws the reference's own sentence
+                // for a list with nothing in it.
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    state.pack_versions = match result {
+                        Ok(versions) if versions.is_empty() => Load::Empty,
+                        Ok(versions) => Load::Ready(versions),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+                self.installation_needs();
+                None
+            }
+            Message::Reinstalled(result) => {
+                // The pack's own sentence, landed like the repair's: the link is
+                // unchanged by a re-install, so nothing else on the form moves.
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    state.reinstall = match result {
+                        Ok(line) => Load::Ready(line),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+                None
+            }
+            Message::VersionChanged(result) => {
+                // The link moves with the files, so it is read *again* rather than
+                // assumed: a card naming the old version over files the new one
+                // wrote is the one thing this answer could get wrong. The link read
+                // is taken outside the borrow of the modal, the way
+                // `unlink_instance` takes its own.
+                let id = match &self.modal {
+                    Some(Modal::InstanceSettings(state)) => Some(state.id.clone()),
+                    _ => None,
+                };
+                if let Some(id) = id {
+                    let link = self.store.instance_link(&id);
+                    if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                        state.change = match result {
+                            Ok(line) => Load::Ready(line),
+                            Err(reason) => Load::Failed(reason),
+                        };
+                        state.link = match link {
+                            Ok(Some(link)) => Load::Ready(link),
+                            Ok(None) => Load::Idle,
+                            Err(problem) => Load::Failed(problem),
+                        };
+                        // The card names the new version and the list's mark moves
+                        // with it, so both are read again -- the list from the pair
+                        // that has not changed, but the mark has.
+                        state.modpack = Load::Idle;
+                        state.pack_versions = Load::Idle;
+                    }
+                    self.installation_needs();
+                }
+                None
+            }
             Message::Modpack(result) => {
                 // The card's name, landed on the modal like the two lists above,
                 // and for the same reason: it is that form's own field. A link that
@@ -1865,6 +1974,12 @@ impl Shell {
                     }
                     crate::instance_settings::Message::Unlink => self.unlink_instance(),
                     crate::instance_settings::Message::Repair => self.request_repair(),
+                    crate::instance_settings::Message::ReinstallModpack => {
+                        self.request_reinstall();
+                    }
+                    crate::instance_settings::Message::ChangeVersion(version) => {
+                        self.request_change_version(&version);
+                    }
                     other => {
                         if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
                             state.update(other);
@@ -2106,6 +2221,44 @@ impl Shell {
         // about now, and the sentence under the button is where the answer goes.
         state.error = None;
         self.installation_repair_requested = Some(state.id.clone());
+    }
+
+    /// Ask for the linked pack to be laid over the instance again, and mark the
+    /// form busy.
+    ///
+    /// [`Shell::request_repair`]'s shape over the other action, and its reasons hold
+    /// word for word: nothing runs here, the form is put into the state the button
+    /// draws (`Load::Loading`) in the same frame, and a second press while the first
+    /// is out is dropped because two runs would fetch the same archive twice.
+    fn request_reinstall(&mut self) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        if state.reinstall == Load::Loading {
+            return;
+        }
+        state.reinstall = Load::Loading;
+        state.error = None;
+        self.installation_reinstall_requested = Some(state.id.clone());
+    }
+
+    /// Ask for one version of the linked pack to be laid over the instance.
+    ///
+    /// The version is written down with the instance, because the answer arrives
+    /// after the modal may have been closed or pointed at another instance: what
+    /// the sentence is about is the pair, not whichever form is up when it lands.
+    /// A press while another version is being laid over is dropped, for
+    /// [`Shell::request_reinstall`]'s reason.
+    fn request_change_version(&mut self, version: &str) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        if state.change == Load::Loading {
+            return;
+        }
+        state.change = Load::Loading;
+        state.error = None;
+        self.installation_change_requested = Some((state.id.clone(), version.to_string()));
     }
 
     /// Write what the installation tab holds, and close the modal when the write
@@ -2416,6 +2569,46 @@ impl Shell {
         )
     }
 
+    /// Read the versions of one instance's linked pack that fit it, off the frame
+    /// thread.
+    ///
+    /// One command for what the store answers with two requests (the project's
+    /// versions and the instance's own installation), for
+    /// [`Shell::installation_modpack_command`]'s reason: the list is one answer.
+    fn installation_pack_versions_command(&self, instance: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = instance.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.pack_versions(&asked)),
+            Message::PackVersions,
+        )
+    }
+
+    /// Lay one instance's linked pack over it again, off the frame thread.
+    ///
+    /// [`Shell::installation_repair_command`]'s shape and reason: a blocking store
+    /// call -- a cached archive read, an unpack and however many files the pack
+    /// lists -- on a thread of its own.
+    fn installation_reinstall_command(&self, instance: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = instance.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.reinstall_modpack(&asked)),
+            Message::Reinstalled,
+        )
+    }
+
+    /// Lay one version of one instance's linked pack over it, off the frame thread.
+    fn installation_change_command(&self, instance: &str, version: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = instance.to_string();
+        let wanted = version.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.change_pack_version(&asked, &wanted)),
+            Message::VersionChanged,
+        )
+    }
+
     /// Ask the service to name the pack an instance was installed from.
     ///
     /// One command for what the store answers with three requests, because the
@@ -2450,6 +2643,9 @@ impl Shell {
                 } else if let Some(project) = state.needs_modpack() {
                     state.modpack = Load::Loading;
                     Some(InstallationNeed::Modpack(project))
+                } else if let Some(instance) = state.needs_pack_versions() {
+                    state.pack_versions = Load::Loading;
+                    Some(InstallationNeed::PackVersions(instance))
                 } else {
                     None
                 }
@@ -2463,6 +2659,9 @@ impl Shell {
             }
             Some(InstallationNeed::Modpack(project)) => {
                 self.installation_modpack_requested = Some(project);
+            }
+            Some(InstallationNeed::PackVersions(instance)) => {
+                self.installation_pack_versions_requested = Some(instance);
             }
             None => {}
         }
@@ -8895,6 +9094,213 @@ mod tests {
             matches!(&state.repair, Load::Failed(reason) if reason == "resolution failed with errors"),
             "got: {:?}",
             state.repair
+        );
+        drop(shell.render());
+    }
+
+    /// A shell with one instance, a link to a Modrinth pack on it, and the
+    /// instance-settings modal open on the installation tab.
+    ///
+    /// The three pack actions are all drawn on that tab and only for a linked
+    /// instance, so the three tests below open the same way.
+    fn shell_on_installation_tab(name: &str) -> Shell {
+        let mut shell = shell_with_instance(name);
+        shell
+            .store
+            .save_instance_link(
+                "atm10",
+                &store::InstanceLink {
+                    project_id: "cobblemon".to_string(),
+                    version_id: "pack-1".to_string(),
+                },
+            )
+            .expect("a link");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Tab(
+                crate::instance_settings::Tab::Installation,
+            )),
+        );
+        shell
+    }
+
+    #[test]
+    fn pressing_reinstall_marks_the_form_busy_and_the_sentence_stays_on_it() {
+        // What the shell owns of the installation tab's *Re-install modpack*: the
+        // press raises the fetch off the frame thread (`press` drops the command,
+        // which is the future a real window runs), the form is busy in the same
+        // frame so the button is drawn disabled under the reference's own word
+        // for the wait, a second press while the first is out is dropped rather
+        // than starting a second fetch of the same archive, and the sentence
+        // lands on the form rather than on a page or a notification.
+        let mut shell = shell_on_installation_tab("installation-reinstall");
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::ReinstallModpack),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("re-installing does not close the modal");
+        };
+        assert_eq!(state.reinstall, Load::Loading, "the form is busy from the press");
+        assert!(
+            shell.installation_reinstall_requested.is_none(),
+            "and the request left in the same frame"
+        );
+
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::ReinstallModpack),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is still up");
+        };
+        assert_eq!(state.reinstall, Load::Loading);
+        assert!(shell.installation_reinstall_requested.is_none());
+
+        // The answer -- what the command's own future resolves to in a real
+        // window, which `press` cannot run -- lands on the form.
+        press(
+            &mut shell,
+            Message::Reinstalled(Ok(
+                "Re-applied Cobblemon 1.6.1: 12 file(s), 1 fetched again (0.7 MB)".to_string(),
+            )),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the sentence is drawn on the form");
+        };
+        assert!(
+            state
+                .reinstall
+                .ready()
+                .is_some_and(|line| line.contains("Re-applied Cobblemon 1.6.1")),
+            "got: {:?}",
+            state.reinstall
+        );
+        assert_eq!(
+            state.link.ready().map(|link| link.version_id.as_str()),
+            Some("pack-1"),
+            "a re-install lays the same version over again and moves no link"
+        );
+
+        // And a refusal is a sentence too, on the same form.
+        press(
+            &mut shell,
+            Message::Reinstalled(Err("the archive could not be fetched".to_string())),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("a failed re-install keeps the modal");
+        };
+        assert!(
+            matches!(&state.reinstall, Load::Failed(reason) if reason == "the archive could not be fetched"),
+            "got: {:?}",
+            state.reinstall
+        );
+        drop(shell.render());
+    }
+
+    #[test]
+    fn a_version_change_rewrites_the_link_and_re_reads_the_card_and_the_list() {
+        // *Change version* is the one pack action that moves the link: another
+        // version's files are laid over the instance and the link file is
+        // rewritten with them. The shell checks the pair that travels, and when
+        // the answer lands it reads the link *off the disk* again rather than
+        // trusting the sentence -- a card naming the old version over files the
+        // new one wrote is the one thing this could get wrong.
+        let mut shell = shell_on_installation_tab("installation-change");
+        // The Java/installation reads the tab made when it opened are settled
+        // first, so the one question this test is about is the one the shell
+        // asks next.
+        press(&mut shell, Message::InstallationVersions(Ok(version_list())));
+
+        shell.request_change_version("pack-2");
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is up");
+        };
+        assert_eq!(state.change, Load::Loading, "the rows stop pressing from the press");
+        assert_eq!(
+            shell.installation_change_requested,
+            Some(("atm10".to_string(), "pack-2".to_string())),
+            "the instance and the version travel together"
+        );
+        // A second press while the first is out is dropped rather than queued.
+        shell.request_change_version("pack-3");
+        assert_eq!(
+            shell.installation_change_requested,
+            Some(("atm10".to_string(), "pack-2".to_string())),
+            "the second press changed nothing"
+        );
+        // What the real window does on the frame the flag was set: `handle`
+        // takes it and builds the command from it.
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::ChangeVersion(
+                "pack-2".to_string(),
+            )),
+        );
+        assert!(
+            shell.installation_change_requested.is_none(),
+            "the request left in the same frame"
+        );
+
+        // The answer arrives after the worker rewrote the link, which is the
+        // order `Store::change_pack_version` keeps.
+        shell
+            .store
+            .save_instance_link(
+                "atm10",
+                &store::InstanceLink {
+                    project_id: "cobblemon".to_string(),
+                    version_id: "pack-2".to_string(),
+                },
+            )
+            .expect("the new link");
+        press(
+            &mut shell,
+            Message::VersionChanged(Ok(
+                "Re-applied Cobblemon 1.6.2: 12 file(s), 2 fetched again (4.1 MB)".to_string(),
+            )),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the sentence is drawn on the form");
+        };
+        assert!(
+            state.change.ready().is_some_and(|line| line.contains("1.6.2")),
+            "got: {:?}",
+            state.change
+        );
+        assert_eq!(
+            state.link.ready().map(|link| link.version_id.as_str()),
+            Some("pack-2"),
+            "the link is read off the disk, not assumed from the press"
+        );
+        assert_eq!(
+            state.modpack, Load::Loading,
+            "the card is asked again, because it names the version"
+        );
+        assert_eq!(
+            state.pack_versions, Load::Idle,
+            "and the list follows when the card's answer lands -- one question per frame"
+        );
+        press(
+            &mut shell,
+            Message::Modpack(Ok(Some(store::LinkedModpack {
+                project_id: "cobblemon".to_string(),
+                title: "Cobblemon".to_string(),
+                author: "jellysquid3".to_string(),
+                version: "1.6.2".to_string(),
+            }))),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is up");
+        };
+        assert_eq!(
+            state.pack_versions, Load::Loading,
+            "the list is read once the card's answer lands, so its mark can move"
         );
         drop(shell.render());
     }
