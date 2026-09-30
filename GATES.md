@@ -5993,6 +5993,15 @@ $ python tools/dashboard.py --check
 CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as written
 ```
 
+  **The runner agrees with this machine.** Run `36686962535` on `7340321` is this
+  slice's pull-request path: `Lint` and `Test workspace` green in 1m36s and 1m59s --
+  1069 passed / 0 failed and 18 ignored across the workspace suites (177 + 8 + 594 +
+  4 + 31 + 255), this slice's nine among the desktop crate's 594 -- with `Live
+  services` and `Build exe` skipped by that path's own rule. The run's one red
+  annotation is the lint job's advisory `cargo fmt --check` step, which `ci.yml`
+  marks `continue-on-error`: it prints `Process completed with exit code 1` beside a
+  job that concluded success, and it is a note rather than a gate.
+
   **What this is, and where the reference keeps it.** `model.rs` inherited a settings
   *reader* from `palantir-gui` -- the override-gate semantics Prism keeps
   (`JavaPath`/`OverrideJavaLocation`, `JvmArgs`/`OverrideJavaArgs`,
