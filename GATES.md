@@ -5631,6 +5631,123 @@ test result: ok. 566 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   long enough for this to be measured yet, which is a fact about those pages rather
   than a claim about them.
 
+- [x] G118: this launcher does not hold a Modrinth credential -- the four account
+  surfaces are dropped by decision, and each of them says which service it is
+  waiting for instead of promising a slice
+  CHECK: grep -rn "needs_account(" crates/palantir-desktop/src/ | grep -v "pub fn needs_account"
+         cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py
+         python tools/dashboard.py --check
+  EXPECT: seven call sites, on the four surfaces this launcher does not have: the
+          Servers page's listing paragraph and its three actions, an instance's Share
+          tab, the Skins page's store sections and the checklist's *Sign in to
+          Modrinth* press -- each of them drawing *needs a Modrinth account, which
+          this launcher does not have* where two of them used to draw *is not
+          implemented yet*
+          the plan's stage-3 open list falls from three gates to two, both of them
+          third-party-free (an instance's settings modal, the Skins page's edit
+          modal), stage 3 reads 29 met / 2 open and the program 97%, and the two
+          document tools exit 0 at 123 gates
+          566 passed; 0 failed; 0 ignored, clippy exit 0, and no warning in a file
+          this slice touched
+  EVIDENCE: the transcripts below, and the reason the decision needed no measurement
+  of its own: G105, G109, G110 and G111 are the measurement, and this gate is what a
+  reader does with it.
+
+```
+$ grep -rn "needs_account(" crates/palantir-desktop/src/ | grep -v "pub fn needs_account"
+crates/palantir-desktop/src/pages/instance.rs:561:                .push(ui::paragraph(theme, &store::needs_account("Sharing an instance"))),
+crates/palantir-desktop/src/pages/instance.rs:973:        let reason = store::needs_account("Sharing an instance");
+crates/palantir-desktop/src/pages/servers.rs:70:            Message::NewServer => self.notice = Some(store::needs_account("Creating a server")),
+crates/palantir-desktop/src/pages/servers.rs:71:            Message::ManageBilling => self.notice = Some(store::needs_account("Billing")),
+crates/palantir-desktop/src/pages/servers.rs:72:            Message::Refresh => self.notice = Some(store::needs_account("The server listing")),
+crates/palantir-desktop/src/pages/servers.rs:133:            .push(ui::paragraph(theme, &store::needs_account("The server listing"))),
+crates/palantir-desktop/src/pages/skins.rs:433:                    iced::widget::text(crate::store::needs_account("The skin store"))
+crates/palantir-desktop/src/shell.rs:1698:                        self.modrinth_note = Some(store::needs_account("Signing in to Modrinth"));
+crates/palantir-desktop/src/shell.rs:7336:            Some(store::needs_account("Signing in to Modrinth").as_str())
+crates/palantir-desktop/src/shell.rs:7388:            Some(store::needs_account("Signing in to Modrinth").as_str())
+
+$ python tools/progress.py
+stage  what                                                   met  open   done
+    3  Pages, in the reference's order: instance pages f...    29     2    94%
+
+overall: 97%  (the stage numbers above, weighted by what each stage holds)
+slices:  64 of 66 met in stages 0-5; 59 more gates are the shell this rewrite replaces
+
+open work, the plan's own list; the gate counts are this file's estimate:
+  stage 3  The instance-settings page is not built.         1 gates
+  stage 3  The Skins page's edit half is not built.         1 gates
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 123 gates, 6 stage cards and every subject as written
+$ echo $?
+0
+
+$ cargo test -p palantir-desktop --locked
+test result: ok. 566 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+exit 0; `palantir-desktop` (bin "PalantirMC") 3 warnings and its test build 21,
+none of them pointing at shell.rs, store.rs or the four page modules this slice
+touched, and `grep -cE "never (used|read|constructed)"` is 0
+```
+
+  **What the four surfaces are, and why they are one decision rather than four.**
+  Modrinth Hosting (the Servers rail slot, its listing and its billing page), an
+  instance's Share tab (`shared-instances.modrinth.com`), the skin store beside the
+  account's own skins, and the signed-in half of the panel's friends list plus the
+  fundraising banner that sits near it. Every one of them is Modrinth's *account*
+  service: the page data behind the first is Archon's 67 methods and Labrinth's
+  `billing_internal.getProducts()`, the Share tab is an invite flow that belongs to a
+  Modrinth identity, the store is a Modrinth table of skins, and the friends list is
+  four `plugin:friends` calls. They arrive as one decision because the cost is one
+  thing: a credential. G109 measured what that costs -- a secret in this launcher's
+  own home directory (`PalantirPaths::home`, beside `prefs`; not Prism's
+  `accounts.json`), plaintext unless OS protection is put on top, and every request
+  made in the reader's name -- and G111 read the client's own `AuthFeature`, which
+  stamps that one token onto Labrinth *and* Archon. A custom Minecraft launcher's job
+  is the game: instances, versions, loaders, assets, launches. Its reader is owed a
+  credential only if the launcher is going to use it, and these four surfaces are
+  features of somebody else's product.
+
+  **What is not dropped, and that line is the whole reason this gate is not
+  `rm -rf modrinth`.** Everything this launcher already reads from Modrinth is the
+  *published, anonymous* API: Discover's search, a project's document and its version
+  list, the news feed in the panel, and the mod and pack installs built on all of
+  those. None of it needs an account, all of it is measured and green in the live
+  suite, and the decision above would not touch it if the account half had been taken
+  instead -- which is what makes the cut a scope decision rather than a retreat from
+  the reference.
+
+  **What changed in the tree is a sentence, and the sentence is the point.**
+  `store::not_implemented` said *is not implemented yet*, which is a promise that a
+  later slice keeps; `store::needs_account` says *needs a Modrinth account, which this
+  launcher does not have*, which is a fact. Seven call sites moved: the Servers page's
+  listing paragraph and its three actions (`NewServer`, `ManageBilling`, `Refresh`),
+  an instance's Share tab, the Skins page's store sections, and the checklist's *Sign
+  in to Modrinth* press. Two of them were already reachable as text in the reference's
+  own words and stay that way; the rest are this launcher's own copy, and the Servers
+  page's test was rewritten from "says which stage does it" to "says the service it
+  needs" so that a notice reading *is not implemented yet* fails rather than looks
+  fine. The four surfaces keep their places in the reference's navigation -- the rail
+  slot, the tab, the store cards, the checklist step -- because a reader who goes
+  looking for Modrinth Hosting is owed the answer where they looked for it.
+
+  **What that does to the ledger.** The plan's own open list for stage 3 held three
+  gates, all of them behind a credential. Two of those bullets moved into the prose as
+  a decision, and what is left is the work that needs no third party: an instance's
+  settings modal (the write side of the settings model `model.rs` inherited, which has
+  never had a control) and the Skins page's edit modal (reorder the account's own
+  skins, take one off, keep the uploaded texture -- G123 landed the picker, the pad to
+  64x64, the arm style and the multipart body). `tools/progress.py`'s `OPEN` moved with
+  it in the same commit, which is the tool's whole reason for reading the plan instead
+  of being told: stage 3 goes from 28 met / 3 open (90%) to **29 met / 2 open (94%)**,
+  and the program from 96% to **97%** -- the gate itself counts, and two gates stopped
+  being owed. A reader who disagrees with the decision has the measurements to argue
+  with; G109's and G111's numbers are unchanged above, and the plan keeps the smallest
+  first slice in writing too, because this is a scope decision and not a closed door.
+
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
   here is about ink rows, ink colour and position rather than about pixels.

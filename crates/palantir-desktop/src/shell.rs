@@ -1687,14 +1687,15 @@ impl Shell {
                 // and `@login-modrinth` Modrinth's. Two of the three land on an
                 // answer this launcher does not have: the first is this shell's
                 // own dialog, the second the sentence the card already gives, and
-                // the third has no flow anywhere here, so it says so where the
-                // press was made.
+                // the third is the one press here that is not waiting for a slice
+                // at all -- this launcher does not hold a Modrinth credential
+                // (G118), so its sentence is [`store::needs_account`] rather than
+                // the *not implemented yet* the two sign-ins used to share.
                 match step {
                     Step::CreateInstance => self.act(Message::OpenCreate),
                     Step::LoginMinecraft => self.act(Message::SignIn),
                     Step::LoginModrinth => {
-                        self.modrinth_note =
-                            Some(store::not_implemented("Signing in to Modrinth"));
+                        self.modrinth_note = Some(store::needs_account("Signing in to Modrinth"));
                         None
                     }
                 }
@@ -3415,9 +3416,11 @@ impl Shell {
     /// banner and the news feed. Four of those are here now -- the checklist
     /// (G102), this card (G83), the friends list in the state the reference draws
     /// for a reader with no Modrinth session (G102 too) and the news feed (G101) --
-    /// in the reference's own order, with the fundraiser banner still absent rather
-    /// than drawn empty: its campaign is served by an endpoint this launcher does
-    /// not read.
+    /// in the reference's own order, with the fundraiser banner absent rather than
+    /// drawn empty: its campaign is served by an endpoint this launcher does not
+    /// read, and it is one of the four account surfaces dropped by decision
+    /// (G118) rather than deferred -- so the news feed is the last section of the
+    /// reference's column this shell is going to draw.
     /// The checklist's own rule is what decides between them, and it is drawn where
     /// the reference draws it -- the first thing in the scroll region, above the
     /// card rather than inside the block the rest of the sections sit in.
@@ -3673,7 +3676,9 @@ impl Shell {
     }
 
     /// The panel's friends section: what the reference draws for a reader with no
-    /// Modrinth session.
+    /// Modrinth session, which is the only state this launcher will ever draw it in
+    /// -- the signed-in half is four `plugin:friends` calls behind an account
+    /// (G118), and G102's sentence is the whole of the section here.
     ///
     /// `App.vue` draws `FriendsList` `v-show="showFriendsList"`, and what that
     /// component holds with no credentials is the reference's own sentence --
@@ -7322,11 +7327,13 @@ mod tests {
             let _ = shell.panel();
         }
         // The press is the third step of the checklist, so it is the same sentence
-        // the step gives rather than a second one about the same flow.
+        // the step gives rather than a second one about the same flow -- and that
+        // sentence is the account one, because there is no Modrinth sign-in coming
+        // here (G118).
         press(&mut shell, Message::Checklist(Step::LoginModrinth));
         assert_eq!(
             shell.modrinth_note.as_deref(),
-            Some(store::not_implemented("Signing in to Modrinth").as_str())
+            Some(store::needs_account("Signing in to Modrinth").as_str())
         );
         // Once the instance goes the checklist is up again and the friends section
         // waits behind it -- the other half of the rule, read from the panel's own
@@ -7371,13 +7378,19 @@ mod tests {
             shell.accounts_note.as_deref(),
             Some(store::not_implemented("Signing in to Minecraft").as_str())
         );
-        // *Sign in to Modrinth* has no flow anywhere in this launcher, and its
-        // sentence is its own: it is not the Microsoft flow the note above is
-        // about, and reading one does not clear the other.
+        // *Sign in to Modrinth* has no flow anywhere in this launcher and is not
+        // going to get one -- it is an account this launcher does not hold (G118)
+        // -- and its sentence is its own: it is not the Microsoft flow the note
+        // above is about, and reading one does not clear the other.
         press(&mut shell, Message::Checklist(Step::LoginModrinth));
         assert_eq!(
             shell.modrinth_note.as_deref(),
-            Some(store::not_implemented("Signing in to Modrinth").as_str())
+            Some(store::needs_account("Signing in to Modrinth").as_str())
+        );
+        assert_ne!(
+            shell.modrinth_note.as_deref(),
+            shell.accounts_note.as_deref(),
+            "the two sign-ins are told apart by their sentences"
         );
         press(&mut shell, Message::DismissModrinthNote);
         assert!(shell.modrinth_note.is_none());

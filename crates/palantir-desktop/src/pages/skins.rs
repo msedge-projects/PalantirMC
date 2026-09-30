@@ -418,9 +418,11 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         account_block(theme, appearance, state.wearing)
     }));
     // The sections, each a card that opens and closes. The skins inside them come
-    // from Modrinth's own skin store, which is a service answer this launcher has
-    // not been given: the sentence is inside the card that would draw them rather
-    // than over the account's own skins above.
+    // from Modrinth's own skin store, which is an account service this launcher
+    // does not hold (G118): the sentence is inside the card that would draw them
+    // rather than over the account's own skins above, and it says which of the two
+    // kinds of gap it is. The account's own half above is Minecraft's service and
+    // is not affected -- it is what the reader's own upload writes to.
     let mut sections = column![].spacing(GAP).width(Length::Fill);
     for (index, section) in Section::ALL.iter().enumerate() {
         let open = state.open == Some(index);
@@ -428,7 +430,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             row![]
                 .spacing(ROW_GAP)
                 .push(
-                    iced::widget::text(crate::store::not_implemented("This section's skins"))
+                    iced::widget::text(crate::store::needs_account("The skin store"))
                         .size(13.0)
                         .font(crate::style::medium())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),

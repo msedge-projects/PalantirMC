@@ -543,7 +543,10 @@ fn launch_control(theme: Gen, state: LaunchState) -> Element<'static, Message> {
 /// per frame and rebuilt a row per file in it; [`crate::scale`] has what that
 /// cost at five thousand entries, and why it was worth changing.
 fn body<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
-    // The one tab with nothing to read: its card is the same on every frame.
+    // The one tab with nothing to read: its card is the same on every frame. What
+    // it says is [`store::needs_account`] rather than "not implemented yet":
+    // sharing is `shared-instances.modrinth.com` and the reader's own Modrinth
+    // account, which this launcher does not hold (G118).
     if let InstanceTab::Share = state.tab {
         return ui::card(
             theme,
@@ -555,7 +558,7 @@ fn body<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
                         .font(semibold())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
                 )
-                .push(ui::paragraph(theme, &store::not_implemented("Sharing an instance"))),
+                .push(ui::paragraph(theme, &store::needs_account("Sharing an instance"))),
         );
     }
     match &state.listed {
@@ -967,7 +970,7 @@ mod tests {
 
         // And a refusal is a sentence rather than an empty list: the reader is
         // owed the reason.
-        let reason = store::not_implemented("Sharing an instance");
+        let reason = store::needs_account("Sharing an instance");
         state.update(
             Message::Listed { round: 0, listing: Err(reason.clone()) },
             &store,

@@ -382,10 +382,13 @@ impl State {
     ///
     /// The reference has one sentence for *somebody else has none* and one for *you
     /// have none*, and the difference is decided by comparing the profile's id
-    /// against the signed-in Modrinth account's. This launcher has no Modrinth
-    /// account (G105), so the reader's-own arm is unreachable here and the page
-    /// draws the other one -- both are the reference's copy, and the comparison it
-    /// is missing is the whole of what would select between them.
+    /// against the signed-in Modrinth account's. This launcher does not hold a
+    /// Modrinth credential -- a decision rather than a gap (G105 measured what one
+    /// would reach, G118 is where the launcher decides not to want it) -- so the
+    /// reader's-own arm stays unreachable and the page draws the other one. Both
+    /// are the reference's copy, and the comparison it is missing is the whole of
+    /// what would select between them; the arm is kept rather than deleted so that
+    /// the page is still the reference's page if that decision is ever reversed.
     pub fn empty_sentence(own_profile: bool) -> &'static str {
         if own_profile {
             Key::ProfileLabelNoProjectsAuthDescription.message()

@@ -983,6 +983,21 @@ pub fn not_implemented(what: &str) -> String {
     format!("{what} is not implemented yet.")
 }
 
+/// The sentence for a surface this launcher does not have *on purpose*.
+///
+/// The distinction [`not_implemented`] cannot make, and the one a reader deserves:
+/// "not yet" promises a slice, and four of the reference's surfaces are not owed
+/// one. Modrinth Hosting and its billing, an instance's Share tab, the skin store
+/// and the signed-in half of the panel's friends list are all Modrinth *account*
+/// services, and this launcher does not hold a Modrinth credential -- a decision
+/// rather than a gap (G118; the measurements behind it are G105, G109 and G111).
+/// Everything else this launcher reads from Modrinth is the published, anonymous
+/// API: Discover's search, project documents, version lists and the installs that
+/// use them need no account and stay.
+pub fn needs_account(what: &str) -> String {
+    format!("{what} needs a Modrinth account, which this launcher does not have.")
+}
+
 /// Run a blocking request on a thread of its own, and await the answer.
 ///
 /// This is the whole crossing between the engine, which is blocking, and iced,
