@@ -420,6 +420,12 @@ pub struct Shell {
     /// The same for one platform's builds at one game version: the pair *is* the
     /// question, so it travels here rather than being read off the form again.
     installation_builds_requested: Option<(crate::catalog::LoaderKind, String)>,
+    /// The project whose name the installation tab's modpack card is waiting for.
+    ///
+    /// An id rather than a flag, for [`Shell::installation_builds_requested`]'s
+    /// reason: the link can be taken away while the request is out, and an answer
+    /// about a project that is no longer linked must land nowhere.
+    installation_modpack_requested: Option<String>,
     /// The launches in flight, one per instance, oldest first.
     ///
     /// A list rather than the single run this shell used to hold: the reference
@@ -801,6 +807,10 @@ enum InstallationNeed {
     /// One platform's builds at one game version, as a pair because a pair is
     /// what the answer is about.
     Builds(crate::catalog::LoaderKind, String),
+    /// The project an instance was installed from, whose title the card draws.
+    /// The project's id rather than the instance's, because that is what the
+    /// service is asked about.
+    Modpack(String),
 }
 
 /// Everything the shell can be told.
@@ -908,6 +918,13 @@ pub enum Message {
     /// Mojang's version list, read for the instance-settings modal's
     /// installation tab.
     InstallationVersions(Result<store::VersionList, String>),
+    /// The pack an instance was installed from, named by the service, for the same
+    /// tab's card.
+    ///
+    /// `Ok(None)` is a link that was taken away while the request was out, which
+    /// the card draws as no link at all: the answer is about the file as it was,
+    /// and the reader has since said it is not what they want.
+    Modpack(Result<Option<store::LinkedModpack>, String>),
     /// One platform's builds at one game version, read for the same tab. The
     /// question travels back with the answer, for [`Message::LoaderBuilds`]'s
     /// reason: the reader can move to another version while it is out.
@@ -1027,6 +1044,7 @@ impl Shell {
             loader_builds_requested: false,
             installation_versions_requested: false,
             installation_builds_requested: None,
+            installation_modpack_requested: None,
             runs: Vec::new(),
             next_run_id: 0,
             accounts: None,
@@ -1377,16 +1395,20 @@ impl Shell {
         if std::mem::take(&mut self.loader_builds_requested) {
             return self.loader_builds_command();
         }
-        // The instance-settings modal's two reads, batched because they are owed
-        // at once and neither waits on the other: the version list is Mojang's and
-        // the builds are the loader's, so a modal opened on the installation tab
-        // asks both and draws whichever lands first.
+        // The instance-settings modal's three reads, batched because they are owed
+        // at once and none waits on another: the version list is Mojang's, the
+        // builds are the loader's and the pack's name is Modrinth's, so a modal
+        // opened on the installation tab asks for what it is owed and draws
+        // whichever lands first.
         let mut installation = Vec::new();
         if std::mem::take(&mut self.installation_versions_requested) {
             installation.push(self.installation_versions_command());
         }
         if let Some((loader, game)) = self.installation_builds_requested.take() {
             installation.push(self.installation_builds_command(loader, &game));
+        }
+        if let Some(project) = self.installation_modpack_requested.take() {
+            installation.push(self.installation_modpack_command(&project));
         }
         if !installation.is_empty() {
             return iced::Command::batch(installation);
@@ -1625,6 +1647,21 @@ impl Shell {
                 self.installation_needs();
                 None
             }
+            Message::Modpack(result) => {
+                // The card's name, landed on the modal like the two lists above,
+                // and for the same reason: it is that form's own field. A link that
+                // went away while the request was out is no link at all, rather
+                // than a card naming a pack the reader has just unlinked.
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    state.modpack = match result {
+                        Ok(Some(named)) => Load::Ready(named),
+                        Ok(None) => Load::Idle,
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+                self.installation_needs();
+                None
+            }
             Message::InstallationBuilds { loader, game, builds } => {
                 // The answer is dropped unless it is the answer to the question
                 // in force: see [`crate::instance_settings::State::builds_for`].
@@ -1790,6 +1827,7 @@ impl Shell {
                     crate::instance_settings::Message::SaveInstallation => {
                         self.save_instance_installation();
                     }
+                    crate::instance_settings::Message::Unlink => self.unlink_instance(),
                     other => {
                         if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
                             state.update(other);
@@ -1956,6 +1994,16 @@ impl Shell {
                 name,
                 &settings,
                 &installation,
+                // The link is read here with the other two, and its failure is
+                // deliberately *not* this form's: an instance installed from a pack
+                // is still an instance whose heap can be edited, so a link file that
+                // cannot be read is the card's own sentence rather than a modal that
+                // draws nothing but a complaint.
+                match self.store.instance_link(id) {
+                    Ok(Some(link)) => Load::Ready(link),
+                    Ok(None) => Load::Idle,
+                    Err(problem) => Load::Failed(problem),
+                },
             ),
             // Either failure draws the sentence alone: a form with values under it
             // would be this launcher claiming a file it never read.
@@ -1964,6 +2012,35 @@ impl Shell {
             }
         };
         self.modal = Some(Modal::InstanceSettings(Box::new(state)));
+    }
+
+    /// Forget an instance's link to the pack it came from, and re-read the card.
+    ///
+    /// The modal stays up: what changed is one card, not the form, and closing it
+    /// here would take the reader out of the settings they were in the middle of.
+    /// The link is read *again* rather than assumed gone, so a file this launcher
+    /// could not remove is a sentence in the form instead of a card that vanishes
+    /// while the file it was drawn from is still there.
+    fn unlink_instance(&mut self) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        let id = state.id.clone();
+        state.error = None;
+        match self.store.clear_instance_link(&id) {
+            Ok(_) => {
+                state.link = match self.store.instance_link(&id) {
+                    Ok(Some(link)) => Load::Ready(link),
+                    Ok(None) => Load::Idle,
+                    Err(problem) => Load::Failed(problem),
+                };
+                // Nothing to name: the card's own read is dropped with the link it
+                // was about, and `needs_modpack` will not ask again while the link
+                // is gone.
+                state.modpack = Load::Idle;
+            }
+            Err(problem) => state.error = Some(problem),
+        }
     }
 
     /// Write what the installation tab holds, and close the modal when the write
@@ -2258,6 +2335,20 @@ impl Shell {
         )
     }
 
+    /// Ask the service to name the pack an instance was installed from.
+    ///
+    /// One command for what the store answers with three requests, because the
+    /// card wants one answer: the *title* of the pack this instance came from.
+    /// What that costs is [`crate::store::Store::linked_modpack`]'s business.
+    fn installation_modpack_command(&self, project: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = project.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.linked_modpack(&asked)),
+            Message::Modpack,
+        )
+    }
+
     /// Raise whatever the instance-settings modal's installation tab is owed.
     ///
     /// Called after every message that form handles rather than once when it
@@ -2275,6 +2366,9 @@ impl Shell {
                     state.builds = Load::Loading;
                     state.builds_for = Some((loader, game.clone()));
                     Some(InstallationNeed::Builds(loader, game))
+                } else if let Some(project) = state.needs_modpack() {
+                    state.modpack = Load::Loading;
+                    Some(InstallationNeed::Modpack(project))
                 } else {
                     None
                 }
@@ -2285,6 +2379,9 @@ impl Shell {
             Some(InstallationNeed::Versions) => self.installation_versions_requested = true,
             Some(InstallationNeed::Builds(loader, game)) => {
                 self.installation_builds_requested = Some((loader, game));
+            }
+            Some(InstallationNeed::Modpack(project)) => {
+                self.installation_modpack_requested = Some(project);
             }
             None => {}
         }
@@ -8537,6 +8634,91 @@ mod tests {
         assert_eq!(written.platform, crate::catalog::LoaderKind::Quilt);
         assert_eq!(written.game_version, "1.21.1");
         assert_eq!(written.loader_build, "0.9.2");
+        drop(shell.render());
+    }
+
+    #[test]
+    fn a_linked_instance_names_its_pack_and_unlinking_forgets_it() {
+        // The whole path of the linked card: the gear's read finds the link file
+        // beside the profile, the tab's switch is what makes the shell ask the
+        // service to name the pack, the answer lands on the form, and Unlink takes
+        // the file away while the form -- and the instance -- stay.
+        let mut shell = shell_with_instance("installation-link");
+        shell
+            .store
+            .save_instance_link(
+                "atm10",
+                &store::InstanceLink {
+                    project_id: "cobblemon".to_string(),
+                    version_id: "pack-1".to_string(),
+                },
+            )
+            .expect("a link (an instance installed from a pack has one)");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the gear opens the instance-settings modal");
+        };
+        assert_eq!(
+            state.link,
+            Load::Ready(store::InstanceLink {
+                project_id: "cobblemon".to_string(),
+                version_id: "pack-1".to_string(),
+            }),
+            "the card is drawn from the instance's own link file"
+        );
+        assert_eq!(state.needs_modpack(), None, "the Java half draws no card");
+
+        // The reader moves to the installation tab, and the name the service
+        // answers with lands on the form. `press` drops commands, so the answer is
+        // delivered here as the message the command's own future resolves to --
+        // which is exactly what the shell sees when it arrives for real.
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Tab(
+                crate::instance_settings::Tab::Installation,
+            )),
+        );
+        press(
+            &mut shell,
+            Message::Modpack(Ok(Some(store::LinkedModpack {
+                project_id: "cobblemon".to_string(),
+                title: "Cobblemon".to_string(),
+                author: "jellysquid3".to_string(),
+                version: "1.6.1".to_string(),
+            }))),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is still up");
+        };
+        assert_eq!(
+            state.modpack.ready().map(|pack| pack.title.as_str()),
+            Some("Cobblemon"),
+            "the card's name is the service's and it is on the form"
+        );
+
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Unlink),
+        );
+        assert!(shell.modal.is_some(), "unlinking is not closing the modal");
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is still up");
+        };
+        assert_eq!(state.link, Load::Idle, "the link is gone from the form");
+        assert_eq!(state.modpack, Load::Idle, "and so is the name read from it");
+        assert_eq!(
+            shell.store.instance_link("atm10").expect("read back"),
+            None,
+            "and gone from the disk"
+        );
+        assert!(
+            shell.store.instance_installation("atm10").is_ok(),
+            "the profile the installation tab edits is not the link's to touch"
+        );
         drop(shell.render());
     }
 }

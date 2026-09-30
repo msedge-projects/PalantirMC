@@ -53,6 +53,8 @@ use palantir_net::modrinth::{ModrinthMember, NewsArticle};
 use palantir_net::{
     MinecraftSkins, MicrosoftAuth, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
 };
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::LoaderKind;
 use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
@@ -331,6 +333,71 @@ pub struct InstanceInstallation {
     pub game_version: String,
     /// The build of `platform` in force; empty for vanilla.
     pub loader_build: String,
+}
+
+/// The file an instance's link to the project it came from is kept in, beside
+/// `mmc-pack.json`.
+///
+/// The reference keeps this on the instance itself: its `InstanceLink`
+/// (`{ type: 'modrinth_modpack', project_id, version_id }`) lives inside the
+/// `link` field of its own `profile.json`, and its panel re-reads the project and
+/// version through the API to name them. This launcher's instances are
+/// Prism-shaped, and Prism has no such field -- so the link is a file of its own
+/// rather than a rewrite of a file another launcher owns, with the reference's own
+/// field names inside it, so a reader who knows its `InstanceLink` recognises
+/// this one.
+///
+/// It is deliberately *not* in `mmc-pack.json`: that file is a component list a
+/// launch resolves, a Modrinth link is not a component, and a launcher that put
+/// its own bookkeeping there would be writing a shape Prism reads.
+pub const LINK_FILE: &str = "modrinth-link.json";
+
+/// The one link type this launcher writes, in the reference's own word for it.
+const MODRINTH_MODPACK: &str = "modrinth_modpack";
+
+/// Which Modrinth project and version an instance was installed from.
+///
+/// Two ids rather than a title and a version number: the reference stores the
+/// pair and asks the API for the names, so a project that is renamed shows under
+/// its new name, and this is the reference's shape rather than one of this
+/// launcher's own invention. [`Store::linked_modpack`] is the read that turns it
+/// into something a card can draw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceLink {
+    /// The project the instance was installed from.
+    pub project_id: String,
+    /// The version of that project which was installed.
+    pub version_id: String,
+}
+
+/// The link, named: what the installation tab's modpack card draws.
+///
+/// The author and the version number are captions and both can be missing -- a
+/// project's team can fail to read, and a version the author has since deleted is
+/// gone from the API -- so both are empty strings rather than errors, and the card
+/// draws what it has. What cannot be missing is the title: without it there is
+/// nothing to say which pack this instance came from, and the read fails instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedModpack {
+    /// The project's id, which is also what the card's link to the project page
+    /// would be built from.
+    pub project_id: String,
+    /// The project's title, as Modrinth spells it now.
+    pub title: String,
+    /// The author's name, or empty when the team could not be read.
+    pub author: String,
+    /// The linked version's number, or empty when the version is gone.
+    pub version: String,
+}
+
+/// The link file's own shape: the reference's field names, and its `type`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LinkFile {
+    /// `modrinth_modpack`, which is the only kind this launcher writes.
+    #[serde(rename = "type")]
+    kind: String,
+    project_id: String,
+    version_id: String,
 }
 
 /// Set a string setting behind its instance override gate, or take both away.
@@ -851,6 +918,113 @@ impl Store {
             .map_err(|error| format!("writing {} failed: {error}", path.display()))
     }
 
+    /// The project an instance was installed from, if it came from one.
+    ///
+    /// `Ok(None)` is an instance nobody linked -- every instance this launcher
+    /// makes by hand, and every instance it imported from another launcher. A
+    /// link file that is there and cannot be believed is an `Err` rather than a
+    /// `None`, because the difference matters to the reader: one means "this
+    /// instance did not come from a pack", the other means "it did, and this
+    /// launcher cannot read the file that says so" -- and only the second is a
+    /// thing they could fix.
+    pub fn instance_link(&self, id: &str) -> Result<Option<InstanceLink>, String> {
+        let path = self.instance_dir(id).join(LINK_FILE);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let text = palantir_core::util::read_text(&path)
+            .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+        let file: LinkFile = serde_json::from_str(&text)
+            .map_err(|error| format!("{} is not a link this launcher wrote: {error}", path.display()))?;
+        if file.kind != MODRINTH_MODPACK {
+            return Err(format!(
+                "{} is linked as a {}, a kind of link this launcher does not draw yet",
+                path.display(),
+                file.kind
+            ));
+        }
+        if file.project_id.trim().is_empty() || file.version_id.trim().is_empty() {
+            return Err(format!("{} names no project or version", path.display()));
+        }
+        Ok(Some(InstanceLink { project_id: file.project_id, version_id: file.version_id }))
+    }
+
+    /// Write an instance's link, atomically.
+    ///
+    /// `prefs`' rule and `saved_skins`', for the same reason: the file is read by
+    /// the next run, and a half-written one is an instance whose pack cannot be
+    /// named.
+    pub fn save_instance_link(&self, id: &str, link: &InstanceLink) -> Result<(), String> {
+        let path = self.instance_dir(id).join(LINK_FILE);
+        let file = LinkFile {
+            kind: MODRINTH_MODPACK.to_string(),
+            project_id: link.project_id.clone(),
+            version_id: link.version_id.clone(),
+        };
+        let mut text = serde_json::to_string_pretty(&file).map_err(|error| error.to_string())?;
+        text.push('\n');
+        palantir_core::util::atomic_write(&path, text.as_bytes())
+            .map_err(|error| format!("writing {} failed: {error}", path.display()))
+    }
+
+    /// Forget an instance's link, and say whether there was one.
+    ///
+    /// What unlinks an instance is exactly this: the *file* goes and everything
+    /// else stays, because the instance and the files a pack install put in it are
+    /// not the link's. That is what the reference says unlink does ("permanently
+    /// disconnects this instance from the pack project, allowing you to change the
+    /// loader and Minecraft version, but you won't receive future updates"), and it
+    /// is why this is a deletion rather than a flag: there is no half-linked state
+    /// for the rest of the launcher to check.
+    pub fn clear_instance_link(&self, id: &str) -> Result<bool, String> {
+        let path = self.instance_dir(id).join(LINK_FILE);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_file(&path)
+            .map_err(|error| format!("removing {} failed: {error}", path.display()))?;
+        Ok(true)
+    }
+
+    /// The pack an instance came from, named for the installation tab's card.
+    ///
+    /// **Blocking**, for [`Store::project`]'s reason, and three requests for one
+    /// card for the same reason: the project document names the title and the
+    /// team, the team names the author, and the version number lives in the
+    /// versions list rather than in a document of its own. All three are cached
+    /// under their own URLs by the engine, so a modal reopened is free.
+    ///
+    /// Two of the three failures are deliberately not this call's: an author is a
+    /// caption, and a version the author has deleted is a version this card can no
+    /// longer name. Both are drawn as nothing rather than as a broken card, which
+    /// is the reference's own arm (`modpackInfo.value.version?.version_number`).
+    pub fn linked_modpack(&self, id: &str) -> Result<Option<LinkedModpack>, String> {
+        let Some(link) = self.instance_link(id)? else {
+            return Ok(None);
+        };
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("The project this instance came from"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        let api = engine.api();
+        let project = api
+            .project(&link.project_id, &cancel, &backoff)
+            .map_err(|error| error.to_string())?;
+        let members = api.members(&link.project_id, &cancel, &backoff).unwrap_or_default();
+        let versions = api.versions(&link.project_id, &cancel, &backoff).unwrap_or_default();
+        Ok(Some(LinkedModpack {
+            project_id: link.project_id,
+            title: project.title,
+            author: author_of(&members).to_string(),
+            version: versions
+                .iter()
+                .find(|version| version.id == link.version_id)
+                .map(|version| version.version_number.clone())
+                .unwrap_or_default(),
+        }))
+    }
+
     /// The reason a page's data is not here yet.
     pub fn not_implemented(&self, what: &str) -> String {
         not_implemented(what)
@@ -1174,10 +1348,25 @@ impl Store {
             project.title.as_str(),
             &mut |_| {},
         )?;
-        Ok(Outcome::Pack {
-            id: installed.id.clone(),
-            line: installed.summary(&project.title),
-        })
+        // The link is written here, where the project and version are still in
+        // hand, and before the answer: an instance that appears in the library is
+        // an instance whose own settings modal can say what it came from
+        // ([`Store::linked_modpack`]). A link that would not write is *not* an
+        // install that failed -- the files are on disk and the instance is
+        // playable -- so the line the page draws carries the reason instead, which
+        // is the one place a reader would see it.
+        let summary = installed.summary(&project.title);
+        let line = match self.save_instance_link(
+            &installed.id,
+            &InstanceLink {
+                project_id: project.id.clone(),
+                version_id: version.id.clone(),
+            },
+        ) {
+            Ok(()) => summary,
+            Err(error) => format!("{summary} (the link to it could not be recorded: {error})"),
+        };
+        Ok(Outcome::Pack { id: installed.id.clone(), line })
     }
 }
 
@@ -1983,6 +2172,117 @@ mod tests {
         let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).expect("a profile");
         assert!(pack.contains("1.21.4"), "the instance is the pack's game: {pack}");
         assert!(pack.contains("net.fabricmc.fabric-loader"), "and its loader: {pack}");
+
+        // And the instance remembers which project and version it came from,
+        // which is the whole of what the installation tab's modpack card draws.
+        assert_eq!(
+            store.instance_link(&id).expect("a link"),
+            Some(InstanceLink {
+                project_id: "cobblemon".to_string(),
+                version_id: "pack-1".to_string(),
+            })
+        );
+        assert_eq!(fetch.count(), 4, "and a link read is a file read, not a request");
+    }
+
+    #[test]
+    fn a_link_is_a_file_of_its_own_and_one_that_cannot_be_read_is_a_refusal() {
+        // The link is the one thing this launcher knows about an instance that
+        // Prism's format has no field for, so it lives in a file of its own beside
+        // `mmc-pack.json` -- with the reference's own `type` inside it, because the
+        // ids alone do not say what they are ids *of*.
+        //
+        // Over a real instances directory rather than `Store::default()`: a default
+        // store's `instances_dir` is the empty path, which makes this instance a
+        // *relative* `atm10` shared with every other test in the process -- and two
+        // tests writing one link file is a race, not a fixture.
+        let store = store_without_instances("link", Arc::new(MapFetch::new()));
+        let dir = store.instance_dir("atm10");
+        std::fs::create_dir_all(&dir).expect("an instance folder");
+        assert_eq!(
+            store.instance_link("atm10").expect("no link"),
+            None,
+            "an instance nobody linked is not an error"
+        );
+
+        let link = InstanceLink {
+            project_id: "cobblemon".to_string(),
+            version_id: "pack-1".to_string(),
+        };
+        store.save_instance_link("atm10", &link).expect("a write");
+        let text = palantir_core::util::read_text(&dir.join(LINK_FILE)).expect("the file");
+        assert!(text.contains("modrinth_modpack"), "the reference's own type: {text}");
+        assert_eq!(store.instance_link("atm10").expect("a link"), Some(link.clone()));
+
+        // A file this build cannot believe is an error rather than a `None`: one
+        // says "this instance came from nothing", the other says "it came from
+        // something, and this launcher cannot read the file that says what" -- and
+        // only the second is a thing the reader could act on.
+        std::fs::write(
+            dir.join(LINK_FILE),
+            r#"{"type":"shared_instance","project_id":"x","version_id":"y"}"#,
+        )
+        .expect("a hand-written link");
+        let reason = store.instance_link("atm10").expect_err("a kind this launcher does not draw");
+        assert!(reason.contains("shared_instance"), "the refusal names the kind: {reason}");
+        std::fs::write(dir.join(LINK_FILE), "{ not json").expect("a broken link");
+        let reason = store.instance_link("atm10").expect_err("junk");
+        assert!(reason.contains(LINK_FILE), "the refusal names the file: {reason}");
+
+        // Unlinking takes the link and leaves everything else: the instance, its
+        // `mmc-pack.json` and every file the pack install put in it.
+        store.save_instance_link("atm10", &link).expect("a write");
+        assert!(store.clear_instance_link("atm10").expect("a clear"));
+        assert_eq!(store.instance_link("atm10").expect("no link"), None);
+        assert!(
+            !store.clear_instance_link("atm10").expect("a second clear"),
+            "unlinking an unlinked instance says there was nothing to take"
+        );
+        assert!(dir.join("mmc-pack.json").is_file() || dir.is_dir(), "the instance stays");
+    }
+
+    #[test]
+    fn the_linked_modpack_is_named_from_the_service_and_not_from_the_file() {
+        // Two ids is what the file holds, and two ids are not a card: the title,
+        // the author and the version number are the service's, which is why a
+        // rename shows here and why this read is a request rather than a parse.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&project_url("cobblemon"), Route::text(PACK_PROJECT_BODY));
+        fetch.set_route(&project_members_url("cobblemon"), Route::text(MEMBERS_BODY));
+        fetch.set_route(&version_url("cobblemon"), Route::text(&pack_versions_body("0", 1)));
+        let store = store_without_instances("linked-modpack", fetch.clone());
+        std::fs::create_dir_all(store.instance_dir("atm10")).expect("an instance folder");
+        assert_eq!(store.linked_modpack("atm10").expect("no link"), None);
+        assert_eq!(fetch.count(), 0, "an instance with no link asks nobody anything");
+
+        let linked = |version_id: &str| InstanceLink {
+            project_id: "cobblemon".to_string(),
+            version_id: version_id.to_string(),
+        };
+        store.save_instance_link("atm10", &linked("pack-1")).expect("a write");
+        let named = store.linked_modpack("atm10").expect("a read").expect("a link");
+        assert_eq!(named.project_id, "cobblemon");
+        assert_eq!(named.title, "Cobblemon", "the project document's own title");
+        assert_eq!(named.author, "jellysquid3", "the team's Project Lead");
+        assert_eq!(named.version, "1.6.1", "found in the version list by its id");
+        assert_eq!(fetch.count(), 3, "the document, the team and the versions list");
+
+        // A version its author has deleted is a caption this card cannot draw, and
+        // the card is still a card -- the reference's own `version?.version_number`.
+        store.save_instance_link("atm10", &linked("pack-gone")).expect("a write");
+        let named = store.linked_modpack("atm10").expect("a read").expect("a link");
+        assert_eq!(named.version, "", "no version number, and no failure");
+        assert_eq!(named.title, "Cobblemon");
+
+        // A launcher with no way out says so rather than drawing a card with a
+        // title it made up.
+        let bare = Store::load(&PalantirPaths::at(scratch("linked-no-engine")));
+        std::fs::create_dir_all(bare.instance_dir("atm10")).expect("an instance folder");
+        bare.save_instance_link("atm10", &linked("pack-1")).expect("a write");
+        assert_eq!(
+            bare.linked_modpack("atm10").expect_err("no engine"),
+            not_implemented("The project this instance came from")
+        );
     }
 
     #[test]

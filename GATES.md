@@ -6338,6 +6338,96 @@ CONFIRMED: the page carries all 127 gates, 6 stage cards and every subject as wr
   job's own conclusion is success, which is why a red line and a green job appear
   together.
 
+- [x] G129: an instance installed from a Modrinth pack remembers which project and
+  version it came from, and the settings modal draws the reference's own card over
+  it -- the pack named from the service, and *Unlink modpack*
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py
+         python tools/dashboard.py --check
+  EXPECT: installing a pack writes its link beside the profile the install wrote --
+          `modrinth-link.json`, carrying the reference's own `type`, project id and
+          version id -- and the installation tab draws it: the *Installed modpack*
+          card, named from the project document and the version list rather than
+          from the file, so a project renamed shows under its new name
+          *Unlink modpack* takes the link and nothing else: the instance, its
+          `mmc-pack.json` and every file the pack install put in it stay
+          an instance nobody linked asks no service anything, and a link file that
+          cannot be read is a sentence in the tab rather than a modal that draws
+          nothing but a complaint
+          610 passed; 0 failed; 0 ignored, and clippy exit 0 with no new warning in
+          the files this slice touched
+          the plan's installation item narrows from the panel to the three actions
+          that re-run an install -- stage 3 reads 33 met / 2 open (94%) -- and both
+          document tools exit 0 at 128 gates
+  EVIDENCE: the transcripts below, and the one drawn difference (no icon on the
+  card) recorded where it is drawn rather than assumed.
+
+```
+$ cargo test -p palantir-desktop --locked
+running 610 tests
+test result: ok. 610 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+exit 0; the bin's 3 and the test bin's 21 (1 duplicate), the counts G125 and G128
+both read, so this slice adds none
+
+$ python tools/progress.py
+stage 3  Pages, in the reference's order: instance pages f...    33     2    94%
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 128 gates, 6 stage cards and every subject as written
+```
+
+  **What this is, and where the reference keeps it.** The reference stores the
+  link on the instance (`InstanceLink`, `{ type: 'modrinth_modpack', project_id,
+  version_id }`, inside its own `profile.json`) and names it from the service
+  (`get_linked_modpack_info`, which is what its card draws). This launcher's
+  instances are Prism-shaped and Prism has no such field, so the link is a file of
+  its own beside `mmc-pack.json` (`crate::store::LINK_FILE`), with the reference's
+  field names inside it -- deliberately not a key in `mmc-pack.json`, which is a
+  component list a launch resolves, and not a rewrite of a file another launcher
+  owns. `Store::install_pack` writes it where the project and version are still in
+  hand, before the answer, so an instance that appears in the library is one whose
+  own modal can say what it came from; a link that would not write is not an
+  install that failed, and the line the page draws carries the reason instead.
+
+  **The card, and the one action that is a file.** The tab draws the reference's
+  own `Installed modpack` card, named by `Store::linked_modpack` -- three requests
+  (the document, the team, the version list), all cached by the engine, with the
+  author and the version number deliberately allowed to be missing: an author is a
+  caption on a team read that can fail, and a version its author has deleted is a
+  version no card can name, which is the reference's own `version?.version_number`.
+  *Unlink modpack* is the first of the panel's four actions to land, and it is the
+  one that is a file write rather than an install: it removes the link and nothing
+  else, which is what the reference's own sentence says it does. The form stays up
+  when it is pressed, and the link is read *again* rather than assumed gone -- a
+  file this launcher could not remove is a sentence in the form instead of a card
+  that vanishes while the file it was drawn from is still there.
+
+  **A race this slice's own tests found, and the shape to avoid.** The first draft
+  of the two link tests was built on `Store::default()`, whose `instances_dir` is
+  the *empty* path -- so `instance_dir("atm10")` was the relative `atm10`, one
+  folder shared by every test in that process, and the two tests wrote one
+  `modrinth-link.json` between them. It passed on the first run and failed on the
+  second with each test reading the other's link, which is what a race looks like
+  when the fixture is the bug. Both now run over a real instances directory
+  (`store_without_instances`), and the trap is written down here because
+  `Store::default()` looks like the cheap way to build a read-only fixture and is
+  not one for a test that writes: a default store's instance folder is wherever
+  the test binary was run from.
+
+  **What is still owed, and the one drawn difference.** *Change version* (the
+  reference's *Swap*), *Re-install modpack* and *Repair instance* are not built:
+  each of the three re-runs an install rather than editing a file, which is
+  `crate::install`'s job rather than this modal's, and the plan's own item says so.
+  The card is also drawn without the project's picture, which the reference puts
+  beside its title on the same row: an icon is a fetch and a decode, this kit has
+  that path in exactly one place (`crate::pages::user`'s avatar), and what the card
+  is asked is which pack this instance came from -- which the words answer.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

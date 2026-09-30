@@ -31,13 +31,23 @@
 //! visible difference worth knowing: a game version the loader never published
 //! for is not hidden from the list up front, it answers with that sentence.
 //!
-//! **What is not built, named rather than implied.** The reference's installation
-//! tab also carries a linked modpack's panel -- its version, *Repair*,
-//! *Reinstall*, *Swap* and *Unlink* -- which is a different job: it manages what
-//! a pack install wrote (`crate::install`), not what an instance file says. That
-//! stays owed. The general and sharing tabs are not built by decision: sharing is
+//! **The linked pack, and what of it is still owed.** An instance installed from
+//! a Modrinth pack keeps the project and version it came from
+//! ([`crate::store::InstanceLink`], a file of its own beside `mmc-pack.json`), and
+//! this tab draws the reference's own panel over it: the *Installed modpack* card,
+//! named from the service the way the reference names it, and *Unlink modpack*,
+//! which forgets the link and nothing else. Three of the reference's four actions
+//! are owed -- *Change version* (its *Swap*), *Re-install modpack* and *Repair
+//! instance* -- because each of the three re-runs an install rather than editing a
+//! file (`crate::install`), and that is the next slice's job rather than this
+//! one's. The general and sharing tabs are not built by decision: sharing is
 //! `shared-instances.modrinth.com` (G118), and general is name, icon and update
 //! channel, which the instance cards' own flows own today.
+//!
+//! The card is also drawn without the project's picture, which the reference puts
+//! beside its title: an icon is a fetch and a decode this kit has no path for on a
+//! modal (the user page's avatar is the one place that does it), and a card that
+//! names the pack answers the question the card is asked.
 //!
 //! **What the forms hold and what the files hold.** The controls are strings
 //! while they are being typed ([`InstanceSettings`] and [`InstanceInstallation`]
@@ -61,7 +71,9 @@ use crate::catalog::LoaderKind;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::Load;
-use crate::store::{GameVersion, InstanceInstallation, InstanceSettings, LoaderBuild};
+use crate::store::{
+    GameVersion, InstanceInstallation, InstanceLink, InstanceSettings, LinkedModpack, LoaderBuild,
+};
 use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Theme as Gen};
@@ -73,6 +85,8 @@ const INSTALLATION_TAB_KEY: &str = "instance-settings:tab:installation";
 /// The repeating rows' names, scoped by the value they carry.
 const VERSION_ROW: &str = "instance-settings:version";
 const BUILD_ROW: &str = "instance-settings:build";
+/// The card's own control: the reference's *Unlink modpack*.
+const UNLINK_KEY: &str = "instance-settings:unlink";
 /// The game-version list's footer toggle, which has two names rather than one:
 /// its word changes with the state it flips, and a hover must not carry across a
 /// control whose label changed under the pointer. The creation dialog's picker
@@ -138,6 +152,12 @@ pub enum Message {
     /// The installation half was asked to save, and is the shell's for
     /// [`Message::Save`]'s reason -- a second file, a second refusal.
     SaveInstallation,
+    /// The reader asked to forget the project this instance was installed from.
+    ///
+    /// The shell's, for [`Message::Save`]'s reason twice over: forgetting a link
+    /// is a file the modal does not own, and it is a file the *launcher* owns
+    /// rather than the instance.
+    Unlink,
     /// The pointer entered or left one of the form's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     ///
@@ -208,6 +228,15 @@ pub struct State {
     /// game version, or the other platform -- is dropped rather than drawn under
     /// the wrong heading. `None` while nothing has been asked for.
     pub builds_for: Option<(LoaderKind, String)>,
+    /// The project this instance was installed from, or the reason the file that
+    /// says so could not be read.
+    ///
+    /// Read by the shell when the modal opens, because it is a disk read and the
+    /// modal owns no files: `Idle` is "this instance did not come from a pack",
+    /// which is the answer for every instance made or imported by hand.
+    pub link: Load<InstanceLink>,
+    /// That project and version, named by the service, for the card to draw.
+    pub modpack: Load<LinkedModpack>,
     /// The last refusal, in the reader's words, or `None` while nothing failed.
     pub error: Option<String>,
 }
@@ -223,6 +252,7 @@ impl State {
         name: String,
         loaded: &InstanceSettings,
         installation: &InstanceInstallation,
+        link: Load<InstanceLink>,
     ) -> State {
         State {
             id,
@@ -245,6 +275,8 @@ impl State {
             versions: Load::Idle,
             builds: Load::Idle,
             builds_for: None,
+            link,
+            modpack: Load::Idle,
             error: None,
         }
     }
@@ -276,6 +308,8 @@ impl State {
             versions: Load::Idle,
             builds: Load::Idle,
             builds_for: None,
+            link: Load::Idle,
+            modpack: Load::Idle,
             error: Some(problem),
         }
     }
@@ -329,9 +363,9 @@ impl State {
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
-            // See `Message::Save` and `Message::SaveInstallation`: the shell is
-            // the one that acts on them.
-            Message::Save | Message::SaveInstallation => {}
+            // See `Message::Save`, `Message::SaveInstallation` and
+            // `Message::Unlink`: the shell is the one that acts on them.
+            Message::Save | Message::SaveInstallation | Message::Unlink => {}
         }
     }
 
@@ -409,6 +443,21 @@ impl State {
             return None;
         }
         Some(pair)
+    }
+
+    /// The project whose name the shell should read, when the card has none.
+    ///
+    /// Only on the installation tab, and only once: [`Load::settled`] is what
+    /// stops a second request per frame, exactly as it does for the two lists.
+    /// The Java half draws no card, so a modal opened on it asks nobody anything.
+    pub fn needs_modpack(&self) -> Option<String> {
+        if !self.loaded || self.tab != Tab::Installation || self.modpack != Load::Idle {
+            return None;
+        }
+        match &self.link {
+            Load::Ready(link) => Some(link.project_id.clone()),
+            _ => None,
+        }
     }
 
     /// The versions the game-version list draws: releases, snapshots only when
@@ -521,8 +570,33 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
         .iter()
         .map(|loader| platform_chip_key(*loader))
         .collect();
-    let mut body = column![]
-        .spacing(12.0)
+    let mut body = column![].spacing(12.0);
+    // The linked pack goes first, where the reference draws it: above the platform,
+    // the game version and the loader, because it is what the instance *is* rather
+    // than what it runs.
+    match &state.link {
+        Load::Ready(_) => {
+            body = body.push(modpack_card(theme, state)).push(unlink_section(theme));
+        }
+        // The file that says what this instance came from is there and cannot be
+        // read. A sentence where the card would be rather than no card at all:
+        // "this instance came from nothing" and "this launcher cannot read the
+        // link" are different answers, and only one of the two is anything the
+        // reader could act on.
+        Load::Failed(reason) => {
+            body = body.push(ui::admonition(
+                theme,
+                ui::Severity::Warning,
+                "instance-settings:link",
+                reason,
+            ));
+        }
+        // The link read is a file read the shell does before the modal is drawn, so
+        // there is no waiting state for it to draw: `Loading` and `Empty` are arms
+        // this read cannot produce, kept so the match is total.
+        Load::Idle | Load::Loading | Load::Empty => {}
+    }
+    body = body
         .push(ui::card(
             theme,
             column![]
@@ -592,6 +666,117 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
     }
     body.push(save_row(theme, "instance-settings:installation:save", Message::SaveInstallation))
         .into()
+}
+
+/// The pack an instance was installed from, named.
+///
+/// The heading is the reference's own (`label.installed-modpack`), and the card
+/// under it is the reference's shape minus its icon: the project's picture is a
+/// fetch and a decode this slice does not do, and a card with the pack named in
+/// words is a card -- what it would add is the picture, not the answer.
+fn modpack_card<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let mut card = column![
+    ]
+    .spacing(8.0)
+    .push(section_heading(theme, Key::LabelInstalledModpack.message()));
+    card = match &state.modpack {
+        // Asked, not answered. The reference replaces its whole tab with a spinner
+        // while its own linked-pack query is in flight; this is the kit's word for
+        // the same wait, drawn where the name will be.
+        Load::Idle | Load::Loading => card.push(paragraph(theme, Key::LabelLoading.message())),
+        Load::Failed(reason) => card.push(paragraph_ink(theme, reason, Ink::Red)),
+        // An answer with nothing in it is not a state this read produces -- a linked
+        // instance is linked to a project, so its answer is a title or the failure
+        // above. The arm draws the heading alone rather than a name invented for it,
+        // which is what keeps the match total without lying about what arrived.
+        Load::Empty => card,
+        Load::Ready(pack) => card.push(pack_line(theme, pack)),
+    };
+    ui::card(theme, card)
+}
+
+/// One named pack: the title the service gave, and the caption under it.
+fn pack_line<'a>(theme: Gen, pack: &LinkedModpack) -> Element<'a, Message> {
+    let caption = pack_caption(pack);
+    let mut line = column![
+    ]
+    .spacing(2.0)
+    .push(
+        text(pack.title.clone())
+            .size(14.0)
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+    );
+    if !caption.is_empty() {
+        line = line.push(paragraph(theme, &caption));
+    }
+    line.into()
+}
+
+/// The pack's caption: the author and the version number, with the middot the
+/// reference puts between them only when both arrived.
+///
+/// Either half can be missing and neither is a failure: an author is a caption on
+/// a team read that is allowed to fail, and a version the author has deleted is a
+/// version no card can name.
+fn pack_caption(pack: &LinkedModpack) -> String {
+    match (pack.author.is_empty(), pack.version.is_empty()) {
+        (false, false) => format!("{} · {}", pack.author, pack.version),
+        (false, true) => pack.author.clone(),
+        (true, false) => pack.version.clone(),
+        (true, true) => String::new(),
+    }
+}
+
+/// The way to forget the link, in the reference's own words.
+///
+/// The heading is the reference's `installation-settings.linked-instance.title`
+/// filled with its own word for the kind of link (`modpack`), and the button is
+/// `button.unlink-modpack`. The kit has no orange, which is the colour the
+/// reference gives this button beside the red it gives *Re-install*: both are its
+/// "this takes something away" pair, and here both take the one colour this kit
+/// has for that. The sentence under the button is the reference's own, and it is
+/// the whole of what this button does -- the instance keeps its files and stops
+/// being updatable, because the thing that went is the link and not the content.
+///
+/// `'static` rather than borrowed, because everything in it is owned: the two
+/// sentences are the reference's words with its placeholders filled, so nothing
+/// here outlives the call.
+fn unlink_section(theme: Gen) -> Element<'static, Message> {
+    ui::card(
+        theme,
+        column![]
+            .spacing(8.0)
+            .push(section_heading(theme, &unlink_title()))
+            .push(paragraph(theme, &unlink_sentence()))
+            .push(row![ui::button(
+                theme,
+                UNLINK_KEY,
+                Key::ButtonUnlinkModpack,
+                ui::Kind::Danger,
+                Message::Unlink,
+            )]),
+    )
+}
+
+/// The unlink section's heading: the reference's `Linked {projectType}` filled
+/// with its own word for the kind of link.
+fn unlink_title() -> String {
+    Key::InstallationSettingsLinkedInstanceTitle
+        .message()
+        .replace("{projectType}", Key::InstallationSettingsLinkedModpack.message())
+}
+
+/// The unlink section's sentence, with the reference's two placeholders filled.
+///
+/// Both words are the reference's own (`instance`, and `modpack` for the thing
+/// being unlinked from), and the sentence is the whole of what the button does: a
+/// reader who presses it keeps every file and stops receiving updates.
+fn unlink_sentence() -> String {
+    Key::InstallationSettingsUnlinkDescription
+        .message()
+        .replace("{type}", Key::InstallationSettingsTypeInstance.message())
+        .replace("{projectType}", Key::InstallationSettingsLinkedModpack.message())
 }
 
 /// The sentence under the installation Save: what a version or platform change
@@ -921,7 +1106,99 @@ mod tests {
     }
 
     fn state() -> State {
-        State::new("atm10".to_string(), "All the Mods 10".to_string(), &loaded(), &installed())
+        State::new(
+            "atm10".to_string(),
+            "All the Mods 10".to_string(),
+            &loaded(),
+            &installed(),
+            // An instance this launcher made by hand: there is no link file, and
+            // nothing about its installation tab is owed because of that.
+            Load::Idle,
+        )
+    }
+
+    /// The same form for an instance that was installed from a Modrinth pack.
+    fn linked_state() -> State {
+        State::new(
+            "cobblemon".to_string(),
+            "Cobblemon".to_string(),
+            &loaded(),
+            &installed(),
+            Load::Ready(InstanceLink {
+                project_id: "cobblemon".to_string(),
+                version_id: "pack-1".to_string(),
+            }),
+        )
+    }
+
+    fn named(author: &str, version: &str) -> LinkedModpack {
+        LinkedModpack {
+            project_id: "cobblemon".to_string(),
+            title: "Cobblemon".to_string(),
+            author: author.to_string(),
+            version: version.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_linked_instance_asks_for_its_pack_and_an_unlinked_one_asks_nothing() {
+        // The card's name is the service's, so the shell is asked for it once --
+        // and an instance that came from no pack asks nobody anything, which is
+        // what keeps a hand-made instance off the network.
+        let mut plain = state();
+        plain.update(Message::Tab(Tab::Installation));
+        assert_eq!(plain.needs_modpack(), None, "this instance came from nothing");
+
+        let mut linked = linked_state();
+        assert_eq!(
+            linked.needs_modpack(),
+            None,
+            "the Java half draws no card, so opening on it asks nothing"
+        );
+        linked.update(Message::Tab(Tab::Installation));
+        assert_eq!(linked.needs_modpack(), Some("cobblemon".to_string()));
+        // One answer arrives, and the question is not asked again on the next
+        // frame: `Load::settled` is the same rule the two lists keep.
+        linked.modpack = Load::Ready(named("jellysquid3", "1.6.1"));
+        assert_eq!(linked.needs_modpack(), None);
+
+        // A link file that cannot be read is not a question either: there is
+        // nothing to name, and the tab says so where the card would be.
+        let broken = State::new(
+            "cobblemon".to_string(),
+            "Cobblemon".to_string(),
+            &loaded(),
+            &installed(),
+            Load::Failed("modrinth-link.json is not a link this launcher wrote".to_string()),
+        );
+        assert_eq!(broken.needs_modpack(), None);
+    }
+
+    #[test]
+    fn the_pack_caption_says_what_the_service_gave_and_nothing_more() {
+        // The reference puts the author and the version number on one line with a
+        // middot between them, and both halves can be missing: a team read that
+        // failed, or a version its author has deleted.
+        assert_eq!(pack_caption(&named("jellysquid3", "1.6.1")), "jellysquid3 · 1.6.1");
+        assert_eq!(pack_caption(&named("jellysquid3", "")), "jellysquid3");
+        assert_eq!(
+            pack_caption(&named("", "1.6.1")),
+            "1.6.1",
+            "no middot when there is only one thing to say"
+        );
+        assert_eq!(pack_caption(&named("", "")), "");
+    }
+
+    #[test]
+    fn the_unlink_copy_is_the_reference_own_with_its_placeholders_filled() {
+        // The two words the reference fills in, and what a reader must never see:
+        // an unfilled `{projectType}` left in a sentence.
+        let title = unlink_title();
+        assert_eq!(title, "Linked modpack");
+        let sentence = unlink_sentence();
+        assert!(!sentence.contains('{'), "{sentence}");
+        assert!(sentence.contains("this instance"), "{sentence}");
+        assert!(sentence.contains("modpack"), "{sentence}");
     }
 
     #[test]
@@ -941,6 +1218,7 @@ mod tests {
         // file: what the profile said is what a save without a press writes.
         assert_eq!(state.tab, Tab::Java, "the modal opens on the Java half");
         assert_eq!(state.installation(), installed());
+        assert_eq!(state.link, Load::Idle, "and it came from no pack");
     }
 
     #[test]
