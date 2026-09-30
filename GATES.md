@@ -6580,6 +6580,17 @@ CONFIRMED: the page carries all 130 gates, 6 stage cards and every subject as wr
   new instance rather than re-applying one -- and the plan's open item is what
   names them now.
 
+  **The runner agrees, and its numbers are the rebased tree's.** Run
+  `36700223556` (`d8c2a52`, the commit rebased onto G127's record):
+  `Test workspace` and `Lint` green in 2m17s and 1m28s, 1091 passed / 0 failed and
+  18 ignored (177 + 8 + 616 + 4 + 31 + 255), the desktop crate's row reading 616
+  exactly as the local transcript above does -- this slice's five tests, and no
+  other agent's work in the same commit. `Live services` and `Build exe` are
+  skipped, which is the pull-request path's own rule rather than a failure, and
+  the lint job marks its usual one red annotation -- the advisory `cargo fmt
+  --check` step it runs `continue-on-error`, beside a job whose own conclusion is
+  success.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
