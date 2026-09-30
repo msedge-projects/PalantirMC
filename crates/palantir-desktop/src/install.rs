@@ -117,6 +117,34 @@ impl DownloadJob {
             _ => false,
         }
     }
+
+    /// Whether the destination is there *and* is the file the metadata names.
+    ///
+    /// The repair's rule, and the one a launch does not pay for: hashing a present
+    /// file is a read of everything installed, while a repair is the one moment a
+    /// reader is asking for exactly that. A source that publishes no digest cannot
+    /// be checked, so it keeps [`DownloadJob::satisfied`]'s answer -- the same
+    /// "an empty expectation means do not check" rule [`verify_download`] states.
+    pub fn verified(&self) -> bool {
+        self.satisfied() && verify_download(&self.dest, &self.sha1).is_ok()
+    }
+}
+
+/// Whether a plan trusts the files that are already on disk.
+///
+/// A named rule rather than a `bool` at the call site, because the two answers
+/// are different questions and the difference is the whole of what a repair is:
+/// [`Existing::Trust`] is "is something of the right size there", which is what a
+/// launch asks on its way to the game, and [`Existing::Verify`] is "is the file
+/// the one the metadata names", which is what a reader pressing *Repair* asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Existing {
+    /// Leave a file that is present and plausibly complete alone.
+    #[default]
+    Trust,
+    /// Hash every present file against the digest its metadata publishes, and plan
+    /// the ones that do not match -- `repair`, in the reference's own word.
+    Verify,
 }
 
 /// The asset half of an install: one index and the objects it lists.
@@ -152,6 +180,14 @@ pub struct InstallPlan {
     pub total_bytes: i64,
     /// Things that could not be planned at all, for the log.
     pub problems: Vec<String>,
+    /// The question the plan's file checks answered ([`Existing`]).
+    ///
+    /// Carried on the plan rather than asked at the call site again, because
+    /// [`run`] asks it of files the plan does not list: the asset objects are
+    /// enumerated from the index at run time, and a repair that verified its
+    /// libraries and then trusted every asset object would be checking half of
+    /// what the reader pressed the button for.
+    pub existing: Existing,
 }
 
 impl InstallPlan {
@@ -240,9 +276,11 @@ pub fn plan(
     instance_root: &Path,
     profile: &LaunchProfile,
     ctx: &RuntimeContext,
+    existing: Existing,
 ) -> InstallPlan {
     let mut plan = InstallPlan {
         natives_dir: instance_root.join("natives"),
+        existing,
         ..InstallPlan::default()
     };
     let local_libraries = instance_root.join("libraries");
@@ -319,7 +357,7 @@ pub fn plan(
                         size,
                         label: library_label(library),
                     };
-                    if job.satisfied() {
+                    if keeps(&job, existing) {
                         plan.present += 1;
                     } else {
                         plan.total_bytes += job.size.max(0);
@@ -339,7 +377,7 @@ pub fn plan(
     let (assets, index_jobs, index_present) = plan_assets(paths, instance_root, profile);
     plan.assets = assets;
     for job in index_jobs {
-        if job.satisfied() {
+        if keeps(&job, existing) {
             plan.present += 1;
         } else {
             plan.total_bytes += job.size.max(0);
@@ -348,6 +386,14 @@ pub fn plan(
     }
     plan.present += index_present;
     plan
+}
+
+/// Whether a planned file can be left where it is, by [`Existing`]'s rule.
+fn keeps(job: &DownloadJob, existing: Existing) -> bool {
+    match existing {
+        Existing::Trust => job.satisfied(),
+        Existing::Verify => job.verified(),
+    }
 }
 
 /// The asset index file (if the profile names one that is downloadable).
@@ -660,7 +706,7 @@ pub fn run(plan: &InstallPlan, wire: &Wire, threads: usize, reporter: &mut Repor
     }
 
     if let Some(assets) = &plan.assets {
-        run_assets(assets, wire, threads, &mut report, reporter);
+        run_assets(assets, wire, threads, plan.existing, &mut report, reporter);
     }
 
     if !plan.natives.is_empty() {
@@ -748,10 +794,16 @@ pub(crate) fn download_with_progress(
 }
 
 /// Phase two: read the index and fetch the objects it names.
+///
+/// `existing` is the plan's own question, asked here too: an object that is
+/// already there is checked by its size on a launch and hashed on a repair (see
+/// [`Existing`]), and the plan cannot answer for the objects because it has not
+/// read the index when it is built.
 fn run_assets(
     assets: &AssetPlan,
     wire: &Wire,
     threads: usize,
+    existing: Existing,
     report: &mut InstallReport,
     reporter: &mut Reporter,
 ) {
@@ -789,13 +841,18 @@ fn run_assets(
         // The path on disk, not the path on the CDN: separate helpers, and this
         // is the one place both are in play.
         let dest = assets.assets_dir.join(object_relative_path(&object.hash));
-        if let Ok(meta) = std::fs::metadata(&dest) {
-            if meta.is_file() && (object.size <= 0 || meta.len() >= object.size as u64) {
-                report.present += 1;
-                continue;
-            }
+        let job = DownloadJob {
+            url: asset_object_url(&object.hash),
+            dest,
+            sha1: object.hash.clone(),
+            size: object.size,
+            label: name.clone(),
+        };
+        if keeps(&job, existing) {
+            report.present += 1;
+            continue;
         }
-        jobs.push(FileJob::new(asset_object_url(&object.hash), dest, &object.hash));
+        jobs.push(FileJob::new(&job.url, job.dest, &job.sha1));
         labels.push(name.clone());
     }
     if !jobs.is_empty() {
@@ -1089,7 +1146,12 @@ pub fn install_loader(
 /// reads a downloaded file back to check it any more. It stays because the tests
 /// below are how the rule itself -- an empty expectation means "do not check" --
 /// is written down, and a test is a reader.
-#[cfg(test)]
+///
+/// It was `#[cfg(test)]` until the repair half needed it
+/// ([`DownloadJob::verified`]), which is the file's own rule turned on it: a rule
+/// in a `cfg(test)` module is a rule the binary does not have, and "is this file
+/// the one the metadata names" is now a question this launcher asks a reader's
+/// install.
 pub fn verify_download(path: &Path, expected_sha1: &str) -> Result<(), String> {
     let expected = expected_sha1.trim().to_ascii_lowercase();
     if expected.is_empty() {
@@ -1926,7 +1988,7 @@ mod tests {
     fn planning_lists_missing_files_with_their_urls_and_digests() {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
-        let plan = plan(&paths, &paths.root.join("instances").join("Test"), &profile(), &ctx);
+        let plan = plan(&paths, &paths.root.join("instances").join("Test"), &profile(), &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 2, "jobs: {:?}", plan.jobs);
         assert_eq!(plan.present, 0);
 
@@ -1970,7 +2032,7 @@ mod tests {
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         std::fs::write(&dest, vec![0u8; 77]).unwrap();
 
-        let plan = plan(&paths, &paths.root, &profile(), &ctx);
+        let plan = plan(&paths, &paths.root, &profile(), &ctx, Existing::Trust);
         assert_eq!(plan.present, 1);
         assert_eq!(plan.jobs.len(), 1, "only the missing library is planned");
         assert!(plan.summary().contains("already present"));
@@ -1987,9 +2049,47 @@ mod tests {
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         // 10 bytes against a published size of 77: an interrupted copy.
         std::fs::write(&dest, vec![0u8; 10]).unwrap();
-        let plan = plan(&paths, &paths.root, &profile(), &ctx);
+        let plan = plan(&paths, &paths.root, &profile(), &ctx, Existing::Trust);
         assert_eq!(plan.present, 0);
         assert!(plan.jobs.iter().any(|job| job.dest == dest));
+    }
+
+    #[test]
+    fn a_repair_hashes_what_is_on_disk_and_a_launch_does_not() {
+        // The whole difference between the two questions a plan can be built
+        // with. The brigadier file below is the right *size* and the wrong *file*:
+        // a launch leaves it (`satisfied`), a repair plans it again (`verified`).
+        // The digest in the fixture is `"abc"`, which 77 zero bytes do not hash
+        // to, so the check fails for the honest reason rather than a short file --
+        // and "abc" is not even hex, which a launcher that trusted the shape of
+        // the field would have read as "no digest" and passed everything.
+        let (_dir, paths) = test_paths();
+        let ctx = RuntimeContext::current_host();
+        let dest = paths
+            .root
+            .join("libraries")
+            .join("com/mojang/brigadier/1.0.18/brigadier-1.0.18.jar");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, vec![0u8; 77]).unwrap();
+        // And the Maven library, which publishes no digest at all: a repair has
+        // nothing to check it against, so it keeps it. That is the second half of
+        // the rule -- an empty expectation means "do not check" -- and a repair
+        // that deleted it would be a repair that broke an instance.
+        let maven = paths
+            .root
+            .join("libraries")
+            .join("net/fabricmc/intermediary/1.21.1/intermediary-1.21.1.jar");
+        std::fs::create_dir_all(maven.parent().unwrap()).unwrap();
+        std::fs::write(&maven, b"whatever this file is").unwrap();
+
+        let trusted = plan(&paths, &paths.root, &profile(), &ctx, Existing::Trust);
+        assert_eq!(trusted.present, 2, "a launch trusts the sizes it can see");
+        assert!(trusted.jobs.is_empty(), "jobs: {:?}", trusted.jobs);
+
+        let repaired = plan(&paths, &paths.root, &profile(), &ctx, Existing::Verify);
+        assert_eq!(repaired.present, 1, "the file with no digest is kept");
+        assert_eq!(repaired.jobs.len(), 1, "jobs: {:?}", repaired.jobs);
+        assert_eq!(repaired.jobs[0].dest, dest, "and the wrong one is planned again");
     }
 
     #[test]
@@ -2005,7 +2105,7 @@ mod tests {
             .libraries
             .push(library_from(native_library(&ctx, &classifier, &native_path, "def", 5)));
         let instance_root = paths.root.join("instances").join("Natives");
-        let plan = plan(&paths, &instance_root, &profile, &ctx);
+        let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 1, "jobs: {:?}", plan.jobs);
         assert_eq!(plan.natives.len(), 1);
         assert_eq!(plan.natives[0].path, paths.root.join("libraries").join(&native_path));
@@ -2057,7 +2157,7 @@ mod tests {
         })));
 
         ctx.java_architecture = "64".into();
-        let sixty_four = plan(&paths, &paths.root, &profile, &ctx);
+        let sixty_four = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert_eq!(
             sixty_four.natives.len(),
             1,
@@ -2072,7 +2172,7 @@ mod tests {
         );
 
         ctx.java_architecture = "32".into();
-        let thirty_two = plan(&paths, &paths.root, &profile, &ctx);
+        let thirty_two = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert_eq!(thirty_two.natives.len(), 1, "natives: {:?}", thirty_two.natives);
         assert!(
             thirty_two.natives[0].path.to_string_lossy().ends_with("-32.jar"),
@@ -2157,7 +2257,7 @@ mod tests {
             &digest,
             native_bytes.len(),
         )));
-        let plan = plan(&paths, &instance_root, &profile, &ctx);
+        let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 1);
 
         let mut fetcher = Script::new();
@@ -2188,7 +2288,7 @@ mod tests {
                 }
             }
         })));
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 1);
         let mut fetcher = Script::new();
         fetcher.insert(&plan.jobs[0].url, b"a different file".to_vec());
@@ -2219,7 +2319,7 @@ mod tests {
         profile
             .libraries
             .push(library_from(json!({ "name": "com.example:orphan:1.0" })));
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty());
         assert_eq!(plan.problems.len(), 1);
         assert!(plan.problems[0].contains("no download source"), "{:?}", plan.problems);
@@ -2235,7 +2335,7 @@ mod tests {
             "MMC-hint": "local",
             "url": "https://example.invalid/"
         })));
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty(), "jobs: {:?}", plan.jobs);
         assert!(plan.problems.is_empty(), "problems: {:?}", plan.problems);
     }
@@ -2269,7 +2369,7 @@ mod tests {
         });
 
         let instance_root = paths.root.join("instances").join("Assets");
-        let plan = plan(&paths, &instance_root, &profile, &ctx);
+        let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 1, "just the index: {:?}", plan.jobs);
         assert!(plan.assets.is_some());
         assert!(plan.summary().contains("to download"));
@@ -2316,7 +2416,7 @@ mod tests {
             id: "17".into(),
             known: true,
         });
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
         // Same length, different bytes: the case a size check cannot see.
@@ -2355,9 +2455,9 @@ mod tests {
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
         fetcher.insert(&cdn_url(&hash), body.to_vec());
 
-        let first = plan(&paths, &paths.root, &profile, &ctx);
+        let first = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         run_lines(&first, &fetcher.wire(), 1);
-        let second = plan(&paths, &paths.root, &profile, &ctx);
+        let second = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(second.is_noop(), "jobs: {:?}", second.jobs);
         assert!(second.summary().contains("already installed"));
         let (report, _) = run_lines(&second, &Script::new().wire(), 1);
@@ -2373,7 +2473,7 @@ mod tests {
         let mut profile = LaunchProfile::default();
         // `"assets": "17"` with no `assetIndex` object: no URL to fetch.
         profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo::bare("17"));
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty());
         let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
         assert!(report.problems.iter().any(|p| p.contains("no download URL")));
@@ -2402,7 +2502,7 @@ mod tests {
         let instance_root = paths.root.join("instances").join("Old");
         std::fs::create_dir_all(instance_root.join("minecraft")).unwrap();
 
-        let plan = plan(&paths, &instance_root, &profile, &ctx);
+        let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
         fetcher.insert(&cdn_url(&hash), body.to_vec());
@@ -2470,7 +2570,7 @@ mod tests {
             "url": "https://example.invalid/",
             "rules": [{ "action": "allow", "os": { "name": "linux" } }]
         })));
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty(), "jobs: {:?}", plan.jobs);
     }
 
@@ -2623,7 +2723,7 @@ mod tests {
             fetcher.insert(&cdn_url(&hash), body.into_bytes());
         }
 
-        let plan = plan(&paths, &paths.root, &profile, &ctx);
+        let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         let (report, lines, levels) = run_both(&plan, &fetcher.wire(), 4);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);

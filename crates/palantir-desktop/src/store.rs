@@ -1368,6 +1368,39 @@ impl Store {
         };
         Ok(Outcome::Pack { id: installed.id.clone(), line })
     }
+
+    /// Re-install one instance's files, checking what is already on disk.
+    ///
+    /// **Blocking**, for [`Store::install_project`]'s reason and a longer one than
+    /// it has: this is a metadata read, a resolve, a plan and however many files
+    /// the check finds wrong, so the shell runs it off the frame thread.
+    ///
+    /// The work is [`crate::launch::repair_instance`]'s, because a repair *is* the
+    /// half of a launch that puts files on disk -- the loader's own installer, the
+    /// libraries, the client jar, the asset index and its objects -- with the one
+    /// difference that a file already present is hashed against the digest its
+    /// metadata publishes instead of being trusted by its size. What this method
+    /// owns is the way out: the metadata store and the wire, built the way every
+    /// other install builds them.
+    ///
+    /// The answer is the sentence the installation tab draws under its button, and
+    /// a repair that could not finish answers with one too, so a reader is told
+    /// which file failed rather than only that something did.
+    pub fn repair_instance(&self, instance_id: &str) -> Result<String, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("Repairing an instance"));
+        };
+        let Some(paths) = &self.paths else {
+            return Err(not_implemented("Repairing an instance"));
+        };
+        // The engine's own pool, not a second one built from the same numbers:
+        // [`Store::install_project`]'s rule, and the reason there is a fetch here
+        // at all.
+        let wire = Wire::over(paths.meta_dir(), engine.fetch());
+        let mut store = crate::meta::PublisherMeta::for_instance(&wire, paths, instance_id);
+        let mut quiet = |_line: String| {};
+        crate::launch::repair_instance(paths, instance_id, &mut store, &wire, &mut quiet)
+    }
 }
 
 /// The name a project page draws under the title, out of a team list.

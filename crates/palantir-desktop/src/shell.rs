@@ -426,6 +426,15 @@ pub struct Shell {
     /// reason: the link can be taken away while the request is out, and an answer
     /// about a project that is no longer linked must land nowhere.
     installation_modpack_requested: Option<String>,
+    /// The instance whose files the installation tab asked to have installed
+    /// again.
+    ///
+    /// An id rather than a flag, for the modpack request's reason: the repair is a
+    /// minute of hashing and fetching, the modal can be closed or opened on another
+    /// instance while it runs, and a sentence about an instance the reader has left
+    /// must land nowhere -- while the repair itself happened either way, which is
+    /// why nothing here cancels it.
+    installation_repair_requested: Option<String>,
     /// The launches in flight, one per instance, oldest first.
     ///
     /// A list rather than the single run this shell used to hold: the reference
@@ -925,6 +934,15 @@ pub enum Message {
     /// the card draws as no link at all: the answer is about the file as it was,
     /// and the reader has since said it is not what they want.
     Modpack(Result<Option<store::LinkedModpack>, String>),
+    /// The installation tab's *Repair instance*, over: the instance's own files
+    /// were installed again, with every file already on disk checked against the
+    /// digest its metadata publishes, and the sentence is what the check came to.
+    ///
+    /// The modal's own line under the button, landed like [`Message::Modpack`]'s
+    /// card and for the same reason: a repair is that form's action, and a modal
+    /// that was closed while the check ran has nowhere to draw a sentence about an
+    /// instance the reader has left.
+    Repaired(Result<String, String>),
     /// One platform's builds at one game version, read for the same tab. The
     /// question travels back with the answer, for [`Message::LoaderBuilds`]'s
     /// reason: the reader can move to another version while it is out.
@@ -1045,6 +1063,7 @@ impl Shell {
             installation_versions_requested: false,
             installation_builds_requested: None,
             installation_modpack_requested: None,
+            installation_repair_requested: None,
             runs: Vec::new(),
             next_run_id: 0,
             accounts: None,
@@ -1395,11 +1414,12 @@ impl Shell {
         if std::mem::take(&mut self.loader_builds_requested) {
             return self.loader_builds_command();
         }
-        // The instance-settings modal's three reads, batched because they are owed
-        // at once and none waits on another: the version list is Mojang's, the
-        // builds are the loader's and the pack's name is Modrinth's, so a modal
-        // opened on the installation tab asks for what it is owed and draws
-        // whichever lands first.
+        // The instance-settings modal's reads and its one action, batched because
+        // they are owed at once and none waits on another: the version list is
+        // Mojang's, the builds are the loader's, the pack's name is Modrinth's, and
+        // the repair fetches from all three -- so a modal opened on the
+        // installation tab asks for what it is owed and draws whichever lands
+        // first.
         let mut installation = Vec::new();
         if std::mem::take(&mut self.installation_versions_requested) {
             installation.push(self.installation_versions_command());
@@ -1409,6 +1429,9 @@ impl Shell {
         }
         if let Some(project) = self.installation_modpack_requested.take() {
             installation.push(self.installation_modpack_command(&project));
+        }
+        if let Some(instance) = self.installation_repair_requested.take() {
+            installation.push(self.installation_repair_command(&instance));
         }
         if !installation.is_empty() {
             return iced::Command::batch(installation);
@@ -1647,6 +1670,19 @@ impl Shell {
                 self.installation_needs();
                 None
             }
+            Message::Repaired(result) => {
+                // The check's own sentence, landed on the modal like the card's
+                // name below and for the same reason: it is that form's field. A
+                // modal that went away while the check ran keeps nothing, and the
+                // files are installed all the same.
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    state.repair = match result {
+                        Ok(line) => Load::Ready(line),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+                None
+            }
             Message::Modpack(result) => {
                 // The card's name, landed on the modal like the two lists above,
                 // and for the same reason: it is that form's own field. A link that
@@ -1828,6 +1864,7 @@ impl Shell {
                         self.save_instance_installation();
                     }
                     crate::instance_settings::Message::Unlink => self.unlink_instance(),
+                    crate::instance_settings::Message::Repair => self.request_repair(),
                     other => {
                         if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
                             state.update(other);
@@ -2041,6 +2078,34 @@ impl Shell {
             }
             Err(problem) => state.error = Some(problem),
         }
+    }
+
+    /// Ask for one instance's files to be installed again, and mark the form busy.
+    ///
+    /// Nothing runs here. A repair is the store's longest blocking call
+    /// ([`crate::store::Store::repair_instance`]), so the command leaves from
+    /// `handle`'s flag-taking with every other request, and what this does is the
+    /// two things that belong to the press: the form is put into the state the
+    /// button draws (`Load::Loading`) in the same frame, and the id of the instance
+    /// it is about is written down, because the answer comes back minutes
+    /// later and the modal may be about something else by then.
+    ///
+    /// A second press while the first is running -- a keyboard, or a frame raced by
+    /// the pointer -- is dropped rather than queued: the form draws the button
+    /// disabled (see `repair_section`), and two installs over one instance would
+    /// fetch the same files twice and race each other's renames.
+    fn request_repair(&mut self) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        if state.repair == Load::Loading {
+            return;
+        }
+        state.repair = Load::Loading;
+        // Whatever was wrong with the last save is not what the reader is asking
+        // about now, and the sentence under the button is where the answer goes.
+        state.error = None;
+        self.installation_repair_requested = Some(state.id.clone());
     }
 
     /// Write what the installation tab holds, and close the modal when the write
@@ -2332,6 +2397,22 @@ impl Shell {
         iced::Command::perform(
             crate::store::off_thread(move || store.loader_builds(loader, &asked)),
             move |builds| Message::InstallationBuilds { loader, game: back.clone(), builds },
+        )
+    }
+
+    /// Install one instance's own files again, off the frame thread.
+    ///
+    /// One command for a minute of blocking work the store owns
+    /// ([`crate::store::Store::repair_instance`]), for
+    /// [`Shell::installation_modpack_command`]'s reason and a bigger one: this is
+    /// the longest thing this launcher does that is not a launch, and a frame spent
+    /// on it is a window that stops drawing.
+    fn installation_repair_command(&self, instance: &str) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = instance.to_string();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.repair_instance(&asked)),
+            Message::Repaired,
         )
     }
 
@@ -8718,6 +8799,102 @@ mod tests {
         assert!(
             shell.store.instance_installation("atm10").is_ok(),
             "the profile the installation tab edits is not the link's to touch"
+        );
+        drop(shell.render());
+    }
+
+    #[test]
+    fn pressing_repair_marks_the_form_busy_and_the_answer_stays_on_it() {
+        // What the shell owns of the installation tab's *Repair instance*: the
+        // press raises the check off the frame thread (`press` drops the command,
+        // which is the future a real window runs), the form is busy in the same
+        // frame so the button is drawn disabled, a second press while it runs does
+        // nothing, and the sentence comes back to the form rather than to a closed
+        // modal or a notification.
+        let mut shell = shell_with_instance("installation-repair");
+        shell
+            .store
+            .save_instance_link(
+                "atm10",
+                &store::InstanceLink {
+                    project_id: "cobblemon".to_string(),
+                    version_id: "pack-1".to_string(),
+                },
+            )
+            .expect("a link (the repair is drawn on a linked instance)");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Tab(
+                crate::instance_settings::Tab::Installation,
+            )),
+        );
+
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Repair),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("repairing does not close the modal");
+        };
+        assert_eq!(state.repair, Load::Loading, "the form is busy from the press");
+        assert!(
+            shell.installation_repair_requested.is_none(),
+            "and the request left in the same frame"
+        );
+
+        // A second press while the check runs is dropped rather than starting a
+        // second install over the first. The form draws the button disabled; this
+        // is the rule behind that. (The request flag is `None` here, so a second
+        // command cannot leave either.)
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Repair),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the modal is still up");
+        };
+        assert_eq!(state.repair, Load::Loading);
+        assert!(shell.installation_repair_requested.is_none());
+
+        // The answer -- what the command's own future resolves to in a real
+        // window, which `press` cannot run -- lands on the form.
+        press(
+            &mut shell,
+            Message::Repaired(Ok(
+                "Repaired 'All the Mods 10': 412 file(s) checked, 1 fetched again (2.4 MB)"
+                    .to_string(),
+            )),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the sentence is drawn on the form");
+        };
+        assert!(
+            state
+                .repair
+                .ready()
+                .is_some_and(|line| line.contains("412 file(s) checked")),
+            "got: {:?}",
+            state.repair
+        );
+
+        // And a refusal is a sentence too, on the same form: a repair that could
+        // not finish does not close the window it was asked from.
+        press(
+            &mut shell,
+            Message::Repaired(Err("resolution failed with errors".to_string())),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("a failed repair keeps the modal");
+        };
+        assert!(
+            matches!(&state.repair, Load::Failed(reason) if reason == "resolution failed with errors"),
+            "got: {:?}",
+            state.repair
         );
         drop(shell.render());
     }

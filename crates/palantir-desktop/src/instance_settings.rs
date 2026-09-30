@@ -35,12 +35,15 @@
 //! a Modrinth pack keeps the project and version it came from
 //! ([`crate::store::InstanceLink`], a file of its own beside `mmc-pack.json`), and
 //! this tab draws the reference's own panel over it: the *Installed modpack* card,
-//! named from the service the way the reference names it, and *Unlink modpack*,
-//! which forgets the link and nothing else. Three of the reference's four actions
-//! are owed -- *Change version* (its *Swap*), *Re-install modpack* and *Repair
-//! instance* -- because each of the three re-runs an install rather than editing a
-//! file (`crate::install`), and that is the next slice's job rather than this
-//! one's. The general and sharing tabs are not built by decision: sharing is
+//! named from the service the way the reference names it, *Unlink modpack*, which
+//! forgets the link and nothing else, and *Repair instance*, which re-installs the
+//! instance's own files with every one already on disk hashed against the digest
+//! its metadata publishes ([`crate::launch::repair_instance`]). Two of the
+//! reference's four actions are still owed -- *Change version* (its *Swap*) and
+//! *Re-install modpack* -- because both re-apply the *pack's* files rather than the
+//! launcher's dependencies, and putting a pack into an instance that already exists
+//! is a different path from the one that made it. The general and sharing tabs are
+//! not built by decision: sharing is
 //! `shared-instances.modrinth.com` (G118), and general is name, icon and update
 //! channel, which the instance cards' own flows own today.
 //!
@@ -87,6 +90,12 @@ const VERSION_ROW: &str = "instance-settings:version";
 const BUILD_ROW: &str = "instance-settings:build";
 /// The card's own control: the reference's *Unlink modpack*.
 const UNLINK_KEY: &str = "instance-settings:unlink";
+/// The repair button, which has two names rather than one for the snapshot
+/// toggle's reason: its word changes with the state it reports (*Repairing…*
+/// while the check runs), and a hover must not carry across a control whose label
+/// changed under the pointer.
+const REPAIR_KEY: &str = "instance-settings:repair";
+const REPAIRING_KEY: &str = "instance-settings:repairing";
 /// The game-version list's footer toggle, which has two names rather than one:
 /// its word changes with the state it flips, and a hover must not carry across a
 /// control whose label changed under the pointer. The creation dialog's picker
@@ -158,6 +167,14 @@ pub enum Message {
     /// is a file the modal does not own, and it is a file the *launcher* owns
     /// rather than the instance.
     Unlink,
+    /// The reader asked for the instance's own files to be installed again, with
+    /// every one already on disk checked against its published digest.
+    ///
+    /// The shell's, for [`Message::Save`]'s reason and a larger one: this is the
+    /// half of a launch that fetches files ([`crate::launch::repair_instance`]),
+    /// which is the longest thing this launcher does that is not a launch, and it
+    /// cannot run on the frame thread.
+    Repair,
     /// The pointer entered or left one of the form's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     ///
@@ -237,6 +254,14 @@ pub struct State {
     pub link: Load<InstanceLink>,
     /// That project and version, named by the service, for the card to draw.
     pub modpack: Load<LinkedModpack>,
+    /// What a repair came to, or the reason it could not finish.
+    ///
+    /// `Loading` *is* the busy state: it draws the button disabled under the
+    /// reference's own word for the wait, which is the whole of what a reader is
+    /// told while a machine hashes their install. A [`Load`] rather than a flag
+    /// beside a sentence because the three states it can be in are this enum's
+    /// three, and the section draws each of them differently.
+    pub repair: Load<String>,
     /// The last refusal, in the reader's words, or `None` while nothing failed.
     pub error: Option<String>,
 }
@@ -277,6 +302,7 @@ impl State {
             builds_for: None,
             link,
             modpack: Load::Idle,
+            repair: Load::Idle,
             error: None,
         }
     }
@@ -310,6 +336,7 @@ impl State {
             builds_for: None,
             link: Load::Idle,
             modpack: Load::Idle,
+            repair: Load::Idle,
             error: Some(problem),
         }
     }
@@ -363,9 +390,9 @@ impl State {
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
-            // See `Message::Save`, `Message::SaveInstallation` and
-            // `Message::Unlink`: the shell is the one that acts on them.
-            Message::Save | Message::SaveInstallation | Message::Unlink => {}
+            // See `Message::Save`, `Message::SaveInstallation`, `Message::Unlink`
+            // and `Message::Repair`: the shell is the one that acts on them.
+            Message::Save | Message::SaveInstallation | Message::Unlink | Message::Repair => {}
         }
     }
 
@@ -576,7 +603,10 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
     // than what it runs.
     match &state.link {
         Load::Ready(_) => {
-            body = body.push(modpack_card(theme, state)).push(unlink_section(theme));
+            body = body
+                .push(modpack_card(theme, state))
+                .push(unlink_section(theme))
+                .push(repair_section(theme, state));
         }
         // The file that says what this instance came from is there and cannot be
         // read. A sentence where the card would be rather than no card at all:
@@ -777,6 +807,47 @@ fn unlink_sentence() -> String {
         .message()
         .replace("{type}", Key::InstallationSettingsTypeInstance.message())
         .replace("{projectType}", Key::InstallationSettingsLinkedModpack.message())
+}
+
+/// The way to re-install the instance's own files.
+///
+/// The heading, the button and the sentence under it are the reference's own
+/// (`installation-settings.repair.instance-title`, `button.repair`/`button
+/// .repairing`, and `installation-settings.repair.instance-description`), and the
+/// sentence says what the button is for: the launcher's half of an instance -- the
+/// loader, Minecraft's libraries, the client jar and the assets -- checked and
+/// put back, with nothing a reader added to the instance touched. The reference
+/// draws its description under the button and asks again in a confirmation modal;
+/// this kit has no such modal, and the sentence under the button is the whole of
+/// what the confirmation would say, so the press is the confirmation.
+///
+/// What the section draws once the check is over is this launcher's own word for
+/// it: the reference answers through a notification, and a modal that is already
+/// open has a better place to be told.
+fn repair_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let button = if state.repair == Load::Loading {
+        // The press is gone while the check runs, for [`crate::ui::button_or`]'s
+        // reason: a second press would start a second install over the first, and
+        // the reference draws a spinner here for the same one.
+        ui::button_or(theme, REPAIRING_KEY, Key::ButtonRepairing, ui::Kind::Standard, None)
+    } else {
+        ui::button(theme, REPAIR_KEY, Key::ButtonRepair, ui::Kind::Standard, Message::Repair)
+    };
+    let mut section = column![]
+        .spacing(8.0)
+        .push(section_heading(theme, Key::InstallationSettingsRepairInstanceTitle.message()))
+        .push(row![button])
+        .push(paragraph(theme, Key::InstallationSettingsRepairInstanceDescription.message()));
+    match &state.repair {
+        Load::Ready(line) => section = section.push(paragraph(theme, line)),
+        Load::Failed(reason) => section = section.push(paragraph_ink(theme, reason, Ink::Red)),
+        // Neither has been asked for, the check is running -- the disabled button
+        // above is that state's whole drawing -- or the section is drawn for a form
+        // whose repair state was never set. The last arm is not a state the shell
+        // produces; it is here so the match is total without inventing a sentence.
+        Load::Idle | Load::Loading | Load::Empty => {}
+    }
+    ui::card(theme, section)
 }
 
 /// The sentence under the installation Save: what a version or platform change
@@ -1199,6 +1270,48 @@ mod tests {
         assert!(!sentence.contains('{'), "{sentence}");
         assert!(sentence.contains("this instance"), "{sentence}");
         assert!(sentence.contains("modpack"), "{sentence}");
+    }
+
+    #[test]
+    fn the_repair_section_wears_the_reference_own_words() {
+        // The heading, the button in both of its states and the sentence under it
+        // are the reference's own, and they are the whole of what the section
+        // says: the two sentences of the installation tab that a reader must not
+        // see paraphrased are this one and *Unlink*'s.
+        assert_eq!(
+            Key::InstallationSettingsRepairInstanceTitle.message(),
+            "Repair instance"
+        );
+        assert_eq!(Key::ButtonRepair.message(), "Repair");
+        assert_eq!(Key::ButtonRepairing.message(), "Repairing...");
+        let description = Key::InstallationSettingsRepairInstanceDescription.message();
+        assert!(description.contains("checks for corruption"), "{description}");
+        assert!(
+            description.contains("Minecraft dependencies"),
+            "the sentence names what is re-installed: {description}"
+        );
+    }
+
+    #[test]
+    fn the_form_does_not_start_a_repair_itself() {
+        // `Message::Repair` is the shell's -- the check is a minute of blocking
+        // work and a window that ran it would stop drawing -- so the form's own
+        // update leaves the state where it is. It is the shell that moves the
+        // form to `Load::Loading` when it raises the request, and the reply that
+        // moves it on from there; a form that started the work itself would be
+        // the frame thread hashing an install.
+        let mut state = linked_state();
+        state.update(Message::Repair);
+        assert_eq!(state.repair, Load::Idle, "nothing was asked of the shell here");
+        assert_eq!(state.error, None, "and no sentence appeared under the button");
+        assert_eq!(
+            state.link,
+            Load::Ready(InstanceLink {
+                project_id: "cobblemon".to_string(),
+                version_id: "pack-1".to_string(),
+            }),
+            "the link is still what the card is drawn from"
+        );
     }
 
     #[test]

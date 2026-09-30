@@ -6467,6 +6467,119 @@ CONFIRMED: the page carries all 128 gates, 6 stage cards and every subject as wr
   its usual one red annotation -- the advisory `cargo fmt --check` step it runs
   `continue-on-error`, beside a job whose own conclusion is success.
 
+- [x] G130: the installation tab's *Repair instance* re-installs an instance's own
+  files -- the loader's installer, the libraries, the client jar, the asset index
+  and its objects -- hashing every file already on disk against the digest its
+  metadata publishes
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py
+         python tools/dashboard.py --check
+  EXPECT: the button wears the reference's own words (`button.repair`,
+          `button.repairing`, `install-settings.repair.instance-title` and its
+          description) and runs the install the reference's own `repair()` runs
+          the check is the repair's whole difference: a file that is there at the
+          size its metadata publishes but is not the file the metadata names is
+          fetched again, where a launch leaves it -- and a file whose source
+          publishes no digest is left alone, because there is nothing to check it
+          against
+          the repair touches nothing a reader put in the instance: it adds and
+          replaces, so it cannot break an instance that was sound
+          the asset objects are checked by the same rule, and the plan carries
+          which rule it was built with because the objects are enumerated from the
+          index at run time rather than at plan time
+          a repair runs off the frame thread, the button is drawn disabled for as
+          long as it takes, and the sentence it ends with (or the reason it could
+          not finish) is drawn under the button with the modal still up
+          616 passed; 0 failed; 0 ignored, and clippy exit 0 with no new warning in
+          the files this slice touched
+          the plan's installation item narrows to the two pack actions that are
+          left -- stage 3 reads 34 met / 2 open (94%) -- and both document tools
+          exit 0 at 130 gates
+  EVIDENCE: the transcripts below, and the schema comment on `Existing` for the
+  rule itself.
+
+```
+$ cargo test -p palantir-desktop --locked
+running 616 tests
+test result: ok. 616 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+exit 0; the bin's 3 and the test bin's 21 (1 duplicate), the counts G125 and G128
+both read, so this slice adds none
+
+$ python tools/progress.py
+stage 3  Pages, in the reference's order: instance pages f...    34     2    94%
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 130 gates, 6 stage cards and every subject as written
+```
+
+  **What a repair is, and where the reference keeps it.** The reference's
+  installation tab answers *Repair instance* with `install_existing_instance(id,
+  true)` (`installation-settings.vue`'s `repair()`), which is the same install a
+  launch runs for that instance; its own sentence is that it "reinstalls Minecraft
+  dependencies and checks for corruption ... if your game is not launching due to
+  launcher-related errors". That is exactly the half a launch does not do: a launch
+  installs what is *missing* and takes a file that is there at the right size on
+  faith, because hashing every classpath jar on the way to the game is a read of
+  the whole install for a question a launch has no reason to ask. This is the one
+  moment a reader does ask it. The reference puts the sentence under the button and
+  asks again in a `ConfirmRepairModal`; this kit has no such modal, and the
+  sentence under the button is the whole of what the confirmation says, so the
+  press is the confirmation -- a difference recorded where the button is drawn.
+
+  **The seam, and why the rule travels on the plan.** A repair *is* the install
+  half of a launch, so the half moved out of `prepare_launch` into `prepare_files`:
+  open the instance, read the launcher's settings and the pack, run the loader's
+  own installer, resolve, plan, transfer. What is left in `prepare_launch` is
+  everything that names a session, a Java and a process. The one parameter that
+  differs is `install::Existing` -- `Trust` for a launch, `Verify` for a repair --
+  and it is a named enum rather than a `bool` because the two answers are different
+  questions (`satisfied` is "something of the right size is there", `verified` is
+  "this is the file the metadata names"), and a boolean at a call site would read
+  as a preference rather than a rule. `DownloadJob::verified` is what the second
+  answer is built on, and it keeps the module's existing rule for a source that
+  publishes no digest: an empty expectation means *do not check*, so a Maven
+  library is left alone by a repair too -- a repair that deleted a file it cannot
+  check would be a repair that breaks an instance. The rule is carried *on* the
+  plan (`InstallPlan::existing`) rather than asked at the call site again because
+  `run` asks it of files the plan does not list: the asset objects are enumerated
+  from the index at run time, and a repair that hashed its libraries and then
+  trusted every asset object would be checking half of what the button promised.
+
+  **"Nothing is deleted" is the property, not a caveat.** A repair adds and
+  replaces: it can put a wrong file back, and it cannot take away a mod, a world or
+  a configuration the reader put in the instance. That is what makes it safe to
+  press on an instance that is merely suspect, and it is why it is not the same
+  button as the reference's *Re-install modpack*, whose own sentence says it
+  "resets the instance's content to its original state, removing any mods or
+  content you have added". The two are separate actions in the reference for that
+  reason and they stay separate here.
+
+  **What the modal does with the answer.** The form's `repair` field is a `Load`,
+  and the three states it can be in are the three the section draws: nothing
+  asked, the check running (the button disabled under `button.repairing` -- a press
+  that went nowhere would be counted twice, and the reference draws a spinner
+  there for the same reason), and the sentence a finished check comes to, or the
+  reason it could not finish. Nothing is started on the frame thread: the press
+  raises a request the way the tab's three reads do, the shell runs
+  `Store::repair_instance` through `store::off_thread`, and the answer lands on
+  the modal rather than on a notification. Its shape is one sentence --
+  `Repaired '<name>': N file(s) checked, M fetched again (X MB)` -- where the
+  *checked* count is the half a launch never produces; a failure names the first
+  file it happened to. A modal closed while the check ran keeps nothing, and the
+  files are installed all the same.
+
+  **What is still owed.** *Re-install modpack* and *Change version* (the
+  reference's *Swap*) are not built: both re-apply the *pack's* own files rather
+  than the launcher's dependencies, so both need a path that puts a pack into an
+  instance that already exists -- `crate::install::install_pack_archive` makes a
+  new instance rather than re-applying one -- and the plan's open item is what
+  names them now.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
