@@ -7,7 +7,7 @@
 use palantir_core::instance::{groups::Groups, Instance};
 use palantir_core::json;
 use palantir_core::launch;
-use palantir_core::pack::{PackProfile, Require};
+use palantir_core::pack::{Component, PackProfile, Require};
 use palantir_core::paths::PalantirPaths;
 use palantir_core::resolve::{resolve, OfflineMetaStore};
 use palantir_core::settings::Settings;
@@ -217,14 +217,21 @@ fn resolve_fabric_instance_end_to_end() {
     let instance = Instance::create(&paths.instances_dir(), "Fabric 1.21.1", "1.21.1").unwrap();
     let mut profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
     profile.set_version("net.fabricmc.fabric-loader", "0.16.5", true);
+    // The LWJGL slot a profile written by Prism -- or by a build of this launcher
+    // from before it read piston -- carries beside `net.minecraft`: no version, to
+    // be filled from the `requires` the mirror-shaped fixture below publishes.
+    // Neither launcher writes it against Mojang's own file, which keeps those
+    // libraries itself, so it is added here rather than inherited from
+    // `Instance::create`.
+    profile.append(Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() });
     profile.save(&instance.mmc_pack_path()).unwrap();
 
     let mut store = OfflineMetaStore::new(paths.meta_dir());
     let ctx = RuntimeContext::current_host();
     let saved = PackProfile::load(&instance.mmc_pack_path()).unwrap();
-    // The `org.lwjgl3` slot this instance was created with carries no version.
-    // Leaving it that way is the point: the dependency machinery has to fill it
-    // from `net.minecraft`'s requirement, or the instance cannot start.
+    // The `org.lwjgl3` slot carries no version. Leaving it that way is the point:
+    // the dependency machinery has to fill it from `net.minecraft`'s requirement,
+    // or the instance cannot start.
     assert!(
         saved
             .components()

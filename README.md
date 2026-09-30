@@ -38,7 +38,8 @@ crates/
                       asset index, launch arguments — and the data-root layout.
   palantir-net/       Auth, downloads, metadata and the Modrinth API client.
   palantir-loader/    Forge, Fabric, NeoForge, Quilt and modpack archives.
-  palantir-gui/       The view-model the shell reads; goes with `app.rs`.
+                      (The view-model the shell reads used to be a fifth crate,
+                      `palantir-gui`; it is `palantir-desktop/src/model.rs` now.)
 tools/               The measurement and gate harnesses (Python).
 vendor/modrinth-app/ The reference client's source, vendored as the design
                      oracle and pinned in its `UPSTREAM.md`. Read and measured,
@@ -104,7 +105,28 @@ tag is one of the few actions that needs a human's go-ahead first (see
 - `tools/unused_deps.py` — the unused-dependency check `cargo` does not have: a
   manifest that declares what no source in its crate names. A hit is a question
   to read, not a verdict (a package's lib name is not always its package name).
-  Not wired into CI: `tools/**` deliberately starts no run.
+- `tools/progress.py` — the plan's progress counted rather than described. It
+  reads `NEXT_STEPS.md`'s stage table for what each stage is and what it still
+  owes, reads `GATES.md`'s ledger for the slices that landed, and prints a
+  percentage per stage and overall. Landed slices are gates, each attributed to
+  one stage in the tool; the only number it owns is the estimate of how many
+  gates an open item will take, and it prints that with its reasons. `--check`
+  fails when the three disagree — a gate no stage owns, a stage marked done
+  with open work, an open bullet renamed. Not wired into CI: `tools/**`
+  deliberately starts no run. It also counts what the tree is made of: lines
+  and code lines per crate, with the four generated files — `icons_gen.rs`,
+  `text_gen.rs`, `theme_gen.rs`, `theme_tokens.rs` — reported as their own
+  total, because 47,000 machine-written lines inside a hand-written crate's
+  row is a number that hides rather than tells. `vendor/` is not counted: it
+  is another project's source.
+- `tools/progress.cmd` — the double-click entry point for the above, and the
+  answer to a console that opens and closes before its output can be read. A
+  `.py` opened from Explorer goes to whatever `python` resolves to, and on this
+  machine that is the Microsoft Store alias, which exists, answers "not found"
+  and exits. The wrapper finds the `py` launcher (or a python.org install)
+  itself, runs the script from the repository root, and pauses only when
+  nothing asked it not to: `--check` and `--no-pause` suppress the pause so a
+  caller that can read output is never left waiting on a keypress.
 
 Captures live in `.scratch/` and are never committed. `GATES.md` records which
 gates are environment-dependent and what a green run means for each.
@@ -122,9 +144,12 @@ gates are environment-dependent and what a green run means for each.
 
 ## Licence and attribution
 
-PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. It vendors the
-Modrinth App source (GPL-3.0, pinned in `vendor/modrinth-app/UPSTREAM.md`) as a
-read-only measurement reference — never compiled, never shipped. Full notices:
-`THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
+PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. The full text is
+`LICENSE`, and `release.yml` copies that file into the release folder, so every
+Release attaches the terms beside each exe and its `.sha256` sidecar — the zips are
+compressed from the exes *before* that copy, so the text travels next to them
+rather than inside. It vendors the Modrinth App source (GPL-3.0, pinned in
+`vendor/modrinth-app/UPSTREAM.md`) as a read-only measurement reference — never
+compiled, never shipped. Full notices: `THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
 GPL-3.0 grants rights in the code and not in the identity: this launcher draws
 its own mark in the same slots.

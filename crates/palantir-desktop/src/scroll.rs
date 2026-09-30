@@ -42,6 +42,7 @@
 //! * **Bounded, not physical.** Easing is against a deadline, so a gesture
 //!   cannot settle forever and cannot grow with the distance it covers.
 
+#[cfg(test)]
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{tree, Tree};
@@ -53,10 +54,12 @@ use iced::{event, Element, Event, Length, Rectangle, Size, Vector};
 /// The log buffer may retain many more lines for troubleshooting, but drawing
 /// all of them makes wheel input expensive. The view renders only the newest
 /// window, which bounds layout/draw work per frame.
+#[cfg(test)]
 pub const LOG_RENDER_CAP: usize = 500;
 
 /// Convert a buffered-line count into the number of rows the log page should
 /// build. This is deliberately O(1) and allocation-free.
+#[cfg(test)]
 pub const fn visible_log_lines(total: usize) -> usize {
     if total < LOG_RENDER_CAP {
         total
@@ -77,6 +80,7 @@ pub const WHEEL_PIXELS_PER_NOTCH: f32 = 60.0;
 /// expected to. It is a *request* rather than a guarantee: the position is
 /// driven by the clock, so a machine that answers late draws fewer, larger
 /// steps rather than falling behind.
+#[cfg(test)]
 pub const FRAME: Duration = Duration::from_millis(16);
 
 /// How long a glide takes, wall clock, on a machine that can draw one.
@@ -85,6 +89,7 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// either way — which is the whole reason this is a duration. A frame count
 /// makes the *length* of the gesture depend on how fast the machine happens to
 /// be, and on a slow renderer that turns a scroll into a slideshow.
+#[cfg(test)]
 pub const DURATION: Duration = Duration::from_millis(160);
 
 /// The frame interval above which this machine is not asked to glide.
@@ -99,12 +104,14 @@ pub const DURATION: Duration = Duration::from_millis(160);
 /// This is measured rather than assumed — see [`ScrollAnim::tick`] — so a
 /// machine with a working GPU gets the glide and a software-rasterised one gets
 /// the instant step, from the same binary and with no setting to get wrong.
+#[cfg(test)]
 pub const SMOOTH_FRAME: Duration = Duration::from_millis(24);
 
 /// Below this many pixels from the target, the animation is over.
 ///
 /// Without a floor, a re-clamped target would leave the page a fraction of a
 /// pixel from where it belongs and keep asking for frames.
+#[cfg(test)]
 pub const SETTLED: f32 = 0.5;
 
 /// How many consecutive slow frames it takes to stop animating on a machine.
@@ -115,6 +122,7 @@ pub const SETTLED: f32 = 0.5;
 /// frames, and the next gesture corrects it. So one fast frame is enough to
 /// resume animating, while a single hitch -- a page fault, another window
 /// painting, a background scan -- is not enough to stop it.
+#[cfg(test)]
 const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 
 /// Where a page's scroll position is, and where it is going.
@@ -122,6 +130,7 @@ const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 /// Plain numbers and a clock rather than a reference to any widget state, so
 /// the whole easing policy is unit tested without a renderer or a window.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg(test)]
 pub struct ScrollAnim {
     /// The offset the content is drawn at.
     pub offset: f32,
@@ -146,15 +155,18 @@ pub struct ScrollAnim {
 
 /// One glide: where it started, when, and the deadline it must meet.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 struct Glide {
     from: f32,
     began: Instant,
     duration: Duration,
 }
 
+#[cfg(test)]
 impl ScrollAnim {
     /// The largest offset that still shows content: never negative, so a page
     /// shorter than the window cannot scroll at all.
+    #[cfg(test)]
     pub fn max_offset(&self) -> f32 {
         (self.content_height - self.view_height).max(0.0)
     }
@@ -336,12 +348,108 @@ impl ScrollAnim {
     }
 }
 
+// ---- How many rows a frame draws -----------------------------------------
+
+/// How many rows beyond the visible ones a frame draws, on each side.
+///
+/// The reference's `bufferSize` in `ui/src/composables/virtual-scroll.ts`, and
+/// the same reasoning: a wheel notch lands as a report of where the region *is*,
+/// and the frame that draws it is built from that report, so without a margin
+/// the edge of the window would be a line the reader can see arriving. Five
+/// rows is more than one notch's travel at any row height this interface draws.
+pub const OVERSCAN: usize = 5;
+
+/// The fewest rows a frame draws before the scroll region has reported where it
+/// is.
+///
+/// The reference's `initialItemCount`. The floor exists for the row that is
+/// tall: an assumption about the height of a window (below) is a row count only
+/// once a row height is known, and a list whose rows are taller than that budget
+/// still owes the reader a screenful rather than a row and a half.
+pub const INITIAL_ROWS: usize = 20;
+
+/// The height of the window assumed before the scroll region has reported its
+/// own, in pixels.
+///
+/// **This is where the port has to differ from the reference, and the reason is
+/// that the reference can measure and this cannot.** `useScrollViewport` attaches
+/// to the scrolling ancestor on mount and reads `clientHeight` then, which is why
+/// twenty items are enough for it: they are one frame's worth, before the ref
+/// exists. iced publishes a scrollable's viewport only from an *event* -- wheel,
+/// touch, a scrollbar drag -- so a tab the reader has opened and not yet scrolled
+/// would draw twenty rows and then a band of nothing on any window taller than
+/// that. A height rather than a count is what makes the fallback work for rows of
+/// every size this page draws: 4,000px of them is a taller window than this shell
+/// can be drawn at, so what it draws always covers the visible slice, and it is
+/// still a constant -- a list of five thousand costs what a list of ninety costs,
+/// until the first event says exactly what to draw.
+pub const INITIAL_VIEW: f32 = 4_000.0;
+
+/// Where a scroll region is, in pixels, as `Scrollable::on_scroll` reports it.
+///
+/// Plain numbers rather than the widget's own viewport, so the rule below is a
+/// function of its inputs and is unit tested without a window -- the same reason
+/// [`ScrollAnim`] carries numbers instead of a reference to widget state.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Geometry {
+    /// Pixels the content has been scrolled by, from its top.
+    pub offset: f32,
+    /// Height of the part of it that is on screen.
+    pub view_height: f32,
+}
+
+impl Geometry {
+    /// The geometry a scrollable reported.
+    ///
+    /// `absolute_offset` rather than the relative one: the rows are placed from
+    /// the content's own top (see [`crate::pages::instance`]), and a percentage
+    /// would have to be turned back into pixels against the same content height
+    /// the caller already has.
+    pub fn of(viewport: iced::widget::scrollable::Viewport) -> Geometry {
+        Geometry {
+            offset: viewport.absolute_offset().y,
+            view_height: viewport.bounds().height,
+        }
+    }
+}
+
+/// The rows one frame draws, out of a list `len` long whose rows are all
+/// `row_height` tall.
+///
+/// A port of the reference's `visibleRange`, including both of its guards, and
+/// the reason this is a *policy* rather than a loop: the rows outside the range
+/// are the ones that cost nothing, so what a frame costs stops depending on how
+/// long the list is. `crate::scale` is where that is measured at five thousand.
+///
+/// The two guards are worth naming. A region that has not reported its height
+/// yet gets [`INITIAL_VIEW`] rather than "all of them" or "none", and at least
+/// [`INITIAL_ROWS`]. A range is never shorter than the window, so at the very end
+/// of a list the range slides rather than shrinking -- which is what keeps the
+/// count of drawn rows constant while a reader scrolls, and therefore the frame
+/// cost constant too.
+pub fn window(len: usize, row_height: f32, at: Geometry) -> std::ops::Range<usize> {
+    if len == 0 || row_height <= 0.0 {
+        return 0..len;
+    }
+    let view = if at.view_height > 0.0 { at.view_height } else { INITIAL_VIEW };
+    let visible = (view / row_height).ceil() as usize;
+    let size = (visible + OVERSCAN * 2).max(INITIAL_ROWS);
+    // `saturating_sub` for the list shorter than one window: there is no offset
+    // that would show `size` rows of it, and `0` is the only range that makes
+    // sense.
+    let start = ((at.offset / row_height).floor().max(0.0) as usize)
+        .saturating_sub(OVERSCAN)
+        .min(len.saturating_sub(size));
+    start..(start + size).min(len)
+}
+
 /// Cubic ease-out: quick to leave, gentle to arrive.
 ///
 /// A scroll is a *position* animation the hand asked for, not a decoration, so
 /// it has to look like it is obeying — closing most of the distance early and
 /// settling — rather than starting slowly the way an ease-in-out transition
 /// would. `progress` is in `0.0..=1.0`.
+#[cfg(test)]
 fn ease_out(progress: f32) -> f32 {
     let remaining = 1.0 - progress;
     1.0 - remaining * remaining * remaining
@@ -372,27 +480,6 @@ pub fn wheel_notches(delta: &mouse::ScrollDelta) -> f32 {
     match delta {
         mouse::ScrollDelta::Lines { y, .. } => *y,
         mouse::ScrollDelta::Pixels { y, .. } => *y / WHEEL_PIXELS_PER_NOTCH,
-    }
-}
-
-/// Wraps a page's content so the shell, not the scrollable, handles the wheel.
-///
-/// Transparent to layout and to painting: it delegates every one of them to its
-/// content. Its only job is to report a wheel event it has seen and to claim
-/// it, which is what stops `Scrollable` from applying the jump the animation is
-/// supposed to replace.
-pub fn guard<'a, Message, Theme, Renderer>(
-    content: impl Into<Element<'a, Message, Theme, Renderer>>,
-    on_wheel: impl Fn(Wheel) -> Message + 'a,
-) -> WheelGuard<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: 'a,
-{
-    WheelGuard {
-        content: content.into(),
-        on_wheel: Box::new(on_wheel),
     }
 }
 
@@ -599,6 +686,87 @@ mod tests {
             assert!(frames < 60, "the animation must terminate");
         }
         frames
+    }
+
+    /// A scroll region holding `len` rows of `row_height`, scrolled to `offset`
+    /// in a `view_height` window.
+    fn at(len: usize, row_height: f32, offset: f32, view_height: f32) -> std::ops::Range<usize> {
+        window(len, row_height, Geometry { offset, view_height })
+    }
+
+    #[test]
+    fn a_window_holds_the_visible_rows_and_a_margin_either_side() {
+        // 66px rows in a 600px region: nine and a bit rows are on screen, and
+        // nine are drawn beside them -- five above and five below, which is what
+        // keeps a partly-scrolled row from arriving as a blank line.
+        assert_eq!(at(5_000, 66.0, 0.0, 600.0).len(), 10 + OVERSCAN * 2);
+        // At the top the margin cannot go above row zero.
+        assert_eq!(at(5_000, 66.0, 0.0, 600.0).start, 0);
+        // A hundred rows in: the window has moved with the reader, and its size
+        // has not changed.
+        let middle = at(5_000, 66.0, 6_600.0, 600.0);
+        assert_eq!(middle.start, 100 - OVERSCAN);
+        assert_eq!(middle.len(), 10 + OVERSCAN * 2);
+    }
+
+    #[test]
+    fn the_window_slides_at_the_end_of_the_list_rather_than_shrinking() {
+        // The constant size is the point: a range that shrank at the bottom would
+        // make the last screenful the cheapest frame and the one before it the
+        // most expensive, for no reason a reader could see.
+        let end = at(5_000, 66.0, 400_000.0, 600.0);
+        assert_eq!(end.start, 5_000 - (10 + OVERSCAN * 2));
+        assert_eq!(end.end, 5_000, "there is nothing past the end to draw");
+        assert_eq!(end.len(), 10 + OVERSCAN * 2);
+    }
+
+    #[test]
+    fn a_region_that_has_not_reported_itself_draws_a_window_taller_than_a_window() {
+        // Nothing published yet. The whole list would be the cost this rule
+        // exists to remove, and twenty rows would be a band of nothing on a tall
+        // window at this row height -- so the fallback is a height, and it is
+        // more than any window this shell can be drawn in.
+        let first = at(5_000, 66.0, 0.0, 0.0);
+        assert!(first.len() > INITIAL_ROWS, "{}", first.len());
+        assert!(first.len() < 100, "and it is still a window, not the list");
+        assert_eq!(first.start, 0, "nothing has been scrolled, so it starts at the top");
+        // And a list shorter than that draws all of itself.
+        assert_eq!(at(7, 66.0, 0.0, 0.0), 0..7);
+        // A row taller than the assumed window still owes a screenful: the floor
+        // is what makes the fallback work for rows of every size.
+        assert_eq!(at(5_000, 500.0, 0.0, 0.0).len(), INITIAL_ROWS);
+    }
+
+    #[test]
+    fn a_list_shorter_than_its_window_is_all_of_itself() {
+        assert_eq!(at(3, 66.0, 0.0, 600.0), 0..3);
+        // A row taller than the region is still one row: `ceil` rounds a part of
+        // a row up, and a window of zero rows would draw nothing at all. (The
+        // count is the floor's, not the row's -- the floor is above one row.)
+        assert!(at(5_000, 900.0, 0.0, 600.0).contains(&0));
+        // An empty listing, and a row height of zero, which is the shape a
+        // divide by zero would take if this were written as a division.
+        assert_eq!(at(0, 66.0, 0.0, 600.0), 0..0);
+        assert_eq!(at(9, 0.0, 0.0, 600.0), 0..9);
+        // The floor is a floor: a short list is still all of itself, however few
+        // rows its region could hold.
+        assert_eq!(at(3, 900.0, 0.0, 600.0), 0..3);
+    }
+
+    #[test]
+    fn the_window_keeps_the_scrollbar_where_it_was_by_never_passing_the_end() {
+        // The page draws a spacer above the first row and one below the last, so
+        // the content's height is the whole list's whatever is drawn. What this
+        // checks is the other half: the range is always inside the list, so the
+        // rows that are drawn are always at the offset they claim to be at.
+        for offset in [0.0, 1.0, 6_599.0, 6_600.0, 329_999.0, 400_000.0] {
+            let range = at(5_000, 66.0, offset, 600.0);
+            assert!(range.end <= 5_000 && range.start <= range.end, "{offset}: {range:?}");
+            assert_eq!(range.len(), 10 + OVERSCAN * 2, "{offset}: {range:?}");
+        }
+        // A negative offset is the top: a region cannot report one, and a rule
+        // that trusted it would panic on the cast rather than draw.
+        assert_eq!(at(5_000, 66.0, -120.0, 600.0).start, 0);
     }
 
     #[test]

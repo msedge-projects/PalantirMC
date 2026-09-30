@@ -262,6 +262,39 @@ pub fn resolve(
         file: VersionFile,
     }
 
+    /// Whether the file of another slot already carries the libraries this
+    /// versionless slot would add.
+    ///
+    /// One naming relationship answers it: the component a launcher names for
+    /// LWJGL is `org.lwjgl3`, and its libraries live in the `org.lwjgl` group.
+    /// `meta.prismlauncher.org` serves Mojang's `net.minecraft` with those
+    /// libraries *removed* and a `requires` naming `org.lwjgl3` in their place,
+    /// which is why a profile written by Prism -- or by an earlier build of this
+    /// launcher -- names that slot at all. Mojang's own file keeps its LWJGL
+    /// entries and requires nothing, so against piston the slot has no version to
+    /// work out. Loading the mirror's `org.lwjgl3` anyway would put every LWJGL
+    /// jar on the classpath twice, under the two naming schemes its file uses,
+    /// so the answer is "nothing to do" rather than "fetch it" -- and only when
+    /// the game's own file really carries that group, which leaves a profile
+    /// still pointed at the mirror resolving the slot from the requirement that
+    /// names it.
+    fn carried_elsewhere(slots: &[Slot], index: usize) -> bool {
+        let group = slots[index]
+            .uid
+            .trim_end_matches(|c: char| c.is_ascii_digit());
+        if group.is_empty() {
+            return false;
+        }
+        slots.iter().enumerate().any(|(other, slot)| {
+            other != index
+                && slot.file.as_ref().is_some_and(|file| {
+                    file.libraries
+                        .iter()
+                        .any(|library| library.name.group() == group)
+                })
+        })
+    }
+
     /// One component being resolved, in the order it will be reported.
     struct Slot {
         uid: String,
@@ -372,6 +405,14 @@ pub fn resolve(
                 // Round 1 has no basis for a decision; a later round may have
                 // one, because loading another component adds requirements.
                 if round == 0 {
+                    index += 1;
+                    continue;
+                }
+                if carried_elsewhere(&slots, index) {
+                    // Reported as a component with nothing behind it, rather than
+                    // as an error that blocks the launch: the instance is sound,
+                    // it just names a slot whose contents arrived with the game.
+                    slots[index].disabled = true;
                     index += 1;
                     continue;
                 }
@@ -742,6 +783,53 @@ mod tests {
     /// The negative control: a component nobody asks about and no version for
     /// is still a refusal, so the fills above cannot have been bought by
     /// inventing a version out of nothing.
+    /// The other half of `carried_elsewhere`: the LWJGL slot the mirror needs is
+    /// nothing to do once the game's own file carries the libraries.
+    #[test]
+    fn an_lwjgl_slot_the_game_file_answers_is_nothing_to_do() {
+        let mut store = MapStore::with(
+            "net.minecraft",
+            "1.21.1",
+            json!({
+                "uid": "net.minecraft", "version": "1.21.1", "order": 0,
+                "mainClass": "net.minecraft.client.main.Main",
+                "libraries": [{"name": "org.lwjgl:lwjgl:3.3.3"}]
+            }),
+        );
+        store.files.insert(
+            ("org.lwjgl3".into(), "3.3.3".into()),
+            json!({
+                "uid": "org.lwjgl3", "version": "3.3.3", "order": 1,
+                "libraries": [{"name": "org.lwjgl:lwjgl:3.3.3"}]
+            }),
+        );
+        let profile = profile_with(vec![
+            Component { uid: "net.minecraft".into(), version: "1.21.1".into(), important: true, ..Default::default() },
+            Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() },
+        ]);
+        let r = resolve(&profile, Path::new("/no/patches"), &mut store, &RuntimeContext::current_host()).unwrap();
+        assert_eq!(r.severity(), ProblemSeverity::None, "problems: {:?}", r.problems);
+        // The slot stays visible, with no version and nothing loaded: the
+        // profile's own shape, reported rather than silently deleted.
+        let lwjgl = r
+            .components
+            .iter()
+            .find(|c| c.uid == "org.lwjgl3")
+            .expect("the slot is still reported");
+        assert!(lwjgl.disabled, "the slot is nothing to do");
+        assert!(lwjgl.version.is_empty());
+        // And the classpath carries LWJGL once, because only one of the two files
+        // was merged.
+        assert_eq!(
+            r.profile
+                .libraries
+                .iter()
+                .filter(|l| l.name.group() == "org.lwjgl")
+                .count(),
+            1
+        );
+    }
+
     #[test]
     fn a_versionless_component_nobody_requires_is_still_an_error() {
         let mut store = MapStore::with("net.minecraft", "1", json!({"uid": "net.minecraft"}));

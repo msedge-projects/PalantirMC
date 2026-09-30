@@ -20,7 +20,46 @@ pub const MODRINTH_BASE_URL: &str = "https://api.modrinth.com/v2";
 /// Prism's browsing page size. Use [`search_url_with_project_type`] when the
 /// caller is browsing one of Modrinth's content tabs.
 pub fn search_url(query: &str) -> String {
-    format!("{}/search?query={}&limit=50", MODRINTH_BASE_URL, percent_encode(query))
+    search_url_parts(query, None, None, 50, 0)
+}
+
+/// Build a search URL from the parts a browsing interface actually has, each of
+/// them optional except the query.
+///
+/// This is the one place the parameters are spelled out, and the builders around
+/// it are this function with a field filled in: a caller that knows it wants a
+/// project type should not have to write `None` for a sort order, and two
+/// encoders for the same query string is how two pages come to send subtly
+/// different ones.
+///
+/// The parts that are present are emitted in the order the API documents, and an
+/// absent one is left out rather than sent empty: `facets=` with nothing after it
+/// asks Modrinth to match a project type called `""`, which returns nothing and
+/// looks like a broken search rather than a missing filter.
+pub fn search_url_parts(
+    query: &str,
+    project_type: Option<&str>,
+    index: Option<&str>,
+    limit: u32,
+    offset: u32,
+) -> String {
+    let mut url = format!(
+        "{}/search?query={}&limit={}",
+        MODRINTH_BASE_URL,
+        percent_encode(query),
+        limit.max(1)
+    );
+    if offset > 0 {
+        url.push_str(&format!("&offset={offset}"));
+    }
+    if let Some(project_type) = project_type.filter(|kind| !kind.is_empty()) {
+        let facets = format!(r#"[["project_type:{project_type}"]]"#);
+        url.push_str(&format!("&facets={}", percent_encode(&facets)));
+    }
+    if let Some(index) = index.filter(|order| !order.is_empty()) {
+        url.push_str(&format!("&index={}", percent_encode(index)));
+    }
+    url
 }
 
 /// Build a Modrinth search URL constrained to one project type.
@@ -30,12 +69,7 @@ pub fn search_url(query: &str) -> String {
 /// from hand-rolling subtly different filters and means resource-pack searches
 /// never return mods that the install path cannot handle.
 pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
-    let facets = format!(r#"[["project_type:{project_type}"]]"#);
-    format!(
-        "{}&facets={}",
-        search_url(query),
-        percent_encode(&facets)
-    )
+    search_url_parts(query, Some(project_type), None, 50, 0)
 }
 
 /// Build a Modrinth search URL constrained to one project type *and* sorted by
@@ -47,13 +81,7 @@ pub fn search_url_with_project_type(query: &str, project_type: &str) -> String {
 /// Discover page offers the same list, in the same order, behind its Sort
 /// control.
 pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String {
-    let facets = format!(r#"[["project_type:{project_type}"]]"#);
-    format!(
-        "{}&facets={}&index={}",
-        search_url(query),
-        percent_encode(&facets),
-        percent_encode(index)
-    )
+    search_url_parts(query, Some(project_type), Some(index), 50, 0)
 }
 
 /// Build the version-list URL for a project id or slug.
@@ -62,6 +90,25 @@ pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String
 /// filtering happens client-side).
 pub fn version_url(project: &str) -> String {
     format!("{}/project/{}/version", MODRINTH_BASE_URL, percent_encode_path(project))
+}
+
+/// Read a string field that the service is allowed to publish as `null`.
+///
+/// `#[serde(default)]` covers a field that is *absent* from a document; it does
+/// not cover one that is present and `null`, and `null` is exactly how Modrinth
+/// writes an account with no display name -- measured on `/v2/user/modrinth`,
+/// whose `name` is `null` while its `username` is a string. Without this, one
+/// unset word would fail the parse of the whole profile. A `null` read through
+/// here becomes the empty string, which is what the reference draws anyway.
+///
+/// Only the fields known to be nullable use it. `username`, `id`, `bio` and the
+/// dates are strings in the service's own schema, and defaulting them to empty on
+/// a `null` would be this launcher inventing a shape the API does not have.
+fn null_as_empty<'de, D>(reader: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(<Option<String> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
 }
 
 /// A `GET /v2/search` response body (subset; unknown fields ignored).
@@ -111,6 +158,19 @@ pub struct ModrinthSearchHit {
     /// Newest version id, if any.
     #[serde(default)]
     pub latest_version: String,
+    /// The game versions the project supports, as the search API lists them.
+    ///
+    /// On a *search hit* rather than on the project document, and that is the
+    /// API's shape rather than a choice: a browsing card shows these tags without
+    /// a second request per card, which is the whole reason the field is on the
+    /// hit at all.
+    #[serde(default)]
+    pub versions: Vec<String>,
+    /// The project's categories, which is also where a hit carries its loaders
+    /// (`fabric`, `quilt`, `forge`, `neoforge`, ...): Modrinth tags them in the
+    /// same list, and its own cards draw both from it.
+    #[serde(default)]
+    pub categories: Vec<String>,
 }
 
 impl ModrinthSearchHit {
@@ -175,6 +235,9 @@ pub struct ModrinthProjectVersion {
     /// Download count.
     #[serde(default)]
     pub downloads: u64,
+    /// What changed in this version, in markdown.
+    #[serde(default)]
+    pub changelog: String,
     /// Target game versions (e.g. `["1.20.4"]`).
     #[serde(default)]
     pub game_versions: Vec<String>,
@@ -229,6 +292,311 @@ impl ModrinthVersionFile {
     }
 }
 
+/// Build the project URL for a project id or slug.
+///
+/// Calls `GET /v2/project/{project}` -- the document a project page's header is.
+pub fn project_url(project: &str) -> String {
+    format!("{}/project/{}", MODRINTH_BASE_URL, percent_encode_path(project))
+}
+
+/// Build the team-members URL for a project id or slug.
+///
+/// Calls `GET /v2/project/{project}/members`. A project document names the team
+/// it belongs to but not the people on it, and Modrinth's own project page shows
+/// one of them by name -- so the name is a second request, against this URL.
+pub fn project_members_url(project: &str) -> String {
+    format!("{}/project/{}/members", MODRINTH_BASE_URL, percent_encode_path(project))
+}
+
+/// One `GET /v2/project/{id}` response (subset; unknown fields ignored).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthProject {
+    /// Project id.
+    #[serde(default)]
+    pub id: String,
+    /// URL slug.
+    #[serde(default)]
+    pub slug: String,
+    /// Modrinth's own project type (`mod`, `modpack`, `resourcepack`, ...).
+    #[serde(default)]
+    pub project_type: String,
+    /// Title.
+    #[serde(default)]
+    pub title: String,
+    /// The one-line summary.
+    #[serde(default)]
+    pub description: String,
+    /// The long description, in markdown.
+    #[serde(default)]
+    pub body: String,
+    /// Total downloads.
+    #[serde(default)]
+    pub downloads: u64,
+    /// Followers.
+    #[serde(default)]
+    pub followers: u64,
+    /// The game versions it has a version for.
+    #[serde(default)]
+    pub game_versions: Vec<String>,
+    /// The loaders it runs on.
+    #[serde(default)]
+    pub loaders: Vec<String>,
+    /// The gallery, in the order the author put it in.
+    #[serde(default)]
+    pub gallery: Vec<ModrinthGalleryImage>,
+}
+
+/// One entry of a project's `gallery` array.
+///
+/// An image is a URL and a caption; the caption has a title and a longer
+/// description, and either may be missing, which is why the page falls back to
+/// the URL when it draws one.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthGalleryImage {
+    /// Where the image is.
+    #[serde(default)]
+    pub url: String,
+    /// The caption's title.
+    #[serde(default)]
+    pub title: String,
+    /// The caption's description.
+    #[serde(default)]
+    pub description: String,
+}
+
+/// One `GET /v2/project/{id}/members` entry (subset).
+///
+/// The entry wraps the *whole* user document, not a cut-down one: this tree once
+/// had a second `ModrinthUser` holding nothing but `username`, which is the same
+/// document as [`ModrinthUser`] below with every other field dropped. Two types
+/// for one object is how a member's name and a profile's name end up parsed by
+/// different code; the member keeps the same type and reads the one field it
+/// draws.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ModrinthMember {
+    /// The user on the team.
+    #[serde(default)]
+    pub user: ModrinthUser,
+    /// Their role: `Owner`, `Member`, and so on.
+    #[serde(default)]
+    pub role: String,
+}
+
+/// Modrinth's news feed: the one Modrinth document this launcher reads that is
+/// not the API.
+///
+/// `App.vue` fetches exactly this URL at startup and takes `res.articles`, so the
+/// panel's news section is a publisher's own file rather than a scraped page. It
+/// is not under `/v2` and it is not a project's metadata; a feed of
+/// announcements, published as JSON for the news page and its readers.
+pub const NEWS_URL: &str = "https://modrinth.com/news/feed/articles.json";
+
+/// The news page the panel's *View all news* button opens: the reference's own
+/// `href` in `App.vue`, spelled once here because the shell draws it and nothing
+/// else in this launcher writes a URL by hand.
+pub const NEWS_PAGE_URL: &str = "https://modrinth.com/news";
+
+/// The feed's own envelope, `{ "articles": [...] }`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct NewsFeed {
+    /// The articles, newest first as the feed publishes them.
+    #[serde(default)]
+    pub articles: Vec<NewsArticle>,
+}
+
+/// One news article.
+///
+/// Five fields, measured off the live feed rather than guessed: the title, the
+/// one-line summary, a thumbnail URL, an ISO-8601 date, and the article's own
+/// link. Everything is defaulted, because a feed is a stranger's JSON and one
+/// article missing a summary should cost the panel a paragraph rather than the
+/// whole section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct NewsArticle {
+    /// The headline.
+    #[serde(default)]
+    pub title: String,
+    /// One line under it.
+    #[serde(default)]
+    pub summary: String,
+    /// The card's image, as a URL on Modrinth's own CDN.
+    #[serde(default)]
+    pub thumbnail: String,
+    /// When it was published, ISO-8601 (`2026-09-07T19:00:00.000Z`).
+    #[serde(default)]
+    pub date: String,
+    /// The article's own page on modrinth.com.
+    #[serde(default)]
+    pub link: String,
+}
+
+/// The month names the reference's `dateStyle: 'long'` uses, in its default
+/// locale. Twelve entries rather than a date crate: this launcher draws one
+/// format, and a dependency that can format any date is a dependency that has to
+/// be kept current for a word.
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+impl NewsArticle {
+    /// The publication date as the reference draws it: `September 7, 2026`.
+    ///
+    /// Read out of the ISO-8601 string's own first ten characters, which is the
+    /// only part of it this needs; a time zone would move the *day* of an evening
+    /// announcement, and the reference reads the same string the same way.
+    ///
+    /// A date that cannot be read is drawn as it was published rather than as
+    /// nothing: a wrong-looking date is a bug report, a missing one is silence.
+    pub fn date_label(&self) -> String {
+        date_label(&self.date)
+    }
+}
+
+/// The publication date as the reference draws it: `September 7, 2026`.
+///
+/// Read out of the ISO-8601 string's own first ten characters, which is the only
+/// part of it this needs; a time zone would move the *day* of an evening
+/// announcement, and the reference reads the same string the same way. A date that
+/// cannot be read comes back as it arrived rather than as nothing: a wrong-looking
+/// date is a bug report, a missing one is silence.
+///
+/// A free function because three documents now carry dates in the same shape -- an
+/// article's publication, a user's `created`, and a project's `published` -- and one
+/// formatter is what keeps them from drifting apart.
+pub fn date_label(iso: &str) -> String {
+    let date = iso.get(..10).unwrap_or_default();
+    let mut parts = date.split('-');
+    let year = parts.next().and_then(|part| part.parse::<i32>().ok());
+    let month = parts.next().and_then(|part| part.parse::<usize>().ok());
+    let day = parts.next().and_then(|part| part.parse::<u32>().ok());
+    match (year, month, day) {
+        (Some(year), Some(month), Some(day)) if (1..=12).contains(&month) => {
+            format!("{} {day}, {year}", MONTHS[month - 1])
+        }
+        _ => iso.to_string(),
+    }
+}
+
+/// One user's profile, as Modrinth's own document writes it.
+///
+/// The reference's page draws this header through `plugin:users|get_user_profile`,
+/// which wraps Labrinth's *v3* user service -- a route outside Modrinth's published
+/// API. What is here is the **published** `/v2/user/{username}` document instead: the
+/// same account, the same fields, and the same URL the reference's own web client
+/// uses, which is why this launcher can draw a real profile without a Modrinth
+/// session. The v3-only halves of that page -- collections, organizations, anything
+/// that needs the reader to be signed in -- are the parts that stay named as absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthUser {
+    /// The account's id, which is what the projects list is asked for by.
+    #[serde(default)]
+    pub id: String,
+    /// The username, which is what `/user/:user` is matched against.
+    #[serde(default)]
+    pub username: String,
+    /// The display name, which is `null` for an account that has not set one.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub name: String,
+    /// Where the avatar is, if they have one.
+    #[serde(default)]
+    pub avatar_url: String,
+    /// Their own sentence about themselves, if they wrote one.
+    #[serde(default)]
+    pub bio: String,
+    /// When the account was created, in the API's ISO-8601 shape.
+    #[serde(default)]
+    pub created: String,
+}
+
+impl ModrinthUser {
+    /// The name to draw: the display name when there is one, the username otherwise.
+    ///
+    /// The reference draws both -- `name` as the heading and `@username` under it --
+    /// and an account with no display name has only the username to draw once.
+    pub fn display_name(&self) -> &str {
+        if self.name.trim().is_empty() {
+            &self.username
+        } else {
+            &self.name
+        }
+    }
+
+    /// Whether the display name is a second name rather than the username repeated.
+    ///
+    /// A heading that is the username and a line under it that is the same string
+    /// with an `@` in front is a line worth skipping.
+    pub fn has_separate_username(&self) -> bool {
+        !self.name.trim().is_empty() && !self.name.eq_ignore_ascii_case(&self.username)
+    }
+
+    /// When they joined, as the feed's dates are written.
+    pub fn joined_label(&self) -> String {
+        date_label(&self.created)
+    }
+}
+
+/// One project a user owns, as `/v2/user/{id}/projects` writes them.
+///
+/// The same documents a search returns, with one difference that matters: the
+/// project document keys its own id as `id`, where a search hit keys it as
+/// `project_id`. That is why this is its own type rather than a second alias on
+/// [`ModrinthSearchHit`] -- a struct that answers to two spellings of the same field
+/// would accept a document that has neither.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthUserProject {
+    /// The project's id.
+    #[serde(default)]
+    pub id: String,
+    /// Its URL slug, which is what a link to it is built from.
+    #[serde(default)]
+    pub slug: String,
+    /// Its title.
+    #[serde(default)]
+    pub title: String,
+    /// Its one-line summary.
+    #[serde(default)]
+    pub description: String,
+    /// When it was published.
+    #[serde(default)]
+    pub published: String,
+    /// Total downloads.
+    #[serde(default)]
+    pub downloads: u64,    /// Its icon, if it has one: `null` for a project that has not uploaded one,
+    /// which is the one field of this document the service marks nullable.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub icon_url: String,
+
+
+    /// Its type (`mod`, `modpack`, `resourcepack`, ...), as the document says.
+    #[serde(default)]
+    pub project_type: String,
+}
+
+/// The profile document for one user, by username or by id.
+///
+/// `/v2/user/{id|username}` answers either, which is what lets the projects list be
+/// asked for by id afterwards: a display name can change between two requests, an id
+/// cannot.
+pub fn user_url(user: &str) -> String {
+    format!("{MODRINTH_BASE_URL}/user/{}", percent_encode(user))
+}
+
+/// Every project one user owns.
+pub fn user_projects_url(user: &str) -> String {
+    format!("{MODRINTH_BASE_URL}/user/{}/projects", percent_encode(user))
+}
+
 /// Percent-encode a query string (RFC 3986 unreserved set left intact).
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -275,6 +643,45 @@ fn hex_nibble(v: u8) -> char {
 mod tests {
     use super::*;
 
+    /// An article with just a date, which is all `date_label` reads.
+    fn dated(date: &str) -> NewsArticle {
+        NewsArticle { date: date.to_string(), ..NewsArticle::default() }
+    }
+
+    #[test]
+    fn a_news_date_is_drawn_the_way_the_reference_draws_it() {
+        // `dateStyle: 'long'` in the reference's own locale: `September 7, 2026`.
+        // The day is not zero-padded, because the reference's formatter is not.
+        assert_eq!(dated("2026-09-07T19:00:00.000Z").date_label(), "September 7, 2026");
+        assert_eq!(dated("2026-01-31T00:00:00.000Z").date_label(), "January 31, 2026");
+        assert_eq!(dated("2026-12-01").date_label(), "December 1, 2026");
+        // A date this launcher cannot read is drawn as it was published rather
+        // than as nothing: a wrong-looking date is a bug report, an empty one is
+        // silence. A month of 13 is not a month.
+        assert_eq!(dated("not a date").date_label(), "not a date");
+        assert_eq!(dated("2026-13-01T00:00:00Z").date_label(), "2026-13-01T00:00:00Z");
+        assert_eq!(dated("").date_label(), "");
+    }
+
+    #[test]
+    fn the_feed_is_an_articles_envelope_and_nothing_else_is_required() {
+        // The shape the live feed serves, measured: one top-level key, and every
+        // article field optional so that one article missing a summary costs the
+        // panel a paragraph rather than the whole section.
+        let feed: NewsFeed = serde_json::from_str(
+            r#"{"articles": [{"title": "A", "date": "2026-09-07T19:00:00.000Z"}]}"#,
+        )
+        .expect("the feed's own shape");
+        assert_eq!(feed.articles.len(), 1);
+        assert_eq!(feed.articles[0].title, "A");
+        assert_eq!(feed.articles[0].summary, "");
+        assert_eq!(feed.articles[0].link, "");
+        // And an envelope with no `articles` at all is an empty feed rather than
+        // a parse failure: the panel draws nothing for it either way.
+        let empty: NewsFeed = serde_json::from_str("{}").expect("no articles key");
+        assert!(empty.articles.is_empty());
+    }
+
     #[test]
     fn search_url_encodes_query_and_limit() {
         assert_eq!(
@@ -313,6 +720,35 @@ mod tests {
         assert_eq!(
             search_url_with_project_type("faithful", "resourcepack"),
             "https://api.modrinth.com/v2/search?query=faithful&limit=50&facets=%5B%5B%22project_type%3Aresourcepack%22%5D%5D"
+        );
+    }
+
+    #[test]
+    fn a_search_url_leaves_out_the_parts_it_does_not_have() {
+        // The three builders above are this one with fields filled in, and the
+        // two rules that matter are here: an absent part is *omitted* rather than
+        // sent empty (`facets=` with nothing after it asks for a project type
+        // called `""` and returns nothing, which reads as a broken search), and
+        // the two optional parts keep the order the API documents.
+        assert_eq!(
+            search_url_parts("sodium", None, None, 20, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20"
+        );
+        assert_eq!(
+            search_url_parts("sodium", Some("mod"), None, 20, 40),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20&offset=40\
+             &facets=%5B%5B%22project_type%3Amod%22%5D%5D"
+        );
+        // An empty string for a filter is an absent filter, not a filter that
+        // matches nothing.
+        assert_eq!(
+            search_url_parts("sodium", Some(""), Some(""), 20, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20"
+        );
+        // And a limit of zero would be a page with no rows in it.
+        assert_eq!(
+            search_url_parts("sodium", None, Some("newest"), 0, 0),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=1&index=newest"
         );
     }
 
@@ -367,6 +803,8 @@ mod tests {
             follows: 0,
             icon_url: String::new(),
             latest_version: String::new(),
+            versions: Vec::new(),
+            categories: Vec::new(),
         };
         assert_eq!(hit.project_ref(), "sodium");
     }
@@ -383,6 +821,8 @@ mod tests {
             follows: 0,
             icon_url: String::new(),
             latest_version: String::new(),
+            versions: Vec::new(),
+            categories: Vec::new(),
         };
         assert_eq!(hit.project_ref(), "ID");
     }
@@ -463,6 +903,7 @@ mod tests {
             version_number: String::new(),
             version_type: String::new(),
             downloads: 0,
+            changelog: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: Vec::new(),
@@ -487,6 +928,7 @@ mod tests {
             version_number: String::new(),
             version_type: String::new(),
             downloads: 0,
+            changelog: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
             files: vec![mk(false, "a.jar"), mk(false, "b.jar")],
@@ -506,6 +948,86 @@ mod tests {
         };
         assert_eq!(f.sha512(), None);
         assert_eq!(f.sha1(), None);
+    }
+
+    #[test]
+    fn a_user_is_asked_for_by_name_and_their_projects_by_their_number() {
+        // `/v2/user/{id|username}` takes either, which is the whole reason the
+        // projects list can be asked for by the id the first answer gives: a
+        // display name can change between two requests, an id cannot.
+        assert_eq!(user_url("jellysquid3"), "https://api.modrinth.com/v2/user/jellysquid3");
+        assert_eq!(
+            user_projects_url("2REoufqX"),
+            "https://api.modrinth.com/v2/user/2REoufqX/projects"
+        );
+        // A name with a space in it is one path segment, not two.
+        assert!(user_url("a b").ends_with("/user/a%20b"));
+    }
+
+    #[test]
+    fn a_user_s_own_document_is_read_field_by_field() {
+        // The shape `GET /v2/user/Modrinth` answers with, trimmed: `name` is null
+        // for an account that has not set one, which is the case the header has to
+        // survive.
+        let body = r#"{
+            "id": "2REoufqX",
+            "username": "Modrinth",
+            "name": null,
+            "avatar_url": "https://cdn.modrinth.com/data/2REoufqX/abc_96.webp",
+            "bio": "An official user account of Modrinth.",
+            "created": "2023-11-13T23:22:36.604990Z",
+            "role": "admin",
+            "badges": 1
+        }"#;
+        let user: ModrinthUser = serde_json::from_str(body).expect("the profile");
+        assert_eq!(user.id, "2REoufqX");
+        assert_eq!(user.username, "Modrinth");
+        assert!(user.avatar_url.ends_with("abc_96.webp"));
+        // A profile with no display name is drawn under its username, and there is
+        // no second name to draw under that.
+        assert_eq!(user.display_name(), "Modrinth");
+        assert!(!user.has_separate_username());
+        assert_eq!(user.joined_label(), "November 13, 2023");
+        // A display name that *is* the username (in any case) is the same answer:
+        // one name rather than the same string twice.
+        let same: ModrinthUser =
+            serde_json::from_str(r#"{"username":"jellysquid3","name":"JellySquid3"}"#)
+                .expect("the profile");
+        assert!(!same.has_separate_username());
+        let named: ModrinthUser =
+            serde_json::from_str(r#"{"username":"jellysquid3","name":"Jelly"}"#)
+                .expect("the profile");
+        assert_eq!(named.display_name(), "Jelly");
+        assert!(named.has_separate_username());
+        // A date that cannot be read is drawn as it arrived rather than as nothing.
+        let odd: ModrinthUser = serde_json::from_str(r#"{"created":"sometime"}"#).expect("parsed");
+        assert_eq!(odd.joined_label(), "sometime");
+    }
+
+    #[test]
+    fn a_user_s_projects_are_the_documents_the_rest_of_the_api_writes() {
+        // Two entries out of `GET /v2/user/jellysquid3/projects`, with the fields
+        // this launcher draws and the key that makes them a type of their own: the
+        // id is `id` here and `project_id` in a search hit.
+        let body = r#"[
+            {"id":"hEOCdOgW","slug":"phosphor","project_type":"mod","title":"Phosphor",
+             "description":"No-compromises lighting engine optimization mod",
+             "published":"2021-01-03T00:58:54.900351Z","downloads":865848,
+             "icon_url":"https://cdn.modrinth.com/data/hEOCdOgW/abc.png"},
+            {"id":"AANobbMI","slug":"sodium","project_type":"mod","title":"Sodium",
+             "description":"Modern rendering engine","downloads":50000000}
+        ]"#;
+        let projects: Vec<ModrinthUserProject> = serde_json::from_str(body).expect("the list");
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].id, "hEOCdOgW");
+        assert_eq!(projects[0].slug, "phosphor");
+        assert_eq!(projects[0].downloads, 865848);
+        assert_eq!(date_label(&projects[0].published), "January 3, 2021");
+        // An entry with no icon is still an entry: the card says so rather than
+        // dropping a project the reader owns.
+        assert!(projects[1].icon_url.is_empty());
+        assert_eq!(projects[1].title, "Sodium");
+        assert!(serde_json::from_str::<Vec<ModrinthUserProject>>("[]").is_ok());
     }
 
     #[test]

@@ -77,16 +77,6 @@ impl Adapter {
         self.hardware && ACCELERATED_BACKENDS.contains(&self.backend_key.as_str())
     }
 
-    /// One line for the About page: `name · backend`, marked when the adapter is
-    /// a software one, because that is the fact most likely to explain an
-    /// unexpectedly heavy frame.
-    pub fn summary(&self) -> String {
-        if self.hardware {
-            format!("{} · {}", self.name, self.backend)
-        } else {
-            format!("{} · {} (software)", self.name, self.backend)
-        }
-    }
 }
 
 /// Everything the probe learned, kept whole so the About page can print it.
@@ -104,31 +94,6 @@ impl Report {
         self.accelerated.is_some()
     }
 
-    /// The most capable *hardware* adapter found, whether or not it qualifies.
-    ///
-    /// Used for reporting only. wgpu lists software adapters first on Windows, so
-    /// "the first adapter" is the one adapter a user is least likely to care
-    /// about.
-    pub fn best_hardware(&self) -> Option<&Adapter> {
-        self.adapters.iter().find(|adapter| adapter.hardware)
-    }
-
-    /// One line for the About page.
-    ///
-    /// Names the adapter that will be used, or — when none will be — the GPU the
-    /// machine actually has, alongside the fact that software rendering was
-    /// chosen. Naming the *first* adapter here would be actively misleading: on
-    /// the machine measured above, wgpu enumerates WARP before the real GPU, so
-    /// the first entry is the software rasteriser.
-    pub fn summary(&self) -> String {
-        if let Some(adapter) = &self.accelerated {
-            return adapter.summary();
-        }
-        match self.best_hardware() {
-            Some(adapter) => format!("{} — software rendering", adapter.summary()),
-            None => "software rendering (no graphics adapter detected)".to_string(),
-        }
-    }
 }
 
 /// wgpu's backend name, spelled the way the rest of the shell writes it.
@@ -226,25 +191,6 @@ pub fn forced_backend(explicit: Option<&OsStr>, report: &Report) -> Option<&'sta
 /// answer is fixed for the life of the process and only the About page reads it.
 static DETECTED: OnceLock<Report> = OnceLock::new();
 
-/// The report produced by [`select_renderer`], if it has run.
-pub fn detected() -> Option<&'static Report> {
-    DETECTED.get()
-}
-
-/// Which renderer this process is running, as far as it can know from here.
-///
-/// When nothing pins `ICED_BACKEND`, iced tries `wgpu` first and would fall back
-/// only if no compositor could be built — so this reports what was *asked for*,
-/// and [`detected`] carries the adapter evidence behind the request. It is
-/// deliberately not phrased as a certainty about the frame that just got drawn:
-/// nothing inside the application can observe which compositor won.
-pub fn active_backend() -> &'static str {
-    match std::env::var(BACKEND_ENV) {
-        Ok(value) if value == SOFTWARE_BACKEND => "tiny-skia (CPU rasteriser)",
-        _ => "wgpu (GPU compositor)",
-    }
-}
-
 /// Probe the machine and pin `ICED_BACKEND` accordingly.
 ///
 /// Must run before iced builds its compositor, which happens inside `App::run`;
@@ -326,18 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn the_reported_machine_is_pinned_to_the_rasteriser() {
-        let report = the_reported_machine();
-        assert!(!report.accelerated_available(), "nothing there qualifies");
-        assert!(
-            report.summary().contains("software rendering"),
-            "the summary must not imply GPU compositing: {}",
-            report.summary()
-        );
-        assert_eq!(forced_backend(None, &report), Some("tiny-skia"));
-    }
-
-    #[test]
     fn a_machine_with_a_real_backend_keeps_iceds_own_order() {
         let machine = report(vec![adapter("GeForce RTX 4070", "dx12", true)]);
         assert!(machine.accelerated_available());
@@ -393,54 +327,4 @@ mod tests {
         assert_eq!(backend_name("something-new"), "something-new");
     }
 
-    #[test]
-    fn the_report_names_the_gpu_rather_than_the_software_adapter() {
-        // wgpu enumerates WARP *before* the real GPU, so taking the first entry
-        // reported "Microsoft Basic Render Driver" for a machine whose GPU is an
-        // Intel HD 4400. The report has to name the hardware the user has.
-        let machine = the_reported_machine();
-        let summary = machine.summary();
-        assert!(
-            summary.contains("Intel(R) HD Graphics 4400"),
-            "the summary should name the real GPU: {summary}"
-        );
-        assert!(
-            !summary.contains("Basic Render Driver"),
-            "and not the software rasteriser it is declining to use: {summary}"
-        );
-        assert!(summary.contains("software"), "while saying it will not be used: {summary}");
-    }
-
-    #[test]
-    fn a_machine_with_no_adapter_says_so() {
-        assert!(Report::default().summary().contains("no graphics adapter"));
-        assert!(Report::default().best_hardware().is_none());
-    }
-
-    /// Informational: run with `--nocapture` to see what this machine offers.
-    /// Asserts nothing, because a build machine may legitimately have no GPU.
-    #[test]
-    fn report_what_this_machine_offers() {
-        let report = probe();
-        println!("--- every adapter wgpu can see ---");
-        for adapter in &report.adapters {
-            println!(
-                "  {} | {} | hardware={} | qualifies={}",
-                adapter.name,
-                adapter.backend,
-                adapter.hardware,
-                adapter.qualifies()
-            );
-        }
-        println!("--- decision ---");
-        println!(
-            "  summary: {}",
-            report.summary()
-        );
-        println!(
-            "  accelerated: {} | forced backend: {:?}",
-            report.accelerated_available(),
-            forced_backend(None, &report)
-        );
-    }
 }

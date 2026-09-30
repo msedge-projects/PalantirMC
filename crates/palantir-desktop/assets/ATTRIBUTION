@@ -1,19 +1,16 @@
-Instance icons in icons/ are carved from the Prism Launcher binary
-(prismlauncher.exe), (c) Prism Launcher contributors, licensed GPL-3.0-only.
+The carved instance icons that lived in `icons/` were removed with the shell that
+drew them.
 
-Our workspace is already GPL-3.0-only, so the carved GPL assets stay under
-the same license. The carved directory itself lives outside this repo and is
-never moved; only the mapped PNGs listed below were copied here under
-canonical names.
+They were PNGs mapped out of the Prism Launcher binary (`prismlauncher.exe`),
+(c) Prism Launcher contributors, GPL-3.0-only, kept under this workspace's own
+GPL-3.0-only licence. Their reader was `crates/palantir-desktop/src/icons.rs`,
+whose only caller was the old shell (`app.rs`); when that shell was deleted
+nothing was left to draw them, so the art went with its reader instead of staying
+in the tree as files nothing references.
 
-These are *instance* icons: the Minecraft-themed art a user picks per instance,
-and recognises from Prism. The launcher's own chrome (rail, dialogs, inline
-buttons) is not carved art at all — it is drawn as tintable vectors in
-`crate::glyphs`. The toolbar PNGs that used to sit here (play, kill, minus,
-check, help, about, folder, update, refresh) were removed when the chrome moved
-to vectors, because a bitmap cannot take the colour of the button it sits in.
+The mapping, for `git log`'s benefit (carved filename -> meaning -> canonical
+name) -- all that is left of them:
 
-Verified visual mapping (carved filename -> meaning -> canonical name):
 - 128x128_5178_169.png = chicken head -> chicken_legacy.png
 - 50x50_1246_137.png = enderman head -> enderman_legacy.png
 - 128x128_18345_174.png = enderpearl orb -> enderpearl_legacy.png
@@ -24,3 +21,10 @@ Verified visual mapping (carved filename -> meaning -> canonical name):
 - 32x32_1361_109.png = creeper -> creeper.png
 - 32x32_228_108.png = TNT -> tnt.png
 - 32x32_2270_93.png = yellow gear -> gear.png
+
+What ships now: the launcher's own chrome is the reference Modrinth App's icon
+set, compiled from its vendored SVGs by `tools/gen_icons.py` into `icons_gen.rs`
+and stroked by `icon.rs` -- see `THIRD_PARTY_NOTICES.md`, which carries that
+notice for the source and the binary -- plus the brand art in `assets/brand/`.
+No Prism-derived art is shipped. Instance art, when an instance page draws it,
+comes from the reference's own set on the same terms.

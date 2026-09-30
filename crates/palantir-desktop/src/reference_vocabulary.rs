@@ -888,11 +888,13 @@ fn the_chrome_is_the_scoped_copy() {
     // came from is exactly the shape of claim this module retires: the row is
     // read and the two are compared. `SCOPED` is compiled in, so this holds
     // without the vendored tree too; when the tree moves and the generator is
-    // re-run, this is the test that says the chrome moved with it.
+    // re-run, this is the test that says the chrome moved with it. The shell
+    // these rows name is the only one there is now: the old shell's own copies
+    // of the three went with it.
     for (token, ours, name) in [
-        ("--top-bar-height", crate::app::TITLE_BAR_HEIGHT, "TITLE_BAR_HEIGHT"),
-        ("--left-bar-width", crate::app::RAIL_WIDTH, "RAIL_WIDTH"),
-        ("--right-bar-width", crate::app::SIDEBAR_WIDTH, "SIDEBAR_WIDTH"),
+        ("--top-bar-height", crate::shell::BAR, "shell::BAR"),
+        ("--left-bar-width", crate::shell::RAIL, "shell::RAIL"),
+        ("--right-bar-width", crate::shell::PANEL, "shell::PANEL"),
     ] {
         let Some(row) = theme_tokens::SCOPED
             .iter()

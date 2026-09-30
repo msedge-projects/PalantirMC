@@ -13,15 +13,20 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 sha2 = "0.10"
+# The content store is named by digests, and the services do not agree on which
+# one: Mojang publishes a sha1 per asset and library and a sha1 for the asset
+# index itself, Modrinth publishes a sha1 and a sha512 per file, and Prism's
+# metadata publishes a sha256. All three are verified rather than trusted, so all
+# three are computed. Same version the desktop crate and this one's own dev
+# dependencies already use, so it adds no package to the lock file.
+sha1 = "0.10"
 # `auth` builds the entitlements request id itself: the endpoint takes a UUID
 # and answers an empty item list without one. Already in the workspace lock file.
 uuid.workspace = true
+# `forge` reads the launch profile out of the loader's installer jar, which is
+# a zip. Same version `palantir-loader` already uses, so it adds no package to
+# the lock file.
+zip = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
-# The live test checks that a runtime entry's published digest is the digest of
-# the manifest its URL serves — the one assumption the whole Java-download path
-# rests on: if it were wrong, every install would be refused as tampered with,
-# and only a live test can notice, because a fixture would have been written
-# with the same assumption. Same version the desktop crate already uses.
-sha1 = "0.10"

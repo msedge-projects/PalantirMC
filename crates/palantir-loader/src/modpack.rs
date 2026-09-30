@@ -303,6 +303,46 @@ pub fn import_mrpack(
     Ok(instance.root().to_path_buf())
 }
 
+/// Apply a Modrinth (`.mrpack`) pack to an instance that already exists.
+///
+/// The half of [`import_mrpack`] that creates nothing: the pack's `overrides/`
+/// tree is written over the instance root and its `fabric-loader`/
+/// `quilt-loader`/`forge`/`neoforge` dependency is registered in the instance's
+/// own `mmc-pack.json`. What the caller does with the answer is fetch the files
+/// the index lists, because this crate performs no network access at all.
+///
+/// **Nothing here is deleted, and that is deliberate.** The reference's
+/// *Re-install modpack* says it "resets the {type} content to its original state,
+/// removing any mods or content you have added", and it does: its install path
+/// clears the pack's own folders first. This launcher's does not, and the reason
+/// is the same one *Repair instance* gives -- a reader's worlds, their configs and
+/// the mods they added are theirs, and a button that can take them away is a
+/// button that has to be sure. Re-applying the pack puts back every file the pack
+/// names and leaves everything else where it is, which is what the card's own
+/// sentence says (G133).
+///
+/// Only `.mrpack` is accepted: a CurseForge archive's `manifest.json` names its
+/// files by CurseForge project and file id, which resolve only through an API
+/// this launcher has no key for, so re-applying one would put back the overrides
+/// and none of the mods.
+pub fn apply_mrpack(
+    zip_bytes: impl AsRef<[u8]>,
+    instance: &palantir_core::instance::Instance,
+) -> Result<PackPlan> {
+    let data = zip_bytes.as_ref();
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(data)).map_err(|e| Error::Zip(e.to_string()))?;
+    if archive.by_name("modrinth.index.json").is_err() {
+        return Err(Error::InvalidPack(
+            "missing modrinth.index.json".to_string(),
+        ));
+    }
+    let plan = plan_mrpack(&mut archive)?;
+    extract_overrides(&mut archive, plan.overrides.as_str(), instance.root())?;
+    register_loaders(instance, &plan.loaders)?;
+    Ok(plan)
+}
+
 /// One file a pack's index lists.
 ///
 /// Nothing in this crate fetches these — the module performs no network access
@@ -794,5 +834,94 @@ mod tests {
         assert!(!file.satisfied_at(&dest), "a short file is fetched again");
         std::fs::write(&dest, b"abcd").unwrap();
         assert!(file.satisfied_at(&dest));
+    }
+
+    #[test]
+    fn applying_a_pack_over_an_instance_keeps_what_the_reader_added() {
+        // The G133 half of the pack path: an instance that already exists gets
+        // the pack's overrides written over its root and its loader registered,
+        // and *nothing is deleted* -- not the worlds and mods the reader added,
+        // and not a file the pack's previous version wrote that this one does not
+        // name. It is the property the installation tab's own sentence promises.
+        let index = serde_json::json!({
+            "formatVersion": 1,
+            "dependencies": {"minecraft": "1.21.4", "fabric-loader": "0.16.9"},
+            "overrides": "overrides"
+        });
+        let bytes = build_zip(&[
+            (
+                "modrinth.index.json",
+                serde_json::to_vec(&index).unwrap().as_slice(),
+            ),
+            ("overrides/config/pack.cfg", b"new"),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let instances = dir.path().join("instances");
+        let instance =
+            palantir_core::instance::Instance::create(&instances, "Cobblemon", "1.21.4").unwrap();
+        let root = instance.root().to_path_buf();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::create_dir_all(root.join("saves").join("world")).unwrap();
+        std::fs::create_dir_all(root.join("mods")).unwrap();
+        // What the pack's previous version wrote, and the three things a
+        // re-install must not touch.
+        std::fs::write(root.join("config").join("pack.cfg"), b"old").unwrap();
+        std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
+        std::fs::write(root.join("saves").join("world").join("level.dat"), b"my world")
+            .unwrap();
+        std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
+
+        let plan = apply_mrpack(bytes.as_slice(), &instance).unwrap();
+        assert_eq!(plan.minecraft, "1.21.4");
+        // The override is written over the root with `overrides/` stripped, and a
+        // file of the same name is replaced rather than merged.
+        assert_eq!(
+            std::fs::read(root.join("config").join("pack.cfg")).unwrap(),
+            b"new"
+        );
+        // The loader is registered, so the instance the pack was laid over
+        // resolves the pack's own profile at its next launch.
+        let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).unwrap();
+        assert!(pack.contains("net.fabricmc.fabric-loader"), "pack: {pack}");
+        assert!(pack.contains("0.16.9"), "pack: {pack}");
+        // And nothing is gone.
+        assert!(
+            root.join("config").join("left-behind.cfg").is_file(),
+            "a config the new pack does not name stays where it is"
+        );
+        assert!(
+            root.join("saves").join("world").join("level.dat").is_file(),
+            "the reader's world stays"
+        );
+        assert!(
+            root.join("mods").join("manual.jar").is_file(),
+            "the mod the reader added stays"
+        );
+    }
+
+    #[test]
+    fn applying_a_curseforge_archive_is_refused_because_its_files_cannot_be_fetched() {
+        // `apply_mrpack` reads the Modrinth index or says why it cannot: a
+        // CurseForge archive's files are project/file id pairs that resolve only
+        // through an API this launcher has no key for, so re-applying one would
+        // put back the overrides and none of the mods.
+        let manifest = serde_json::json!({
+            "manifestType": "minecraftModpack",
+            "manifestVersion": 1,
+            "minecraft": {"version": "1.20.1", "modLoaders": []},
+            "overrides": "overrides"
+        });
+        let bytes = build_zip(&[(
+            "manifest.json",
+            serde_json::to_vec(&manifest).unwrap().as_slice(),
+        )]);
+        let dir = tempfile::tempdir().unwrap();
+        let instance =
+            palantir_core::instance::Instance::create(dir.path(), "Curse", "1.20.1").unwrap();
+        let error = apply_mrpack(bytes.as_slice(), &instance).unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidPack(why) if why.contains("modrinth.index.json")),
+            "got: {error:?}"
+        );
     }
 }

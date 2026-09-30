@@ -231,7 +231,7 @@ pub fn download_many_with_progress(
 }
 
 /// Return the sibling temporary path `<dest>.part` for atomic downloads.
-fn part_path(dest: &Path) -> PathBuf {
+pub(crate) fn part_path(dest: &Path) -> PathBuf {
     let mut os: OsString = dest.as_os_str().to_owned();
     os.push(".part");
     PathBuf::from(os)

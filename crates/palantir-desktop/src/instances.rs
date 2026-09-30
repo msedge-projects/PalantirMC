@@ -12,17 +12,14 @@
 
 use std::path::{Path, PathBuf};
 
-use palantir_core::instance::{groups::Groups, Instance};
+use palantir_core::instance::Instance;
 use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::defaults;
-use palantir_gui::InstanceEntry;
+use crate::model::InstanceEntry;
 
 use crate::catalog::LoaderKind;
 use crate::mods::list_mods;
-
-/// Label used for instances that belong to no group.
-pub const UNGROUPED_LABEL: &str = "Ungrouped";
 
 /// Everything a card and the detail sidebar need about one instance.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,24 +78,29 @@ impl InstanceCard {
     }
 
     /// Whether a mod loader is installed.
+    #[cfg(test)]
     pub fn has_loader(&self) -> bool {
         self.loader.loads_mods() && !self.loader_version.is_empty()
     }
 }
 
-/// Result of a full background scan: cards plus the group index and whatever
-/// was pre-selected.
+/// Result of a full background scan: the cards, and the directory they came
+/// from.
+///
+/// `selected` and `status` were the old shell's summary strip — the tests are
+/// their only reader now, so they are gated rather than deleted: they are what
+/// pins the scan's outcome.
 #[derive(Debug, Clone, Default)]
 pub struct LoadedInstances {
     /// One summary per discovered instance, name-sorted.
     pub cards: Vec<InstanceCard>,
-    /// Group membership + collapsed flags.
-    pub groups: Groups,
     /// Pre-selected instance id (`InstanceDir` override applied).
+    #[cfg(test)]
     pub selected: Option<String>,
     /// Resolved instances directory.
     pub instances_dir: PathBuf,
     /// One-line outcome for the status strip.
+    #[cfg(test)]
     pub status: String,
 }
 
@@ -153,30 +155,42 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
 /// empty list plus a status line, never a crash.
 pub fn load(paths: &PalantirPaths) -> LoadedInstances {
     let instances_dir = paths.configured_instances_dir();
-    let groups = Groups::load(paths);
-    let model = match palantir_gui::InstanceListModel::load(paths) {
+    let model = match crate::model::InstanceListModel::load(paths) {
         Ok(model) => model,
-        Err(error) => {
+        Err(_error) => {
             return LoadedInstances {
-                groups,
                 instances_dir: instances_dir.clone(),
-                status: format!("listing instances failed: {error}"),
+                // The message goes only to the tests' status field — the binary
+                // has no strip to put it on, so the binding is named for the
+                // build that does not use it.
+                #[cfg(test)]
+                status: format!("listing instances failed: {_error}"),
                 ..Default::default()
             };
         }
     };
     let cards: Vec<InstanceCard> =
         model.entries().iter().map(|entry| summarize(&instances_dir, entry)).collect();
+    #[cfg(test)]
     let selected = resolve_selected_id(paths, &cards);
+    #[cfg(test)]
     let status = if cards.is_empty() {
         format!("No instances yet — press N to create one (looked in {}).", instances_dir.display())
     } else {
         format!("{} instance(s) ready", cards.len())
     };
-    LoadedInstances { cards, groups, selected, instances_dir, status }
+    LoadedInstances {
+        cards,
+        instances_dir,
+        #[cfg(test)]
+        selected,
+        #[cfg(test)]
+        status,
+    }
 }
 
 /// Pre-selection for startup: `SelectedInstance` when it still exists.
+#[cfg(test)]
 pub fn resolve_selected_id(paths: &PalantirPaths, cards: &[InstanceCard]) -> Option<String> {
     let want = paths.selected_instance_id()?;
     if want.trim().is_empty() {
@@ -273,9 +287,11 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
                 // and no libraries at all: the loader jar, the ASM stack it
                 // loads and Forge's ForgeWrapper never reached the classpath, so
                 // the game stopped on the first missing class. The invented
-                // entry points were wrong too -- the metadata starts Forge and
-                // NeoForge through ForgeWrapper, not through the launchwrapper
-                // or bootstraplauncher names that were written here.
+                // entry points were wrong too -- the metadata then started Forge
+                // and NeoForge through ForgeWrapper, not through the
+                // launchwrapper or bootstraplauncher names that were written
+                // here, and the loader's own installer has since replaced that
+                // rewrite entirely (G119).
                 if let Err(error) = register_loader(&instance, uid, build) {
                     warnings.push(format!(
                         "{} {} was not installed: {error}",
@@ -383,6 +399,7 @@ pub fn import_icon_file(paths: &PalantirPaths, source: &Path, id: &str) -> Resul
 }
 
 /// Install an icon file onto an existing instance and persist the key.
+#[cfg(test)]
 pub fn set_instance_icon(paths: &PalantirPaths, id: &str, source: &Path) -> Result<String, String> {
     let key = import_icon_file(paths, source, id)?;
     let mut instance = Instance::open(&paths.configured_instances_dir().join(id))
@@ -569,7 +586,7 @@ mod tests {
         );
 
         // …and the card agrees with the disk.
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Fabric);
         assert_eq!(card.loader_version, "0.19.5");
@@ -584,8 +601,10 @@ mod tests {
         let created = create(&paths, &NewInstance::vanilla("Plain", "26.2")).unwrap();
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         let profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
-        // `net.minecraft` plus the lwjgl3 component every Prism profile carries.
-        assert_eq!(profile.components().len(), 2);
+        // One component. The `org.lwjgl3` slot Prism writes beside it is not
+        // needed against Mojang's own file, which carries the LWJGL libraries
+        // itself, so a new instance does not name it.
+        assert_eq!(profile.components().len(), 1);
         assert_eq!(profile.get("net.minecraft").unwrap().version, "26.2");
         assert!(
             !profile
@@ -597,7 +616,7 @@ mod tests {
         assert!(!instance.patches_dir().join("net.fabricmc.fabric-loader.json").exists());
 
         // …and the card agrees with the disk.
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Vanilla);
         assert_eq!(card.subtitle(), "26.2");
@@ -647,7 +666,7 @@ mod tests {
         let created = create(&paths, &spec).unwrap();
         assert_eq!(created.warnings.len(), 1);
         assert!(created.warnings[0].contains("no Fabric build"));
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
         assert_eq!(card.loader, LoaderKind::Vanilla);
         assert_eq!(card.subtitle(), "1.21.1");
@@ -704,7 +723,7 @@ mod tests {
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         assert_eq!(instance.settings().get_i64("MaxMemAlloc", 0), 6144);
         assert!(instance.settings().get_bool("OverrideMemory", false));
-        let model = palantir_gui::InstanceListModel::load(&paths).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
         assert_eq!(summarize(&paths.instances_dir(), &model.entries()[0]).max_mem_mb, 6144);
     }
 

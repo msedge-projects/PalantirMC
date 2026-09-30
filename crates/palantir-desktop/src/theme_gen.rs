@@ -1033,33 +1033,31 @@ pub const MOTION: &[Motion] = &[
     Motion { property: "all", millis: 300, curve: Curve::Ease, source: "ui/src/components/chart/Chart.vue" },
     Motion { property: "all", millis: 300, curve: Curve::EaseInOut, source: "ui/src/components/nav/PopupNotificationPanel.vue" },
     Motion { property: "all", millis: 500, curve: Curve::EaseOut, source: "ui/src/layouts/wrapped/hosting/manage/backups.vue" },
-    Motion { property: "all", millis: 200000, curve: Curve::EaseInOut, source: "ui/src/layouts/wrapped/hosting/manage/backups.vue" },
     Motion { property: "background-color", millis: 200, curve: Curve::EaseInOut, source: "app-frontend/src/pages/project/Index.vue" },
     Motion { property: "bottom", millis: 250, curve: Curve::EaseInOut, source: "ui/src/components/base/FloatingActionBar.vue" },
     Motion { property: "box-shadow", millis: 100, curve: Curve::EaseInOut, source: "app-frontend/src/assets/stylesheets/global.scss" },
     Motion { property: "clip-path", millis: 250, curve: Curve::EaseOutExpo, source: "ui/src/components/base/Slider.vue" },
     Motion { property: "filter", millis: 100, curve: Curve::EaseInOut, source: "ui/src/components/base/DropdownSelect.vue" },
     Motion { property: "filter", millis: 200, curve: Curve::EaseInOut, source: "ui/src/components/base/DropdownSelect.vue" },
-    Motion { property: "filter", millis: 200000, curve: Curve::EaseInOut, source: "ui/src/components/skin/SkinButton.vue" },
     Motion { property: "height", millis: 200, curve: Curve::Ease, source: "ui/src/layouts/shared/files-tab/components/upload/FileUploadDropdown.vue" },
-    Motion { property: "height", millis: 220000, curve: Curve::EaseInOut, source: "ui/src/components/servers/access/AuditLogTable.vue" },
+    Motion { property: "height", millis: 220, curve: Curve::EaseInOut, source: "ui/src/components/servers/access/AuditLogTable.vue" },
     Motion { property: "opacity", millis: 125, curve: Curve::EaseOut, source: "ui/src/components/base/SmartClickable.vue" },
     Motion { property: "opacity", millis: 200, curve: Curve::EaseInOut, source: "app-frontend/src/assets/stylesheets/global.scss" },
+    Motion { property: "opacity", millis: 250, curve: Curve::EaseInOut, source: "ui/src/components/base/BaseTerminal.vue" },
     Motion { property: "opacity", millis: 300, curve: Curve::EaseOut, source: "ui/src/components/modal/OpenInAppModal.vue" },
     Motion { property: "opacity", millis: 300, curve: Curve::Ease, source: "ui/src/components/base/AppearingProgressBar.vue" },
     Motion { property: "opacity", millis: 300, curve: Curve::EaseInOut, source: "app-frontend/src/components/ui/SplashScreen.vue" },
-    Motion { property: "opacity", millis: 250000, curve: Curve::EaseInOut, source: "ui/src/components/base/BaseTerminal.vue" },
-    Motion { property: "opacity", millis: 350000, curve: Curve::EaseInOut, source: "app-frontend/src/components/ui/screenshots-page/card.vue" },
-    Motion { property: "outline-color", millis: 150000, curve: Curve::Ease, source: "app-frontend/src/components/ui/instance_settings/icon-editor-modal/index.vue" },
+    Motion { property: "opacity", millis: 350, curve: Curve::EaseInOut, source: "app-frontend/src/components/ui/screenshots-page/card.vue" },
+    Motion { property: "outline-color", millis: 150, curve: Curve::Ease, source: "app-frontend/src/components/ui/instance_settings/icon-editor-modal/index.vue" },
     Motion { property: "right", millis: 250, curve: Curve::EaseInOut, source: "ui/src/components/nav/NotificationPanel.vue" },
     Motion { property: "scale", millis: 125, curve: Curve::EaseOut, source: "ui/src/components/base/SmartClickable.vue" },
     Motion { property: "stroke-dashoffset", millis: 50, curve: Curve::Linear, source: "ui/src/components/modal/OpenInAppModal.vue" },
     Motion { property: "transform", millis: 62, curve: Curve::Ease, source: "assets/styles/classes.scss" },
     Motion { property: "transform", millis: 125, curve: Curve::EaseInOut, source: "assets/styles/classes.scss" },
     Motion { property: "transform", millis: 200, curve: Curve::Ease, source: "ui/src/components/base/DropdownSelect.vue" },
+    Motion { property: "transform", millis: 200, curve: Curve::EaseInOut, source: "ui/src/layouts/wrapped/hosting/manage/backups.vue" },
     Motion { property: "transform", millis: 300, curve: Curve::EaseInOut, source: "assets/styles/classes.scss" },
     Motion { property: "transform", millis: 2000, curve: Curve::EaseInOut, source: "ui/src/components/brand/TextLogo.vue" },
-    Motion { property: "transform", millis: 200000, curve: Curve::EaseInOut, source: "ui/src/layouts/wrapped/hosting/manage/backups.vue" },
     Motion { property: "width", millis: 200, curve: Curve::EaseInOut, source: "ui/src/components/base/ProgressBar.vue" },
     Motion { property: "width", millis: 250, curve: Curve::EaseOutExpo, source: "ui/src/components/base/Slider.vue" },
     Motion { property: "width", millis: 300, curve: Curve::EaseOut, source: "app-frontend/src/components/ui/ProgressBar.vue" },
@@ -1280,6 +1278,16 @@ mod tests {
         assert!(!MOTION.is_empty());
         for motion in MOTION {
             assert!(motion.millis > 0, "{} has no duration", motion.property);
+            // The reference's longest transition is 2s. Every row past this
+            // bound written so far was the generator's own unit error, not a
+            // slow animation: `--check` compares bytes, so only a bound in the
+            // tool catches a wrong number both files agree on.
+            assert!(
+                motion.millis <= 2000,
+                "{} declares {}ms, longer than any transition in the reference",
+                motion.property,
+                motion.millis
+            );
             assert!(motion.source.ends_with(".css") || motion.source.ends_with(".scss")
                 || motion.source.ends_with(".vue"));
         }

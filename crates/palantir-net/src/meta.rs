@@ -108,6 +108,13 @@ impl BlockingHttpFetcher {
     ///
     /// Shared by both body shapes so a 404 is reported the same way whether the
     /// caller wanted the bytes or a stream of them.
+    ///
+    /// A refusal is reported the way the pool reports one: [`crate::Error::status_with`]
+    /// carries the status in the field a retry policy reads *and* whatever
+    /// sentence the service put in the body. This used to be an
+    /// `Error::http(url, format!("http status {status}"))`, which read the same in
+    /// a log and left `status: None` -- so a metadata 404 with a real status was
+    /// a failure the retry line could not tell from a dropped connection.
     fn get(&self, url: &str) -> Result<reqwest::blocking::Response, crate::Error> {
         let response = self
             .client
@@ -117,7 +124,9 @@ impl BlockingHttpFetcher {
             .map_err(|e| crate::Error::http(url, e.to_string()))?;
         let status = response.status();
         if !status.is_success() {
-            return Err(crate::Error::http(url, format!("http status {status}")));
+            let sentence =
+                crate::engine::http::failure_sentence(&crate::engine::http::failure_body(response));
+            return Err(crate::Error::status_with(url, status.as_u16(), sentence.as_deref()));
         }
         Ok(response)
     }

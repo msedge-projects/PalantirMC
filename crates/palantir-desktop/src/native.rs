@@ -26,6 +26,7 @@
 //! carry no `cfg` and are unit tested everywhere, so the only untested code is
 //! the FFI call itself.
 
+#[cfg(test)]
 use iced::mouse;
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
@@ -57,6 +58,7 @@ pub enum ResizeEdge {
 
 impl ResizeEdge {
     /// Every edge and corner.
+    #[cfg(test)]
     pub const ALL: [ResizeEdge; 8] = [
         ResizeEdge::NorthWest,
         ResizeEdge::North,
@@ -69,6 +71,7 @@ impl ResizeEdge {
     ];
 
     /// A stable key for tests and tooltips.
+    #[cfg(test)]
     pub const fn label(self) -> &'static str {
         match self {
             ResizeEdge::North => "north",
@@ -104,6 +107,7 @@ impl ResizeEdge {
     ///
     /// iced has no diagonal resize cursors, so corners borrow the axis they
     /// mostly move along rather than showing nothing.
+    #[cfg(test)]
     pub const fn interaction(self) -> mouse::Interaction {
         match self {
             ResizeEdge::North | ResizeEdge::South => mouse::Interaction::ResizingVertically,
@@ -280,8 +284,11 @@ pub fn beyond_every_monitor_x() -> f32 {
 /// dragging a frame works), and the foreground window at that moment is not
 /// necessarily ours. The process check means a failed walk does nothing rather
 /// than resizing someone else's window.
+///
+/// `pub(crate)` for [`crate::pick`]'s one use: a file dialog wants this window as its
+/// owner, or it opens unowned and can end up behind the launcher it belongs to.
 #[cfg(windows)]
-fn own_hwnd() -> Option<isize> {
+pub(crate) fn own_hwnd() -> Option<isize> {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindow, GetWindowThreadProcessId, IsWindowVisible, GW_OWNER,
@@ -317,33 +324,6 @@ fn own_hwnd() -> Option<isize> {
     match FOUND.load(Ordering::Relaxed) {
         0 => None,
         hwnd => Some(hwnd),
-    }
-}
-
-/// Hand the pointer to Windows and let it run a native resize loop from `edge`.
-#[cfg(windows)]
-pub fn start_resize(edge: ResizeEdge) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_NCLBUTTONDOWN};
-
-    let Some(hwnd) = own_hwnd() else {
-        return;
-    };
-
-    // SAFETY: both calls take the handle we just verified belongs to this
-    // process; neither dereferences a pointer of ours.
-    unsafe {
-        // Windows only starts its resize loop for the thread that holds the
-        // mouse capture, and that is this one — the UI thread.
-        ReleaseCapture();
-        // `PostMessage` rather than `SendMessage` on purpose. `SendMessage`
-        // would enter Windows' modal resize loop underneath our own `update`,
-        // and everything pumped during that loop — including our redraws —
-        // could re-enter iced mid-update. winit avoids the same hazard by
-        // running this on a worker thread; posting keeps it on the ordinary
-        // message pump instead, which is the path a real user-driven resize
-        // already takes.
-        PostMessageW(hwnd, WM_NCLBUTTONDOWN, edge.hit_code() as usize, 0);
     }
 }
 
@@ -818,12 +798,6 @@ pub fn window_maximized() -> Option<bool> {
 }
 
 /// Whether the pointer is resting on the title bar's maximize button.
-#[cfg(windows)]
-pub fn maximize_button_hovered() -> bool {
-    MAXIMIZE_HOVERED.load(Ordering::Relaxed)
-}
-
-/// Whether the pointer is resting on the title bar's maximize button.
 #[cfg(not(windows))]
 pub fn maximize_button_hovered() -> bool {
     false
@@ -838,11 +812,16 @@ pub fn maximize_button_hovered() -> bool {
 const PERSONALIZE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 /// Where Windows keeps its own version numbers.
 #[cfg(windows)]
+#[cfg(test)]
 const CURRENT_VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
 /// A UTF-16, NUL-terminated copy of `text` for the `...W` Win32 entry points.
+///
+/// Shared with [`crate::pick`], which is the other module that hands a string to
+/// Windows: the file dialog takes its title, its filter and its default suffix in the
+/// same shape these calls do.
 #[cfg(windows)]
-fn wide(text: &str) -> Vec<u16> {
+pub(crate) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
@@ -877,6 +856,7 @@ fn registry_dword(root: isize, subkey: &str, value: &str) -> Option<u32> {
 
 /// Read a `REG_SZ` from the registry, or `None` if it is not there.
 #[cfg(windows)]
+#[cfg(test)]
 fn registry_string(root: isize, subkey: &str, value: &str) -> Option<String> {
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
@@ -947,12 +927,14 @@ pub fn system_prefers_light() -> bool {
 ///
 /// The build number is what actually distinguishes one Windows 10 from
 /// another, so it belongs in the label. Pure enough to test without a registry.
+#[cfg(test)]
 pub fn version_label(major: u32, minor: u32, build: &str) -> String {
     format!("Windows {major}.{minor}.{build}")
 }
 
 /// The running Windows version, or `None` when it cannot be read.
 #[cfg(windows)]
+#[cfg(test)]
 pub fn windows_version() -> Option<String> {
     use windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE;
 

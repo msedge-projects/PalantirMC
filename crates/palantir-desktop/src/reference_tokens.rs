@@ -53,7 +53,8 @@ use std::path::{Path, PathBuf};
 use iced::font::Weight;
 use iced::Color;
 
-use crate::theme::{self, ColorTheme, Palette};
+use crate::color_theme::ColorTheme;
+use crate::theme::{self, Palette};
 
 /// One rem in the reference's own scale.
 ///
@@ -479,7 +480,12 @@ impl Sheets {
             ColorTheme::Oled => &self.oled,
             // `System` resolves to one of the two the shell offers, and the two
             // it resolves to are here: a claim is never made about `System`.
-            ColorTheme::Dark | ColorTheme::System => &self.dark,
+            //
+            // `Retro` is here for totality and is unreachable: it is not in
+            // `CLAIMED_THEMES`, the hand-written palette has no retro colours for a
+            // claim to be about, and the reference's retro is resolved by
+            // `theme_gen`, whose own generated tests cover it.
+            ColorTheme::Dark | ColorTheme::System | ColorTheme::Retro => &self.dark,
         }
     }
 
@@ -876,7 +882,11 @@ fn claims(theme: ColorTheme) -> Vec<Claim> {
     let (palette, mut list) = match theme {
         ColorTheme::Light => (Palette::light(), light_claims(&Palette::light())),
         ColorTheme::Oled => (Palette::oled(), oled_claims(&Palette::oled())),
-        ColorTheme::Dark | ColorTheme::System => (Palette::dark(), dark_claims(&Palette::dark())),
+        // `Retro` rides with dark for the same reason `System` does, and is
+        // unreachable for a different one: see `for_theme`.
+        ColorTheme::Dark | ColorTheme::System | ColorTheme::Retro => {
+            (Palette::dark(), dark_claims(&Palette::dark()))
+        }
     };
     // Radii are modeless -- no `--radius-*` token moves between modes -- so one
     // copy of the claims rides along with whichever theme is being checked.
@@ -885,9 +895,13 @@ fn claims(theme: ColorTheme) -> Vec<Claim> {
     list
 }
 
-/// The themes a claim is made about. `System` is absent on purpose: it resolves
-/// to one of the two the shell offers, and a claim about it would be a claim
-/// about whichever machine ran the test.
+/// The themes a claim is made about.
+///
+/// Two are absent, for two different reasons. `System` resolves to one of the two
+/// the shell offers, so a claim about it would be a claim about whichever machine
+/// ran the test. `Retro` is a real theme the reference paints and this gate has
+/// nothing to compare it against: the palette it checks by hand is dark, light and
+/// OLED, and retro's values are the generated tables' business.
 const CLAIMED_THEMES: [ColorTheme; 3] = [ColorTheme::Dark, ColorTheme::Light, ColorTheme::Oled];
 
 // ---- The value-comparison -------------------------------------------------

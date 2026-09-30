@@ -2561,10 +2561,8 @@ dependencies = [
  "image",
  "md-5",
  "palantir-core",
- "palantir-gui",
  "palantir-loader",
  "palantir-net",
- "reqwest",
  "serde",
  "serde_json",
  "sha1",
@@ -2572,15 +2570,6 @@ dependencies = [
  "wgpu",
  "windows-sys 0.52.0",
  "zip",
-]
-
-[[package]]
-name = "palantir-gui"
-version = "0.1.0"
-dependencies = [
- "palantir-core",
- "tempfile",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2610,6 +2599,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "uuid",
+ "zip",
 ]
 
 [[package]]

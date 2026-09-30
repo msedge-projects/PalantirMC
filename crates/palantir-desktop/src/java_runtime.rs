@@ -15,9 +15,9 @@
 //! them. It also carries [`JavaPrefs`] — the paths the Java tab writes, which
 //! nothing read on the launch path until it existed.
 //!
-//! Everything here takes a [`Fetcher`], so the whole chain — list, version file,
-//! manifest, files — is exercised by tests with canned bodies in a temp
-//! directory, and none of them touch the network.
+//! Everything here takes a [`Wire`], so the whole chain — list, version file,
+//! manifest, files — is exercised by tests against the engine's own scripted
+//! server in a temp directory, and none of them touch the network.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,9 +27,8 @@ use palantir_net::java::{
     parse_manifest, parse_runtimes, pick_runtime, runtime_file_url, runtime_list_url,
     runtime_version, RuntimeFile, MANAGED_DIR, JAVA_RUNTIMES_UID,
 };
-use palantir_net::meta::Fetcher;
-
 use crate::install;
+use crate::wire::{FileJob, Wire};
 
 /// The host's runtime tag, re-exported so a caller choosing a Java does not have
 /// to know which crate the metadata shapes live in.
@@ -187,7 +186,7 @@ pub fn install_runtime(
     paths: &PalantirPaths,
     name: &str,
     files: &[RuntimeFile],
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     threads: usize,
     reporter: &mut install::Reporter<'_>,
 ) -> Result<usize, String> {
@@ -195,7 +194,7 @@ pub fn install_runtime(
     if let Err(error) = palantir_core::util::ensure_dir(&dir) {
         return Err(format!("{}: {error}", dir.display()));
     }
-    let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+    let mut jobs: Vec<FileJob> = Vec::new();
     let mut wanted: Vec<&RuntimeFile> = Vec::new();
     let mut already = 0usize;
     for file in files {
@@ -204,7 +203,7 @@ pub fn install_runtime(
             already += 1;
             continue;
         }
-        jobs.push((file.url.clone(), dest));
+        jobs.push(FileJob::new(&file.url, dest, &file.sha1));
         wanted.push(file);
     }
     reporter.log(format!(
@@ -220,25 +219,21 @@ pub fn install_runtime(
         // runtime's name, because a bar that says "files" while a JRE unpacks
         // is a bar that does not say what the 50 MB is for.
         let label = format!("Java '{name}'");
-        let results = install::download_with_progress(fetcher, &jobs, threads, &label, reporter);
-        for (index, (_url, result)) in results.into_iter().enumerate() {
+        let results = install::download_with_progress(wire, &jobs, threads, &label, reporter);
+        for (index, result) in results.into_iter().enumerate() {
             let file = match wanted.get(index) {
                 Some(file) => *file,
                 None => continue,
             };
-            let dest = &jobs[index].1;
+            // The digest is checked by the transfer that wrote the file, against
+            // the archive's own `sha1`, so what is left here is the one thing the
+            // engine cannot know: that this runtime's launcher has to be runnable.
             match result {
-                Ok(_) => match install::verify_download(dest, &file.sha1) {
-                    Ok(()) => {
-                        if file.executable {
-                            make_executable(dest);
-                        }
+                Ok(_) => {
+                    if file.executable {
+                        make_executable(&jobs[index].dest);
                     }
-                    Err(reason) => {
-                        let _ = std::fs::remove_file(dest);
-                        failed.push(format!("{}: {reason}", file.path));
-                    }
-                },
+                }
                 Err(error) => failed.push(format!("{}: {error}", file.path)),
             }
         }
@@ -283,7 +278,7 @@ pub struct RuntimeRequest<'a> {
 pub fn ensure_runtime(
     paths: &PalantirPaths,
     request: &RuntimeRequest<'_>,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     threads: usize,
     reporter: &mut install::Reporter<'_>,
 ) -> Result<String, String> {
@@ -312,7 +307,7 @@ pub fn ensure_runtime(
     // dialog does, so one implementation covers both and the cached copy is at
     // the path the offline store reads.
     let (known, from_cache) =
-        match crate::catalog::fetch_list(request.base_url, &meta_dir, JAVA_RUNTIMES_UID, fetcher) {
+        match crate::catalog::fetch_list(request.base_url, &meta_dir, JAVA_RUNTIMES_UID, wire) {
             Ok((entries, from_cache)) => (entries, from_cache),
             Err(error) => {
                 return Err(format!(
@@ -333,23 +328,24 @@ pub fn ensure_runtime(
             continue;
         }
         let file_url = runtime_file_url(request.base_url, &version);
-        let bytes = match fetcher.fetch(&file_url) {
-            Ok(bytes) => {
-                // Cached in the metadata layout, so the next launch — or Prism —
-                // does not ask again.
+        let text = match wire.document(&file_url) {
+            Ok(text) => {
+                // Copied into the metadata layout as well, so the next launch —
+                // or Prism — reads what this one wrote even if the engine's own
+                // cache has since been swept.
                 let cache = meta_dir.join(JAVA_RUNTIMES_UID).join(format!("{version}.json"));
                 if let Some(parent) = cache.parent() {
                     let _ = palantir_core::util::ensure_dir(parent);
                 }
-                let _ = palantir_core::util::atomic_write(&cache, &bytes);
-                bytes
+                let _ = palantir_core::util::atomic_write(&cache, text.as_bytes());
+                text
             }
             Err(remote_error) => {
                 let cache = meta_dir.join(JAVA_RUNTIMES_UID).join(format!("{version}.json"));
-                match std::fs::read(&cache) {
-                    Ok(bytes) => {
+                match std::fs::read_to_string(&cache) {
+                    Ok(text) => {
                         reporter.log(format!("{version}: {remote_error} — using the cached copy"));
-                        bytes
+                        text
                     }
                     Err(_) => {
                         last = format!("{version}: {remote_error}");
@@ -358,7 +354,7 @@ pub fn ensure_runtime(
                 }
             }
         };
-        let entries = match parse_runtimes(&bytes, Path::new(&file_url)) {
+        let entries = match parse_runtimes(text.as_bytes(), Path::new(&file_url)) {
             Ok(entries) => entries,
             Err(error) => {
                 last = error.to_string();
@@ -383,8 +379,8 @@ pub fn ensure_runtime(
             "{version}: fetching {name} for {} from {}",
             request.os, entry.url
         ));
-        let manifest = match fetcher.fetch(&entry.url) {
-            Ok(bytes) => bytes,
+        let manifest = match wire.document(&entry.url) {
+            Ok(text) => text,
             Err(error) => {
                 last = format!("{version}: {error}");
                 continue;
@@ -392,7 +388,7 @@ pub fn ensure_runtime(
         };
         if !entry.sha1.is_empty() {
             let published = entry.sha1.to_ascii_lowercase();
-            let got = install::sha1_hex(&manifest);
+            let got = install::sha1_hex(manifest.as_bytes());
             if published != got {
                 last = format!(
                     "{version}: the manifest digest {got} does not match the published {published}"
@@ -400,7 +396,7 @@ pub fn ensure_runtime(
                 continue;
             }
         }
-        let files = match parse_manifest(&manifest, Path::new(&entry.url)) {
+        let files = match parse_manifest(manifest.as_bytes(), Path::new(&entry.url)) {
             Ok(files) => files,
             Err(error) => {
                 last = error.to_string();
@@ -411,7 +407,7 @@ pub fn ensure_runtime(
             last = format!("{version}: the manifest for '{name}' lists no files");
             continue;
         }
-        match install_runtime(paths, name, &files, fetcher, threads, reporter) {
+        match install_runtime(paths, name, &files, wire, threads, reporter) {
             Ok(count) => {
                 let runnable = launcher_binary(paths, name);
                 reporter.log(format!(
@@ -429,7 +425,7 @@ pub fn ensure_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palantir_net::meta::MapFetcher;
+    use crate::wire::Script;
     use serde_json::json;
 
     #[test]
@@ -535,7 +531,7 @@ mod tests {
     #[test]
     fn installing_a_runtime_writes_every_file_under_the_runtime_name() {
         let (_dir, paths) = temp_paths();
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert_str("https://objects/java", "java-binary-bytes");
         fetcher.insert_str("https://objects/lib", "library-bytes");
         let files = vec![
@@ -560,7 +556,7 @@ mod tests {
             &paths,
             "java-runtime-delta",
             &files,
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::new(
                 &mut |line| lines.push(line),
@@ -601,7 +597,7 @@ mod tests {
             &paths,
             "java-runtime-delta",
             &files,
-            &MapFetcher::new(),
+            &Script::new().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -612,7 +608,7 @@ mod tests {
     #[test]
     fn a_file_with_the_wrong_digest_is_removed_rather_than_kept() {
         let (_dir, paths) = temp_paths();
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert_str("https://objects/java", "not what was published");
         let files = vec![RuntimeFile {
             path: exe_rel().into(),
@@ -625,7 +621,7 @@ mod tests {
             &paths,
             "java-runtime-delta",
             &files,
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -637,7 +633,7 @@ mod tests {
     #[test]
     fn an_installation_missing_its_executable_is_reported() {
         let (_dir, paths) = temp_paths();
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert_str("https://objects/lib", "library");
         let files = vec![RuntimeFile {
             path: "lib/modules".into(),
@@ -650,7 +646,7 @@ mod tests {
             &paths,
             "java-runtime-delta",
             &files,
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -659,8 +655,8 @@ mod tests {
     }
 
     /// A whole `net.minecraft.java` chain, canned: list, version file, manifest.
-    fn runtime_fetcher() -> MapFetcher {
-        let mut fetcher = MapFetcher::new();
+    fn runtime_fetcher() -> Script {
+        let mut fetcher = Script::new();
         fetcher.insert_str(
             "https://meta.example/v1/net.minecraft.java/index.json",
             r#"{"formatVersion":1,"uid":"net.minecraft.java","versions":[
@@ -709,7 +705,7 @@ mod tests {
         let binary = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "windows-x64"),
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
@@ -726,7 +722,7 @@ mod tests {
         let again = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "windows-x64"),
-            &MapFetcher::new(),
+            &Script::new().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
@@ -753,7 +749,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "windows-x64"),
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -765,7 +761,7 @@ mod tests {
     #[test]
     fn an_archive_only_platform_is_reported_instead_of_half_unpacked() {
         let (_dir, paths) = temp_paths();
-        let mut fetcher = MapFetcher::new();
+        let mut fetcher = Script::new();
         fetcher.insert_str(
             "https://meta.example/v1/net.minecraft.java/index.json",
             r#"{"formatVersion":1,"uid":"net.minecraft.java","versions":[{"version":"java21"}]}"#,
@@ -780,7 +776,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "linux-riscv64"),
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -794,7 +790,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[21], "", "windows-x64"),
-            &MapFetcher::new(),
+            &Script::new().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -808,7 +804,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[], "java-runtime-delta", "windows-x64"),
-            &MapFetcher::new(),
+            &Script::new().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -822,7 +818,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "solaris-sparc"),
-            &runtime_fetcher(),
+            &runtime_fetcher().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -842,7 +838,7 @@ mod tests {
         let binary = ensure_runtime(
             &paths,
             &request(&[23, 21], "java-runtime-delta", "windows-x64"),
-            &runtime_fetcher(),
+            &runtime_fetcher().wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -858,7 +854,7 @@ mod tests {
         ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "windows-x64"),
-            &fetcher,
+            &fetcher.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
@@ -866,7 +862,7 @@ mod tests {
         // Remove what was installed, keep the metadata, and serve only the
         // cached list plus nothing else: the version file has to come from disk.
         std::fs::remove_dir_all(runtime_dir(&paths, "java-runtime-delta")).unwrap();
-        let mut partial = MapFetcher::new();
+        let mut partial = Script::new();
         partial.insert_str(
             "https://meta.example/v1/net.minecraft.java/index.json",
             r#"{"formatVersion":1,"uid":"net.minecraft.java","versions":[{"version":"java21"}]}"#,
@@ -875,7 +871,7 @@ mod tests {
         let err = ensure_runtime(
             &paths,
             &request(&[21], "java-runtime-delta", "windows-x64"),
-            &partial,
+            &partial.wire(),
             DOWNLOAD_THREADS,
             &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )

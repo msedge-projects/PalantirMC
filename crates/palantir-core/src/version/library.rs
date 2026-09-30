@@ -155,7 +155,10 @@ impl Library {
         if !self.repository_url.is_empty() {
             root.insert("url".into(), Value::String(self.repository_url.clone()));
         }
-        if self.is_native() {
+        if !self.native_classifiers.is_empty() {
+            // The `natives` map is written only for the classic shape; a native
+            // that is its own entry carries its classifier in the name, and an
+            // empty map here would parse back as the wrong shape.
             let natives: serde_json::Map<String, Value> = self
                 .native_classifiers
                 .iter()
@@ -202,9 +205,28 @@ impl Library {
         Value::Object(root)
     }
 
-    /// Whether the library carries native classifiers.
+    /// Whether this entry is a native library.
+    ///
+    /// Two shapes mean that, and both are Mojang's own: the classic one, where an
+    /// entry names a classifier per OS in a `natives` map, and the one every
+    /// version from 1.19 on uses, where the native is *its own entry* whose
+    /// name's classifier is the OS -- `org.lwjgl:lwjgl:3.3.3:natives-windows`.
+    /// The second shape used to be read as an ordinary jar, which put a native
+    /// library on the classpath and left the shared objects inside it where
+    /// nothing could load them.
     pub fn is_native(&self) -> bool {
-        !self.native_classifiers.is_empty()
+        !self.native_classifiers.is_empty() || !self.own_native_classifier().is_empty()
+    }
+
+    /// The classifier this entry's own name carries, when that classifier names a
+    /// native; empty for every other entry.
+    fn own_native_classifier(&self) -> &str {
+        let classifier = self.name.classifier();
+        if classifier.starts_with("natives-") {
+            classifier
+        } else {
+            ""
+        }
     }
 
     /// `MMC-hint == "local"` (stored inside the instance).
@@ -221,6 +243,13 @@ impl Library {
     /// (`Library::getCompatibleNative`): precise `<os>-<arch>` first, bare
     /// `<os>` only on legacy (x86) architectures.
     pub fn compatible_native(&self, ctx: &RuntimeContext) -> Option<String> {
+        // A native that is its own entry was already matched to this host by its
+        // `rules` -- `is_active` asks this only after they allowed the entry -- so
+        // the classifier in its name is the answer, `${arch}` and all.
+        let own = self.own_native_classifier();
+        if !own.is_empty() {
+            return Some(own.to_string());
+        }
         let precise = ctx.classifier();
         if let Some(c) = self.native_classifiers.get(&precise) {
             return Some(c.clone());

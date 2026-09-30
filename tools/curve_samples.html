@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>curve samples</title></head>
+  <body>
+    <!--
+      The reference's own timing functions, measured in the engine the
+      reference ships inside.
+
+      `crates/palantir-desktop/src/motion.rs` carries a curve solver that had
+      to be written by hand -- iced has no `cubic-bezier()` -- and a test that
+      asserts its answers against Chromium's. The numbers in that test come
+      from this page: load it in a browser and read the JSON it prints, or run
+      it headless. It animates `opacity` from 0 to 1 on each curve, pauses the
+      animation at each tenth of a second and reads the computed style back,
+      which is the fraction a browser would paint at that moment. `opacity` is
+      the vehicle because it is the one property every engine interpolates on
+      exactly the timing function, with no rounding to layout to get in the
+      way.
+
+      The five curves are the ones `tools/gen_theme.py` compiles into
+      `theme_gen::Curve`: the four CSS-named easings plus `--ease-out-expo`,
+      which is `cubic-bezier(0.16, 1, 0.3, 1)` and the one the reference
+      actually uses for anything a user waits on.
+
+      This page is not part of the build. It exists so the test's oracle is
+      reproducible rather than remembered.
+    -->
+    <p id="out">measuring…</p>
+    <script>
+      const curves = {
+        Linear: [0, 0, 1, 1],
+        Ease: [0.25, 0.1, 0.25, 1],
+        EaseOut: [0, 0, 0.58, 1],
+        EaseInOut: [0.42, 0, 0.58, 1],
+        EaseOutExpo: [0.16, 1, 0.3, 1],
+      };
+      const el = document.createElement('div');
+      document.body.appendChild(el);
+      const out = {};
+      for (const [name, c] of Object.entries(curves)) {
+        const animation = el.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: 1000,
+          easing: `cubic-bezier(${c.join(',')})`,
+          fill: 'both',
+        });
+        animation.pause();
+        out[name] = [];
+        for (let step = 1; step <= 9; step++) {
+          animation.currentTime = step * 100;
+          out[name].push(Number(getComputedStyle(el).opacity));
+        }
+        animation.cancel();
+      }
+      window.__curves = out;
+      document.getElementById('out').textContent = JSON.stringify(out);
+    </script>
+  </body>
+</html>

@@ -4,9 +4,11 @@
 //! that used to be missing now in place:
 //!
 //! * **The game is installed, not assumed.** Metadata is resolved through
-//!   [`OnlineMetaStore`], which fetches what is not cached and writes it in the
-//!   offline store's layout; then [`crate::install`] fetches the libraries, the
-//!   client jar, the asset index and its objects, and extracts the natives.
+//!   [`PublisherMeta`], which asks the loaders' own services -- and, for the two
+//!   Forge-shaped loaders, their installer jars -- for a launch profile, and
+//!   Prism's mirror for what they do not serve; then
+//!   [`crate::install`] fetches the libraries, the client jar, the asset index
+//!   and its objects, and extracts the natives.
 //!   Only after that does anything check for a main jar — the old flow demanded
 //!   one up front and so could never bootstrap a fresh instance.
 //! * **The session is real.** An offline account produces the legacy session it
@@ -22,11 +24,13 @@
 //! `MinecraftInstance::getNativePath` points, so both launchers run the same
 //! extracted libraries.
 //!
-//! Three things travel back to the GUI through the `iced::subscription::channel`
-//! sender owned by the worker thread: `Vec<String>` batches of log lines, the
+//! What travels back to a shell through the `iced::subscription::channel` sender
+//! owned by the worker thread is a [`LaunchEvent`]: a batch of log lines, the
 //! running progress of whatever phase is fetching (a level, deliberately
-//! droppable — see `send_progress`), and the final outcome as a done message.
-//! See `app.rs` for the subscription.
+//! droppable — see `send_progress`), the game coming up, the run ending, and a
+//! renewed session. It is an enum of facts rather than one shell's messages
+//! because there are two shells while this rewrite is: see [`LaunchEvent`],
+//! and `app.rs` and `shell.rs` for the two subscriptions that map it.
 
 use futures::channel::mpsc::Sender;
 use palantir_core::{
@@ -35,12 +39,17 @@ use palantir_core::{
     launch,
     pack::PackProfile,
     paths::{PalantirPaths, System},
-    resolve::{resolve, MetaStore, OfflineMetaStore},
+    resolve::{resolve, MetaStore, Resolution},
     settings::{defaults, Settings},
     version::{ProblemSeverity, RuntimeContext},
 };
-use palantir_gui::SettingsModel;
-use palantir_net::meta::Fetcher;
+// Only the tests need to read a metadata tree from disk: a launch resolves
+// against whatever the caller handed it.
+#[cfg(test)]
+use palantir_core::resolve::OfflineMetaStore;
+use crate::meta::PublisherMeta;
+use crate::model::SettingsModel;
+use crate::wire::Wire;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -49,8 +58,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::accounts::{needs_refresh, AccountKind};
-use crate::app::Message;
 use crate::install;
+use crate::loader_install;
 use crate::java_runtime::{self, JavaPrefs};
 
 /// Shared handle for the running game process (for the Kill button).
@@ -255,6 +264,52 @@ pub enum LaunchReadiness {
     Blocked,
 }
 
+/// What a launch reports while it runs, as *facts* rather than as one shell's
+/// messages.
+///
+/// Two shells are alive while this rewrite is -- the one that runs by default
+/// and the one being built -- and their message types are not the same, so the
+/// worker speaks in this instead and each shell decides what to do with it. The
+/// five are exactly what the old shell has carried all along, one per variant of
+/// its own enum: a batch of lines that happened, a level that keeps changing, the
+/// end of the indeterminate wait, the end of the run, and a session that was
+/// renewed and has to be written down. A launch is never *silent* about any of
+/// them on purpose: a run whose only sign of life is the window disappearing is
+/// the failure this enum exists to make impossible.
+#[derive(Debug, Clone)]
+pub enum LaunchEvent {
+    /// A batch of lines the launcher or the game produced.
+    Log {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// The lines, already redacted and already written to the run log.
+        lines: Vec<String>,
+    },
+    /// How far the phase that is fetching has got.
+    Progress {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// What the phase has finished so far.
+        progress: install::Progress,
+    },
+    /// The game's own output says its window is up, so there is nothing left to
+    /// wait for.
+    Started {
+        /// Run id this belongs to.
+        run_id: u64,
+    },
+    /// The run finished, with its last word.
+    Done {
+        /// Run id this belongs to.
+        run_id: u64,
+        /// The outcome, as the run log carries it too.
+        note: String,
+    },
+    /// A Microsoft session the run renewed, to be written back to the account
+    /// store so the next launch reuses the token this one paid for.
+    Tokens(RefreshedTokens),
+}
+
 // ---- pure helpers ---------------------------------------------------------
 
 /// Java binary names to look up on `PATH` when no `JavaPath` is configured.
@@ -393,44 +448,6 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
-/// Open `path` in the platform file manager (best effort).
-pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
-    let (tool, verb) = if cfg!(windows) {
-        ("explorer", "opening")
-    } else if cfg!(target_os = "macos") {
-        ("open", "opening")
-    } else {
-        ("xdg-open", "opening")
-    };
-    match Command::new(tool).arg(path).spawn() {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("{verb} '{}' failed: {e}", path.display())),
-    }
-}
-
-/// Open `url` in the default browser (best effort).
-///
-/// Windows needs `cmd /C start` rather than `explorer.exe` for a URL: passing a
-/// URL to Explorer opens a *folder* search instead of the browser, which is the
-/// kind of "it did nothing" failure worth avoiding in a sign-in flow.
-pub fn open_url(url: &str) -> Result<(), String> {
-    let result = if cfg!(windows) {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", url]);
-        // `start` still opens the browser without a console of its own.
-        hide_console(&mut command);
-        command.spawn()
-    } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(url).spawn()
-    } else {
-        Command::new("xdg-open").arg(url).spawn()
-    };
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("opening '{url}' failed: {e}")),
-    }
-}
-
 // ---- authentication -------------------------------------------------------
 
 /// Build the launch session for `account`, renewing Microsoft tokens when they
@@ -502,104 +519,54 @@ pub fn prepare_auth(
 
 /// Resolve + install + plan a launch without starting anything.
 ///
-/// The metadata store and the HTTP fetcher are injected so this is testable
-/// offline: production passes an [`OnlineMetaStore`] (which caches what it
-/// fetches) and a [`palantir_net::BlockingHttpFetcher`], while tests pass an
-/// offline store and a map of canned bodies.
+/// The metadata store and the wire are injected so this is testable offline:
+/// production passes an [`OnlineMetaStore`] (which caches what it fetches) and a
+/// [`Wire`] over the engine's pool, while a test passes an offline store and a
+/// wire over the engine's own scripted server.
 pub fn prepare_launch(
     paths: &PalantirPaths,
     instance_id: &str,
     session: &launch::AuthSession,
     defaults: &LaunchDefaults,
     store: &mut dyn MetaStore,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     log: &mut dyn FnMut(String),
     progress: &mut dyn FnMut(install::Progress),
 ) -> LaunchReadiness {
-    // Resolved dir: honors the `InstanceDir` override in prismlauncher.cfg.
-    let instance = match Instance::open(&paths.configured_instances_dir().join(instance_id)) {
-        Ok(instance) => instance,
-        Err(e) => {
-            log(format!("cannot open instance '{instance_id}': {e}"));
+    // The files first, and the launch half after: what this returns is an
+    // instance whose loader, metadata, libraries and assets are on disk.
+    //
+    // The two taps become one sink here, because everything the install half
+    // reports goes through it: the few lines the phases keep and the running count
+    // they report are the same call's business (see [`install::Reporter`]).
+    let mut reporter = install::Reporter::new(&mut *log, &mut *progress);
+    let prepared = match prepare_files(
+        paths,
+        instance_id,
+        install::Existing::Trust,
+        defaults,
+        store,
+        wire,
+        &mut reporter,
+    ) {
+        Ok(prepared) => prepared,
+        // The helper said what went wrong; "— not launching" is this caller's
+        // half of the answer, and a repair's own wrapper leaves it off.
+        Err(reason) => {
+            log(format!("{reason} — not launching"));
             return LaunchReadiness::Blocked;
         }
     };
-    let name = instance.name();
-    let id = instance.id();
-    log(format!("preparing launch of '{name}' ({id})"));
-
-    let global = match Settings::load(&paths.global_config()) {
-        Ok(settings) => settings,
-        Err(_) => {
-            log("no global prismlauncher.cfg found, using defaults".to_string());
-            Settings::empty(paths.global_config())
-        }
-    };
-    let model = SettingsModel::with_instance(global, instance.settings().clone());
-
-    let profile = match PackProfile::load(&instance.mmc_pack_path()) {
-        Ok(profile) => profile,
-        Err(_) => {
-            log("no mmc-pack.json found, using an empty component list".to_string());
-            PackProfile::default()
-        }
-    };
-
-    let ctx = RuntimeContext::current_host();
-    let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
-        Ok(resolution) => resolution,
-        Err(e) => {
-            log(format!("resolution error: {e}"));
-            return LaunchReadiness::Blocked;
-        }
-    };
-    for problem in &resolution.problems {
-        log(format!("resolve {:?}: {}", problem.severity, problem.message));
-    }
-    for component in &resolution.components {
-        for problem in &component.problems {
-            log(format!("resolve {} {:?}: {}", component.uid, problem.severity, problem.message));
-        }
-    }
-    if resolution.severity() == ProblemSeverity::Error {
-        log("resolution failed with errors — not launching".to_string());
-        return LaunchReadiness::Blocked;
-    }
-    if resolution.profile.main_class.is_empty() {
-        log("no main class resolved — metadata is incomplete, not launching".to_string());
-        return LaunchReadiness::Blocked;
-    }
-    log(format!(
-        "resolved {} component(s), main class {}",
-        resolution.components.len(),
-        resolution.profile.main_class
-    ));
-
-    // ---- install ---------------------------------------------------------
-    let install_plan = install::plan(paths, instance.root(), &resolution.profile, &ctx);
-    log(format!("install: {}", install_plan.summary()));
-    for problem in &install_plan.problems {
-        log(format!("install: {problem}"));
-    }
-    // The phases that fetch are handed a [`install::Reporter`], built from the
-    // two taps this function was given: a phase that draws a bar and writes no
-    // lines, or writes lines and reports no bar, is not something a caller can
-    // ask for by accident.
-    let report = {
-        let mut reporter = install::Reporter::new(&mut *log, &mut *progress);
-        install::run(&install_plan, fetcher, install::DEFAULT_THREADS, &mut reporter)
-    };
-    log(format!("install: {}", report.summary()));
-    for failure in &report.failed {
-        log(format!("install failed: {failure}"));
-    }
-    for problem in &report.problems {
-        log(format!("install: {problem}"));
-    }
-    if !report.is_complete() {
+    // And the answer to the transfer is the launch's own rule, not the install
+    // helper's: a repair can report a file it could not fetch and leave the
+    // instance usable, while a launch that cannot fetch one cannot start.
+    if !prepared.report.is_complete() {
         log("files are missing and could not be downloaded — not launching".to_string());
         return LaunchReadiness::Blocked;
     }
+    let Prepared { instance, model, resolution, ctx, java, .. } = prepared;
+    let name = instance.name();
+    let id = instance.id();
 
     let target = join_target(instance.settings(), log);
 
@@ -651,48 +618,21 @@ pub fn prepare_launch(
     // `UnsupportedClassVersionError` rather than an answer. Prism reads
     // `AutomaticJava` (on unless switched off) and picks a runtime it can find;
     // the same rule here means an instance keeps launching.
-    let majors = &resolution.profile.compatible_java_majors;
-    let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
-    let configured = configured.trim();
-    let java_bin = if configured.is_empty() {
-        String::new()
-    } else if !Path::new(configured).is_file() {
-        log(format!(
-            "the configured JavaPath '{configured}' is not there — looking for another Java"
-        ));
-        String::new()
-    } else {
-        match java_fits_version(configured, majors) {
-            Ok(()) => {
-                log(format!("using the configured Java: {configured}"));
-                configured.to_string()
-            }
-            Err(reason) => {
-                log(format!("{reason} — looking for another Java"));
-                String::new()
-            }
-        }
-    };
-    let java_bin = if java_bin.is_empty() {
-        match pick_java(
-            paths,
-            &defaults.java,
-            &resolution.profile.compatible_java_majors,
-            &resolution.profile.compatible_java_name,
-            fetcher,
-            log,
-            progress,
-        ) {
+    // A loader-shaped instance answered this before its install, because the
+    // installer's processors are Java programs; every other launch answers it here,
+    // which is where it has always been. Both go through [`choose_java`], so the
+    // install and the spawn cannot come to disagree about which Java a build uses
+    // (G131).
+    let java_bin = match java {
+        Some(java) => java,
+        None => match choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress)
+        {
             Some(found) => found,
             None => {
-                log(
-                    "no Java found: set a Java path in the Java tab of the settings, or install a Java runtime — looked under <data root>/java, in JAVA_HOME, in the standard install locations and on PATH".to_string(),
-                );
+                log(NO_JAVA_FOUND.to_string());
                 return LaunchReadiness::Blocked;
             }
-        }
-    } else {
-        java_bin
+        },
     };
     match probe_java(&java_bin) {
         Ok(detail) => log(format!("using java '{java_bin}' ({detail})")),
@@ -805,6 +745,288 @@ pub fn prepare_launch(
     log(format!("command: {java_bin} {}", argv.join(" ")));
     let plan = LaunchPlan { java_bin, argv, cwd: game_root, main_jar, envs };
     LaunchReadiness::Ready(plan)
+}
+
+/// What the install half of a launch leaves in hand.
+///
+/// One struct rather than a tuple, because the fields are six different kinds of
+/// thing that happen to come out of one call and the two callers want different
+/// ones: the launch half reads the instance, the settings, the resolution and the
+/// Java the install ran on, and a repair reads the report to say what its check
+/// came to.
+struct Prepared {
+    /// The instance, opened.
+    instance: Instance,
+    /// This launcher's settings over the instance's own: the heap, the window and
+    /// the JVM arguments a launch reads.
+    model: SettingsModel,
+    /// What the pack resolved to: the profile a launch runs and the components it
+    /// was read from.
+    resolution: Resolution,
+    /// This machine, as the resolve saw it: the library files a launch puts on the
+    /// classpath and the agents it adds are chosen by architecture and OS, and the
+    /// two have to be the same reading or the classpath would name a platform the
+    /// install did not fetch for.
+    ctx: RuntimeContext,
+    /// The Java a loader's install ran on, when this instance has one to run: the
+    /// launch's own answer, handed back so the spawn uses it rather than asking the
+    /// same question twice (G131). `None` for vanilla, Fabric and Quilt, whose
+    /// launch has nothing to install and whose Java is chosen where it always was.
+    java: Option<String>,
+    /// What the transfer came to, for the repair that has no console to write to.
+    report: install::InstallReport,
+}
+
+/// The install half of a launch: the loader's installer, the resolve, the plan and
+/// the transfer.
+///
+/// Extracted from [`prepare_launch`] when the installation tab's *Repair* arrived,
+/// because a repair *is* this function with [`install::Existing::Verify`] in place
+/// of [`install::Existing::Trust`]. What the launch keeps to itself is the half
+/// that needs a session, the account and a process.
+///
+/// The first line's word comes from [`install::Existing`] rather than from a
+/// parameter of its own, because those two answers *are* the two callers: a launch
+/// reads *preparing launch of* and a repair reads *repairing*, and a repair's log
+/// that read as a launch would be the wrong word in the file.
+///
+/// `defaults` arrives from the launch's own half because a loader's install runs
+/// on the Java the *launch* chose (G131), and the install happens in here: it is
+/// after the resolve, which is what says which major this version wants, and
+/// before the plan, which reads the files it wrote.
+fn prepare_files(
+    paths: &PalantirPaths,
+    instance_id: &str,
+    existing: install::Existing,
+    defaults: &LaunchDefaults,
+    store: &mut dyn MetaStore,
+    wire: &Wire,
+    reporter: &mut install::Reporter<'_>,
+) -> Result<Prepared, String> {
+    // Resolved dir: honors the `InstanceDir` override in prismlauncher.cfg.
+    let instance = Instance::open(&paths.configured_instances_dir().join(instance_id))
+        .map_err(|e| format!("cannot open instance '{instance_id}': {e}"))?;
+    let name = instance.name();
+    let id = instance.id();
+    let lead_in = match existing {
+        install::Existing::Trust => "preparing launch of",
+        install::Existing::Verify => "repairing",
+    };
+    reporter.log(format!("{lead_in} '{name}' ({id})"));
+
+    let global = match Settings::load(&paths.global_config()) {
+        Ok(settings) => settings,
+        Err(_) => {
+            reporter.log("no global prismlauncher.cfg found, using defaults");
+            Settings::empty(paths.global_config())
+        }
+    };
+    let model = SettingsModel::with_instance(global, instance.settings().clone());
+
+    let profile = match PackProfile::load(&instance.mmc_pack_path()) {
+        Ok(profile) => profile,
+        Err(_) => {
+            reporter.log("no mmc-pack.json found, using an empty component list");
+            PackProfile::default()
+        }
+    };
+
+    // A pack can name one of the two uids without naming a Minecraft version --
+    // an imported profile, or one edited by hand -- and then there is nothing for
+    // an installer URL to be matched against: the resolve takes the mirror's
+    // ForgeWrapper document instead of the publisher's, and the install this
+    // launcher runs at preparation moves back to launch time, inside the wrapper
+    // (G107). Say which document answers, because the alternative is a reader
+    // watching a wrapper do a job this launcher does itself once the pack names
+    // its game (G132). The job is worked out here rather than beside the install
+    // so that the question is asked once, and it is asked before the resolve
+    // because naming the loader is what decides who answers for it.
+    let job = loader_install::forge_shaped(&profile);
+    if job.is_none() {
+        if let Some(loader) = loader_install::named_shaped(&profile) {
+            reporter.log(format!(
+                "this instance names {} but no Minecraft version, so its installer cannot be matched to a game: the mirror's wrapper document answers for it, and the install runs at launch instead — add a 'net.minecraft' component to run it here",
+                loader_install::label(loader)
+            ));
+        }
+    }
+
+    let ctx = RuntimeContext::current_host();
+    let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
+        Ok(resolution) => resolution,
+        Err(e) => return Err(format!("resolution error: {e}")),
+    };
+    for problem in &resolution.problems {
+        reporter.log(format!("resolve {:?}: {}", problem.severity, problem.message));
+    }
+    for component in &resolution.components {
+        for problem in &component.problems {
+            reporter.log(format!(
+                "resolve {} {:?}: {}",
+                component.uid, problem.severity, problem.message
+            ));
+        }
+    }
+    if resolution.severity() == ProblemSeverity::Error {
+        return Err("resolution failed with errors".to_string());
+    }
+    if resolution.profile.main_class.is_empty() {
+        return Err("no main class resolved — metadata is incomplete".to_string());
+    }
+    reporter.log(format!(
+        "resolved {} component(s), main class {}",
+        resolution.components.len(),
+        resolution.profile.main_class
+    ));
+
+    // ---- the loader's own install ----------------------------------------
+    // A Forge or NeoForge instance resolves through its installer's own profile
+    // (G119), and that profile names the patched client as one of its libraries.
+    // The install has to run before the plan reads those names, or the plan
+    // queues a download for a file no maven hosts -- the processors' product.
+    // The resume case rides on the digests the installer itself declares: a
+    // second launch skips every processor whose outputs are already there.
+    //
+    // The Java the processors run on is this launch's own Java, decided here
+    // rather than by `engine::find_java`, which takes the newest major on the
+    // machine and cannot know what this instance runs on (G131): a build whose
+    // processors need an older Java used to fail at the install while the spawn
+    // beside it would have picked a runtime that fits. One function answers the
+    // question for both, so the install and the spawn cannot drift apart, and the
+    // answer travels back out in [`Prepared::java`] so the spawn does not ask a
+    // second time.
+    let install_java = match &job {
+        Some(_) => {
+            // Both of the reporter's taps, because the search's last answer can be
+            // a runtime fetched from the metadata service, and that fetch belongs
+            // on the bar like every other transfer in here.
+            let chosen = reporter.with_taps(|log, progress| {
+                choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress)
+            });
+            match chosen {
+                Some(java) => Some(java),
+                None => return Err(NO_JAVA_FOUND.to_string()),
+            }
+        }
+        None => None,
+    };
+    if let (Some(job), Some(java)) = (&job, &install_java) {
+        reporter.report(install::Progress::starting(format!(
+            "installing {} {}",
+            job.label(),
+            job.build
+        )));
+        loader_install::install(
+            paths,
+            instance.root(),
+            job,
+            wire,
+            Path::new(java),
+            &mut |line| reporter.log(line),
+        )?;
+    }
+
+    // ---- install ---------------------------------------------------------
+    // The plan is built with the caller's own rule ([`install::Existing`]): what
+    // is already on disk and what is worth checking is the one question that
+    // separates a launch from a repair.
+    let install_plan = install::plan(paths, instance.root(), &resolution.profile, &ctx, existing);
+    reporter.log(format!("install: {}", install_plan.summary()));
+    for problem in &install_plan.problems {
+        reporter.log(format!("install: {problem}"));
+    }
+    // The phases that fetch are handed the same [`install::Reporter`] everything
+    // above has written through: a phase that draws a bar and writes no lines, or
+    // writes lines and reports no bar, is not something a caller can ask for by
+    // accident.
+    let report = install::run(&install_plan, wire, install::DEFAULT_THREADS, reporter);
+    reporter.log(format!("install: {}", report.summary()));
+    for failure in &report.failed {
+        reporter.log(format!("install failed: {failure}"));
+    }
+    for problem in &report.problems {
+        reporter.log(format!("install: {problem}"));
+    }
+
+    Ok(Prepared { instance, model, resolution, ctx, java: install_java, report })
+}
+
+/// Re-install one instance's files, hashing what is already there.
+///
+/// This is the reference's *Repair instance* -- `installation-settings.vue`'s
+/// `repair()`, which is `install_existing_instance(id, true)` -- as the half of a
+/// launch that puts files on disk: the loader's own installer, the metadata the
+/// pack resolves against, the libraries, the client jar, the asset index and its
+/// objects, all with [`install::Existing::Verify`] deciding what a file that is
+/// already present is worth. A file of the right size that is not the file the
+/// metadata names is fetched again rather than trusted, which is the whole of what
+/// "checks for corruption" means here: a launch never looks inside a file that is
+/// the right size, and this is the one moment a reader asks it to.
+///
+/// `defaults` is the Java the launch would have run on, and it is here for the same
+/// reason the launch passes its own: a loader's install runs on the Java the
+/// *launch* chose (G131), and a repair that picked differently would install on a
+/// runtime the next launch does not use.
+///
+/// **Nothing is deleted.** A repair adds and replaces; it cannot remove content
+/// somebody put in the instance, so it also cannot break an instance that was
+/// sound -- which is the property the reference's own `repair()` has and its
+/// `reinstallModpack()` deliberately does not.
+///
+/// **Blocking**, like every other install: the shell runs it off the frame thread.
+/// The answer is one sentence for the modal, and it is an `Err` when the repair
+/// could not finish, so a reader who is told nothing came back is told why.
+pub fn repair_instance(
+    paths: &PalantirPaths,
+    instance_id: &str,
+    defaults: &LaunchDefaults,
+    store: &mut dyn MetaStore,
+    wire: &Wire,
+    log: &mut dyn FnMut(String),
+) -> Result<String, String> {
+    // A repair has no bar to fill: the modal draws a spinner while it runs and one
+    // sentence when it is over. An empty sink rather than a new reporter kind,
+    // because there is no page for a level to reach.
+    let mut nowhere = |_: install::Progress| {};
+    let mut reporter = install::Reporter::new(&mut *log, &mut nowhere);
+    let prepared = prepare_files(
+        paths,
+        instance_id,
+        install::Existing::Verify,
+        defaults,
+        store,
+        wire,
+        &mut reporter,
+    )?;
+    let line = repaired_line(prepared.instance.name().as_str(), &prepared.report);
+    if prepared.report.is_complete() {
+        Ok(line)
+    } else {
+        Err(line)
+    }
+}
+
+/// What a repair says when it is over, for the modal's one sentence.
+///
+/// Two numbers and no more: how many files were *checked* -- the half of a repair
+/// that a launch does not do at all -- and how many had to be fetched again. A
+/// repair that checked 412 files and fetched none is exactly the answer the reader
+/// pressed the button for, so the zero is drawn rather than hidden, and a failure
+/// names the first file it happened to.
+fn repaired_line(name: &str, report: &install::InstallReport) -> String {
+    let megabytes = report.bytes as f64 / (1024.0 * 1024.0);
+    let fetched = report.downloaded + report.objects_downloaded;
+    let checked = report.present + fetched;
+    let mut line = format!(
+        "Repaired '{name}': {checked} file(s) checked, {fetched} fetched again ({megabytes:.1} MB)"
+    );
+    if let Some(first) = report.failed.first() {
+        line.push_str(&format!(
+            "; {} could not be fetched, starting with: {first}",
+            report.failed.len()
+        ));
+    }
+    line
 }
 
 /// The heap a launch uses: the instance's own numbers when it overrides memory,
@@ -1081,6 +1303,59 @@ pub fn best_java(candidates: &[JavaCandidate], want_majors: &[i64]) -> Option<Ja
         .cloned()
 }
 
+/// What a launch says when there is no Java anywhere to run it.
+const NO_JAVA_FOUND: &str = "no Java found: set a Java path in the Java tab of the settings, or install a Java runtime — looked under <data root>/java, in JAVA_HOME, in the standard install locations and on PATH";
+
+/// The Java this launch will run on, chosen the same way wherever it is asked
+/// for.
+///
+/// Two questions in order: whether the instance's own `JavaPath` is there and
+/// fits what the profile says this version runs on, and then [`pick_java`]'s
+/// five answers. It is a function rather than a block because the loader's own
+/// install has to run on a Java before the launch's own block ever chose one
+/// (G131) -- the installer's processors are Java programs -- and a second copy of
+/// this rule is how the install and the spawn come to disagree about which Java
+/// a build uses.
+fn choose_java(
+    paths: &PalantirPaths,
+    model: &SettingsModel,
+    defaults: &LaunchDefaults,
+    profile: &palantir_core::version::LaunchProfile,
+    wire: &Wire,
+    log: &mut dyn FnMut(String),
+    progress: &mut dyn FnMut(install::Progress),
+) -> Option<String> {
+    // The instance's own path, when it is both there and a major this version
+    // accepts. `java_fits_version` is what says why when it is not, and both
+    // answers to "not" are the same: carry on with the search.
+    let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        if !Path::new(configured).is_file() {
+            log(format!(
+                "the configured JavaPath '{configured}' is not there — looking for another Java"
+            ));
+        } else {
+            match java_fits_version(configured, &profile.compatible_java_majors) {
+                Ok(()) => {
+                    log(format!("using the configured Java: {configured}"));
+                    return Some(configured.to_string());
+                }
+                Err(reason) => log(format!("{reason} — looking for another Java")),
+            }
+        }
+    }
+    pick_java(
+        paths,
+        &defaults.java,
+        &profile.compatible_java_majors,
+        &profile.compatible_java_name,
+        wire,
+        log,
+        progress,
+    )
+}
+
 /// Choose a Java for this version, saying what was chosen and why.
 ///
 /// The order is five answers to one question, from the most specific promise to
@@ -1101,7 +1376,7 @@ fn pick_java(
     java: &JavaPrefs,
     want_majors: &[i64],
     want_name: &str,
-    fetcher: &(dyn Fetcher + Sync),
+    wire: &Wire,
     log: &mut dyn FnMut(String),
     progress: &mut dyn FnMut(install::Progress),
 ) -> Option<String> {
@@ -1167,7 +1442,7 @@ fn pick_java(
         java_runtime::ensure_runtime(
             paths,
             &request,
-            fetcher,
+            wire,
             java_runtime::DOWNLOAD_THREADS,
             &mut reporter,
         )
@@ -1308,18 +1583,23 @@ pub fn record_play_time(
     }
 }
 
-/// The metadata store and HTTP client a real launch uses.
-pub fn online_backend(paths: &PalantirPaths) -> (palantir_net::OnlineMetaStore, palantir_net::BlockingHttpFetcher) {
-    (
-        palantir_net::OnlineMetaStore::new(palantir_net::DEFAULT_META_BASE_URL, paths.meta_dir()),
-        palantir_net::BlockingHttpFetcher::new(Duration::from_secs(30)),
-    )
-}
-
-/// The offline counterpart, for the sandbox shell and for tests: everything
-/// must already be cached and installed.
-pub fn offline_backend(paths: &PalantirPaths) -> (OfflineMetaStore, palantir_net::MapFetcher) {
-    (OfflineMetaStore::new(paths.meta_dir()), palantir_net::MapFetcher::new())
+/// The metadata store and the wire a real launch uses.
+///
+/// The store is per instance, because one of the questions it answers is asked at
+/// one instance's game version: Fabric's and Quilt's launch profiles are the
+/// publishers' own documents, read over the wire's cache and client, and what is
+/// left on the mirror is named in [`crate::meta`] with the measurement that put it
+/// there.
+///
+/// Everything the launch transfers goes over the wire: the client jar, the
+/// libraries, the asset objects, the Java runtime, and the documents the Java
+/// path reads on the way, all under one pool, one ceiling, one retry policy and
+/// one queue, with each file checked against the digest its publisher stated
+/// before the transfer renames it into place.
+pub fn online_backend(paths: &PalantirPaths, instance_id: &str) -> (PublisherMeta, Wire) {
+    let wire = Wire::new(paths.meta_dir());
+    let store = PublisherMeta::for_instance(&wire, paths, instance_id);
+    (store, wire)
 }
 
 // ---- worker ---------------------------------------------------------------
@@ -1327,7 +1607,7 @@ pub fn offline_backend(paths: &PalantirPaths) -> (OfflineMetaStore, palantir_net
 /// Run one launch in a background thread: sign in, resolve, install, spawn the
 /// child with piped output, stream batches + a final done message through the
 /// subscription sender. Never reports success it did not observe.
-pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<Message>) {
+pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<LaunchEvent>) {
     let paths = PalantirPaths::at(&params.data_root);
     let run_id = params.run_id;
     let mut sender = sender;
@@ -1346,7 +1626,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
     }
     // Sent after the preparation block: the log closure below owns the sender
     // for the duration of that block.
-    let mut tokens_message: Option<Message> = None;
+    let mut tokens_message: Option<LaunchEvent> = None;
 
     // The launch has a bar of its own, and this is its first half. Everything
     // before the game's own output is indeterminate work — signing in, resolving
@@ -1390,24 +1670,18 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             }
         };
         if let Some(refreshed) = prepared.as_ref().and_then(|prepared| prepared.refreshed.clone()) {
-            tokens_message = Some(Message::AccountTokens {
-                uuid: refreshed.uuid,
-                name: refreshed.name,
-                access_token: refreshed.access_token,
-                refresh_token: refreshed.refresh_token,
-                expires_at_ms: refreshed.expires_at_ms,
-            });
+            tokens_message = Some(LaunchEvent::Tokens(refreshed));
         }
         match prepared {
             Some(prepared) => {
-                let (mut store, fetcher) = online_backend(&paths);
+                let (mut store, wire) = online_backend(&paths, &params.instance_id);
                 prepare_launch(
                     &paths,
                     &params.instance_id,
                     &prepared.session,
                     &params.defaults,
                     &mut store,
-                    &fetcher,
+                    &wire,
                     &mut log,
                     &mut progress,
                 )
@@ -1517,7 +1791,7 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<M
             Ok((is_stderr, line)) => {
                 if !game_up && !is_stderr && startup_line(&line) {
                     game_up = true;
-                    if !send_message(&mut sender, Message::LaunchStarted { run_id }) {
+                    if !send_message(&mut sender, LaunchEvent::Started { run_id }) {
                         kill_slot(&slot);
                         return;
                     }
@@ -1730,7 +2004,7 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
 
 /// Send one message, waiting while the channel is full; `false` means the GUI is
 /// gone.
-fn send_message(sender: &mut Sender<Message>, message: Message) -> bool {
+fn send_message(sender: &mut Sender<LaunchEvent>, message: LaunchEvent) -> bool {
     let mut pending = Some(message);
     loop {
         let message = match pending.take() {
@@ -1879,8 +2153,8 @@ impl LaunchLogFile {
 /// behind would be the wrong trade twice over. Nothing here touches the journal:
 /// a level is not a line, and a log that grows by a line per 2% of a download is
 /// a log nobody reads.
-fn send_progress(sender: &mut Sender<Message>, run_id: u64, progress: install::Progress) {
-    let _ = sender.try_send(Message::LaunchProgress { run_id, progress });
+fn send_progress(sender: &mut Sender<LaunchEvent>, run_id: u64, progress: install::Progress) {
+    let _ = sender.try_send(LaunchEvent::Progress { run_id, progress });
 }
 
 /// Forward one batch; `false` means the GUI is gone and the worker should stop.
@@ -1889,7 +2163,7 @@ fn send_progress(sender: &mut Sender<Message>, run_id: u64, progress: install::P
 /// the game's output alike — so this is the one place that has to redact, and the
 /// one place that writes the log to disk.
 fn send_batch(
-    sender: &mut Sender<Message>,
+    sender: &mut Sender<LaunchEvent>,
     run_id: u64,
     lines: Vec<String>,
     journal: &LaunchLogFile,
@@ -1905,12 +2179,12 @@ fn send_batch(
             Some(batch) => batch,
             None => return true,
         };
-        match sender.try_send(Message::LaunchLog { run_id, lines: batch }) {
+        match sender.try_send(LaunchEvent::Log { run_id, lines: batch }) {
             Ok(()) => return true,
             Err(e) => {
                 if e.is_full() {
                     match e.into_inner() {
-                        Message::LaunchLog { lines, .. } => {
+                        LaunchEvent::Log { lines, .. } => {
                             pending = Some(lines);
                             std::thread::sleep(Duration::from_millis(10));
                         }
@@ -1925,19 +2199,19 @@ fn send_batch(
 }
 
 /// Deliver the final outcome (retries while the channel is full).
-fn send_done(sender: &mut Sender<Message>, run_id: u64, note: String) {
+fn send_done(sender: &mut Sender<LaunchEvent>, run_id: u64, note: String) {
     let mut pending: Option<String> = Some(note);
     loop {
         let note = match pending.take() {
             Some(note) => note,
             None => return,
         };
-        match sender.try_send(Message::LaunchDone { run_id, note }) {
+        match sender.try_send(LaunchEvent::Done { run_id, note }) {
             Ok(()) => return,
             Err(e) => {
                 if e.is_full() {
                     match e.into_inner() {
-                        Message::LaunchDone { note, .. } => {
+                        LaunchEvent::Done { note, .. } => {
                             pending = Some(note);
                             std::thread::sleep(Duration::from_millis(10));
                         }
@@ -1955,7 +2229,8 @@ fn send_done(sender: &mut Sender<Message>, run_id: u64, note: String) {
 mod tests {
     use super::*;
     use palantir_core::pack::Component;
-    use palantir_net::{MapFetcher, MapTransport, MicrosoftOAuth};
+    use crate::wire::Script;
+    use palantir_net::{MapTransport, MicrosoftOAuth};
 
     #[test]
     fn server_addresses_parse_with_default_port() {
@@ -2228,7 +2503,7 @@ mod tests {
             &java,
             &[21],
             "java-runtime-delta",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         )
@@ -2244,7 +2519,7 @@ mod tests {
             &java,
             &[17],
             "java-runtime-gamma",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         )
@@ -2268,7 +2543,7 @@ mod tests {
             &stale,
             &[21],
             "java-runtime-delta",
-            &MapFetcher::new(),
+            &Script::new().wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2571,7 +2846,7 @@ mod tests {
     fn prepare_launch_reports_missing_instance() {
         let (_dir, paths) = test_root();
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2579,7 +2854,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2596,7 +2871,7 @@ mod tests {
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Cold", "1.21.1").unwrap();
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2604,7 +2879,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2636,7 +2911,7 @@ mod tests {
         seed_library(paths.root.join("libraries").join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"));
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         // Levels as well as lines: this is the only path through
         // `prepare_launch` that reaches the install phase with nothing missing,
@@ -2650,7 +2925,7 @@ mod tests {
             &session(),
             &LaunchDefaults::default(),
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |level| levels.push(level),
         );
@@ -2717,7 +2992,7 @@ mod tests {
         };
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
-        let fetcher = MapFetcher::new();
+        let fetcher = Script::new();
         let mut lines = Vec::new();
         let readiness = prepare_launch(
             &paths,
@@ -2725,7 +3000,7 @@ mod tests {
             &session(),
             &defaults,
             &mut store,
-            &fetcher,
+            &fetcher.wire(),
             &mut |line| lines.push(line),
             &mut |_| {},
         );
@@ -2748,6 +3023,223 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_repair_puts_back_a_file_a_launch_would_have_trusted() {
+        // The whole property the button is for. Two files are on disk, both at the
+        // size their metadata publishes: the library is three bytes of the wrong
+        // thing, and the client jar is the file. A launch plans neither; a repair
+        // re-fetches the library and leaves the jar alone -- which the scripted
+        // service proves, because it publishes one URL and a request for the
+        // other would fail the repair.
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Broken", "1.21.1").unwrap();
+        let library = paths
+            .root
+            .join("libraries")
+            .join("test/lib/lib/1.0/lib-1.0.jar");
+        let client = paths
+            .root
+            .join("libraries")
+            .join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar");
+        seed_meta_with_digest(&paths, &instance, "1.21.1", &[], &install::sha1_hex(b"jar"));
+        seed_library(library.clone());
+        seed_library(client.clone());
+        // The right length and one byte of difference, which is exactly the file a
+        // size check cannot tell from the one the metadata names.
+        std::fs::write(&library, b"jat").unwrap();
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let mut fetcher = Script::new();
+        fetcher.insert("https://example.invalid/lib-1.0.jar", b"jar".to_vec());
+        let mut lines = Vec::new();
+        let line = repair_instance(
+            &paths,
+            &instance.id(),
+            &LaunchDefaults::default(),
+            &mut store,
+            &fetcher.wire(),
+            &mut |line| lines.push(line),
+        )
+        .expect("every wrong file has a source");
+        assert_eq!(
+            std::fs::read(&library).unwrap(),
+            b"jar",
+            "the wrong file is the file the metadata names again"
+        );
+        assert_eq!(std::fs::read(&client).unwrap(), b"jar", "and the right one is untouched");
+        assert!(line.contains("Repaired 'Broken'"), "got: {line}");
+        assert!(line.contains("1 fetched again"), "got: {line}");
+        // The check is what the reader pressed for, and it is named even when
+        // nothing had to be fetched: this run checked two files and fetched one.
+        assert!(line.contains("2 file(s) checked"), "got: {line}");
+        assert!(
+            lines.iter().any(|l| l.starts_with("repairing 'Broken'")),
+            "the log says what it was doing: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("install:")),
+            "and the install lines are there: {lines:?}"
+        );
+    }
+
+    /// A Forge-shaped instance's install runs on the Java *this launch* chose,
+    /// and that choice is made before the install rather than after it.
+    ///
+    /// The order is the whole point: the installer's processors are Java
+    /// programs, so `engine::find_java` -- the newest major on the machine -- is
+    /// the wrong question for a build that wants an older one, and answering it
+    /// there made a launch fail at the install while the spawn beside it would
+    /// have picked a runtime that fits.
+    #[test]
+    fn a_forge_install_runs_on_the_java_the_launch_chose() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Forge", "1.21.1").unwrap();
+        // This build wants Java 8 and the instance is pinned to 21, which is the
+        // shape a machine whose default Java is 21 leaves behind -- and it
+        // matters more here than at the spawn, because the processors run first.
+        seed_forge_meta(&paths, &instance, "1.21.1", &[8]);
+        seed_library(paths.root.join("libraries").join("test/lib/lib/1.0/lib-1.0.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"),
+        );
+
+        let jdks = tempfile::tempdir().unwrap();
+        let pinned = fake_java_home(jdks.path(), "jdk21", "21.0.6");
+        let wanted = fake_java_home(jdks.path(), "jdk8", "1.8.0_402");
+        let mut instance = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
+        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance.settings_mut().set_str("JavaPath", &pinned);
+        instance.save().unwrap();
+
+        let defaults = LaunchDefaults {
+            java: JavaPrefs { default_path: wanted.clone(), ..JavaPrefs::default() },
+            ..LaunchDefaults::default()
+        };
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = Script::new();
+        // Lines and levels in one list: the order *between* the two taps is what
+        // this test measures, and two lists would not show it.
+        let events = std::cell::RefCell::new(Vec::new());
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &defaults,
+            &mut store,
+            &fetcher.wire(),
+            &mut |line| events.borrow_mut().push(format!("line: {line}")),
+            &mut |level| events.borrow_mut().push(format!("level: {}", level.label)),
+        );
+        let events = events.into_inner();
+        let text = events.join("\n");
+        let at = |needle: &str| {
+            events
+                .iter()
+                .position(|event| event.contains(needle))
+                .unwrap_or_else(|| panic!("'{needle}' is missing from: {text}"))
+        };
+        let refused = at("is Java 21, but this version wants Java 8");
+        let chosen = at(&format!("using the default Java from the settings: {wanted}"));
+        let installing = at("installing Forge");
+        assert!(
+            refused < chosen,
+            "the pin that cannot run this build is named before the answer that can: {text}"
+        );
+        assert!(
+            chosen < installing,
+            "the Java is chosen before the install that needs it: {text}"
+        );
+        // The install itself stops at the network, which is what an empty fetcher
+        // is: what this test reads is which Java it was handed and when, not what
+        // a processor chain does -- that is the live test's measurement.
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+        assert!(text.contains("not launching"), "got: {text}");
+    }
+
+    /// A pack that names Forge without naming a game version cannot ask an
+    /// installer anything, and the launch says which document answers instead of
+    /// resolving the mirror's wrapper in silence: naming the loader is what
+    /// decides who answers for it (G132), and without a game this launcher is not
+    /// one of the candidates.
+    #[test]
+    fn a_forge_pack_with_no_game_version_names_the_document_that_answers() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Nogame", "1.21.1").unwrap();
+        // The pack names the loader alone -- no `net.minecraft` component at all,
+        // which is a profile edited by hand or imported from one.
+        let mut pack = PackProfile::default();
+        pack.append(Component {
+            uid: "net.minecraftforge".into(),
+            version: "52.1.0".into(),
+            important: true,
+            ..Default::default()
+        });
+        pack.save(&instance.mmc_pack_path()).unwrap();
+        // What the mirror serves for this uid is the wrapper's document: a main
+        // class of the wrapper's and no library list an install could read.
+        write_meta(
+            &paths,
+            "net.minecraftforge",
+            "52.1.0",
+            serde_json::json!({
+                "uid": "net.minecraftforge",
+                "version": "52.1.0",
+                "order": 0,
+                "mainClass": "io.github.zekerzhayard.forgewrapper.installer.Main",
+                "libraries": []
+            }),
+        );
+
+        // A Java the settings name, so the test does not scan this machine: the
+        // launch stops at the probe, which is not what this test is about.
+        let jdks = tempfile::tempdir().unwrap();
+        let default_java = fake_java_home(jdks.path(), "jdk21", "21.0.6");
+        let defaults = LaunchDefaults {
+            java: JavaPrefs { default_path: default_java, ..JavaPrefs::default() },
+            ..LaunchDefaults::default()
+        };
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = Script::new();
+        let mut lines = Vec::new();
+        let mut levels: Vec<install::Progress> = Vec::new();
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &defaults,
+            &mut store,
+            &fetcher.wire(),
+            &mut |line| lines.push(line),
+            &mut |level| levels.push(level),
+        );
+        let text = lines.join("\n");
+        assert!(
+            text.contains("names Forge but no Minecraft version"),
+            "the fallback has to be named: {text}"
+        );
+        assert!(
+            text.contains("the mirror's wrapper document answers for it"),
+            "and it has to say which document answers: {text}"
+        );
+        assert!(
+            text.contains("add a 'net.minecraft' component"),
+            "and what the reader can do about it: {text}"
+        );
+        // Nothing installed the loader here: the level the install announces
+        // itself with never arrives, because this launch has no game to match an
+        // installer against.
+        assert!(
+            levels.iter().all(|level| !level.label.starts_with("installing")),
+            "this launch must not have installed anything: {levels:?}"
+        );
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+    }
+
     /// Write a version file into the metadata cache for `uid`/`version`.
     fn write_meta(paths: &PalantirPaths, uid: &str, version: &str, value: serde_json::Value) {
         let dir = paths.meta_dir().join(uid);
@@ -2766,7 +3258,27 @@ mod tests {
     /// `majors` is what the version declares it will run on
     /// (`compatibleJavaMajors`), which is the field a launcher picks a Java
     /// from; an empty slice means the version does not say.
+    /// The asset index every metadata fixture here publishes: one with no objects,
+    /// because a repair test that also had to serve 5000 of them would be measuring
+    /// the CDN.
+    const EMPTY_ASSET_INDEX: &[u8] = br#"{"objects":{}}"#;
+
     fn seed_meta(paths: &PalantirPaths, instance: &Instance, game: &str, majors: &[i64]) {
+        seed_meta_with_digest(paths, instance, game, majors, "")
+    }
+
+    /// [`seed_meta`] with a digest on the library it publishes.
+    ///
+    /// The digest is the field a repair is built on, and the default fixture
+    /// leaves it empty -- so the repair's own test writes one that says what the
+    /// file on disk is not.
+    fn seed_meta_with_digest(
+        paths: &PalantirPaths,
+        instance: &Instance,
+        game: &str,
+        majors: &[i64],
+        library_sha1: &str,
+    ) {
         write_meta(
             paths,
             "net.minecraft",
@@ -2780,7 +3292,12 @@ mod tests {
                 "assets": "17",
                 "assetIndex": {
                     "id": "17",
-                    "sha1": "0000000000000000000000000000000000000000",
+                    // The digest of the index this fixture writes below, rather
+                    // than a row of zeroes: a launch never looks at it (the file
+                    // is there, which is all `Trust` asks), and a repair does --
+                    // with zeroes it would plan the index again and then fail the
+                    // transfer, which is a fixture measuring the wrong thing.
+                    "sha1": install::sha1_hex(EMPTY_ASSET_INDEX),
                     "size": 2,
                     "totalSize": 0,
                     "url": "https://example.invalid/17.json"
@@ -2791,7 +3308,7 @@ mod tests {
                         "downloads": {
                             "artifact": {
                                 "path": "test/lib/lib/1.0/lib-1.0.jar",
-                                "sha1": "",
+                                "sha1": library_sha1,
                                 "size": 3,
                                 "url": "https://example.invalid/lib-1.0.jar"
                             }
@@ -2813,13 +3330,41 @@ mod tests {
         // network failure instead of the launch plan.
         let indexes = paths.assets_dir().join("indexes");
         std::fs::create_dir_all(&indexes).unwrap();
-        std::fs::write(indexes.join("17.json"), br#"{"objects":{}}"#).unwrap();
+        std::fs::write(indexes.join("17.json"), EMPTY_ASSET_INDEX).unwrap();
 
         // The pack must reference it, exactly as `Instance::create` writes it.
         let mut profile = PackProfile::default();
         profile.append(Component {
             uid: "net.minecraft".into(),
             version: game.into(),
+            important: true,
+            ..Default::default()
+        });
+        profile.save(&instance.mmc_pack_path()).unwrap();
+    }
+
+    /// The same minimal instance with a Forge component beside the game: the
+    /// shape the Create dialog leaves for a Forge instance, and the shape that
+    /// makes `prepare_launch` reach the loader's own install.
+    fn seed_forge_meta(paths: &PalantirPaths, instance: &Instance, game: &str, majors: &[i64]) {
+        seed_meta(paths, instance, game, majors);
+        write_meta(
+            paths,
+            "net.minecraftforge",
+            "52.1.0",
+            serde_json::json!({
+                "uid": "net.minecraftforge",
+                "version": "52.1.0",
+                "order": 5,
+                "mainClass": "net.minecraftforge.bootstrap.ForgeBootstrap",
+                "compatibleJavaMajors": majors,
+                "libraries": []
+            }),
+        );
+        let mut profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
+        profile.append(Component {
+            uid: "net.minecraftforge".into(),
+            version: "52.1.0".into(),
             important: true,
             ..Default::default()
         });
@@ -2923,7 +3468,7 @@ mod tests {
         let instance = Instance::create(&paths.instances_dir(), "Streamed", "1.21.1").unwrap();
         let journal = LaunchLogFile::open(&paths, &instance.id());
 
-        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(4);
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<LaunchEvent>(4);
         assert!(send_batch(
             &mut tx,
             7,
@@ -2933,7 +3478,7 @@ mod tests {
             ],
             &journal,
         ));
-        let Ok(Message::LaunchLog { run_id, lines }) = rx.try_recv() else {
+        let Ok(LaunchEvent::Log { run_id, lines }) = rx.try_recv() else {
             panic!("expected a log batch");
         };
         assert_eq!(run_id, 7);
@@ -2965,7 +3510,7 @@ mod tests {
         let (_dir, paths) = test_root();
         let instance = Instance::create(&paths.instances_dir(), "Busy", "1.21.1").unwrap();
         let journal = LaunchLogFile::open(&paths, &instance.id());
-        let (mut tx, mut rx) = futures::channel::mpsc::channel::<Message>(1);
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<LaunchEvent>(1);
 
         const SENT: usize = 16;
         for done in 1..=SENT {
@@ -2979,7 +3524,7 @@ mod tests {
         let mut arrived: Vec<usize> = Vec::new();
         while let Ok(message) = rx.try_recv() {
             match message {
-                Message::LaunchProgress { run_id, progress } => {
+                LaunchEvent::Progress { run_id, progress } => {
                     assert_eq!(run_id, 7);
                     arrived.push(progress.done);
                 }
@@ -3003,16 +3548,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn open_url_reports_a_browser_it_cannot_launch() {
-        // A URL is only opened through the platform opener, which on every
-        // supported system is an absolute command; a nonsense URL still has to
-        // produce success from the spawn itself, so what is asserted here is
-        // that the call does not panic and reports a real error shape when it
-        // fails.
-        let result = open_url("not-a-url");
-        if let Err(message) = result {
-            assert!(message.contains("opening"), "got {message}");
-        }
-    }
 }
