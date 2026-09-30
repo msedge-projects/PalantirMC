@@ -6370,3 +6370,16 @@ dashboard exit=0
   processors need an older major than the machine's newest, the install is where
   it fails; moving the java block above the install is the change that fixes it,
   and it is not in this slice.
+
+  **The runner agrees, and here it had to: this slice's own install ran on the
+  runner.** No push to this branch schedules anything -- the mirror's draft
+  pull request belongs to the working branch, and this one is under none -- so
+  the run is asked for rather than got. `36692523799` on `ce9ca73` is all five
+  jobs: `Lint` green, `Test workspace` green at 1077 passed / 0 failed and 19
+  ignored (177 + 8 + 599 + 4 + 31 + 258, the desktop crate's 599 and
+  palantir-net's 258 being this machine's own counts to the test), the live
+  suite 19 passed / 0 failed in 175.23s with this slice's own
+  `a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer
+  ... ok` among them -- both pinned builds installed for real, from the
+  runner's network rather than this machine's -- and both Windows exes staged
+  (msvc 5,553,996 B, gnu 5,623,878 B).
