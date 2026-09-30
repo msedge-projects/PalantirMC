@@ -169,6 +169,13 @@ pub enum Ask {
     /// style and cape, and which of the three -- and the pixels are read here,
     /// because a page has never read a file in this tree.
     EditSkin(skins::Edit),
+    /// Write the Skins page's saved rows in the order the reader put them in.
+    ///
+    /// A write with no account in it at all: the order is `crate::saved_skins`'
+    /// own index, which is a file under this product's directory and therefore the
+    /// shell's -- a page has never written a file in this tree -- and the reference
+    /// reaches the same write through its own store's `set_custom_skin_order`.
+    Reorder(skins::Reorder),
     /// Put a project into one of the launcher's instances.
     ///
     /// The same shape as the other asks, pointed at a file instead of a page: the
@@ -308,6 +315,15 @@ impl Message {
     /// and redraws the other rather than being told about it.
     pub fn skin_saved(edit: &skins::Edit, result: Result<(), String>) -> Message {
         Message::Skins(skins::Message::Edited { round: edit.round, result })
+    }
+
+    /// The message that carries a reorder's outcome back to the Skins page.
+    ///
+    /// [`Message::skin_saved`]'s twin, and the same sentence on failure: what an
+    /// order change rewrites is the store the page reads, so a success reloads it
+    /// and the reader sees the order they asked for rather than a sentence about it.
+    pub fn skin_reordered(order: &skins::Reorder, result: Result<(), String>) -> Message {
+        Message::Skins(skins::Message::Reordered { round: order.round, result })
     }
 
     /// The message that carries an install's outcome back to the page whose button

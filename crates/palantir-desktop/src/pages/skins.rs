@@ -25,7 +25,12 @@
 //! own `unequip_skin` has no caller anywhere in the vendored frontend, so taking a skin
 //! off is reached from this launcher's editor rather than from the reference's, and the
 //! deletion the reference draws in a confirm dialog of its own lives in the editor too,
-//! because this page has no preview panel to put it on ([`edit_view`]).
+//! because this page has no preview panel to put it on ([`edit_view`]). Since G134 the
+//! rows can be put in the reader's own order: the reference drags a saved skin anywhere
+//! in its list (`VirtualSkinSectionList.vue`'s `reorder-saved-skins`, which `Skins.vue`
+//! answers with `set_custom_skin_order`), and a row here carries a chevron up and a
+//! chevron down instead, because this launcher has no drag widget -- the write
+//! underneath is the same one ([`Step`], [`Reorder`]).
 
 use iced::widget::{column, image, row, text, Space};
 use iced::{Alignment, Element, Length};
@@ -162,6 +167,23 @@ pub struct Add {
     pub round: u64,
 }
 
+/// The order the reader asked the saved rows to be in.
+///
+/// The whole order rather than a move, because that is the write: the reference's
+/// `set_custom_skin_order` takes the list of texture keys and
+/// [`crate::saved_skins::reorder`] takes the same. The page computes it from the rows
+/// it is drawing -- the only list it can see -- and the store ignores keys it does not
+/// hold and keeps rows it was not told about, so an order that arrives short cannot
+/// delete anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reorder {
+    /// Which request this is, counting from one, beside the reads', the writes' and
+    /// the editor's own counters.
+    pub round: u64,
+    /// Every saved row's key, in the order the reader put them in.
+    pub keys: Vec<String>,
+}
+
 /// What came of asking the reader for a file.
 ///
 /// Three answers rather than a `Result`, because a cancel is not a failure: a reader
@@ -240,6 +262,22 @@ pub struct Edit {
     pub act: Act,
 }
 
+/// Which way a saved row was asked to move.
+///
+/// The reference reorders its saved skins by dragging one anywhere in the list
+/// (`VirtualSkinSectionList.vue`'s `reorder-saved-skins`, which `Skins.vue` answers
+/// with `set_custom_skin_order`). This launcher has no drag widget -- [`crate::ui`] is
+/// buttons, chips and fields -- so a row moves one place per press and a reader
+/// reaches any order by repeating, which is this launcher's control rather than the
+/// reference's. The write underneath is the same one either way: the whole order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Toward the front of the list.
+    Up,
+    /// Toward the back.
+    Down,
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -285,6 +323,13 @@ pub enum Message {
         /// The row's key.
         key: String,
     },
+    /// A stored row was asked to move one place in the reader's own order.
+    Move {
+        /// The row's key.
+        key: String,
+        /// Which way -- one place, which is what the control offers.
+        step: Step,
+    },
     /// The arm style was chosen in the modal.
     ArmStyle {
         /// `CLASSIC` or `SLIM`, the two words the service uses.
@@ -306,6 +351,19 @@ pub enum Message {
         /// Which request this answers.
         round: u64,
         /// Nothing on success, or the reason it could not be done.
+        result: Result<(), String>,
+    },
+    /// The shell's answer to a move: which request it answers, and what happened.
+    ///
+    /// A success says nothing and reloads instead, for [`Message::Applied`]'s
+    /// reason: the order the store now holds is what the page draws again. A failure
+    /// is a sentence in the page's own slot, and the order still on screen is the
+    /// one the store holds -- the write is one atomic file, so a refusal wrote
+    /// nothing to re-read.
+    Reordered {
+        /// Which request this answers.
+        round: u64,
+        /// Nothing on success, or the reason the order could not be written.
         result: Result<(), String>,
     },
     /// The pointer entered or left one of the page's controls, for the clock
@@ -336,6 +394,15 @@ pub const EARS_PROJECT: &str = "mfzaZK3Z";
 /// The name space the stored rows' editors take theirs from. One per row, keyed by
 /// the texture's digest, because two rows can share a file name.
 const EDIT_KEY: &str = "skins:edit";
+
+/// The same for the two controls that move a stored row, one space each because a
+/// row carries both and each is its own control to the hover clock.
+const MOVE_UP_KEY: &str = "skins:move-up";
+const MOVE_DOWN_KEY: &str = "skins:move-down";
+
+/// The chevrons' own size: the reference's `!size-4` on the head's buttons, which
+/// is the size it draws a small icon at (`HEAD_ICON`).
+const MOVE_MARK: f32 = 16.0;
 
 /// The name space the per-row Apply buttons take their hover names from.
 const WEAR_KEY: &str = "skins:wear";
@@ -480,6 +547,31 @@ impl State {
                         ears: row.ears,
                         act: Act::Save,
                     });
+                }
+            }
+            Message::Move { key, step } => {
+                // One write at a time, for the reason the editor's own actions are:
+                // two reorders would be two read-modify-writes of the same index.
+                if !self.wearing {
+                    if let Some(keys) = moved(&self.saved, &key, step) {
+                        self.wearing = true;
+                        self.notice = None;
+                        let round = self.round + 1;
+                        self.round = round;
+                        return Some(Ask::Reorder(Reorder { round, keys }));
+                    }
+                }
+            }
+            Message::Reordered { round, result } => {
+                if round == self.round {
+                    self.wearing = false;
+                    match result {
+                        // What changed is the store's order, so the answer is the
+                        // read of it again, the way a change that worked reloads the
+                        // document rather than thanking the reader.
+                        Ok(()) => return Some(Ask::Skins(self.ask())),
+                        Err(reason) => self.notice = Some(reorder_line(&reason)),
+                    }
                 }
             }
             Message::ArmStyle { variant } => {
@@ -808,19 +900,25 @@ fn saved_block<'a>(theme: Gen, rows: &'a [SavedRow], wearing: bool) -> Element<'
         );
     }
     let mut block = column![].spacing(ROW_GAP).width(Length::Fill);
-    for row in rows {
+    let last = rows.len() - 1;
+    for (index, row) in rows.iter().enumerate() {
         let facts = format!("{} -- {}", row.entry.name, variant_label(&row.entry.variant));
         // A press while a write is out is refused rather than queued: the answer to
         // the write closes the modal, so an editor opened behind it would vanish.
         let action = (!wearing).then_some(Message::Edit { key: row.entry.key.clone() });
-        block = block.push(owned_row(
-            theme,
-            &facts,
-            false,
-            Key::AppSkinsEditButton,
-            ui::scoped(EDIT_KEY, &row.entry.key),
-            action,
-        ));
+        // The two controls this launcher has instead of the reference's drag: drawn
+        // only where a move would do something -- the first row has no up, the last
+        // no down -- and only while no write is out, because the order they would ask
+        // the store for is the order it is about to be read back in anyway.
+        let up = (index > 0 && !wearing).then_some(Message::Move {
+            key: row.entry.key.clone(),
+            step: Step::Up,
+        });
+        let down = (index < last && !wearing).then_some(Message::Move {
+            key: row.entry.key.clone(),
+            step: Step::Down,
+        });
+        block = block.push(saved_row(theme, &facts, &row.entry.key, action, up, down));
     }
     block.into()
 }
@@ -952,6 +1050,39 @@ fn wear_cape(cape: &palantir_net::MinecraftCape, worn: bool, wearing: bool) -> O
     Some(Message::Wear(SkinChange::Cape { id: cape.id.clone() }))
 }
 
+/// The order a move would write, or `None` when the press would change nothing.
+///
+/// [`wear_skin`]'s arrangement and its reason: the rule -- the row is found by its
+/// key, and it has a neighbour to trade places with -- is a thing a test can read
+/// rather than something to be inferred from a drawn list. The two ends answer
+/// `None` rather than an order equal to the one on screen, because a press there
+/// would be a write that changes nothing, and the row is drawn without the control
+/// that would send it (see [`saved_block`]).
+fn moved(rows: &[SavedRow], key: &str, step: Step) -> Option<Vec<String>> {
+    let index = rows.iter().position(|row| row.entry.key == key)?;
+    let to = match step {
+        Step::Up if index > 0 => index - 1,
+        Step::Down if index + 1 < rows.len() => index + 1,
+        _ => return None,
+    };
+    let mut keys: Vec<String> = rows.iter().map(|row| row.entry.key.clone()).collect();
+    keys.swap(index, to);
+    Some(keys)
+}
+
+/// The sentence under an order that could not be written.
+///
+/// The reference's answer to the same failure is a notification with a title
+/// (`app.skins.reorder-error.title`, "Failed to reorder skins") over one of two
+/// sentences -- "Your skin order could not be saved.", or the thrown error's own
+/// message. This page's notice slot is one line, so the reference's title comes
+/// first and the store's refusal follows it: the title is what happened and the
+/// refusal is which file this launcher could not write, which is the half a reader
+/// can act on and the half the reference keeps only when its error carries one.
+fn reorder_line(reason: &str) -> String {
+    format!("{}: {reason}", Key::AppSkinsReorderErrorTitle.message())
+}
+
 /// One thing the account owns: what it is called, and the mark when it is worn.
 ///
 /// The mark is the reference's own `CheckIcon`, in the accent ink rather than a word
@@ -996,6 +1127,65 @@ fn owned_row<'a>(
     ));
     // Named rather than inferred: `ui::card` takes `impl Into<Element>`, and an
     // `into()` inside that is a conversion with two possible targets.
+    let row: Element<'a, Message> = line.into();
+    ui::card(theme, row)
+}
+
+/// One row of the launcher's own store: what it is called, the two controls that
+/// move it, and the press that opens its editor.
+///
+/// [`owned_row`] with the two move controls rather than a wider [`owned_row`]: the
+/// account's rows have nothing to reorder -- Minecraft's document is a set, not an
+/// order -- and a parameter that is empty for every caller but one is the kind of
+/// widening that leaves the next reader asking which callers use it.
+fn saved_row<'a>(
+    theme: Gen,
+    name: &str,
+    key: &str,
+    edit: Option<Message>,
+    up: Option<Message>,
+    down: Option<Message>,
+) -> Element<'a, Message> {
+    let mut line = row![]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center)
+        .push(
+            text(name.to_string())
+                .size(14.0)
+                .font(crate::style::medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        )
+        .push(Space::with_width(Length::Fill));
+    // The reference reorders this list by dragging a row; this launcher has no drag
+    // widget, so a row has a chevron up and a chevron down, drawn exactly where they
+    // would move something (`saved_block`) and gone while a write is out.
+    if let Some(message) = up {
+        line = line.push(ui::icon_button(
+            theme,
+            ui::scoped(MOVE_UP_KEY, key),
+            Glyph::ChevronUp,
+            MOVE_MARK,
+            message,
+        ));
+    }
+    if let Some(message) = down {
+        line = line.push(ui::icon_button(
+            theme,
+            ui::scoped(MOVE_DOWN_KEY, key),
+            Glyph::ChevronDown,
+            MOVE_MARK,
+            message,
+        ));
+    }
+    let line = line.push(ui::button_or(
+        theme,
+        ui::scoped(EDIT_KEY, key),
+        Key::AppSkinsEditButton,
+        ui::Kind::Standard,
+        edit,
+    ));
+    // Named rather than inferred, for [`owned_row`]'s reason: `ui::card` takes
+    // `impl Into<Element>`, and an `into()` inside that has two possible targets.
     let row: Element<'a, Message> = line.into();
     ui::card(theme, row)
 }
@@ -1471,19 +1661,114 @@ mod tests {
         drop(view(Gen::ALL[0], &state, &store));
         let state = State {
             open: Some(3),
-            saved: vec![SavedRow {
-                entry: saved_skins::Entry {
-                    key: "abc".to_string(),
-                    name: "my skin".to_string(),
-                    variant: "CLASSIC".to_string(),
-                    cape: String::new(),
-                    source: saved_skins::Source::Custom,
-                    file: "abc.png".to_string(),
-                },
-                ears: false,
-            }],
+            saved: vec![stored("abc")],
             ..State::default()
         };
         drop(view(Gen::ALL[0], &state, &store));
+    }
+
+    /// One stored row, as the page draws it.
+    fn stored(key: &str) -> SavedRow {
+        SavedRow {
+            entry: saved_skins::Entry {
+                key: key.to_string(),
+                name: key.to_string(),
+                variant: "CLASSIC".to_string(),
+                cape: String::new(),
+                source: saved_skins::Source::Custom,
+                file: format!("{key}.png"),
+            },
+            ears: false,
+        }
+    }
+
+    #[test]
+    fn a_move_swaps_a_row_with_its_neighbour_and_asks_the_shell_once() {
+        // The reference reorders this list by dragging a row anywhere; this launcher's
+        // control is a chevron per row, so the order asked for is always the list on
+        // screen with two neighbours swapped -- and it travels as the whole order,
+        // which is the write the reference's `set_custom_skin_order` makes too.
+        let mut state = State {
+            round: 4,
+            saved: vec![stored("a"), stored("b"), stored("c")],
+            ..State::default()
+        };
+        let Some(Ask::Reorder(order)) = state.update(Message::Move {
+            key: "b".to_string(),
+            step: Step::Up,
+        }) else {
+            panic!("the press asks the shell");
+        };
+        assert_eq!(order.round, 5, "the answer is matched to this press");
+        assert_eq!(order.keys, ["b", "a", "c"], "one place toward the front");
+        assert!(state.wearing, "and the page waits on the write");
+        assert_eq!(state.notice, None);
+
+        // A second press while the first is out is dropped rather than queued: two
+        // reorders would be two read-modify-writes of the same index.
+        assert_eq!(
+            state.update(Message::Move { key: "c".to_string(), step: Step::Up }),
+            None
+        );
+        assert!(state.wearing);
+    }
+
+    #[test]
+    fn the_ends_of_the_list_do_not_move_and_a_key_the_page_does_not_hold_is_nothing() {
+        // The rule `moved` states, read where a test can: the first row has no place
+        // to move up into and the last none to move down into, so such a press is not
+        // an ask -- it is not even a write that changes nothing -- and the row is
+        // drawn without the control that would send it.
+        let rows = vec![stored("a"), stored("b")];
+        assert_eq!(moved(&rows, "a", Step::Up), None);
+        assert_eq!(moved(&rows, "b", Step::Down), None);
+        assert_eq!(moved(&rows, "missing", Step::Up), None);
+        assert_eq!(moved(&rows, "a", Step::Down), Some(vec!["b".into(), "a".into()]));
+
+        let mut state = State { saved: rows, ..State::default() };
+        assert_eq!(
+            state.update(Message::Move { key: "a".to_string(), step: Step::Up }),
+            None
+        );
+        assert!(!state.wearing, "and nothing is waiting");
+    }
+
+    #[test]
+    fn a_reorder_that_worked_reloads_the_list_and_one_that_failed_says_so() {
+        let mut state = State { round: 9, wearing: true, ..State::default() };
+        let Some(Ask::Skins(asked)) = state.update(Message::Reordered { round: 9, result: Ok(()) })
+        else {
+            panic!("an order that was written reloads the store");
+        };
+        assert_eq!(asked.round, 10);
+        assert!(!state.wearing);
+        assert_eq!(state.notice, None, "a success is not a sentence");
+
+        state.round = 10;
+        state.wearing = true;
+        assert_eq!(
+            state.update(Message::Reordered {
+                round: 10,
+                result: Err("cannot write 'skins/index.json': disk full".to_string()),
+            }),
+            None
+        );
+        assert!(!state.wearing);
+        let notice = state.notice.clone().expect("a failure is a sentence");
+        assert!(
+            notice.contains("Failed to reorder skins"),
+            "the reference's own title comes first: {notice}"
+        );
+        assert!(
+            notice.contains("disk full"),
+            "and the store's refusal is the half that names what failed: {notice}"
+        );
+        // An answer to a move the page has replaced is dropped rather than drawn.
+        state.notice = None;
+        assert_eq!(
+            state.update(Message::Reordered { round: 99, result: Err("old".to_string()) }),
+            None
+        );
+        assert_eq!(state.notice, None, "the stale answer changed nothing");
     }
 }

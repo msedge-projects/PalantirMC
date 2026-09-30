@@ -7191,6 +7191,103 @@ desktop=0
   failed and 19 ignored in the workspace run, `Lint` green in 2m8s, the live
   suite 19 passed / 0 failed in 129.02s, and both Windows exes staged (msvc
   5,579,551 B, gnu 5,648,751 B).
+- [x] G134: the Skins page's stored rows can be put in the reader's own order -- the
+  reference's drag replaced by a chevron up and a chevron down per row, over the
+  same `set_custom_skin_order` write
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 631 passed; 0 failed in the desktop crate's own run, this slice's five
+          among them, with `tests/native.rs`'s four beside it
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0, with stage 3 now Done and no open item left
+          anywhere in the plan
+  EVIDENCE: the transcripts below.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test pages::skins::tests::a_move_swaps_a_row_with_its_neighbour_and_asks_the_shell_once ... ok
+test pages::skins::tests::a_reorder_that_worked_reloads_the_list_and_one_that_failed_says_so ... ok
+test pages::skins::tests::the_ends_of_the_list_do_not_move_and_a_key_the_page_does_not_hold_is_nothing ... ok
+test shell::tests::a_move_is_written_to_the_stores_own_order ... ok
+test shell::tests::the_pages_move_is_an_ask_the_shell_takes_and_drops_while_one_is_out ... ok
+test result: ok. 631 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 42.72s
+     Running tests\native.rs (target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.91s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\PalantirMC\crates\palantir-desktop)
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 12s
+
+$ python tools/progress.py --check
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 135 gates, 6 stage cards and every subject as written
+```
+
+  **The last item on the plan, and the one G124 named as missing.** G124 landed the
+  store the reader's own additions are kept in and the editor its rows open, and
+  said of the reference's two store writes that `set_custom_skin_order` is
+  `reorder`, "which is tested and has no drag-and-drop list to call it from". This
+  slice is that control: a stored row carries a chevron up and a chevron down, and
+  a press asks the shell to write the whole order. Nothing else in stages 0-5 is
+  left open, which is what moves the stage table to Done.
+
+  **The reference drags; this launcher has no drag widget.** `Skins.vue` passes
+  `@reorder-saved-skins` to `VirtualSkinSectionList.vue`, which makes every saved
+  skin draggable and emits the whole list when a drag ends; `reorderSavedSkins`
+  then swaps its own list optimistically, calls `set_custom_skin_order` with the
+  custom rows' texture keys, reloads its lists and shows a notification on failure.
+  This launcher's kit is buttons, chips and fields -- there is no drag in it -- so
+  the control is two chevrons per row, one place per press, which reaches any order
+  by repeating. The write underneath is the reference's own: `saved_skins::reorder`
+  takes the whole list of keys, ignores keys it does not hold and keeps rows the
+  list did not name, so a page drawing a shorter list than the file holds cannot
+  lose a row by asking.
+
+  **What the page owns and what the shell owns.** The page owns the rule: `moved`
+  is the list it is drawing with two neighbours swapped, and it answers `None` at
+  the ends -- the first row has no place to move up into, the last none down -- and
+  for a key it does not hold, so the control is drawn exactly where a press would
+  change something and a press that could not is not an ask at all. The shell owns
+  the file (`write_skin_order`), for the reason every store write is the shell's: a
+  page has never written a file in this tree. One write at a time, like every other
+  write on this page; a success reloads, because the order the store now holds is
+  what the page draws again; and a failure is the reference's own title with the
+  store's refusal after it, in the page's one notice slot -- the same one-line shape
+  the reference's notification carries, where its text would have been the fallback
+  sentence. The `#[allow(dead_code)]` G124 left on `reorder` is gone with the
+  caller it was waiting for.
+
+  **The tests.** Five, and each watches a different half. The page's: a move asks
+  the shell once, with the list on screen swapped; a second press while that write
+  is out is dropped; the two ends and a key the page does not hold answer `None`;
+  and a reorder that worked reloads while one that failed wears the reference's
+  title and the store's reason, with an answer to a move the page has replaced
+  dropped rather than drawn. The shell's: `write_skin_order` writes the reader's
+  order over a real temporary store and the next read draws it, with a stranger in
+  the list ignored and a row the list left out still in place; and the page's press
+  comes out of `act` as the ask the command is built from, with the second press,
+  while one is out, not an ask at all.
+
+  **What this cannot say.**
+- **Nothing drags.** The reference's gesture cannot be reproduced in this kit, and
+  the departure is deliberate rather than unfinished: two presses reach what one
+  drag does, because the order is a list rather than a position. A reader who wants
+  a row five places further up presses five times, and each press is a write.
+- **No test moves a row through the running command.** The write is one function
+  over a store and a list of keys, and it is tested directly; the command around it
+  is a `Command::perform` future, which no test in this tree can run. What is not
+  exercised end to end is the round trip *press -> worker -> message -> reload*,
+  which is the shape every write on this page has.
+- **The order is only as good as the last add.** A row added after a reorder
+  promotes itself to the front (`saved_skins::add`), so the newest skin is first
+  whatever order the reader set earlier. That is the reference's own behaviour for
+  a newly added skin, and it means an order is not a preference that survives an
+  add.
 
 ## What these gates cannot say
 

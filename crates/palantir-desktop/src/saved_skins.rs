@@ -293,13 +293,12 @@ pub fn forget(home: &PalantirPaths, key: &str) -> Result<bool, String> {
 /// their place at the end, because the caller is a page drawing a list and a list
 /// that arrived short is not an instruction to delete anything.
 ///
-/// `#[allow(dead_code)]` because this launcher has no drag-and-drop list to call it
-/// from yet: `Index::order` is what a reorder would write, `add` maintains it by
-/// promoting a row to the front and `forget` prunes it, and the reference's own
-/// `set_custom_skin_order` is the vocabulary this keeps so the slice that draws the
-/// list does not have to re-derive it. `locale.rs`'s `Direction` is the same
-/// arrangement, for the same reason.
-#[allow(dead_code)]
+/// The caller is the Skins page's saved rows (G134): the reference reaches the same
+/// write by dragging a row (`VirtualSkinSectionList`'s `reorder-saved-skins` ->
+/// `set_custom_skin_order`), and this launcher's list has no drag -- see
+/// [`crate::pages::skins::Step`] for the control it has instead. `Index::order` is
+/// what it writes, `add` maintains it by promoting a row to the front and `forget`
+/// prunes it.
 pub fn reorder(home: &PalantirPaths, ordered: &[String]) -> Result<(), String> {
     let mut index = load(home);
     let mut want: Vec<String> = Vec::with_capacity(index.skins.len());

@@ -144,6 +144,13 @@ enum Asked {
     /// the same rule the picker follows, for the same reason. Two of its three
     /// actions also need the account's token, which is the shell's.
     EditSkin(skins::Edit),
+    /// Write the Skins page's saved rows in the order the reader put them in.
+    ///
+    /// The only ask here with no account and no service in it: the order lives in
+    /// this launcher's own store ([`crate::saved_skins`]), which is a folder under
+    /// the product's directory and therefore the shell's -- the reference reaches
+    /// the same write through its own store's `set_custom_skin_order`.
+    Reorder(skins::Reorder),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1426,6 +1433,7 @@ impl Shell {
                 Asked::Wear(worn) => self.wear(worn),
                 Asked::AddSkin(add) => self.add_skin(add),
                 Asked::EditSkin(edit) => self.edit_skin(edit),
+                Asked::Reorder(order) => self.reorder_skins(order),
             };
         }
         // A create and an import are not a page's requests and do not go through
@@ -1923,6 +1931,9 @@ impl Shell {
                     // The editor's three actions, which are also not owed by arrival: a
                     // press of Save, Forget or Take off is a reader's doing.
                     Some(pages::Ask::EditSkin(edit)) => Some(Asked::EditSkin(edit)),
+                    // Nor is a move: the order is the reader's, so the rows arrive in
+                    // whatever order the store holds until they say otherwise.
+                    Some(pages::Ask::Reorder(order)) => Some(Asked::Reorder(order)),
                     Some(pages::Ask::Install(install)) => {
                         // The dialog is opened rather than a transfer started: the
                         // missing half of the request is *which instance*, and only
@@ -2706,7 +2717,8 @@ impl Shell {
                 | pages::Ask::Stop(_)
                 | pages::Ask::Wear(_)
                 | pages::Ask::AddSkin(_)
-                | pages::Ask::EditSkin(_),
+                | pages::Ask::EditSkin(_)
+                | pages::Ask::Reorder(_),
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
@@ -2976,6 +2988,26 @@ impl Shell {
                 }
             }),
             move |result| Message::Screen(pages::Message::skin_saved(&edit, result)),
+        )
+    }
+
+    /// Write the Skins page's saved rows in the order the reader put them in, and
+    /// bring the outcome back as a page message.
+    ///
+    /// Off the frame thread for [`Shell::edit_skin`]'s reason, and the one ask in
+    /// this shell that reaches nothing but this launcher's own store: no account, no
+    /// token and no service, because the order is an index under the product's own
+    /// directory. The whole order travels rather than a move, because that is the
+    /// write -- the reference's `set_custom_skin_order` takes the list of texture
+    /// keys and [`crate::saved_skins::reorder`] takes the same -- and the store
+    /// ignores keys it does not hold and keeps rows it was not told about, so a page
+    /// that drew a shorter list than the file holds cannot lose a row by asking.
+    fn reorder_skins(&self, order: skins::Reorder) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let outcome = order.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || write_skin_order(&store, &outcome.keys)),
+            move |result| Message::Screen(pages::Message::skin_reordered(&order, result)),
         )
     }
 
@@ -5970,6 +6002,21 @@ fn stored_rows(store: &Store) -> Vec<skins::SavedRow> {
         .collect()
 }
 
+/// Write the reader's own order for the stored skins, the way the Skins page's move
+/// asks for it.
+///
+/// A free function beside [`stored_rows`], for the same reason and one more: the write
+/// is a file under the product's own directory, so it needs a store and a list of keys --
+/// a test can hand it both and read the index back, where the command around it is a
+/// `Command::perform` future no test can run. The refusal is what a store with no folder
+/// on disk is answered with, rather than a write into nowhere.
+fn write_skin_order(store: &Store, keys: &[String]) -> Result<(), String> {
+    let Some(paths) = store.paths() else {
+        return Err("This launcher has no folder for saved skins.".to_string());
+    };
+    crate::saved_skins::reorder(paths, keys)
+}
+
 /// Keep a texture the reader just picked, the way Add promises the Saved-skins section
 /// will.
 ///
@@ -8777,6 +8824,113 @@ mod tests {
         // the page rather than a flag on this shell.
         press(&mut shell, Message::CloseModal);
         assert!(shell.screen.skins_edit().is_none(), "the scrim closed it");
+    }
+
+    #[test]
+    fn a_move_is_written_to_the_stores_own_order() {
+        // What the shell owns of a move: the rule is the page's (`skins::moved`), and
+        // the *file* is this shell's -- `crate::saved_skins`, under the product's own
+        // directory. Two stored rows, then the order a reader asked for, then the
+        // index read back the way the page's reload reads it: this is what the
+        // command's own future does, with the future itself left to a window.
+        let shell = shell_with_home("skin-order");
+        let paths = shell.store.paths().expect("a store with a folder");
+        let first = crate::saved_skins::add(
+            paths,
+            &skin_bytes(None),
+            "first",
+            "CLASSIC",
+            "",
+            crate::saved_skins::Source::Custom,
+        )
+        .expect("a stored row");
+        let second = crate::saved_skins::add(
+            paths,
+            &skin_bytes(Some(0x7f3c5f00)),
+            "second",
+            "SLIM",
+            "",
+            crate::saved_skins::Source::Custom,
+        )
+        .expect("a second stored row");
+        // `add` promotes what it just added, so the second row is the front of the
+        // order the page would draw -- which is the order this test is about to move.
+        let names = |store: &Store| -> Vec<String> {
+            stored_rows(store)
+                .into_iter()
+                .map(|row| row.entry.name)
+                .collect()
+        };
+        assert_eq!(names(&shell.store), ["second", "first"]);
+
+        // What the page asks for is *keys* -- its rows' digests -- in the new order,
+        // because that is what the reference's `set_custom_skin_order` takes too.
+        write_skin_order(
+            &shell.store,
+            &[first.key.clone(), second.key.clone()],
+        )
+        .expect("the order is written");
+        assert_eq!(
+            names(&shell.store),
+            ["first", "second"],
+            "the reader's order is what the next read draws"
+        );
+        // Keys the store does not hold are ignored and rows the order did not name keep
+        // their place: an order that arrives short is not an instruction to lose a row.
+        write_skin_order(&shell.store, &[second.key.clone(), "gone".to_string()])
+            .expect("an order with a stranger in it");
+        assert_eq!(names(&shell.store), ["second", "first"]);
+    }
+
+    #[test]
+    fn the_pages_move_is_an_ask_the_shell_takes_and_drops_while_one_is_out() {
+        let mut shell = shell_with_home("skin-order-ask");
+        press(&mut shell, Message::Go("/skins".into()));
+        // The rows placed by hand, because the page's own list is what a move reads: the
+        // shell's read would fill them from the store, and this is that state.
+        let row = |key: &str| skins::SavedRow {
+            entry: crate::saved_skins::Entry {
+                key: key.to_string(),
+                name: key.to_string(),
+                variant: "CLASSIC".to_string(),
+                cape: String::new(),
+                source: crate::saved_skins::Source::Custom,
+                file: format!("{key}.png"),
+            },
+            ears: false,
+        };
+        match &mut shell.screen {
+            Screen::Skins(state) => state.saved = vec![row("a"), row("b")],
+            _ => panic!("the shell is on the skins page"),
+        }
+        // `act` is what `handle` sends a message through, and its answer is the ask the
+        // command is built from: what the press leaves here is the whole order -- the
+        // page's list with two neighbours swapped -- and the page waiting on it.
+        let Some(Asked::Reorder(order)) = shell.act(Message::Screen(pages::Message::Skins(
+            skins::Message::Move { key: "b".to_string(), step: skins::Step::Up },
+        ))) else {
+            panic!("the press is an ask the shell takes");
+        };
+        assert_eq!(
+            order.keys,
+            ["b", "a"],
+            "the order the page is drawing, two rows swapped"
+        );
+        match &shell.screen {
+            Screen::Skins(state) => assert!(state.wearing, "and the page waits on the write"),
+            _ => panic!("the shell is still on the skins page"),
+        }
+        drop(shell.render());
+
+        // A second move while the first is out is not an ask at all: two reorders would
+        // be two read-modify-writes of the same index.
+        assert_eq!(
+            shell.act(Message::Screen(pages::Message::Skins(skins::Message::Move {
+                key: "a".to_string(),
+                step: skins::Step::Down,
+            }))),
+            None
+        );
     }
 
     #[test]
