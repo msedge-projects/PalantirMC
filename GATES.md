@@ -5484,6 +5484,145 @@ test result: ok. 546 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 ## What these gates cannot say
 
+- [x] G117: the instance page's tab body is a window -- a frame draws the rows the
+  scroll region says are on screen, and the rows it does not draw are two spacers
+  holding their place
+  CHECK: cargo test -p palantir-desktop --locked -- --nocapture
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+  EXPECT: the Content tab's frame at 5,000 mods falls from 32.0 ms (G116) to 0.139 ms
+          and the Files tab's from 12.0 ms to 0.107 ms, because both draw a twenty-row
+          window instead of the listing; the frame at 100 and the frame at 5,000 are one
+          number, asserted as a ratio rather than described; a tab whose region has not
+          reported yet draws the fallback window at 0.358 ms and 0.436 ms, bounded by a
+          height rather than by the listing
+          566 passed; 0 failed; 0 ignored, and clippy exit 0, adding no warning
+  EVIDENCE: this slice's own table, unchanged in every row it does not name. Nothing
+  under `store::` moves: the read was already one call per tab entry, and this slice
+  is about what a frame does with the answer. `tests/native.rs`'s four tests -- the
+  ones that read the tree for a browser or a scripting engine -- pass beside it.
+
+```
+$ cargo test -p palantir-desktop --locked -- --nocapture          # after this slice
+== instance page, per frame ==
+mods/ read (store::content)        n=0          0.092 ms
+Content: the read (once a tab)     n=0          0.087 ms
+Content: the row names (once a tab) n=0          0.000 ms
+Content view (no report yet)       n=0          0.047 ms
+Content view (region reported)     n=0          0.047 ms
+Files view (no report yet)         n=0          0.047 ms
+Files view (region reported)       n=0          0.047 ms
+  of which: rows drawn, reported   n=0              0 rows of 0
+  of which: rows drawn, no report  n=0         0 /    0 rows of 0
+Files: the read (once a tab)       n=0          0.099 ms
+  of which: every row built (no window) n=0          0.004 ms
+mods/ read (store::content)        n=100        0.220 ms
+Content: the read (once a tab)     n=100        0.222 ms
+Content: the row names (once a tab) n=100        0.081 ms
+Content view (no report yet)       n=100        0.339 ms
+Content view (region reported)     n=100        0.135 ms
+Files view (no report yet)         n=100        0.259 ms
+Files view (region reported)       n=100        0.105 ms
+  of which: rows drawn, reported   n=100           20 rows of 100
+  of which: rows drawn, no report  n=100      57 /  100 rows of 100
+Files: the read (once a tab)       n=100        0.255 ms
+  of which: every row built (no window) n=100        0.156 ms
+mods/ read (store::content)        n=1000       1.512 ms
+Content: the read (once a tab)     n=1000       1.635 ms
+Content: the row names (once a tab) n=1000       0.836 ms
+Content view (no report yet)       n=1000       0.342 ms
+Content view (region reported)     n=1000       0.136 ms
+Files view (no report yet)         n=1000       0.781 ms
+Files view (region reported)       n=1000       0.194 ms
+  of which: rows drawn, reported   n=1000          20 rows of 1000
+  of which: rows drawn, no report  n=1000     57 /  177 rows of 1000
+Files: the read (once a tab)       n=1000       3.250 ms
+  of which: every row built (no window) n=1000       2.760 ms
+mods/ read (store::content)        n=5000       7.893 ms
+Content: the read (once a tab)     n=5000      10.107 ms
+Content: the row names (once a tab) n=5000       4.938 ms
+Content view (no report yet)       n=5000       0.358 ms
+Content view (region reported)     n=5000       0.139 ms
+Files view (no report yet)         n=5000       0.436 ms
+Files view (region reported)       n=5000       0.107 ms
+  of which: rows drawn, reported   n=5000          20 rows of 5000
+  of which: rows drawn, no report  n=5000     57 /  177 rows of 5000
+Files: the read (once a tab)       n=5000       8.599 ms
+  of which: every row built (no window) n=5000       8.663 ms
+test result: ok. 566 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+  **Where the rule comes from: the reference's own virtual scroll, ported.**
+  `ui/src/composables/virtual-scroll.ts` computes a `visibleRange` from the scroll
+  container's `scrollTop` and `clientHeight` against a caller's `itemHeight`, with
+  `bufferSize = 5` rows either side and `initialItemCount = 20` before the container
+  has been measured, and pads with `visibleTop = start * itemHeight` inside a
+  container whose `minHeight` is the whole list's. Both tabs that can get long use
+  it: `content-tab/components/ContentCardTable.vue` with `itemHeight: 74` and
+  `files-tab/layout.vue` with `itemHeight: 61`. `crate::scroll::window` is that
+  computation, as a pure function of `(len, row_height, Geometry)` so it is tested
+  without a window, and `Geometry::of` is the one line that turns iced's own
+  `scrollable::Viewport` into it. Two of the reference's properties are carried
+  deliberately: a range is never *shorter* than the window, so at the end of a list
+  it slides instead of shrinking (a shrinking range would make the last screenful
+  the cheapest frame and the one before it the most expensive, for no visible
+  reason), and an empty listing is `0..0` rather than a window's worth of nothing.
+
+  **Where the port has to differ, and it is the only place it does.** The reference
+  measures its scrollable ancestor on mount -- `watchEffect` reads `clientHeight`
+  before any scroll -- which is why twenty items are enough for it: they are one
+  frame's worth. iced publishes a scrollable's viewport only from an *event* (wheel,
+  touch, a scrollbar drag, a key; `notify_on_scroll` in `iced_widget`'s
+  `scrollable.rs`), and it declines to publish at all when the content fits, so a tab
+  the reader has opened and not yet touched would draw twenty rows and then a band of
+  nothing on any taller window -- 480px of a 24px-row Files listing. So the fallback
+  is a *height* rather than a count, `INITIAL_VIEW = 4,000`px with
+  `INITIAL_ROWS = 20` as its floor, and the price of it is measured rather than
+  argued: 0.358 ms on the Content tab and 0.436 ms on Files, against 12.0 ms when the
+  tab drew its whole listing, falling to 0.107 ms the moment the reader scrolls. A
+  window taller than 4,000px of body would draw a band of nothing until its first
+  event; that is a deliberate trade against drawing an unbounded number of rows on a
+  screen nobody has, and it is the one number here that is an assumption.
+
+  **The layout that makes it possible is the reference's too.** `instance/Layout.vue`
+  has `renderMode: 'scroll'` (the whole page moves inside `.app-viewport`) and
+  `'fixed'` (`shrink-0` header and tabs, `min-h-0 flex-1 overflow-y-auto` body), and a
+  windowed listing is the second case: rows are placed at `index * row_height` inside
+  a region whose own height is the number the window is computed from, and a page
+  that scrolled as a whole could not name where its list starts without measuring
+  everything drawn above it. Every row is therefore a *slot* of one height --
+  `CONTENT_ROW = 86` (the toggle's 40, the card's two 16px paddings, its two
+  hairlines, and the 12px gap the tab already put between two cards) and
+  `PLAIN_ROW = 24` -- and the two spacers hold the extent the rows that are not drawn
+  would have had, which is what keeps the scrollbar's size a property of the listing
+  rather than of the window. One consequence is recorded rather than hidden: a row's
+  label is drawn on one line (`Wrapping::None`), because a wrapped name is a row whose
+  height depends on a string and the arithmetic above is only as good as its row
+  height. The reference's own `itemHeight` makes the same trade.
+
+  **What the frame costs now is a function of the window, and the test says so as a
+  ratio.** `scale.rs` measures the same frame at 0, 100, 1,000 and 5,000 rows and
+  asserts that the 1,000- and 5,000-row frames are within three times the 100-row one
+  (they are the same number to within a tenth of a millisecond), which is a property a
+  page that went back to drawing its whole listing fails by a factor of sixty. The
+  fallback frames are compared with a ceiling of 4 ms instead, because their window is
+  a fixed height of rows and at 24px that is more rows than a hundred are. The unwindowed
+  cost is still printed beside them -- `every row built (no window)`, 8.663 ms at 5,000
+  -- because a measurement of the alternative is what makes the slice's number mean
+  something. `pages::instance`'s own tests cover the seam the numbers do not: the
+  region's report is what moves the window, a tab change leaves the geometry where
+  iced has it (its `Scrollable` keeps its offset across one, and a page that reset the
+  window would draw the top of a list whose region is still scrolled down), and five
+  thousand rows draw under all four themes in both scroll states.
+
+  **What this does not do.** Discover's results list is not windowed: it is 2.1 ms at
+  a hundred hits and 18.7 ms at a thousand in this run (3.3 and 30.8 in the same test
+  an hour earlier, which is the shared runner rather than the page), and it is a
+  smaller question than this one was because the API answers twenty results a page.
+  The body's region is not scrolled to the top on a tab change -- iced keeps the
+  offset, which is why the geometry is kept with it -- and no other page has a list
+  long enough for this to be measured yet, which is a fact about those pages rather
+  than a claim about them.
+
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
   here is about ink rows, ink colour and position rather than about pixels.

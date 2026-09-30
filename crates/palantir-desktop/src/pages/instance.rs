@@ -22,14 +22,27 @@
 //! and the answer arrives as [`Message::Listed`] -- so a frame draws what is
 //! already here and opens no directory to paint itself. Five of the six tabs have
 //! a listing; Share is a service's page and has nothing to read.
+//!
+//! **And a tab draws the rows a reader can see, not all of them.** With the read
+//! moved off the frame the remaining cost was the drawing itself -- 32.0 ms of
+//! frame at five thousand mods, 6.4 us a row -- and that is a cost no amount of
+//! caching removes, because the rows are built and laid out and rasterised once
+//! per frame. What removes it is building only the rows in the scroll region's
+//! window ([`crate::scroll::window`], a port of the reference's own
+//! `useVirtualScroll`, which its content tab and files tab both use): the tab body
+//! is the scroll region ([`scrolling`], the reference's `'fixed'` render mode),
+//! the region reports where it is, and the rows outside the window are two spacers
+//! holding their place. A frame's cost is then a function of the *window*, not of
+//! the folder.
 
-use iced::widget::{column, row, text, Space};
-use iced::{Alignment, Element, Font, Length};
+use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icons_gen::Glyph;
-use crate::page::{self, Load, GAP, ROW_GAP};
+use crate::page::{self, Load, GAP, INSET, ROW_GAP};
 use crate::pages::Ask;
 use crate::route::InstanceTab;
+use crate::scroll::{self, Geometry};
 use crate::store::{self, LaunchState, Store};
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
@@ -73,6 +86,12 @@ pub enum Message {
         /// The rows, or the sentence for why there are none.
         listing: Result<store::Listing, String>,
     },
+    /// The tab body's scroll region reported where it is.
+    ///
+    /// The only thing that moves the window ([`scroll::window`]): it arrives on
+    /// every wheel, drag and keyboard scroll, and the frame built from it draws
+    /// the rows that report puts on screen.
+    Scrolled(Geometry),
 }
 
 crate::hovered!(Message);
@@ -86,6 +105,34 @@ const TAB_KEYS: [&str; 6] = [
     "instance:tab:logs",
     "instance:tab:share",
 ];
+
+/// How tall one row of the Content tab's listing is, in pixels.
+///
+/// A row's *slot*, not its card: [`slot`] gives every row exactly this much room
+/// and the card inside it takes what it needs, so a window is arithmetic rather
+/// than a measurement of the text in it. The number is the card's own parts added
+/// up -- the toggle (`ui::CONTROL`, 40px) plus the card's padding above and below
+/// (`ui::CARD_PAD` twice) plus its hairline top and bottom -- and then the gap the
+/// tab already put between two cards (`page::GAP`), so a windowed listing is
+/// spaced the way the unwindowed one was.
+///
+/// A name longer than the card is drawn on one line rather than wrapped (see
+/// [`listing_body`]), which is what keeps the sum above true: a row that wrapped
+/// would need a height that depends on a string, and the reference's own
+/// `itemHeight` has the same constant. It is 74px there, for a card that carries
+/// two lines and a row of actions; this one is a single line.
+/// Public because the measurement in [`crate::scale`] computes the same window the
+/// view does, and a row height that had drifted from the one the rows are given
+/// would make that measurement describe a page nobody draws.
+pub const CONTENT_ROW: f32 = ui::CONTROL + ui::CARD_PAD * 2.0 + 2.0 + GAP;
+
+/// How tall one row of the other listings is, in pixels.
+///
+/// The same idea at the other size: an icon and a label, which is about 20px of
+/// content, in a slot with the 4px the tab already spaced its rows by. Public for
+/// [`CONTENT_ROW`]'s reason: the measurement computes the window these rows are
+/// drawn in.
+pub const PLAIN_ROW: f32 = 24.0;
 
 /// The namespace a Content row's toggle is named in.
 ///
@@ -147,12 +194,33 @@ pub struct State {
     /// Which read is in flight, so an answer the page has replaced is dropped by
     /// [`State::update`] rather than drawn.
     round: u64,
+    /// Where the tab body's scroll region is, as it last reported.
+    ///
+    /// Defaulted rather than measured, because a region that nobody has scrolled
+    /// has never reported: the first frame of a tab is drawn inside the window a
+    /// window-sized guess gives ([`scroll::INITIAL_VIEW`]), and the first wheel
+    /// event replaces it with the truth.
+    geometry: Geometry,
 }
 
 impl State {
     /// A page for one instance, on one tab.
     pub fn new(id: String, tab: InstanceTab) -> State {
-        State { id, tab, notice: None, listed: Load::Idle, keys: Vec::new(), round: 0 }
+        State {
+            id,
+            tab,
+            notice: None,
+            listed: Load::Idle,
+            keys: Vec::new(),
+            round: 0,
+            geometry: Geometry::default(),
+        }
+    }
+
+    /// The scroll region's last report, for the tests that place a window.
+    #[cfg(test)]
+    pub fn geometry(&self) -> Geometry {
+        self.geometry
     }
 
     /// The loaded Content rows' clock names, for the tests that check when they
@@ -301,23 +369,72 @@ impl State {
                 over,
                 hover.unwrap_or_else(crate::theme::hover_brightness),
             ),
+            // Nothing else to do with it: where the region is *is* the page's
+            // state, and the next frame ([`view`]) is the one that uses it. A tab
+            // change deliberately does not reset it -- iced's own scrollable keeps
+            // its offset across one, and a page that disagreed with it would draw
+            // the wrong rows rather than the ones on screen.
+            Message::Scrolled(at) => self.geometry = at,
         }
         None
     }
 }
 
 /// Draw the page.
+///
+/// **The header and the tab strip are pinned, and the tab body is the scroll
+/// region.** That is the reference's own arrangement rather than an invention of
+/// this port: `instance/Layout.vue` has two render modes, `'scroll'` where the
+/// whole page moves inside `.app-viewport` and `'fixed'` where the header and tabs
+/// are `shrink-0` and the body is `min-h-0 flex-1 overflow-y-auto`. A windowed
+/// listing needs the second one, and for the reason the reference names as well as
+/// this one's: rows are placed at their own offsets ([`scroll::window`]) inside a
+/// region whose height is reported, and a page that scrolled as a whole could not
+/// say where its list starts without measuring everything drawn above it.
 pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
-    let mut blocks: Vec<Element<'a, Message>> = Vec::new();
-    blocks.push(header(theme, state, store));
+    let mut above = column![].spacing(GAP).width(Length::Fill);
+    above = above.push(header(theme, state, store));
     if let Some(notice) = &state.notice {
-        blocks.push(ui::admonition(theme, ui::Severity::Warning, &state.id, notice));
+        above = above.push(ui::admonition(theme, ui::Severity::Warning, &state.id, notice));
     }
-    blocks.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
+    above = above.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
         Message::Tab(State::tab_at(index))
     }));
-    blocks.push(body(theme, state));
-    page::body(blocks, GAP)
+    // The pinned part keeps the page's own inset; the body below it keeps the
+    // gap that used to separate them, and the inset the whole page used to put
+    // inside the scroll region, so what a reader sees is where it was.
+    let pinned = container(above).width(Length::Fill).padding(Padding {
+        top: INSET,
+        right: INSET,
+        bottom: 0.0,
+        left: INSET,
+    });
+    column![pinned, scrolling(theme, state)]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// The tab body's scroll region, which reports where it is.
+///
+/// Its content is the whole body -- one card, or a windowed column of rows -- and
+/// its own height is whatever the pinned part above leaves, which is the number
+/// [`scroll::window`] is handed on every report. The inset lives inside it, as it
+/// did when the page was one scroll region, so the scrollbar is against the pane's
+/// edge and the text does not slide under its rounded corner.
+fn scrolling<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    scrollable(
+        container(body(theme, state)).width(Length::Fill).padding(Padding {
+            top: GAP,
+            right: INSET,
+            bottom: INSET,
+            left: INSET,
+        }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .on_scroll(|viewport| Message::Scrolled(scroll::Geometry::of(viewport)))
+    .into()
 }
 
 /// The header: the instance's name, what it is, and Play.
@@ -453,75 +570,78 @@ fn body<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 }
 
 /// One tab's rows, from the listing that was read for it.
+///
+/// **Windowed**: only the rows the region reports are on screen are built, and
+/// the rest of the list is space. Every row is in a slot of one height ([`slot`])
+/// so that the rows that are drawn sit at the offsets they would have in the whole
+/// list; the spacers [`rows`] puts above and below them hold the scrollbar where
+/// the whole list would have put it, which is what makes the scrollbar's size a
+/// property of the listing rather than of the window.
+///
+/// Two details are deliberate rather than incidental. A row's label does not wrap
+/// (`Wrapping::None`): a wrapped name is a row of a height that depends on a
+/// string, and the window's arithmetic is only as good as the row height it is
+/// given. And the Content tab's card is built with a [`Message::ToggleContent`]
+/// that owns its file name, so nothing in a drawn row borrows the listing -- which
+/// is what lets the spacers stand in for the rows that are not.
 fn listing_body<'a>(
     theme: Gen,
     state: &'a State,
     listing: &'a store::Listing,
 ) -> Element<'a, Message> {
     match listing {
-        store::Listing::Content(mods) => {
-            let mut list = column![].spacing(GAP).width(Length::Fill);
-            for (index, entry) in mods.iter().enumerate() {
-                let toggle = ui::button(
-                    theme,
-                    // The name came out of the clock's table when the listing
-                    // arrived rather than on this frame: see [`CONTENT_TOGGLE`].
-                    state.keys.get(index).copied().unwrap_or(CONTENT_TOGGLE),
-                    if entry.enabled {
-                        Key::AppScreenshotsDeselect
-                    } else {
-                        Key::AppScreenshotsEdit
-                    },
-                    if entry.enabled { ui::Kind::Standard } else { ui::Kind::Quiet },
-                    Message::ToggleContent {
-                        file_name: entry.file_name.clone(),
-                        enabled: !entry.enabled,
-                    },
-                );
-                list = list.push(ui::card(
-                    theme,
-                    row![]
-                        .spacing(ROW_GAP)
-                        .align_items(Alignment::Center)
-                        .push(ui::icon_label(theme, Glyph::Package, &entry.display_name))
-                        .push(Space::with_width(Length::Fill))
-                        .push(toggle),
-                ));
-            }
-            list.into()
-        }
-        store::Listing::Files(entries) => {
-            let mut list = column![].spacing(4.0).width(Length::Fill);
-            for entry in entries {
-                let glyph = if entry.directory { Glyph::Folder } else { Glyph::File };
-                let label = if entry.directory {
-                    entry.name.clone()
+        store::Listing::Content(mods) => rows(mods.len(), CONTENT_ROW, state.geometry, |index| {
+            let entry = &mods[index];
+            let toggle = ui::button(
+                theme,
+                // The name came out of the clock's table when the listing
+                // arrived rather than on this frame: see [`CONTENT_TOGGLE`].
+                state.keys.get(index).copied().unwrap_or(CONTENT_TOGGLE),
+                if entry.enabled {
+                    Key::AppScreenshotsDeselect
                 } else {
-                    format!("{} · {}", entry.name, store::bytes_label(entry.bytes))
-                };
-                list = list.push(ui::icon_label(theme, glyph, &label));
-            }
-            ui::card(theme, list)
+                    Key::AppScreenshotsEdit
+                },
+                if entry.enabled { ui::Kind::Standard } else { ui::Kind::Quiet },
+                Message::ToggleContent {
+                    file_name: entry.file_name.clone(),
+                    enabled: !entry.enabled,
+                },
+            );
+            slot(ui::card(
+                theme,
+                row![]
+                    .spacing(ROW_GAP)
+                    .align_items(Alignment::Center)
+                    .push(ui::icon_label(theme, Glyph::Package, &entry.display_name))
+                    .push(Space::with_width(Length::Fill))
+                    .push(toggle),
+            ), CONTENT_ROW)
+        }),
+        store::Listing::Files(entries) => {
+            ui::card(theme, files_rows(theme, entries, state.geometry))
         }
-        store::Listing::Worlds(worlds) => {
-            let mut list = column![].spacing(4.0).width(Length::Fill);
-            for world in worlds {
+        store::Listing::Worlds(worlds) => ui::card(
+            theme,
+            rows(worlds.len(), PLAIN_ROW, state.geometry, |index| {
+                let world = &worlds[index];
                 let state_label = if world.played { "played" } else { "never opened" };
-                list = list.push(ui::icon_label(
-                    theme,
-                    Glyph::Globe,
-                    &format!("{} · {state_label}", world.name),
-                ));
-            }
-            ui::card(theme, list)
-        }
-        store::Listing::Screenshots(shots) => {
-            let mut list = column![].spacing(4.0).width(Length::Fill);
-            for name in shots {
-                list = list.push(ui::icon_label(theme, Glyph::Image, name));
-            }
-            ui::card(theme, list)
-        }
+                slot(
+                    ui::icon_label(
+                        theme,
+                        Glyph::Globe,
+                        &format!("{} · {state_label}", world.name),
+                    ),
+                    PLAIN_ROW,
+                )
+            }),
+        ),
+        store::Listing::Screenshots(shots) => ui::card(
+            theme,
+            rows(shots.len(), PLAIN_ROW, state.geometry, |index| {
+                slot(ui::icon_label(theme, Glyph::Image, &shots[index]), PLAIN_ROW)
+            }),
+        ),
         store::Listing::Log(tail) => ui::card(
             theme,
             text(tail.as_str())
@@ -531,6 +651,79 @@ fn listing_body<'a>(
         ),
     }
 }
+
+/// The Files tab's rows: a directory or a file, with the size of the latter.
+///
+/// Split out of [`listing_body`] because the closure that builds one row is long
+/// enough that inlining it makes the match unreadable, and because the two things
+/// that are the same in every windowed listing -- the slot and the window -- are
+/// then visible next to each other.
+fn files_rows<'a>(
+    theme: Gen,
+    entries: &'a [store::Entry],
+    at: Geometry,
+) -> Element<'a, Message> {
+    rows(entries.len(), PLAIN_ROW, at, |index| {
+        let entry = &entries[index];
+        let glyph = if entry.directory { Glyph::Folder } else { Glyph::File };
+        let label = if entry.directory {
+            entry.name.clone()
+        } else {
+            format!("{} · {}", entry.name, store::bytes_label(entry.bytes))
+        };
+        slot(ui::icon_label(theme, glyph, &label), PLAIN_ROW)
+    })
+}
+
+/// A windowed column of rows: the ones in `at`'s window, and spacers where the
+/// rest of them would have been.
+///
+/// The spacers are the part this is easy to get wrong -- the content's *height* is
+/// what the scrollbar is drawn against, so a window that dropped the rows it did
+/// not draw would be a list that scrolls as if it were one screen long. Their
+/// total is exact because a row is exactly `row_height` tall ([`slot`]).
+fn rows<'a>(
+    count: usize,
+    row_height: f32,
+    at: Geometry,
+    mut build: impl FnMut(usize) -> Element<'a, Message>,
+) -> Element<'a, Message> {
+    let drawn = scroll::window(count, row_height, at);
+    let mut list = column![].spacing(0.0).width(Length::Fill);
+    if drawn.start > 0 {
+        list = list.push(space(drawn.start, row_height));
+    }
+    for index in drawn.clone() {
+        list = list.push(build(index));
+    }
+    if drawn.end < count {
+        list = list.push(space(count - drawn.end, row_height));
+    }
+    list.into()
+}
+
+/// One row's slot: exactly `row_height` tall, whatever the row inside it needs.
+///
+/// The window's arithmetic places each drawn row at `index * row_height`, and the
+/// row is drawn at the top of its slot for the same reason the tab's rows were
+/// top-aligned before there was a window: the gap between two cards is *under* the
+/// upper one. The top of a container is `Vertical::Top` here, not
+/// `iced::Alignment::Start`: the two enums name the same end and it is the
+/// vertical one the widget asks for.
+fn slot<'a>(content: Element<'a, Message>, row_height: f32) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fixed(row_height))
+        .align_y(iced::alignment::Vertical::Top)
+        .into()
+}
+
+/// The room `count` rows would have taken, as one empty widget.
+fn space<'a>(count: usize, row_height: f32) -> Element<'a, Message> {
+    Space::with_height(Length::Fixed(count as f32 * row_height)).into()
+}
+
+
 
 /// What a tab draws when its listing came back with nothing in it.
 ///
@@ -780,6 +973,92 @@ mod tests {
             &store,
         );
         assert_eq!(state.listed, Load::Failed(reason));
+    }
+
+    #[test]
+    fn the_region_s_report_is_what_the_window_is_computed_from() {
+        // The seam this slice is: the page draws a window, and the only thing that
+        // moves the window is the report its own scroll region publishes. A page
+        // that kept no report would draw the same rows however far the reader had
+        // scrolled -- which is the failure that looks like a stuck list.
+        let store = store_at("window-report");
+        let mut state = State::new("atm".to_string(), InstanceTab::Content);
+        assert_eq!(
+            state.geometry(),
+            Geometry::default(),
+            "nothing has reported yet"
+        );
+        state.update(
+            Message::Scrolled(Geometry { offset: 858.0, view_height: 600.0 }),
+            &store,
+        );
+        assert_eq!(state.geometry().offset, 858.0);
+
+        // Ten 86px rows down: the window is that screenful and the margin either
+        // side of it, and it is nothing like the five thousand rows the listing
+        // holds. Twenty rather than seventeen, because the floor
+        // (`scroll::INITIAL_ROWS`) is above a 600px body's seven slots plus the
+        // two margins -- which is the floor doing its job rather than a slip.
+        let window = scroll::window(5_000, CONTENT_ROW, state.geometry());
+        assert_eq!(window.start, 9 - scroll::OVERSCAN);
+        let slots = (600.0_f32 / CONTENT_ROW).ceil() as usize;
+        assert_eq!(window.len(), (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS));
+        assert!(window.end < 100, "{}", window.end);
+    }
+
+    #[test]
+    fn a_tab_change_leaves_the_scroll_region_where_iced_has_it() {
+        // iced's own `Scrollable` keeps its offset across a tab change -- it is the
+        // same widget in the same place in the tree -- so the page's copy of the
+        // geometry is deliberately not reset with the listing. A page that reset it
+        // would draw the top of the new tab's list while the region was still
+        // scrolled down, which is a blank screen rather than a fresh one.
+        let store = store_at("tab-keeps-scroll");
+        let mut state = State::new("atm".to_string(), InstanceTab::Files);
+        state.update(
+            Message::Scrolled(Geometry { offset: 1_200.0, view_height: 600.0 }),
+            &store,
+        );
+        state.update(Message::Tab(InstanceTab::Content), &store);
+        assert_eq!(state.geometry().offset, 1_200.0);
+    }
+
+    #[test]
+    fn five_thousand_rows_draw_in_every_theme_in_both_scroll_states() {
+        // The view is what the window is for, so what it has to survive is the two
+        // states a frame is drawn in: a tab whose region has reported (the rows are
+        // a screenful) and one that has just been opened (the rows are the
+        // window-sized guess, `scroll::INITIAL_VIEW`). The cost of each is measured
+        // in `crate::scale`; this is the smoke test that both draw, for every tab
+        // that has rows and every theme, at the size the plan named.
+        let store = store_at("five-thousand");
+        let mods: Vec<crate::mods::ModEntry> = (0..5_000)
+            .map(|index| mod_entry(&format!("mod-{index:05}.1.0.jar")))
+            .collect();
+        let files: Vec<store::Entry> = (0..5_000)
+            .map(|index| store::Entry {
+                name: format!("config-{index:05}.toml"),
+                directory: false,
+                bytes: 12,
+            })
+            .collect();
+        for theme in Gen::ALL {
+            for (tab, listing) in [
+                (InstanceTab::Content, store::Listing::Content(mods.clone())),
+                (InstanceTab::Files, store::Listing::Files(files.clone())),
+            ] {
+                let mut state = State::new("atm".to_string(), tab);
+                state.update(Message::Listed { round: 0, listing: Ok(listing) }, &store);
+                for at in [
+                    Geometry::default(),
+                    Geometry { offset: 0.0, view_height: 600.0 },
+                    Geometry { offset: 200_000.0, view_height: 600.0 },
+                ] {
+                    state.update(Message::Scrolled(at), &store);
+                    drop(view(*theme, &state, &store));
+                }
+            }
+        }
     }
 
     #[test]

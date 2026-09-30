@@ -57,6 +57,14 @@ const FILE_COUNTS: [usize; 4] = [0, 100, 1_000, 5_000];
 /// cards without complaint, and 1,000 is where a linear cost becomes visible.
 const HIT_COUNTS: [usize; 3] = [20, 100, 1_000];
 
+/// The tab body a windowed listing is measured in, in pixels.
+///
+/// A 700px window with the bar, the instance header and the tab strip above the
+/// body leaves about this much, which is the number the page is handed by its own
+/// scroll region (`Scrollable::on_scroll`) and the number the window
+/// ([`crate::scroll::window`]) is computed from.
+const VIEW: f32 = 600.0;
+
 /// The clock's counts: a page's controls, then ten pages of them.
 const CONTROL_COUNTS: [usize; 4] = [0, 100, 1_000, 5_000];
 
@@ -141,12 +149,30 @@ fn row(surface: &str, n: usize, ms: f64) {
     println!("{surface:<34} n={n:<6} {ms:>9.3} ms");
 }
 
+/// The scroll region's report for a body of [`VIEW`] pixels, scrolled to
+/// `offset`.
+///
+/// A plain value rather than a real `Viewport`, because a real one is what a
+/// window that has been scrolled hands the page -- and these tests run without
+/// one. The page is handed the same thing either way
+/// ([`crate::scroll::Geometry::of`] is the only conversion).
+fn scroll_geometry(offset: f32) -> crate::scroll::Geometry {
+    crate::scroll::Geometry { offset, view_height: VIEW }
+}
+
 #[test]
 fn the_instance_pages_tabs_cost_this_much_a_frame() {
     println!();
     println!("== instance page, per frame ==");
     let theme = Gen::ALL[0];
     let mut worst = 0.0_f64;
+    // The frame at a hundred entries, which every larger count has to match: the
+    // window is the same size there as here.
+    let mut base = (0.0_f64, 0.0_f64);
+    // And the worst of the two fallback frames, which are compared with a ceiling
+    // rather than with the hundred-row frame: their window is a fixed height of
+    // rows, and at this row height that is more rows than a hundred rows are.
+    let mut opened = 0.0_f64;
     for n in FILE_COUNTS {
         let (store, id) = instance(&format!("mods-{n}"), n);
         let directory = store.instance_dir(&id);
@@ -183,9 +209,14 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
         row("Content: the row names (once a tab)", n, intern);
 
         // Drawn as the shell draws it: the listing was read when the tab was
-        // entered, and the page's body is handed nothing but the state. What this
-        // row measures is therefore the frame's whole cost, which is the number
-        // the budget is about.
+        // entered, and the page's body is handed nothing but the state. What these
+        // rows measure is the frame's whole cost, which is the number the budget
+        // is about -- in the two states a frame is drawn in. *Reported* is a tab
+        // the reader has scrolled, whose region has said how tall it is and where
+        // it is; *no report yet* is a tab that has just been opened, where the page
+        // draws the window a window-sized guess gives
+        // ([`crate::scroll::INITIAL_VIEW`]) because a region nobody has touched has
+        // never published a viewport.
         let mut state = crate::pages::instance::State::new(id.clone(), InstanceTab::Content);
         let _ = state.update(
             crate::pages::instance::Message::Listed {
@@ -194,10 +225,20 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
             },
             &store,
         );
-        let content = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
+        let content_open = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
             std::hint::black_box(crate::pages::instance::view(theme, &state, &store));
         });
-        row("Content tab view (listing loaded)", n, content);
+        row("Content view (no report yet)", n, content_open);
+
+        let mut scrolled = state.clone();
+        let _ = scrolled.update(
+            crate::pages::instance::Message::Scrolled(scroll_geometry(0.0)),
+            &store,
+        );
+        let content = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
+            std::hint::black_box(crate::pages::instance::view(theme, &scrolled, &store));
+        });
+        row("Content view (region reported)", n, content);
 
         let mut files_state = crate::pages::instance::State::new(id.clone(), InstanceTab::Files);
         let _ = files_state.update(
@@ -207,13 +248,53 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
             },
             &store,
         );
+        let files_open = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
+            std::hint::black_box(crate::pages::instance::view(theme, &files_state, &store));
+        });
+        row("Files view (no report yet)", n, files_open);
+
         // The Files tab's own listing is the root's `n` config files plus the
         // `mods` directory above them, which is the one entry the count does not
         // account for and the reason this row is `n` and not `n + 1`.
+        let mut files_scrolled = files_state.clone();
+        let _ = files_scrolled.update(
+            crate::pages::instance::Message::Scrolled(scroll_geometry(0.0)),
+            &store,
+        );
         let files = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
-            std::hint::black_box(crate::pages::instance::view(theme, &files_state, &store));
+            std::hint::black_box(crate::pages::instance::view(theme, &files_scrolled, &store));
         });
-        row("Files tab view (listing loaded)", n, files);
+        row("Files view (region reported)", n, files);
+
+        // What each window holds at each size, which is the property rather than
+        // the cost. Reported, it is one number for every size the test names;
+        // with no report yet it is the fallback window, bounded by a height
+        // ([`crate::scroll::INITIAL_VIEW`]) rather than by the listing -- and the
+        // Files tab is where that shows, because its rows are the short ones.
+        let drawn = crate::scroll::window(n, crate::pages::instance::CONTENT_ROW, scroll_geometry(0.0));
+        println!(
+            "{:<34} n={:<6} {:>9} rows of {n}",
+            "  of which: rows drawn, reported",
+            n,
+            drawn.len()
+        );
+        let open = crate::scroll::window(
+            n,
+            crate::pages::instance::CONTENT_ROW,
+            crate::scroll::Geometry::default(),
+        );
+        let open_files = crate::scroll::window(
+            n,
+            crate::pages::instance::PLAIN_ROW,
+            crate::scroll::Geometry::default(),
+        );
+        println!(
+            "{:<34} n={:<6} {:>4} / {:>4} rows of {n}",
+            "  of which: rows drawn, no report",
+            n,
+            open.len(),
+            open_files.len()
+        );
 
         // The read this tab pays once when it is entered, and the rows it draws --
         // measured apart because they are where a fix has to choose between. The
@@ -224,6 +305,9 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
             let _ = std::hint::black_box(store::listing(&directory, &InstanceTab::Files));
         });
         row("Files: the read (once a tab)", n, read);
+        // The contrast row: every row built, which is what the tab did before
+        // there was a window, and the cost G116 left behind. It is not part of
+        // `worst` -- it is a measurement of the alternative, not of the page.
         let built = median_ms(if n >= 1_000 { 5 } else { 20 }, || {
             // The message type is named because nothing in this closure tells the
             // compiler which page's `Element` these rows are for -- the real view
@@ -235,21 +319,55 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
             }
             std::hint::black_box(crate::ui::card(theme, list));
         });
-        row("  of which: N rows in one column", n, built);
+        row("  of which: every row built (no window)", n, built);
 
-        worst = worst.max(content).max(files);
+        match n {
+            0 | 100 => {
+                base = (content, files);
+            }
+            _ => {
+                // The property this slice is about, asserted rather than
+                // described: a hundred rows and five thousand draw the same frame,
+                // because they draw the same window. The margins are for the
+                // shared runner -- the measurement is flat to within a tenth of a
+                // millisecond -- and a page that had gone back to drawing the whole
+                // listing would be 60 times past them at this size.
+                assert!(
+                    content < base.0 * 3.0 + 0.5,
+                    "{n} mods drew {content:.3} ms against {:.3} ms at 100",
+                    base.0
+                );
+                assert!(
+                    files < base.1 * 3.0 + 0.5,
+                    "{n} entries drew {files:.3} ms against {:.3} ms at 100",
+                    base.1
+                );
+            }
+        }
+
+        worst = worst.max(content).max(files).max(content_open).max(files_open);
+        opened = opened.max(content_open).max(files_open);
     }
     println!();
-    // A frame at 60Hz is 16.7 ms and the measured worst case above is 110 ms at
-    // 5,000 mods -- this page does not fit in a frame at that size, and the gate
-    // says so with the number rather than a ceiling that hides it. What this
-    // assertion guards is the *regression*: 250 ms is more than twice the
-    // measurement, because the runner is shared and this test runs beside 533
-    // others, and a page that had gone quadratic (a scan inside the row loop, say)
-    // would be an order of magnitude past it rather than a few percent.
+    // The tab with no report yet is the only frame whose cost is not flat, and it
+    // is still bounded: the fallback draws a window's worth of rows whatever the
+    // listing holds -- 177 rows for the Files tab's 24px ones, five times what a
+    // 600px body needs -- so 4 ms is a ceiling on a frame that was 12.0 ms when the
+    // tab drew its whole listing and is 0.18 ms once the reader scrolls. A page
+    // that had stopped windowing the reported case would be a hundred times past
+    // this at the size below.
     assert!(
-        worst < 250.0,
-        "the instance page's tabs are linear in the entry count; worst was {worst:.3} ms"
+        opened < 4.0,
+        "a tab nobody has scrolled draws a bounded window; worst was {opened:.3} ms"
+    );
+    // What this guards is the *window*: a frame at 60Hz is 16.7 ms, the frame at
+    // 5,000 mods was 32.0 ms when every row was built, and it is now the same frame
+    // as at a hundred. 8 ms is a long way above the measurement -- a shared runner
+    // is the reason -- and a page that had stopped windowing would be four times
+    // past it at the size this test names.
+    assert!(
+        worst < 8.0,
+        "a windowed tab draws the window and not the listing; worst was {worst:.3} ms"
     );
 }
 
