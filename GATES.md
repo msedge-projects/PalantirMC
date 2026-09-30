@@ -6114,8 +6114,28 @@ CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as wr
   instance-settings modal landed as G125 first, so this install is G126 and the
   routing flip behind it is G127.
 
-  The runner's own numbers are recorded below, in the paragraph this entry gains
-  once its push has one to read.
+  **The runner agrees with this machine, and here it had to: this slice has
+  never been compiled anywhere else.** The pull-request path is run
+  `36687632320` on `e76832c` -- `Lint` and `Test workspace` green in 1m30s and
+  2m12s, 1073 passed / 0 failed and 18 ignored across the workspace suites (177
+  + 8 + 598 + 4 + 31 + 255), with `Live services` and `Build exe` skipped by
+  that path's own rule. Run `36688232327` is the same commit through all five
+  jobs, green in 7m11s: `Test workspace` 2m8s and `Lint` 1m28s on the same rows,
+  the live suite 18 passed / 0 failed in 92.16s, and both Windows exes staged --
+  13,827,072 B (msvc) and 14,098,432 B (gnu). Those are the exe's own bytes,
+  read back from the downloaded artifacts and matching the `.sha256` the
+  workflow wrote beside each; the *zips* the same jobs upload are the ~5.5 MB
+  figures the run table's earlier rows quote in the same slot, so the two look
+  like a disagreement and are not one. `check_exe.py` reports the msvc and gnu
+  exes both `needs nothing beyond Windows' own DLLs`, and clippy's 42 warning
+  lines are the same set G124 recorded, none of them pointing at `install.rs`,
+  `launch.rs` or `wire.rs`.
+
+  **The EXPECT's `1060 + 3` is arithmetic the push outran.** The desktop crate
+  was 594 at G125, and this slice's four tests -- three in `install.rs`, one in
+  `wire.rs` -- make it 598, so the workspace total is 1073 rather than 1063. The
+  prediction named the count it expected; the run named the count it made, and
+  the run is the number.
 
 - [x] G128: an instance's installation is a form too -- the platform, the game
   version and the loader's build, read from its own `mmc-pack.json` and written
