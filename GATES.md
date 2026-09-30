@@ -5501,6 +5501,14 @@ test result: ok. 546 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   is about what a frame does with the answer. `tests/native.rs`'s four tests -- the
   ones that read the tree for a browser or a scripting engine -- pass beside it.
 
+  **The runner agrees with this machine.** Run `36675700351` on `d3acb83` is the
+  pull-request path: `Lint` and `Test workspace` green in 1m55s, 1041 passed / 0
+  failed and 18 ignored across the workspace suites (177 + 8 + 566 + 4 + 31 + 255),
+  this slice's eight new tests among the 566, with `Live services` and `Build exe`
+  skipped by that path's own rule. Run `36675919956` is the same commit through all
+  five jobs: the same counts, the live suite 18 passed / 0 failed in 95.28s, and both
+  Windows exes staged (msvc 5,500,023 B, gnu 5,568,247 B).
+
 ```
 $ cargo test -p palantir-desktop --locked -- --nocapture          # after this slice
 == instance page, per frame ==
