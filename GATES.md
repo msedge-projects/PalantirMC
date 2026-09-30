@@ -6331,6 +6331,18 @@ dashboard exit=0
   own entry stays above as the record of what landed then; the call site it added
   is what this commit replaces.
 
+  **The flip G126's entry reserves as G127 is this entry's, not a slice still
+  to come.** That entry stops at the install and leaves the resolve where it
+  was: `published_loader` answered `None` for `net.minecraftforge` and
+  `net.neoforged`, so an instance naming either was served the mirror's
+  wrapper document. Closing that is this commit's other half --
+  `Source::Publisher` over the publishers' own translated profiles, with the
+  main jar read from the installer's own `PATCHED` entry -- so no G127 is owed
+  and the reservation is settled rather than renamed. It is written here
+  because a reservation is what a later reader acts on: G126's entry names
+  G127 as the thing it left, and a slice that landed on the integration branch
+  after this one repeats the name. This is the line that says it is spent.
+
   **What this cannot say.**
 - **No gate launches the game.** The end of this pipe is the profile and the
   files a launch resolves -- Mojang's client jar by its digest, the loader's
