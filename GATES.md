@@ -6428,6 +6428,17 @@ CONFIRMED: the page carries all 128 gates, 6 stage cards and every subject as wr
   that path in exactly one place (`crate::pages::user`'s avatar), and what the card
   is asked is which pack this instance came from -- which the words answer.
 
+  **The runner agrees, and its numbers are the rebased tree's.** Run
+  `36694325430` (`f474588`, the commit that also carries G127's routing flip):
+  `Test workspace` and `Lint` green in 3m00s and 1m29s, 1086 passed / 0 failed and
+  18 ignored (177 + 8 + 611 + 4 + 31 + 255). The desktop crate's row reads 611
+  where the local transcript above reads 610, because G127's flip rides in the same
+  commit and its tests are the difference; the local run is this slice alone, over
+  the tree before that rebase. `Live services` and `Build exe` are skipped, which
+  is the pull-request path's own rule rather than a failure, and the lint job marks
+  its usual one red annotation -- the advisory `cargo fmt --check` step it runs
+  `continue-on-error`, beside a job whose own conclusion is success.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
