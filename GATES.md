@@ -6824,6 +6824,37 @@ dashboard exit=0
   ... ok` among them -- both pinned builds installed for real, from the
   runner's network rather than this machine's -- and both Windows exes staged
   (msvc 5,553,996 B, gnu 5,623,878 B).
+
+  **Landed on the tip as a merge, and the caveat above is answered with it.** This
+  slice was written and run on `g119-forge-flip`, and it met a tip that had already
+  landed the same two halves as G126 (the install, run before the resolve) and
+  G127 (the flip): `install.rs`, `launch.rs` and `meta.rs` all carried both
+  versions of the work. G119's is the one that survives -- it is the one a live run
+  has measured, and it is the one whose measurements found the two publisher
+  shapes described above -- grafted into the tip's `prepare_files`, the seam a
+  *Repair instance* shares (G130), with the install still after the resolution and
+  before `install::plan`. The caveat above is answered rather than dropped:
+  moving the java block above the install is what the branch's second gate did,
+  and it is G131 on this tree, so `engine::find_java`'s newest-major guess is no
+  longer what the processors run on. The two gates the branch brought were
+  numbered G129 and G130 there; the mirror's tip already records those numbers for
+  the linked pack and *Repair instance*, so they are G131 and G132 here -- in
+  `NEXT_STEPS.md`, in `tools/progress.py` and in the comments that cite them --
+  while G126 and G127 stay in stage 5's tuple with what happened to them said
+  beside their names.
+
+  **The runner agrees on the merged tree too.** `36741498071` on `343f773`, all
+  five jobs, asked for by dispatch because the mirror's pull-request path skips the
+  live suite: `Test workspace` green in 2m18s at 1097 passed / 0 failed and 19
+  ignored (177 + 8 + 619 + 4 + 31 + 258, the desktop crate's 619 being both lanes'
+  tests in one tree), `Lint` green in 1m25s with its usual one red annotation, the
+  live suite 19 passed / 0 failed in 168.48s with
+  `a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer ...
+  ok` among them -- both pinned builds installed for real on the merged tree
+  rather than on the branch that wrote the test -- and both Windows exes staged
+  (msvc 5,571,182 B, gnu 5,639,669 B). The pull-request path on the same commit,
+  `36741486331`, is `Lint` and `Test workspace` green in 2m11s and 4m3s with the
+  same 1097 / 0 / 19.
 - [x] G131: the loader's install runs on the Java the launch chose -- one function
   answers which Java for the install and the spawn both, and it is asked before
   the installer's processors rather than after the plan
