@@ -6383,3 +6383,91 @@ dashboard exit=0
   ... ok` among them -- both pinned builds installed for real, from the
   runner's network rather than this machine's -- and both Windows exes staged
   (msvc 5,553,996 B, gnu 5,623,878 B).
+- [x] G129: the loader's install runs on the Java the launch chose -- one function
+  answers which Java for the install and the spawn both, and it is asked before
+  the installer's processors rather than after the plan
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 600 passed; 0 failed in the desktop crate's own run, its one new test
+          among them and the 599 the crate had before this slice, with
+          `tests/native.rs`'s four beside it
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0
+  EVIDENCE: the transcripts below, from this machine and from the runner.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (C:/PalantirMC/target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 600 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.17s
+     Running tests\native.rs (C:/PalantirMC/target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-loader\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.89s
+desktop=0
+
+$ python tools/progress.py --check
+progress exit=0
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 128 gates, 6 stage cards and every subject as written
+dashboard exit=0
+```
+
+  **The install ran on a Java the launch would not have used.** `prepare_launch`
+  asked `engine::find_java`, which scans `PATH` and the standard install locations
+  and takes the newest major on the machine; the launch's own choice, a few hundred
+  lines further down the same function, prefers the instance's configured `JavaPath`
+  when it fits the profile, then the settings' default, then a runtime this machine
+  has at a major the profile accepts, and only then one fetched from the metadata
+  service. G119's entry named that difference and left it there: for the two builds
+  that gate installs -- Minecraft 1.21.1 -- the two answers agree, which is why its
+  live test could not tell them apart. For a build whose processors need an older
+  major they do not, and the install is where that shows, because the installer's
+  processors are the first Java programs a launch runs: the launch failed at its
+  install, before it ever reached the Java it had picked for the spawn.
+
+  **One function, asked wherever the question comes up first.** The block that
+  chose the Java is now `choose_java` -- the instance's own path and the fit test,
+  then `pick_java`'s five answers -- and `prepare_launch` asks it in two places. A
+  loader-shaped instance asks before the install, because the install needs that
+  answer and the answer is what the spawn will use: it is kept in `install_java`
+  rather than asked twice, so a runtime fetch happens once at most. Every other
+  launch asks it where it has always asked it, after the plan and before the
+  spawn, and nothing else about those launches moved. A second copy of the rule is
+  how the install and the spawn come to disagree about which Java a build uses;
+  deleting the second copy is what this slice is.
+
+  **The test reads the order, because the order is the change.** A Forge instance
+  is pinned to Java 21 while the profile it resolves wants Java 8 -- the shape
+  G119's own caveat describes -- and the test collects log lines and progress
+  levels into one list, then asserts three positions in it: the wrong pin is named,
+  the settings' Java is chosen after it, and the `installing Forge` level the
+  install announces itself with comes last. On the parent commit the install's
+  level comes first instead, because the install ran before the Java was chosen,
+  which is what makes this an assertion rather than a description. The install
+  itself stops at the network under an empty fetcher, which is where the test wants
+  it: nothing in this test reaches a service.
+
+  **What this cannot say.**
+- **No gate here runs a processor chain on that Java.** This entry's test reads
+  which Java the install was handed and when; the chain that Java would run is the
+  live test's (G119), and that test calls `engine::install_client` directly, so
+  `prepare_launch`'s own choice is not what it exercises. What would cover it is a
+  launch of a real Forge instance from the interface, which is a stage-5 receipt
+  and not this slice's.
+- **A runtime fetch can now precede the game's own files, for a loader instance.**
+  `pick_java`'s last answer is a runtime fetched from the metadata service, so a
+  machine with no Java resolves a Forge launch by fetching one before the install
+  unpacks anything. Every other launch keeps the order it had, files first. That is
+  deliberate -- the install cannot start without a Java -- and it is one more thing
+  a reader of the progress bar can see change for these two loaders.
+- **The first full sweep of the suite on this machine was red, and the machine was
+  the reason.** `scale::discover_costs_this_much_a_frame` measured 294.054 ms for
+  the documented hundred result cards with three agents compiling on the same cores,
+  against a per-frame budget; run alone it passes (three tests, 18.23 s), and the
+  rerun quoted above is clean at 33.17 s. The numbers that count are the runner's,
+  in the paragraph below.

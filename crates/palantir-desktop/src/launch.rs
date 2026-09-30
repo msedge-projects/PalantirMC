@@ -598,22 +598,32 @@ pub fn prepare_launch(
     // queues a download for a file no maven hosts -- the processors' product.
     // The resume case rides on the digests the installer itself declares: a
     // second launch skips every processor whose outputs are already there.
-    if let Some(job) = loader_install::forge_shaped(&profile) {
-        let Some(java) = palantir_net::engine::find_java() else {
-            log(format!(
-                "{} {} needs a Java runtime to run its installer, and this machine has none — not launching",
-                job.label(),
-                job.build
-            ));
-            return LaunchReadiness::Blocked;
-        };
+    // The Java the processors run on is this launch's own Java, decided here
+    // rather than by `engine::find_java`, which takes the newest major on the
+    // machine and cannot know what this instance runs on (G129): a build whose
+    // processors need an older Java used to fail at the install while the spawn
+    // beside it would have picked a runtime that fits. One function answers the
+    // question for both, so the install and the spawn cannot drift apart.
+    let job = loader_install::forge_shaped(&profile);
+    let install_java = match &job {
+        Some(_) => {
+            match choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress) {
+                Some(java) => Some(java),
+                None => {
+                    log(NO_JAVA_FOUND.to_string());
+                    return LaunchReadiness::Blocked;
+                }
+            }
+        }
+        None => None,
+    };
+    if let (Some(job), Some(java)) = (&job, &install_java) {
         progress(install::Progress::starting(format!(
             "installing {} {}",
             job.label(),
             job.build
         )));
-        if let Err(error) = loader_install::install(paths, instance.root(), &job, wire, &java, log)
-        {
+        if let Err(error) = loader_install::install(paths, instance.root(), job, wire, Path::new(java), log) {
             log(format!("{error} — not launching"));
             return LaunchReadiness::Blocked;
         }
@@ -695,48 +705,20 @@ pub fn prepare_launch(
     // `UnsupportedClassVersionError` rather than an answer. Prism reads
     // `AutomaticJava` (on unless switched off) and picks a runtime it can find;
     // the same rule here means an instance keeps launching.
-    let majors = &resolution.profile.compatible_java_majors;
-    let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
-    let configured = configured.trim();
-    let java_bin = if configured.is_empty() {
-        String::new()
-    } else if !Path::new(configured).is_file() {
-        log(format!(
-            "the configured JavaPath '{configured}' is not there — looking for another Java"
-        ));
-        String::new()
-    } else {
-        match java_fits_version(configured, majors) {
-            Ok(()) => {
-                log(format!("using the configured Java: {configured}"));
-                configured.to_string()
-            }
-            Err(reason) => {
-                log(format!("{reason} — looking for another Java"));
-                String::new()
+    // A loader-shaped instance answered this before its install, because the
+    // installer's processors are Java programs; every other launch answers it
+    // here, which is where it has always been.
+    let java_bin = match install_java {
+        Some(java) => java,
+        None => {
+            match choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress) {
+                Some(found) => found,
+                None => {
+                    log(NO_JAVA_FOUND.to_string());
+                    return LaunchReadiness::Blocked;
+                }
             }
         }
-    };
-    let java_bin = if java_bin.is_empty() {
-        match pick_java(
-            paths,
-            &defaults.java,
-            &resolution.profile.compatible_java_majors,
-            &resolution.profile.compatible_java_name,
-            wire,
-            log,
-            progress,
-        ) {
-            Some(found) => found,
-            None => {
-                log(
-                    "no Java found: set a Java path in the Java tab of the settings, or install a Java runtime — looked under <data root>/java, in JAVA_HOME, in the standard install locations and on PATH".to_string(),
-                );
-                return LaunchReadiness::Blocked;
-            }
-        }
-    } else {
-        java_bin
     };
     match probe_java(&java_bin) {
         Ok(detail) => log(format!("using java '{java_bin}' ({detail})")),
@@ -1123,6 +1105,59 @@ pub fn best_java(candidates: &[JavaCandidate], want_majors: &[i64]) -> Option<Ja
         })
         .or_else(|| candidates.first())
         .cloned()
+}
+
+/// What a launch says when there is no Java anywhere to run it.
+const NO_JAVA_FOUND: &str = "no Java found: set a Java path in the Java tab of the settings, or install a Java runtime — looked under <data root>/java, in JAVA_HOME, in the standard install locations and on PATH";
+
+/// The Java this launch will run on, chosen the same way wherever it is asked
+/// for.
+///
+/// Two questions in order: whether the instance's own `JavaPath` is there and
+/// fits what the profile says this version runs on, and then [`pick_java`]'s
+/// five answers. It is a function rather than a block because the loader's own
+/// install has to run on a Java before the launch's own block ever chose one
+/// (G129) — the installer's processors are Java programs — and a second copy of
+/// this rule is how the install and the spawn come to disagree about which Java
+/// a build uses.
+fn choose_java(
+    paths: &PalantirPaths,
+    model: &SettingsModel,
+    defaults: &LaunchDefaults,
+    profile: &palantir_core::version::LaunchProfile,
+    wire: &Wire,
+    log: &mut dyn FnMut(String),
+    progress: &mut dyn FnMut(install::Progress),
+) -> Option<String> {
+    // The instance's own path, when it is both there and a major this version
+    // accepts. `java_fits_version` is what says why when it is not, and both
+    // answers to "not" are the same: carry on with the search.
+    let configured = model.get_str("JavaPath", Some("OverrideJavaLocation"), "");
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        if !Path::new(configured).is_file() {
+            log(format!(
+                "the configured JavaPath '{configured}' is not there — looking for another Java"
+            ));
+        } else {
+            match java_fits_version(configured, &profile.compatible_java_majors) {
+                Ok(()) => {
+                    log(format!("using the configured Java: {configured}"));
+                    return Some(configured.to_string());
+                }
+                Err(reason) => log(format!("{reason} — looking for another Java")),
+            }
+        }
+    }
+    pick_java(
+        paths,
+        &defaults.java,
+        &profile.compatible_java_majors,
+        &profile.compatible_java_name,
+        wire,
+        log,
+        progress,
+    )
 }
 
 /// Choose a Java for this version, saying what was chosen and why.
@@ -2792,6 +2827,85 @@ mod tests {
         );
     }
 
+    /// A Forge-shaped instance's install runs on the Java *this launch* chose,
+    /// and that choice is made before the install rather than after it.
+    ///
+    /// The order is the whole point: the installer's processors are Java
+    /// programs, so `engine::find_java` -- the newest major on the machine -- is
+    /// the wrong question for a build that wants an older one, and answering it
+    /// there made a launch fail at the install while the spawn beside it would
+    /// have picked a runtime that fits.
+    #[test]
+    fn a_forge_install_runs_on_the_java_the_launch_chose() {
+        let (_dir, paths) = test_root();
+        let instance = Instance::create(&paths.instances_dir(), "Forge", "1.21.1").unwrap();
+        // This build wants Java 8 and the instance is pinned to 21, which is the
+        // shape a machine whose default Java is 21 leaves behind -- and it
+        // matters more here than at the spawn, because the processors run first.
+        seed_forge_meta(&paths, &instance, "1.21.1", &[8]);
+        seed_library(paths.root.join("libraries").join("test/lib/lib/1.0/lib-1.0.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"),
+        );
+
+        let jdks = tempfile::tempdir().unwrap();
+        let pinned = fake_java_home(jdks.path(), "jdk21", "21.0.6");
+        let wanted = fake_java_home(jdks.path(), "jdk8", "1.8.0_402");
+        let mut instance = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
+        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance.settings_mut().set_str("JavaPath", &pinned);
+        instance.save().unwrap();
+
+        let defaults = LaunchDefaults {
+            java: JavaPrefs { default_path: wanted.clone(), ..JavaPrefs::default() },
+            ..LaunchDefaults::default()
+        };
+
+        let mut store = OfflineMetaStore::new(paths.meta_dir());
+        let fetcher = Script::new();
+        // Lines and levels in one list: the order *between* the two taps is what
+        // this test measures, and two lists would not show it.
+        let events = std::cell::RefCell::new(Vec::new());
+        let readiness = prepare_launch(
+            &paths,
+            &instance.id(),
+            &session(),
+            &defaults,
+            &mut store,
+            &fetcher.wire(),
+            &mut |line| events.borrow_mut().push(format!("line: {line}")),
+            &mut |level| events.borrow_mut().push(format!("level: {}", level.label)),
+        );
+        let events = events.into_inner();
+        let text = events.join("
+");
+        let at = |needle: &str| {
+            events
+                .iter()
+                .position(|event| event.contains(needle))
+                .unwrap_or_else(|| panic!("'{needle}' is missing from: {text}"))
+        };
+        let refused = at("is Java 21, but this version wants Java 8");
+        let chosen = at(&format!("using the default Java from the settings: {wanted}"));
+        let installing = at("installing Forge");
+        assert!(
+            refused < chosen,
+            "the pin that cannot run this build is named before the answer that can: {text}"
+        );
+        assert!(
+            chosen < installing,
+            "the Java is chosen before the install that needs it: {text}"
+        );
+        // The install itself stops at the network, which is what an empty fetcher
+        // is: what this test reads is which Java it was handed and when, not what
+        // a processor chain does -- that is the live test's measurement.
+        assert!(matches!(readiness, LaunchReadiness::Blocked));
+        assert!(text.contains("not launching"), "got: {text}");
+    }
+
     /// Write a version file into the metadata cache for `uid`/`version`.
     fn write_meta(paths: &PalantirPaths, uid: &str, version: &str, value: serde_json::Value) {
         let dir = paths.meta_dir().join(uid);
@@ -2864,6 +2978,34 @@ mod tests {
         profile.append(Component {
             uid: "net.minecraft".into(),
             version: game.into(),
+            important: true,
+            ..Default::default()
+        });
+        profile.save(&instance.mmc_pack_path()).unwrap();
+    }
+
+    /// The same minimal instance with a Forge component beside the game: the
+    /// shape the Create dialog leaves for a Forge instance, and the shape that
+    /// makes `prepare_launch` reach the loader's own install.
+    fn seed_forge_meta(paths: &PalantirPaths, instance: &Instance, game: &str, majors: &[i64]) {
+        seed_meta(paths, instance, game, majors);
+        write_meta(
+            paths,
+            "net.minecraftforge",
+            "52.1.0",
+            serde_json::json!({
+                "uid": "net.minecraftforge",
+                "version": "52.1.0",
+                "order": 5,
+                "mainClass": "net.minecraftforge.bootstrap.ForgeBootstrap",
+                "compatibleJavaMajors": majors,
+                "libraries": []
+            }),
+        );
+        let mut profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
+        profile.append(Component {
+            uid: "net.minecraftforge".into(),
+            version: "52.1.0".into(),
             important: true,
             ..Default::default()
         });
