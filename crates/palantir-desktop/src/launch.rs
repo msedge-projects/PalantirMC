@@ -560,6 +560,43 @@ pub fn prepare_launch(
         }
     };
 
+    // The loader's own install, before the resolve. G100's processors patch the
+    // client jar and unpack the launcher stack, and the profile a launch
+    // resolves for a Forge-shaped uid is the installer's own -- whose libraries
+    // only the processors produce -- so running this after the resolve would
+    // resolve a profile nothing has installed. The Java is looked up here rather
+    // than reused from the launch's own choice further down because the
+    // processors have to run before the resolve, and the runtime the launch
+    // picks is picked after it; `find_java` answers the same question from PATH
+    // and the installed runtimes, which is enough for the tools.
+    if install::loader_component(&profile).is_some() {
+        let java = palantir_net::engine::find_java();
+        match install::install_loader(
+            paths,
+            instance.root(),
+            &profile,
+            wire,
+            java.as_deref(),
+            &mut *log,
+        ) {
+            install::LoaderInstall::NotNeeded => {}
+            install::LoaderInstall::Installed { ran, skipped } => {
+                log(format!("installer: {ran} processor(s) ran, {skipped} resumed"));
+            }
+            install::LoaderInstall::NoJava => {
+                log(
+                    "the loader's installer needs a Java runtime to run its processors, and none was found — not launching"
+                        .to_string(),
+                );
+                return LaunchReadiness::Blocked;
+            }
+            install::LoaderInstall::Failed(why) => {
+                log(format!("the loader's installer failed ({why}) — not launching"));
+                return LaunchReadiness::Blocked;
+            }
+        }
+    }
+
     let ctx = RuntimeContext::current_host();
     let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
         Ok(resolution) => resolution,

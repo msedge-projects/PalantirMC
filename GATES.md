@@ -6045,6 +6045,77 @@ CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as wr
   the read the modal shows is the store's `instance_settings`, which is the *values
   in force*: an instance that overrides nothing draws the launcher's own prefs with
   the switch off, because that is what a launch would use.
+- [x] G126: the Forge-shaped loaders install at launch preparation -- their own
+  processors run before the resolve, and a machine with no Java is told so
+  rather than discovered halfway through a chain
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: three new desktop tests
+          `cargo test --workspace` reports 1060 + 3 passed, 0 failed, 18 ignored
+          clippy exit 0 at 42 warning lines, G124's own count unchanged
+          both document tools exit 0, the ledger now carrying 126 gates
+  EVIDENCE: G100 landed the two Forge-shaped loaders' processors and named its
+            own gap: nothing outside `engine::forge` called `install` or built an
+            `InstallCtx`, so the processors were *unreached from the interface*.
+            This slice is the seam that reaches them, and it is deliberately the
+            first half of the pair G107 measured -- the install at launch
+            preparation, before the routing flip that follows it.
+
+  **Where it runs, and why that order is not a preference.** `prepare_launch`
+  gains one call before its resolve: `install::install_loader`, guarded by
+  `install::loader_component(&profile).is_some()` so a vanilla or Fabric launch
+  neither looks for Java nor touches the network. The processors patch the
+  client jar and unpack the launcher stack, and the profile a launch resolves
+  for `net.minecraftforge`/`net.neoforged` is the installer's own -- whose
+  libraries only the processors produce -- so a resolve that ran first would
+  resolve a profile nothing has installed. `loader_component` reads the build
+  off the component's own version and the game off `net.minecraft`; a component
+  with no build, or a profile with no game, is `None` rather than half a
+  question asked of a maven.
+
+  **The client jar is Mojang's, and it is not re-downloaded under another
+  name.** `install_loader` reads Mojang's version file through `piston` and puts
+  the client jar in the content store under the digest the manifest itself
+  publishes (the `minecraft_jar` contract `InstallCtx` already states), which is
+  the same jar `install::plan` fetches to `libraries/com/mojang/minecraft/...`
+  for the classpath. The installer and every tool it names travel through that
+  store too, under the `.sha1` sidecars their maven serves, so a stalled host
+  resumes rather than restarts. The installer jar and its extracted `/data/...`
+  files live under `cache/installers/`, keyed by loader, game and build: one
+  build's installer is the same bytes for every instance that runs it.
+
+  **The resume test is the installer's own.** A processor whose every declared
+  output is already present and matching is skipped by `engine::forge::install`,
+  which is what makes a second launch of the same build cheap and an interrupted
+  install continue instead of restarting. The offline test states it where
+  `prepare_launch` reaches it: a scripted installer naming one processor whose
+  output is already on disk and whose digest matches, a stand-in `java` that is
+  a file and nothing more, and the outcome `Installed { ran: 0, skipped: 1 }` --
+  no maven coordinate resolved and no process started, which is the proof that
+  the branch was not taken rather than a description of it. With no Java the
+  call is `NoJava` *before the first request*; `prepare_launch` turns that into a
+  blocked launch with the reason said, because a Forge instance cannot be
+  installed without a runtime.
+
+  **What this does not prove.** There is no live run of a Forge build through
+  `prepare_launch` here, and there cannot be one on this machine: the processors
+  download tens of megabytes and run Java tools for minutes, and the live proof
+  of that sequence is G100's own `#[ignore]`d test against a real Forge and a
+  real NeoForge build. What is exercised offline is the *wiring* -- which
+  component is read as a loader, that no request is made when no Java is found,
+  and that a fully-resumed install ends as `Installed { ran: 0, skipped: 1 }`.
+  The resolve still answers `net.minecraftforge`/`net.neoforged` from the
+  mirror: the flip is G127, and this slice deliberately leaves it where it was.
+
+  **The id shifted by one.** The work order named this slice G125, but the
+  instance-settings modal landed as G125 first, so this install is G126 and the
+  routing flip behind it is G127.
+
+  The runner's own numbers are recorded below, in the paragraph this entry gains
+  once its push has one to read.
 
 ## What these gates cannot say
 
