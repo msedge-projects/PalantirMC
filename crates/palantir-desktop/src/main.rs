@@ -138,6 +138,13 @@ mod reference_vocabulary;
 /// Accounts and About on the rail; the reference keeps the first four inside
 /// an instance and Settings in a modal, and this is the module that says so.
 mod route;
+/// The skins the reader has added, in this launcher's own store.
+///
+/// The reference keeps them in a `minecraft-skins` plugin; this is the folder
+/// that stands in for it -- an index and one PNG per row, under the launcher's
+/// own directory. See the module for its three decisions, and for what the
+/// reference keeps that this does not.
+mod saved_skins;
 /// What the interface costs at size: the instance page's tabs against a `mods/`
 /// folder of thousands, Discover against a hundred hits, and the interaction
 /// clock against every control on a page. Compiled for tests only -- it builds

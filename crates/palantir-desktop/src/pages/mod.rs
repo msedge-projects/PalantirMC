@@ -23,7 +23,6 @@ pub mod user;
 use iced::Element;
 
 use crate::route::{Address, Route};
-use crate::skin::Appearance;
 use crate::store::Store;
 use crate::theme_gen::Theme as Gen;
 
@@ -159,6 +158,17 @@ pub enum Ask {
     /// shell's, and `crate::pick` says why the dialog has to be opened on the thread the
     /// window lives on.
     AddSkin(skins::Add),
+    /// Do what the Skins page's edit modal asked for: write a stored row's arm
+    /// style and cape and put it on, forget it, or take the account's skin off.
+    ///
+    /// Three actions in one ask because they are three presses of one modal, and
+    /// because two of them are the launcher's *own* files rather than the
+    /// account's: only the shell knows where this launcher's skin store lives
+    /// (`crate::saved_skins`), and only the shell holds the token the third and
+    /// the first need. The description travels -- the row's key, the chosen arm
+    /// style and cape, and which of the three -- and the pixels are read here,
+    /// because a page has never read a file in this tree.
+    EditSkin(skins::Edit),
     /// Put a project into one of the launcher's instances.
     ///
     /// The same shape as the other asks, pointed at a file instead of a page: the
@@ -258,7 +268,7 @@ impl Message {
     /// The same seam as [`Message::project_result`], and the reason it is a
     /// function: the answer's own type is the page's, and the shell has never seen
     /// one. It hands over what the store said and names nothing else.
-    pub fn skins_result(asked: &skins::Asked, result: Result<Appearance, String>) -> Message {
+    pub fn skins_result(asked: &skins::Asked, result: Result<skins::Loaded, String>) -> Message {
         Message::Skins(skins::Message::Found {
             round: asked.round,
             result: result.map(Box::new),
@@ -282,6 +292,15 @@ impl Message {
     /// something, and `skins::Picked` is the type that says so.
     pub fn skin_added(add: &skins::Add, picked: skins::Picked) -> Message {
         Message::Skins(skins::Message::Added { round: add.round, picked })
+    }
+
+    /// The message that carries the edit modal's outcome back to the Skins page.
+    ///
+    /// [`Message::skin_worn`]'s twin, and the same sentence on failure: what a
+    /// row's write changed is the row or the account, and the page reloads one
+    /// and redraws the other rather than being told about it.
+    pub fn skin_saved(edit: &skins::Edit, result: Result<(), String>) -> Message {
+        Message::Skins(skins::Message::Edited { round: edit.round, result })
     }
 
     /// The message that carries an install's outcome back to the page whose button
@@ -482,6 +501,32 @@ impl Screen {
             // idle and the shell asks on the same turn -- which is why this is the
             // page's own `opening` rather than a request the tab press sends.
             Screen::Instance(state) => state.opening().map(Ask::Instance),
+            _ => None,
+        }
+    }
+
+    /// The Skins page's editor, when one is open: the choices being made, the capes
+    /// they can be made from, and whether a write is already out.
+    ///
+    /// The shell draws the modal layer, but the editor is the *page's* state rather
+    /// than the shell's: a `Modal` variant holding a copy of it would be a second
+    /// fact to keep in step with [`skins::State::edit`], and the two would drift the
+    /// first time one of them was updated without the other. So the shell asks the
+    /// page for it, one frame at a time, and wraps what it gets back in its own
+    /// dialog frame ([`crate::shell`]).
+    pub fn skins_edit(&self) -> Option<(&skins::Edit, &[palantir_net::MinecraftCape], bool)> {
+        match self {
+            Screen::Skins(state) => state.edit.as_ref().map(|edit| {
+                // The capes are the account's own, from the same read the rows are
+                // drawn from: an editor opened before that answer arrived has none to
+                // offer, which is the reference's own state as its list loads.
+                let capes = state
+                    .appearance
+                    .ready()
+                    .map(|appearance| appearance.capes.as_slice())
+                    .unwrap_or(&[]);
+                (edit, capes, state.wearing)
+            }),
             _ => None,
         }
     }

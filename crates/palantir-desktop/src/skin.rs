@@ -106,20 +106,46 @@ impl FrontView {
     }
 }
 
-/// Cut `texture` into the front view the Skins page draws.
+/// Read the marker out of a decoded texture.
+///
+/// `None` for a legacy 64x32 texture, and not by accident: its canvas has no row
+/// 32, and the Ears format is a modern-layout format -- the same answer the mod's
+/// own reader gives, which reads a 64x32 canvas's absent pixel as "no marker".
+/// Bounds are checked rather than assumed, because the one caller hands this
+/// whichever shape the account's document listed.
+fn ears_of(image: &image::RgbaImage) -> Option<Ears> {
+    let pixel = image.get_pixel_checked(EARS_PIXEL.0, EARS_PIXEL.1)?.0;
+    // RGB only: the reference compares the same three bytes and never the alpha,
+    // so a marker pixel that has been made translucent still announces itself.
+    let magic = ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | pixel[2] as u32;
+    if magic == EARS_MARKERS.0 {
+        Some(Ears::V0)
+    } else if magic == EARS_MARKERS.1 {
+        Some(Ears::V1)
+    } else {
+        None
+    }
+}
+
+/// Cut `texture` into the picture the Skins page draws, and read its marker.
 ///
 /// `None` when the bytes are not an image, or are not a texture of either shape
 /// Minecraft publishes: a skin that cannot be cut into its parts is a skin this
 /// launcher cannot draw, and the page says so rather than drawing part of a
 /// player. Everything the format *does* define is drawn -- including the parts a
 /// legacy skin keeps no pixels for.
-pub fn front_view(texture: &[u8]) -> Option<FrontView> {
+///
+/// The second answer is the Ears marker ([`Ears`]), which the page needs to know
+/// whether to draw its notice. It is not an error for it to be absent: a skin with
+/// no marker is a skin that asks for nothing this launcher does not already draw.
+pub fn cut(texture: &[u8]) -> Option<Cut> {
     let decoded = image::load_from_memory(texture).ok()?.to_rgba8();
     let (width, height) = (decoded.width(), decoded.height());
     if width != TEXTURE_WIDTH || (height != TEXTURE_HEIGHT && height != LEGACY_HEIGHT) {
         return None;
     }
     let legacy = height == LEGACY_HEIGHT;
+    let ears = ears_of(&decoded);
     let mut pixels = vec![0u8; (FRONT_WIDTH * FRONT_HEIGHT * 4) as usize];
     for part in &PARTS {
         let mirrored = legacy && part.legacy_stand_in.is_some();
@@ -131,7 +157,10 @@ pub fn front_view(texture: &[u8]) -> Option<FrontView> {
         };
         blit(&decoded, &mut pixels, source, part.to, part.size, mirrored);
     }
-    Some(FrontView { width: FRONT_WIDTH, height: FRONT_HEIGHT, pixels })
+    Some(Cut {
+        front: FrontView { width: FRONT_WIDTH, height: FRONT_HEIGHT, pixels },
+        ears,
+    })
 }
 
 /// Copy one part's front from the texture into the view.
@@ -207,6 +236,48 @@ pub struct Prepared {
     pub model: Model,
     /// A 64x64 PNG's bytes, which is the only shape the upload service takes.
     pub png: Vec<u8>,
+}
+
+/// Whether a texture carries the Ears mod's own marker, and which version.
+///
+/// The Ears format writes a description of the features a skin asks for into the
+/// pixels a vanilla texture leaves unused, and it announces itself in one of them:
+/// the RGB of the pixel at `(0, 32)` is the format's magic number. The reference
+/// reads exactly this before it parses anything (`use-ears-mod-features.ts` in the
+/// reference's `ui` package, which is a port of the Ears mod and carries its
+/// licence), and this launcher reads the same pixel for the one thing the Skins
+/// page needs from it: whether the skin in force asks for something this launcher
+/// does not draw, which is what the notice beside the preview is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ears {
+    /// The first version of the format.
+    V0,
+    /// The second, which the mod's own reader tries after the first.
+    V1,
+}
+
+/// The two magic numbers the marker pixel can hold: `(V0, V1)`.
+///
+/// Copied from the reference's own constants of the same names
+/// (`EARS_V0_MAGIC` and `EARS_V1_MAGIC`), because they are the format's rather
+/// than a choice this tree gets to make: a texture written by the mod carries one
+/// of these or it carries no marker at all.
+const EARS_MARKERS: (u32, u32) = (0x3f23d8, 0xea2501);
+
+/// The pixel the marker lives in: `(x, y)`.
+const EARS_PIXEL: (u32, u32) = (0, 32);
+
+/// What one texture was cut into: the picture, and the marker under it.
+///
+/// One value rather than two functions because the decode is the expensive part,
+/// for the reason [`prepare`] gives: both answers come out of the same image, and
+/// a caller that asked twice would decode the same PNG twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cut {
+    /// The front view the Skins page draws.
+    pub front: FrontView,
+    /// Whether the texture asks for Ears features, and which version.
+    pub ears: Option<Ears>,
 }
 
 /// One limb box: sixteen pixels on a side, four faces of four columns each.
@@ -317,7 +388,7 @@ fn to_modern(texture: &[u8]) -> Option<image::RgbaImage> {
 /// In place rather than across the box, for [`LIMB_BOXES`]' reason: a face keeps its
 /// own four columns and reverses within them, so the front stays the front and its
 /// pixels are the mirror of the right limb's front. That is what the mirrored left
-/// limb the format describes *is*, and it is the same claim `front_view`'s legacy
+/// limb the format describes *is*, and it is the same claim `cut`'s legacy
 /// stand-ins make from the other direction -- which is why a test can hold the two
 /// together (`a_normalised_legacy_texture_draws_the_same_doll_as_the_legacy_one`).
 fn fill_limb(canvas: &mut image::RgbaImage, from: (u32, u32), to: (u32, u32)) {
@@ -371,7 +442,7 @@ fn encode(image: image::RgbaImage) -> Option<Vec<u8>> {
 ///
 /// Three things from two reads and one cut: Minecraft's document for the name and
 /// the two lists, the texture of the skin in force over the engine, and
-/// [`front_view`] for the picture. The fetch and the cut can fail while the lists
+/// [`cut`] for the picture. The fetch and the cut can fail while the lists
 /// are fine -- an account that owns skins still owns them on a machine with no
 /// connection -- so a reason travels *beside* the picture rather than replacing the
 /// whole answer, which is the difference between a page that draws what it has and
@@ -386,6 +457,12 @@ pub struct Appearance {
     pub capes: Vec<MinecraftCape>,
     /// The front view of the skin in force, when one could be drawn.
     pub front: Option<FrontView>,
+    /// Whether that skin asks for Ears features, and which version of the format.
+    ///
+    /// Read from the same decode as the picture, and `None` whenever the picture
+    /// is: a skin this launcher cannot draw is a skin whose marker it does not
+    /// claim to know either.
+    pub ears: Option<Ears>,
     /// Why there is no front view, when there is none.
     pub note: Option<String>,
 }
@@ -403,21 +480,23 @@ impl Appearance {
         owned: MinecraftSkins,
         texture: Result<Vec<u8>, String>,
     ) -> Appearance {
-        let (front, note) = match texture {
-            Ok(bytes) => match front_view(&bytes) {
-                Some(view) => (Some(view), None),
+        let (front, ears, note) = match texture {
+            Ok(bytes) => match cut(&bytes) {
+                Some(cut) => (Some(cut.front), cut.ears, None),
                 None => (
+                    None,
                     None,
                     Some("The skin in force is not a texture this launcher can draw.".to_string()),
                 ),
             },
-            Err(reason) => (None, Some(reason)),
+            Err(reason) => (None, None, Some(reason)),
         };
         Appearance {
             username: username.into(),
             skins: owned.skins,
             capes: owned.capes,
             front,
+            ears,
             note,
         }
     }
@@ -482,6 +561,15 @@ mod tests {
         bytes
     }
 
+    /// The picture half of a cut, which is the only half these tests are about.
+    ///
+    /// The cut answers two questions at once -- the doll and the Ears marker -- and
+    /// nothing outside this module wants the picture alone, so the front is taken out
+    /// of a cut here rather than through a public wrapper with no caller.
+    fn front(texture: &[u8]) -> Option<FrontView> {
+        cut(texture).map(|cut| cut.front)
+    }
+
     /// The colour at one pixel of the front view.
     fn at(view: &FrontView, x: u32, y: u32) -> [u8; 4] {
         let offset = ((y * view.width + x) * 4) as usize;
@@ -492,7 +580,7 @@ mod tests {
 
     #[test]
     fn the_front_view_lays_the_six_parts_out_where_the_doll_wants_them() {
-        let view = front_view(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin");
+        let view = front(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin");
         assert_eq!((view.width, view.height), (FRONT_WIDTH, FRONT_HEIGHT));
         assert_eq!(view.pixels.len(), (FRONT_WIDTH * FRONT_HEIGHT * 4) as usize);
         // The head, centred over the body: its top-left corner is 4 in from the
@@ -517,7 +605,7 @@ mod tests {
 
     #[test]
     fn a_legacy_skin_has_its_left_limbs_mirrored_rather_than_left_empty() {
-        let view = front_view(&texture(LEGACY_HEIGHT)).expect("a 64x32 skin");
+        let view = front(&texture(LEGACY_HEIGHT)).expect("a 64x32 skin");
         // The right arm and the right leg are the legacy format's own.
         assert_eq!(at(&view, 0, 8), [0, 255, 0, 255], "the right arm");
         assert_eq!(at(&view, 4, 20), [255, 0, 255, 255], "the right leg");
@@ -539,7 +627,7 @@ mod tests {
         image::DynamicImage::ImageRgba8(image)
             .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
             .expect("a PNG in memory");
-        let flipped = front_view(&bytes).expect("a 64x32 skin");
+        let flipped = front(&bytes).expect("a 64x32 skin");
         assert_eq!(at(&flipped, 12, 8), [0, 0, 255, 255], "the texture's last column");
         assert_eq!(at(&flipped, 15, 8), [255, 0, 0, 255], "and its first, on the far side");
     }
@@ -547,7 +635,7 @@ mod tests {
     #[test]
     fn a_texture_that_is_not_a_skin_is_refused_rather_than_half_drawn() {
         // Not an image at all.
-        assert!(front_view(b"this is not a PNG").is_none());
+        assert!(front(b"this is not a PNG").is_none());
         // An image of the wrong shape: the two heights Minecraft publishes are the
         // only two this knows the layout of.
         for (width, height) in [(64, 63), (64, 34), (32, 64), (63, 64)] {
@@ -556,13 +644,13 @@ mod tests {
             image::DynamicImage::ImageRgba8(image)
                 .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
                 .expect("a PNG in memory");
-            assert!(front_view(&bytes).is_none(), "{width}x{height} is not a skin");
+            assert!(front(&bytes).is_none(), "{width}x{height} is not a skin");
         }
     }
 
     #[test]
     fn the_view_is_something_the_image_widget_can_draw() {
-        let view = front_view(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin");
+        let view = front(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin");
         // The handle is built from the pixels rather than from the encoded bytes:
         // the cut is the whole point, and handing the renderer the texture would
         // draw a 64x64 grid of body parts.
@@ -652,8 +740,8 @@ mod tests {
         // The two halves of this module agreeing is what "the same appearance" means.
         let legacy = texture(LEGACY_HEIGHT);
         let prepared = prepare(&legacy).expect("a 64x32 skin");
-        let cut_from_legacy = front_view(&legacy).expect("a 64x32 skin");
-        let cut_from_modern = front_view(&prepared.png).expect("the normalised texture");
+        let cut_from_legacy = front(&legacy).expect("a 64x32 skin");
+        let cut_from_modern = front(&prepared.png).expect("the normalised texture");
         assert_eq!(cut_from_legacy, cut_from_modern);
         // And with the four-colour arm, where a wrong direction would be a different
         // picture rather than the same one: the doll's left arm is the right arm's
@@ -661,8 +749,8 @@ mod tests {
         let coloured = four_colour_arm();
         let prepared = prepare(&coloured).expect("a 64x32 skin");
         assert_eq!(
-            front_view(&coloured).expect("a 64x32 skin"),
-            front_view(&prepared.png).expect("a normalised skin")
+            front(&coloured).expect("a 64x32 skin"),
+            front(&prepared.png).expect("a normalised skin")
         );
     }
 
@@ -812,5 +900,59 @@ mod tests {
         assert!(appearance.equipped().is_none());
         assert!(appearance.front.is_none());
         assert_eq!(appearance.skins.len(), 2, "both are still the account's own");
+    }
+    /// A texture whose marker pixel is painted, if one is asked for.
+    ///
+    /// A legacy texture has no row 32, so the paint is skipped rather than written
+    /// out of bounds -- which is the same reason such a texture has no marker.
+    fn marked(height: u32, magic: Option<[u8; 3]>) -> Vec<u8> {
+        let bytes = texture(height);
+        let Some(magic) = magic else {
+            return bytes;
+        };
+        if height < 33 {
+            return bytes;
+        }
+        let mut image = image::load_from_memory(&bytes).expect("a PNG").to_rgba8();
+        image.put_pixel(0, 32, image::Rgba([magic[0], magic[1], magic[2], 255]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .expect("a PNG in memory");
+        out
+    }
+
+    #[test]
+    fn the_ears_marker_is_the_pixel_and_the_two_numbers_the_reference_reads() {
+        let first = marked(TEXTURE_HEIGHT, Some([0x3f, 0x23, 0xd8]));
+        let second = marked(TEXTURE_HEIGHT, Some([0xea, 0x25, 0x01]));
+        assert_eq!(cut(&first).expect("a 64x64 skin").ears, Some(Ears::V0));
+        assert_eq!(cut(&second).expect("a 64x64 skin").ears, Some(Ears::V1));
+
+        // A plain texture asks for nothing, and one byte away from a magic is not a
+        // magic -- the comparison is the whole three bytes.
+        assert_eq!(cut(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin").ears, None);
+        let nearly = marked(TEXTURE_HEIGHT, Some([0x3f, 0x23, 0xd9]));
+        assert_eq!(cut(&nearly).expect("a 64x64 skin").ears, None);
+    }
+
+    #[test]
+    fn painting_the_marker_does_not_change_the_picture() {
+        // The marker lives in a pixel no part of the doll reads, which is what makes
+        // it invisible to Minecraft: a skin with Ears features is the same player.
+        let plain = cut(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin");
+        let strange = cut(&marked(TEXTURE_HEIGHT, Some([0xea, 0x25, 0x01]))).expect("a 64x64 skin");
+        assert_eq!(plain.front, strange.front);
+        assert_ne!(plain.ears, strange.ears);
+    }
+
+    #[test]
+    fn a_legacy_texture_has_no_marker_because_its_canvas_has_no_row_32() {
+        let legacy = cut(&texture(LEGACY_HEIGHT)).expect("a 64x32 skin");
+        assert_eq!(legacy.ears, None);
+        // Even when the bytes are the very same paint, written where the row would
+        // be: the format is a modern-layout one and the canvas is what decides.
+        let painted = marked(LEGACY_HEIGHT, Some([0xea, 0x25, 0x01]));
+        assert_eq!(cut(&painted).expect("a 64x32 skin").ears, None);
     }
 }

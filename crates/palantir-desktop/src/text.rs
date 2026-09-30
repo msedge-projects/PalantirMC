@@ -498,6 +498,26 @@ pub fn tagged<'a>(message: &'a str, tag: &str) -> Option<(&'a str, &'a str, &'a 
     Some((&message[..start], &message[rest..end], &message[end + close.len()..]))
 }
 
+/// A message's `{name}` placeholder, and the sentence on either side of it.
+///
+/// The reference's copy marks a word that is a *control* with an ICU placeholder
+/// rather than a tag when the component fills the slot itself:
+/// `app.skins.ears-feature-notice` is
+/// `"This skin uses features from the {ears} mod"`, and its component substitutes a
+/// sentinel for the placeholder, splits on the sentinel and draws what is between the
+/// halves as a link. The generated table keeps the placeholder verbatim -- it has to,
+/// because the placeholder's *name* is the slot -- so the split is what a caller draws
+/// around, and this is that split: the text before the slot and the text after it.
+///
+/// `None` when the message has no such placeholder, which is the honest answer a
+/// caller should draw the sentence for rather than inventing a control in the middle
+/// of it.
+pub fn placeholder_parts<'a>(message: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+    let slot = format!("{{{name}}}");
+    let at = message.find(&slot)?;
+    Some((&message[..at], &message[at + slot.len()..]))
+}
+
 /// An integer as `Intl.NumberFormat` writes it in English: thousands separated.
 ///
 /// Hand-rolled rather than reaching for a formatting crate: the reference
@@ -740,5 +760,17 @@ mod tests {
         assert_eq!(value.grouped(), "1,200");
         assert_eq!(Plural::from(1200u64), value);
         assert_eq!(Plural::from("1.2K"), Plural::Category("1.2K"));
+    }
+
+    #[test]
+    fn a_placeholder_is_split_out_of_the_sentence_around_it() {
+        let notice = "This skin uses features from the {ears} mod";
+        assert_eq!(
+            placeholder_parts(notice, "ears"),
+            Some(("This skin uses features from the ", " mod"))
+        );
+        // A sentence with no such slot, and one that merely mentions the word.
+        assert_eq!(placeholder_parts("nothing to fill", "ears"), None);
+        assert_eq!(placeholder_parts("braces but no slot: {}", "ears"), None);
     }
 }

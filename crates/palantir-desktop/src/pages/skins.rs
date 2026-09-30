@@ -16,11 +16,16 @@
 //!
 //! Three of those are a *write* to the reader's own Minecraft account -- putting a skin
 //! on, putting a cape on, and adding the file -- so what a press will do is written
-//! where the press is. Two things the reference has are still not here, and this page
-//! says so rather than drawing a control that lies: its edit modal, which is where its
-//! own `unequip_skin` is reached from (the client *can* take a skin off -- see
-//! `palantir_net::SkinChange` -- and no control asks for it), and the store of the
-//! skins a reader has added, which its Saved skins sections are drawn from.
+//! where the press is. Since G124 the two things this page had none of are here: the
+//! *store* of the skins the reader has added ([`crate::saved_skins`], a folder under
+//! this product's own directory, which the Saved-skins section is drawn from), and the
+//! editor its rows open. That editor is the reference's `EditSkinModal.vue` -- the
+//! arm-style choice, the cape choice, and the Ears notice with its link to project
+//! `mfzaZK3Z` -- with two differences, each written where it is drawn: the reference's
+//! own `unequip_skin` has no caller anywhere in the vendored frontend, so taking a skin
+//! off is reached from this launcher's editor rather than from the reference's, and the
+//! deletion the reference draws in a confirm dialog of its own lives in the editor too,
+//! because this page has no preview panel to put it on ([`edit_view`]).
 
 use iced::widget::{column, image, row, text, Space};
 use iced::{Alignment, Element, Length};
@@ -29,7 +34,8 @@ use palantir_net::SkinChange;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP, ROW_GAP};
-use crate::pages::Ask;
+use crate::pages::{Ask, Open};
+use crate::saved_skins;
 use crate::skin::Appearance;
 use crate::store::Store;
 use crate::style::{INK_CONTRAST, INK_SECONDARY};
@@ -174,6 +180,66 @@ pub enum Picked {
     NoPicker(String),
 }
 
+/// One skin the launcher has stored, as the page draws it.
+///
+/// The store's own row (`crate::saved_skins`) plus the one thing the page cannot
+/// work out for itself: whether the texture asks for Ears features. That answer is
+/// in the PNG, which a page never holds, so the shell reads it when it reads the
+/// store and hands the row over with the flag already in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedRow {
+    /// The row, as the store read it.
+    pub entry: saved_skins::Entry,
+    /// Whether the stored texture carries the Ears mod's marker.
+    pub ears: bool,
+}
+
+/// Everything the page's own read answers with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Loaded {
+    /// The account's own appearance, from Minecraft's document.
+    pub appearance: Appearance,
+    /// The skins the reader has added, in the reader's order.
+    pub saved: Vec<SavedRow>,
+}
+
+/// Which of the edit modal's three actions a press asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Act {
+    /// Write the arm style and cape onto the row, and put the skin on.
+    Save,
+    /// Forget the row and its pixels -- the reference's `remove_custom_skin`.
+    Forget,
+    /// Take the account's skin off altogether.
+    TakeOff,
+}
+
+/// An edit of one stored skin, as the modal is making it.
+///
+/// The state of the modal rather than a request: which row, and the two choices
+/// the reader has made about it. It becomes an ask when one of the actions is
+/// pressed, and the *round* it carries is the one the page will match the answer
+/// against -- the modal opens inside a round rather than starting one, because
+/// opening it asks nobody anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    /// Which request this belongs to, so an answer is matched to the press waiting
+    /// for it.
+    pub round: u64,
+    /// The stored row's key, which is what the shell reads its pixels by.
+    pub key: String,
+    /// What the row is called, for the modal's title.
+    pub name: String,
+    /// The arm style the reader has chosen, in the service's own words.
+    pub variant: String,
+    /// The cape the reader has chosen: a document id, or empty for none.
+    pub cape: String,
+    /// Whether the stored texture asks for Ears features.
+    pub ears: bool,
+    /// What the reader has asked for.
+    pub act: Act,
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -212,7 +278,35 @@ pub enum Message {
         /// replaced is dropped rather than drawn.
         round: u64,
         /// The account's appearance, or why it could not be read.
-        result: Result<Box<Appearance>, String>,
+        result: Result<Box<Loaded>, String>,
+    },
+    /// A stored row was pressed: open the edit modal on it.
+    Edit {
+        /// The row's key.
+        key: String,
+    },
+    /// The arm style was chosen in the modal.
+    ArmStyle {
+        /// `CLASSIC` or `SLIM`, the two words the service uses.
+        variant: &'static str,
+    },
+    /// A cape was chosen in the modal -- or none was.
+    Cape {
+        /// The cape's own id, or empty for none.
+        id: String,
+    },
+    /// The notice's own link was pressed: open the Ears mod's project page.
+    OpenEars,
+    /// The modal was dismissed without doing anything.
+    CloseEdit,
+    /// The modal asked for one of its three actions.
+    Act(Act),
+    /// The shell's answer to what the modal asked for.
+    Edited {
+        /// Which request this answers.
+        round: u64,
+        /// Nothing on success, or the reason it could not be done.
+        result: Result<(), String>,
     },
     /// The pointer entered or left one of the page's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
@@ -231,6 +325,17 @@ crate::hovered!(Message);
 /// The one control in the page's header. The rows carry the other action, and their
 /// hover names come from [`ui::scoped`] because they repeat.
 const ADD_KEY: &str = "skins:add";
+
+/// The Ears mod's project, as the reference's own notice links it.
+///
+/// `pages/Skins.vue` writes `to="/project/mfzaZK3Z"` where it draws the notice, and
+/// this launcher's project page takes the same id -- the reference's link is its
+/// router, and this one is the route the shell already has.
+pub const EARS_PROJECT: &str = "mfzaZK3Z";
+
+/// The name space the stored rows' editors take theirs from. One per row, keyed by
+/// the texture's digest, because two rows can share a file name.
+const EDIT_KEY: &str = "skins:edit";
 
 /// The name space the per-row Apply buttons take their hover names from.
 const WEAR_KEY: &str = "skins:wear";
@@ -264,6 +369,16 @@ pub struct State {
     /// one and saw nothing happen would press it again, and the second press would
     /// be a second write to their own account.
     pub wearing: bool,
+    /// The skins the reader has added, in the reader's order.
+    ///
+    /// Read from the launcher's own store rather than from a service: it arrives
+    /// with [`State::appearance`] because the shell reads both in one turn, and a
+    /// page that asked twice would draw its rows and its doll a frame apart.
+    pub saved: Vec<SavedRow>,
+    /// The edit the modal is making, when it is open. `None` is a closed modal,
+    /// which is what the shell draws from: the editor belongs to the page that
+    /// owns the row, and the shell is what puts it over the window.
+    pub edit: Option<Edit>,
 }
 
 impl State {
@@ -337,9 +452,79 @@ impl State {
             Message::Found { round, result } => {
                 if round == self.round {
                     self.appearance = match result {
-                        Ok(appearance) => Load::Ready(*appearance),
+                        Ok(loaded) => {
+                            // The rows and the doll arrive together and are drawn
+                            // together; the store's half is moved out of the box
+                            // before the appearance is.
+                            let loaded = *loaded;
+                            self.saved = loaded.saved;
+                            Load::Ready(loaded.appearance)
+                        }
                         Err(reason) => Load::Failed(reason),
                     };
+                }
+            }
+            Message::Edit { key } => {
+                // Opening the editor asks nobody anything -- the row's own facts are
+                // in the store this page is already drawing -- so it raises no ask
+                // and starts no round: the round it carries is the one the write it
+                // leads to will be answered by.
+                if let Some(row) = self.saved.iter().find(|row| row.entry.key == key) {
+                    self.notice = None;
+                    self.edit = Some(Edit {
+                        round: self.round,
+                        key: row.entry.key.clone(),
+                        name: row.entry.name.clone(),
+                        variant: row.entry.variant.clone(),
+                        cape: row.entry.cape.clone(),
+                        ears: row.ears,
+                        act: Act::Save,
+                    });
+                }
+            }
+            Message::ArmStyle { variant } => {
+                if let Some(edit) = self.edit.as_mut() {
+                    edit.variant = variant.to_string();
+                }
+            }
+            Message::Cape { id } => {
+                if let Some(edit) = self.edit.as_mut() {
+                    edit.cape = id;
+                }
+            }
+            Message::OpenEars => {
+                // The notice's link, which is the reference's own `to` attribute: a
+                // navigation rather than a request, so it travels as `Open` and the
+                // shell turns it into an address.
+                return Some(Ask::Open(Open::Project(EARS_PROJECT.to_string())));
+            }
+            Message::CloseEdit => self.edit = None,
+            Message::Act(act) => {
+                // One at a time, like every other write this page can ask for: a
+                // second press while the first is out would be a second request
+                // against the same account.
+                if !self.wearing {
+                    if let Some(edit) = self.edit.as_mut() {
+                        edit.act = act;
+                        let edit = edit.clone();
+                        self.wearing = true;
+                        self.notice = None;
+                        return Some(Ask::EditSkin(edit));
+                    }
+                }
+            }
+            Message::Edited { round, result } => {
+                if round == self.round {
+                    self.wearing = false;
+                    // The modal closes either way: on success what it changed is
+                    // drawn by the reload, and on failure the sentence belongs in
+                    // the page's own slot rather than under a modal that would be
+                    // covering the row it is about.
+                    self.edit = None;
+                    match result {
+                        Ok(()) => return Some(Ask::Skins(self.ask())),
+                        Err(reason) => self.notice = Some(reason),
+                    }
                 }
             }
             Message::Hover { key, over, hover } => crate::ui::pointer_with(
@@ -426,18 +611,15 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     let mut sections = column![].spacing(GAP).width(Length::Fill);
     for (index, section) in Section::ALL.iter().enumerate() {
         let open = state.open == Some(index);
-        let body: Element<'a, Message> = if open {
-            row![]
-                .spacing(ROW_GAP)
-                .push(
-                    iced::widget::text(crate::store::needs_account("The skin store"))
-                        .size(13.0)
-                        .font(crate::style::medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-                )
-                .into()
-        } else {
+        // The one section whose contents this launcher *has*: the reference's skin
+        // packs come from Modrinth's own skin store, which this tree has never been
+        // given, but the skins the reader has added are a folder it owns.
+        let body: Element<'a, Message> = if !open {
             Space::with_height(Length::Fixed(0.0)).into()
+        } else if *section == Section::SavedSkins {
+            saved_block(theme, &state.saved, state.wearing)
+        } else {
+            caption(theme, &crate::store::needs_account("The skin store"))
         };
         let head = row![]
             .spacing(ROW_GAP)
@@ -462,6 +644,185 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     }
     blocks.push(sections.into());
     page::body(blocks, GAP)
+}
+
+/// The editor's body: the arm style, the cape, the Ears notice, and three actions.
+///
+/// This is the reference's `EditSkinModal.vue`, drawn as the *body* of this launcher's
+/// modal rather than as a modal of its own: the shell puts the dialog's frame, its title
+/// and its close button around what this returns, because an editor belongs to the row
+/// it edits and the modal layer is the shell's.
+///
+/// The reference's modal has Save and Cancel. Deleting a saved skin is a button in its
+/// preview panel leading to a confirm dialog of its own (`Skins.vue`'s `deleteSkin`),
+/// and taking the account's skin off is `helpers/skins.ts`'s `unequip_skin`, which
+/// nothing in the vendored frontend calls at all. This page has no preview panel -- the
+/// doll above draws what Minecraft says is in force, not a candidate -- so the editor
+/// carries the deletion, and it carries the take-off for the same reason: it is the one
+/// place a reader would look for it.
+///
+/// `wearing` is handed in rather than read here because it belongs to the page: while a
+/// write is out, the two actions that *are* writes are drawn unusable, which is the rule
+/// every other row on this page follows.
+pub fn edit_view<'a>(
+    theme: Gen,
+    edit: &'a Edit,
+    capes: &'a [palantir_net::MinecraftCape],
+    wearing: bool,
+) -> Element<'a, Message> {
+    let slim = edit.variant.eq_ignore_ascii_case("SLIM");
+    let mut body = column![].spacing(GAP).width(Length::Fill);
+    // The name the row is stored under. The reference's own title is the sentence
+    // "Editing skin"; *which* skin is the row's, and a reader who opened the wrong one
+    // needs to see that before they press Save.
+    body = body.push(caption(theme, &edit.name));
+    // Arm style: the reference's own `RadioButtons` over the service's two words.
+    body = body.push(heading(theme, Key::AppSkinsModalArmStyleSection.message()));
+    body = body.push(ui::chips(
+        theme,
+        &[ui::scoped(EDIT_KEY, "arm:wide"), ui::scoped(EDIT_KEY, "arm:slim")],
+        &[(variant_label("CLASSIC"), !slim), (variant_label("SLIM"), slim)],
+        move |index| {
+            Some(Message::ArmStyle {
+                variant: if index == 0 { "CLASSIC" } else { "SLIM" },
+            })
+        },
+    ));
+    // The cape: one choice per cape the account owns, and the reference's own "None"
+    // last. A choice's mark is the row's *stored* cape id, so a chip draws the check the
+    // other choices do only when it is the one this row asks for.
+    body = body.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
+    let mut cape_keys: Vec<&'static str> = capes
+        .iter()
+        .map(|cape| ui::scoped(EDIT_KEY, &format!("cape:{}", cape.id)))
+        .collect();
+    cape_keys.push(ui::scoped(EDIT_KEY, "cape:none"));
+    let mut cape_labels: Vec<(String, bool)> = capes
+        .iter()
+        .map(|cape| {
+            let name = if cape.alias.is_empty() { cape.id.clone() } else { cape.alias.clone() };
+            (name, edit.cape == cape.id)
+        })
+        .collect();
+    cape_labels.push((
+        Key::AppSkinsModalNoneCapeOption.message().to_string(),
+        edit.cape.is_empty(),
+    ));
+    let cape_ids: Vec<String> = capes.iter().map(|cape| cape.id.clone()).collect();
+    body = body.push(ui::chips(theme, &cape_keys, &cape_labels, move |index| {
+        Some(Message::Cape { id: cape_ids.get(index).cloned().unwrap_or_default() })
+    }));
+    if edit.ears {
+        body = body.push(ears_notice(theme));
+    }
+    // The actions. Save is the reference's own button, and Forget is its danger preset
+    // -- the one colour the reference gives the single control that takes something
+    // away. Take-off has no key to be drawn unusable with, because the reference has no
+    // word for it at all; the page refuses a second press in `update`, which is the
+    // rule where it cannot be sidestepped.
+    body = body.push(
+        row![]
+            .spacing(ROW_GAP)
+            .align_items(Alignment::Center)
+            .push(ui::button_or(
+                theme,
+                ui::scoped(EDIT_KEY, "save"),
+                Key::AppSkinsModalSaveSkinButton,
+                ui::Kind::Colored,
+                (!wearing).then_some(Message::Act(Act::Save)),
+            ))
+            .push(Space::with_width(Length::Fill))
+            .push(ui::button_text(
+                theme,
+                ui::scoped(EDIT_KEY, "takeoff"),
+                TAKE_OFF_LABEL,
+                ui::Kind::Outlined,
+                Message::Act(Act::TakeOff),
+            ))
+            .push(ui::button_or(
+                theme,
+                ui::scoped(EDIT_KEY, "forget"),
+                Key::AppSkinsDeleteButton,
+                ui::Kind::Danger,
+                (!wearing).then_some(Message::Act(Act::Forget)),
+            )),
+    );
+    body.into()
+}
+
+/// The take-off action's own words.
+///
+/// Hand-written rather than taken from the generated table, because that table is the
+/// reference's and the reference has no string for this: `unequip_skin` is in its client
+/// and nothing in its frontend calls it. The page's other hand-written sentences -- the
+/// Saved-skins empty state, the note under the doll -- are the same kind of thing.
+const TAKE_OFF_LABEL: &str = "Take it off";
+
+/// The reference's Ears notice, with its own link where its placeholder is.
+///
+/// `app.skins.ears-feature-notice` is `"This skin uses features from the {ears} mod"`,
+/// and the reference fills the placeholder with a sentinel, splits on it and draws what
+/// is between the halves as a `router-link` to `/project/mfzaZK3Z` labelled "Ears"
+/// (`Skins.vue`, its `earsFeatureNoticeParts`). This is that split
+/// ([`crate::text::placeholder`]) and that link. A message that arrived without the
+/// placeholder is drawn whole rather than dropped: the reader still needs to know why
+/// their skin looks different.
+fn ears_notice<'a>(theme: Gen) -> Element<'a, Message> {
+    let message = Key::AppSkinsEarsFeatureNotice.message();
+    let Some((before, after)) = crate::text::placeholder_parts(message, "ears") else {
+        return caption(theme, message);
+    };
+    row![]
+        .spacing(6.0)
+        .align_items(Alignment::Center)
+        .push(caption(theme, before))
+        .push(
+            iced::widget::mouse_area(
+                text("Ears")
+                    .size(13.0)
+                    .font(crate::style::medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::AccentContrast))),
+            )
+            .interaction(iced::mouse::Interaction::Pointer)
+            .on_press(Message::OpenEars),
+        )
+        .push(caption(theme, after))
+        .into()
+}
+
+/// The skins the reader has added: one row per stored skin, and the way into the
+/// editor.
+///
+/// The reference's rows select and its *preview panel* carries the Edit button; this
+/// page has no panel for a candidate skin -- the doll above draws what Minecraft says
+/// is in force -- so the row itself is the way in. What it draws is the store's own:
+/// the name the skin was added under and the arm style it was read with. It does not
+/// draw which of the reference's two sources the row came in as, because the
+/// reference's own rows do not either; that field is in the index and named in the
+/// gate.
+fn saved_block<'a>(theme: Gen, rows: &'a [SavedRow], wearing: bool) -> Element<'a, Message> {
+    if rows.is_empty() {
+        return caption(
+            theme,
+            "Nothing saved yet -- Add keeps every skin you pick from here on.",
+        );
+    }
+    let mut block = column![].spacing(ROW_GAP).width(Length::Fill);
+    for row in rows {
+        let facts = format!("{} -- {}", row.entry.name, variant_label(&row.entry.variant));
+        // A press while a write is out is refused rather than queued: the answer to
+        // the write closes the modal, so an editor opened behind it would vanish.
+        let action = (!wearing).then_some(Message::Edit { key: row.entry.key.clone() });
+        block = block.push(owned_row(
+            theme,
+            &facts,
+            false,
+            Key::AppSkinsEditButton,
+            ui::scoped(EDIT_KEY, &row.entry.key),
+            action,
+        ));
+    }
+    block.into()
 }
 
 /// The account's own appearance, as the page draws it.
@@ -526,6 +887,7 @@ fn account_block<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> E
             theme,
             &variant_label(&skin.variant),
             skin.equipped(),
+            Key::AppSkinsApplyButton,
             key,
             wear_skin(skin, wearing),
         ));
@@ -541,7 +903,14 @@ fn account_block<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> E
         let worn = appearance.equipped_cape().is_some_and(|worn| worn.id == cape.id);
         let identity = if cape.id.is_empty() { name.to_string() } else { cape.id.clone() };
         let key = ui::scoped(WEAR_KEY, &identity);
-        blocks.push(owned_row(theme, name, worn, key, wear_cape(cape, worn, wearing)));
+        blocks.push(owned_row(
+            theme,
+            name,
+            worn,
+            Key::AppSkinsApplyButton,
+            key,
+            wear_cape(cape, worn, wearing),
+        ));
     }
     // The reference's own "no cape" choice, drawn only when something has to be
     // taken off: a row that hides a cape the account is not wearing would be a
@@ -551,6 +920,7 @@ fn account_block<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> E
             theme,
             Key::AppSkinsModalNoneCapeOption.message(),
             false,
+            Key::AppSkinsApplyButton,
             ui::scoped(WEAR_KEY, &format!("none:{}", cape.id)),
             (!wearing).then_some(Message::Wear(SkinChange::NoCape)),
         ));
@@ -591,6 +961,7 @@ fn owned_row<'a>(
     theme: Gen,
     name: &str,
     worn: bool,
+    label: Key,
     key: &'static str,
     action: Option<Message>,
 ) -> Element<'a, Message> {
@@ -619,7 +990,7 @@ fn owned_row<'a>(
     let line = line.push(ui::button_or(
         theme,
         key,
-        Key::AppSkinsApplyButton,
+        label,
         ui::Kind::Standard,
         action,
     ));
@@ -722,7 +1093,11 @@ mod tests {
             palantir_net::MinecraftSkins::default(),
             Err("the network is down".into()),
         );
-        state.update(Message::Found { round: asked.round, result: Ok(Box::new(appearance)) });
+        // What arrives is the two halves the shell read in one turn: the account's
+        // appearance, and the launcher's own stored skins. Nothing is stored in this
+        // test, so the second half is empty.
+        let loaded = Loaded { appearance, saved: Vec::new() };
+        state.update(Message::Found { round: asked.round, result: Ok(Box::new(loaded)) });
         assert!(matches!(state.appearance, Load::Ready(_)));
         state.update(Message::Found { round: asked.round, result: Err("signed out".into()) });
         assert_eq!(state.appearance, Load::Failed("signed out".into()));
@@ -936,5 +1311,179 @@ mod tests {
             };
             drop(view(*theme, &state, &store));
         }
+    }
+    #[test]
+    fn opening_the_editor_reads_the_row_it_was_pressed_on() {
+        let row = SavedRow {
+            entry: saved_skins::Entry {
+                key: "abc".to_string(),
+                name: "my skin".to_string(),
+                variant: "SLIM".to_string(),
+                cape: "cape-1".to_string(),
+                source: saved_skins::Source::Custom,
+                file: "abc.png".to_string(),
+            },
+            ears: true,
+        };
+        let mut state = State { saved: vec![row], ..State::default() };
+        // A press on a row the page does not hold asks for nothing and opens nothing.
+        assert_eq!(state.update(Message::Edit { key: "nope".to_string() }), None);
+        assert!(state.edit.is_none());
+        state.update(Message::Edit { key: "abc".to_string() });
+        let edit = state.edit.clone().expect("the editor opened on the row");
+        assert_eq!(edit.key, "abc");
+        assert_eq!(edit.name, "my skin");
+        assert_eq!(edit.variant, "SLIM");
+        assert_eq!(edit.cape, "cape-1");
+        assert!(edit.ears, "and the marker travels with it");
+        // The two choices are the modal's own state, and neither asks anybody anything.
+        assert_eq!(state.update(Message::ArmStyle { variant: "CLASSIC" }), None);
+        assert_eq!(state.update(Message::Cape { id: "cape-2".to_string() }), None);
+        let edit = state.edit.as_ref().expect("still open");
+        assert_eq!(edit.variant, "CLASSIC");
+        assert_eq!(edit.cape, "cape-2");
+        assert_eq!(state.update(Message::CloseEdit), None);
+        assert!(state.edit.is_none(), "and closing it is not a request either");
+    }
+
+    #[test]
+    fn each_of_the_editors_three_actions_travels_as_one_ask() {
+        for act in [Act::Save, Act::Forget, Act::TakeOff] {
+            let opened = Edit {
+                round: 7,
+                key: "abc".to_string(),
+                name: "my skin".to_string(),
+                variant: "CLASSIC".to_string(),
+                cape: String::new(),
+                ears: false,
+                act: Act::Save,
+            };
+            let mut state = State { edit: Some(opened), ..State::default() };
+            let Some(Ask::EditSkin(edit)) = state.update(Message::Act(act)) else {
+                panic!("the press asks the shell: {act:?}");
+            };
+            assert_eq!(edit.act, act);
+            assert_eq!(edit.round, 7, "the round the answer is matched by");
+            assert!(state.wearing, "and the page waits on it");
+            // A second press while the first is out is dropped, not sent.
+            assert_eq!(state.update(Message::Act(Act::Forget)), None);
+            assert!(state.wearing);
+        }
+        // With nothing open there is nothing to ask for.
+        let mut state = State::default();
+        assert_eq!(state.update(Message::Act(Act::Save)), None);
+    }
+
+    #[test]
+    fn the_editors_answer_closes_it_and_a_success_reloads() {
+        // The modal opens inside a round rather than starting one, so the answer that
+        // comes back carries the round the page is already on.
+        let opened = Edit {
+            round: 3,
+            key: "abc".to_string(),
+            name: "my skin".to_string(),
+            variant: "CLASSIC".to_string(),
+            cape: String::new(),
+            ears: false,
+            act: Act::Save,
+        };
+        let mut state = State { round: 3, edit: Some(opened), wearing: true, ..State::default() };
+        let Some(Ask::Skins(asked)) = state.update(Message::Edited { round: 3, result: Ok(()) })
+        else {
+            panic!("a write that worked reloads");
+        };
+        assert_eq!(asked.round, 4);
+        assert!(state.edit.is_none(), "the modal closes either way");
+        assert!(!state.wearing);
+        assert_eq!(state.notice, None, "a success is not a sentence");
+
+        // A failure is a sentence in the page's own slot, and the modal still closes.
+        state.round = 4;
+        state.edit = Some(Edit {
+            round: 4,
+            key: "abc".to_string(),
+            name: "my skin".to_string(),
+            variant: "CLASSIC".to_string(),
+            cape: String::new(),
+            ears: false,
+            act: Act::Forget,
+        });
+        state.wearing = true;
+        assert_eq!(
+            state.update(Message::Edited { round: 4, result: Err("gone".to_string()) }),
+            None
+        );
+        assert!(state.edit.is_none());
+        assert!(!state.wearing);
+        assert!(state.notice.as_deref().unwrap_or_default().contains("gone"));
+        // And an answer to an edit the page has replaced is dropped rather than drawn.
+        assert_eq!(
+            state.update(Message::Edited { round: 99, result: Err("old".to_string()) }),
+            None
+        );
+        assert!(state.notice.as_deref().unwrap_or_default().contains("gone"));
+    }
+
+    #[test]
+    fn the_ears_notices_link_opens_the_mods_own_project() {
+        let mut state = State::default();
+        let Some(Ask::Open(Open::Project(id))) = state.update(Message::OpenEars) else {
+            panic!("the link is a navigation");
+        };
+        assert_eq!(id, EARS_PROJECT);
+        assert_eq!(id, "mfzaZK3Z", "the project the reference's own link names");
+    }
+
+    #[test]
+    fn the_editor_draws_in_every_theme_and_around_both_answers_to_ears() {
+        let capes = vec![palantir_net::MinecraftCape {
+            id: "cape-1".to_string(),
+            state: "ACTIVE".to_string(),
+            url: String::new(),
+            alias: "Migrator".to_string(),
+        }];
+        for theme in Gen::ALL {
+            for ears in [false, true] {
+                let edit = Edit {
+                    round: 1,
+                    key: "abc".to_string(),
+                    name: "my skin".to_string(),
+                    variant: "SLIM".to_string(),
+                    cape: String::new(),
+                    ears,
+                    act: Act::Save,
+                };
+                // With capes to choose and with none: an account that owns no cape still
+                // gets the modal's own "None".
+                drop(edit_view(*theme, &edit, &capes, false));
+                drop(edit_view(*theme, &edit, &[], true));
+            }
+        }
+    }
+
+    #[test]
+    fn the_saved_section_draws_a_row_per_stored_skin_and_an_empty_state() {
+        let store = Store::default();
+        // The Saved-skins section is the fourth card, and with nothing stored it draws
+        // its own sentence rather than an empty column.
+        assert_eq!(Section::ALL[3], Section::SavedSkins);
+        let state = State { open: Some(3), ..State::default() };
+        drop(view(Gen::ALL[0], &state, &store));
+        let state = State {
+            open: Some(3),
+            saved: vec![SavedRow {
+                entry: saved_skins::Entry {
+                    key: "abc".to_string(),
+                    name: "my skin".to_string(),
+                    variant: "CLASSIC".to_string(),
+                    cape: String::new(),
+                    source: saved_skins::Source::Custom,
+                    file: "abc.png".to_string(),
+                },
+                ears: false,
+            }],
+            ..State::default()
+        };
+        drop(view(Gen::ALL[0], &state, &store));
     }
 }

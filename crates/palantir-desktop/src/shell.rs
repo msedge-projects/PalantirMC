@@ -135,6 +135,15 @@ enum Asked {
     /// frame a directory walk -- `crate::scale` measured the Files tab at 2,304 ms
     /// of frame at five thousand entries before this moved.
     Instance(instance::Asked),
+    /// Do what the Skins page's editor asked for: write a stored row and put it on,
+    /// forget it, or take the account's skin off.
+    ///
+    /// The third kind of thing a page can ask the shell for, and the first that
+    /// touches this launcher's *own* files: `crate::saved_skins` is a folder under
+    /// this product's directory, and a page has never read a file in this tree --
+    /// the same rule the picker follows, for the same reason. Two of its three
+    /// actions also need the account's token, which is the shell's.
+    EditSkin(skins::Edit),
 }
 
 // ---- Geometry, quoted from the reference --------------------------------
@@ -1292,6 +1301,7 @@ impl Shell {
                 Asked::Skins(asked) => self.skins(asked),
                 Asked::Wear(worn) => self.wear(worn),
                 Asked::AddSkin(add) => self.add_skin(add),
+                Asked::EditSkin(edit) => self.edit_skin(edit),
             };
         }
         // A create and an import are not a page's requests and do not go through
@@ -1635,6 +1645,9 @@ impl Shell {
                     // `opening`'s match above: what this does is ask the reader for a
                     // file they already decided to add.
                     Some(pages::Ask::AddSkin(add)) => Some(Asked::AddSkin(add)),
+                    // The editor's three actions, which are also not owed by arrival: a
+                    // press of Save, Forget or Take off is a reader's doing.
+                    Some(pages::Ask::EditSkin(edit)) => Some(Asked::EditSkin(edit)),
                     Some(pages::Ask::Install(install)) => {
                         // The dialog is opened rather than a transfer started: the
                         // missing half of the request is *which instance*, and only
@@ -1768,6 +1781,16 @@ impl Shell {
             }
             Message::CloseModal => {
                 self.modal = None;
+                // The Skins editor is the page's state rather than this shell's
+                // (`pages::Screen::skins_edit`), so dismissing it is a message to the
+                // page. A close with no editor open is the same nothing: the page
+                // ignores `CloseEdit` when it holds no edit.
+                if self.screen.skins_edit().is_some() {
+                    let _ = self.screen.update(
+                        pages::Message::Skins(skins::Message::CloseEdit),
+                        &self.store,
+                    );
+                }
                 None
             }
             Message::Tick => {
@@ -2043,7 +2066,8 @@ impl Shell {
                 | pages::Ask::Play(_)
                 | pages::Ask::Stop(_)
                 | pages::Ask::Wear(_)
-                | pages::Ask::AddSkin(_),
+                | pages::Ask::AddSkin(_)
+                | pages::Ask::EditSkin(_),
             ) => iced::Command::none(),
             None => iced::Command::none(),
         }
@@ -2078,11 +2102,20 @@ impl Shell {
         let store = self.store.clone();
         let account = self.account();
         iced::Command::perform(
-            crate::store::off_thread(move || match account.access_token.as_deref() {
-                Some(token) => store.appearance(&account.username, token),
-                None => Err(
-                    "Sign in to a Microsoft account to see the skins it owns.".to_string(),
-                ),
+            crate::store::off_thread(move || {
+                let appearance = match account.access_token.as_deref() {
+                    Some(token) => store.appearance(&account.username, token),
+                    None => {
+                        return Err(
+                            "Sign in to a Microsoft account to see the skins it owns."
+                                .to_string(),
+                        )
+                    }
+                }?;
+                // The launcher's own store is read on this thread too: a row's Ears
+                // marker is in its PNG, and decoding a handful of 64x64 textures is
+                // not work for the thread that draws.
+                Ok(skins::Loaded { appearance, saved: stored_rows(&store) })
             }),
             move |result| Message::Screen(pages::Message::skins_result(&asked, result)),
         )
@@ -2169,15 +2202,29 @@ impl Shell {
             async move {
                 match choice {
                     Choice::Answered(picked) => picked,
-                    Choice::Upload(change) => skins::Picked::Done(
-                        crate::store::off_thread(move || match account.access_token.as_deref() {
-                            Some(token) => store.wear(token, change),
-                            None => Err(
-                                "Sign in to a Microsoft account to add a skin.".to_string(),
-                            ),
-                        })
-                        .await,
-                    ),
+                    Choice::Upload(change) => {
+                        // The texture is cloned for the store before the change is moved
+                        // into the worker: the row the reader will see in the Saved-skins
+                        // section is this same file, so the two must agree about what was
+                        // added.
+                        let picked = change.clone();
+                        skins::Picked::Done(
+                            crate::store::off_thread(move || {
+                                let result = match account.access_token.as_deref() {
+                                    Some(token) => store.wear(token, change),
+                                    None => Err(
+                                        "Sign in to a Microsoft account to add a skin."
+                                            .to_string(),
+                                    ),
+                                };
+                                if result.is_ok() {
+                                    keep_picked(&store, &picked);
+                                }
+                                result
+                            })
+                            .await,
+                        )
+                    }
                 }
             },
             move |picked| Message::Screen(pages::Message::skin_added(&add, picked)),
@@ -2209,6 +2256,88 @@ impl Shell {
             file_name,
             texture: prepared.png,
         })
+    }
+
+    /// Do what the Skins page's editor asked for, and bring the outcome back as a page
+    /// message.
+    ///
+    /// Off the frame thread for [`Shell::wear`]'s reason, and the one ask that reaches
+    /// two stores at once: the launcher's own ([`crate::saved_skins`]) for the row's arm
+    /// style and cape, or for forgetting it, and the account's through Minecraft's
+    /// service for the two actions that change what is *worn*. The account and its token
+    /// are read here, the way [`Shell::skins`] reads them, so a reader who is not signed
+    /// in is told to sign in rather than sent a request with no token -- for the two
+    /// actions that need one. Forgetting a row is a local file and works signed out, which
+    /// is why the token is read inside the arms that need it rather than once above them.
+    fn edit_skin(&self, edit: skins::Edit) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let account = self.account();
+        let outcome = edit.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || {
+                let paths = store
+                    .paths()
+                    .ok_or_else(|| "This launcher has no folder for saved skins.".to_string())?;
+                match outcome.act {
+                    // Forgetting is this launcher's own file and needs no token: a reader
+                    // signed out can still tidy their store.
+                    skins::Act::Forget => {
+                        crate::saved_skins::forget(paths, &outcome.key)?;
+                        Ok(())
+                    }
+                    // Taking the skin off is the one change with nothing to describe: the
+                    // service's own DELETE (`SkinChange::NoSkin`), which G106 implemented
+                    // and left unreachable until there was a control to reach it from.
+                    skins::Act::TakeOff => match account.access_token.as_deref() {
+                        Some(token) => store.wear(token, palantir_net::SkinChange::NoSkin),
+                        None => Err(
+                            "Sign in to a Microsoft account to change what it wears."
+                                .to_string(),
+                        ),
+                    },
+                    // Save writes the row and puts it on. The row is written first, so the
+                    // two choices the editor collected are the reader's whatever the
+                    // service does with the upload; the texture is read back from the
+                    // store rather than carried here, because a page has never held a file
+                    // and the store is where the picker's copy lives.
+                    skins::Act::Save => {
+                        crate::saved_skins::update(
+                            paths,
+                            &outcome.key,
+                            &outcome.variant,
+                            &outcome.cape,
+                        )?;
+                        let Some(entry) =
+                            crate::saved_skins::load(paths).get(&outcome.key).cloned()
+                        else {
+                            return Err(
+                                "That saved skin is no longer in the store.".to_string()
+                            );
+                        };
+                        let texture = crate::saved_skins::texture(paths, &entry)?;
+                        match account.access_token.as_deref() {
+                            Some(token) => store.wear(
+                                token,
+                                palantir_net::SkinChange::Upload {
+                                    variant: outcome.variant.clone(),
+                                    // The store's own file name, which is the digest and
+                                    // a `.png`: `file_part_name` reduces whatever a caller
+                                    // sends, and a name this launcher wrote is not a name
+                                    // from a dialog.
+                                    file_name: entry.file.clone(),
+                                    texture,
+                                },
+                            ),
+                            None => Err(
+                                "Sign in to a Microsoft account to change what it wears."
+                                    .to_string(),
+                            ),
+                        }
+                    }
+                }
+            }),
+            move |result| Message::Screen(pages::Message::skin_saved(&edit, result)),
+        )
     }
 
     /// Read the news feed and bring the answer back as a shell message.
@@ -2643,7 +2772,10 @@ impl Shell {
         // is the blurred chrome behind the scrim instead of nothing -- the same
         // class of deviation as `backdrop-filter` itself, and recorded rather
         // than approximated.
-        if self.modal.is_some() {
+        // The Skins page's editor is a modal too, and it is not in `Modal`: it is the
+        // page's own state (`pages::Screen::skins_edit`), so the layer is drawn for it
+        // as well as for the shell's own modals.
+        if self.modal.is_some() || self.screen.skins_edit().is_some() {
             return self.modal_layer();
         }
         let theme = self.theme;
@@ -5062,7 +5194,21 @@ impl Shell {
 
     /// The scrim and the dialog, over whatever the shell was drawing.
     fn modal_layer(&self) -> Element<'_, Message> {
-        let theme = self.theme;
+        // The one modal that is not the shell's own. The Skins page's editor belongs to
+        // the page's state -- a `Modal` variant would be a second copy of
+        // [`skins::State::edit`] to keep in step -- so it is asked for here, and this
+        // shell's own part is the frame around it. It is checked first because the page
+        // cannot be showing an editor while a shell modal is up: a shell modal replaces
+        // the window's contents, so nothing on the page is under it to press.
+        if let Some((edit, capes, wearing)) = self.screen.skins_edit() {
+            // The body is the *page's* message type, so every press in it is wrapped
+            // back into `Message::Screen` here: the editor's controls are the page's,
+            // and the shell is the one that draws them.
+            let body = skins::edit_view(self.theme, edit, capes, wearing)
+                .map(|message| Message::Screen(pages::Message::Skins(message)));
+            let dialog = self.dialog(Key::AppSkinsModalEditTitle, body);
+            return self.scrim(dialog);
+        }
         let dialog = match &self.modal {
             Some(Modal::Create) => self.create_dialog(),
             Some(Modal::Import) => self.import_dialog(),
@@ -5073,6 +5219,16 @@ impl Shell {
             // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
         };
+        self.scrim(dialog)
+    }
+
+    /// The translucent bed a modal sits on, and the press that dismisses it.
+    ///
+    /// Its own function because there are now two ways into the layer -- a `Modal` and
+    /// the Skins page's editor -- and a second copy of these eight lines would be a
+    /// second place the scrim's colour could be changed alone.
+    fn scrim<'a>(&self, dialog: Element<'a, Message>) -> Element<'a, Message> {
+        let theme = self.theme;
         let scrim = container(dialog)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -5136,6 +5292,66 @@ impl<Message> canvas::Program<Message> for RailButton {
         }
         vec![frame.into_geometry()]
     }
+}
+
+/// The skins this launcher has stored, as the Skins page draws them.
+///
+/// A free function rather than a method because [`Shell::skins`]'s worker calls it with a
+/// store it owns, and because it is pure: read the index, read each row's PNG, and answer
+/// whether that PNG asks for the Ears features. A row whose texture will not come back is
+/// still a row -- its name and arm style are in the index -- so a failed read answers
+/// `false` for the marker rather than dropping the skin.
+fn stored_rows(store: &Store) -> Vec<skins::SavedRow> {
+    let Some(paths) = store.paths() else {
+        // A store built over a fetch double has no folder, which is how the tests build
+        // one: there is nothing saved, and that is not an error.
+        return Vec::new();
+    };
+    crate::saved_skins::load(paths)
+        .ordered()
+        .into_iter()
+        .map(|entry| {
+            let ears = crate::saved_skins::texture(paths, entry)
+                .ok()
+                .and_then(|bytes| crate::skin::cut(&bytes))
+                .and_then(|cut| cut.ears)
+                .is_some();
+            skins::SavedRow { entry: entry.clone(), ears }
+        })
+        .collect()
+}
+
+/// Keep a texture the reader just picked, the way Add promises the Saved-skins section
+/// will.
+///
+/// The name is the file's own with its extension dropped, because that is what the reader
+/// called it and the reference names a custom skin by the file it came from. The source is
+/// [`crate::saved_skins::Source::Custom`], the picker being the only way in this launcher
+/// has for a texture of the reader's own; the reference's `custom_external` would be a
+/// texture imported from another launcher, which this job has no importer for. A store
+/// write that fails is *not* reported: the upload is what the reader asked for, and a row
+/// missing from a section they have not opened is a smaller failure than a sentence saying
+/// the skin they can see on their account did not go up.
+fn keep_picked(store: &Store, change: &palantir_net::SkinChange) {
+    let palantir_net::SkinChange::Upload { variant, file_name, texture } = change else {
+        // The picker only ever builds an upload; any other change is not this function's.
+        return;
+    };
+    let Some(paths) = store.paths() else {
+        return;
+    };
+    let name = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let _ = crate::saved_skins::add(
+        paths,
+        texture,
+        name,
+        variant,
+        "",
+        crate::saved_skins::Source::Custom,
+    );
 }
 
 /// The icon a rail slot draws, from `App.vue`'s own imports.
@@ -7788,6 +8004,130 @@ mod tests {
             (1.0, 0.0),
             "the crossing belonged to the page that is gone"
         );
+    }
+    /// A real 64x64 skin in memory, with the Ears marker painted in when one is
+    /// asked for: what the store's marker answer comes from is the pixels, so a mock
+    /// of them would be testing the mock.
+    fn skin_bytes(ears: Option<u32>) -> Vec<u8> {
+        // The decode crate is spelled with a leading `::`, because this module has
+        // `iced::widget::image` in scope and the name would otherwise resolve to the
+        // widget rather than to the crate that writes a PNG (`pages::user`'s
+        // `Avatar::of` is the same collision, handled the same way).
+        let mut face = ::image::RgbaImage::from_pixel(64, 64, ::image::Rgba([0, 0, 0, 0]));
+        if let Some(magic) = ears {
+            face.put_pixel(
+                0,
+                32,
+                ::image::Rgba([(magic >> 16) as u8, (magic >> 8) as u8, magic as u8, 255]),
+            );
+        }
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(face)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .expect("a PNG in memory");
+        bytes
+    }
+
+    #[test]
+    fn the_stored_skins_are_read_back_in_the_readers_order_and_with_their_marker() {
+        let shell = shell_with_home("stored-skins");
+        let paths = shell.store.paths().expect("a store with a folder");
+        // One plain texture and one carrying the Ears format's first magic. The
+        // second is added second and is therefore the *front* of the reader's order,
+        // because `add` promotes what was just added -- which is the reference's own
+        // behaviour for a newly added skin.
+        crate::saved_skins::add(
+            paths,
+            &skin_bytes(None),
+            "plain",
+            "SLIM",
+            "",
+            crate::saved_skins::Source::Custom,
+        )
+        .expect("a stored row");
+        crate::saved_skins::add(
+            paths,
+            &skin_bytes(Some(0x3f23d8)),
+            "eared",
+            "CLASSIC",
+            "cape-1",
+            crate::saved_skins::Source::Custom,
+        )
+        .expect("a second stored row");
+        let rows = stored_rows(&shell.store);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].entry.name, "eared", "the most recent row is first");
+        assert!(rows[0].ears, "and its marker reached the page");
+        assert_eq!(rows[0].entry.cape, "cape-1");
+        assert_eq!(rows[1].entry.name, "plain");
+        assert!(!rows[1].ears, "a texture with no marker asks for nothing");
+        // A row whose pixels will not come back is still a row: the name and the arm
+        // style live in the index, and only the marker is the pixels' answer.
+        crate::saved_skins::add(
+            paths,
+            b"this is not a PNG",
+            "broken",
+            "CLASSIC",
+            "",
+            crate::saved_skins::Source::Custom,
+        )
+        .expect("a third row");
+        let rows = stored_rows(&shell.store);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].entry.name, "broken");
+        assert!(!rows[0].ears, "bytes that are not a texture carry no marker");
+    }
+
+    #[test]
+    fn the_editors_press_is_an_ask_and_its_close_comes_back_to_the_page() {
+        let mut shell = shell_at("/skins");
+        press(&mut shell, Message::Go("/skins".into()));
+        // The row the shell's own read would have filled, placed by hand: the editor
+        // is drawn from the *page's* state, and this is that state.
+        let row = skins::SavedRow {
+            entry: crate::saved_skins::Entry {
+                key: "abc".to_string(),
+                name: "my skin".to_string(),
+                variant: "CLASSIC".to_string(),
+                cape: String::new(),
+                source: crate::saved_skins::Source::Custom,
+                file: "abc.png".to_string(),
+            },
+            ears: true,
+        };
+        match &mut shell.screen {
+            Screen::Skins(state) => state.saved = vec![row],
+            _ => panic!("the shell is on the skins page"),
+        }
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Skins(skins::Message::Edit {
+                key: "abc".to_string(),
+            })),
+        );
+        assert!(shell.screen.skins_edit().is_some(), "the editor opened");
+        // The editor is a modal, so the layer is what is drawn -- including the Ears
+        // notice, because the row's marker is set.
+        drop(shell.render());
+        // A press of one of the three actions is the page's ask, and the shell takes
+        // it; what the page records is that it is waiting on the answer.
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Skins(skins::Message::Act(
+                skins::Act::Forget,
+            ))),
+        );
+        match shell.screen.skins_edit() {
+            Some((edit, _, wearing)) => {
+                assert_eq!(edit.act, skins::Act::Forget);
+                assert!(wearing, "the page is waiting on the write");
+            }
+            None => panic!("the editor stays up while the write is out"),
+        }
+        // And the scrim's own dismiss closes the page's editor, which is a message to
+        // the page rather than a flag on this shell.
+        press(&mut shell, Message::CloseModal);
+        assert!(shell.screen.skins_edit().is_none(), "the scrim closed it");
     }
 }
 

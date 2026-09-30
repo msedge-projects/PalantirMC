@@ -567,6 +567,18 @@ impl Store {
         &self.instances_dir
     }
 
+    /// This launcher's own directory, when the store was read from one.
+    ///
+    /// Where the skins this launcher keeps for the reader live
+    /// (`crate::saved_skins`): the *launcher's* own folder, and not the data root,
+    /// for the reason `prefs` gives -- the data root can be an install another
+    /// launcher created and can change, while what this product stores under its
+    /// own name cannot. `None` for a store that was built over a fetch double
+    /// rather than read from a directory, which is how the tests build one.
+    pub fn paths(&self) -> Option<&PalantirPaths> {
+        self.paths.as_ref()
+    }
+
     /// The reason a page's data is not here yet.
     pub fn not_implemented(&self, what: &str) -> String {
         not_implemented(what)

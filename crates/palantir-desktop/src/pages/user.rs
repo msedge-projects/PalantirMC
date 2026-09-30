@@ -83,7 +83,7 @@ const TYPE_TAB_KEYS: [&str; 7] = [
 /// RGBA8, exactly as [`Handle::from_pixels`] takes them, and deliberately the same
 /// shape [`crate::skin::FrontView`] has -- the two are the same job done on a
 /// different picture. What is *not* shared is the work between them: a skin is cut
-/// into the parts of a doll ([`crate::skin::front_view`]) and an avatar is drawn as
+/// into the parts of a doll ([`crate::skin::cut`]) and an avatar is drawn as
 /// it arrives, so only the decode is common and each type keeps its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Avatar {

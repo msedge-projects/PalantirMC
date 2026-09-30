@@ -5482,8 +5482,6 @@ test result: ok. 546 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   across a reload, and all six tabs draw in all five load states under all four
   themes.
 
-## What these gates cannot say
-
 - [x] G117: the instance page's tab body is a window -- a frame draws the rows the
   scroll region says are on screen, and the rows it does not draw are two spacers
   holding their place
@@ -5755,6 +5753,187 @@ touched, and `grep -cE "never (used|read|constructed)"` is 0
   services` and `Build exe` skipped by that path's own rule. The 566 is the desktop
   crate's own count, unchanged by a slice that moved copy, so the runner and this
   machine disagree about nothing here.
+
+- [x] G124: the skins the reader adds are kept, and one can be edited -- arm style,
+  cape, the Ears notice, and the way to take a skin off
+  CHECK: cargo check -p palantir-desktop --locked --all-targets
+         cargo test -p palantir-desktop --locked --bin PalantirMC
+         cargo test --workspace --all-targets --locked
+         cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: exit 0 for the type check of the desktop crate, with no warning at all in the
+             binary's own build -- the three dead-code warnings the first draft drew are
+             resolved rather than tolerated
+          585 passed, 0 failed in the desktop binary's suite on the merged tree -- 552
+             before this slice, 566 once the two slices already on the branch are counted
+             (G116-G117), and this slice's 19 on top: the store's 7, `skin`'s 3 Ears
+             tests, `text`'s 1 placeholder test, the page's 6 and the shell's 2
+          1060 passed, 0 failed, 18 ignored between the seven suites
+          exit 0 for clippy, the warning set still G123's own 42 lines -- the six new
+             style warnings this slice's first draft drew were cleared rather than added
+          exit 0 for both document checks, with the dashboard reading 124 gates
+  EVIDENCE: the transcripts of these commands on this tree:
+
+```
+$ cargo check -p palantir-desktop --locked --all-targets
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-jobs\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 42.74s
+
+$ cargo test -p palantir-desktop --locked --bin PalantirMC
+test pages::skins::tests::opening_the_editor_reads_the_row_it_was_pressed_on ... ok
+test pages::skins::tests::each_of_the_editors_three_actions_travels_as_one_ask ... ok
+test pages::skins::tests::the_editors_answer_closes_it_and_a_success_reloads ... ok
+test pages::skins::tests::the_ears_notices_link_opens_the_mods_own_project ... ok
+test pages::skins::tests::the_editor_draws_in_every_theme_and_around_both_answers_to_ears ... ok
+test saved_skins::tests::adding_the_same_pixels_twice_is_one_row_and_brings_it_to_the_front ... ok
+test saved_skins::tests::forgetting_removes_the_row_and_its_pixels ... ok
+test saved_skins::tests::what_the_modal_writes_is_what_the_next_read_draws ... ok
+test skin::tests::the_ears_marker_is_the_pixel_and_the_two_numbers_the_reference_reads ... ok
+test skin::tests::a_legacy_texture_has_no_marker_because_its_canvas_has_no_row_32 ... ok
+test shell::tests::the_stored_skins_are_read_back_in_the_readers_order_and_with_their_marker ... ok
+test shell::tests::the_editors_press_is_an_ask_and_its_close_comes_back_to_the_page ... ok
+test text::tests::a_placeholder_is_split_out_of_the_sentence_around_it ... ok
+test result: ok. 585 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 107.73s
+
+$ cargo test --workspace --all-targets --locked
+test result: ok. 177 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.41s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.64s
+test result: ok. 585 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 53.18s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.77s
+test result: ok. 255 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.55s
+test result: ok. 0 passed; 0 failed; 18 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+warning: `palantir-desktop` (bin "PalantirMC" test) generated 21 warnings (1 duplicate) (run `cargo clippy --fix --bin "PalantirMC" -p palantir-desktop --tests -- -D clippy::correctness` to apply 12 suggestions)
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings (run `cargo clippy --fix --bin "PalantirMC" -p palantir-desktop -- -D clippy::correctness` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 55s
+
+$ python tools/progress.py --check
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 124 gates, 6 stage cards and every subject as written
+```
+
+  So far the Skins page has read the account's own skins and capes (G104), put one
+  on or taken a cape off (G106), and uploaded a file the reader picked (G123). None of
+  those kept anything: G123's own entry says it out loud -- "nothing in this launcher
+  stores a texture, so there is nothing to be wrong about later (that store is
+  G124's)". This slice is that store, and the editor the reference draws a row's
+  changes in.
+
+  **The store is a folder under the product's own directory.** `crate::saved_skins`
+  keeps `<home>/skins/index.json` and one `<key>.png` per row, where `home` is
+  `PalantirPaths::home` -- the directory this launcher's preferences already live in,
+  and deliberately not the data root, because the data root can be an install another
+  launcher created and can move. A row is keyed by the SHA-1 of its pixels, which is
+  the digest the rest of this tree already speaks (Mojang publishes one per library,
+  Modrinth one per file, and both are checked with it), and the index's `order` list is
+  the reader's own order, which `add` maintains by promoting what was just added to the
+  front -- the reference's own behaviour for a newly added skin. Writes go through
+  `palantir_core::util::atomic_write`, so a crash mid-save cannot leave a half index;
+  an index that will not parse is left in place and read as empty, which is `prefs`'
+  rule for the same reason.
+
+  **What the reference keeps and this does not, named rather than implied.**
+  `helpers/skins.ts` labels every row with a `source` of `'default' | 'custom' |
+  'custom_external'`; this enum has two, and the missing one is the point:
+  `'default'` is a skin Minecraft ships, which the reference's plugin holds a copy of
+  for its bundles, and this launcher has no bundle to hold. A row here is always the
+  reader's own -- `Custom` for a file the picker returned, `CustomExternal` for a
+  texture the account already owned and this launcher kept so it could be edited --
+  and `CustomExternal` has no importer yet. `set_custom_skin_order` is `reorder`,
+  which is tested and has no drag-and-drop list to call it from; `remove_custom_skin`
+  is `forget`, which the editor calls. Those two -- and `Source::as_str`, the
+  reference's own word for a source -- are marked `#[allow(dead_code)]` with the reason
+  beside each, which is `locale.rs`'s `Direction` arrangement: the vocabulary is kept
+  with its tests so the slice that paints the list does not re-derive it, and the
+  attribute is what keeps the warning count honest about it.
+
+  **Adding a skin now keeps a copy.** G123 uploaded a file and kept nothing; `keep_picked`
+  writes the padded 64x64 texture, the file's own name with its extension dropped, the
+  arm style the pixels were read for and `Source::Custom`, after the upload succeeds.
+  It is best-effort on purpose: a store this launcher cannot write is not a reason to
+  call the service's upload a failure. Adding the same pixels twice is one row rather
+  than two -- `add` dedupes by digest, promotes the existing row and takes the new name
+  and arm style, without writing a second file.
+
+  **The page's read is one turn with two halves.** `Shell::skins` already read the
+  account's appearance on a worker thread; `stored_rows` now reads the index and
+  decodes each stored PNG on that same thread, and the page is handed
+  `Loaded { appearance, saved }` so its rows and its doll cannot be a frame apart. A
+  row's Ears answer is the marker in its *own* pixels (`skin::ears_of`: the RGB of
+  pixel `(0, 32)` against the format's two magics, which the reference reads in
+  `use-ears-mod-features.ts`), and a row whose pixels will not come back is still a
+  row: the name and the arm style live in the index, and only the marker is the
+  pixels' answer. The shell's test asserts exactly that, with a row whose texture is
+  the bytes `this is not a PNG`.
+
+  **The editor is the page's; the frame is the shell's.** The reference's
+  `EditSkinModal.vue` is open when a row is pressed, and this launcher's is drawn from
+  `skins::State::edit` through `pages::Screen::skins_edit`, with the shell's own
+  `dialog` and a new `scrim` helper around the body and every press mapped back through
+  `Message::Screen`. It is deliberately *not* a `Modal` variant: that would be a second
+  copy of the page's editor to keep in step, and the two would drift the first time one
+  was updated without the other. `Message::CloseModal` -- the scrim, and the dialog's
+  own X -- now forwards `CloseEdit` to the page as well, so the editor is dismissed the
+  way the shell's own modals are.
+
+  **The three actions, and one departure from the reference that has to be written
+  down.** Save writes the row's arm style and cape and puts the skin on, reading the
+  texture back out of the store (`SkinChange::Upload`, the same one G123 sends). Forget
+  removes the row and its pixels, needs no token, and works for a reader who is signed
+  out. Take off is `SkinChange::NoSkin` -- the change G106 implemented and left
+  unreachable, "because the reference reaches it from its edit modal".
+
+  That last clause is in the job's own brief, and **the vendored source does not back
+  it**. `helpers/skins.ts` defines `unequip_skin()` at line 177 and nothing in
+  `app-frontend` calls it; `grep -rn unequip_skin vendor/modrinth-app/app-frontend`
+  finds the definition and no caller at all. `EditSkinModal.vue` has Save and Cancel
+  and no third action. Deletion is not in that modal either: `Skins.vue`'s
+  `deleteSkin` is a button on its preview panel leading to a confirm dialog of its own
+  (`delete-modal.title` / `delete-modal.description`). This page has no preview panel
+  -- the doll above draws what Minecraft says is in force, not a candidate -- so its
+  editor carries both, and that is this launcher's arrangement rather than the
+  reference's. Two consequences follow. The take-off button's words are this
+  launcher's own ("Take it off", a hand-written string, where the reference has no
+  string for a control it never draws; the page's Saved-skins empty state and the note
+  under the doll are the same kind of thing). And the deletion here has no confirm
+  step, where the reference asks twice.
+
+  **The Ears notice is the reference's sentence with its own link.** The modal draws it
+  only when the row's texture carries one of the format's two magics.
+  `app.skins.ears-feature-notice` is `"This skin uses features from the {ears} mod"`,
+  and the reference fills the placeholder with a sentinel, splits on it and draws what
+  is between the halves as a `router-link` to `/project/mfzaZK3Z` labelled "Ears".
+  `text::placeholder_parts` is that split and `Message::OpenEars` is that link, sent
+  through the page's own `Ask::Open(Open::Project(...))` to the project page this
+  launcher already has. It is not the reference's whole Ears support: the mod's reader
+  parses a feature request out of the same pixels and renders wings, ears and tails,
+  and this launcher reads only that the marker is there and says so.
+
+  **Two corrections this slice made in passing, because they were in lines it had
+  already touched.** `text::placeholder` collided with the module's own private ICU
+  `placeholder`; it is `placeholder_parts` now, and its test with it. And
+  `skin::front_view` went dead the moment `Appearance::of` moved to `cut`: its only
+  remaining callers were the tests, which is the case `prepare`'s own doc calls out as
+  "a sign that the function has no caller rather than that it is useful", so it is gone
+  and the tests take a cut's front out through a local helper. The six new clippy
+  warnings the first draft drew (three hex literals whose digit groups clashed, three
+  `Default::default()` plus assignment) are cleared rather than tolerated, which is why
+  clippy's warning set is G123's own 42 lines exactly.
+
+  **What this does not prove.** There is no live upload and no live unequip, and there
+  cannot be: both change the appearance of a real account, so no test performs one,
+  which is the limit G104's read, G106's write and G123's upload all carry. The store
+  is exercised over a real temporary directory -- writing, reading back, reordering,
+  forgetting, and a broken index -- but only this launcher's own reading of it: the
+  reference's `minecraft-skins` plugin is not in this tree, so the two on-disk formats
+  are not compared anywhere. And the editor is drawn and its asks are routed in tests,
+  but what its buttons *do* to a real account is the same thing G106's rows do: a
+  request this launcher's client already builds.
+
+## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
