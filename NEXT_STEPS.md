@@ -37,6 +37,7 @@ last is the first since G101 that could run at all, and it carries stages 2, 3 a
 | 36610530981 | `a7cc615` | The rebased tree, carrying the instance listing's load and the Skins picker both: 1033 passed / 0 failed and 18 ignored on the runner (177 + 8 + 558 + 4 + 31 + 255), with `Live services` and `Build exe` skipped by the pull-request path's own rule |
 | 36675700351 | `d3acb83` | The pull-request path on the windowed tab body: `Lint` and `Test workspace` green in 1m55s -- 1041 passed / 0 failed and 18 ignored (177 + 8 + 566 + 4 + 31 + 255), this slice's eight new tests among them -- with `Live services` and `Build exe` skipped by that path's own rule |
 | 36675919956 | `d3acb83` | The same commit through all five jobs: the same 1041 passed / 0 failed and 18 ignored in the workspace run, the live suite 18 passed / 0 failed in 95.28s, and both Windows exes staged (msvc 5,500,023 B, gnu 5,568,247 B) |
+| 36679862832 | `fcdc935` | The pull-request path on the account-surface decision and the hours the plan is read in: `Lint` and `Test workspace` green in 3m31s -- 1041 passed / 0 failed and 18 ignored (177 + 8 + 566 + 4 + 31 + 255), the desktop crate's 566 unchanged by a slice that moved copy -- with `Live services` and `Build exe` skipped by that path's own rule |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next

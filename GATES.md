@@ -5748,6 +5748,14 @@ touched, and `grep -cE "never (used|read|constructed)"` is 0
   with; G109's and G111's numbers are unchanged above, and the plan keeps the smallest
   first slice in writing too, because this is a scope decision and not a closed door.
 
+  **The runner agrees with this machine.** Run `36679862832` on `fcdc935`, which
+  carries this decision and the hours the plan is now read in, is the pull-request
+  path: `Lint` and `Test workspace` green in 3m31s, 1041 passed / 0 failed and 18
+  ignored across the workspace suites (177 + 8 + 566 + 4 + 31 + 255), with `Live
+  services` and `Build exe` skipped by that path's own rule. The 566 is the desktop
+  crate's own count, unchanged by a slice that moved copy, so the runner and this
+  machine disagree about nothing here.
+
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
   here is about ink rows, ink colour and position rather than about pixels.
