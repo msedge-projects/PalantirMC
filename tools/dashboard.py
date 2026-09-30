@@ -307,6 +307,7 @@ def _stage_cards(
     percents: dict[int, float],
     ledger: list[tuple[str, bool, str]],
     open_items: dict[int, list[str]],
+    hours: dict[int, tuple[tuple[float, float], tuple[float, float]]],
 ) -> str:
     by_stage: dict[int, list[tuple[str, bool]]] = {}
     for gate_id, met, _ in ledger:
@@ -327,13 +328,20 @@ def _stage_cards(
         for name in open_items.get(number, []):
             entry = next(
                 (item for item in progress.OPEN.get(number, ()) if item[0] == name),
-                (name, 0, ""),
+                (name, 0, (0.0, 0.0), ""),
             )
             lines.append(
-                f'<div class="open-item"><span class="est">{entry[1]} gate(s)</span>'
+                f'<div class="open-item"><span class="est">{entry[1]} gate(s), '
+                f"{progress.hours_form(*entry[2])}</span>"
                 f"<b>{html.escape(name)}</b><br>"
-                f'<span class="why">{html.escape(entry[2])}</span></div>'
+                f'<span class="why">{html.escape(entry[3])}</span></div>'
             )
+        stage_landed, stage_left = hours.get(number, ((0.0, 0.0), (0.0, 0.0)))
+        lines.append(
+            f'<div class="open-item"><span class="est">'
+            f"{progress.hours_form(*stage_landed)} landed, "
+            f"{progress.hours_form(*stage_left)} left</span></div>"
+        )
         cards.append(
             f"""<section class="card stage">
   <div class="head"><span class="num">stage {number}</span>
@@ -423,7 +431,12 @@ def render(root: Path) -> tuple[str, list[str]]:
             unmet_by_stage.setdefault(int(owner) if owner != "before" else -1, []).append(gate_id)
     for number, _, _ in stages:
         met = met_by_stage.get(number, 0)
-        sized[number] = (met, sum(g for _, g, _ in progress.OPEN.get(number, ())) + len(unmet_by_stage.get(number, ())))
+        sized[number] = (
+            met,
+            sum(g for _, g, _, _ in progress.OPEN.get(number, ()))
+            + len(unmet_by_stage.get(number, ())),
+        )
+    hours = progress.effort(stages, sized, unmet_by_stage)
     totals = progress.plan_totals(stages, sized, met_by_stage)
     percents = totals["percents"]
     ledger_html = _ledger(ledger)
@@ -434,7 +447,7 @@ def render(root: Path) -> tuple[str, list[str]]:
         for name in ("NEXT_STEPS.md", "GATES.md")
         if (root / name).exists()
     )
-    stages_html = _stage_cards(stages, sized, percents, ledger, open_items)
+    stages_html = _stage_cards(stages, sized, percents, ledger, open_items, hours)
     themes_html = "".join(
         f'<button data-theme="{name}">{name}</button>' for name in THEME_ORDER
     )

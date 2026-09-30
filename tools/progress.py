@@ -4,8 +4,9 @@
 Why this exists: a percentage kept in prose drifts. The number in the last
 message is right until the next slice lands, and nothing re-derives it. This
 reads the two documents that do not drift for a reason -- `NEXT_STEPS.md`'s
-stage table and `GATES.md`'s ledger -- and prints what they add up to, plus
-how many lines the tree it is counting is made of.
+stage table and `GATES.md`'s ledger -- and prints what they add up to -- slices,
+the agent-hours those slices represent, and how many lines the tree it is
+counting is made of.
 
 What a slice is here: one gate. `GATES.md` is where a landed slice becomes
 evidence (`- [x] GNN: ...`), so the ledger is the count of work that happened,
@@ -16,13 +17,15 @@ this tool exists to catch rather than the thing it has to be told about. The
 gates written before this rewrite (G1-G57) are the shell it replaces: they are
 counted, reported, and left out of the percentages.
 
-What is an estimate: the `open` column. Each of the plan's own open items --
-the bullets under "What stage N does **not** have yet" and "What stage N still
-owes" -- is matched to an entry in `OPEN` here, which carries how many gates
-the plan expects that item to land as. Those numbers are judgement, and they
-are the only ones in this file; the tool prints them with their reasons so a
-reader can disagree with one and change it. Everything else is read from the
-tree.
+What is an estimate: the `open` column and the two hour columns. Each of the
+plan's own open items -- the bullets under "What stage N does **not** have yet"
+and "What stage N still owes" -- is matched to an entry in `OPEN` here, which
+carries how many gates the plan expects that item to land as and how many hours
+it is expected to take. A landed slice's hours are not in the ledger either, so
+the landed column prices every one at `SLICE_HOURS`, the typical slice measured
+on the last three. Those numbers are judgement, and they are the only ones in
+this file; the tool prints them with their reasons so a reader can disagree
+with one and change it. Everything else is read from the tree.
 
     python tools/progress.py            # the table
     python tools/progress.py --check    # silent on success, drift on failure
@@ -43,7 +46,8 @@ printed once, at the moment it appears.
 Exit status is 1 when the documents disagree with each other or with this
 file: a met gate no stage owns, a stage row that is `Done` with open work, an
 `In progress` stage with nothing open, an open list whose items no longer match
-`OPEN`, a gate `OPEN` or `GATE_OWNERS` names that the ledger does not have.
+`OPEN`, an estimate with no gates or no hours, a gate `OPEN` or `GATE_OWNERS`
+names that the ledger does not have.
 An unmet gate (`- [ ]`) is printed and counted as an open slice of the stage
 that owns it; there are none at the time of writing.
 """
@@ -103,15 +107,25 @@ GATE_OWNERS: dict[str, list[tuple[int, int]]] = {
     5: [(78, 81), (84, 90)],  # create, import, the picker, the launch; the loaders; the action bar; the view-model crate; the delete; the prune; the several runs
 }
 
-# The plan's open work, by the bold name its bullet carries, with the number of
-# gates the plan expects the item to land as and why. The count is the tool's
-# estimate and it is deliberately coarse: an item here is a family of slices
-# (the loaders are the chips and the install), and it moves when the plan does.
-OPEN: dict[int, list[tuple[str, int, str]]] = {
+# What a landed slice is priced at, because the ledger records what was built
+# and not how long it took. Measured on the last three landed (G115-G117): each
+# took about 2-3 h of agent wall-clock, roughly 25 min of that spent waiting on
+# local compiles. A range rather than a number because a slice is not a fixed
+# amount of work, and one value for every stage because nothing in the documents
+# says one stage's slices are cheaper than another's.
+SLICE_HOURS = (2.0, 3.0)
+
+# The plan's open work, by the bold name its bullet carries: how many gates the
+# plan expects the item to land as, the hours it is expected to take, and why.
+# Both numbers are the tool's estimate and they are deliberately coarse: an
+# item here is a family of slices (the loaders are the chips and the install),
+# and they move when the plan does.
+OPEN: dict[int, list[tuple[str, int, tuple[float, float], str]]] = {
     3: [
         (
             "The instance-settings page is not built.",
             1,
+            (3.0, 5.0),
             "the reference's `InstanceSettingsModal`: the settings an instance file "
             "already holds (memory, Java, the game arguments, the loader, the "
             "version) read back into controls and written on save, which is the "
@@ -123,6 +137,7 @@ OPEN: dict[int, list[tuple[str, int, str]]] = {
         (
             "The Skins page's edit half is not built.",
             1,
+            (2.0, 3.0),
             "the modal beside the account's own rows: reorder the skins it owns, "
             "take one off (`unequip_skin`, which names the modal as its only "
             "control) and keep the texture a reader uploaded. G123 landed the "
@@ -292,6 +307,52 @@ def plan_totals(
     }
 
 
+def hours_form(low: float, high: float) -> str:
+    """`3-5 h` for a range, `2 h` for a point, `-` when there is nothing.
+
+    Rounded to a tenth because the inputs are estimates: a division of `5-8 h`
+    over three agents is `1.7-2.7 h` and not `1.6666666666666667-2.6666666...`,
+    which is what a float prints and what makes an estimate look like a
+    measurement.
+    """
+    if high <= 0:
+        return "-"
+    low, high = round(low, 1), round(high, 1)
+    if low == high:
+        return f"{low:g} h"
+    return f"{low:g}-{high:g} h"
+
+
+def effort(
+    stages: list[tuple[int, str, str]],
+    sized: dict[int, tuple[int, int]],
+    unmet_by_stage: dict[int, list[str]],
+) -> dict[int, tuple[tuple[float, float], tuple[float, float]]]:
+    """Hours per stage: `(landed low, landed high), (left low, left high)`.
+
+    Two different estimates on purpose. A *landed* stage is priced per slice at
+    `SLICE_HOURS`, because the ledger records what was built and not how long it
+    took, and that rate is the only measurement this file has. An *open* stage
+    is priced at what its own `OPEN` entries say, because that is the plan's
+    answer to "how much is this" rather than an average of other work. A stage
+    with an unmet gate -- none at the time of writing -- is priced the first way
+    for it too, because a gate is a slice whether or not it has landed.
+
+    A function rather than a block in `report`, for the same reason as
+    `plan_totals`: the dashboard shows these numbers too, and a second
+    computation is a second answer.
+    """
+    hours: dict[int, tuple[tuple[float, float], tuple[float, float]]] = {}
+    for number, _, _ in stages:
+        met = sized[number][0]
+        landed = (met * SLICE_HOURS[0], met * SLICE_HOURS[1])
+        unmet = len(unmet_by_stage.get(number, ()))
+        low = sum(entry[2][0] for entry in OPEN.get(number, ())) + unmet * SLICE_HOURS[0]
+        high = sum(entry[2][1] for entry in OPEN.get(number, ())) + unmet * SLICE_HOURS[1]
+        hours[number] = (landed, (low, high))
+    return hours
+
+
 def owner_of(gate_id: str) -> str | None:
     """The stage a gate belongs to, from its id."""
     number = int(re.match(r"G(\d+)", gate_id).group(1))
@@ -302,8 +363,13 @@ def owner_of(gate_id: str) -> str | None:
     return None
 
 
-def report(root: Path) -> tuple[str, list[str]]:
+def report(root: Path, *, agents: int = 3) -> tuple[str, list[str]]:
     """The table as text, and the disagreements that stop it being printed.
+
+    `agents` is only the divisor the effort line uses: how many agents are
+    working the plan is a fact about the session, not about the documents, so it
+    is a flag with a default rather than something the documents could be read
+    for.
 
     A function rather than the body of `main`, because `--watch` asks for a
     fresh report on every change: the loop has to be able to render again
@@ -342,12 +408,17 @@ def report(root: Path) -> tuple[str, list[str]]:
     for stage in OPEN:
         if stage not in stage_numbers:
             problems.append(f"OPEN names stage {stage}, which the stage table does not have")
+        for name, gates, span, _ in OPEN[stage]:
+            if gates < 1 or span[1] <= 0 or span[1] < span[0]:
+                problems.append(
+                    f"stage {stage}: {name!r} has an impossible estimate: {gates} gate(s), {span}"
+                )
     for stage, items in open_items.items():
         estimated = OPEN.get(stage)
         if estimated is None:
             problems.append(f"stage {stage} has an open list and OPEN has no estimate for it")
             continue
-        names = [name for name, _, _ in estimated]
+        names = [name for name, _, _, _ in estimated]
         if names != items:
             problems.append(
                 f"stage {stage}: the plan's open items are {items}, OPEN estimates {names}"
@@ -367,7 +438,7 @@ def report(root: Path) -> tuple[str, list[str]]:
     sized: dict[int, tuple[int, int]] = {}
     for number, _, state in stages:
         met = met_by_stage.get(number, 0)
-        open_estimate = sum(gates for _, gates, _ in OPEN.get(number, ()))
+        open_estimate = sum(gates for _, gates, _, _ in OPEN.get(number, ()))
         unmet = len(unmet_by_stage.get(number, ()))
         if state == "in_progress" and open_estimate + unmet == 0:
             problems.append(f"stage {number} is In progress with nothing open -- move the stage table")
@@ -378,10 +449,24 @@ def report(root: Path) -> tuple[str, list[str]]:
     if problems:
         return "", problems
 
+    hours = effort(stages, sized, unmet_by_stage)
+    landed = (
+        sum(pair[0][0] for pair in hours.values()),
+        sum(pair[0][1] for pair in hours.values()),
+    )
+    left = (
+        sum(pair[1][0] for pair in hours.values()),
+        sum(pair[1][1] for pair in hours.values()),
+    )
+
     out: list[str] = []
     # The table. `what` is truncated for the column; the documents hold the
-    # whole sentence.
-    out.append(f"{'stage':>5}  {'what':<52}  {'met':>4}  {'open':>4}  {'done':>5}")
+    # whole sentence. The landed hours are a rate rather than a recording --
+    # see `SLICE_HOURS` -- and the left ones are the plan's own estimates.
+    out.append(
+        f"{'stage':>5}  {'what':<52}  {'met':>4}  {'open':>4}  {'done':>5}  "
+        f"{'landed':>9}  {'left':>8}"
+    )
     for number, what, state in stages:
         met, open_estimate = sized[number]
         if state == "done":
@@ -389,7 +474,11 @@ def report(root: Path) -> tuple[str, list[str]]:
         else:
             percent = round(100 * met / (met + open_estimate))
         column = what if len(what) <= 52 else what[:49] + "..."
-        out.append(f"{number:>5}  {column:<52}  {met:>4}  {open_estimate:>4}  {percent:>4}%")
+        stage_landed, stage_left = hours[number]
+        out.append(
+            f"{number:>5}  {column:<52}  {met:>4}  {open_estimate:>4}  {percent:>4}%  "
+            f"{hours_form(*stage_landed):>9}  {hours_form(*stage_left):>8}"
+        )
 
     totals = plan_totals(stages, sized, met_by_stage)
     overall = totals["overall"]
@@ -403,12 +492,29 @@ def report(root: Path) -> tuple[str, list[str]]:
     unmet = [gate_id for gate_id, met, _ in ledger if not met]
     if unmet:
         out.append(f"unmet:   {len(unmet)} gate(s) not met: {', '.join(unmet)}")
+    out.append(
+        f"effort:  {met_total} slices landed = {hours_form(*landed)} of agent time, "
+        f"{hours_form(landed[0] / agents, landed[1] / agents)} per agent at the typical "
+        f"{hours_form(*SLICE_HOURS)} a slice (measured on the last three, G115-G117)"
+    )
+    if slice_total > met_total:
+        out.append(
+            f"         {slice_total - met_total} open slices left = {hours_form(*left)}; "
+            f"over {agents} agents = {hours_form(left[0] / agents, left[1] / agents)} each, "
+            "unevenly, because the documents and the one CI ref are shared"
+        )
+    else:
+        out.append("         nothing open, so no hours remain")
 
     out.append("")
-    out.append("open work, the plan's own list; the gate counts are this file's estimate:")
+    out.append("open work, the plan's own list; the gate counts and hours are this file's estimate:")
     for number, what, _ in stages:
-        for name, gates, why in OPEN.get(number, ()):
-            out.append(f"  stage {number}  {name:<46}  {gates:>2} gates  ({why})")
+        for name, gates, span, why in OPEN.get(number, ()):
+            plural = "s" if gates != 1 else " "
+            out.append(
+                f"  stage {number}  {name:<46}  {gates:>2} gate{plural}  "
+                f"{hours_form(*span):>8}  ({why})"
+            )
 
     # What the work above is made of. Physical lines first, then the lines that
     # are not blank or comment-only, because the two answer different questions:
@@ -451,7 +557,7 @@ def document_signature(root: Path) -> tuple[tuple[int, int], ...]:
     return tuple(signature)
 
 
-def watch(root: Path, *, check: bool, interval: float) -> int:
+def watch(root: Path, *, check: bool, interval: float, agents: int = 3) -> int:
     """`report` on every change to the documents, until interrupted.
 
     A pane rather than a print: the table is cleared and redrawn, so a reader
@@ -478,7 +584,7 @@ def watch(root: Path, *, check: bool, interval: float) -> int:
             stamp = state
             now = time.strftime("%H:%M:%S")
             try:
-                text, problems = report(root)
+                text, problems = report(root, agents=agents)
             except (ValueError, OSError) as problem:
                 text, problems = "", [str(problem)]
             if check:
@@ -525,12 +631,19 @@ def main() -> int:
                         help="redraw whenever NEXT_STEPS.md or GATES.md changes")
     parser.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
                         help="how often --watch looks for a change (default: 1)")
+    parser.add_argument("--agents", type=int, default=3, metavar="N",
+                        help="how many agents the remaining hours are divided by "
+                             "(default: 3)")
     parser.add_argument("--dashboard", nargs="?", const="", metavar="PATH",
                         help="write the HTML dashboard instead of the table "
                              "(default: .scratch/progress.html)")
     parser.add_argument("--root", default=str(REPO),
                         help="the tree to read (default: this repository)")
     args = parser.parse_args()
+    if args.agents < 1:
+        # Only the effort line divides by this, and a division by zero in the
+        # middle of the table is a bad way to find out the flag was mistyped.
+        parser.error("--agents takes at least one agent")
     root = Path(args.root)
 
     if args.dashboard is not None:
@@ -556,10 +669,10 @@ def main() -> int:
     if args.watch:
         # A floor rather than a reject: a poll this tool owes nothing to being
         # fast at, and `--interval 0` from a script should not spin a core.
-        return watch(root, check=args.check, interval=max(args.interval, 0.1))
+        return watch(root, check=args.check, interval=max(args.interval, 0.1), agents=args.agents)
 
     try:
-        text, problems = report(root)
+        text, problems = report(root, agents=args.agents)
     except (ValueError, OSError) as problem:
         print(f"progress: {problem}", file=sys.stderr)
         return 1

@@ -113,7 +113,10 @@ of this paragraph managed to mislabel three of them. The same numbers are on a
 page as well as in a table: `python tools/progress.py --dashboard` writes the
 stage cards, the whole gate ledger and the code sizes to `.scratch/progress.html`,
 and `python tools/dashboard.py --check` is what keeps it carrying every gate
-(G92).
+(G92). The terminal table prices the work as well as counting it: a landed slice
+at the 2-3 h the last three measured (G115-G117), an open item at what its own
+bullet estimates, and what is left divided by the agents working it (`--agents`,
+three by default), so the remainder reads as hours rather than as a percentage.
 
 ## The plan, and where each stage stands
 
