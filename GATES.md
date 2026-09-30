@@ -6249,6 +6249,19 @@ CONFIRMED: the page carries all 127 gates, 6 stage cards and every subject as wr
   `GATE_OWNERS` entry, the stage-3 open list and this ledger line were the three
   places it appeared.
 
+  **The runner agrees, and its numbers are the rebased tree's.** Run
+  `36690942443` (`b2d1582`, the commit that also carries G126): `Test workspace`
+  and `Lint` green in 2m25s and 1m31s, 1079 passed / 0 failed and 18 ignored
+  (177 + 8 + 604 + 4 + 31 + 255). The desktop crate's row reads 604 rather than
+  this slice's own 600 because G126's installers ride in the same commit and add
+  four; the local transcript above is the slice alone. `Live services` and
+  `Build exe` are skipped, which is the pull-request path's own rule rather than
+  a failure -- the four-job path is what a push to the branch gets, and the
+  five-job run is asked for separately. The lint job marks one red annotation
+  again, the advisory `cargo fmt --check` step it runs `continue-on-error`; the
+  job's own conclusion is success, which is why a red line and a green job appear
+  together.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
