@@ -1399,7 +1399,12 @@ impl Store {
         let wire = Wire::over(paths.meta_dir(), engine.fetch());
         let mut store = crate::meta::PublisherMeta::for_instance(&wire, paths, instance_id);
         let mut quiet = |_line: String| {};
-        crate::launch::repair_instance(paths, instance_id, &mut store, &wire, &mut quiet)
+        // The launch's own Java, read the way a launch reads it: a repair runs the
+        // loader's installer, and the processors have to run on the same runtime
+        // the next launch will use rather than on whichever one a second rule
+        // happens to find (G131).
+        let defaults = self.launch_defaults();
+        crate::launch::repair_instance(paths, instance_id, &defaults, &mut store, &wire, &mut quiet)
     }
 }
 

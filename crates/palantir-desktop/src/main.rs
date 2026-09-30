@@ -55,6 +55,10 @@ mod instance_settings;
 mod instances;
 mod java_runtime;
 mod launch;
+/// The loader install a launch runs before it plans anything: Forge's and
+/// NeoForge's processors patch the client jar their own profile names, and the
+/// plan that follows has to see those files as present.
+mod loader_install;
 /// The language the interface is in: the tag, the table behind it, the fallback
 /// when the table has nothing to say, and the writing direction.
 ///

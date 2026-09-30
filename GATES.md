@@ -6591,6 +6591,427 @@ CONFIRMED: the page carries all 130 gates, 6 stage cards and every subject as wr
   --check` step it runs `continue-on-error`, beside a job whose own conclusion is
   success.
 
+- [x] G119: the install runs before the flip -- a Forge- or NeoForge-shaped instance
+  installs the loader's own installer's processors first and then resolves the
+  publisher's translated profile, main jar and all, rather than the mirror's
+  ForgeWrapper rewrite
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo test -p palantir-net --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         cargo clippy -p palantir-net --all-targets --locked -- -D clippy::correctness
+         cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 a_forge_shaped_loader
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 861 passed; 0 failed; 19 ignored across the two crates' own runs (599 + 4
+          desktop, 258 net), this slice's five desktop tests among the 599 and its
+          three engine tests among the 258
+          both clippy sweeps exit 0, adding no warning in a line this slice wrote
+          the live test installs both pinned builds for real -- Forge
+          1.21.1-52.1.0 and NeoForge 21.1.172 -- resolves each through the profile
+          inside the same installer jar that installed it, and installs each a
+          second time so the resume case is a measurement rather than a claim
+          both document tools exit 0
+  EVIDENCE: the transcripts below, from this machine and from the runner.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (C:/PalantirMC/target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 599 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 69.75s
+     Running tests\native.rs (C:/PalantirMC/target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+$ cargo test -p palantir-net --locked
+     Running unittests src\lib.rs (C:/PalantirMC/target\debug\deps\palantir_net-ab9392d33e358279.exe)
+test result: ok. 258 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.83s
+     Running tests\live.rs (C:/PalantirMC/target\debug\deps\live-b96cfc255a8b8b3c.exe)
+test result: ok. 0 passed; 0 failed; 19 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy -p palantir-net --all-targets --locked -- -D clippy::correctness
+    Checking palantir-core v0.1.0 (C:\palantirmc-loader\crates\palantir-core)
+    Checking palantir-net v0.1.0 (C:\palantirmc-loader\crates\palantir-net)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.66s
+net=0
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-loader\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 27s
+desktop=0
+
+$ cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1 a_forge_shaped_loader
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running tests\live.rs (C:/PalantirMC/target\debug\deps\live-b96cfc255a8b8b3c.exe)
+
+running 1 test
+test a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 245.73s
+
+$ python tools/progress.py --check
+progress exit=0
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 127 gates, 6 stage cards and every subject as written
+dashboard exit=0
+```
+
+  The sweeps print warnings in code this slice did not write -- nine in
+  `palantir-core`, one in `palantir-net/src/download.rs`, and the desktop
+  binary's own -- none denied by `-D clippy::correctness` and none of them in an
+  added line. The one warning the first sweep did find in an added line, a
+  `format!` with nothing to format in this slice's own test fixture, is fixed
+  before this commit, which is why the net sweep above is the second run of it.
+
+  **What was missing was not the reading or the running, it was the caller.**
+  G99 reads the two publishers' installer jars and G100 runs their processors;
+  both end at `engine::forge`. Nothing outside that module called `install` or
+  built an `InstallCtx` -- a grep for `forge::install`, `engine::forge` and
+  `InstallerMeta` across `crates/` minus the module itself returns only the
+  re-exports in `engine/mod.rs` and `lib.rs` -- and `published_loader` answered
+  `None` for `net.minecraftforge` and `net.neoforged`, so an instance naming
+  either was served the mirror's rewrite. G107 measured what that rewrite is: a
+  document whose main class is `io.github.zekerzhayard.forgewrapper.installer.Main`,
+  whose classpath comes from a `mavenFiles` list, and which finishes its own
+  install at launch. `install::plan` walks `libraries`, `native_libraries` and
+  `main_jar` and never `mavenFiles`, so the wrapper's jar is not what this
+  launcher fetches and the client it would patch is not what this launcher has.
+  The two halves landed green and never met; this slice is the joint.
+
+  **The install is one call, made before anything plans a file.**
+  `forge::install_client` fetches Mojang's client jar by the digest the piston
+  manifest states into the content store, writes the installer jar out of the
+  same read into a scratch directory, builds the `InstallCtx` G100 runs
+  (library directory, game directory, Java, `MINECRAFT_JAR`, the extracted
+  `/data` entries), and returns the processors' report: which ran, and which
+  were skipped for being the other side's or for every output already present
+  and matching. Two refusals come first, both naming the reason: an installer
+  that states no Minecraft version, and one whose `minecraft` is not the game
+  the instance names -- a client patched for another version is worse than a
+  refusal. Afterwards it reads the `PATCHED` coordinate and refuses a build that
+  ran its processors without writing the file that entry names.
+
+  **A chain that declares no outputs is read from the client it wrote.** The
+  per-digest resume G100 landed compares each processor's declared outputs with
+  the files on disk, which is how Forge's second install finishes in 7.3 s with
+  every processor reported skipped. NeoForge's installer declares none --
+  measured from `neoforge-21.1.172-installer.jar`: ten processors in
+  `install_profile.json` and not one `outputs` between them -- so the second
+  install ran its six client-side processors again, which a live run caught at
+  316.04 s. The last step of that chain is what writes `PATCHED`, so when every
+  client-side processor is outputless and the client it names is already there,
+  the install returns with all of them reported skipped and resolves nothing at
+  all; the unit test proves that by serving no route for the processor's jar.
+  Forge declares its digests, so its own resume path still answers and this fast
+  path is not consulted. NeoForge's second install went from 151.3 s of Java to
+  0.6 s of parsing and file checks, which is the difference between a second
+  launch that works and one nobody would sit through.
+
+  **The publisher's profile names no main jar, and a live run is what said so.**
+  The translation is the publisher's `version.json` with its arguments reshaped,
+  so a file with no `mainJar` leaves `VersionFile::parse` on its own fallback: a
+  `com.mojang:minecraft:{id}:client` coordinate built out of `id`, where these
+  files' `id` is `1.21.1-forge-52.1.0`, and with no Mojang downloads in the file
+  the fallback lands as `URL for the main jar could not be determined - Mojang
+  removed the server that we used as fallback.` at `ProblemSeverity::Error`, the
+  severity a launch refuses on. Measured twice before anything changed: the
+  first live run failed at 223.73 s with that sentence and the second at 78.60 s
+  with the same one. `PATCHED` is the coordinate of the client the installer's
+  own processors write, so the translation names it as the main jar when the
+  file names none and leaves a file that names one alone. The two publishers
+  differ in where that client is named, measured from the installer jars
+  themselves: Forge's `version.json` lists
+  `net.minecraftforge:forge:{game}-{build}:client` among its libraries as well,
+  while NeoForge's -- 6,922,832 bytes for `21.1.172`, `mainJar` absent, no
+  `net.neoforged:neoforge` entry in its libraries at all -- carries the client
+  only in `PATCHED`. The hinge of the flip is the same either way: the profile a
+  launch resolves points at the jar the install wrote, as its main jar and, on
+  Forge, on its classpath before it.
+
+  **The instance half is one module and one block.** `loader_install::forge_shaped`
+  reads the pack profile for a component whose uid is one of the two loaders and
+  whose version is a build, with a disabled component skipped rather than
+  installed; `loader_install::install` runs the install over the launcher's own
+  content store and a scratch directory named for the build, and logs what ran.
+  `launch::prepare_launch` makes the call after the resolution and before
+  `install::plan`, so the flip is the end state of a launch rather than a knob:
+  a missing Java or a failed install becomes a `Blocked` problem carrying the
+  message, instead of a launch that starts a client the loader never patched.
+  `PublisherMeta` carries the installer meta and a content store over the
+  launcher's own cache, and `published_loader` maps the two uids to their
+  loaders, so the same question the mirror used to answer is answered out of the
+  jar.
+
+  **The live test is the join.** It installs both pinned builds for real in a
+  temporary root -- Forge 1.21.1-52.1.0 and NeoForge 21.1.172 -- and asserts
+  that G100's counts are unchanged (3 ran / 4 skipped and 6 ran / 4 skipped),
+  that the patched client exists at the path `PATCHED` names, that the profile
+  the same installer resolves names that file as its main jar -- and, for Forge,
+  among its libraries too -- that its main class is the loader's own and not
+  ForgeWrapper's, that no `Error`-severity problem survives the parse, and that
+  a second install of the same build runs nothing at all -- Forge through the
+  digests its processors declare, NeoForge through the client its chain wrote --
+  which is the number a launch of an already-installed instance pays. The test
+  prints its measurements as it goes, and the second read out of the same run is
+  `forge 52.1.0: first install 70.9s (3 ran, 4 skipped), second 7.3s (all
+  skipped), patched client 28054104 bytes, profile
+  net.minecraftforge.bootstrap.ForgeBootstrap with 49 libraries` beside
+  `neoforge 21.1.172: first install 151.3s (6 ran, 4 skipped), second 0.6s (all
+  skipped), patched client 5634244 bytes, profile
+  cpw.mods.bootstraplauncher.BootstrapLauncher with 47 libraries`. An earlier run
+  of the same test measured Forge's first install at 100.8 s and again at
+  80.6 s; the spread is the network, not the work.
+
+  **One install path, and why this entry says so.** A parallel slice landed
+  first -- `e76832c`, G126 -- wiring the same install through
+  `palantir-desktop/src/install.rs` and G100's `engine::install`, and leaving the
+  routing flip as G127. Two call sites would run two installs on every launch,
+  so this slice supersedes that wiring rather than sitting beside it: the install
+  is `engine::forge::install_client` with `loader_install` as its desktop half,
+  and it carries what the other half did not -- the `PATCHED` coordinate as the
+  client a launch names, a refusal of an installer built for another Minecraft,
+  the outputless-chain fast path, and a live test over both pinned builds. G126's
+  own entry stays above as the record of what landed then; the call site it added
+  is what this commit replaces.
+
+  **The flip G126's entry reserves as G127 is this entry's, not a slice still
+  to come.** That entry stops at the install and leaves the resolve where it
+  was: `published_loader` answered `None` for `net.minecraftforge` and
+  `net.neoforged`, so an instance naming either was served the mirror's
+  wrapper document. Closing that is this commit's other half --
+  `Source::Publisher` over the publishers' own translated profiles, with the
+  main jar read from the installer's own `PATCHED` entry -- so no G127 is owed
+  and the reservation is settled rather than renamed. It is written here
+  because a reservation is what a later reader acts on: G126's entry names
+  G127 as the thing it left, and a slice that landed on the integration branch
+  after this one repeats the name. This is the line that says it is spent.
+
+  **What this cannot say.**
+- **No gate launches the game.** The end of this pipe is the profile and the
+  files a launch resolves -- Mojang's client jar by its digest, the loader's
+  processors' output, and a main jar that is that output. Nothing here starts
+  Minecraft or reaches a main menu, which is stage 5's kind of receipt and not
+  this slice's.
+- **The mirror is still the fallback when the game version is unknown.**
+  `PublisherMeta::source` answers `Publisher` only when the instance names a
+  game version, which every instance this launcher creates does; a pack that
+  names one of the two uids without one resolves the wrapper's document. That is
+  named here rather than tested, and the test that would cover it needs a pack
+  with no `net.minecraft` component.
+- **The live job does not run on the pull-request path.** `ci.yml`'s `live` job
+  is gated on `github.event_name != 'pull_request'`, so the live numbers in this
+  entry are this machine's, quoted with the run that produced them; the runner's
+  own receipt for this slice is the workspace suites below.
+- **The install runs on the machine's Java, not the runtime the launch picks.**
+  The install block calls `engine::find_java`, which scans `PATH` and the
+  standard install locations and takes the newest major; the launch's own
+  selection, a few hundred lines further down `prepare_launch`, prefers the
+  instance's configured `JavaPath`, then the settings' default, then the
+  launcher's own runtimes, and only then a fetched one. For the two builds this
+  gate installs -- Minecraft 1.21.1, whose processors run on a modern Java -- the
+  two agree, which is why the live test cannot tell them apart. For a build whose
+  processors need an older major than the machine's newest, the install is where
+  it fails; moving the java block above the install is the change that fixes it,
+  and it is not in this slice.
+
+  **The runner agrees, and here it had to: this slice's own install ran on the
+  runner.** No push to this branch schedules anything -- the mirror's draft
+  pull request belongs to the working branch, and this one is under none -- so
+  the run is asked for rather than got. `36692523799` on `ce9ca73` is all five
+  jobs: `Lint` green, `Test workspace` green at 1077 passed / 0 failed and 19
+  ignored (177 + 8 + 599 + 4 + 31 + 258, the desktop crate's 599 and
+  palantir-net's 258 being this machine's own counts to the test), the live
+  suite 19 passed / 0 failed in 175.23s with this slice's own
+  `a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer
+  ... ok` among them -- both pinned builds installed for real, from the
+  runner's network rather than this machine's -- and both Windows exes staged
+  (msvc 5,553,996 B, gnu 5,623,878 B).
+- [x] G131: the loader's install runs on the Java the launch chose -- one function
+  answers which Java for the install and the spawn both, and it is asked before
+  the installer's processors rather than after the plan
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 600 passed; 0 failed in the desktop crate's own run, its one new test
+          among them and the 599 the crate had before this slice, with
+          `tests/native.rs`'s four beside it
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0
+  EVIDENCE: the transcripts below, from this machine and from the runner.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (C:/PalantirMC/target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 600 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.17s
+     Running tests\native.rs (C:/PalantirMC/target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-loader\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.89s
+desktop=0
+
+$ python tools/progress.py --check
+progress exit=0
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 128 gates, 6 stage cards and every subject as written
+dashboard exit=0
+```
+
+  **The install ran on a Java the launch would not have used.** `prepare_launch`
+  asked `engine::find_java`, which scans `PATH` and the standard install locations
+  and takes the newest major on the machine; the launch's own choice, a few hundred
+  lines further down the same function, prefers the instance's configured `JavaPath`
+  when it fits the profile, then the settings' default, then a runtime this machine
+  has at a major the profile accepts, and only then one fetched from the metadata
+  service. G119's entry named that difference and left it there: for the two builds
+  that gate installs -- Minecraft 1.21.1 -- the two answers agree, which is why its
+  live test could not tell them apart. For a build whose processors need an older
+  major they do not, and the install is where that shows, because the installer's
+  processors are the first Java programs a launch runs: the launch failed at its
+  install, before it ever reached the Java it had picked for the spawn.
+
+  **One function, asked wherever the question comes up first.** The block that
+  chose the Java is now `choose_java` -- the instance's own path and the fit test,
+  then `pick_java`'s five answers -- and `prepare_launch` asks it in two places. A
+  loader-shaped instance asks before the install, because the install needs that
+  answer and the answer is what the spawn will use: it is kept in `install_java`
+  rather than asked twice, so a runtime fetch happens once at most. Every other
+  launch asks it where it has always asked it, after the plan and before the
+  spawn, and nothing else about those launches moved. A second copy of the rule is
+  how the install and the spawn come to disagree about which Java a build uses;
+  deleting the second copy is what this slice is.
+
+  **The test reads the order, because the order is the change.** A Forge instance
+  is pinned to Java 21 while the profile it resolves wants Java 8 -- the shape
+  G119's own caveat describes -- and the test collects log lines and progress
+  levels into one list, then asserts three positions in it: the wrong pin is named,
+  the settings' Java is chosen after it, and the `installing Forge` level the
+  install announces itself with comes last. On the parent commit the install's
+  level comes first instead, because the install ran before the Java was chosen,
+  which is what makes this an assertion rather than a description. The install
+  itself stops at the network under an empty fetcher, which is where the test wants
+  it: nothing in this test reaches a service.
+
+  **What this cannot say.**
+- **No gate here runs a processor chain on that Java.** This entry's test reads
+  which Java the install was handed and when; the chain that Java would run is the
+  live test's (G119), and that test calls `engine::install_client` directly, so
+  `prepare_launch`'s own choice is not what it exercises. What would cover it is a
+  launch of a real Forge instance from the interface, which is a stage-5 receipt
+  and not this slice's.
+- **A runtime fetch can now precede the game's own files, for a loader instance.**
+  `pick_java`'s last answer is a runtime fetched from the metadata service, so a
+  machine with no Java resolves a Forge launch by fetching one before the install
+  unpacks anything. Every other launch keeps the order it had, files first. That is
+  deliberate -- the install cannot start without a Java -- and it is one more thing
+  a reader of the progress bar can see change for these two loaders.
+- **The first full sweep of the suite on this machine was red, and the machine was
+  the reason.** `scale::discover_costs_this_much_a_frame` measured 294.054 ms for
+  the documented hundred result cards with three agents compiling on the same cores,
+  against a per-frame budget; run alone it passes (three tests, 18.23 s), and the
+  rerun quoted above is clean at 33.17 s. The numbers that count are the runner's,
+  in the paragraph below.
+
+  **The runner agrees with this machine, and it had to: this slice's own test is
+  one of the 600.** Run `36698324867` on `dc455e7` -- asked for by dispatch, since
+  a push to this branch schedules nothing -- is all five jobs: `Lint` green, `Test
+  workspace` green at 1078 passed / 0 failed and 19 ignored (177 + 8 + 600 + 4 + 31
+  + 258, the desktop crate's 600 being this machine's own count to the test), the
+  live suite 19 passed / 0 failed in 188.28s, and both Windows exes staged (msvc
+  5,552,485 B, gnu 5,620,320 B).
+- [x] G132: the one pack shape where the mirror answers for the two Forge-shaped
+  uids is named rather than silent -- a pack that names the loader and no game
+  version, which is a launch whose own install cannot be matched to anything
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: 602 passed; 0 failed in the desktop crate's own run, its two new tests
+          among them, with `tests/native.rs`'s four beside it
+          clippy exits 0, adding no warning in a line this slice wrote
+          both document tools exit 0
+  EVIDENCE: the transcripts below, from this machine and from the runner.
+
+```
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\main.rs (C:/PalantirMC/target\debug\deps\PalantirMC-e218ba471e45c5b5.exe)
+test result: ok. 602 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 34.89s
+     Running tests\native.rs (C:/PalantirMC/target\debug\deps\native-fb513c730c22e076.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+    Checking palantir-desktop v0.1.0 (C:\palantirmc-loader\crates\palantir-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.11s
+desktop=0
+
+$ python tools/progress.py --check
+progress exit=0
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 129 gates, 6 stage cards and every subject as written
+dashboard exit=0
+```
+
+  **What was there was a silence, not a wrong answer.** `meta.rs` answers
+  `Source::Publisher` for the two uids only when the instance names a game version,
+  and that is deliberate: a loader's profile URL *is* the game version, so a URL
+  built out of a version nobody could read would be a launch failing on a question
+  the user never asked. A pack with the uid and no `net.minecraft` component
+  therefore resolves the mirror's ForgeWrapper document, whose job is to run the
+  installer's processors at launch -- the work G119 moved to preparation. G119's
+  entry named that shape and did not test it; the naming is this slice.
+
+  **Two questions, one rule behind them.** `forge_shaped` answered "no" for two
+  different packs: vanilla, Fabric or Quilt, which need no install step at all, and
+  a Forge-shaped pack whose game version is missing, which is the one where the
+  mirror comes back. The second needed its own name, so `shaped_component` is the
+  rule -- enabled, a Forge-shaped uid, a build to install -- and both questions
+  read it: `forge_shaped` is it plus the game version, `named_shaped` is it alone.
+  A launch asks both, before the resolve, and says what it found:
+  `this instance names Forge but no Minecraft version, so its installer cannot be
+  matched to a game: the mirror's wrapper document answers for it, and the install
+  runs at launch instead — add a 'net.minecraft' component to run it here`
+
+  **What the test reads.** The pack is the loader alone -- no `net.minecraft`
+  component at all -- and the wrapper's own document is cached where the mirror
+  would serve it from, so an offline store can answer. Two tests: the module one
+  pins the two questions apart (the same pack is `None` for `forge_shaped` and
+  `Some(Forge)` for `named_shaped`, and vanilla, Fabric and a disabled component
+  answer `None` to both), and the launch one asks `prepare_launch` to prepare that
+  pack and reads three things: the sentence is in the log, the level an install
+  announces itself with never arrives -- nothing of this launcher's own ran -- and
+  the launch stops where the fixture leaves it, at a Java placeholder rather than at
+  a service. Which is the point: what is being tested is what the launch *says*,
+  not what it spawns.
+
+  **What this cannot say.**
+- **The pack itself is still not launchable, and this slice does not pretend
+  otherwise.** A profile with no `net.minecraft` component has no game profile,
+  no client jar and no assets, so the resolve after this sentence is a document
+  about a version of Minecraft the instance does not name. What the sentence fixes
+  is that a reader can tell that from the log instead of from a launch that dies.
+- **The wrapper's own document is not re-measured here.** Its shape -- a main class
+  of ForgeWrapper's, its own jar in `mavenFiles` rather than `libraries`, which
+  `install::plan` never walks -- is G107's measurement, and nothing here changes or
+  re-tests it: no live launch of such a pack was run, and whether the wrapper can
+  fetch what it needs after this launcher's plan is exactly what G107 raised.
+- **No path here reads the game version out of the loader's build.** Prism spells
+  a Forge component `1.21.1-52.1.0`, which carries the game in front of the build,
+  and reading it there is the obvious repair. It was not done because it does not
+  repair anything: the same pack names no `net.minecraft` component, so there is no
+  game profile for that version to resolve, and a guess would move the failure one
+  step later -- to a client jar or an asset index nobody can fetch -- while making
+  the launcher claim it knew which game this was.
+
+  **The runner agrees with this machine.** Run `36701927049` on `5ae73d1` -- asked
+  for by dispatch, since a push to this branch schedules nothing -- is all five
+  jobs: `Lint` green, `Test workspace` green at 1080 passed / 0 failed and 19
+  ignored (177 + 8 + 602 + 4 + 31 + 258, the desktop crate's 602 being this
+  machine's own count to the test and this slice's two among them), the live suite
+  19 passed / 0 failed in 162.69s, and both Windows exes staged (msvc 5,552,801 B,
+  gnu 5,620,593 B).
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
