@@ -6471,3 +6471,11 @@ dashboard exit=0
   against a per-frame budget; run alone it passes (three tests, 18.23 s), and the
   rerun quoted above is clean at 33.17 s. The numbers that count are the runner's,
   in the paragraph below.
+
+  **The runner agrees with this machine, and it had to: this slice's own test is
+  one of the 600.** Run `36698324867` on `dc455e7` -- asked for by dispatch, since
+  a push to this branch schedules nothing -- is all five jobs: `Lint` green, `Test
+  workspace` green at 1078 passed / 0 failed and 19 ignored (177 + 8 + 600 + 4 + 31
+  + 258, the desktop crate's 600 being this machine's own count to the test), the
+  live suite 19 passed / 0 failed in 188.28s, and both Windows exes staged (msvc
+  5,552,485 B, gnu 5,620,320 B).
