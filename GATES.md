@@ -6210,8 +6210,36 @@ CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as wr
   commit by the `Live services` job, over the same `InstallerMeta::profile` the
   arm calls and a real Forge 1.21.1/52.1.0 and NeoForge 1.21.1/21.1.172.
 
-  The runner's own numbers are recorded below, in the paragraph this entry gains
-  once its push has one to read.
+  **The runner found a slip this machine could not, and the next push fixed
+  it.** Run `36692796431` on `e92c99c` is the flip's pull-request path: `Lint`
+  and `Test workspace` green in 1m32s and 2m27s, 1080 passed / 0 failed and 18
+  ignored (177 + 8 + 605 + 4 + 31 + 255) -- the desktop crate's 605 being G128's
+  604 plus this slice's one new test, which ran and passed on the runner as
+  `meta::tests::a_forge_instance_resolves_its_loader_from_the_installers_own_profile`.
+  Its lint job counted 45 warning lines against G124's 42, and all three of the
+  difference were the new test's own: two needless borrows into `insert_str`'s
+  generic arguments, and the `to_string` on a digest whose `hex()` is already a
+  `&str`. Those are complexity lints, not the correctness lints the gate's
+  `-D clippy::correctness` denies, so the job was green -- but this tree keeps
+  the count flat, so the follow-up `9fafdde` passes the `format!` and the
+  `PathBuf` by value and hands `insert_str` the `&str` itself. That commit's own
+  run was superseded by the next push's merge request -- the cancelled case the
+  run table's note describes -- and the count came back to 42 in the next run to
+  measure the tree it sits on, `36694325430` on `f474588`, whose lint job prints
+  the desktop test build at its 21. The three were invisible on this machine,
+  which may not run clippy at all; that is the runner doing the job `AGENTS.md`
+  gives it.
+
+  **The dispatch is what gives the live suite and the exes their numbers.** Run
+  `36693126918` is `e92c99c` through all five jobs, green in 7m14s: `Test
+  workspace` 2m11s and `Lint` 1m33s on the same rows, the live suite 18 passed /
+  0 failed in 91.32s -- G99's and G100's real Forge and NeoForge installs among
+  them -- and both Windows exes staged, 14,127,104 B (gnu) and 13,855,232 B
+  (msvc), read back from the downloaded artifacts and matching the `.sha256` the
+  workflow wrote beside each. Both `check_exe.py` runs report `needs nothing
+  beyond Windows' own DLLs`. The two lines `9fafdde` changed are function
+  arguments inside the test, so neither the live suite nor the exes differ for
+  the fixed commit, and the counts above stand for both.
 
 - [x] G128: an instance's installation is a form too -- the platform, the game
   version and the loader's build, read from its own `mmc-pack.json` and written
