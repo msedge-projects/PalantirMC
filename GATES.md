@@ -6137,6 +6137,82 @@ CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as wr
   prediction named the count it expected; the run named the count it made, and
   the run is the number.
 
+- [x] G127: the two Forge-shaped loaders resolve from their installer's own
+  translated profile -- the resolve asks the jar the launch has already run,
+  rather than Prism's mirror, and neither uid is dialled at
+  meta.prismlauncher.org
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+         python tools/dashboard.py --check
+  EXPECT: `published_loader` names `net.minecraftforge` and `net.neoforged`, and
+          `PublisherMeta::version_file` answers both out of `InstallerMeta::profile`
+          -- the same call G99 and G100 measure against a real Forge and a real
+          NeoForge -- while Fabric's and Quilt's profiles still come from
+          `LoaderMeta`
+          `a_forge_instance_resolves_its_loader_from_the_installers_own_profile`
+          fetches the installer at its maven URL with the digest its `.sha1`
+          states and returns `net.minecraftforge.bootstrap.ForgeBootstrap`, a
+          class the mirror's ForgeWrapper copy does not name, with the mirror's
+          base a URL the scripted service has nothing at -- so a question asked
+          of it would come back as a problem rather than be hidden by a hit
+          an instance whose pack profile names no game version still leaves the
+          loader to the mirror, and the mappings components an imported instance
+          may list stay the mirror's
+          the desktop crate's 604 tests become 605, and clippy exits 0 with no
+          new warning in `meta.rs`
+          both document tools exit 0, the ledger now carrying 128 gates
+  EVIDENCE: G107 read what the mirror serves for these two uids and named why it
+            is not this launcher's, G126 landed the install that has to run
+            before a resolve can use the installer's profile, and G99/G100 are
+            the measurements of that profile against real builds. This is the
+            routing flip between them, in the order G107 named.
+
+  **Why the mirror was never the answer for these two.** G107 read Prism's
+  `net.minecraftforge` and `net.neoforged` profiles and found they are not the
+  loader's file at all: the main class is
+  `io.github.zekerzhayard.forgewrapper.installer.Main`, and a second key,
+  `mavenFiles`, holds the loader's own installer plus neoform, installertools and
+  binarypatcher. That is a *wrapper* which runs an installer at first launch, and
+  `install::plan` -- the launcher's own install -- walks `libraries`,
+  `native_libraries` and `main_jar` only, so the wrapper's `maven_files` are
+  parsed and never fetched: resolving that profile launches a launcher sitting
+  next to a loader nothing put there. The loader's own answer is the
+  `version.json` inside its installer, which G99 measured against the mirror
+  library for library, and which G100 proved is a profile an install can finish.
+
+  **The order was not a preference, and this half is why.** A launch resolves
+  through `PublisherMeta`, so a flip that came before G126's install would resolve
+  the installer's profile against an instance whose client jar the processors have
+  not patched yet: the libraries the profile names are not on disk and the main
+  class launches a client that was never built. G126 runs the install in
+  `prepare_launch` before the resolve, which is what makes the installer's own
+  profile the honest source for a launch rather than an optimistic one. The two
+  halves are the pair G107 named, landed in the order it named.
+
+  **What it changes in the code is one match arm.** `published_loader` names the
+  two uids; `PublisherMeta` gains the `InstallerMeta` and `ContentStore` the wire
+  already holds (`Wire::installers`, `Wire::content`), so the installer G126
+  fetched is a cache hit here rather than a second download; and
+  `version_file`'s `Publisher` arm splits -- Fabric and Quilt still come from
+  `LoaderMeta`, the Forge-shaped two from `InstallerMeta::profile`. The content
+  store is the same `content/` a launch's own downloads use, which is what makes
+  the two halves one install rather than two copies of one.
+
+  **What the offline test proves, and what it does not.** It proves the routing,
+  the fetch at the installer's maven URL under the digest its own `.sha1` states,
+  and the translated launch class that comes back -- with the mirror's base a URL
+  the scripted service has nothing at, so a mirror answer would fail rather than
+  pass quietly. It cannot prove that a real Forge build resolves end to end,
+  because that is G99's and G100's work and they live in `palantir-net`'s
+  `#[ignore]`d live suite: `PublisherMeta` is in the desktop crate, so no live
+  test reaches this arm. The live receipt is those two tests re-run on this
+  commit by the `Live services` job, over the same `InstallerMeta::profile` the
+  arm calls and a real Forge 1.21.1/52.1.0 and NeoForge 1.21.1/21.1.172.
+
+  The runner's own numbers are recorded below, in the paragraph this entry gains
+  once its push has one to read.
+
 - [x] G128: an instance's installation is a form too -- the platform, the game
   version and the loader's build, read from its own `mmc-pack.json` and written
   back to the same profile a launch resolves

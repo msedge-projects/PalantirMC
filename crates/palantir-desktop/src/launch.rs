@@ -4,8 +4,9 @@
 //! that used to be missing now in place:
 //!
 //! * **The game is installed, not assumed.** Metadata is resolved through
-//!   [`PublisherMeta`], which asks the loaders' own services for a loader's
-//!   launch profile and Prism's mirror for what they do not serve; then
+//!   [`PublisherMeta`], which asks the loaders' own services -- and, for the two
+//!   Forge-shaped loaders, their installer jars -- for a launch profile, and
+//!   Prism's mirror for what they do not serve; then
 //!   [`crate::install`] fetches the libraries, the client jar, the asset index
 //!   and its objects, and extracts the natives.
 //!   Only after that does anything check for a main jar — the old flow demanded
