@@ -41,6 +41,14 @@
 //! `minecraftArguments` string already present (the `versionInfo` era) is kept
 //! as is.
 //!
+//! One key is added rather than reshaped. Neither publisher's `version.json`
+//! names a `mainJar`: `VersionFile::parse` builds a Mojang client coordinate out
+//! of `id` when the key is absent -- and `1.21.1-forge-52.1.0` is not a version
+//! Mojang serves a client for -- which lands as the error a launch refuses on.
+//! The client the installer's own processors write is named in its `data` as
+//! `PATCHED`, so the translation takes the main jar from there when the file
+//! names none (G119), and leaves a file that names one alone.
+//!
 //! ## Where the bytes come from
 //!
 //! Every jar here travels through the content store, digest-checked against
@@ -68,6 +76,7 @@ use crate::engine::cancel::Cancel;
 use crate::engine::content::{ContentStore, Digest};
 use crate::engine::download::{fetch_to_file, Download};
 use crate::engine::loaders::Loader;
+use crate::engine::piston::PistonMeta;
 use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::Error;
@@ -104,9 +113,19 @@ pub fn component_uid(loader: Loader) -> &'static str {
 /// service serves, so there is no installer to name.
 pub fn installer_url(loader: Loader, game: &str, build: &str) -> Option<String> {
     match loader {
-        Loader::Forge => Some(format!(
-            "{FORGE_MAVEN}net/minecraftforge/forge/{game}-{build}/forge-{game}-{build}-installer.jar"
-        )),
+        Loader::Forge => {
+            // A component version may carry the game in front of the build.
+            // Prism writes Forge that way (`1.21.1-52.1.0`) and an instance
+            // imported from it keeps the spelling, while this launcher's create
+            // flow writes the promotions' `52.1.0`; the URL is
+            // `forge-{game}-{build}-installer.jar` and must not repeat the game
+            // either way. NeoForge spells the build alone in both.
+            let prefix = format!("{game}-");
+            let build = build.strip_prefix(prefix.as_str()).unwrap_or(build);
+            Some(format!(
+                "{FORGE_MAVEN}net/minecraftforge/forge/{game}-{build}/forge-{game}-{build}-installer.jar"
+            ))
+        }
         Loader::NeoForge => Some(format!(
             "{NEOFORGE_MAVEN}net/neoforged/neoforge/{build}/neoforge-{build}-installer.jar"
         )),
@@ -541,8 +560,23 @@ impl InstallerMeta {
         let (_, parsed) =
             self.parsed(loader, game, build, store, cancel, backoff).map_err(Error::into_core)?;
         let uid = component_uid(loader);
-        let translated = translate_profile(&parsed.version_json, uid, build)
+        let mut translated = translate_profile(&parsed.version_json, uid, build)
             .map_err(|detail| palantir_core::error::Error::json(&url, detail))?;
+        // Neither publisher's `version.json` names a main jar: both leave the
+        // client to the launch wrapper this launcher does not run (G107), so a
+        // parse of the file alone falls back to a Mojang coordinate built out
+        // of `id` -- and `1.21.1-forge-52.1.0` is not a version Mojang serves a
+        // client for -- which lands as the error a launch refuses on. The
+        // installer's own `PATCHED` entry is the client its processors write
+        // (G100), so naming it as the main jar is what makes the translated
+        // profile launchable here; a file that does name one is left alone.
+        if let Some(object) = translated.as_object_mut() {
+            if !object.contains_key("mainJar") {
+                if let Some(DataValue::Artifact(coord)) = parsed.install.data.get("PATCHED") {
+                    object.insert("mainJar".to_string(), serde_json::json!({ "name": coord }));
+                }
+            }
+        }
         VersionFile::parse(&translated, &PathBuf::from(&url), false)
     }
 }
@@ -1186,10 +1220,250 @@ pub fn install(
     Ok(report)
 }
 
+/// Everything one Forge-shaped install needs: the two jars it works with,
+/// where it writes, and how it runs.
+///
+/// `root` and `library_dir` are the directories the official installer's
+/// `{ROOT}` and `{LIBRARY_DIR}` name, and they have to be the ones a launch
+/// reads: the patched client is a classpath entry under the maven coordinate
+/// the installer's own `version.json` carries, so a library directory of this
+/// function's own would install the loader somewhere no launch looks.
+pub struct ClientInstall<'a> {
+    /// The installer metadata, over the engine's cache and client.
+    pub meta: &'a InstallerMeta,
+    /// Mojang's own metadata: the client jar the processors patch.
+    pub piston: &'a PistonMeta,
+    /// The way bytes arrive, for the client jar's content-store fetch.
+    pub fetch: &'a dyn Fetch,
+    /// Where every fetched file is filed by its digest before it is used.
+    pub store: &'a ContentStore,
+    /// The instance's game directory; `{ROOT}` and the processors' cwd.
+    pub root: &'a Path,
+    /// Where artifacts land in maven layout; `{LIBRARY_DIR}`.
+    pub library_dir: &'a Path,
+    /// Scratch directory for the installer jar and its `/data/...` files.
+    pub scratch: &'a Path,
+    /// The `java` binary the processors run on.
+    pub java: &'a Path,
+    /// How a running install is stopped.
+    pub cancel: &'a Cancel,
+    /// How a failed request is retried.
+    pub backoff: &'a Backoff,
+}
+
+/// What one [`install_client`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientInstallReport {
+    /// Every processor, in the order the installer lists them.
+    pub processors: Vec<InstalledProcessor>,
+    /// Mojang's client jar as the content store holds it -- the file the
+    /// processors read, not a second copy under this module's own name.
+    pub minecraft_jar: PathBuf,
+    /// The patched client, when the installer's `data` names one (`PATCHED`).
+    pub patched_client: Option<PathBuf>,
+}
+
+impl ClientInstallReport {
+    /// Processors that ran.
+    pub fn ran(&self) -> usize {
+        self.processors.iter().filter(|processor| !processor.skipped).count()
+    }
+
+    /// Processors that were skipped: server-only, or already done.
+    pub fn skipped(&self) -> usize {
+        self.processors.iter().filter(|processor| processor.skipped).count()
+    }
+}
+
+/// Install one Forge-shaped loader build into an instance, the way the
+/// loader's own installer does.
+///
+/// The two files the installer takes for granted are fetched here rather than
+/// assumed: the installer jar, through [`InstallerMeta`] and against the digest
+/// its maven's `.sha1` sidecar states, and Mojang's client jar, through
+/// [`PistonMeta`] and against the digest the manifest published. Both travel
+/// through the content store, so the install that follows them (and the next
+/// launch of the same instance) finds what is already here rather than
+/// fetching it a second time.
+///
+/// What comes back is the processors' own report -- which ran, which were
+/// skipped as server-only or as already done -- beside the two files that
+/// matter afterwards: Mojang's client jar, and the patched client when the
+/// installer names one. The launch profile that goes with this install is
+/// [`InstallerMeta::profile`]'s; this function is the other half, and the two
+/// read the same jar, so a caller that runs this and then resolves through
+/// `meta` is resolving the same build it installed.
+///
+/// Blocking, like every engine call.
+pub fn install_client(
+    loader: Loader,
+    game: &str,
+    build: &str,
+    setup: &ClientInstall<'_>,
+) -> Result<ClientInstallReport, Error> {
+    if installer_url(loader, game, build).is_none() {
+        return Err(Error::format(
+            PathBuf::from(loader.name()),
+            format!(
+                "{} publishes no installer to run: its launch profile is a document",
+                loader.name()
+            ),
+        ));
+    }
+    let (bytes, parsed) =
+        setup.meta.parsed(loader, game, build, setup.store, setup.cancel, setup.backoff)?;
+    // The client jar below is fetched for `game`, and the processors are told
+    // `{MINECRAFT_VERSION}` from the installer's own file: an installer whose
+    // two disagree would patch a client for another version, which is the one
+    // mismatch worth refusing by name rather than discovering at launch.
+    if parsed.install.minecraft.trim().is_empty() {
+        return Err(Error::format(
+            PathBuf::from(loader.name()),
+            format!("{} {build}'s install profile names no Minecraft version", loader.name()),
+        ));
+    }
+    if parsed.install.minecraft != game {
+        return Err(Error::format(
+            PathBuf::from(loader.name()),
+            format!(
+                "{} {build} installs Minecraft {}, but the instance names {game}",
+                loader.name(),
+                parsed.install.minecraft
+            ),
+        ));
+    }
+    // Mojang's client jar: the manifest's own digest, checked into the store
+    // before a processor sees the file.
+    let translated = setup
+        .piston
+        .translated(game, "net.minecraft", setup.cancel, setup.backoff)
+        .map_err(|error| {
+            Error::format(
+                PathBuf::from(game),
+                format!("Minecraft {game}'s version file could not be read: {error}"),
+            )
+        })?;
+    let artifact = translated
+        .main_jar
+        .as_ref()
+        .and_then(|jar| jar.mojang_downloads.as_ref())
+        .and_then(|downloads| downloads.artifact.as_ref())
+        .ok_or_else(|| {
+            Error::format(
+                PathBuf::from(game),
+                format!("Minecraft {game} publishes no client jar for the processors to patch"),
+            )
+        })?;
+    let digest = Digest::parse(&artifact.sha1).map_err(|error| {
+        Error::format(
+            PathBuf::from(&artifact.url),
+            format!("{}: {error}", artifact.url),
+        )
+    })?;
+    setup
+        .store
+        .fetch_blocking(setup.fetch, &artifact.url, &digest, setup.cancel, setup.backoff)?;
+    let minecraft_jar = setup.store.path(&digest);
+
+    // The client a launch's classpath will name. Reading the coordinate out of
+    // `PATCHED` is how the official installer knows it too; a build whose
+    // processors ran but which did not leave that file has not installed, and
+    // the profile must not be resolved as if it had.
+    let patched_client = match parsed.install.data.get("PATCHED") {
+        Some(DataValue::Artifact(coord)) => {
+            let spec = GradleSpecifier::parse(coord);
+            if spec.valid() && !spec.to_path("").is_empty() {
+                Some(setup.library_dir.join(spec.to_path("")))
+            } else {
+                return Err(Error::format(
+                    PathBuf::from(loader.name()),
+                    format!("{} {build} names '{coord}' as its patched client", loader.name()),
+                ));
+            }
+        }
+        _ => None,
+    };
+
+    // A client chain that declares no outputs leaves the per-digest resume
+    // below nothing to compare, and the last step of that chain is what writes
+    // `PATCHED`. NeoForge's `install_profile.json` is that shape -- measured on
+    // 21.1.172: ten processors and not one `outputs` between them -- so without
+    // this a second launch runs its six client-side processors again, minutes
+    // of Java to write bytes that are already on disk. Forge declares digests,
+    // so its own resume path still answers and this is not consulted; a chain
+    // that ran out before its last step has no `PATCHED` and falls through to
+    // it.
+    let no_outputs = parsed
+        .install
+        .processors
+        .iter()
+        .filter(|processor| {
+            processor.sides.is_empty()
+                || processor.sides.iter().any(|side| side == CLIENT_SIDE)
+        })
+        .all(|processor| processor.outputs.is_empty());
+    if no_outputs {
+        if let Some(patched) = &patched_client {
+            if patched.is_file() {
+                let processors = parsed
+                    .install
+                    .processors
+                    .iter()
+                    .enumerate()
+                    .map(|(index, processor)| InstalledProcessor {
+                        index,
+                        jar: processor.jar.clone(),
+                        skipped: true,
+                    })
+                    .collect();
+                return Ok(ClientInstallReport {
+                    processors,
+                    minecraft_jar,
+                    patched_client: patched_client.clone(),
+                });
+            }
+        }
+    }
+
+    std::fs::create_dir_all(setup.scratch).map_err(|error| Error::io(setup.scratch, error))?;
+    let installer_path = setup.scratch.join("installer.jar");
+    std::fs::write(&installer_path, &bytes).map_err(|error| Error::io(&installer_path, error))?;
+    let extract_dir = setup.scratch.join("data");
+    let ctx = InstallCtx {
+        meta: setup.meta,
+        store: setup.store,
+        library_dir: setup.library_dir,
+        root: setup.root,
+        installer_path: &installer_path,
+        installer_bytes: &bytes,
+        minecraft_jar: &minecraft_jar,
+        extract_dir: &extract_dir,
+        java: setup.java,
+        side: CLIENT_SIDE,
+        game: &parsed.install.minecraft,
+    };
+    let processors = install(loader, &parsed.install, &ctx, setup.cancel, setup.backoff)?;
+
+    if let Some(patched) = &patched_client {
+        if !patched.is_file() {
+            return Err(Error::format(
+                PathBuf::from(loader.name()),
+                format!(
+                    "{} {build} ran its processors without writing {}",
+                    loader.name(),
+                    patched.display()
+                ),
+            ));
+        }
+    }
+    Ok(ClientInstallReport { processors, minecraft_jar, patched_client })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::cache::DEFAULT_TTL;
+    use crate::engine::piston::PISTON_MANIFEST_URL;
     use crate::engine::request::{MapFetch, Route};
     use std::io::Write;
     use std::time::Duration;
@@ -1200,6 +1474,13 @@ mod tests {
         assert_eq!(
             installer_url(Loader::Forge, "1.21.1", "52.1.0").as_deref(),
             Some("https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-52.1.0/forge-1.21.1-52.1.0-installer.jar")
+        );
+        // The spelling Prism writes an imported instance's component with is
+        // the same jar: the game in front of the build is the prefix, not part
+        // of the build, and a URL that repeats it answers 404.
+        assert_eq!(
+            installer_url(Loader::Forge, "1.21.1", "1.21.1-52.1.0"),
+            installer_url(Loader::Forge, "1.21.1", "52.1.0")
         );
         assert_eq!(
             installer_url(Loader::NeoForge, "1.21.1", "21.1.172").as_deref(),
@@ -1338,6 +1619,23 @@ mod tests {
         );
         assert!(file.requires.is_empty(), "and no requirement the publisher did not state");
         assert_eq!(file.libraries.len(), 2);
+        // The profile names the patched client as its main jar even though the
+        // publisher's own file does not: without it a parse falls back to a
+        // Mojang coordinate built out of `id`, which is an error a launch
+        // refuses on rather than a jar anything could start.
+        assert_eq!(
+            file.main_jar.as_ref().map(|jar| jar.name.serialize()),
+            Some("net.minecraftforge:forge:1.21.1-52.1.0:client".to_string()),
+            "the main jar is the client the install writes, named from `PATCHED`"
+        );
+        assert!(
+            !file
+                .problems
+                .iter()
+                .any(|problem| problem.severity == palantir_core::version::ProblemSeverity::Error),
+            "problems: {:?}",
+            file.problems
+        );
         // Asked again, everything is already held: one sidecar and one
         // installer fetch between the two asks.
         meta.profile(Loader::Forge, "1.21.1", "52.1.0", &store, &cancel, &backoff).expect("again");
@@ -1368,6 +1666,300 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains(&url), "{message}");
         assert!(message.contains("refused"), "{message}");
+    }
+
+    /// An installer jar whose install half is one server-only processor, so a
+    /// client install runs nothing and the test needs no Java tool to exist.
+    fn idle_installer(minecraft: &str) -> Vec<u8> {
+        let version = serde_json::json!({
+            "id": "1.21.1-forge-52.1.0",
+            "mainClass": "net.minecraftforge.bootstrap.ForgeBootstrap",
+            "arguments": { "game": [] },
+            "libraries": []
+        });
+        let profile = serde_json::json!({
+            "spec": 1,
+            "profile": "forge",
+            "version": "1.21.1-forge-52.1.0",
+            "minecraft": minecraft,
+            "libraries": [],
+            "data": {},
+            "processors": [{
+                "jar": "net.minecraftforge:binarypatcher:1.2.0",
+                "classpath": [],
+                "args": [],
+                "outputs": {},
+                "sides": ["server"]
+            }]
+        });
+        write_jar(&[
+            ("version.json", &version.to_string()),
+            ("install_profile.json", &profile.to_string()),
+        ])
+    }
+
+    /// An installer whose one client-side processor declares no outputs, which
+    /// is the shape NeoForge's real `install_profile.json` has: the per-digest
+    /// resume has nothing to compare, and the client the chain names is the only
+    /// evidence that it ran. Its processor's jar is a coordinate no route in
+    /// these tests serves, so an install that resolves it fails rather than
+    /// quietly skipping this path.
+    fn unchecked_installer(minecraft: &str) -> Vec<u8> {
+        let version = serde_json::json!({
+            "id": format!("{minecraft}-neoforge-21.1.172"),
+            "mainClass": "cpw.mods.bootstraplauncher.BootstrapLauncher",
+            "arguments": { "game": [] },
+            "libraries": []
+        });
+        let profile = serde_json::json!({
+            "spec": 1,
+            "profile": "neoforge",
+            "version": format!("{minecraft}-neoforge-21.1.172"),
+            "minecraft": minecraft,
+            "libraries": [],
+            "data": { "PATCHED": "[net.neoforged:neoforge:21.1.172:client]" },
+            "processors": [{
+                "jar": "net.neoforged.installertools:binarypatcher:2.1.2:fatjar",
+                "classpath": [],
+                "args": [],
+                "outputs": {},
+                "sides": []
+            }]
+        });
+        write_jar(&[
+            ("version.json", &version.to_string()),
+            ("install_profile.json", &profile.to_string()),
+        ])
+    }
+
+    /// Publish a piston manifest, a version file and a client jar for `game`,
+    /// returning the client's bytes. The version file is the shape Mojang
+    /// serves, trimmed; the digests are the ones the caller can check.
+    fn piston_routes(fetch: &MapFetch, game: &str) -> Vec<u8> {
+        let client = b"the client jar".to_vec();
+        let client_sha1 = Digest::sha1(&client).hex().to_string();
+        let version_url = "https://piston.invalid/1.21.1.json";
+        let version = format!(
+            r#"{{"id":"{game}","type":"release","releaseTime":"2024-12-03T10:12:57+00:00",
+                "mainClass":"net.minecraft.client.main.Main","assets":"19",
+                "assetIndex":{{"id":"19","sha1":"aa","size":1,"totalSize":1,
+                    "url":"https://piston.invalid/19.json"}},
+                "javaVersion":{{"component":"java-runtime-delta","majorVersion":21}},
+                "downloads":{{"client":{{"sha1":"{client_sha1}","size":{},
+                    "url":"https://piston.invalid/client.jar"}}}},
+                "arguments":{{"jvm":[],"game":[]}},"libraries":[]}}"#,
+            client.len()
+        );
+        let digest = Digest::sha1(version.as_bytes()).hex().to_string();
+        let manifest = format!(
+            r#"{{"latest":{{"release":"{game}","snapshot":"25w02a"}},
+                "versions":[{{"id":"{game}","type":"release","url":"{version_url}",
+                    "releaseTime":"2024-12-03T10:12:57+00:00","sha1":"{digest}"}}]}}"#
+        );
+        fetch.set_route(PISTON_MANIFEST_URL, Route::body(manifest.into_bytes()));
+        fetch.set_route(version_url, Route::body(version.into_bytes()));
+        fetch.set_route("https://piston.invalid/client.jar", Route::body(client.clone()));
+        client
+    }
+
+    /// The composition `install_client` exists for, without a network: the
+    /// installer jar comes off its maven against its own sidecar, Mojang's
+    /// client jar comes through piston against the manifest's digest, and the
+    /// processors report in the installer's own terms.
+    #[test]
+    fn an_install_fetches_the_client_it_patches_and_reports_its_processors() {
+        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("client-install");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let fetch = MapFetch::new();
+        let client = piston_routes(&fetch, "1.21.1");
+        let jar = idle_installer("1.21.1");
+        let url = installer_url(Loader::Forge, "1.21.1", "52.1.0").expect("Forge publishes one");
+        fetch.set_route(&url, Route::body(jar.clone()));
+        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        let fetch = Arc::new(fetch);
+
+        let meta = InstallerMeta::new(
+            MetadataCache::new(root.join("meta"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let piston = PistonMeta::new(
+            MetadataCache::new(root.join("piston"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let store = ContentStore::new(root.join("store"));
+        let instance = root.join("instance");
+        let library_dir = instance.join("libraries");
+        let java = root.join("java.exe");
+        std::fs::write(&java, b"").expect("a stand-in for a java binary");
+        let cancel = Cancel::new();
+        let backoff = Backoff::with_attempts(1);
+
+        let report = install_client(
+            Loader::Forge,
+            "1.21.1",
+            "52.1.0",
+            &ClientInstall {
+                meta: &meta,
+                piston: &piston,
+                fetch: fetch.as_ref(),
+                store: &store,
+                root: &instance,
+                library_dir: &library_dir,
+                scratch: &root.join("scratch"),
+                java: &java,
+                cancel: &cancel,
+                backoff: &backoff,
+            },
+        )
+        .expect("the install");
+
+        assert_eq!(report.processors.len(), 1, "{report:?}");
+        assert_eq!(
+            (report.ran(), report.skipped()),
+            (0, 1),
+            "the only processor is server-only: {report:?}"
+        );
+        assert_eq!(
+            std::fs::read(&report.minecraft_jar).expect("the client jar"),
+            client,
+            "the jar the processors read is the one Mojang published"
+        );
+        assert!(
+            report.patched_client.is_none(),
+            "this installer names no patched client: {report:?}"
+        );
+    }
+
+    /// A chain that declares no outputs is read from the client it wrote: the
+    /// file is there, so nothing runs -- and nothing is even resolved, which is
+    /// what this test can tell from a service that has no route for the
+    /// processor's jar.
+    #[test]
+    fn an_install_that_declares_no_outputs_is_read_from_the_client_it_wrote() {
+        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("unchecked-install");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let fetch = MapFetch::new();
+        piston_routes(&fetch, "1.21.1");
+        let jar = unchecked_installer("1.21.1");
+        let url = installer_url(Loader::NeoForge, "1.21.1", "21.1.172")
+            .expect("NeoForge publishes one");
+        fetch.set_route(&url, Route::body(jar.clone()));
+        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        let fetch = Arc::new(fetch);
+
+        let meta = InstallerMeta::new(
+            MetadataCache::new(root.join("meta"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let piston = PistonMeta::new(
+            MetadataCache::new(root.join("piston"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let store = ContentStore::new(root.join("store"));
+        let instance = root.join("instance");
+        let library_dir = instance.join("libraries");
+        let patched = library_dir
+            .join("net")
+            .join("neoforged")
+            .join("neoforge")
+            .join("21.1.172")
+            .join("neoforge-21.1.172-client.jar");
+        std::fs::create_dir_all(patched.parent().expect("a parent directory"))
+            .expect("the maven layout");
+        std::fs::write(&patched, b"the client a first install wrote").expect("the patched client");
+        // Deliberately not a program: a fast path that shelled out to it would
+        // fail this test rather than pass it quietly.
+        let java = root.join("java.exe");
+        std::fs::write(&java, b"").expect("a stand-in for a java binary");
+
+        let report = install_client(
+            Loader::NeoForge,
+            "1.21.1",
+            "21.1.172",
+            &ClientInstall {
+                meta: &meta,
+                piston: &piston,
+                fetch: fetch.as_ref(),
+                store: &store,
+                root: &instance,
+                library_dir: &library_dir,
+                scratch: &root.join("scratch"),
+                java: &java,
+                cancel: &Cancel::new(),
+                backoff: &Backoff::with_attempts(1),
+            },
+        )
+        .expect("the install");
+
+        assert_eq!(
+            report.patched_client.as_deref(),
+            Some(patched.as_path()),
+            "the report names the client that was found"
+        );
+        assert_eq!((report.ran(), report.skipped()), (0, 1), "{report:?}");
+        assert!(
+            !fetch
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("binarypatcher")),
+            "the processor's jar was resolved even though nothing had to run: {:?}",
+            fetch.requests().iter().map(|request| &request.url).collect::<Vec<_>>()
+        );
+    }
+
+    /// An installer that patches another Minecraft than the instance runs is
+    /// refused before anything is fetched: the client jar in hand is not the
+    /// one its processors would patch.
+    #[test]
+    fn an_installer_for_another_minecraft_is_refused_rather_than_patched() {
+        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("client-mismatch");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let fetch = MapFetch::new();
+        // No piston routes at all: a service that answers nothing is what makes
+        // "the mismatch was refused before the client was fetched" an
+        // assertion rather than a reading of the source order.
+        let jar = idle_installer("1.20.1");
+        let url = installer_url(Loader::Forge, "1.21.1", "52.1.0").expect("Forge publishes one");
+        fetch.set_route(&url, Route::body(jar.clone()));
+        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        let fetch = Arc::new(fetch);
+
+        let meta = InstallerMeta::new(
+            MetadataCache::new(root.join("meta"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let piston = PistonMeta::new(
+            MetadataCache::new(root.join("piston"), DEFAULT_TTL),
+            fetch.clone(),
+        );
+        let store = ContentStore::new(root.join("store"));
+        let java = root.join("java.exe");
+        std::fs::write(&java, b"").expect("a stand-in for a java binary");
+
+        let error = install_client(
+            Loader::Forge,
+            "1.21.1",
+            "52.1.0",
+            &ClientInstall {
+                meta: &meta,
+                piston: &piston,
+                fetch: fetch.as_ref(),
+                store: &store,
+                root: &root.join("instance"),
+                library_dir: &root.join("instance").join("libraries"),
+                scratch: &root.join("scratch"),
+                java: &java,
+                cancel: &Cancel::new(),
+                backoff: &Backoff::with_attempts(1),
+            },
+        )
+        .expect_err("a mismatch");
+        let message = error.to_string();
+        assert!(message.contains("1.20.1"), "{message}");
+        assert!(message.contains("1.21.1"), "{message}");
     }
 
     #[test]

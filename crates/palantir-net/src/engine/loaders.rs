@@ -119,8 +119,9 @@ impl Loader {
     /// launch profile for those two is not a document a service serves. Their
     /// installer jar carries a `version.json`, and a launcher that reads it is
     /// expected to *run* the installer -- its processors patch the client jar and
-    /// unzip the maven artifacts the profile names -- which is why this launcher
-    /// resolves them through Prism's rewritten copy today. `None` is that fact
+    /// unzip the maven artifacts the profile names. This launcher reads that file
+    /// instead ([`super::forge::InstallerMeta::profile`], G99) and runs the
+    /// install before a launch plans a file (G119), so `None` here is that fact
     /// stated once, rather than a URL that would answer 404.
     pub fn profile_url(self, game: &str, build: &str) -> Option<String> {
         match self {

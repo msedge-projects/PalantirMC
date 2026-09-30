@@ -59,10 +59,11 @@ pub use download::{
     verify_sha256,
 };
 pub use engine::{
-    artifact_path, component_uid, fetch_to_file, find_java, install, installer_url, is_retryable,
-    maven_roots, maven_sha1, next_event, parse_installer, translate_profile, Backoff, Build,
-    Cancel, Cached, ContentStore, DataValue, Digest, Download, Downloaded, Event, Fetch, HttpPool,
-    InstallCtx, InstallSpec, InstalledProcessor, InstallerMeta, Job, JobId, Limit, Loader,
+    artifact_path, component_uid, fetch_to_file, find_java, install, install_client, installer_url,
+    is_retryable, maven_roots, maven_sha1, next_event, parse_installer, translate_profile, Backoff,
+    Build, Cancel, Cached, ClientInstall, ClientInstallReport, ContentStore, DataValue, Digest,
+    Download, Downloaded, Event, Fetch, HttpPool, InstallCtx, InstallSpec, InstalledProcessor,
+    InstallerMeta, Job, JobId, Limit, Loader,
     LoaderMeta, Manifest, ManifestVersion, MetadataCache, ModrinthApi, Outcome, ParsedInstaller,
     PistonMeta, Processor, Request, Response, Scheduler, Search, Stored, CENTRAL_MAVEN,
     CLIENT_SIDE, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL, DEFAULT_WORKERS, FORGE_MAVEN,

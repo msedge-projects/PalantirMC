@@ -287,9 +287,11 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
                 // and no libraries at all: the loader jar, the ASM stack it
                 // loads and Forge's ForgeWrapper never reached the classpath, so
                 // the game stopped on the first missing class. The invented
-                // entry points were wrong too -- the metadata starts Forge and
-                // NeoForge through ForgeWrapper, not through the launchwrapper
-                // or bootstraplauncher names that were written here.
+                // entry points were wrong too -- the metadata then started Forge
+                // and NeoForge through ForgeWrapper, not through the
+                // launchwrapper or bootstraplauncher names that were written
+                // here, and the loader's own installer has since replaced that
+                // rewrite entirely (G119).
                 if let Err(error) = register_loader(&instance, uid, build) {
                     warnings.push(format!(
                         "{} {} was not installed: {error}",

@@ -1601,6 +1601,189 @@ fn forge_and_neoforge_processors_install_a_client() {
     }
 }
 
+/// G119's end state, measured against the services rather than a double: a
+/// Forge or NeoForge build is installed by its own installer, and the profile a
+/// launch then resolves is the publisher's own -- the loader's main class, and
+/// the patched client the install just wrote among its libraries -- not the
+/// mirror's ForgeWrapper rewrite, which runs the same processors at *launch*.
+///
+/// This is the two halves G99 and G100 measured separately, run in the order the
+/// desktop now runs them: `install_client` (G100's processors, with Mojang's own
+/// client jar fetched through piston for them), and `InstallerMeta::profile`
+/// (G99's translation) afterwards -- the exact sequence `prepare_launch` uses.
+/// What the test adds over either is the join: the artifact the install produced
+/// is the artifact the resolved profile names, so the flip cannot resolve a
+/// launch that misses the client its install patched.
+///
+/// It installs each build twice. The second pass is the resume case the desktop
+/// relies on -- outputs already present and matching the digests the installer
+/// declared, so every processor is skipped -- and its numbers are printed beside
+/// the first pass's so a regression in the check is visible as a duration.
+#[test]
+#[ignore = "live: installs real Forge+NeoForge builds (downloads, Java processors, minutes)"]
+fn a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer() {
+    use palantir_net::engine::{
+        component_uid, find_java, install_client, Backoff, Cancel, ClientInstall, ContentStore,
+        HttpPool, InstallerMeta, Loader, MetadataCache, PistonMeta, DEFAULT_LIMIT, DEFAULT_TTL,
+    };
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// Loader name, game, build, the loader's own main class, and the processor
+    /// counts G100 measured for a client install of this build.
+    const BUILDS: &[(&str, &str, &str, &str, usize, usize)] = &[
+        ("forge", "1.21.1", "52.1.0", "net.minecraftforge.bootstrap.ForgeBootstrap", 3, 4),
+        ("neoforge", "1.21.1", "21.1.172", "cpw.mods.bootstraplauncher.BootstrapLauncher", 6, 4),
+    ];
+
+    let java = find_java().expect("this machine has no Java to run the processors with");
+    let cancel = Cancel::new();
+    // The same shape G100 uses: a long timeout for hosts that move slowly and
+    // attempts to spare, because resume is per digest in the content store.
+    let pool = Arc::new(HttpPool::new(DEFAULT_LIMIT, Duration::from_secs(600)));
+    let backoff = Backoff::with_attempts(8);
+
+    for (name, game, build, main, ran, skipped) in BUILDS {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let installers = InstallerMeta::new(
+            MetadataCache::new(tmp.path().join("installers"), DEFAULT_TTL),
+            pool.clone(),
+        );
+        let piston = PistonMeta::new(
+            MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL),
+            pool.clone(),
+        );
+        let store = ContentStore::new(tmp.path().join("content"));
+        let loader =
+            Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
+        let root = tmp.path().join("instance");
+        let library_dir = root.join("libraries");
+
+        let install = |installers: &InstallerMeta, piston: &PistonMeta| {
+            let started = Instant::now();
+            let report = install_client(
+                loader,
+                game,
+                build,
+                &ClientInstall {
+                    meta: installers,
+                    piston,
+                    fetch: pool.as_ref(),
+                    store: &store,
+                    root: &root,
+                    library_dir: &library_dir,
+                    scratch: &tmp.path().join("scratch"),
+                    java: &java,
+                    cancel: &cancel,
+                    backoff: &backoff,
+                },
+            )
+            .unwrap_or_else(|e| panic!("{name} {build} install: {e}"));
+            (report, started.elapsed())
+        };
+
+        let (first, first_took) = install(&installers, &piston);
+        assert_eq!(
+            (first.ran(), first.skipped()),
+            (*ran, *skipped),
+            "{name} {build}: G100's run/skip counts changed: {:?}",
+            first.processors
+        );
+        let patched = first
+            .patched_client
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} {build} installed without naming a patched client"));
+        assert!(patched.is_file(), "{name} {build}: {}", patched.display());
+        let patched_bytes = patched.metadata().map(|meta| meta.len()).unwrap_or(0);
+
+        // The flip: the same jar, read as the profile a launch resolves. Its
+        // main class is the loader's own, and the install's product is one of
+        // the libraries it names -- which is the join this slice exists for.
+        let profile = installers
+            .profile(loader, game, build, &store, &cancel, &backoff)
+            .unwrap_or_else(|e| panic!("{name} {build} profile: {e}"));
+        assert_eq!(profile.uid, component_uid(loader));
+        assert_eq!(profile.version, *build);
+        // Parse errors are what a launch refuses on. The publisher's file has to
+        // survive the translation without one -- a profile with no `mainJar`
+        // falls back to a Mojang client jar built out of `id`, which is exactly
+        // the kind of error this catches.
+        assert!(
+            !profile
+                .problems
+                .iter()
+                .any(|problem| problem.severity == palantir_core::version::ProblemSeverity::Error),
+            "{name} {build}: the translated profile carries errors: {:?}",
+            profile.problems
+        );
+        assert_eq!(profile.main_class, *main, "{name} {build} resolves through {}", profile.main_class);
+        assert_ne!(
+            profile.main_class, "io.github.zekerzhayard.forgewrapper.installer.Main",
+            "{name} {build} resolved the mirror's rewrite instead of the publisher's file"
+        );
+        assert!(
+            !profile
+                .libraries
+                .iter()
+                .any(|library| library.name.artifact() == "ForgeWrapper"),
+            "{name} {build}: the wrapper is not part of this profile"
+        );
+        let relative = patched
+            .strip_prefix(&library_dir)
+            .unwrap_or_else(|_| panic!("{name} {build}: {}", patched.display()))
+            .to_string_lossy()
+            .replace('\\', "/");
+        // `PATCHED` is the client the install wrote, and the profile has to
+        // name it: that is the join this slice exists for. The two publishers
+        // differ in *where* it appears -- Forge's `version.json` lists it among
+        // the libraries as well, NeoForge's lists only its fancy-mod-loader
+        // stack and leaves the client to `PATCHED` alone -- so the assertion
+        // both satisfy is the one a launch actually uses: the main jar, which
+        // is the classpath's last entry the game is started with.
+        let main_jar = profile
+            .main_jar
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} {build} resolved no main jar"));
+        assert_eq!(
+            main_jar.name.to_path(""),
+            relative,
+            "{name} {build}: the main jar is not the client the install wrote"
+        );
+        if *name == "forge" {
+            assert!(
+                profile.libraries.iter().any(|library| library.name.to_path("") == relative),
+                "{name} {build}: the profile does not name the client the install wrote ({relative}) among its libraries: {:?}",
+                profile
+                    .libraries
+                    .iter()
+                    .map(|library| library.name.serialize())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // The resume case, on the same root and store: every output is present
+        // and matches the digest the installer declared, so nothing runs.
+        let (second, second_took) = install(&installers, &piston);
+        assert_eq!(
+            second.ran(),
+            0,
+            "{name} {build}: a second install ran processors again: {:?}",
+            second.processors
+        );
+        assert_eq!(second.skipped(), ran + skipped);
+
+        println!(
+            "{name} {build}: first install {:.1}s ({ran} ran, {skipped} skipped), \
+             second {:.1}s (all skipped), patched client {patched_bytes} bytes, \
+             profile {} with {} libraries",
+            first_took.as_secs_f64(),
+            second_took.as_secs_f64(),
+            profile.main_class,
+            profile.libraries.len()
+        );
+    }
+}
+
 /// A refusal arrives with its status *and* whatever sentence the service sent.
 ///
 /// The unit tests in `engine/http.rs` prove the three shapes are read out of a

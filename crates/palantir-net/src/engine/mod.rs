@@ -69,10 +69,10 @@ pub use cancel::Cancel;
 pub use content::{ContentStore, Digest, Stored};
 pub use download::{fetch_to_file, Download, Downloaded};
 pub use forge::{
-    artifact_path, component_uid, find_java, install, installer_url, maven_roots, maven_sha1,
-    parse_installer, translate_profile, DataValue, InstallCtx, InstallSpec, InstalledProcessor,
-    InstallerMeta, ParsedInstaller, Processor, CENTRAL_MAVEN, CLIENT_SIDE, FORGE_MAVEN,
-    MOJANG_LIBRARIES, NEOFORGE_MAVEN,
+    artifact_path, component_uid, find_java, install, install_client, installer_url, maven_roots,
+    maven_sha1, parse_installer, translate_profile, ClientInstall, ClientInstallReport, DataValue,
+    InstallCtx, InstallSpec, InstalledProcessor, InstallerMeta, ParsedInstaller, Processor,
+    CENTRAL_MAVEN, CLIENT_SIDE, FORGE_MAVEN, MOJANG_LIBRARIES, NEOFORGE_MAVEN,
 };
 pub use http::{HttpPool, DEFAULT_LIMIT, DEFAULT_TIMEOUT, USER_AGENT};
 pub use limit::{Limit, Permit};

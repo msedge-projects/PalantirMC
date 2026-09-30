@@ -15,8 +15,10 @@
 //!   a launcher is expected to *run* that installer's processors -- they patch the
 //!   client jar and unpack maven artifacts -- so there is no document a service
 //!   serves. [`Loader::profile_url`] answers `None` for them and carries the
-//!   measurement; Prism's copy is a rewrite of that file around a wrapper which
-//!   runs the processors at launch instead.
+//!   measurement. This store answers them from the installer's own `version.json`
+//!   (`engine::forge::InstallerMeta`) rather than from Prism's rewrite of that file
+//!   around ForgeWrapper (G119): the wrapper's job is to run those processors at
+//!   *launch*, and this launcher has already run them at install (G100).
 //! * **Everything else**, including the mappings components
 //!   (`net.fabricmc.intermediary`, `org.quiltmc.hashed`) an *imported* instance may
 //!   list. A Fabric instance this launcher creates lists two components, and the
@@ -40,7 +42,9 @@ use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::resolve::{MetaStore, VersionEntry};
 use palantir_core::version::VersionFile;
-use palantir_net::engine::{Backoff, Cancel, Loader, LoaderMeta, PistonMeta};
+use palantir_net::engine::{
+    Backoff, Cancel, ContentStore, InstallerMeta, Loader, LoaderMeta, PistonMeta,
+};
 use palantir_net::{OnlineMetaStore, DEFAULT_META_BASE_URL};
 
 use crate::wire::Wire;
@@ -53,6 +57,14 @@ const MINECRAFT_UID: &str = "net.minecraft";
 pub struct PublisherMeta {
     /// The loaders' own profiles, over the wire's cache and client.
     loaders: LoaderMeta,
+    /// Forge's and NeoForge's installer jars, over the same cache and client:
+    /// their launch profile is read out of the jar itself (G99), and the install
+    /// that patches the client reads the same bytes.
+    installers: InstallerMeta,
+    /// Where the installer jar and the files its processors touch are filed by
+    /// digest: the same store the launch's own install reads, so a launch after
+    /// an install finds its client jar rather than fetching it again.
+    content: ContentStore,
     /// Mojang's own version files, over the same cache and client.
     piston: PistonMeta,
     /// Prism's mirror, for every question the publishers above do not answer in
@@ -76,6 +88,7 @@ impl PublisherMeta {
             wire,
             DEFAULT_META_BASE_URL,
             paths.meta_dir(),
+            paths.cache_dir().join("content"),
             instance_game(paths, instance_id),
         )
     }
@@ -87,10 +100,13 @@ impl PublisherMeta {
         wire: &Wire,
         mirror_base: impl Into<String>,
         mirror_dir: impl Into<std::path::PathBuf>,
+        content_dir: impl Into<std::path::PathBuf>,
         game: Option<String>,
     ) -> PublisherMeta {
         PublisherMeta {
             loaders: wire.loaders(),
+            installers: wire.installers(),
+            content: ContentStore::new(content_dir),
             piston: wire.piston(),
             mirror: OnlineMetaStore::new(mirror_base, mirror_dir),
             game,
@@ -127,8 +143,27 @@ impl MetaStore for PublisherMeta {
                 // `source` only answers `Publisher` when the game version is
                 // known, which is the middle of the URL this asks for.
                 let game = self.game.clone().unwrap_or_default();
-                self.loaders
-                    .profile(loader, &game, version, &Cancel::new(), &Backoff::default())
+                match loader {
+                    // The two Forge-shaped loaders publish no profile document:
+                    // theirs is read out of their own installer jar and
+                    // translated here (G99), and the install the profile belongs
+                    // to runs before any launch plans a file (G119).
+                    Loader::Forge | Loader::NeoForge => self.installers.profile(
+                        loader,
+                        &game,
+                        version,
+                        &self.content,
+                        &Cancel::new(),
+                        &Backoff::default(),
+                    ),
+                    Loader::Fabric | Loader::Quilt => self.loaders.profile(
+                        loader,
+                        &game,
+                        version,
+                        &Cancel::new(),
+                        &Backoff::default(),
+                    ),
+                }
             }
             Source::Mirror => self.mirror.version_file(uid, version),
         }
@@ -157,13 +192,17 @@ enum Source {
 
 /// The loader a publisher serves a launch profile for, by component uid.
 ///
-/// Forge and NeoForge are deliberately absent, and [`published_loader`] is where
-/// that is decided rather than in a URL: see the module documentation for the
-/// measurement.
+/// All four are here. Forge and NeoForge answer through their own installer jar
+/// rather than a URL ([`Loader::profile_url`] is still `None` for them); the flip
+/// from Prism's ForgeWrapper rewrite to the publisher's own translated profile is
+/// G119, and G107 measured what it changes: the wrapper runs the installer's
+/// processors at launch, which is a job the install has already done.
 fn published_loader(uid: &str) -> Option<Loader> {
     match uid {
         "net.fabricmc.fabric-loader" => Some(Loader::Fabric),
         "org.quiltmc.quilt-loader" => Some(Loader::Quilt),
+        "net.minecraftforge" => Some(Loader::Forge),
+        "net.neoforged" => Some(Loader::NeoForge),
         _ => None,
     }
 }
@@ -185,12 +224,32 @@ fn instance_game(paths: &PalantirPaths, instance_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::sync::Arc;
+
     use crate::wire::Script;
     use palantir_core::instance::Instance;
     use palantir_core::resolve::resolve;
     use palantir_core::version::{ProblemSeverity, RuntimeContext};
     use palantir_net::engine::Digest;
     use palantir_net::PISTON_MANIFEST_URL;
+
+    /// A jar from entry names and bodies, stored rather than compressed: the
+    /// fixtures care about the JSON inside, not the codec.
+    fn write_jar(entries: &[(&str, &str)]) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut out);
+            let options = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for (name, body) in entries {
+                writer.start_file(*name, options).expect("starting a zip entry");
+                writer.write_all(body.as_bytes()).expect("writing a zip entry");
+            }
+            writer.finish().expect("finishing the jar");
+        }
+        out.into_inner()
+    }
 
     /// A store over a service that answers nothing, for the questions that are
     /// about routing: what is asked of whom, without a document anywhere.
@@ -200,6 +259,7 @@ mod tests {
             &Script::new().wire(),
             "https://mirror.invalid/v1",
             &dir,
+            dir.join("content"),
             game.map(str::to_string),
         );
         store
@@ -211,12 +271,12 @@ mod tests {
         assert_eq!(store.source("net.minecraft"), Source::Piston);
         assert_eq!(store.source("net.fabricmc.fabric-loader"), Source::Publisher(Loader::Fabric));
         assert_eq!(store.source("org.quiltmc.quilt-loader"), Source::Publisher(Loader::Quilt));
-        // The two Forge-shaped uids have no publisher-served profile at all, and
-        // the mappings components an imported instance may list are the mirror's
-        // too.
-        for uid in ["net.minecraftforge", "net.neoforged", "net.fabricmc.intermediary"] {
-            assert_eq!(store.source(uid), Source::Mirror, "{uid} is the mirror's");
-        }
+        // The two Forge-shaped uids are the publishers' now, through their
+        // installer jars; the mappings components an imported instance may list
+        // are still the mirror's.
+        assert_eq!(store.source("net.minecraftforge"), Source::Publisher(Loader::Forge));
+        assert_eq!(store.source("net.neoforged"), Source::Publisher(Loader::NeoForge));
+        assert_eq!(store.source("net.fabricmc.intermediary"), Source::Mirror);
     }
 
     #[test]
@@ -270,6 +330,154 @@ mod tests {
         assert_eq!(file.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
         assert_eq!(file.libraries.len(), 2, "the mappings jar is one of its libraries");
         assert!(file.requires.is_empty(), "nothing to reach the mappings by");
+    }
+
+    /// The flip, end to end and without a network: an instance whose pack names
+    /// Forge resolves through the installer jar on Forge's own maven, and the
+    /// profile that comes back is the loader's own launch -- ForgeBootstrap --
+    /// rather than the ForgeWrapper file the mirror serves. The mirror's base URL
+    /// is one the scripted service has nothing at, so a question asked of it
+    /// would fail the resolution rather than pass unnoticed, and the request
+    /// count is asserted for the same reason.
+    #[test]
+    fn a_forge_instance_resolves_its_loader_from_its_own_installer() {
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let paths = PalantirPaths::at(dir.path());
+        let created = crate::instances::create(
+            &paths,
+            &crate::instances::NewInstance {
+                loader: crate::catalog::LoaderKind::Forge,
+                loader_build: Some("52.1.0".to_string()),
+                ..crate::instances::NewInstance::vanilla("Forged", "1.21.1")
+            },
+        )
+        .expect("an instance");
+
+        // The loader's own file, in the shape the publisher's really has: its
+        // main class and a library naming the client, and no `mainJar` at all
+        // -- that is what the install's `PATCHED` entry is for, because a
+        // profile with no `mainJar` falls back to a Mojang client jar built
+        // out of `id` ("1.21.1-forge-52.1.0"), which is not a version and
+        // which the parser records as an error the resolver refuses to launch
+        // on. No wrapper anywhere -- if this test's profile came from the
+        // mirror, the main class would be ForgeWrapper's rather than the
+        // loader's.
+        let version = serde_json::json!({
+            "id": "1.21.1-forge-52.1.0",
+            "mainClass": "net.minecraftforge.bootstrap.ForgeBootstrap",
+            "arguments": { "game": ["--launchTarget", "forge_client"] },
+            "libraries": [{
+                "name": "net.minecraftforge:forge:1.21.1-52.1.0:client",
+                "url": "https://maven.minecraftforge.invalid/"
+            }]
+        });
+        let install = serde_json::json!({
+            "spec": 1, "profile": "forge", "version": "1.21.1-forge-52.1.0",
+            "minecraft": "1.21.1", "libraries": [],
+            "data": { "PATCHED": "[net.minecraftforge:forge:1.21.1-52.1.0:client]" },
+            "processors": []
+        });
+        let jar = write_jar(&[
+            ("version.json", &version.to_string()),
+            ("install_profile.json", &install.to_string()),
+        ]);
+
+        // Mojang's half of the same resolution, in the shape piston serves.
+        const VANILLA_URL: &str = "https://piston.invalid/1.21.1.json";
+        const VANILLA: &str = r#"{
+          "id": "1.21.1", "type": "release", "releaseTime": "2024-08-08T12:00:00+00:00",
+          "mainClass": "net.minecraft.client.main.Main", "assets": "17",
+          "assetIndex": {"id": "17", "sha1": "aa", "size": 1, "totalSize": 1,
+                         "url": "https://piston.invalid/17.json"},
+          "javaVersion": {"component": "java-runtime-delta", "majorVersion": 21},
+          "downloads": {"client": {"sha1": "bb", "size": 2, "url": "https://piston.invalid/client.jar"}},
+          "arguments": {"jvm": [], "game": []},
+          "libraries": []
+        }"#;
+        let digest = Digest::sha1(VANILLA.as_bytes()).hex().to_string();
+        let installer_url = palantir_net::engine::installer_url(Loader::Forge, "1.21.1", "52.1.0")
+            .expect("Forge publishes one");
+        let mut script = Script::new();
+        script.insert_str(
+            PISTON_MANIFEST_URL,
+            &format!(
+                r#"{{"latest": {{"release": "1.21.1", "snapshot": "25w02a"}},
+                    "versions": [{{"id": "1.21.1", "type": "release",
+                                   "url": "{VANILLA_URL}",
+                                   "releaseTime": "2024-08-08T12:00:00+00:00",
+                                   "sha1": "{digest}"}}]}}"#
+            ),
+        );
+        script.insert_str(VANILLA_URL, VANILLA);
+        script.insert(installer_url.clone(), jar.clone());
+        script.insert(
+            format!("{installer_url}.sha1"),
+            Digest::sha1(&jar).hex().to_string(),
+        );
+
+        let fetch = Arc::new(script.fetch());
+        let wire = Wire::over(dir.path().join("cache"), fetch.clone());
+        let mut store = PublisherMeta::for_instance(&wire, &paths, &created.id);
+
+        let instance = Instance::open(&paths.instances_dir().join(&created.id))
+            .expect("the instance on disk");
+        let profile = PackProfile::load(&instance.mmc_pack_path()).expect("its pack profile");
+        let resolution = resolve(
+            &profile,
+            &instance.patches_dir(),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .expect("a resolution");
+
+        assert_eq!(
+            resolution.severity(),
+            ProblemSeverity::None,
+            "problems: {:?}, components: {:?}",
+            resolution.problems,
+            resolution
+                .components
+                .iter()
+                .map(|component| (&component.uid, &component.problems))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            resolution.profile.main_class, "net.minecraftforge.bootstrap.ForgeBootstrap",
+            "the loader's own launch, not ForgeWrapper's"
+        );
+        assert!(
+            resolution
+                .profile
+                .libraries
+                .iter()
+                .any(|library| library.name.serialize()
+                    == "net.minecraftforge:forge:1.21.1-52.1.0:client"),
+            "the profile names the client the install patches: {:?}",
+            resolution
+                .profile
+                .libraries
+                .iter()
+                .map(|library| library.name.serialize())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            resolution
+                .profile
+                .main_jar
+                .as_ref()
+                .map(|jar| jar.name.serialize()),
+            Some("net.minecraftforge:forge:1.21.1-52.1.0:client".to_string()),
+            "the launch's main jar is the patched client, not Mojang's"
+        );
+        // Four documents: piston's manifest and version file, and the
+        // installer jar with the sidecar that states its digest. A fifth would
+        // be the mirror being consulted, which is the flip this slice undoes.
+        assert_eq!(
+            fetch.count(),
+            4,
+            "requests: {:?}",
+            fetch.requests().iter().map(|request| &request.url).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -335,6 +543,7 @@ mod tests {
             &wire,
             "https://mirror.invalid/v1",
             &dir.path().join("meta"),
+            dir.path().join("content"),
             Some("1.21.4".to_string()),
         );
         let instance = Instance::open(&paths.instances_dir().join(&created.id))

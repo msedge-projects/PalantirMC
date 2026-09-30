@@ -25,9 +25,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use palantir_net::engine::{
-    next_event, Backoff, Cancel, ContentStore, Digest, Download, Event, Fetch, HttpPool,
-    InstallerMeta, Job, JobId, LoaderMeta, MetadataCache, PistonMeta, Scheduler, DEFAULT_LIMIT,
-    DEFAULT_TTL, DEFAULT_TIMEOUT,
+    next_event, Backoff, Cancel, Digest, Download, Event, Fetch, HttpPool, InstallerMeta, Job,
+    JobId, LoaderMeta, MetadataCache, PistonMeta, Scheduler, DEFAULT_LIMIT, DEFAULT_TTL,
+    DEFAULT_TIMEOUT,
 };
 
 /// One file to fetch, and the digest that says it arrived.
@@ -109,48 +109,22 @@ impl Wire {
         PistonMeta::new(self.cache.clone(), self.fetch.clone())
     }
 
-    /// The two Forge-shaped loaders' installers over the same cache and client.
-    ///
-    /// Neither of them publishes a launch profile a launcher can fetch: their
-    /// profile *and* their install both live inside an installer jar, which is
-    /// why this handle is not a `LoaderMeta` -- the way a caller reaches them is
-    /// by opening that jar, not by asking a URL for a document.
+    /// The two loaders that publish an installer jar over the same cache and
+    /// client (G99): the jar carries both the launch profile a resolve merges and
+    /// the install that patches the client, so one view serves both halves.
     pub fn installers(&self) -> InstallerMeta {
         InstallerMeta::new(self.cache.clone(), self.fetch.clone())
     }
 
-    /// The content store this wire's files are kept in.
+    /// The client under every request this wire makes.
     ///
-    /// Rooted at `content/` beside the cache this wire was built with
-    /// (`cache/meta` -> `cache/content`), so there is one place under the
-    /// launcher's own data root where an installer's processors and a launch's
-    /// own downloads share a copy rather than keeping two. The derivation is
-    /// the cache directory's *parent* rather than a second field because every
-    /// caller here already builds the wire over `paths.meta_dir()`, and a wire
-    /// that carried the same directory twice could be pointed at two.
-    pub fn content(&self) -> ContentStore {
-        let cache = self.cache.dir();
-        let root = cache
-            .parent()
-            .map(|dir| dir.join("content"))
-            .unwrap_or_else(|| cache.join("content"));
-        ContentStore::new(root)
-    }
-
-    /// Put one file in that store, digest-checked.
-    ///
-    /// The whole of "download only what is missing" for a *caller* rather than
-    /// a plan: a store that already holds the digest answers without a request,
-    /// and a transfer that fails the digest is deleted rather than kept. The
-    /// path it was filed under comes back, because that is what a caller that
-    /// needs the file itself -- a processor reading Mojang's client jar -- has
-    /// to hand along.
-    pub fn store_file(&self, url: &str, digest: &Digest) -> Result<PathBuf, String> {
-        let store = self.content();
-        store
-            .fetch_blocking(&*self.fetch, url, digest, &Cancel::new(), &self.backoff)
-            .map_err(|error| format!("{error}"))?;
-        Ok(store.path(digest))
+    /// For the engine calls that take the seam themselves rather than a URL --
+    /// the content store's `fetch_blocking` is the one this exists for -- so a
+    /// file already held by digest costs no second request. It is the same pool
+    /// under the same ceiling; a caller cannot reach a network this wire's rules
+    /// do not cover.
+    pub fn fetch(&self) -> Arc<dyn Fetch> {
+        self.fetch.clone()
     }
 
     /// One document, through the cache: a request only when it has to.
@@ -339,35 +313,6 @@ mod tests {
         assert!(results[0].is_err(), "{:?}", results[0]);
         assert_eq!(fetch.count(), 0, "the request was never made");
         assert!(!dest.exists(), "and no file was left behind");
-    }
-
-    #[test]
-    fn the_content_store_sits_beside_the_cache_and_files_by_digest() {
-        // The wire is built over `paths.meta_dir()`, so its cache's *parent* is
-        // the data root's `cache/` and `content/` is its sibling: one store for
-        // an installer's processors and a launch's own downloads. A file put
-        // through the wire lands under the digest its publisher stated, and a
-        // second call for the same digest is a read rather than a request --
-        // which is the whole reason the store exists.
-        let dir = scratch("content-store");
-        let cache = dir.join("cache").join("meta");
-        let fetch = Arc::new(
-            MapFetch::new()
-                .with_route("https://libraries.invalid/gson.jar", Route::body(b"the bytes".to_vec())),
-        );
-        let wire = Wire::over(&cache, fetch.clone());
-        let digest = Digest::sha1(b"the bytes");
-        assert_eq!(wire.content().dir(), dir.join("cache").join("content"));
-        let path = wire
-            .store_file("https://libraries.invalid/gson.jar", &digest)
-            .expect("a file in the store");
-        assert_eq!(fs::read(&path).expect("the file"), b"the bytes");
-        assert_eq!(fetch.count(), 1, "one request, the first time");
-        wire.store_file("https://libraries.invalid/gson.jar", &digest)
-            .expect("the same file again");
-        assert_eq!(fetch.count(), 1, "the store answered the second call");
-        assert!(wire.store_file("https://libraries.invalid/gson.jar", &Digest::sha1(b"other"))
-            .is_err(), "a digest the store does not hold is fetched, not invented");
     }
 }
 

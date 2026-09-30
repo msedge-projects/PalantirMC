@@ -58,6 +58,7 @@ use std::time::{Duration, Instant};
 
 use crate::accounts::{needs_refresh, AccountKind};
 use crate::install;
+use crate::loader_install;
 use crate::java_runtime::{self, JavaPrefs};
 
 /// Shared handle for the running game process (for the Kill button).
@@ -560,43 +561,6 @@ pub fn prepare_launch(
         }
     };
 
-    // The loader's own install, before the resolve. G100's processors patch the
-    // client jar and unpack the launcher stack, and the profile a launch
-    // resolves for a Forge-shaped uid is the installer's own -- whose libraries
-    // only the processors produce -- so running this after the resolve would
-    // resolve a profile nothing has installed. The Java is looked up here rather
-    // than reused from the launch's own choice further down because the
-    // processors have to run before the resolve, and the runtime the launch
-    // picks is picked after it; `find_java` answers the same question from PATH
-    // and the installed runtimes, which is enough for the tools.
-    if install::loader_component(&profile).is_some() {
-        let java = palantir_net::engine::find_java();
-        match install::install_loader(
-            paths,
-            instance.root(),
-            &profile,
-            wire,
-            java.as_deref(),
-            &mut *log,
-        ) {
-            install::LoaderInstall::NotNeeded => {}
-            install::LoaderInstall::Installed { ran, skipped } => {
-                log(format!("installer: {ran} processor(s) ran, {skipped} resumed"));
-            }
-            install::LoaderInstall::NoJava => {
-                log(
-                    "the loader's installer needs a Java runtime to run its processors, and none was found — not launching"
-                        .to_string(),
-                );
-                return LaunchReadiness::Blocked;
-            }
-            install::LoaderInstall::Failed(why) => {
-                log(format!("the loader's installer failed ({why}) — not launching"));
-                return LaunchReadiness::Blocked;
-            }
-        }
-    }
-
     let ctx = RuntimeContext::current_host();
     let resolution = match resolve(&profile, &instance.patches_dir(), store, &ctx) {
         Ok(resolution) => resolution,
@@ -626,6 +590,34 @@ pub fn prepare_launch(
         resolution.components.len(),
         resolution.profile.main_class
     ));
+
+    // ---- the loader's own install ----------------------------------------
+    // A Forge or NeoForge instance resolves through its installer's own profile
+    // (G119), and that profile names the patched client as one of its libraries.
+    // The install has to run before the plan reads those names, or the plan
+    // queues a download for a file no maven hosts -- the processors' product.
+    // The resume case rides on the digests the installer itself declares: a
+    // second launch skips every processor whose outputs are already there.
+    if let Some(job) = loader_install::forge_shaped(&profile) {
+        let Some(java) = palantir_net::engine::find_java() else {
+            log(format!(
+                "{} {} needs a Java runtime to run its installer, and this machine has none — not launching",
+                job.label(),
+                job.build
+            ));
+            return LaunchReadiness::Blocked;
+        };
+        progress(install::Progress::starting(format!(
+            "installing {} {}",
+            job.label(),
+            job.build
+        )));
+        if let Err(error) = loader_install::install(paths, instance.root(), &job, wire, &java, log)
+        {
+            log(format!("{error} — not launching"));
+            return LaunchReadiness::Blocked;
+        }
+    }
 
     // ---- install ---------------------------------------------------------
     let install_plan = install::plan(paths, instance.root(), &resolution.profile, &ctx);
