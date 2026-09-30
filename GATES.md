@@ -6562,3 +6562,11 @@ dashboard exit=0
   game profile for that version to resolve, and a guess would move the failure one
   step later -- to a client jar or an asset index nobody can fetch -- while making
   the launcher claim it knew which game this was.
+
+  **The runner agrees with this machine.** Run `36701927049` on `5ae73d1` -- asked
+  for by dispatch, since a push to this branch schedules nothing -- is all five
+  jobs: `Lint` green, `Test workspace` green at 1080 passed / 0 failed and 19
+  ignored (177 + 8 + 602 + 4 + 31 + 258, the desktop crate's 602 being this
+  machine's own count to the test and this slice's two among them), the live suite
+  19 passed / 0 failed in 162.69s, and both Windows exes staged (msvc 5,552,801 B,
+  gnu 5,620,593 B).
