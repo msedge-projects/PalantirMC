@@ -34,7 +34,10 @@ use crate::wire::Wire;
 use serde_json::Value;
 
 /// uid of the Minecraft component.
-#[cfg(test)]
+///
+/// A constant rather than a literal at the call sites because the settings
+/// modal's installation tab reads it, its store writes it, and the resolve
+/// rules compare against it: three places that must agree on one string.
 pub const MINECRAFT_UID: &str = "net.minecraft";
 
 /// How many builds the "Other" loader-version dropdown offers.

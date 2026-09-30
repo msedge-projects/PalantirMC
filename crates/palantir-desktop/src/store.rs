@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use palantir_core::instance::Instance;
+use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::Settings;
 use palantir_net::engine::{
@@ -314,6 +315,22 @@ pub struct InstanceSettings {
     pub jvm_args: String,
     /// Whether the instance's own JVM arguments are what a launch uses.
     pub override_java_args: bool,
+}
+
+/// One instance's installation, as its settings modal reads and writes it: the
+/// three facts `mmc-pack.json` carries and a launch resolves.
+///
+/// The platform is this launcher's own vocabulary ([`LoaderKind`]) rather than a
+/// uid, because the tab and the builds the shell reads are keyed by it; the
+/// file's own uid is what [`LoaderKind::uid`] maps it to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceInstallation {
+    /// Vanilla, or one of the four loaders this launcher models.
+    pub platform: LoaderKind,
+    /// The Minecraft version the instance runs.
+    pub game_version: String,
+    /// The build of `platform` in force; empty for vanilla.
+    pub loader_build: String,
 }
 
 /// Set a string setting behind its instance override gate, or take both away.
@@ -730,6 +747,108 @@ impl Store {
         instance
             .save()
             .map_err(|error| format!("saving '{id}' failed: {error}"))
+    }
+
+    /// One instance's installation, read from its own `mmc-pack.json`.
+    ///
+    /// A loader the file names but this launcher does not model (Prism's
+    /// LiteLoader) answers as vanilla here and is *refused on the write side*:
+    /// the tab draws what it knows, and a save that would have to take out a
+    /// component it cannot name is a sentence instead.
+    pub fn instance_installation(&self, id: &str) -> Result<InstanceInstallation, String> {
+        let instance = Instance::open(&self.instance_dir(id))
+            .map_err(|error| format!("cannot open '{id}': {error}"))?;
+        let path = instance.mmc_pack_path();
+        let profile = PackProfile::load(&path)
+            .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+        let platform = LoaderKind::all()
+            .into_iter()
+            .find(|kind| {
+                kind.uid()
+                    .and_then(|uid| profile.get(uid))
+                    .map(|component| component.is_enabled())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(LoaderKind::Vanilla);
+        Ok(InstanceInstallation {
+            platform,
+            game_version: profile
+                .get(crate::catalog::MINECRAFT_UID)
+                .map(|component| component.version.clone())
+                .unwrap_or_default(),
+            loader_build: platform
+                .uid()
+                .and_then(|uid| profile.get(uid))
+                .map(|component| component.version.clone())
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Write an instance's installation back to its `mmc-pack.json`.
+    ///
+    /// The two components are the whole write: `net.minecraft` carries the game
+    /// version, the platform's own component carries its build, and every other
+    /// loader is *taken out*, because two loader components in one profile is a
+    /// profile nothing can resolve -- `ModLoader::conflicting_uids` is the same
+    /// rule stated by the model. A component this launcher does not model is a
+    /// refusal rather than a deletion, because a save that silently dropped one
+    /// would be this tab editing a file it cannot read.
+    ///
+    /// What happens to a changed version or loader is the next launch's: the run
+    /// resolves the profile it finds and fetches what is not here yet, which is
+    /// the same path a first launch takes ([`crate::launch`]).
+    pub fn save_instance_installation(
+        &self,
+        id: &str,
+        edit: &InstanceInstallation,
+    ) -> Result<(), String> {
+        let game = edit.game_version.trim();
+        if game.is_empty() {
+            return Err("pick a game version".to_string());
+        }
+        let build = edit.loader_build.trim();
+        if edit.platform.loads_mods() && build.is_empty() {
+            return Err(format!(
+                "pick a {} build: an empty one leaves a loader to resolve with no version to \
+                 resolve it to",
+                edit.platform.label()
+            ));
+        }
+        let instance = Instance::open(&self.instance_dir(id))
+            .map_err(|error| format!("cannot open '{id}': {error}"))?;
+        let path = instance.mmc_pack_path();
+        let mut profile = PackProfile::load(&path)
+            .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
+        for loader in profile.mod_loaders() {
+            if LoaderKind::from_uid(loader.uid()).is_none() {
+                return Err(format!(
+                    "this instance runs {}, a loader this launcher does not model; changing \
+                     the platform here would take that component out",
+                    loader.uid()
+                ));
+            }
+        }
+        profile.set_version(crate::catalog::MINECRAFT_UID, game, true);
+        for kind in LoaderKind::all() {
+            let Some(uid) = kind.uid() else { continue };
+            if Some(uid) == edit.platform.uid() {
+                continue;
+            }
+            // Our own writes mark a loader `important`, and `remove` refuses an
+            // important component -- Prism's rule, because the reader asked for
+            // it. The flag is cleared first, because this *is* the reader asking
+            // for it to go.
+            if let Some(component) = profile.get_mut(uid) {
+                component.important = false;
+            }
+            profile.remove(uid);
+        }
+        if let Some(uid) = edit.platform.uid() {
+            profile.set_version(uid, build, true);
+        }
+        profile
+            .save(&path)
+            .map_err(|error| format!("writing {} failed: {error}", path.display()))
     }
 
     /// The reason a page's data is not here yet.
@@ -2330,5 +2449,87 @@ mod tests {
         // Neither refusal wrote anything: the file still says what it said.
         let back = store.instance_settings("atm10").expect("read back");
         assert!(!back.override_memory);
+    }
+
+    #[test]
+    fn an_instance_s_installation_is_the_platform_and_the_two_versions_it_runs() {
+        // The values the creation flow wrote are the values the tab reads back:
+        // one profile, no second copy of the facts anywhere.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("installation-read", fetch);
+        let installation = store.instance_installation("atm10").expect("the installation");
+        assert_eq!(installation.platform, LoaderKind::Fabric);
+        assert_eq!(installation.game_version, "1.21.4");
+        assert_eq!(installation.loader_build, "0.16.9");
+    }
+
+    #[test]
+    fn changing_the_platform_takes_the_loader_it_replaces_out() {
+        // Two loader components in one profile is a profile nothing can resolve,
+        // so a switch is a write *and* a removal -- and neither is allowed to
+        // touch the components this tab does not own.
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("installation-write", fetch);
+        let mut edit = store.instance_installation("atm10").expect("the installation");
+        edit.platform = LoaderKind::NeoForge;
+        edit.loader_build = "21.4.157".to_string();
+        edit.game_version = "1.21.1".to_string();
+        store.save_instance_installation("atm10", &edit).expect("a save");
+
+        let back = store.instance_installation("atm10").expect("read back");
+        assert_eq!(back, edit);
+        let file = std::fs::read_to_string(store.instance_dir("atm10").join("mmc-pack.json"))
+            .expect("the profile");
+        assert!(!file.contains("net.fabricmc.fabric-loader"), "the old loader is gone:\n{file}");
+        assert!(file.contains("net.neoforged"), "{file}");
+
+        // And back to vanilla: the loader goes, the game version stays where the
+        // tab left it.
+        let vanilla = InstanceInstallation {
+            platform: LoaderKind::Vanilla,
+            game_version: "1.21.1".to_string(),
+            loader_build: String::new(),
+        };
+        store.save_instance_installation("atm10", &vanilla).expect("a vanilla save");
+        let back = store.instance_installation("atm10").expect("read back");
+        assert_eq!(back, vanilla);
+        let file = std::fs::read_to_string(store.instance_dir("atm10").join("mmc-pack.json"))
+            .expect("the profile");
+        assert!(!file.contains("net.neoforged"), "{file}");
+        assert!(file.contains("net.minecraft"), "{file}");
+    }
+
+    #[test]
+    fn an_installation_that_could_not_be_resolved_is_a_sentence_rather_than_a_written_line() {
+        let fetch = Arc::new(MapFetch::new());
+        let store = store_with_instance("installation-refusals", fetch);
+        let mut edit = store.instance_installation("atm10").expect("the installation");
+
+        edit.game_version = "   ".to_string();
+        let nothing_to_run = store.save_instance_installation("atm10", &edit).expect_err("no game");
+        assert!(nothing_to_run.contains("game version"), "{nothing_to_run}");
+
+        edit.game_version = "1.21.4".to_string();
+        edit.loader_build = String::new();
+        let nothing_to_load =
+            store.save_instance_installation("atm10", &edit).expect_err("no build");
+        assert!(nothing_to_load.contains("Fabric"), "{nothing_to_load}");
+
+        // A loader this launcher does not model is refused rather than dropped:
+        // writing one by hand is what a profile edited elsewhere looks like, and
+        // a save that carried on would be this tab editing a file it cannot read.
+        let path = store.instance_dir("atm10").join("mmc-pack.json");
+        let text = std::fs::read_to_string(&path).expect("the profile");
+        let mut profile = PackProfile::from_text(&text, &path).expect("a profile");
+        profile.append(palantir_core::pack::Component {
+            uid: "com.mumfrey.liteloader".to_string(),
+            version: "1.12.2".to_string(),
+            ..Default::default()
+        });
+        profile.save(&path).expect("the profile saved");
+        let edit = store.instance_installation("atm10").expect("the installation");
+        let unmodelled =
+            store.save_instance_installation("atm10", &edit).expect_err("not modelled");
+        assert!(unmodelled.contains("com.mumfrey.liteloader"), "{unmodelled}");
     }
 }

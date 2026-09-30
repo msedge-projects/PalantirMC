@@ -6117,6 +6117,118 @@ CONFIRMED: the page carries all 125 gates, 6 stage cards and every subject as wr
   The runner's own numbers are recorded below, in the paragraph this entry gains
   once its push has one to read.
 
+- [x] G128: an instance's installation is a form too -- the platform, the game
+  version and the loader's build, read from its own `mmc-pack.json` and written
+  back to the same profile a launch resolves
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py
+         python tools/dashboard.py --check
+  EXPECT: the settings modal's second tab opens on what the creation flow wrote:
+          the platform, the game version and the loader's build, all three read
+          from the instance's own `mmc-pack.json`
+          the game-version list is filtered by its search and the snapshot toggle,
+          and the loader-build list is fetched for the `(platform, game version)`
+          pair in force -- a change to either clears the build chosen for the old
+          pair, because a build number belongs to one loader at one game version
+          a save writes `net.minecraft`'s version and the platform's own component,
+          and *takes every other loader out of the profile*: two loader components
+          is a profile nothing can resolve, so a switch is a write and a removal.
+          A switch to vanilla removes the loader and leaves the game version
+          a profile carrying a loader this launcher does not model (Prism's
+          LiteLoader) is a refusal rather than a deletion, and a non-vanilla
+          platform with no build is refused by the store
+          600 passed; 0 failed; 0 ignored, and clippy exit 0 with no new warning in
+          the files this slice touched
+          the plan's stage-3 installation item narrows to the modpack half -- the
+          panel whose first requirement is bookkeeping this launcher does not keep
+          yet -- stage 3 reads 32 met / 2 open (94%), and both document tools exit
+          0 at 127 gates
+  EVIDENCE: the transcripts below, and the three drawn differences from the
+  reference, each recorded where it is drawn rather than assumed.
+
+```
+$ cargo test -p palantir-desktop --locked
+running 600 tests
+test result: ok. 600 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 4 tests
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+warning: `palantir-desktop` (bin "PalantirMC") generated 3 warnings
+exit 0; the bin's 3 and the test bin's 21 (1 duplicate) are the counts the
+settings modal's own commit read, so this slice adds none -- and the only
+diagnostic naming a file it touched is the pre-existing `unnecessary_sort_by` at
+catalog.rs:142, a `#[cfg(test)]` helper the slice did not change (it is in the 21,
+and it is in the logs from G90 onward)
+
+$ python tools/progress.py
+stage 3  Pages, in the reference's order: instance pages f...    32     2    94%
+
+$ python tools/dashboard.py --check
+CONFIRMED: the page carries all 127 gates, 6 stage cards and every subject as written
+```
+
+  **What this is, and where the reference keeps it.** The reference's
+  `InstanceSettingsModal` has an `installation` tab whose component is
+  `components/settings-modal/installation-settings.vue`: three choices -- the
+  platform, the game version and the loader's build -- over a `layout.vue` that
+  draws them as rows, each with a select, and a Save whose `afterSave` re-runs the
+  install. The values behind those three rows are the instance's own
+  `mmc-pack.json`: `net.minecraft`'s version, and the loader component's uid and
+  version. This slice is that tab: `crate::instance_settings` grew a tab strip and
+  the second form, `store::InstanceInstallation` is the value it reads and writes,
+  and the shell routes the tab's two service reads the way it routes the creation
+  dialog's.
+
+  **The write, and the two rules it keeps.** A save writes the game version onto
+  `net.minecraft` and the build onto the platform's component, and it *removes*
+  every other loader the profile carries -- `ModLoader::conflicting_uids` is the
+  same rule stated by the model, and a profile with two loaders is one nothing can
+  resolve. Our own writes mark a loader `important` and `PackProfile::remove`
+  refuses an important component (Prism's rule: the reader asked for it), so the
+  removal clears that flag first, which is this tab's way of saying the reader is
+  asking again. And a component this launcher does not model -- Prism's
+  LiteLoader, which `LoaderKind` has no uid for -- is a *refusal* rather than a
+  deletion: a save that silently dropped it would be this tab editing a file it
+  cannot read. What a changed version or platform costs is the next launch's
+  download, because the launch resolves the components it finds; the reference
+  re-runs its install from the modal instead, and the sentence under this tab's
+  Save says which one happens.
+
+  **The three drawn differences, each with its reason.** The reference's choices
+  are comboboxes filtered by the loader's own manifest (`resolveGameVersions`
+  keeps only the versions that manifest lists); this kit has no combobox of that
+  shape, so each choice is the chips-and-search rows the creation dialog already
+  draws, and the *filter* is the service's rather than a second document's: the
+  store asks the loader for the builds of the chosen game version
+  (`LoaderMeta::builds`) and an empty answer draws the reference's own *no
+  versions available* sentence, so a version the loader never published for is
+  answered rather than hidden. A platform or game-version change clears the build
+  chosen for the old pair, because a Fabric build number under a Quilt heading is
+  not a value any profile can resolve. And the tab strip is this modal's own: the
+  reference's tabs are General, Installation, Sync overrides and Sharing, with the
+  Java settings drawn inside the sync-overrides tab -- which this launcher does not
+  have (G118), so those settings took the tab beside Installation, labelled with
+  this module's word where the reference's own there are none.
+
+  **What is not this half.** The reference's installation tab also carries the
+  panel for an instance installed from a Modrinth pack -- the pack and version,
+  *Repair*, *Reinstall*, *Swap*, *Unlink* -- which is not a write onto the
+  instance file: *Repair* re-runs the install and *Unlink* forgets the link. Its
+  first requirement is bookkeeping this launcher does not keep yet (an instance
+  does not remember the project and version `crate::install` wrote it from), and it
+  stays the plan's open item, named in the module doc and in the plan.
+
+  **The id moved again, and this time it is this entry that moved.** The work
+  order named this slice G127, and it was written and verified as that number
+  before its push -- but G126's own commit, which landed first, reserves G127 for
+  the Forge-shaped loaders' routing flip and says so in its entry. The mirror's
+  tip owns the number, so this installation tab is G128 and G127 is left for that
+  flip. Nothing about the slice changed with the number: the plan's
+  `GATE_OWNERS` entry, the stage-3 open list and this ledger line were the three
+  places it appeared.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

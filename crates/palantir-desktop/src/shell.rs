@@ -412,6 +412,14 @@ pub struct Shell {
     /// A chip was pressed and the loader-build request has not left yet. Taken by
     /// `handle` for [`Shell::versions_requested`]'s reason.
     loader_builds_requested: bool,
+    /// The instance-settings modal's installation tab has asked for Mojang's
+    /// version list. A second flag rather than the dialog's own, because the two
+    /// reads feed two states and a shared reply would have the second answer
+    /// overwrite the first.
+    installation_versions_requested: bool,
+    /// The same for one platform's builds at one game version: the pair *is* the
+    /// question, so it travels here rather than being read off the form again.
+    installation_builds_requested: Option<(crate::catalog::LoaderKind, String)>,
     /// The launches in flight, one per instance, oldest first.
     ///
     /// A list rather than the single run this shell used to hold: the reference
@@ -781,6 +789,20 @@ pub enum Modal {
     InstanceSettings(Box<crate::instance_settings::State>),
 }
 
+/// What the instance-settings modal's installation tab still wants read.
+///
+/// A private vocabulary rather than a shell field per question: [`Shell::act`]
+/// decides which of these the form is owed and [`Shell::update`] turns them into
+/// commands, which is the split the creation dialog's own two requests already
+/// use.
+enum InstallationNeed {
+    /// Mojang's version list: the tab's game-version picker is empty without it.
+    Versions,
+    /// One platform's builds at one game version, as a pair because a pair is
+    /// what the answer is about.
+    Builds(crate::catalog::LoaderKind, String),
+}
+
 /// Everything the shell can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -883,6 +905,21 @@ pub enum Message {
     StopRun(String),
     /// The instance-settings modal's own controls, and its save.
     InstanceSettings(crate::instance_settings::Message),
+    /// Mojang's version list, read for the instance-settings modal's
+    /// installation tab.
+    InstallationVersions(Result<store::VersionList, String>),
+    /// One platform's builds at one game version, read for the same tab. The
+    /// question travels back with the answer, for [`Message::LoaderBuilds`]'s
+    /// reason: the reader can move to another version while it is out.
+    InstallationBuilds {
+        /// The platform the builds were asked about.
+        loader: crate::catalog::LoaderKind,
+        /// The game version they were asked about.
+        game: String,
+        /// The builds the loader's own service published, or why it could not
+        /// be read.
+        builds: Result<Vec<store::LoaderBuild>, String>,
+    },
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
     /// The name in the creation dialog changed.
@@ -988,6 +1025,8 @@ impl Shell {
             loader_builds: Load::Idle,
             loader_builds_for: None,
             loader_builds_requested: false,
+            installation_versions_requested: false,
+            installation_builds_requested: None,
             runs: Vec::new(),
             next_run_id: 0,
             accounts: None,
@@ -1338,6 +1377,20 @@ impl Shell {
         if std::mem::take(&mut self.loader_builds_requested) {
             return self.loader_builds_command();
         }
+        // The instance-settings modal's two reads, batched because they are owed
+        // at once and neither waits on the other: the version list is Mojang's and
+        // the builds are the loader's, so a modal opened on the installation tab
+        // asks both and draws whichever lands first.
+        let mut installation = Vec::new();
+        if std::mem::take(&mut self.installation_versions_requested) {
+            installation.push(self.installation_versions_command());
+        }
+        if let Some((loader, game)) = self.installation_builds_requested.take() {
+            installation.push(self.installation_builds_command(loader, &game));
+        }
+        if !installation.is_empty() {
+            return iced::Command::batch(installation);
+        }
         // Nothing was asked for, but a page may be on screen that has never
         // been asked anything -- a tab that was just switched, or the page a
         // window opened on. Both are the same answer: ask on its behalf.
@@ -1552,6 +1605,41 @@ impl Shell {
                 }
                 None
             }
+            Message::InstallationVersions(result) => {
+                // The installation tab's own read, landed on the modal rather than
+                // on the dialog: the two version lists are read by different
+                // readers and drawn in different places, so one reply message
+                // would have the second answer erase the first.
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    // A list with nothing in it is `Empty`, for
+                    // [`Shell::versions`]'s reason.
+                    state.versions = match result {
+                        Ok(list) if list.versions.is_empty() => Load::Empty,
+                        // The list the picker draws is the versions alone: the
+                        // dialog's recommendation (`latest_release`) is the
+                        // creation flow's question and not this tab's.
+                        Ok(list) => Load::Ready(list.versions),
+                        Err(reason) => Load::Failed(reason),
+                    };
+                }
+                self.installation_needs();
+                None
+            }
+            Message::InstallationBuilds { loader, game, builds } => {
+                // The answer is dropped unless it is the answer to the question
+                // in force: see [`crate::instance_settings::State::builds_for`].
+                if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                    if state.builds_for.as_ref() == Some(&(loader, game)) {
+                        state.builds = match builds {
+                            Ok(builds) if builds.is_empty() => Load::Empty,
+                            Ok(builds) => Load::Ready(builds),
+                            Err(reason) => Load::Failed(reason),
+                        };
+                    }
+                }
+                self.installation_needs();
+                None
+            }
             Message::Imported(result) => {
                 self.importing = false;
                 match result {
@@ -1695,12 +1783,23 @@ impl Shell {
             }
             Message::InstanceSettings(message) => {
                 // Saving is the one message here the form cannot act on: the write
-                // is the store's, and the store is the shell's.
-                if let crate::instance_settings::Message::Save = message {
-                    self.save_instance_settings();
-                } else if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
-                    state.update(message);
+                // is the store's, and the store is the shell's -- and there are
+                // two of them, because the two tabs write different files.
+                match message {
+                    crate::instance_settings::Message::Save => self.save_instance_settings(),
+                    crate::instance_settings::Message::SaveInstallation => {
+                        self.save_instance_installation();
+                    }
+                    other => {
+                        if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
+                            state.update(other);
+                        }
+                    }
                 }
+                // And whatever the form is still owed is raised here rather than
+                // when the modal opened: a platform or a game version can change
+                // while it is up, and each change is a new question.
+                self.installation_needs();
                 None
             }
             Message::Sidebar(shown) => {
@@ -1844,11 +1943,40 @@ impl Shell {
             .ready()
             .map(|card| card.name.clone())
             .unwrap_or_else(|| id.to_string());
-        let state = match self.store.instance_settings(id) {
-            Ok(settings) => crate::instance_settings::State::new(id.to_string(), name, &settings),
-            Err(problem) => crate::instance_settings::State::failed(id.to_string(), name, problem),
+        // Both halves are read here: the modal's two tabs are two files, and a
+        // form that opened on one and had to read the other when its tab was
+        // pressed would flash an empty installation for a frame. Two small reads,
+        // which is why they are synchronous ([`crate::store::Store::instance_settings`]).
+        let state = match (
+            self.store.instance_settings(id),
+            self.store.instance_installation(id),
+        ) {
+            (Ok(settings), Ok(installation)) => crate::instance_settings::State::new(
+                id.to_string(),
+                name,
+                &settings,
+                &installation,
+            ),
+            // Either failure draws the sentence alone: a form with values under it
+            // would be this launcher claiming a file it never read.
+            (Err(problem), _) | (_, Err(problem)) => {
+                crate::instance_settings::State::failed(id.to_string(), name, problem)
+            }
         };
         self.modal = Some(Modal::InstanceSettings(Box::new(state)));
+    }
+
+    /// Write what the installation tab holds, and close the modal when the write
+    /// lands. [`Shell::save_instance_settings`]'s shape over the other file, and
+    /// its refusals are the store's own ([`crate::store::Store::save_instance_installation`]).
+    fn save_instance_installation(&mut self) {
+        let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
+            return;
+        };
+        match self.store.save_instance_installation(&state.id, &state.installation()) {
+            Ok(()) => self.modal = None,
+            Err(problem) => state.error = Some(problem),
+        }
     }
 
     /// Write what the instance-settings form holds, and close it when the write
@@ -2095,6 +2223,71 @@ impl Shell {
             crate::store::off_thread(move || store.loader_builds(loader, &game)),
             move |builds| Message::LoaderBuilds { loader, game: asked.clone(), builds },
         )
+    }
+
+    /// Ask Mojang which versions exist, for the instance-settings modal.
+    ///
+    /// [`Shell::versions_command`]'s twin, and deliberately a second method: the
+    /// two reads feed different states, and one reply message would have the
+    /// second answer overwrite the first.
+    fn installation_versions_command(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.versions()),
+            Message::InstallationVersions,
+        )
+    }
+
+    /// Ask the loader's own service which builds it published for one game
+    /// version, for the instance-settings modal.
+    ///
+    /// The pair travels back with the answer, for [`Message::InstallationBuilds`]'s
+    /// reason: the reader can move to another platform or game version while the
+    /// request is out.
+    fn installation_builds_command(
+        &self,
+        loader: crate::catalog::LoaderKind,
+        game: &str,
+    ) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let asked = game.to_string();
+        let back = asked.clone();
+        iced::Command::perform(
+            crate::store::off_thread(move || store.loader_builds(loader, &asked)),
+            move |builds| Message::InstallationBuilds { loader, game: back.clone(), builds },
+        )
+    }
+
+    /// Raise whatever the instance-settings modal's installation tab is owed.
+    ///
+    /// Called after every message that form handles rather than once when it
+    /// opens, because a platform or game-version change makes a new question. The
+    /// form answers what it is on ([`crate::instance_settings::State::needs_builds`])
+    /// and the pair is written into it here, so the next frame cannot ask the
+    /// same question twice while the answer is still out.
+    fn installation_needs(&mut self) {
+        let need = match &mut self.modal {
+            Some(Modal::InstanceSettings(state)) => {
+                if state.needs_versions() {
+                    state.versions = Load::Loading;
+                    Some(InstallationNeed::Versions)
+                } else if let Some((loader, game)) = state.needs_builds() {
+                    state.builds = Load::Loading;
+                    state.builds_for = Some((loader, game.clone()));
+                    Some(InstallationNeed::Builds(loader, game))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        match need {
+            Some(InstallationNeed::Versions) => self.installation_versions_requested = true,
+            Some(InstallationNeed::Builds(loader, game)) => {
+                self.installation_builds_requested = Some((loader, game));
+            }
+            None => {}
+        }
     }
 
     /// The version the picker is on: what the user chose, or Mojang's own latest
@@ -8282,6 +8475,68 @@ mod tests {
             !shell.store.instance_settings("atm10").expect("read back").override_memory,
             "nothing was written"
         );
+        drop(shell.render());
+    }
+
+    #[test]
+    fn the_installation_tab_writes_the_platform_and_the_versions_it_holds() {
+        // The second half's whole path, through the same gear the first half's
+        // test opens: the form is switched to Installation, a platform, a game
+        // version and a build are chosen, and Save writes the profile a launch
+        // resolves. The reads the tab asks for are commands, and this shell drops
+        // them the way `press` drops every command -- what this test is about is
+        // the write, and the store's own tests are where the reads are proven.
+        let mut shell = shell_with_instance("installation-save");
+        press(&mut shell, Message::Go("/instance/atm10".into()));
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Instance(instance::Message::Settings)),
+        );
+        let Some(Modal::InstanceSettings(state)) = &shell.modal else {
+            panic!("the gear opens the instance-settings modal");
+        };
+        assert_eq!(
+            (state.platform, state.game_version.as_str(), state.loader_build.as_str()),
+            (crate::catalog::LoaderKind::Vanilla, "1.21.4", ""),
+            "the installation half opens on what the profile says"
+        );
+
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Tab(
+                crate::instance_settings::Tab::Installation,
+            )),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Platform(
+                crate::catalog::LoaderKind::Quilt,
+            )),
+        );
+        // The game version first: a change to it clears the build chosen for the
+        // old one, so the build is picked after it, the way a reader who really
+        // means both would.
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::GameVersion(
+                "1.21.1".to_string(),
+            )),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::LoaderBuild(
+                "0.9.2".to_string(),
+            )),
+        );
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::SaveInstallation),
+        );
+        assert!(shell.modal.is_none(), "a landed save closes the modal");
+        let written = shell.store.instance_installation("atm10").expect("read back");
+        assert_eq!(written.platform, crate::catalog::LoaderKind::Quilt);
+        assert_eq!(written.game_version, "1.21.1");
+        assert_eq!(written.loader_build, "0.9.2");
         drop(shell.render());
     }
 }
