@@ -1595,3 +1595,25 @@ What this section does not claim: no capture of this launcher's window was taken
 above is read from the user's own recordings and the vendored reference, and the
 spacing item is the one that cannot be settled by eye at all. A fresh pair of
 recordings after this change is what shows the glide on screen.
+
+### Where the reference keeps each of those
+
+Every item above is in the vendored pin (`8966b5e2`, per `UPSTREAM.md`), so none
+of it needs a newer copy of the reference -- it needs the port. The files, so the
+next slice can start from one:
+
+* **Home as a library grid**: `app-frontend/src/pages/Index.vue`, which is
+  `ui/WelcomeScreen.vue` until an instance exists and `ui/library/index.vue`
+  afterwards. The heading, the toolbar and the tiles are all in that directory:
+  `library/library-toolbar/index.vue` for the row, `sort-menu.vue` for *Last
+  played* and *Custom group*, `filter-menu.vue` for the filter icon and *Add
+  filter*, `library/instance-group/` for a group's own row, and
+  `library/LibrarySelectionActionBar.vue` for what a selection does.
+* **The *Jump in* strip**: `ui/world/RecentWorldsList.vue`.
+* ***Getting started***: `ui/onboarding-checklist/index.vue`.
+* ***Playing as*** and the *Upgrade to Modrinth+* banner: `App.vue`'s right
+  panel, which is also where the promo card's host is named.
+* ***Hide already installed*** and the *Category* list: `pages/Browse.vue`.
+* **The loading skeleton**: `ui/library/instance-group/` and the Browse results
+  list, both of which draw their placeholders from the same card shape the real
+  row uses.
