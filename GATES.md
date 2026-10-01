@@ -7435,6 +7435,16 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   becomes its alt text. Both are the same class as the tab's own `Gallery` before
   its icons landed, and both are one slice each.
 
+  **The runner agrees with this machine.** Run `36838512236` on `55d9f8c` is all
+  five jobs, green in 7m45s: `Lint` 2m6s, `Test workspace` 2m35s at 1133 passed /
+  0 failed and 19 ignored (177 + 8 + 651 + 4 + 33 + 260, the desktop crate's 651
+  being this machine's own count to the test), the live suite 19 passed / 0 failed
+  in 144.41s, and both Windows exes staged and read back -- msvc 14,005,248 B and
+  gnu 14,281,216 B, which is 23,040 B and 24,064 B more than the run before them.
+  That last number is the shape of this fix: the renderer is code, and the glyphs
+  a Chinese page draws are the machine's own fonts, so nothing CJK- sized came
+  into the binary.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
