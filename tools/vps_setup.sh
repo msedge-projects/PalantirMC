@@ -3,11 +3,14 @@
 # screen, the tools that read it, and the reference client to compare against.
 #
 # Why a script rather than a list of commands in a document: the list is long,
-# three of its entries are non-obvious, and a machine that is set up from prose is
+# four of its entries are non-obvious, and a machine that is set up from prose is
 # a machine nobody can set up twice. The non-obvious ones are named where they are
 # installed -- `libxkbcommon-x11-dev` is what makes an iced window open at all,
 # `openbox` is what makes an undecorated one map when there is no desktop to place
-# it, and `x11-utils` is what gives `xshot.py` the geometry it captures.
+# it, `x11-utils` is what gives `xshot.py` the geometry it captures, and
+# `libssl-dev` is what `openssl-sys` links on Linux: the workspace's TLS is
+# `native-tls`, which is SChannel on Windows and OpenSSL here, so without the
+# headers the first `cargo test` dies in a build script rather than in code.
 #
 # Run it with `bash tools/vps_setup.sh` on the machine being set up. It is
 # idempotent: apt and rustup both are, the reference's package is reinstalled at
@@ -40,6 +43,7 @@ say "packages"
 as_root apt-get update -qq
 as_root apt-get install -y --no-install-recommends \
   build-essential pkg-config cmake curl git ca-certificates python3 unzip \
+  libssl-dev \
   libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libxcb1-dev libxcb-shm0-dev \
   libxcb-render0-dev libxcb-xfixes0-dev libwayland-dev libfontconfig1-dev \
   libfreetype-dev \
