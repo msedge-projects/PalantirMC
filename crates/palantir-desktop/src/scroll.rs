@@ -9,25 +9,35 @@
 //! wheel, and lets the shell own the offset. The shell then eases toward a
 //! target, and only asks for frames while something is still moving.
 //!
-//! The tween is a function of **time**, and whether to have one at all is a
-//! function of **this machine**. Both matter, and the second is the one that
-//! took measuring:
+//! The tween is a function of **time**, and the deadline is the whole of the
+//! policy:
 //!
 //! * A frame is not free. iced rebuilds the interface for every message it
 //!   receives, rasterises the window and blits it, and with no usable GPU the
 //!   rasteriser does that on the CPU. A gesture therefore costs one frame per
-//!   frame of animation, so animating at a rate the machine cannot draw buys
-//!   nothing and costs a pegged core.
+//!   frame of animation, so the number of frames a gesture draws is the thing
+//!   to bound.
 //! * [`DURATION`] is a deadline rather than a frame count, so a machine that
 //!   answers slowly draws fewer, larger steps instead of a longer animation.
-//!   After the deadline the gesture is over, whatever else happened.
-//! * [`SMOOTH_FRAME`] is where animating stops being worth it. A machine whose
-//!   frames are slower than that is not asked to glide at all: the offset moves
-//!   inside the frame the wheel event already paid for. That is both cheaper
-//!   and *less* laggy than an animation drawn at 14 frames a second, which is
-//!   what the fixed frame count produced on the machine this was measured on —
-//!   16 ms per tick against a measured 69 ms frame: eleven frames, three
-//!   quarters of a second of one core, to show a single wheel notch.
+//!   After the deadline the gesture is over, whatever else happened -- a machine
+//!   slow enough to draw two steps gets two steps, not a slideshow.
+//!
+//! An earlier revision went further and *classified* the machine, taking the
+//! glide away from one whose frames were slower than 24 ms. It was removed after
+//! the reference's own scrolling was measured frame by frame (`GATES.md` G140):
+//! the official client glides a wheel over two to six frames at ~30 fps, while
+//! ours arrived in a single frame, 14 wheel events out of 14 -- and the
+//! classifier is what produced that, because 24 ms is faster than both the rate
+//! the reference draws at (~33 ms) and the rate this box's software rasteriser
+//! was profiled at (69 ms). Two frames in a row above the threshold set the
+//! cost, the cost was read only when a glide *started*, and a demoted machine
+//! started none -- so no frame ran again to measure it, and the demotion lasted
+//! for the session. The interval between two gestures was the same mistake seen
+//! from the other side: the frame timer exists only while something moves, so a
+//! gesture's first tick was measured against the previous gesture's last tick,
+//! which is the reader's reading time rather than a frame. `tick` measures
+//! nothing now, and the deadline bounds what a slow machine pays: fewer, larger
+//! steps, never more of them.
 //!
 //! Deliberate limits, because each one is a way this can go wrong:
 //!
@@ -37,8 +47,7 @@
 //!   `Scrollable` — it sits inside one.
 //! * **No timer while nothing moves.** The animation is a subscription that
 //!   exists only while [`ScrollAnim::animating`] is true, so an idle window
-//!   does no work at all — and a machine classified as too slow never starts
-//!   one.
+//!   does no work at all.
 //! * **Bounded, not physical.** Easing is against a deadline, so a gesture
 //!   cannot settle forever and cannot grow with the distance it covers.
 
@@ -142,35 +151,11 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// be, and on a slow renderer that turns a scroll into a slideshow.
 pub const DURATION: Duration = Duration::from_millis(160);
 
-/// The frame interval above which this machine is not asked to glide.
-///
-/// 24 ms is about 40 frames a second. Below that an animation reads as motion;
-/// above it the step between two frames is most of the likely distance, so the
-/// eye sees a jump that cost three frames to draw. The policy is therefore not
-/// "animate more cheaply" but "do not animate here": the offset moves in the
-/// frame the wheel event already paid for, which is both the cheapest and the
-/// *least* laggy answer on a machine that cannot keep up.
-///
-/// This is measured rather than assumed — see [`ScrollAnim::tick`] — so a
-/// machine with a working GPU gets the glide and a software-rasterised one gets
-/// the instant step, from the same binary and with no setting to get wrong.
-pub const SMOOTH_FRAME: Duration = Duration::from_millis(24);
-
 /// Below this many pixels from the target, the animation is over.
 ///
 /// Without a floor, a re-clamped target would leave the page a fraction of a
 /// pixel from where it belongs and keep asking for frames.
 pub const SETTLED: f32 = 0.5;
-
-/// How many consecutive slow frames it takes to stop animating on a machine.
-///
-/// The two directions of this measurement are not equally costly, so they are
-/// not treated equally. Believing a fast machine is slow turns the glide off
-/// for the rest of the session; believing a slow one is fast costs a few wasted
-/// frames, and the next gesture corrects it. So one fast frame is enough to
-/// resume animating, while a single hitch -- a page fault, another window
-/// painting, a background scan -- is not enough to stop it.
-const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 
 /// Where a page's scroll position is, and where it is going.
 ///
@@ -188,15 +173,6 @@ pub struct ScrollAnim {
     pub view_height: f32,
     /// The glide in progress, if there is one.
     glide: Option<Glide>,
-    /// When the previous frame was handled, for measuring frame cost.
-    last_tick: Option<Instant>,
-    /// The frame interval this machine was last measured at: a fast one the
-    /// moment it is seen, a slow one only after [`SLOW_FRAMES_TO_DEMOTE`] of
-    /// them in a row. `None` until a glide has run.
-    frame_cost: Option<Duration>,
-    /// How many consecutive frames have now been seen at or above
-    /// [`SMOOTH_FRAME`].
-    slow_frames: u8,
 }
 
 /// One glide: where it started, when, and the deadline it must meet.
@@ -255,8 +231,10 @@ impl ScrollAnim {
         self.target = self.clamp(self.target - notches * WHEEL_PIXELS_PER_NOTCH);
     }
 
-    /// Start easing toward the target — or move there now, if this machine was
-    /// measured too slow to draw the easing.
+    /// Start easing toward the target.
+    ///
+    /// Every machine gets the same gesture: the deadline is what bounds the
+    /// cost, so a slow one draws fewer steps of it rather than none.
     fn begin(&mut self, now: Instant) {
         self.glide = None;
         if !self.animating() {
@@ -264,28 +242,7 @@ impl ScrollAnim {
             // must not start a timer for a gesture that moves nothing.
             return;
         }
-        let duration = Self::glide_duration(self.frame_cost);
-        if duration.is_zero() {
-            // A glide here would be three frames of work to show one step at
-            // 14 fps. Arriving inside the frame the wheel already paid for is
-            // both cheaper and lower-latency than animating it.
-            self.offset = self.target;
-            return;
-        }
-        self.glide = Some(Glide { from: self.offset, began: now, duration });
-    }
-
-    /// How long a glide may take on a machine whose frames cost `cost`.
-    ///
-    /// Pure, so the policy can be exercised without a clock. `None` — nothing
-    /// measured yet — is the optimistic answer, and deliberately so: the first
-    /// gesture of a session glides, and measuring *it* is what every gesture
-    /// afterwards is answered with.
-    pub fn glide_duration(cost: Option<Duration>) -> Duration {
-        match cost {
-            Some(cost) if cost >= SMOOTH_FRAME => Duration::ZERO,
-            _ => DURATION,
-        }
+        self.glide = Some(Glide { from: self.offset, began: now, duration: DURATION });
     }
 
     /// Advance to `now` and report whether there is more to animate.
@@ -298,17 +255,15 @@ impl ScrollAnim {
     /// against a 69 ms frame it asked for eleven frames and took three quarters
     /// of a second to move one notch.
     ///
-    /// The interval between calls is also how the machine's cost is learned,
-    /// which is why this is the only place that has to know.
+    /// What this deliberately does *not* measure is the interval between calls.
+    /// The frame timer exists only while something is moving, so the first tick
+    /// of a gesture is separated from the last tick of the one before it by
+    /// however long the reader spent reading -- seconds, usually -- and a policy
+    /// that read that gap as a frame cost would classify the machine by the
+    /// reader's browsing.
     pub fn tick(&mut self, now: Instant) -> bool {
-        if let Some(last) = self.last_tick {
-            self.observe_cost(now.saturating_duration_since(last));
-        }
-        self.last_tick = Some(now);
-
         let Some(glide) = self.glide else {
-            // No glide: either nothing was moving, or the machine was measured
-            // too slow to have one and `begin` already arrived.
+            // No glide: nothing was moving, and `begin` found nothing to do.
             self.offset = self.target;
             return false;
         };
@@ -328,38 +283,17 @@ impl ScrollAnim {
         true
     }
 
-    /// Fold one observed frame interval into the machine's classification.
-    ///
-    /// Asymmetric on purpose, and the asymmetry is the whole design: see
-    /// [`SLOW_FRAMES_TO_DEMOTE`]. A frame this machine can animate in is its
-    /// answer immediately, and two slow frames in a row are needed to take the
-    /// animation away -- so a hitch neither stops the glide nor, once the
-    /// machine really has become slow, leaves it running for long.
-    fn observe_cost(&mut self, interval: Duration) {
-        if interval < SMOOTH_FRAME {
-            self.frame_cost = Some(interval);
-            self.slow_frames = 0;
-            return;
-        }
-        self.slow_frames = self.slow_frames.saturating_add(1);
-        if self.slow_frames >= SLOW_FRAMES_TO_DEMOTE {
-            self.frame_cost = Some(interval);
-        }
-    }
-
     /// Adopt an offset that came from somewhere else — the scrollbar, a
     /// keyboard scroll, or `scroll_to` — without fighting it.
     ///
     /// Both the offset and the target move, so the next frame does not drag the
     /// content back to where the wheel last asked for it. The glide is dropped
-    /// for the same reason, and the frame clock with it: the gap between a
-    /// drag and the next wheel is not a frame interval and must not be measured
-    /// as one.
+    /// for the same reason: the hand is somewhere else now, and a tween that
+    /// kept going would finish a gesture the reader has already overridden.
     pub fn resync(&mut self, offset: f32) {
         self.offset = offset;
         self.target = offset;
         self.glide = None;
-        self.last_tick = None;
     }
 
     /// Record the scrollable's geometry.
@@ -376,10 +310,8 @@ impl ScrollAnim {
 
     /// Reset for a page the user has just opened.
     ///
-    /// Position and geometry belong to the new page; the measured frame cost
-    /// does not, because it belongs to the machine. Re-learning it per page
-    /// would mean paying for one glide the machine cannot draw on every
-    /// navigation, which is exactly the cost this policy exists to remove.
+    /// Position and geometry belong to the new page; there is nothing else to
+    /// carry across, because nothing about the machine is measured any more.
     ///
     /// Nothing in the shell calls it yet: a region keeps iced's own offset across
     /// a navigation, so resetting the policy alone would put the two sides at odds.
@@ -391,11 +323,6 @@ impl ScrollAnim {
         self.content_height = 0.0;
         self.view_height = 0.0;
         self.glide = None;
-        self.last_tick = None;
-        self.slow_frames = 0;
-        // `frame_cost` is deliberately left alone: it describes the machine, so
-        // re-learning it once per page would mean paying for one glide the
-        // machine cannot draw on every navigation.
     }
 }
 
@@ -446,9 +373,8 @@ impl Region {
 impl Glides {
     /// Take a wheel on `name`, and answer with the command that moves it.
     ///
-    /// One command, not a stream: either this machine is fast enough to glide and
-    /// this is the command that starts it, or it was measured too slow and this is
-    /// the whole gesture (see [`ScrollAnim::glide_duration`]).
+    /// One command, not a stream: the wheel starts the tween and answers with the
+    /// offset it starts from, and every frame after this one is [`Glides::tick`]'s.
     pub fn wheel<Message: 'static>(
         &mut self,
         name: &'static str,
@@ -1079,87 +1005,81 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_budget_decides_whether_there_is_an_animation() {
-        // Nothing measured yet: the optimistic answer, so the first gesture of a
-        // session glides -- and is what measures the machine.
-        assert_eq!(ScrollAnim::glide_duration(None), DURATION);
-        // A machine holding 60fps, or just inside the threshold: the full glide.
-        assert_eq!(ScrollAnim::glide_duration(Some(FRAME)), DURATION);
+    fn a_gap_between_two_gestures_is_not_a_frame() {
+        // The frame timer exists only while something is moving, so the first
+        // tick after a gesture begins is separated from the last tick of the one
+        // before it by however long the reader spent reading -- seconds, not
+        // milliseconds. An earlier revision folded that gap into a frame-cost
+        // measurement, which made it a "frame" of four seconds: the probe was
+        // wrong about what it was measuring, whatever it did with the number.
+        // What this asserts is that the number is not taken at all.
+        let mut anim = page(4000.0, 600.0);
+        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
+        assert!(anim.animating(), "the first gesture of a session must glide");
+        let first = frames_to_settle(&mut anim);
+        assert!(first > 1, "it glided rather than teleporting: {first} frames");
+        // A minute of reading later, the same wheel on the same page.
+        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, anim.target), Instant::now());
+        assert!(anim.animating(), "the gap between two gestures is not a measurement");
         assert_eq!(
-            ScrollAnim::glide_duration(Some(SMOOTH_FRAME - Duration::from_millis(1))),
-            DURATION
+            frames_to_settle(&mut anim),
+            first,
+            "the second gesture must glide exactly like the first"
         );
-        // At the threshold and beyond it: no animation at all.
-        assert_eq!(ScrollAnim::glide_duration(Some(SMOOTH_FRAME)), Duration::ZERO);
-        assert_eq!(
-            ScrollAnim::glide_duration(Some(Duration::from_millis(69))),
-            Duration::ZERO,
-            "the interval this shell was profiled at must not animate"
-        );
-        assert_eq!(ScrollAnim::glide_duration(Some(Duration::from_millis(500))), Duration::ZERO);
     }
 
     #[test]
-    fn a_machine_too_slow_to_animate_moves_instead_of_gliding() {
+    fn a_slow_machine_glides_too_and_lands_on_the_deadline() {
+        // The machine the removed demotion existed for: a software rasteriser
+        // measured at 69 ms a frame, above the 24 ms the probe called slow, so
+        // two frames took its glide away for the rest of the session. What
+        // bounds it instead is the deadline -- three steps of 160 ms rather than
+        // eleven frames over three quarters of a second -- and three large steps
+        // is what the reference draws at ~30 fps (G140).
         let mut anim = page(4000.0, 600.0);
-        // Two measured frames at 69ms: about 14 frames a second, which is this
-        // machine's software rasteriser. Two rather than one because a single
-        // slow frame is not yet evidence -- see `SLOW_FRAMES_TO_DEMOTE` -- and
-        // the point of this test is the machine that has been classified, not
-        // the frame that classified it.
-        anim.observe_cost(Duration::from_millis(69));
-        anim.observe_cost(Duration::from_millis(69));
-        anim.wheel(
-            wheel_at(-1.0, 4000.0, 600.0, 0.0),
-            Instant::now(),
-        );
+        let began = Instant::now();
+        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), began);
+        assert!(anim.animating(), "a slow machine is still asked to glide");
+        let (mut frames, mut now) = (0, began);
+        while anim.tick(now) {
+            frames += 1;
+            now += Duration::from_millis(69);
+        }
+        assert!((2..=4).contains(&frames), "it moved in steps: {frames} of them");
+        assert_eq!(anim.offset, anim.target, "and still landed on the target");
+        assert!(!anim.animating());
+    }
 
-        // The target moved and so did the offset. There is no animation left to
-        // interrupt, so the frame timer is never started and the gesture costs
-        // exactly the frame the wheel event already paid for.
-        assert_eq!(anim.target, WHEEL_PIXELS_PER_NOTCH);
+    #[test]
+    fn a_frame_that_arrives_late_lands_the_gesture_rather_than_extending_it() {
+        // The other half of a deadline: a machine that stalls mid-gesture does
+        // not get a longer animation, it gets the end of this one. There is also
+        // nothing left for the stall to be re-learned as.
+        let mut anim = page(4000.0, 600.0);
+        let began = Instant::now();
+        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), began);
+        assert!(anim.tick(began), "the first frame has the whole glide ahead of it");
+        assert!(
+            !anim.tick(began + Duration::from_secs(2)),
+            "two seconds later the gesture is over"
+        );
         assert_eq!(anim.offset, anim.target);
-        assert!(!anim.animating(), "nothing to animate means no timer at all");
+        assert!(!anim.animating());
     }
 
     #[test]
-    fn one_hitch_does_not_declare_a_fast_machine_slow() {
+    fn a_page_opened_later_starts_at_its_top_and_still_glides() {
         let mut anim = page(4000.0, 600.0);
-        anim.observe_cost(Duration::from_millis(16));
-        anim.observe_cost(Duration::from_millis(200));
-        assert_eq!(
-            anim.frame_cost,
-            Some(Duration::from_millis(16)),
-            "a single bad frame must not take the glide away"
-        );
-        // And the other direction, which is the same measurement read from the
-        // other side: a machine that is slow every frame is classified as slow
-        // within the gesture that revealed it.
-        let mut slow = page(4000.0, 600.0);
-        slow.observe_cost(Duration::from_millis(69));
-        assert_eq!(
-            slow.frame_cost, None,
-            "the first slow frame is still only a suspicion"
-        );
-        slow.observe_cost(Duration::from_millis(69));
-        assert_eq!(slow.frame_cost, Some(Duration::from_millis(69)));
-        assert_eq!(ScrollAnim::glide_duration(slow.frame_cost), Duration::ZERO);
-    }
-
-    #[test]
-    fn a_page_opened_later_remembers_what_the_machine_costs() {
-        let mut anim = page(4000.0, 600.0);
-        anim.observe_cost(Duration::from_millis(69));
-        anim.observe_cost(Duration::from_millis(69));
         anim.scroll_notches(-4.0);
         anim.restart();
         // The newly opened page starts at its top...
         assert_eq!(anim.offset, 0.0);
         assert_eq!(anim.target, 0.0);
         assert!(!anim.animating());
-        // ...but the machine is still the machine, so it does not pay for
-        // re-learning that with one more glide it cannot draw.
-        assert_eq!(anim.frame_cost, Some(Duration::from_millis(69)));
+        // ...and glides like every other one. Nothing about the machine is
+        // carried across a navigation, because nothing about it is measured.
+        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
+        assert!(frames_to_settle(&mut anim) > 1, "a fresh page must glide too");
     }
 
     #[test]

@@ -7686,6 +7686,85 @@ $ python tools/progress.py --check
   that were already here; what this slice added is the wire that lets it see a
   wheel, and the six tests above are the wire's.
 
+- [x] G140: a gesture glides on every machine, and the probe that took the glide
+  away is gone -- the reference's own recording, measured frame by frame, turned its
+  wheel over two to six frames at a time while this launcher's arrived in one
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: 662 passed / 0 failed in the desktop crate's own run -- the same 662 as
+          G139, four tests swapped for four -- this slice's four among them: the gap
+          between two gestures, the 69 ms machine, a frame that arrives late, and a
+          page opened later -- with `tests/native.rs`'s four beside it
+          clippy exits 0
+          progress exits 0, with G140 attributed to stage 3
+  EVIDENCE: the transcripts below, and the measurement and the correction after them.
+
+```text
+$ cargo test -p palantir-desktop --locked -- --nocapture
+test scroll::tests::a_gap_between_two_gestures_is_not_a_frame ... ok
+test scroll::tests::a_slow_machine_glides_too_and_lands_on_the_deadline ... ok
+test scroll::tests::a_frame_that_arrives_late_lands_the_gesture_rather_than_extending_it ... ok
+test scroll::tests::a_page_opened_later_starts_at_its_top_and_still_glides ... ok
+test result: ok. 662 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 78.08s
+     Running tests\native.rs
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.07s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+(exits 0)
+
+$ python tools/progress.py --check
+(exits 0)
+```
+
+  **Every machine gets the glide.** What G139 built is unchanged -- `region`, the
+  wheel guard, one `Glides` table, one frame clock -- and what changed is what the
+  policy does with that clock's ticks. `begin` starts a `DURATION` glide whatever
+  the machine; `tick` advances it and measures nothing; and the probe that
+  classified the frame rate is gone: `SMOOTH_FRAME` (24 ms),
+  `SLOW_FRAMES_TO_DEMOTE`, `frame_cost`, `slow_frames`, `observe_cost`, the
+  zero-duration branch of `begin`, and `ScrollAnim::glide_duration`, which existed
+  only to read the probe's answer.
+
+  **Why, in numbers.** Three seconds of full frame rate around a wheel gesture
+  were taken from each recording, reduced to 320x180 gray frames, and correlated
+  row by row by `tools/scroll_lag.py` (the `ffmpeg` commands are in its
+  docstring). 179 transitions each, and the shapes are opposite. The reference:
+  25 moving (14%), mean 8.36 px while moving, motion runs of
+  `[2, 1, 4, 2, 1, 4, 6, 3, 1, 1]` frames, with intermediate offsets between the
+  frames of a run (`-10, -6, 0, -5, -2, -2, -3, -8, -4, -10`) -- one flick is one
+  eased movement. This launcher: 14 moving (8%), mean 8.50 px, and runs of
+  `[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]` -- every moving transition sits
+  alone between ten and twenty still frames, one wheel event and one teleport, at
+  whole offsets (23, 25, 11, 9, 14 px). The recording was made at 20:44, four
+  hours after `6fe6a38` (16:09) landed and after its build came out of CI, so the
+  wheel in it was the gliding wheel.
+
+  **Why the probe produced that.** 24 ms is 40 fps, and both rates that matter
+  are slower than it: the reference's display paints a frame in ~33 ms and this
+  box's software rasteriser was profiled at 69 ms a frame -- which `anim.rs`
+  said in prose until this slice, which is why that paragraph went with the
+  policy it described. Two consecutive ticks above the threshold set
+  `frame_cost`; `frame_cost` was consulted only when a glide *started*; and a
+  demoted machine started none, so no frame ever ran again to re-measure it.
+  The gap between two gestures was a second, independent way the probe saw
+  something that is not a frame: the frame timer exists only while something
+  moves, so a gesture's first tick was measured against the previous gesture's
+  last tick, which is the reader's reading time. Neither defect is replaced by
+  anything, because neither was needed: a tween against a deadline charges a slow
+  machine a bounded number of steps instead of asking it for a bounded number of
+  frames, and `a_slow_machine_glides_too_and_lands_on_the_deadline` is that claim
+  as three ticks of 69 ms landing exactly on the target.
+
+  **What this gate cannot say.** No capture of this launcher's own window was
+  taken -- `PrintWindow` returns a surface without the page in it (G135's note) --
+  so the *reference's* glide is a measurement of a recording while *this*
+  launcher's is asserted by the policy's own tests and the four above. The two
+  bursts are three seconds each, taken near each client's own wheel work rather
+  than on the same page, and both recordings predate this change: they are
+  evidence of the defect, not of the fix. Only a fresh recording shows the fix on
+  screen.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

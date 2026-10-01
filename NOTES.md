@@ -309,6 +309,17 @@ settle it.
 - `restart()` (used on navigation) keeps the measured cost and discards only the
   page's position, so the machine is not re-learned once per page.
 
+**Superseded (1 Oct, `GATES.md` G140).** The demotion above is gone, and the
+frame-by-frame measurement of the two recordings is why. The official client
+glides a wheel over two to six frames at ~30 fps; ours arrived in a single
+frame, on 14 wheel events out of 14 — and the classifier was itself the cause,
+because the frame timer exists only while something moves. The first tick of a
+gesture was measured against the last tick of the *previous* one, which is a gap
+of seconds, and two such gaps turned the glide off for the rest of the session.
+`SMOOTH_FRAME`, `SLOW_FRAMES_TO_DEMOTE`, `frame_cost`, `slow_frames` and
+`observe_cost` are removed; `begin` always starts a glide, and the 160 ms
+deadline bounds what any machine pays.
+
 `hero_tile` lost its 28 px glow shadow. iced's tiny-skia backend renders a
 `Shadow` by computing a per-pixel SDF and building a fresh premultiplied pixmap
 from it, uncached, on every frame the page paints -- tens of thousands of `sqrt`
@@ -1478,3 +1489,109 @@ green, clippy `--workspace --all-targets -D clippy::correctness` clean, and
 [35891316483](https://github.com/MSedgeMC/PalantirMC/actions/runs/35891316483)
 then carried it to `master` green in all five jobs: test workspace, lint, live
 services, and both Windows exes.
+
+## 31. The two recordings, and the scroll that teleported
+
+The report was two screen recordings of the same window -- this launcher at 20:44
+(41.0 s, 2458 frames) and the reference client at 20:41 (86.8 s, 5202 frames),
+both 1280x720 at ~60 fps -- with five complaints attached: laggy scrolling, no
+animations, wrong spacing, no tabs, "totally different". This is what the frames
+were asked, what they answered, and what came out of it. The first complaint is
+fixed; the other four are inventoried at the end of this section rather than
+answered, because each one is a slice and this was one.
+
+### The method, because "it feels laggy" is not a measurement
+
+1 fps stills from both (86 and 41), then three seconds at full frame rate over
+the part of each recording where the wheel is turned -- the reference's at 44 s,
+this launcher's at 19 s. Each burst frame became a 320x180 gray PGM, and
+`tools/scroll_lag.py` prints the per-transition vertical displacement from a
+row-mean profile and a +-40 px cross-correlation, so "gliding" and "teleporting"
+stop being adjectives:
+
+```
+$ python tools/scroll_lag.py <official burst> <palantir burst>
+== official (t = 44 s) ==
+moving frames: 25 (14%)  mean |d| while moving: 8.36px  max |d|: 33px
+gentle steps (<=6px): 13  large jumps (>=15px): 4
+motion runs (consecutive moving frames): [2, 1, 4, 2, 1, 4, 6, 3, 1, 1]
+== palantir (t = 19 s) ==
+moving frames: 14 (8%)  mean |d| while moving: 8.50px  max |d|: 25px
+gentle steps (<=6px): 7  large jumps (>=15px): 2
+motion runs (consecutive moving frames): [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+```
+
+Same number of transitions, same mean distance, opposite shapes. The reference
+moves for two to six frames at a time and the offsets between the frames of a run
+are intermediate (`-10, -6, 0, -5, -2, -2, -3, -8, -4, -10`): one flick is one
+eased movement. This launcher moves once and then not at all, fourteen times, at
+whole offsets (23, 25, 11, 9, 14 px): one wheel event, one teleport, ten to twenty
+still frames, and then the next.
+
+### What was wrong, and why the fix is a deletion
+
+The probe that decided whether to animate measured the interval between its own
+`tick` calls and demoted the machine when two in a row were 24 ms or slower. Both
+rates that matter are slower than that: the reference's display paints a frame in
+~33 ms, and this box's software rasteriser was profiled at 69 ms. Once
+`frame_cost` was set, `glide_duration` returned `Duration::ZERO`, `begin` moved
+the offset inside the wheel's own frame, `animating()` went false -- so no further
+frame ran, so nothing was ever re-measured, and the demotion held for the rest of
+the session. The gap between two gestures was read as a frame as well: the frame
+timer exists only while something moves, so a gesture's first tick was measured
+against the previous gesture's last tick, i.e. against however long the reader
+spent reading.
+
+Both defects live in the probe, so the probe is gone: `SMOOTH_FRAME`,
+`SLOW_FRAMES_TO_DEMOTE`, `frame_cost`, `slow_frames`, `observe_cost` and
+`glide_duration` were removed, `begin` always starts a `DURATION` glide, and
+`tick` measures nothing. The deadline was always enough -- a machine that draws
+two frames in 160 ms gets two steps, not an animation that runs longer -- so what
+the demotion bought was nothing and what it cost was every glide after the first.
+The four tests that asserted the demotion became four that assert what it
+prevented: a gap between gestures is not a frame, a 69 ms machine glides and
+lands on the deadline, a late frame ends the gesture instead of extending it, and
+a page opened later still glides. G140 is the ledger entry, and the recording's
+own numbers are above.
+
+### Still different, off the same two recordings
+
+Every item below is visible in a matched pair of stills; the two pairs read
+closely were the Discover page (18 s of ours against 41 s of the reference) and
+the reference's Home at 13 s against our Library at 11 s. None of it is fixed
+yet, and each is a slice rather than a line:
+
+* **Home is a library grid in the reference and a list here.** The reference's
+  Home has a collapsed *Jump in* section (the latest instance as a card, with an
+  *Installing...* pill and a kebab menu) above a *Library* heading, a toolbar of
+  search + *New group* + *New instance*, a *second* toolbar row (*Last played*,
+  *Custom group*, a filter icon, *Add filter*), and instance *tiles* with icon
+  art and a selection circle on hover. This launcher draws one flat list row per
+  instance with a play button and a *View instance* button.
+* **The right panel carries different sections.** On Home the reference shows
+  *Getting started*, *Playing as* (the account row with a chevron), a News feed
+  and a Modrinth Hosting promo card; on Discover it shows *Getting started*,
+  *Hide already installed* as a switch, a *Category* list with icons, and the
+  same promo. This launcher shows *Getting started* and News on both.
+* **Discover's sort row has two controls the reference does not draw**: a
+  *Filter results...* button and a "*Modpacks* • relevance" caption. The
+  reference's filtering is the panel's *Category* list.
+* **Loading states.** The reference draws skeleton result cards with a spinner
+  while a search is in flight; this launcher draws whatever was there before.
+* **Card art.** Our Discover thumbnails are empty rounded squares in that frame
+  where the reference's carry project art.
+* **The titlebar has one control too many**: our green launch arrow beside *No
+  instances running*, where the reference has the pill alone.
+* **Spacing and sizes are eyeballed, not measured.** Section padding, the
+  *Library* heading's size and the toolbar heights all read close but not equal.
+  §28's 189 transcribed tokens are the ruler for that pass, not a screenshot.
+* **Animations**: the reference also animates its skeletons, the *Jump in*
+  chevron, the card hover circle and the *Installing...* spinner. This launcher
+  has hover tweens (§29) and, as of this slice, the scroll glide -- and none of
+  those four.
+
+What this section does not claim: no capture of this launcher's window was taken
+(`PrintWindow` returns a surface without the page in it -- G135), so every item
+above is read from the user's own recordings and the vendored reference, and the
+spacing item is the one that cannot be settled by eye at all. A fresh pair of
+recordings after this change is what shows the glide on screen.

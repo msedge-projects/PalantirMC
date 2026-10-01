@@ -11,16 +11,6 @@
 //! the widget only paints what it is handed. Nothing in here knows about iced,
 //! which is what lets the easing be tested without a window.
 //!
-//! One deliberate difference from [`crate::scroll::ScrollAnim`], because the
-//! cost is different. A scroll animates for 160 ms under a wheel event that can
-//! arrive thirty times a second, over a distance of hundreds of pixels, and on a
-//! software rasteriser that was measured at 69 ms a frame it spent three
-//! quarters of a second of a core to show one notch — so a machine that slow is
-//! not asked to glide at all. A switch animates once per click, for 200 ms,
-//! across 24 pixels: on that same slow machine it is three frames and it is
-//! over. The deadline bounds it either way, so this animation is always worth
-//! drawing, and skipping it would cost the polish while saving nothing.
-//!
 //! The mechanism that keeps it free at rest is the same: [`SwitchAnim::animating`]
 //! gates the frame clock in [`crate::shell`], so a shell whose switches have all
 //! arrived asks for no frames at all.
