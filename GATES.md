@@ -7553,6 +7553,16 @@ $ python tools/progress.py --check
   sized by; the resize event arrives in the first frames of the window's life, so
   a dialog opened later reads the real size.
 
+  **The runner agrees with this machine.** Run `36842682280` on `679f2ef` is all
+  five jobs, green in 7m28s: `Lint` 1m32s, `Test workspace` 2m30s at 1137 passed /
+  0 failed and 19 ignored (177 + 8 + 655 + 4 + 33 + 260, the desktop crate's 655
+  being this machine's own count to the test), the live suite 19 passed / 0 failed
+  in 177.44s, and both Windows exes staged and read back -- msvc 14,011,392 B and
+  gnu 14,287,872 B, which is 6,144 B and 6,656 B more than the run before them.
+  That last pair is the shape of this fix as well: both grids are arithmetic on a
+  measurement this machine takes at run time, so what came into the binary is the
+  code that does it.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
