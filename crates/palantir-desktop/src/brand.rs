@@ -16,6 +16,13 @@
 //! premultiplied and normalized so the emblem's core stays fully opaque;
 //! pixels below 8/255 are cleared outright, which drops the resampler's
 //! ringing and keeps the darkest glow from turning into grey haze.
+//!
+//! Both derived files come from `tools/gen_brand.py`, which is that recipe in
+//! code: it measures the mark's ink box, cuts a square centred on it with the
+//! mark filling 91% of the side -- 309x464 of the 512 tile, so the hero and the
+//! taskbar get the same framing -- and resamples that once per output in
+//! premultiplied space. Regenerate with `python tools/gen_brand.py`; `--check`
+//! fails if the files on disk are not what it writes.
 
 use iced::widget::image::Handle;
 use iced::window::Icon;
@@ -134,12 +141,15 @@ mod tests {
         // square crop's corners stay clear.
         assert!(pixels.chunks_exact(4).any(|px| px[3] == 0), "backdrop must stay transparent");
 
-        // The mark is a soft radial glow rather than a solid disc: at 512x512
-        // exactly two pixels reach alpha 255 and only 102 clear 240. A fixed
-        // threshold on the shrunk peak would therefore be measuring where the
-        // brightest pixel happens to land on the sampling grid, not whether the
-        // shrink preserved the art — 239 is the honest result of averaging that
-        // spike into a 2x2 window. Measure against the source instead.
+        // The bar is relative rather than a fixed threshold, and the artwork is
+        // why: the mark this test was written against was a soft radial glow, of
+        // which at 512x512 exactly two pixels reached alpha 255 and only 102
+        // cleared 240, so a fixed bar measured where the brightest pixel landed
+        // on the sampling grid rather than whether the shrink preserved the art
+        // — 239 is the honest result of averaging that spike into a 2x2 window.
+        // The mark that ships now is a stroke, with 1,423 pixels at alpha 255 in
+        // the same tile; a fixed bar would flatter that one instead. Measuring
+        // against the source is the claim that holds for either.
         let source = image::load_from_memory(LOGO_PNG)
             .expect("embedded logo must decode")
             .to_rgba8();

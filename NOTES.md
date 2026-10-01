@@ -98,12 +98,18 @@ lands while that page is open).
 
 `brand::tests::logo_is_decoded_at_the_drawn_size_not_the_original` failed on the
 first run of the new tree: *"most opaque pixel was 239"* against a bar of 240.
-The bar was wrong, and the artwork is why. `logo512.png` is a soft radial glow,
-not a solid disc — measured directly, **exactly 2 of its 262,144 pixels reach
-alpha 255 and only 102 clear 240**. Averaging that spike into a 2x2 window is
-*expected* to land just under it, so a fixed threshold there measures where the
-brightest pixel fell on the sampling grid, not whether the shrink preserved the
-mark.
+The bar was wrong, and the artwork is why. The `logo512.png` of that run was a
+soft radial glow, not a solid disc — measured directly, **exactly 2 of its
+262,144 pixels reach alpha 255 and only 102 clear 240**. Averaging that spike
+into a 2x2 window is *expected* to land just under it, so a fixed threshold
+there measures where the brightest pixel fell on the sampling grid, not whether
+the shrink preserved the mark.
+
+Both numbers are the artwork of that run. The mark was replaced on 2026-10-01,
+and its successor — solid strokes rather than a glow — measures **1,423 pixels
+at alpha 255** in the same 512 tile. The bar stayed relative rather than going
+back to a fixed threshold, which is the point of it: the relative bar is the
+claim that holds for either mark.
 
 The test now measures the result against the source instead, which is the claim
 that actually matters:

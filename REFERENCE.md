@@ -768,8 +768,8 @@ as timers.
 - **The mark's ink.** The head's mark is a 28px box in both clients because
   that is the reference's `h-7`, but the two marks are different art and the ink
   inside the box is not the same size: the reference's spans x 12..35 and y 10..36,
-  while ours spans 16 by 25 in the same box, because `logo512.png`'s own ink box is
-  `107,23..404,487` of 512 — a tall, narrow mark. Redrawing ours to fill the box
+  while ours spans 17 by 25 in the same box, because `logo512.png`'s own ink box is
+  `102,24..410,487` of 512 — a tall, narrow mark. Redrawing ours to fill the box
   the way the reference's does is a change to the art, not to the head.
 - **The rail's entries.** Its five are Home, Discover, Skin selector, Screenshots
   and Modrinth Hosting, and its foot is create, Settings, account. Ours are Home,
