@@ -278,9 +278,35 @@ const CHECKLIST_PAD: f32 = 12.0;
 pub const DIALOG_WIDTH: f32 = 560.0;
 /// A dialog's padding on all four sides: `p-6`.
 pub const DIALOG_PAD: f32 = 24.0;
+/// The room a dialog's own scrollbar takes out of its body.
+///
+/// **iced draws a `Scrollable`'s bar *over* its content rather than beside it.**
+/// `iced_widget-0.12.3/src/scrollable.rs` places the bar at
+/// `bounds.right - width.max(scroller_width)`, and `Properties::default()` is 10
+/// wide with no margin; this theme sets the bar's colours and nothing else. So
+/// the last ten pixels of a body that scrolls are covered -- and the content that
+/// pays is exactly the content broken for the body's whole width: a row of chips
+/// packed to the padding's edge, a list row's own background, a value aligned to
+/// the right.
+///
+/// Which is what a screenshot of the *Create instance* and *Appearance* dialogs
+/// showed: `Ukrainian` clipped in the language grid's last row, the `Game version`
+/// value sitting behind the bar, and the selected version's row ending ten pixels
+/// early -- all three by the bar's own width, in the two dialogs tall enough to
+/// draw one.
+///
+/// So it is reserved rather than argued about: [`DIALOG_INNER`] is what a body's
+/// content is broken for, and [`Shell::dialog_titled`] draws the body that much
+/// narrower, which leaves the bar in the dialog's padding where it covers nothing.
+/// The cost is the same ten pixels for a body that does not scroll; the
+/// alternative is content nobody can read on the ones that do.
+pub const DIALOG_SCROLLBAR: f32 = 10.0;
 /// What a dialog's body has to fit inside, which is what a row of controls in
 /// one is broken for.
-pub const DIALOG_INNER: f32 = DIALOG_WIDTH - 2.0 * DIALOG_PAD;
+///
+/// Less than the padding leaves by [`DIALOG_SCROLLBAR`], and deliberately so: the
+/// body is drawn at this width, so this is the width a row really has.
+pub const DIALOG_INNER: f32 = DIALOG_WIDTH - 2.0 * DIALOG_PAD - DIALOG_SCROLLBAR;
 /// The room a dialog leaves above and below itself, so that a dialog as tall as
 /// the window is not drawn flush against both of its edges.
 const DIALOG_MARGIN: f32 = 16.0;
@@ -5345,12 +5371,17 @@ impl Shell {
                 // content fits is drawn at its content's height with no bar, and
                 // one that does not is drawn at the room it has and scrolls.
                 .push(
+                    // [`DIALOG_INNER`] rather than `Fill`: the width the body's
+                    // content is broken for has to be the width the body is
+                    // *given*, or the bar iced draws over a scrollable's right
+                    // edge sits on the last chip of a row. See
+                    // [`DIALOG_SCROLLBAR`].
                     container(crate::scroll::region(
                         crate::scroll::DIALOG,
                         body,
                         Message::Wheel,
                     ))
-                    .width(Length::Fill)
+                    .width(Length::Fixed(DIALOG_INNER))
                     .max_height(self.dialog_body_room()),
                 ),
         )
@@ -8506,6 +8537,23 @@ mod tests {
         assert!(
             indonesian > room,
             "Indonesian's {indonesian} of grid is the one that has to scroll rather than be cut off"
+        );
+    }
+
+    #[test]
+    fn a_dialog_body_is_broken_for_less_than_its_padding_leaves() {
+        // The arithmetic behind the two screenshots this slice came from. The
+        // number is iced's: a `Scrollable`'s bar is drawn over its content, at
+        // `Properties::default()`'s 10 pixels, so a body's last ten pixels are
+        // covered whenever something scrolls -- and the language grid's last row
+        // and the `Game version` value are what sat under it. Read back as the
+        // identity rather than as a literal, so that moving the dialog's width,
+        // its padding or the bar cannot silently widen the content again: the
+        // padding, the bar and the body's own width *are* the dialog.
+        assert_eq!(DIALOG_PAD * 2.0 + DIALOG_SCROLLBAR + DIALOG_INNER, DIALOG_WIDTH);
+        assert!(
+            DIALOG_INNER < DIALOG_WIDTH - 2.0 * DIALOG_PAD,
+            "a body broken for the full padding leaves its last chip under the bar"
         );
     }
 

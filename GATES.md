@@ -7765,6 +7765,73 @@ $ python tools/progress.py --check
   evidence of the defect, not of the fix. Only a fresh recording shows the fix on
   screen.
 
+- [x] G141: a dialog's body is drawn ten pixels narrower than its padding leaves,
+  so the bar iced draws over the content covers nothing -- read off the two
+  screenshots the report came with
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: 663 passed / 0 failed in the desktop crate's own run (662 before this
+          slice), this slice's one among them -- `a_dialog_body_is_broken_for_less_
+          than_its_padding_leaves` -- with the two that own the grids beside it and
+          `tests/native.rs`'s four
+          clippy exits 0
+          progress exits 0, with G141 attributed to stage 3
+  EVIDENCE: the transcripts below, and the arithmetic and the screenshots after them.
+
+```text
+$ cargo test -p palantir-desktop --locked -- --nocapture
+test shell::tests::a_dialog_body_is_broken_for_less_than_its_padding_leaves ... ok
+test shell::tests::a_language_grid_taller_than_the_window_scrolls_rather_than_drawing_past_it ... ok
+test shell::tests::every_settings_grid_breaks_inside_the_dialog_in_every_language ... ok
+test result: ok. 663 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.93s
+     Running tests\native.rs
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+(exits 0)
+
+$ python tools/progress.py --check
+(exits 0)
+```
+
+  **What the two screenshots showed.** The *Create instance* dialog with its
+  version list, and the *Appearance* dialog with the language grid, both tall
+  enough to scroll -- and in both of them the content's right edge was cut: the
+  `Game version` row's value ending behind the bar, the version list's selected row
+  stopping short of the card, and the language grid's last row's `Ukrainian`
+  clipped. Three different kinds of row, one shared edge.
+
+  **The cause is iced's scrollbar, drawn over the content.** `iced_widget`'s
+  `Scrollable` puts its bar at `bounds.right - width.max(scroller_width)`
+  (`iced_widget-0.12.3/src/scrollable.rs`) and `Properties::default()` is 10 with
+  no margin; this launcher's theme sets the bar's colours and border radius and
+  nothing else, and nobody calls `scrollbar_width`. So a body that scrolls has its
+  last ten pixels covered -- and what was broken for the body's whole width was
+  exactly what paid: `DIALOG_INNER` was `560 - 2 x 24 = 512`, and every chip row,
+  every right-aligned value and every list row in a dialog was measured against
+  512 while the body could only show 502.
+
+  **The fix is a reservation, not a re-measure.** `DIALOG_SCROLLBAR` (10) is
+  subtracted from `DIALOG_INNER` and the dialog's body is drawn at `DIALOG_INNER`
+  rather than `Length::Fill`, which moves the bar into the dialog's own padding
+  where it covers nothing -- so this cannot be re-broken by a row that fills its
+  width, whatever it draws. The new test is the identity the two numbers have to
+  keep: the padding, the bar and the body's width *are* the dialog's width. It is
+  arithmetic on iced's own constant rather than a measurement of our window, which
+  is this gate's limit rather than its claim.
+
+  **What this gate cannot say.** There is no capture of the dialog after the
+  change: the before is the report's own two screenshots and the after is the
+  arithmetic plus a test. A capture at 1280x720 is what would close it, and that is
+  one command on a machine whose window can be driven
+  (`python tools/winshot.py --launch dist/msvc/PalantirMC.exe --client 1280x720`).
+  It also does not touch the same defect one level out: a *page's* scroll region is
+  drawn the full width of its viewport too, so a page's own bar covers its last ten
+  pixels the same way. That is a wider change -- every page's content narrows by
+  ten pixels, and a grid's column count can depend on it -- so it is a slice of its
+  own rather than a rider on this one.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

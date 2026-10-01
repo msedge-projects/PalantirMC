@@ -1354,10 +1354,11 @@ mod tests {
             button_width(&labels[0]) > BUTTON_PAD * 2.0,
             "a label with no width would make every wrap free and this gate empty"
         );
-        // The dialog's own inner width, a column narrower, and a strip too narrow
-        // for one button: the last one is the case where a row holds a single
-        // label wider than the space it was broken for.
-        for avail in [512.0f32, 240.0, 100.0] {
+        // The dialog's own inner width -- the real one, bar reserved and all
+        // (`crate::shell::DIALOG_INNER`) -- a column narrower, and a strip too
+        // narrow for one button: the last one is the case where a row holds a
+        // single label wider than the space it was broken for.
+        for avail in [crate::shell::DIALOG_INNER, 240.0, 100.0] {
             let rows = wrap_labels(&labels, avail, ROW_GAP);
             let flattened: Vec<usize> = rows.iter().flatten().copied().collect();
             assert_eq!(
