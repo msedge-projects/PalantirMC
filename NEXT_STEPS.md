@@ -27,7 +27,8 @@ was closed by.
 
 Runs in which jobs actually executed. The first three carry stages 0 and 1; the
 rows after them carry stages 2-5 to the landing, and the landing itself is the
-first `ci.yml` run a push to `master` has ever scheduled:
+first `ci.yml` run a push to `master` has ever scheduled, and the rows after it are
+the changes that went on top of the landing:
 
 | Run | Commit | What it proved |
 | --- | --- | --- |
@@ -65,6 +66,7 @@ first `ci.yml` run a push to `master` has ever scheduled:
 | 36753247156 | `58f3265` | The pull-request path on the record that closes the plan: `Lint` and `Test workspace` green in 1m22s and 3m37s -- 1111 passed / 0 failed and 19 ignored (177 + 8 + 631 + 4 + 33 + 258), which is what the two rows above should have summed to; both were first written down as 1109 for the same six lines, and this run's log is where 1111 was read back -- with `Live services` and `Build exe` skipped by that path's own rule |
 | 36755302728 | `aa39351` | The dispatch asked for on `master` before the landing, to read the row `AGENTS.md` §2 had never seen a run on: `Lint` green in 2m51s, `Test workspace` green in 5m53s and `Live services` green in 1m26s on the tree `master` still carried, and then the landing push superseded it -- same run group, `cancel-in-progress` -- leaving both exe jobs cancelled rather than failed |
 | 36756417601 | `cccbfc9` | The landing: the first `ci.yml` run a push to `master` has ever scheduled, on the merged tree -- `Lint` green in 2m24s, `Test workspace` green in 3m1s at 1111 passed / 0 failed and 19 ignored, the live suite 19 passed / 0 failed in 124.87s, and both Windows exes staged -- 13,898,240 B (msvc) and 14,173,184 B (gnu) of the exe itself, read back from the downloaded artifacts and matching their `.sha256` sidecars |
+| 36818789581 | `d98f0ef` | The new mark through all five jobs -- the first `ci.yml` run a push to `master` has scheduled since the landing -- green in 6m44s: `Test workspace` at 1111 passed / 0 failed and 19 ignored (177 + 8 + 631 + 4 + 33 + 258), the same six rows as the landing because a new logo adds no tests, the live suite 19 passed / 0 failed in 167.37s, and both Windows exes staged -- 13,942,784 B (msvc) and 14,217,216 B (gnu) of the exe itself, 44,544 B and 44,032 B larger than the landing's because the embedded art is bigger -- read back from the downloaded artifacts and matching their `.sha256` sidecars, with the lint job's one red annotation the advisory `cargo fmt --check` step it marks `continue-on-error` |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
