@@ -681,15 +681,31 @@ mod tests {
         // this product's folder while the settings pane showed something else.
         let (_dir, paths) = root();
         assert_eq!(palantir_core::paths::recorded_data_root(&paths), None);
+        // The pointer itself is read back verbatim on every host -- the file is
+        // the record, and `D:/minecraft` is what a Windows install writes into
+        // it -- so this leg keeps the Windows-shaped literal on purpose.
         let prefs = Prefs { app_directory: Some("D:/minecraft".into()), ..Prefs::default() };
         save(&paths, &prefs).unwrap();
         assert_eq!(
             palantir_core::paths::recorded_data_root(&paths).as_deref(),
             Some("D:/minecraft")
         );
+        // Whether that pointer is *obeyed* is the host's own answer:
+        // `resolve_data_root` takes an absolute path as written and refuses a
+        // relative one, and `D:/minecraft` is relative on every host but
+        // Windows. The core crate picks its own absolute literal the same way
+        // (`an_absolute_data_root_is_taken_even_before_it_exists`), so the two
+        // crates read one rule rather than two.
+        let absolute = if cfg!(windows) { "D:/minecraft" } else { "/minecraft" };
+        assert_eq!(
+            palantir_core::paths::resolve_data_root(&paths, Some(absolute)),
+            std::path::PathBuf::from(absolute)
+        );
+        #[cfg(not(windows))]
         assert_eq!(
             palantir_core::paths::resolve_data_root(&paths, Some("D:/minecraft")),
-            std::path::PathBuf::from("D:/minecraft")
+            paths.root,
+            "a drive-letter pointer is relative to this host, refused like any other"
         );
     }
 
