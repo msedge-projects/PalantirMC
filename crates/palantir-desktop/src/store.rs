@@ -55,6 +55,7 @@ use palantir_net::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::avatar;
 use crate::catalog::LoaderKind;
 use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
@@ -1163,6 +1164,53 @@ impl Store {
             .fetch()
             .get(&Request::get(url), &cancel)
             .map_err(|error| format!("fetching the skin's texture failed: {error}"))
+    }
+
+    /// Every icon of a page of results, decoded to the size a card draws.
+    ///
+    /// A search answers with an `icon_url` per hit and nothing else about it, so
+    /// the bytes are a request of their own -- the reference's own `Avatar` makes
+    /// it with an `<img src>`, which is the browser's fetch and not the app's. This
+    /// is that fetch, over the engine's pool, plus the decode: twenty PNGs decoded
+    /// on the frame thread is a visible hitch, and the one thread that must not do
+    /// it is the one drawing (`crate::store::off_thread` is where this runs).
+    ///
+    /// Not through the metadata cache, for [`Self::skin_texture`]'s reason: a
+    /// cache of documents has no business holding a file, and what names this one
+    /// is a URL the search just handed out.
+    ///
+    /// **A failed icon is not a failed answer**, which is the one place this store
+    /// swallows a reason: an icon is the card's decoration, the reference draws its
+    /// own placeholder where one will not come back, and twenty sentences about
+    /// twenty broken pictures would be louder than the pictures were. What the
+    /// caller gets is the icons that *arrived*; the box a page reserves is drawn
+    /// whether one arrived or not (see [`crate::ui::icon_box`]). A store with no
+    /// engine at all answers with nothing here, and with the same sentence
+    /// everywhere else that it always does.
+    pub fn project_icons(&self, urls: &[String]) -> Vec<avatar::Fetched> {
+        urls.iter()
+            .filter_map(|url| {
+                let bytes = self.project_icon(url).ok()?;
+                let icon = avatar::Icon::of(&bytes, avatar::ICON_SIDE)?;
+                Some(avatar::Fetched { url: url.clone(), icon })
+            })
+            .collect()
+    }
+
+    /// One project's icon, as the bytes of the file behind its URL.
+    ///
+    /// Blocking, like every read here, and deliberately not the whole answer: the
+    /// caller is [`Store::project_icons`], which loops over a page's URLs and
+    /// decodes what each one returned.
+    pub fn project_icon(&self, url: &str) -> Result<Vec<u8>, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("This project's icon"));
+        };
+        let cancel = Cancel::new();
+        engine
+            .fetch()
+            .get(&Request::get(url), &cancel)
+            .map_err(|error| format!("fetching a project's icon failed: {error}"))
     }
 
     /// Read one project: its own document, its team, and its versions.

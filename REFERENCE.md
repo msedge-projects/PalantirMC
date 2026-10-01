@@ -646,9 +646,15 @@ than a heading, and there is no Search button.
 * **The count** on the right is what this client kept (`SEARCH_LIMIT`), not the
   API's `total_hits`, which the search response carries and `parse_search` does
   not yet read.
-* **A card's icon slot** is the measured 100x100 box holding the content type's
-  glyph. The reference loads each project's own icon there, which is a network
-  fetch per card this shell does not do yet.
+* **A card's icon slot** is the measured 100x100 box, and it holds the project's
+  own icon now rather than the content type's glyph. The reference loads it
+  through an `<img src>`, which is the browser's fetch; here it is a second request
+  the page makes once its results are on screen, decoded off the frame thread
+  (`crate::avatar`, `crate::store::Store::project_icons`), and the box is drawn
+  whether a picture arrived or not so that a card never reflows under a reader.
+  What is *not* drawn is the reference's placeholder art -- an inline hexagon
+  outline in `#9a9a9a` on that box -- because the path lives inside `Avatar.vue`
+  rather than in one of the 313 SVGs `tools/gen_icons.py` compiles.
 * **The right panel is still this shell's.** The reference's Discover panel is a
   *filter* column 331px wide -- "Search content...", Environment (Client /
   Server), Game version, Open source -- against the 299px every other page's
@@ -658,6 +664,37 @@ than a heading, and there is no Search button.
 * **Servers** is still absent from the strip: the reference has a sixth tab for
   it, and `project_type:server` answers 0 hits through the public search API, so
   a tab for it could only ever be empty.
+
+### The card's interior, from `ProjectCard.vue`
+
+The 100x100 slot above was measured off the reference's window; the rest of the
+card's rhythm is read from the component, because a capture's rows cannot separate a
+line box from an ink row -- a 20px title's ink and its line box are the same band in
+a screenshot:
+
+| Thing | Rule |
+| --- | --- |
+| Card | `p-4 grid grid-project-card-list gap-x-3 gap-y-2`, `bg-surface-3`, a `surface-4` hairline, `rounded-2xl` |
+| Grid | `'icon info stats stats'` / `'icon info stats stats'` / `'icon tags tags tags'`, columns `auto 1fr auto auto` |
+| Icon | `Avatar size="100px"`: `border-radius: calc(16 / 96 * 100)` = **17**, `object-fit: contain`, background `--color-button-bg`, `outline: 1px solid rgb(255 255 255 / 15%)` at `-1px` |
+| Title | `ProjectCardTitle`: `text-xl font-semibold text-contrast`, so **20px** -- the preset remaps colours, not sizes, and the root is 16px |
+| Author | `ProjectCardAuthor`: `text-secondary font-normal`, preceded by the word `by` -- 16px, at the *tertiary* token |
+| Summary | `project-card-summary m-0 font-normal line-clamp-2`: 16px, normal weight, the default ink |
+| Stats | `ProjectCardStats`: a `size-5` **20px** icon and the count 8px from it, the two counts 12px apart, right-aligned; the count is `formatCompactNumber` |
+| Tags | `flex items-center gap-2` inside a `gap-3` row, `maxTags` five (six with no environment line) |
+| Hover | `highlight-on-hover`: `filter: brightness(1.25)` in dark, `0.9` in light |
+
+The compact count is `format-number.ts`'s own three cases: under 10,000 a grouped
+number (`9,999`), under a million one fraction digit (`12.3K`), and above it two
+(`41M`, `1.23M`) -- with the unit promoted when the mantissa rounds up (`999,999`
+is `1M`).
+
+Three of those are not drawn here, and each is named rather than approximated: the
+two-line clamp (iced wraps a paragraph and has no line limit, so a long summary
+makes a taller card than the reference's), the tooltip that holds the full count (this
+kit has no tooltip, so the compact count is all a reader gets), and the brightness
+filter over the card's *subtree* (`card_at` brightens the surface and the hairline;
+what is left is the tag pills and the picture, and iced gives an image no filter).
 
 ## Surfaces measured, with what they contain
 

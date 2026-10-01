@@ -20,10 +20,19 @@
 //!
 //! The results themselves come from Modrinth's search API, and the page *asks* for
 //! them rather than fetching them: [`State::update`] and [`State::opening`] hand the
-//! shell an [`Asked`], the shell runs it through the store off the frame thread, and
+//! shell an [`Ask`], the shell runs it through the store off the frame thread, and
 //! the answer comes back as [`Message::Found`]. A store with no engine to ask
 //! answers with a sentence rather than a list (see [`crate::store`]), and the four
 //! states of the answer draw through [`crate::page::draw`] either way.
+//!
+//! The cards are `ProjectCard.vue` in its *list* layout -- the reference's browse
+//! draws `ProjectCardList` with `effectiveLayout`, whose own default is `list` --
+//! and a card's icon is a second request rather than part of the first: a search
+//! answers with twenty `icon_url`s and no pictures, so the page asks for the icons
+//! once the results are on screen ([`Message::Icons`]) and draws each one's box
+//! whether the picture has arrived or not. Waiting for twenty PNGs before drawing a
+//! single row would put a download in front of a list the reader could already
+//! read.
 //!
 //! The vocabulary -- the five orders, the six view sizes, the three messages -- is
 //! declared here rather than in the search code, because the strings the controls
@@ -32,16 +41,23 @@
 //! the query string are one thing read twice.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+
 use iced::mouse::Interaction;
 use iced::widget::{column, mouse_area, row, text, Space};
 use iced::{Alignment, Element, Length};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
-use crate::page::{self, Load, GAP, GRID_GAP, ROW_GAP};
+use crate::avatar::{self, Fetched, Icon};
+use crate::icon;
+use crate::icons_gen::Glyph;
+use crate::locale;
+use crate::page::{self, Load, GAP, ROW_GAP};
+use crate::pages::Ask;
 use crate::route::ProjectType;
 use crate::store::Store;
-use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
+use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
 // `Hovered` is in scope for the result cards below: a card names its own crossing
@@ -67,6 +83,12 @@ pub struct Hit {
     pub downloads: u64,
     /// Followers.
     pub follows: u64,
+    /// Where the project's own icon is, as the search API hands it out.
+    ///
+    /// Empty when a project has none, which is a state the reference draws
+    /// rather than an error: its `Avatar` falls back to an outline box. This
+    /// shell draws nothing there, which [`crate::avatar`] names as a departure.
+    pub icon_url: String,
     /// The versions the project supports, as the card's tags draw them.
     pub game_versions: Vec<String>,
     /// Its loaders or categories.
@@ -93,6 +115,7 @@ impl Hit {
             // the loaders first).
             game_versions: hit.versions.clone(),
             loaders: hit.categories.clone(),
+            icon_url: hit.icon_url.clone(),
         }
     }
 }
@@ -209,6 +232,18 @@ pub enum Message {
         /// The hits, or the reason there are none.
         result: Result<Vec<Hit>, String>,
     },
+    /// The icons of the results on screen, from the shell.
+    ///
+    /// No round, unlike [`Message::Found`], and that is the type of the answer
+    /// rather than an omission: an icon is keyed by the URL it was fetched from, so
+    /// an icon from a search the reader has left is one the page can only look *up*,
+    /// never draw under another project. What bounds the page's map is the results
+    /// that arrive ([`State::icons_ask`]), not this message.
+    Icons {
+        /// The ones that arrived. An icon that could not be fetched or decoded is
+        /// simply absent, and its box draws empty (`crate::ui::icon_box`).
+        arrived: Vec<Fetched>,
+    },
     /// The pointer entered or left one of the page's controls.
     ///
     /// A hover is a message rather than something a stylesheet reads off the
@@ -238,6 +273,18 @@ pub struct Asked {
     pub query: ApiSearch,
 }
 
+/// The icons of one page of results, to fetch.
+///
+/// A request of its own rather than part of [`Asked`], because it is asked for at a
+/// different moment: the search has to land before the page knows which URLs it is
+/// missing, and a card has to be drawable while they are still in flight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Icons {
+    /// The `icon_url`s the page does not hold an icon for, in the order the
+    /// results name them and each one once.
+    pub urls: Vec<String>,
+}
+
 /// Discover's own state: what the user is asking for, and what came back.
 #[derive(Debug, Clone)]
 pub struct State {
@@ -253,6 +300,13 @@ pub struct State {
     pub page: usize,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
+    /// The icons of those results, decoded, by the `icon_url` each answers.
+    ///
+    /// A map rather than a field on the [`Hit`] it belongs to, and by the URL rather
+    /// than by the project: the URL is the only name an answer carries, so an icon
+    /// that arrived late -- or for a page the reader has left and come back to -- can
+    /// always find the card it belongs to, and can never land on another one.
+    icons: HashMap<String, Icon>,
     /// How many times this page has asked, which is how an answer is told apart
     /// from an answer to a question it has since replaced.
     round: u64,
@@ -273,6 +327,7 @@ impl State {
             // so `Idle` is a state that lasts one message rather than a page that
             // sits there.
             results: Load::Idle,
+            icons: HashMap::new(),
             round: 0,
         }
     }
@@ -281,7 +336,7 @@ impl State {
     ///
     /// One message in, at most one request out: a page cannot ask twice in a turn,
     /// and the shell cannot be handed a request it has already run.
-    pub fn update(&mut self, message: Message) -> Option<Asked> {
+    pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
@@ -307,7 +362,7 @@ impl State {
             }
             Message::View(view) => self.view = view,
             Message::Page(page) => self.page = page.max(1),
-            Message::Search => return Some(self.ask()),
+            Message::Search => return Some(Ask::Search(self.ask())),
             Message::Found { round, result } => {
                 // An answer to a question this page has replaced is dropped. It
                 // is not an error and not worth a notice: the user asked for
@@ -318,6 +373,18 @@ impl State {
                         Ok(hits) => Load::Ready(hits),
                         Err(reason) => Load::Failed(reason),
                     };
+                    // And the pictures those results name, asked for on the same
+                    // turn: the cards are drawable now and their icons arrive when
+                    // they arrive.
+                    return self.icons_ask();
+                }
+            }
+            // Decoration, and the page keeps it either way: what the map holds is
+            // what the cards on screen look up, so an icon no card names is one
+            // that is never drawn and is dropped when the next results land.
+            Message::Icons { arrived } => {
+                for fetched in arrived {
+                    self.icons.insert(fetched.url, fetched.icon);
                 }
             }
             // The crossing, recorded where the clock lives: the page draws the
@@ -344,6 +411,43 @@ impl State {
             Some(self.ask())
         } else {
             None
+        }
+    }
+
+    /// The icons the results on screen are missing, as a request, if any.
+    ///
+    /// Two things at once, and they belong together: what the page *keeps* is
+    /// narrowed to the icons its results name, and what is still missing is
+    /// described. The narrowing is what bounds the map -- a reader who searches all
+    /// afternoon would otherwise hold a picture of every project they ever saw -- and
+    /// it can never drop an icon it is about to ask for, because the two lists are
+    /// read from the same results.
+    ///
+    /// Empty when there is nothing to ask for, which is the common case for a second
+    /// search of the same tab: the results are the same projects, so their icons are
+    /// already here.
+    fn icons_ask(&mut self) -> Option<Ask> {
+        let named: Vec<String> = match &self.results {
+            Load::Ready(hits) => {
+                let mut named: Vec<String> = Vec::new();
+                for hit in hits {
+                    if !hit.icon_url.is_empty() && !named.contains(&hit.icon_url) {
+                        named.push(hit.icon_url.clone());
+                    }
+                }
+                named
+            }
+            _ => Vec::new(),
+        };
+        self.icons.retain(|url, _| named.contains(url));
+        let missing: Vec<String> = named
+            .into_iter()
+            .filter(|url| !self.icons.contains_key(url))
+            .collect();
+        if missing.is_empty() {
+            None
+        } else {
+            Some(Ask::Icons(Icons { urls: missing }))
         }
     }
 
@@ -445,31 +549,55 @@ fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 fn results<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     match &state.results {
         Load::Ready(hits) if hits.is_empty() => page::empty(theme, Key::BrowseNoResults),
-        Load::Ready(hits) => {
-            let mut list = column![].spacing(GRID_GAP).width(Length::Fill);
-            for hit in hits {
-                list = list.push(hit_card(theme, hit));
-            }
-            list.into()
-        }
+        Load::Ready(hits) => cards(theme, state, hits),
         // The empty arm is the reference's own sentence; the other two are the
         // scaffold's.
-        other => page::draw(theme, other, "results", |hits| {
-            let mut list = column![].spacing(GRID_GAP).width(Length::Fill);
-            for hit in hits {
-                list = list.push(hit_card(theme, hit));
-            }
-            list.into()
-        }),
+        other => page::draw(theme, other, "results", |hits| cards(theme, state, hits)),
     }
 }
 
-/// One project card: its title, its author, its summary and its counts.
+/// The result cards, stacked.
+///
+/// `ProjectCardList`'s own `gap-3` between the cards of a *list*, which is
+/// [`GAP`] -- 12 pixels -- and not the wider [`crate::page::GRID_GAP`] its grid
+/// layout is spaced with. The reference's browse opens on the list one
+/// (`use-browse-search.ts`'s `effectiveDisplayMode` defaults to `'list'`), so this
+/// is the gap a reader sees.
+fn cards<'a>(theme: Gen, state: &'a State, hits: &'a [Hit]) -> Element<'a, Message> {
+    let mut list = column![].spacing(GAP).width(Length::Fill);
+    for hit in hits {
+        list = list.push(hit_card(theme, hit, state.icons.get(&hit.icon_url)));
+    }
+    list.into()
+}
+
+/// `ProjectCard.vue`'s list grid: `p-4 grid-project-card-list gap-x-3 gap-y-2`.
+///
+/// The card's own two gaps. The padding is [`ui::card_at`]'s (`p-4`, the same 16).
+const CARD_COLUMN_GAP: f32 = 12.0;
+/// `gap-y-2`, between the icon's row and the row of tags under it.
+const CARD_ROW_GAP: f32 = 8.0;
+
+/// One project card: its icon, its title, its author, its summary and its counts.
 ///
 /// The whole card is pressable, which is what the reference does and what the
 /// absence of controls inside it makes safe: iced's `mouse_area` does not forward
 /// a press to its content, so nothing interactive may be drawn inside one.
-pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
+///
+/// The arrangement is `ProjectCard.vue`'s list layout, which is a CSS grid:
+///
+/// ```text
+/// grid-project-card-list =
+///     'icon info  stats stats'
+///     'icon info  stats stats'
+///     'icon tags  tags  tags';
+/// grid-template-columns: auto 1fr auto auto;
+/// ```
+///
+/// iced has no grid, so the same placement is two rows: the icon, the info column
+/// and the stats in one, and the tags indented by the icon's own column in the
+/// next, which is where the grid's third row puts them.
+pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a, Message> {
     // A card's identity is the project it names, so its key is derived from that
     // rather than from its position in the list: reordering the results must not
     // move a tween from one card to another.
@@ -479,54 +607,111 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
     // dark theme, the global `--hover-brightness`, not the 0.9 that
     // `LegacyProjectCard.vue` dims a *grid* card by. The two are different cards
     // in the reference and it was the grid one's constant that was ported here.
+    //
+    // One thing that filter does in the reference and cannot here: it brightens
+    // the whole subtree, and [`ui::card_at`] brightens the surface and the hairline
+    // only. The ink inside this card is already at `text-contrast`'s white, which a
+    // multiplier cannot lift any further, so what is left undrawn is the same
+    // brightening applied to the tag pills and to the icon -- and a picture has no
+    // filter in this toolkit.
     let key = ui::scoped("discover:card", &hit.id);
     let (factor, _) = ui::interaction(key);
-    let mut tags = row![].spacing(6.0);
+
+    // `ProjectCardTitle` (`text-xl font-semibold text-contrast`, 20px with the
+    // reference's 16px root) and `ProjectCardAuthor` (`text-secondary font-normal`,
+    // which is the *tertiary* token -- see `crate::style`), eight pixels apart
+    // (`gap-2`).
+    let title = text(hit.title.clone())
+        .size(20.0)
+        .font(semibold())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+    let author = text(format!("by {}", hit.author))
+        .size(16.0)
+        .font(regular())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+    // `project-card-summary m-0 font-normal`: the reference's root 16, normal
+    // weight, the default ink, and clamped to two lines in CSS. The clamp is not
+    // drawn: iced wraps a paragraph and has no line limit, so a very long summary
+    // makes a taller card than the reference's.
+    let summary = text(hit.summary.clone())
+        .size(16.0)
+        .font(regular())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)));
+    let info = column![]
+        .spacing(ROW_GAP)
+        .width(Length::Fill)
+        .push(row![title, author].spacing(ROW_GAP).align_items(Alignment::Center))
+        .push(summary);
+
+    // `ProjectCardStats`: the two counts side by side, twelve pixels apart
+    // (`gap-3`), right-aligned because the grid's stats column is `items-end`.
+    let stats = row![stat(theme, Glyph::Download, hit.downloads), stat(theme, Glyph::Heart, hit.follows)]
+        .spacing(CARD_COLUMN_GAP)
+        .align_items(Alignment::Center);
+
+    // `ProjectCardTags`: `flex items-center gap-2` inside a `gap-3` row. The
+    // reference lists a hit's own `display_categories` then its loaders, of which
+    // the search answer here carries the loaders and the supported versions -- the
+    // two the card has drawn all along, and the `maxTags` the reference passes is
+    // five for a list card with no actions.
+    let mut tags = row![].spacing(ROW_GAP).align_items(Alignment::Center);
     for loader in hit.loaders.iter().take(3) {
         tags = tags.push(ui::tag(theme, loader));
     }
     for version in hit.game_versions.iter().take(2) {
         tags = tags.push(ui::tag(theme, version));
     }
-    mouse_area(ui::card_at(
-        theme,
-        factor,
-        column![]
-            .spacing(6.0)
-            .push(
-                text(hit.title.clone())
-                    .size(16.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            .push(
-                text(hit.author.clone())
-                    .size(13.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-            )
-            .push(ui::paragraph(theme, &hit.summary))
-            .push(tags)
-            .push(
-                row![]
-                    .spacing(ROW_GAP)
-                    .push(ui::icon_label(
-                        theme,
-                        crate::icons_gen::Glyph::Download,
-                        &text_gen::project_download_count_tooltip(hit.downloads),
-                    ))
-                    .push(ui::icon_label(
-                        theme,
-                        crate::icons_gen::Glyph::Heart,
-                        &text_gen::project_follower_count_tooltip(hit.follows),
-                    )),
-            ),
-    ))
-    .interaction(Interaction::Pointer)
-    .on_enter(Message::hover(key, true))
-    .on_exit(Message::hover(key, false))
-    .on_press(Message::Open(hit.id.clone()))
-    .into()
+
+    let placed = column![]
+        .spacing(CARD_ROW_GAP)
+        .push(
+            row![
+                ui::icon_box(theme, avatar::ICON_SIDE as f32, picture),
+                info,
+                stats
+            ]
+            .spacing(CARD_COLUMN_GAP)
+            // `Start` vertically, which is the grid's own top alignment: the icon's
+            // box and the stats sit against the first line of the info column.
+            .align_items(Alignment::Start),
+        )
+        .push(
+            // The indent is the icon's own width, and the row's gap is what follows
+            // it: 100 + 12, which is the 112 pixels the grid's second column starts
+            // at.
+            row![Space::with_width(avatar::ICON_SIDE as f32), tags].spacing(CARD_COLUMN_GAP),
+        );
+
+    mouse_area(ui::card_at(theme, factor, placed))
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(Message::Open(hit.id.clone()))
+        .into()
+}
+
+/// One count of a card: `ProjectCardStats.vue`.
+///
+/// A 20px icon (`size-5`) and the count, eight pixels apart (`gap-2`), in the
+/// theme's default ink -- the component sets no colour class, so it inherits the
+/// page's own, which is what [`INK_DEFAULT`] names.
+///
+/// The count itself is the reference's *compact* form (`41M`), because that is what
+/// it draws: the full number is a tooltip there, and this kit has no tooltip, so the
+/// abbreviated one is all a reader gets. [`crate::locale::compact`] is that rule.
+fn stat<'a>(theme: Gen, glyph: Glyph, count: u64) -> Element<'a, Message> {
+    let ink = theme_gen::ink(theme, INK_DEFAULT);
+    row![]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center)
+        .push(icon::icon(glyph, 20.0, ink))
+        .push(
+            text(locale::compact(locale::tag(), count))
+                .size(16.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(ink)),
+        )
+        .into()
 }
 
 #[cfg(test)]
@@ -541,10 +726,35 @@ mod tests {
             summary: "a summary".to_string(),
             downloads: 12345,
             follows: 678,
+            // No icon unless a test names one: a project that never uploaded one is
+            // a state the card draws rather than an error.
+            icon_url: String::new(),
             game_versions: vec!["1.21".to_string()],
             loaders: vec!["fabric".to_string()],
         }
     }
+
+    /// A PNG of one colour, in memory, the way `avatar.rs`'s tests make one.
+    fn picture(side: u32) -> Vec<u8> {
+        let square =
+            ::image::RgbaImage::from_pixel(side, side, ::image::Rgba([10, 20, 30, 255]));
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(square)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .expect("a PNG in memory");
+        bytes
+    }
+
+    /// One icon, as the shell's fetch would deliver it.
+    fn an_icon(url: &str) -> Fetched {
+        Fetched {
+            url: url.to_string(),
+            icon: Icon::of(&picture(64), avatar::ICON_SIDE).expect("a PNG"),
+        }
+    }
+
+    const SODIUM_ICON: &str = "https://cdn.modrinth.com/sodium.png";
+    const LITHIUM_ICON: &str = "https://cdn.modrinth.com/lithium.png";
 
     #[test]
     fn the_orders_are_the_five_the_reference_declares() {
@@ -670,7 +880,9 @@ mod tests {
         // A slow answer to a question the page has replaced is dropped rather than
         // drawn: the newer request's results are the ones that match the controls
         // on screen.
-        let second = state.update(Message::Search).expect("the button asks again");
+        let Some(Ask::Search(second)) = state.update(Message::Search) else {
+            panic!("the button asks again");
+        };
         assert!(second.round > first.round);
         state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) });
         assert_eq!(state.results, Load::Loading, "the stale answer changed nothing");
@@ -719,6 +931,8 @@ mod tests {
         assert_eq!(card.summary, "Modern rendering engine");
         assert_eq!(card.game_versions, vec!["1.21.4"]);
         assert_eq!(card.loaders, vec!["fabric"]);
+        // The icon travels with the card, because the card is what asks for it.
+        assert_eq!(card.icon_url, "https://cdn.modrinth.com/icon.png");
         // A hit with no id falls back to the slug, which is the other thing the
         // route accepts.
         let slug_only = ModrinthSearchHit { project_id: String::new(), ..api };
@@ -744,11 +958,75 @@ mod tests {
 
     #[test]
     fn a_hit_card_draws_the_counts_the_reference_shows_on_one() {
-        // The counts are the reference's own messages, so a card with 12,345
-        // downloads shows `12,345 downloads` rather than a number on its own.
-        assert_eq!(text_gen::project_download_count_tooltip(12345u64), "12,345 downloads");
-        assert_eq!(text_gen::project_download_count_tooltip(1u64), "1 download");
-        assert_eq!(text_gen::project_follower_count_tooltip(678u64), "678 followers");
-        drop(hit_card(Gen::Dark, &Hit { downloads: 0, follows: 0, ..hit("Empty") }));
+        // The reference's stat is the *compact* count -- `formatCompactNumber` --
+        // and the full one, which the tooltip messages still carry, is a hover label
+        // it draws and this kit does not. (`crate::locale`'s own test has the rule's
+        // cases; this is the card asking for that rule rather than for a sentence.)
+        assert_eq!(locale::compact("en", 12_345), "12.3K");
+        drop(hit_card(Gen::Dark, &Hit { downloads: 0, follows: 0, ..hit("Empty") }, None));
+        // And a card with an icon draws it: the handle travels with the hit, and the
+        // box is the same size either way.
+        let icon = an_icon(SODIUM_ICON);
+        let with_icon = Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium") };
+        drop(hit_card(Gen::Dark, &with_icon, Some(&icon.icon)));
+    }
+
+    #[test]
+    fn the_icons_of_a_page_of_results_are_asked_for_once_and_each_one_alone() {
+        let mut state = State::new(ProjectType::Modpack);
+        let first = state.opening().expect("a request");
+        let hits = vec![
+            Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium") },
+            Hit { icon_url: LITHIUM_ICON.to_string(), ..hit("Lithium") },
+            // A project with no icon is not asked for: there is nothing to fetch,
+            // and its card draws the empty box the reference's placeholder sits on.
+            hit("Phosphor"),
+            // The same icon twice in one page is one fetch: a URL names a file.
+            Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium Extra") },
+        ];
+        assert_eq!(
+            state.update(Message::Found { round: first.round, result: Ok(hits.clone()) }),
+            Some(Ask::Icons(Icons {
+                urls: vec![SODIUM_ICON.to_string(), LITHIUM_ICON.to_string()],
+            }))
+        );
+
+        // Both arrive, and the page keeps them by URL.
+        assert_eq!(
+            state.update(Message::Icons {
+                arrived: vec![an_icon(SODIUM_ICON), an_icon(LITHIUM_ICON)],
+            }),
+            None
+        );
+        assert_eq!(state.icons.len(), 2);
+
+        // The same search again: the same projects, so the same icons are already
+        // here and nothing is asked for a second time.
+        let Some(Ask::Search(again)) = state.update(Message::Search) else {
+            panic!("the search is asked again");
+        };
+        assert_eq!(state.update(Message::Found { round: again.round, result: Ok(hits) }), None);
+        assert_eq!(state.icons.len(), 2, "an icon already held is not fetched twice");
+
+        // A different page of results keeps its own icons and drops the rest: what
+        // the map holds is what the cards on screen can look up.
+        let Some(Ask::Search(third)) = state.update(Message::Search) else {
+            panic!("a third search");
+        };
+        let fresh = Hit { icon_url: "https://cdn.modrinth.com/new.png".to_string(), ..hit("New") };
+        assert_eq!(
+            state.update(Message::Found { round: third.round, result: Ok(vec![fresh]) }),
+            Some(Ask::Icons(Icons {
+                urls: vec!["https://cdn.modrinth.com/new.png".to_string()],
+            }))
+        );
+        assert!(state.icons.is_empty(), "the icons of the results that are gone went with them");
+
+        // And an answer to a search the page has replaced is dropped whole: it is
+        // not asked for icons for results it does not hold.
+        assert_eq!(
+            state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) }),
+            None
+        );
     }
 }

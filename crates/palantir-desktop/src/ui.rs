@@ -10,6 +10,7 @@
 //! | [`select`] | `base/Combobox.vue`: `rounded-xl`, a `font-medium text-primary` prefix, the value, and a chevron |
 //! | [`button`] | `base/buttons/Button.vue`: `text-sm font-bold text-secondary`, colour per type |
 //! | [`switch`] | `base/Toggle.vue`: a 48x24 rounded track with a `--surface-5` hairline, `bg-brand` on and `bg-button-bg` off, and a 16px knob inset 4px from the edge it sits on |
+//! | [`icon_box`] | `base/Avatar.vue`: a `--color-button-bg` box at `border-radius: calc(16 / 96 * size)`, with a 1px `rgb(255 255 255 / 15%)` outline at `-1px` and the picture rounded into it |
 //!
 //! Two of these are *readings* rather than quotations, and say so where they are
 //! written: the input's own wrapper classes come from a shared style that is not in
@@ -35,11 +36,12 @@
 
 #![allow(dead_code)]
 
-use iced::widget::{column, container, mouse_area, row, text, text_input, Space};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
+use iced::widget::{column, container, image, mouse_area, row, text, text_input, Space};
+use iced::{Alignment, Background, Border, Color, ContentFit, Element, Length, Padding};
 use iced::{Theme, mouse::Interaction};
 
 use crate::anim;
+use crate::avatar;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::ROW_GAP;
@@ -158,7 +160,60 @@ pub const CONTROL_ICON: f32 = 20.0;
 /// A tag's height and the pill it sits in.
 pub const TAG_HEIGHT: f32 = 24.0;
 
+/// The hairline around a project's avatar: `Avatar.vue`'s
+/// `outline: 1px solid rgb(255 255 255 / 15%)`.
+///
+/// A literal in the reference's stylesheet rather than one of its tokens, which is
+/// why it is a literal here too: it is the same in every theme, including the one
+/// whose surfaces are light.
+const AVATAR_OUTLINE: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.15);
+
 // ---- Surfaces ------------------------------------------------------------
+
+/// A project's icon, in the box the reference's `Avatar` draws it in.
+///
+/// The box is `Avatar.vue`'s own: a `--color-button-bg` background, the 1px
+/// `AVATAR_OUTLINE` hairline drawn *inside* it (`outline-offset: -1px`), and
+/// `border-radius: calc(16 / 96 * size)`. The picture arrives already fitted to
+/// the box and already rounded ([`crate::avatar::Icon`]), because the toolkit
+/// cannot clip one; what is left for this function is the box around it.
+///
+/// A card with no icon -- not fetched yet, not an image, or a project that never
+/// uploaded one -- draws the *same box, empty*. That is deliberate and it is what
+/// the reference's placeholder sits on, but it is also the only thing that can
+/// keep a card from reflowing: an icon arrives in a message of its own, and a box
+/// that appeared with it would move the title a frame after the reader read it.
+pub fn icon_box<'a, Message: 'a>(
+    theme: Gen,
+    side: f32,
+    picture: Option<&avatar::Icon>,
+) -> Element<'a, Message> {
+    let box_size = Length::Fixed(side);
+    let content: Element<'a, Message> = match picture {
+        // `ContentFit::Fill` rather than `Contain`: the handle is already the
+        // box's size, so the two are the same picture and this one cannot letterbox
+        // it a second time.
+        Some(icon) => image(icon.handle())
+            .width(box_size)
+            .height(box_size)
+            .content_fit(ContentFit::Fill)
+            .into(),
+        None => Space::new(box_size, box_size).into(),
+    };
+    container(content)
+        .width(box_size)
+        .height(box_size)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+            border: Border {
+                color: AVATAR_OUTLINE,
+                width: 1.0,
+                radius: (avatar::radius(side as u32) as f32).into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into()
+}
 
 /// A card: `--surface-3`, `--radius-lg`, a `--surface-4` hairline.
 pub fn card<'a, Message: 'a>(theme: Gen, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {

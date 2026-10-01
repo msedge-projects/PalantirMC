@@ -98,6 +98,12 @@ enum Choice {
 enum Asked {
     /// A search, as Discover describes it.
     Search(discover::Asked),
+    /// The icons of a page of results, as Discover describes them.
+    ///
+    /// The only ask here whose answer is *decoration*: nothing waits for it, no page
+    /// state turns on it, and a picture that will not come back leaves a card's box
+    /// empty rather than a page half drawn (see [`crate::avatar`]).
+    Icons(discover::Icons),
     /// A project, as the project page describes it.
     Project(project::Asked),
     /// A profile, as the user page describes it.
@@ -1426,6 +1432,7 @@ impl Shell {
         if let Some(asked) = self.act(message) {
             return match asked {
                 Asked::Search(asked) => self.search(asked),
+                Asked::Icons(asked) => self.icons(asked),
                 Asked::Instance(asked) => self.instance(asked),
                 Asked::Project(asked) => self.project(asked),
                 Asked::User(asked) => self.user(asked),
@@ -1919,6 +1926,7 @@ impl Shell {
                         None
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
+                    Some(pages::Ask::Icons(asked)) => Some(Asked::Icons(asked)),
                     Some(pages::Ask::Instance(asked)) => Some(Asked::Instance(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
@@ -2694,6 +2702,10 @@ impl Shell {
     fn opening_command(&mut self) -> iced::Command<Message> {
         match self.screen.opening() {
             Some(pages::Ask::Search(asked)) => self.search(asked),
+            // An icon request is not *owed* by a page's arrival either: the page
+            // cannot make one until a set of results has landed, and the one that
+            // made it is the message that delivered them.
+            Some(pages::Ask::Icons(_)) => iced::Command::none(),
             Some(pages::Ask::Instance(asked)) => self.instance(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
             Some(pages::Ask::User(asked)) => self.user(asked),
@@ -3039,6 +3051,33 @@ impl Shell {
         iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
             Message::Screen(pages::Message::search_result(&asked, result))
         })
+    }
+
+    /// Fetch and decode a page of icons, and bring them back as a page message.
+    ///
+    /// [`Shell::search`]'s twin, off the frame thread for a reason of its own: a
+    /// search is one blocking request and this is twenty of them plus a PNG decode
+    /// each, and a decode on the frame thread is a hitch with no request behind it
+    /// to explain it.
+    ///
+    /// No request travels back beside the answer, unlike the two around it: an icon
+    /// is keyed by the URL it was fetched from, so there is no round to check
+    /// (`pages::Message::search_icons`).
+    fn icons(&self, asked: discover::Icons) -> iced::Command<Message> {
+        let store = self.store.clone();
+        let urls = asked.urls;
+        iced::Command::perform(
+            // `Ok` because [`crate::store::off_thread`] answers with a `Result` and
+            // this call has no failure of its own: `project_icons` drops the icons
+            // that would not come back, so the only way to reach the arm below at all
+            // is a worker that died before answering -- and the answer to that is the
+            // same empty boxes as a fetch that failed (`crate::avatar` has that as a
+            // named departure, not an accident).
+            crate::store::off_thread(move || Ok::<_, String>(store.project_icons(&urls))),
+            |arrived| {
+                Message::Screen(pages::Message::search_icons(arrived.unwrap_or_default()))
+            },
+        )
     }
 
     /// Read one project and bring the answer back as a page message.

@@ -119,6 +119,15 @@ pub enum Ask {
     Open(Open),
     /// Ask the store, through the engine, for search results.
     Search(discover::Asked),
+    /// Ask the store for the icons of a page of results: one fetch per URL, and one
+    /// decode per picture, neither of them on the frame thread.
+    ///
+    /// A request of its own rather than part of [`Ask::Search`], because it is made
+    /// at a different moment: the search has to land before the page knows which
+    /// URLs it is missing, and the cards have to be drawable while the pictures are
+    /// still coming. That is what makes this the one ask whose answer is decoration
+    /// -- the page reserves the box either way ([`crate::ui::icon_box`]).
+    Icons(discover::Icons),
     /// Ask the store, through the engine, for one project: its own document, the
     /// people on its team, and its version list.
     ///
@@ -232,6 +241,20 @@ impl Message {
     /// request.
     pub fn search_result(asked: &discover::Asked, result: Result<Vec<discover::Hit>, String>) -> Message {
         Message::Discover(discover::Message::Found { round: asked.round, result })
+    }
+
+    /// The message that carries a page of icons back to Discover.
+    ///
+    /// [`Message::search_result`]'s twin, and the second half of one answer: a
+    /// search brings the results, and this brings the pictures those results name.
+    /// It is a separate message because it is a separate request -- the results are
+    /// on screen before it is made.
+    ///
+    /// No request is named here, unlike its siblings, because there is no round to
+    /// check an icon against: an answer is keyed by the URL it carries, so an icon
+    /// for a project the page has stopped showing is one nothing ever looks up.
+    pub fn search_icons(arrived: Vec<crate::avatar::Fetched>) -> Message {
+        Message::Discover(discover::Message::Icons { arrived })
     }
 
     /// The message that carries one tab's listing back to the instance page.
@@ -436,12 +459,17 @@ impl Screen {
             }
             (Screen::Home(state), Message::Home(message)) => state.update(message),
             (Screen::Discover(state), Message::Discover(message)) => {
-                // The one page that asks for anything yet. The request it reports
+                // The first page that asked for anything. The request it reports
                 // is a value: the shell runs it, and the answer comes back as a
                 // message rather than as a return value, because an answer
                 // arrives turns later.
+                //
+                // It answers with an `Ask` of its own now rather than with the
+                // page's `Asked`, for the project page's reason: this page has a
+                // second kind of request -- the icons of the results it is drawing
+                // -- and only one of the two is a search.
                 if let Some(asked) = state.update(message) {
-                    return Some(Ask::Search(asked));
+                    return Some(asked);
                 }
             }
             (Screen::Project(state), Message::Project(message)) => {
@@ -818,6 +846,9 @@ mod tests {
             summary: "Modern rendering engine".to_string(),
             downloads: 1,
             follows: 1,
+            // No icon: this test is about the request being routed, and the card's
+            // icon is a request of its own (`Message::search_icons`).
+            icon_url: String::new(),
             game_versions: Vec::new(),
             loaders: Vec::new(),
         }];

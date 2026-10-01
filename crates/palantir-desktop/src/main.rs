@@ -18,6 +18,9 @@
 
 mod accounts;
 mod anim;
+/// The reference's `Avatar`: a project's own icon, decoded and rounded to the
+/// share of its size the reference's own stylesheet rounds it by.
+mod avatar;
 mod brand;
 mod browse;
 mod catalog;

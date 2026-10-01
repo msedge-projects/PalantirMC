@@ -122,6 +122,10 @@ fn hits(count: usize) -> Vec<Hit> {
             summary: "A summary sentence of the length a result card carries.".to_string(),
             downloads: 4_200_000 + index as u64,
             follows: 12_000,
+            // A URL per hit, shaped like the API's, because a card's icon slot is a
+            // box whether a picture arrived for it or not: the cost this file is
+            // about is the box, and the fetch is the store's.
+            icon_url: format!("https://cdn.modrinth.com/{index:04}.png"),
             game_versions: vec!["1.21.1".to_string(), "1.20.6".to_string()],
             loaders: vec!["fabric".to_string()],
         })

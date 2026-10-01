@@ -61,6 +61,13 @@ pub const fn semibold() -> Font {
     inter(iced::font::Weight::Semibold)
 }
 
+/// `font-normal`, which the reference writes where the interface's own weight is
+/// too heavy: a project card's summary and the author beside its title are both
+/// 400 against the 500 everything else inherits.
+pub const fn regular() -> Font {
+    inter(iced::font::Weight::Normal)
+}
+
 /// A heading. The reference draws its headings at 800 (`font-extrabold` on a
 /// button's label, `--font-weight-heading` on a title), which is heavier than the
 /// 600 the old shell used.

@@ -387,6 +387,79 @@ fn separator(language: &str) -> &'static str {
     }
 }
 
+/// A count in the reference's compact form: `formatCompactNumber`.
+///
+/// `ui/src/composables/format-number.ts`'s three cases, with its own thresholds and
+/// its own fraction digits:
+///
+/// | Count | Reference | This |
+/// | --- | --- | --- |
+/// | 9,999 | `9,999`, not compact at all | [`group`] |
+/// | 12,345 | one digit, `12.3K` | the same |
+/// | 999,999 | rounds up and promotes, `1M` | the same |
+/// | 41,000,000 | two digits, `41M` | the same |
+///
+/// The million-and-up case is what a project card's own counts are, which is why
+/// this exists: a card that wrote `41,000,000 downloads` beside a download icon is a
+/// card three times the width of the reference's, and the reference puts the full
+/// count in a tooltip this kit does not draw.
+///
+/// **The suffix and the fraction digit are English's**, and deliberately so rather
+/// than by omission: `Intl.NumberFormat` abbreviates per language (`de` writes
+/// `1,2\u{a0}Mio.`), and every count this launcher draws a number *into* is English
+/// already -- the plural helpers in `text_gen` are generated from English's own
+/// messages. A localized suffix table is a second table of strings nobody here has
+/// measured, which is the one thing this module refuses to invent. The grouping
+/// under ten thousand, which is not a suffix, is the language's own.
+pub fn compact(language: &str, value: u64) -> String {
+    // Under ten thousand the reference does not abbreviate: `9,999` is shorter than
+    // `10.0K` and nobody reads `9.9K` for a count of 9,999.
+    if value < 10_000 {
+        return group(language, value);
+    }
+    // The unit, and how many fraction digits the reference allows under it.
+    const UNITS: [(u64, &str, usize); 4] = [
+        (1_000_000_000_000, "T", 2),
+        (1_000_000_000, "B", 2),
+        (1_000_000, "M", 2),
+        (1_000, "K", 1),
+    ];
+    let mut chosen = UNITS[UNITS.len() - 1];
+    for unit in UNITS {
+        if value >= unit.0 {
+            chosen = unit;
+            break;
+        }
+    }
+    let (mut scale, mut suffix, mut digits) = chosen;
+    let mut mantissa = round(value as f64 / scale as f64, digits);
+    // `Intl` rounds the mantissa and *then* promotes a unit that has rounded up to a
+    // thousand: 999,999 is `1M` rather than `1000K`. One step is enough, because the
+    // only way to reach a thousand is to be within a rounding of it -- and
+    // `rposition`, because the table is in descending order and the step up is the
+    // *smallest* unit bigger than the one in hand.
+    if mantissa >= 1000.0 {
+        if let Some(bigger) = UNITS.iter().rposition(|unit| unit.0 > scale) {
+            scale = UNITS[bigger].0;
+            suffix = UNITS[bigger].1;
+            digits = UNITS[bigger].2;
+            mantissa = round(value as f64 / scale as f64, digits);
+        }
+    }
+    // `format!` rather than a hand-rolled trim: the trailing zeros `41.00` must go
+    // and the fraction that survives must keep the digit it was rounded to, and
+    // `format!`'s own `{:.*}` is the one place that rule already lives.
+    let text = format!("{mantissa:.digits$}");
+    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{trimmed}{suffix}")
+}
+
+/// `value` rounded to `digits` decimal places.
+fn round(value: f64, digits: usize) -> f64 {
+    let factor = 10f64.powi(digits as i32);
+    (value * factor).round() / factor
+}
+
 /// An integer with a language's own grouping.
 ///
 /// The same arithmetic as [`crate::text::number`] -- a separator before every
@@ -647,6 +720,32 @@ mod tests {
         let czech: Vec<&str> = (0..1000u64).map(|value| category("cs", value)).collect();
         assert!(!czech.contains(&"many"), "Czech `many` is its fractional arm");
         assert!(czech.contains(&"one") && czech.contains(&"few"));
+    }
+
+    #[test]
+    fn a_count_is_abbreviated_the_way_the_reference_abbreviates_one() {
+        // `format-number.ts`'s three cases, at the boundaries rather than in the
+        // middle: 9,999 is the last count it does not abbreviate and 10,000 the
+        // first it does, and each unit keeps its own fraction digits -- one under a
+        // million, two above it.
+        assert_eq!(compact("en", 0), "0");
+        assert_eq!(compact("en", 999), "999");
+        assert_eq!(compact("en", 9_999), "9,999");
+        assert_eq!(compact("en", 10_000), "10K");
+        assert_eq!(compact("en", 12_345), "12.3K");
+        assert_eq!(compact("en", 999_949), "999.9K");
+        // Rounded up to a thousand, the unit is promoted: `Intl` writes 999,999 as
+        // `1M`, not as `1000K`.
+        assert_eq!(compact("en", 999_999), "1M");
+        assert_eq!(compact("en", 1_000_000), "1M");
+        assert_eq!(compact("en", 1_234_567), "1.23M");
+        assert_eq!(compact("en", 41_000_000), "41M");
+        assert_eq!(compact("en", 1_500_000_000), "1.5B");
+        assert_eq!(compact("en", 2_000_000_000_000), "2T");
+        // The arm under ten thousand is the *language's* grouping, which is the one
+        // part of this rule that is not English's own.
+        assert_eq!(compact("de", 9_999), "9.999");
+        assert_eq!(compact("ru", 9_999), "9\u{a0}999");
     }
 
     #[test]
