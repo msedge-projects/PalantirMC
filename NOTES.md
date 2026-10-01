@@ -1617,3 +1617,44 @@ next slice can start from one:
 * **The loading skeleton**: `ui/library/instance-group/` and the Browse results
   list, both of which draw their placeholders from the same card shape the real
   row uses.
+
+## 32. The move to a machine that can read its own screen
+
+The work in this tree has been done on a Windows box that cannot photograph its own
+window: every capture tool in `tools/` reaches `user32` through `ctypes`, and
+`PrintWindow` on this shell comes back without the page in it -- G135's own note.
+Three gates record what that costs, and each ends with the same sentence about a
+machine whose screen can be read settling it in one command: G135 (the shaped text),
+G138 (the layout nodes, never read back) and G141 (the dialog after the reservation,
+never photographed). The report then found three defects that only exist in a
+running window -- a clipped dialog, a panic on a click sequence, a list rebuilt every
+frame -- and none of them was visible in the source that was being read instead.
+
+So the tree moves to an Ubuntu 24 VPS, for two reasons: a screen that can be read,
+and a machine that can run the reference client beside ours. `TRANSFER.md` is the
+runbook; `tools/vps_setup.sh` is the bootstrap; `tools/xshot.py` is the X11 capture
+and input path, the counterpart of `winshot.py` (same flags, same `--script` format);
+`tools/pack_transfer.py` packs the recordings and the derived frames, which are the
+only part of this work that git does not carry.
+
+What was checked before trusting the move, rather than after: the tree is portable by
+design (`native.rs`: "everything here is a no-op off Windows", with
+`#[cfg(not(windows))]` stubs, and one target-specific dependency in the whole
+workspace); the fonts are `include_bytes!`d from `assets/fonts/`, so text cannot be
+substituted by the host; `gpu.rs` already falls back to iced's tiny-skia rasteriser,
+which is the path this box has been measured on; and `palantir-core::paths` has a
+tested `System::Linux` data root. The reference is pinned to **v0.21.6** (2026-09-27)
+on purpose: that is the generation four days before the recordings and the same
+generation `UPSTREAM.md` pins the source at.
+
+What the move does *not* change: the two recordings stay the timing authority. The
+reference under Xvfb renders through software WebKitGTK, so its scroll timing there
+says nothing about the recording's, and a VPS has no GPU, so this launcher's absolute
+frame costs become that machine's. The Ubuntu box settles layout, spacing, colour,
+pixels -- and crashes, because a panic there lands in a file.
+
+Two things are honest limits rather than plans: `tools/xshot.py` has never been run
+(it was written where it cannot execute, and the first session there should treat it
+as a draft to fix and commit), and the four first jobs are named in `TRANSFER.md`
+rather than done -- capture the four surfaces, the crash, the windowed lists, and the
+parity inventory of section 31.

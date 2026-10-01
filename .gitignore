@@ -10,3 +10,6 @@ __pycache__/
 # Window captures and one-off pixel probes used by tools/panel_gate.py. They are
 # screenshots of the reference client, not source, so they stay local.
 /.scratch/
+# The evidence bundle tools/pack_transfer.py writes: recordings and the frames
+# derived from them, which are captures rather than source.
+/transfer/

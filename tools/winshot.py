@@ -46,6 +46,16 @@ import time
 import numpy as np
 from PIL import Image, ImageGrab
 
+# This is the Windows capture path: everything below reaches `user32`, `gdi32` and
+# `PIL.ImageGrab`. On another system the same job is `tools/xshot.py`, and saying so
+# here is cheaper than the traceback an `AttributeError` on `ctypes.WinDLL` gives.
+if sys.platform != "win32":
+    raise SystemExit(
+        "winshot.py is the Windows capture path (ctypes -> user32). On Linux use "
+        "`python tools/xshot.py`, which does the same work with xdotool and "
+        "ffmpeg's x11grab."
+    )
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
