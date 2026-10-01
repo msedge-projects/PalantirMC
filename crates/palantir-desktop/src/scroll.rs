@@ -5,7 +5,7 @@
 //! Windows feels steppy: the content teleports once per notch rather than
 //! gliding. Nothing in iced exposes a friction/tween setting, but the
 //! scrollable does hand the event to its *content* first and stand down if the
-//! content captures it — so [`guard`] wraps a page's content, swallows the
+//! content captures it — so [`WheelGuard`] wraps a page's content, swallows the
 //! wheel, and lets the shell own the offset. The shell then eases toward a
 //! target, and only asks for frames while something is still moving.
 //!
@@ -42,7 +42,6 @@
 //! * **Bounded, not physical.** Easing is against a deadline, so a gesture
 //!   cannot settle forever and cannot grow with the distance it covers.
 
-#[cfg(test)]
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{tree, Tree};
@@ -74,6 +73,58 @@ pub const fn visible_log_lines(total: usize) -> usize {
 /// change how far a notch travels — only how it gets there.
 pub const WHEEL_PIXELS_PER_NOTCH: f32 = 60.0;
 
+// ---- The regions ---------------------------------------------------------
+//
+// Every scroll region in this shell, named. A name rather than a type because
+// that is what a region is to the two sides that share it: the call site puts
+// it on the scrollable as an `iced::widget::scrollable::Id`, and the shell keys
+// its glide table by it -- and the identity has to be stable across frames,
+// because the command that moves a region is a lookup by that id.
+//
+// Two regions are on screen at once -- a page, and the panel beside it -- so the
+// wheel has to name the one it happened in. The lists inside a dialog are
+// regions of their own for the same reason one level down: a wheel over a
+// version list is not a wheel over the sheet it sits in, and the version and
+// build lists of one dialog are two regions, visible together.
+
+/// A page's own body: [`crate::page::body`], which every page draws through.
+pub const PAGE: &str = "scroll:page";
+/// An instance page's tab body, which is its own region under the pinned head.
+pub const CONTENT: &str = "scroll:content";
+/// The right panel's sections, beside whichever page is up.
+pub const PANEL: &str = "scroll:panel";
+/// An open dialog's body: one modal is up at a time, so one region is enough.
+pub const DIALOG: &str = "scroll:dialog";
+/// The create dialog's list of game versions.
+pub const VERSIONS: &str = "scroll:versions";
+/// The create dialog's list of loader builds, opened by the *Other* chip.
+pub const BUILDS: &str = "scroll:builds";
+/// The instance-settings modal's list of game versions.
+pub const GAME_VERSIONS: &str = "scroll:game-versions";
+/// The same modal's list of loader builds.
+pub const LOADER_BUILDS: &str = "scroll:loader-builds";
+/// The same modal's list of the linked pack's versions.
+pub const PACK_VERSIONS: &str = "scroll:pack-versions";
+
+/// The id a region's scrollable answers to, and the one the shell moves.
+pub fn id(name: &'static str) -> iced::widget::scrollable::Id {
+    iced::widget::scrollable::Id::new(name)
+}
+
+/// A command that puts the region `name` where the policy says it is.
+///
+/// `scroll_to` is the only way a program moves a `Scrollable` in iced -- the
+/// widget owns its offset, and there is no setter -- so a glide is a stream of
+/// these, one per frame, for as long as [`ScrollAnim::animating`] is true. The x
+/// offset is zero because every region here scrolls vertically; the content is as
+/// wide as the region.
+pub fn scroll_to<Message: 'static>(name: &'static str, offset: f32) -> iced::Command<Message> {
+    iced::widget::scrollable::scroll_to(
+        id(name),
+        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset },
+    )
+}
+
 /// How often the tween asks for a frame while it is gliding.
 ///
 /// 16 ms is 60 frames a second, the rate a machine that can hold a glide is
@@ -89,7 +140,6 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// either way — which is the whole reason this is a duration. A frame count
 /// makes the *length* of the gesture depend on how fast the machine happens to
 /// be, and on a slow renderer that turns a scroll into a slideshow.
-#[cfg(test)]
 pub const DURATION: Duration = Duration::from_millis(160);
 
 /// The frame interval above which this machine is not asked to glide.
@@ -104,14 +154,12 @@ pub const DURATION: Duration = Duration::from_millis(160);
 /// This is measured rather than assumed — see [`ScrollAnim::tick`] — so a
 /// machine with a working GPU gets the glide and a software-rasterised one gets
 /// the instant step, from the same binary and with no setting to get wrong.
-#[cfg(test)]
 pub const SMOOTH_FRAME: Duration = Duration::from_millis(24);
 
 /// Below this many pixels from the target, the animation is over.
 ///
 /// Without a floor, a re-clamped target would leave the page a fraction of a
 /// pixel from where it belongs and keep asking for frames.
-#[cfg(test)]
 pub const SETTLED: f32 = 0.5;
 
 /// How many consecutive slow frames it takes to stop animating on a machine.
@@ -122,7 +170,6 @@ pub const SETTLED: f32 = 0.5;
 /// frames, and the next gesture corrects it. So one fast frame is enough to
 /// resume animating, while a single hitch -- a page fault, another window
 /// painting, a background scan -- is not enough to stop it.
-#[cfg(test)]
 const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 
 /// Where a page's scroll position is, and where it is going.
@@ -130,7 +177,6 @@ const SLOW_FRAMES_TO_DEMOTE: u8 = 2;
 /// Plain numbers and a clock rather than a reference to any widget state, so
 /// the whole easing policy is unit tested without a renderer or a window.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-#[cfg(test)]
 pub struct ScrollAnim {
     /// The offset the content is drawn at.
     pub offset: f32,
@@ -155,18 +201,15 @@ pub struct ScrollAnim {
 
 /// One glide: where it started, when, and the deadline it must meet.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg(test)]
 struct Glide {
     from: f32,
     began: Instant,
     duration: Duration,
 }
 
-#[cfg(test)]
 impl ScrollAnim {
     /// The largest offset that still shows content: never negative, so a page
     /// shorter than the window cannot scroll at all.
-    #[cfg(test)]
     pub fn max_offset(&self) -> f32 {
         (self.content_height - self.view_height).max(0.0)
     }
@@ -196,6 +239,9 @@ impl ScrollAnim {
     /// `now` is passed in rather than read here so that the whole policy is a
     /// function of its inputs, and a test can hold the clock still.
     pub fn wheel(&mut self, wheel: Wheel, now: Instant) {
+        // Where the region is is the caller's business, not this one's: only the
+        // caller knows whether the offset the wheel measured is this policy's own
+        // number or somebody else's. See [`Wheel::offset`] and [`Glides::wheel`].
         self.observe(wheel.content_height, wheel.view_height);
         self.scroll_notches(wheel.notches);
         self.begin(now);
@@ -334,6 +380,11 @@ impl ScrollAnim {
     /// does not, because it belongs to the machine. Re-learning it per page
     /// would mean paying for one glide the machine cannot draw on every
     /// navigation, which is exactly the cost this policy exists to remove.
+    ///
+    /// Nothing in the shell calls it yet: a region keeps iced's own offset across
+    /// a navigation, so resetting the policy alone would put the two sides at odds.
+    /// It is here, and under test, for the change that resets both.
+    #[cfg(test)]
     pub fn restart(&mut self) {
         self.offset = 0.0;
         self.target = 0.0;
@@ -345,6 +396,108 @@ impl ScrollAnim {
         // `frame_cost` is deliberately left alone: it describes the machine, so
         // re-learning it once per page would mean paying for one glide the
         // machine cannot draw on every navigation.
+    }
+}
+
+// ---- Who moves them -------------------------------------------------------
+
+/// Every region's glide, keyed by the name the region was built with.
+///
+/// The shell's half of the policy. A region reports a wheel (see [`region`]),
+/// the shell asks this what that wheel should have moved it to, and then asks it
+/// again on every frame until nothing is moving. The regions are a map keyed by
+/// name rather than a field each because a region *is* a name here -- the same
+/// nine names are spread over eight pages, a panel, a dialog and a modal, and no
+/// two of the ones that share a glide are ever on screen together.
+///
+/// A region nobody has moved is not an error and not a special case: it is at
+/// rest at the top, which is what [`Glides::anim`] answers for a name it has
+/// never seen, and where a wheel that arrives on that name starts from.
+#[derive(Debug, Default)]
+pub struct Glides {
+    regions: std::collections::HashMap<&'static str, Region>,
+}
+
+/// One region: its glide, and the number this policy last said it should be at.
+#[derive(Debug, Default)]
+struct Region {
+    anim: ScrollAnim,
+    /// The offset the last `scroll_to` asked for. What a later wheel's measured
+    /// offset is compared against, to tell this policy's own number from somebody
+    /// else's -- see [`Wheel::offset`].
+    sent: f32,
+}
+
+impl Region {
+    /// Take the region over at the offset the wheel measured, if that offset is
+    /// not the one this policy last asked for.
+    ///
+    /// A tolerance rather than an equality, because iced clamps the offset it is
+    /// given at the end of the content and because a frame and a wheel event do
+    /// not have to fall on the same tick: half a pixel is this policy's own
+    /// rounding, and anything past it is a drag, a keyboard scroll or a clamp.
+    fn adopt(&mut self, offset: f32) {
+        if (offset - self.sent).abs() > SETTLED {
+            self.anim.resync(offset);
+        }
+    }
+}
+
+impl Glides {
+    /// Take a wheel on `name`, and answer with the command that moves it.
+    ///
+    /// One command, not a stream: either this machine is fast enough to glide and
+    /// this is the command that starts it, or it was measured too slow and this is
+    /// the whole gesture (see [`ScrollAnim::glide_duration`]).
+    pub fn wheel<Message: 'static>(
+        &mut self,
+        name: &'static str,
+        wheel: Wheel,
+        now: Instant,
+    ) -> iced::Command<Message> {
+        let region = self.regions.entry(name).or_default();
+        region.adopt(wheel.offset);
+        region.anim.wheel(wheel, now);
+        region.sent = region.anim.offset;
+        scroll_to(name, region.sent)
+    }
+
+    /// Advance every region by one frame, and answer with the commands for the
+    /// ones that moved.
+    ///
+    /// Called from the window's frame timer, which exists only while
+    /// [`Glides::animating`] is true -- so this is the last frame of a gesture as
+    /// often as not, and the frame that lands an offset exactly on its target is
+    /// the one that has to be sent. Hence the comparison rather than the flag
+    /// [`ScrollAnim::tick`] returns: what matters here is whether the frame
+    /// *changed* the picture, not whether another one is coming.
+    pub fn tick<Message: 'static>(&mut self, now: Instant) -> iced::Command<Message> {
+        let mut moved = Vec::new();
+        for (name, region) in &mut self.regions {
+            let name = *name;
+            let before = region.anim.offset;
+            region.anim.tick(now);
+            if region.anim.offset != before {
+                region.sent = region.anim.offset;
+                moved.push(scroll_to(name, region.sent));
+            }
+        }
+        iced::Command::batch(moved)
+    }
+
+    /// Whether any region is still moving, which is what keeps the one frame
+    /// timer every region shares alive.
+    pub fn animating(&self) -> bool {
+        self.regions.values().any(|region| region.anim.animating())
+    }
+
+    /// Where one region is, or the resting state for a name nothing has moved.
+    ///
+    /// What a glide is made of is the region's own business, and the shell only
+    /// ever needs the commands; this is how the tests ask a region what it did.
+    #[cfg(test)]
+    pub fn anim(&self, name: &'static str) -> ScrollAnim {
+        self.regions.get(name).map(|region| region.anim).unwrap_or_default()
     }
 }
 
@@ -449,7 +602,6 @@ pub fn window(len: usize, row_height: f32, at: Geometry) -> std::ops::Range<usiz
 /// it has to look like it is obeying — closing most of the distance early and
 /// settling — rather than starting slowly the way an ease-in-out transition
 /// would. `progress` is in `0.0..=1.0`.
-#[cfg(test)]
 fn ease_out(progress: f32) -> f32 {
     let remaining = 1.0 - progress;
     1.0 - remaining * remaining * remaining
@@ -457,9 +609,10 @@ fn ease_out(progress: f32) -> f32 {
 
 /// One wheel event, with the geometry it happened in.
 ///
-/// The guard reports both because they come from the same place: it is laid out
-/// at the content's full height inside the scrollable, and the rectangle it is
-/// asked to draw in is the visible slice of that content.
+/// The guard reports all of it because it comes from the same place: it is laid
+/// out at the content's full height inside the scrollable, the rectangle it is
+/// asked to draw in is the visible slice of that content, and the gap between
+/// the two is where the region currently is.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Wheel {
     /// Notches, positive upward.
@@ -468,6 +621,24 @@ pub struct Wheel {
     pub content_height: f32,
     /// Height of the part that is on screen, in pixels.
     pub view_height: f32,
+    /// Where the region is right now, in pixels from the content's top.
+    ///
+    /// **Measured rather than remembered, because the scrollbar is not this
+    /// policy.** iced's own scrollbar drag, a keyboard scroll and a `scroll_to`
+    /// from anywhere else all move a region without a wheel, and each of them
+    /// leaves the policy's idea of the offset behind. A glide started from that
+    /// stale offset does not slide from where the reader is looking: it jumps
+    /// there first, and then slides.
+    ///
+    /// What reads this is [`Glides`], and what it compares the number against is
+    /// the offset it last *asked* for. The two agree during a glide -- iced
+    /// applies what it is told and hands it back in the next event's viewport --
+    /// so a wheel during a gesture adopts nothing and its notches accumulate,
+    /// while a wheel after a drag adopts the drag. Adopting on every wheel is the
+    /// mistake this field exists to avoid: each notch would re-aim at a position
+    /// a frame behind the one just commanded, and a flick would travel far less
+    /// than the hand asked for.
+    pub offset: f32,
 }
 
 /// Pixels for a wheel delta, matching the units [`ScrollAnim::scroll_notches`]
@@ -483,7 +654,37 @@ pub fn wheel_notches(delta: &mouse::ScrollDelta) -> f32 {
     }
 }
 
-/// See [`guard`].
+/// A scroll region: `content` wrapped so that the wheel over it is reported
+/// rather than applied, inside the scrollable that carries the region's id.
+///
+/// The one call a region's site makes, rather than three that have to agree: the
+/// guard reports the region's name, the scrollable answers to it, and both come
+/// from the same argument. What the wheel is *not* given to is iced's own
+/// handling, and that is the whole reason this exists: a `Scrollable` hands the
+/// event to its content first and stands down if the content claims it, so a
+/// notch that the guard takes is one iced does not apply as an instant 60-pixel
+/// jump. What the caller gets back is the `Scrollable`, so a site can still say
+/// its height, its width or its own `on_scroll`.
+pub fn region<'a, Message, Theme, Renderer>(
+    name: &'static str,
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    on_wheel: impl Fn(&'static str, Wheel) -> Message + 'a,
+) -> iced::widget::Scrollable<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    // `Scrollable` itself is not one of the bounds `Widget` asks for, so it has
+    // to be named: the struct is generic over a theme that can draw a scrollbar.
+    Theme: iced::widget::scrollable::StyleSheet + 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    iced::widget::scrollable(WheelGuard::new(content, move |wheel| on_wheel(name, wheel))).id(id(name))
+}
+
+/// A region's content, guarded, before the scrollable is built around it.
+///
+/// [`region`] is what a call site uses; this is the wrapper itself, which a
+/// caller that needs to place the guarded content in a scrollable of its own
+/// (with its own id) can hold.
 pub struct WheelGuard<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Message: 'a,
@@ -500,6 +701,14 @@ where
     Theme: 'a,
     Renderer: 'a,
 {
+    /// Wrap `content` so that a wheel over it is reported to `on_wheel`.
+    pub fn new(
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        on_wheel: impl Fn(Wheel) -> Message + 'a,
+    ) -> Self {
+        WheelGuard { content: content.into(), on_wheel: Box::new(on_wheel) }
+    }
+
     /// What this guard would report for an event, if it claims it.
     ///
     /// Split out so the claim rule is testable without a window: a wheel over
@@ -522,6 +731,13 @@ where
                     notches: wheel_notches(delta),
                     content_height: bounds.height,
                     view_height,
+                    // `bounds` is this content laid out from its own top, and
+                    // `viewport` is the visible slice of it -- both in the
+                    // window's coordinates, because iced positions layout nodes
+                    // absolutely. So the distance between their tops is exactly
+                    // how far the content has been scrolled, with no state of
+                    // this policy in the answer.
+                    offset: viewport.y - bounds.y,
                 })
             }
             _ => None,
@@ -674,6 +890,12 @@ mod tests {
         anim
     }
 
+    /// A wheel of `notches` on a region `content` tall showing `view` of itself,
+    /// with the region currently at `offset` -- what a guard reports.
+    fn wheel_at(notches: f32, content: f32, view: f32, offset: f32) -> Wheel {
+        Wheel { notches, content_height: content, view_height: view, offset }
+    }
+
     /// Run a gesture to completion on a clock the test owns, and report how many
     /// frames it took.
     fn frames_to_settle(anim: &mut ScrollAnim) -> usize {
@@ -791,10 +1013,10 @@ mod tests {
         // what iced would have moved it; only the path changes.
         let mut anim = page(2000.0, 500.0);
         let now = Instant::now();
-        anim.wheel(Wheel { notches: -1.0, content_height: 2000.0, view_height: 500.0 }, now);
+        anim.wheel(wheel_at(-1.0, 2000.0, 500.0, 0.0), now);
         assert_eq!(anim.target, WHEEL_PIXELS_PER_NOTCH);
         assert_eq!(anim.offset, 0.0, "the offset must ease, not jump");
-        anim.wheel(Wheel { notches: -1.0, content_height: 2000.0, view_height: 500.0 }, now);
+        anim.wheel(wheel_at(-1.0, 2000.0, 500.0, 0.0), now);
         assert_eq!(anim.target, 2.0 * WHEEL_PIXELS_PER_NOTCH);
     }
 
@@ -804,10 +1026,7 @@ mod tests {
         // geometry has to travel with the wheel event or nothing would move.
         let mut anim = ScrollAnim::default();
         assert_eq!(anim.max_offset(), 0.0);
-        anim.wheel(
-            Wheel { notches: -2.0, content_height: 3000.0, view_height: 700.0 },
-            Instant::now(),
-        );
+        anim.wheel(wheel_at(-2.0, 3000.0, 700.0, 0.0), Instant::now());
         assert_eq!(anim.content_height, 3000.0);
         assert_eq!(anim.view_height, 700.0);
         assert_eq!(anim.target, 2.0 * WHEEL_PIXELS_PER_NOTCH);
@@ -891,7 +1110,7 @@ mod tests {
         anim.observe_cost(Duration::from_millis(69));
         anim.observe_cost(Duration::from_millis(69));
         anim.wheel(
-            Wheel { notches: -1.0, content_height: 4000.0, view_height: 600.0 },
+            wheel_at(-1.0, 4000.0, 600.0, 0.0),
             Instant::now(),
         );
 
@@ -1002,8 +1221,8 @@ mod tests {
         );
         assert_eq!(
             claimed,
-            Some(Wheel { notches: -1.0, content_height: 1200.0, view_height: 400.0 }),
-            "the content height and the visible height must both travel with the event"
+            Some(wheel_at(-1.0, 1200.0, 400.0, 0.0)),
+            "the content height, the visible height and the offset must all travel with the event"
         );
         assert_eq!(
             WheelGuard::<(), Theme, iced::Renderer>::claimed(&wheel, outside, bounds, &viewport),
@@ -1035,5 +1254,108 @@ mod tests {
         )
         .expect("a wheel over the visible part is claimed");
         assert_eq!(claimed.view_height, 400.0);
+    }
+
+    #[test]
+    fn the_offset_a_wheel_reports_is_the_region_s_position_and_not_this_policy_s() {
+        // The content is laid out from the top of the region and the visible
+        // slice is translated by the scroll; the gap between the two tops is the
+        // offset, read off the event rather than remembered. Scrolled 300px: the
+        // slice starts that much below the content.
+        let bounds = Rectangle { x: 12.0, y: 40.0, width: 100.0, height: 1200.0 };
+        let viewport = Rectangle { x: 12.0, y: 340.0, width: 100.0, height: 400.0 };
+        let inside = mouse::Cursor::Available(iced::Point::new(50.0, 100.0));
+        let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        });
+        let claimed = WheelGuard::<(), Theme, iced::Renderer>::claimed(
+            &wheel, inside, bounds, &viewport,
+        )
+        .expect("a wheel over the visible part is claimed");
+        assert_eq!(claimed.offset, 300.0);
+    }
+
+    // ---- The shell's side of the policy ---------------------------------
+
+    /// Run a wheel on `name`, with the region reported at `at`.
+    fn glide(glides: &mut Glides, name: &'static str, at: f32, now: Instant) {
+        let _ = glides.wheel::<()>(name, wheel_at(-1.0, 2000.0, 500.0, at), now);
+    }
+
+    #[test]
+    fn a_wheel_moves_the_region_it_names_and_leaves_the_others_alone() {
+        let now = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, now);
+        assert_eq!(glides.anim(PAGE).target, WHEEL_PIXELS_PER_NOTCH);
+        assert_eq!(glides.anim(PANEL).target, 0.0, "a region nobody wheeled is still at the top");
+    }
+
+    #[test]
+    fn a_flick_accumulates_the_way_the_hand_asked_for_it() {
+        // The case the sent-offset comparison exists for. Every notch is answered
+        // before the frame carrying the previous one has been drawn, so the region
+        // reports where it was a frame ago -- and a policy that adopted that report
+        // would re-aim at it, losing most of the flick.
+        let began = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, began);
+        let _ = glides.tick::<()>(began + FRAME);
+        let sent = glides.anim(PAGE).offset;
+        assert!(sent > 0.0 && sent < WHEEL_PIXELS_PER_NOTCH, "one frame of a glide: {sent}");
+        // The second notch arrives with the region still reporting the position
+        // the first frame asked for, because that is what it is at.
+        glide(&mut glides, PAGE, sent, began + FRAME);
+        assert_eq!(
+            glides.anim(PAGE).target,
+            2.0 * WHEEL_PIXELS_PER_NOTCH,
+            "two notches must travel two notches"
+        );
+    }
+
+    #[test]
+    fn a_region_something_else_moved_is_taken_over_rather_than_dragged_back() {
+        // A scrollbar drag moves the region without a wheel, and iced clamps the
+        // end of a shortened page the same way. A glide started from the policy's
+        // stale idea of the offset would jump the page there first.
+        let now = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, now);
+        assert_eq!(glides.anim(PAGE).offset, 0.0);
+        glide(&mut glides, PAGE, 900.0, now);
+        assert_eq!(glides.anim(PAGE).offset, 900.0, "the drag is where the glide starts");
+        assert_eq!(
+            glides.anim(PAGE).target,
+            900.0 + WHEEL_PIXELS_PER_NOTCH,
+            "and the notch is measured from there"
+        );
+    }
+
+    #[test]
+    fn the_regions_stop_asking_for_frames_once_they_have_arrived() {
+        // What keeps the frame timer from running forever: `animating` is what the
+        // shell's subscription asks, so a gesture that has landed must say so.
+        let began = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, began);
+        assert!(glides.animating(), "a wheel that can move a region starts the frame timer");
+        let (mut frames, mut now) = (0, began);
+        while glides.animating() {
+            let _ = glides.tick::<()>(now);
+            now += FRAME;
+            frames += 1;
+            assert!(frames < 60, "the gesture must terminate");
+        }
+        assert!(frames > 1, "it glided rather than arriving in one step: {frames}");
+        assert_eq!(glides.anim(PAGE).offset, WHEEL_PIXELS_PER_NOTCH, "exactly on the target");
+    }
+
+    #[test]
+    fn a_wheel_on_a_region_with_nothing_to_scroll_starts_no_timer() {
+        // A page shorter than its window clamps the target back to the top, so the
+        // wheel moves nothing and must not wake a clock for 160ms.
+        let mut glides = Glides::default();
+        let _ = glides.wheel::<()>(PAGE, wheel_at(-1.0, 400.0, 600.0, 0.0), Instant::now());
+        assert!(!glides.animating());
     }
 }

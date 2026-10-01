@@ -59,6 +59,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -76,6 +84,9 @@ impl State {
     /// Apply a message.
     pub fn update(&mut self, message: Message) {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::Search(text) => self.search = text,
             Message::Open => {
                 self.notice = Some(store::not_implemented("Opening a screenshot in a viewer"));
@@ -158,7 +169,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
                 .push(heading_line(theme, Key::AppScreenshotsEmptyHeading))
                 .push(body_line(theme, Key::AppScreenshotsEmptyDescription.message())),
         ));
-        return page::body(blocks, GAP);
+        return page::body(blocks, GAP, Message::Wheel);
     }
     let visible = state.visible(&shots);
     if visible.is_empty() {
@@ -169,7 +180,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
                 .push(heading_line(theme, Key::AppScreenshotsNoResultsHeading))
                 .push(body_line(theme, &store::not_implemented("Thumbnails"))),
         ));
-        return page::body(blocks, GAP);
+        return page::body(blocks, GAP, Message::Wheel);
     }
     let mut list = column![].spacing(GAP).width(Length::Fill);
     for shot in visible {
@@ -209,7 +220,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
         Key::AppScreenshotsGroupBy.message(),
         &store::not_implemented("Screenshot thumbnails"),
     ));
-    page::body(blocks, GAP)
+    page::body(blocks, GAP, Message::Wheel)
 }
 
 /// A card heading, in the reference's extra-bold face.

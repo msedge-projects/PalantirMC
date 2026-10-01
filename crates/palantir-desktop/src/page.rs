@@ -18,7 +18,7 @@
 
 #![allow(dead_code)]
 
-use iced::widget::{column, container, scrollable, Space};
+use iced::widget::{column, container, Space};
 use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icon;
@@ -122,18 +122,33 @@ pub fn draw<'a, T, Message: 'a>(
 /// The reference's pages are `flex flex-col gap-* p-6` inside `.app-viewport`,
 /// which scrolls. Same here: one scroll region per page, and the inset inside it
 /// so the text does not slide under the pane's rounded corner as it scrolls.
+///
+/// `on_wheel` is how a page tells the shell that the pointer scrolled in it.
+/// [`crate::scroll::region`] takes the wheel before iced's own handling does, and
+/// what happens next is not the page's: iced moves a scrollable with
+/// `scroll_to`, which is a command, and a command is an update's to return. So a
+/// page carries one message variant for the wheel and knows nothing else about
+/// scrolling -- see [`crate::scroll`] for what the glide is and why it is not
+/// drawn as a plain wheel notch.
+///
+/// The name comes back out of the region rather than being written here, so a page
+/// hands its own message constructor in and nothing else: which region the wheel
+/// happened in is a fact about the widget, and the shell keys its glides by it.
 pub fn body<'a, Message: 'a>(
     blocks: Vec<Element<'a, Message>>,
     gap: f32,
+    on_wheel: impl Fn(&'static str, crate::scroll::Wheel) -> Message + 'a,
 ) -> Element<'a, Message> {
     let mut items = column![].spacing(gap).width(Length::Fill);
     for block in blocks {
         items = items.push(block);
     }
-    scrollable(
+    crate::scroll::region(
+        crate::scroll::PAGE,
         container(items)
             .width(Length::Fill)
             .padding(Padding { top: INSET, right: INSET, bottom: INSET, left: INSET }),
+        on_wheel,
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -349,7 +364,10 @@ mod tests {
                 rule(*theme),
                 glyph(*theme, Glyph::Play, 20.0),
             ];
-            drop(body(blocks, GAP));
+            // A message constructor that is never published: what this draws in
+            // is the region, and a region with nothing to publish is still a
+            // region.
+            drop(body(blocks, GAP, |_, _| ()));
         }
     }
 }

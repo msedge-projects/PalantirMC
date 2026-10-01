@@ -243,6 +243,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -294,6 +302,9 @@ impl State {
     /// The instance page answers with an `Ask` for the same reason.
     pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::Tab(tab) => self.tab = tab,
             // The button asks again rather than standing in for an answer: what
             // the page knows is dropped, and the shell is told to go and get it.
@@ -420,7 +431,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             page::waiting(theme, "this project")
         }),
     });
-    page::body(blocks, GAP)
+    page::body(blocks, GAP, Message::Wheel)
 }
 
 /// The header: the title, the author, the summary and the counts.

@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
-use iced::widget::{column, container, image, mouse_area, row, scrollable, text_input, Space};
+use iced::widget::{column, container, image, mouse_area, row, text_input, Space};
 use iced::window;
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
@@ -67,7 +67,7 @@ use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
-use crate::pages::{self, discover, instance, project, skins, user, Screen};
+use crate::pages::{self, discover, home, instance, project, screenshots, servers, skins, user, Screen};
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
@@ -371,6 +371,14 @@ pub struct Shell {
     /// taller than the window loses its head at the top and its last row at the
     /// bottom with nothing to scroll them with.
     viewport: iced::Size,
+    /// One glide per scroll region, keyed by the name the region was built with.
+    ///
+    /// What a wheel moves, and what keeps the frame clock awake while it does:
+    /// see [`crate::scroll::Glides`]. The regions themselves are the pages'
+    /// (`crate::page::body`), this panel's, a dialog's and the instance-settings
+    /// modal's -- all of them named out of [`crate::scroll`] rather than here, so
+    /// that the one place a name is written is the one place the region is built.
+    glides: crate::scroll::Glides,
     /// Where a `--shot` run's picture is going, if this is one. The request is in
     /// place before the first frame, the timer [`Shell::capture`] asks for fires
     /// once the window has settled, and writing the frame is what ends the run.
@@ -1102,6 +1110,14 @@ pub enum Message {
     Minimize,
     ToggleMaximize,
     Close,
+    /// The pointer scrolled in one of this shell's own scroll regions.
+    ///
+    /// A page's region raises the same shape inside its own message and the
+    /// instance-settings modal's inside its; [`Shell::handle`] takes all three
+    /// before `act` can hand any of them to a page, because the answer is a
+    /// command and a page has no way to return one (see [`crate::scroll`]). The
+    /// name is the region's own, which is what the shell's glides are keyed by.
+    Wheel(&'static str, crate::scroll::Wheel),
     /// The window's own state changed, reported by the window procedure: it is
     /// maximized now, or it is not, or the pointer moved on or off the maximize
     /// control. See [`window_state`] for why neither can be a widget's message.
@@ -1139,6 +1155,7 @@ impl Shell {
             modal: None,
             maximized: false,
             viewport: DIALOG_VIEWPORT,
+            glides: crate::scroll::Glides::default(),
             shot: None,
             shot_taken: false,
             kicks: 0,
@@ -1388,15 +1405,34 @@ impl Shell {
         }
     }
 
+    /// Take a wheel on one scroll region, and answer with the command that moves
+    /// it to where the policy says it should be.
+    ///
+    /// This is the whole of the scrolling the shell owns. [`crate::scroll::Glides`]
+    /// keeps one glide per named region, decides whether the offset the wheel
+    /// measured belongs to this shell or to something else that moved the region,
+    /// and eases toward the target the notches asked for. What comes back is
+    /// either the frame that starts a glide or -- on a machine measured too slow
+    /// to draw one -- the whole of the gesture.
+    fn glide(&mut self, name: &'static str, wheel: crate::scroll::Wheel) -> iced::Command<Message> {
+        self.glides.wheel(name, wheel, std::time::Instant::now())
+    }
+
     /// Whether anything is still moving, which is what keeps the clock awake.
     ///
-    /// Two clocks now, and both have to be asked. The rail's plates are the
-    /// shell's own, and the pages' controls are [`crate::anim`]'s process-wide
+    /// Three things now, and every one of them has to be asked. The rail's plates
+    /// are the shell's own; the pages' controls are [`crate::anim`]'s process-wide
     /// interaction clock -- a hover that started on a control is a frame
     /// subscription the shell owes it, or the tween would paint its first frame
-    /// and sit there (see [`crate::hover`]).
+    /// and sit there (see [`crate::hover`]); and a scroll region mid-glide is
+    /// waiting for exactly this frame ([`crate::scroll::Glides`]).
     pub fn animating(&self) -> bool {
         if self.plates.iter().any(Tween::is_running) {
+            return true;
+        }
+        // A region mid-glide is moving as well, and the frame it is waiting for is
+        // this one: without it a glide would draw its first frame and stop there.
+        if self.glides.animating() {
             return true;
         }
         anim::clock().lock().map(|clock| clock.animating()).unwrap_or(false)
@@ -1491,6 +1527,37 @@ impl Shell {
                     }
                 }
                 return window::close(Id::MAIN);
+            }
+            // A wheel is not a page's to apply, and not a dialog's either: iced
+            // moves a `Scrollable` with `scroll_to`, which is a command, and a
+            // command is this match's to return. Every shape a wheel can arrive in
+            // is one of these three -- this shell's own regions, a page's, and the
+            // instance-settings modal's -- and all three answer the same way.
+            Message::Wheel(name, wheel) => return self.glide(name, wheel),
+            Message::Screen(
+                pages::Message::Home(home::Message::Wheel(name, wheel))
+                | pages::Message::Discover(discover::Message::Wheel(name, wheel))
+                | pages::Message::Project(project::Message::Wheel(name, wheel))
+                | pages::Message::Instance(instance::Message::Wheel(name, wheel))
+                | pages::Message::Skins(skins::Message::Wheel(name, wheel))
+                | pages::Message::Screenshots(screenshots::Message::Wheel(name, wheel))
+                | pages::Message::Servers(servers::Message::Wheel(name, wheel))
+                | pages::Message::User(user::Message::Wheel(name, wheel)),
+            ) => return self.glide(name, wheel),
+            Message::InstanceSettings(crate::instance_settings::Message::Wheel(name, wheel)) => {
+                return self.glide(name, wheel)
+            }
+            // The frame clock, which exists only while something is moving. The
+            // regions glide on it with everything else -- one clock in the window,
+            // whichever page is drawing -- and what it answers with is the offsets
+            // of the regions that this frame moved.
+            Message::Tick => {
+                let now = std::time::Instant::now();
+                self.advance(FRAME);
+                if let Ok(mut clock) = anim::clock().lock() {
+                    clock.tick(now);
+                }
+                return self.glides.tick(now);
             }
             _ => {}
         }
@@ -2191,18 +2258,14 @@ impl Shell {
                 }
                 None
             }
-            Message::Tick => {
-                self.advance(FRAME);
-                // The pages' controls advance on the same frame as the rail's
-                // plates: one clock in the window, whichever page is drawing.
-                if let Ok(mut clock) = anim::clock().lock() {
-                    clock.tick(std::time::Instant::now());
-                }
-                None
-            }
             // Handled before this, in `handle`: they are the messages whose
-            // answer is a command rather than a request.
-            Message::Minimize | Message::ToggleMaximize | Message::Close => None,
+            // answer is a command rather than a request -- and a wheel's answer is
+            // that the region it names glides.
+            Message::Minimize
+            | Message::ToggleMaximize
+            | Message::Close
+            | Message::Tick
+            | Message::Wheel(_, _) => None,
         }
     }
 
@@ -4407,8 +4470,15 @@ impl Shell {
         // `border-l` over the wash: iced paints a `Border` on all four sides, so
         // the panel's own edge is a one-pixel column rather than a border width.
         container(
-            row![hairline(theme, true), scrollable(sections).width(Length::Fill).height(Length::Fill)]
-                .height(Length::Fill),
+            row![
+                hairline(theme, true),
+                // The panel is a scroll region of its own, named because a wheel
+                // over it is not a wheel over the page beside it.
+                crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            ]
+            .height(Length::Fill),
         )
         .width(Length::Fixed(PANEL))
         .height(Length::Fill)
@@ -5275,9 +5345,13 @@ impl Shell {
                 // content fits is drawn at its content's height with no bar, and
                 // one that does not is drawn at the room it has and scrolls.
                 .push(
-                    container(scrollable(body))
-                        .width(Length::Fill)
-                        .max_height(self.dialog_body_room()),
+                    container(crate::scroll::region(
+                        crate::scroll::DIALOG,
+                        body,
+                        Message::Wheel,
+                    ))
+                    .width(Length::Fill)
+                    .max_height(self.dialog_body_room()),
                 ),
         )
         .width(Length::Fixed(DIALOG_WIDTH))
@@ -5517,7 +5591,11 @@ impl Shell {
                     // The list scrolls past 300px, which is the reference's own
                     // bound on its options -- and it is the options rather than
                     // the dropdown, so the footer stays outside it.
-                    container(scrollable(column(rows).width(Length::Fill)))
+                    container(crate::scroll::region(
+                        crate::scroll::VERSIONS,
+                        column(rows).width(Length::Fill),
+                        Message::Wheel,
+                    ))
                         .width(Length::Fill)
                         .max_height(VERSION_LIST_HEIGHT)
                         .into()
@@ -5677,7 +5755,11 @@ impl Shell {
                         .into_iter()
                         .map(|build| self.build_row(build))
                         .collect();
-                    container(scrollable(column(rows).width(Length::Fill)))
+                    container(crate::scroll::region(
+                        crate::scroll::BUILDS,
+                        column(rows).width(Length::Fill),
+                        Message::Wheel,
+                    ))
                         .width(Length::Fill)
                         .max_height(VERSION_LIST_HEIGHT)
                         .into()
@@ -6996,6 +7078,58 @@ mod tests {
 
     fn settings(hide_sidebar: bool, show_skins: bool, show_screenshots: bool) -> RailSettings {
         RailSettings { hide_sidebar, show_skins, show_screenshots }
+    }
+
+    #[test]
+    fn a_wheel_from_any_of_the_three_shapes_reaches_the_region_it_names() {
+        // The wire this slice exists for. iced hands a wheel to the content of a
+        // `Scrollable` before it applies it itself, so a region's guard takes it
+        // and publishes it as its own message -- and the three shapes that message
+        // can arrive in have to land in `Shell::handle`, because that is the only
+        // place that can answer with the command that moves a region. A wheel that
+        // reached `act` instead would be a wheel that did nothing.
+        let wheel = crate::scroll::Wheel {
+            notches: -1.0,
+            content_height: 2_000.0,
+            view_height: 500.0,
+            offset: 0.0,
+        };
+        let mut shell = shell_at("/");
+        // A page's region: what `page::body`'s guard publishes, mapped through the
+        // page's own message and `pages::Message` on its way up.
+        press(
+            &mut shell,
+            Message::Screen(pages::Message::Home(home::Message::Wheel(
+                crate::scroll::PAGE,
+                wheel,
+            ))),
+        );
+        assert_eq!(
+            shell.glides.anim(crate::scroll::PAGE).target,
+            crate::scroll::WHEEL_PIXELS_PER_NOTCH
+        );
+        // One of the shell's own, which raises the shell's message directly.
+        press(&mut shell, Message::Wheel(crate::scroll::PANEL, wheel));
+        assert_eq!(
+            shell.glides.anim(crate::scroll::PANEL).target,
+            crate::scroll::WHEEL_PIXELS_PER_NOTCH
+        );
+        // And one of the instance-settings modal's three lists, which raises its
+        // own message inside the shell's.
+        press(
+            &mut shell,
+            Message::InstanceSettings(crate::instance_settings::Message::Wheel(
+                crate::scroll::LOADER_BUILDS,
+                wheel,
+            )),
+        );
+        assert_eq!(
+            shell.glides.anim(crate::scroll::LOADER_BUILDS).target,
+            crate::scroll::WHEEL_PIXELS_PER_NOTCH
+        );
+        // And the frame clock is what carries all three, which is the other half
+        // of the wire: a glide nobody draws is a glide that never happened.
+        assert!(shell.animating());
     }
 
     #[test]

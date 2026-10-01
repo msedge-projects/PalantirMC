@@ -67,7 +67,7 @@
 //! the modal's own Save (`afterSave`); this one lets the next run pay for it, and
 //! says so where the reader is about to press Save.
 
-use iced::widget::{column, container, mouse_area, row, scrollable, text_input, Space};
+use iced::widget::{column, container, mouse_area, row, text_input, Space};
 use iced::{mouse::Interaction, Alignment, Background, Border, Element, Length, Padding};
 
 use crate::catalog::LoaderKind;
@@ -210,6 +210,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+    /// A wheel over one of the installation half's three lists.
+    ///
+    /// The name is the list's own, because two lists of the three can be on
+    /// screen together and which one the wheel is over is not something the form
+    /// can leave for the shell to infer. Reported rather than applied, for
+    /// [`crate::scroll`]'s reason: the glide is the shell's, because the command
+    /// that moves a region is.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -390,6 +398,9 @@ impl State {
     /// The message applied.
     pub fn update(&mut self, message: Message) {
         match message {
+            // A wheel is not this form's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {}
+
             Message::Tab(tab) => self.tab = tab,
             Message::OverrideJava(on) => self.override_java = on,
             Message::JavaPath(value) => self.java_path = value,
@@ -992,7 +1003,11 @@ fn pack_version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             choice_row_or(theme, key, version.number.clone(), chosen, on_press)
         })
         .collect();
-    scrollable(column(items).width(Length::Fill))
+    crate::scroll::region(
+        crate::scroll::PACK_VERSIONS,
+        column(items).width(Length::Fill),
+        Message::Wheel,
+    )
         .height(Length::Fixed(LIST_HEIGHT))
         .into()
 }
@@ -1100,7 +1115,11 @@ fn version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             )
         })
         .collect();
-    scrollable(column(items).width(Length::Fill))
+    crate::scroll::region(
+        crate::scroll::GAME_VERSIONS,
+        column(items).width(Length::Fill),
+        Message::Wheel,
+    )
         .height(Length::Fixed(LIST_HEIGHT))
         .into()
 }
@@ -1194,7 +1213,11 @@ fn build_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             )
         })
         .collect();
-    scrollable(column(items).width(Length::Fill))
+    crate::scroll::region(
+        crate::scroll::LOADER_BUILDS,
+        column(items).width(Length::Fill),
+        Message::Wheel,
+    )
         .height(Length::Fixed(LIST_HEIGHT))
         .into()
 }

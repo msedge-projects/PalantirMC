@@ -122,6 +122,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -191,6 +199,9 @@ impl State {
     /// Apply a message.
     pub fn update(&mut self, message: Message) {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::Search(text) => self.search = text,
             Message::Sort(sort) => self.sort = sort,
             // Reported rather than applied, like `Open`: what makes an instance is
@@ -248,7 +259,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
         // The welcome screen's two buttons are the only way out of it, and there
         // is nothing else on the page: no toolbar, no search, nothing to sort.
         blocks.push(welcome(theme));
-        return page::body(blocks, GAP);
+        return page::body(blocks, GAP, Message::Wheel);
     }
     match store.instances() {
         Load::Ready(cards) => {
@@ -263,13 +274,14 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
                 }
                 blocks.push(grid.into());
             }
-            page::body(blocks, GAP)
+            page::body(blocks, GAP, Message::Wheel)
         }
         _ => page::body(
             vec![page::draw(theme, store.instances(), "your instances", |cards| {
                 cards_placeholder(theme, cards)
             })],
             GAP,
+            Message::Wheel,
         ),
     }
 }
@@ -819,6 +831,6 @@ mod tests {
             }
             blocks.push(grid.into());
         }
-        page::body(blocks, GAP)
+        page::body(blocks, GAP, Message::Wheel)
     }
 }

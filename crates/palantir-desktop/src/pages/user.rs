@@ -277,6 +277,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -311,6 +319,9 @@ impl State {
     /// Apply a message, and answer with what the shell has to do about it.
     pub fn update(&mut self, message: Message) -> Option<Asked> {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::Found { round, result } => {
                 if round == self.round {
                     self.profile = match result {
@@ -411,7 +422,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     blocks.push(page::draw(theme, &state.profile, "this profile", |profile| {
         loaded(theme, state, profile)
     }));
-    page::body(blocks, GAP)
+    page::body(blocks, GAP, Message::Wheel)
 }
 
 /// The header, the filter strip and the list, once there is a profile.

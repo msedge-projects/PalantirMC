@@ -35,7 +35,7 @@
 //! holding their place. A frame's cost is then a function of the *window*, not of
 //! the folder.
 
-use iced::widget::{column, container, row, scrollable, Space};
+use iced::widget::{column, container, row, Space};
 use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icons_gen::Glyph;
@@ -94,6 +94,14 @@ pub enum Message {
     /// every wheel, drag and keyboard scroll, and the frame built from it draws
     /// the rows that report puts on screen.
     Scrolled(Geometry),
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 crate::hovered!(Message);
@@ -324,6 +332,9 @@ impl State {
     /// start one would have to know all four.
     pub fn update(&mut self, message: Message, store: &Store) -> Option<Ask> {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::Tab(tab) => {
                 // A tab is a different read, and the listing in hand belongs to
                 // the tab that is gone. Marked idle rather than rewritten, so the
@@ -431,13 +442,15 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
 /// did when the page was one scroll region, so the scrollbar is against the pane's
 /// edge and the text does not slide under its rounded corner.
 fn scrolling<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
-    scrollable(
+    crate::scroll::region(
+        crate::scroll::CONTENT,
         container(body(theme, state)).width(Length::Fill).padding(Padding {
             top: GAP,
             right: INSET,
             bottom: INSET,
             left: INSET,
         }),
+        Message::Wheel,
     )
     .width(Length::Fill)
     .height(Length::Fill)

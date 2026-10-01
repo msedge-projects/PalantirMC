@@ -7563,6 +7563,129 @@ $ python tools/progress.py --check
   measurement this machine takes at run time, so what came into the binary is the
   code that does it.
 
+- [x] G139: the wheel glides a region instead of teleporting it -- every scrollable
+  in the shell reports its own wheel to one policy, which eases the region to where
+  the notches asked for and stops asking for frames the moment it arrives
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: 662 passed / 0 failed in the desktop crate's own run (655 before this
+          slice), this slice's seven among them: the offset a wheel measures, the
+          region a wheel names, a flick that has to accumulate, a region something
+          else moved, the frame timer ending when the glide lands, a region with
+          nothing to scroll starting no timer at all, and the shell wire itself --
+          all three shapes a wheel arrives in landing in `Shell::handle` -- with
+          `tests/native.rs`'s four beside it
+          clippy exits 0
+          progress exits 0, with G139 attributed to stage 3
+  EVIDENCE: the transcripts below, and the mechanism in the paragraphs after them.
+
+```text
+$ cargo test -p palantir-desktop --locked -- --nocapture
+test scroll::tests::the_offset_a_wheel_reports_is_the_region_s_position_and_not_this_policy_s ... ok
+test scroll::tests::a_wheel_moves_the_region_it_names_and_leaves_the_others_alone ... ok
+test scroll::tests::a_flick_accumulates_the_way_the_hand_asked_for_it ... ok
+test scroll::tests::a_region_something_else_moved_is_taken_over_rather_than_dragged_back ... ok
+test scroll::tests::the_regions_stop_asking_for_frames_once_they_have_arrived ... ok
+test scroll::tests::a_wheel_on_a_region_with_nothing_to_scroll_starts_no_timer ... ok
+test shell::tests::a_wheel_from_any_of_the_three_shapes_reaches_the_region_it_names ... ok
+test result: ok. 662 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 44.03s
+     Running tests\native.rs
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+(exits 0)
+
+$ python tools/progress.py --check
+(exits 0)
+```
+
+  **What the wheel did before, and what it does now.** iced 0.12's `Scrollable`
+  consumes `WheelScrolled` itself, multiplies a line delta by 60 and adds it to its
+  own offset in the same frame (`iced_widget-0.12.3/src/scrollable.rs:571-590`).
+  That is one teleport per notch, and on a machine whose frame is 69 ms it is a
+  slideshow rather than a scroll. Nothing in iced exposes a friction or tween
+  setting, but the scrollable *does* hand the event to its content first and return
+  early on `Status::Captured` (lines 543-549), which is the seam this uses: a
+  `WheelGuard` sits inside every region, lets a click or a key reach the content,
+  and takes the wheel -- publishing `(region, notches, content height, view height,
+  offset)` upward instead of letting iced apply it. The shell owns the offset from
+  there: `crate::scroll::Glides` holds one `ScrollAnim` per named region, eases its
+  target over a 160 ms deadline, and answers each frame with
+  `scrollable::scroll_to(id(region), offset)` -- the only way a program moves a
+  `Scrollable`, since the widget owns its own state.
+
+  **One policy, nine regions, and a name on each.** `crate::scroll` names every
+  scrollable in the shell (`PAGE` for the eight pages that draw through
+  `page::body`, `CONTENT` for the instance page's tab body under its pinned head,
+  `PANEL`, `DIALOG`, and four lists inside two dialogs). A name rather than a type
+  because a region *is* a name to the two sides that share it: the call site puts it
+  on the scrollable as an `iced::widget::scrollable::Id`, the guard reports it, and
+  `Glides` keys by it -- so the name is written once, at the call site, and
+  `region(name, content, on_wheel)` builds all three from that one argument. The
+  name travels out in the message too, which is what lets `Shell::handle` answer
+  every wheel in the tree with one arm and one line: the shell's own regions raise
+  `Message::Wheel(name, wheel)`, a page's raises its own `Message::Wheel(name,
+  wheel)` inside `pages::Message` (the eight are matched as one or-pattern), and the
+  instance-settings modal's inside `instance_settings::Message`. Three shapes, one
+  arm -- because what a wheel *is* is the same in all of them, and none of them is
+  the shell's to hand to a page.
+
+  **Why the page plumbing exists at all.** A command is the only thing that can
+  move a region, and a command is `update`'s to return. A machine message cannot
+  return one, so the wheel has to travel from the widget up to the shell before
+  anything can be done with it, and the widget's message type is its page's. Hence
+  one `Wheel` variant per page -- added by a script in `.scratch/diag/` that also
+  gave each page a no-op arm, so that a wheel that did reach a page would be the
+  same nothing rather than a compile error in eight files. iced maps a published
+  message through every `Element::map` above it (`element.rs:402-413`,
+  `Shell::merge`), so the page's own variant arrives at the shell as
+  `Message::Screen(pages::Message::Home(home::Message::Wheel(..)))` without a line
+  of code to route it.
+
+  **The offset a wheel reports is measured, and the reason is the scrollbar.** This
+  policy is not the only thing that moves a region: iced's scrollbar drag, a
+  keyboard scroll and a `scroll_to` from anywhere else all move it without a wheel.
+  A glide started from the policy's own stale idea of the offset would jump the page
+  there and then slide, which is the one failure worse than the teleport this
+  replaces. So the guard reports where the region *is*: it is laid out at the
+  content's full height and the rectangle it is asked to draw in is the visible
+  slice of that content, both in window coordinates, so `viewport.y - bounds.y` is
+  the scroll offset with no state of this policy in the answer.
+  `the_offset_a_wheel_reports_is_the_region_s_position_and_not_this_policy_s` holds
+  that arithmetic at 300 pixels.
+
+  **Adopting it on every wheel would be the other mistake, and the difference is
+  the flick.** A wheel is answered before the frame carrying the previous one has
+  been drawn, so the region reports a position a frame behind: a policy that
+  re-aimed at it every time would lose most of a fast gesture. `Glides` therefore
+  keeps, per region, the offset it last *asked* for (`Region::sent`) and compares
+  the wheel's measurement against it -- equal during a glide, which is what iced
+  hands back having applied the command, and different after a drag, a keyboard
+  scroll or a clamp at the end of shortened content. `a_flick_accumulates...` is
+  the first case at one frame in and `a_region_something_else_moved...` the second
+  at 900 pixels, and the tolerance is `SETTLED`'s half pixel because that is this
+  policy's own rounding.
+
+  **The frame timer is the same subscription that was already there.**
+  `Shell::animating` -- what decides whether the frame clock exists at all -- now
+  asks the glides as well as the rail's plates and the hover clock, and
+  `Message::Tick`, which used to be a no-op in `act`, moved into `handle` so that
+  it can answer with the frame's `scroll_to` commands (a message that returns a
+  command has to be answered before `act`, whose only answer is a request). A
+  region that has arrived says so, so an idle window still wakes nothing:
+  `the_regions_stop_asking_for_frames_once_they_have_arrived` runs the gesture to
+  its end and measures the offset exactly on the target, and
+  `a_wheel_on_a_region_with_nothing_to_scroll_starts_no_timer` is the page shorter
+  than its window -- a wheel there moves nothing and must not buy 160 ms of clock.
+
+  **What the machine is asked, and what it is not.** The glide is a deadline rather
+  than a frame count, and a machine measured at or above `SMOOTH_FRAME` (24 ms) is
+  not asked to animate at all: `begin` moves the offset inside the frame the wheel
+  already paid for. That policy is the pre-existing one and its tests are the ones
+  that were already here; what this slice added is the wire that lets it see a
+  wheel, and the six tests above are the wire's.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour

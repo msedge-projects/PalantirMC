@@ -258,6 +258,14 @@ pub enum Message {
         /// The hover end, where the control declares one of its own.
         hover: Option<f32>,
     },
+
+    /// A wheel over this page's scroll region.
+    ///
+    /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
+    /// command, so which region glides, and how far, is the shell's -- see
+    /// `crate::scroll`. This page's part is to hand the wheel on, and the name it
+    /// carries is the region the widget was built with.
+    Wheel(&'static str, crate::scroll::Wheel),
 }
 
 /// A request the page has made, and which one it was.
@@ -338,6 +346,9 @@ impl State {
     /// and the shell cannot be handed a request it has already run.
     pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
+            // A wheel is not this page's to apply: see `crate::scroll`.
+            Message::Wheel(..) => {},
+
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
                     self.project_type = project_type;
@@ -503,7 +514,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         controls(theme, state),
         results(theme, state),
     ];
-    page::body(blocks, GAP)
+    page::body(blocks, GAP, Message::Wheel)
 }
 
 /// The project-type tabs: `Browse.vue`'s own list, its own labels.
