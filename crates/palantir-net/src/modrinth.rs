@@ -104,6 +104,16 @@ pub fn version_url(project: &str) -> String {
 /// Only the fields known to be nullable use it. `username`, `id`, `bio` and the
 /// dates are strings in the service's own schema, and defaulting them to empty on
 /// a `null` would be this launcher inventing a shape the API does not have.
+///
+/// Four more fields joined that list because the service published the `null`
+/// rather than omitting the field, which is the whole distinction: a gallery
+/// image's caption (`title` and `description`), and a search hit's `icon_url`
+/// and `latest_version`. The first pair is measured: `GET /v2/project/rQiXwLhB`
+/// carries `"gallery":[{"url":"...","title":null,"description":null,...}]`,
+/// and the parse of that *whole document* used to fail at the `null`'s last
+/// byte -- the reader saw `line 1 column 9168` in place of the project.
+/// `ModrinthUserProject::icon_url` had already met the same shape on an older
+/// document; these are the fields that had not.
 fn null_as_empty<'de, D>(reader: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -152,11 +162,14 @@ pub struct ModrinthSearchHit {
     /// Follower count.
     #[serde(default)]
     pub follows: u64,
-    /// Icon URL, if any.
-    #[serde(default)]
+    /// Icon URL, `null` for a project that has not uploaded one -- the same
+    /// nullable shape [`ModrinthUserProject::icon_url`] already reads.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub icon_url: String,
-    /// Newest version id, if any.
-    #[serde(default)]
+    /// Newest version id, `null` for a project whose versions have all been
+    /// withdrawn. One such hit used to fail the whole search page, because
+    /// `default` covers an absent field and not a present `null`.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub latest_version: String,
     /// The game versions the project supports, as the search API lists them.
     ///
@@ -349,18 +362,19 @@ pub struct ModrinthProject {
 /// One entry of a project's `gallery` array.
 ///
 /// An image is a URL and a caption; the caption has a title and a longer
-/// description, and either may be missing, which is why the page falls back to
-/// the URL when it draws one.
+/// description, and either may be *null* -- not merely absent, which is why
+/// both read through [`null_as_empty`] -- and the page falls back to the URL
+/// when it draws one.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ModrinthGalleryImage {
     /// Where the image is.
     #[serde(default)]
     pub url: String,
-    /// The caption's title.
-    #[serde(default)]
+    /// The caption's title: `null` for an image the author captioned with none.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub title: String,
-    /// The caption's description.
-    #[serde(default)]
+    /// The caption's description, `null` the same way and just as often.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub description: String,
 }
 
@@ -646,6 +660,82 @@ mod tests {
     /// An article with just a date, which is all `date_label` reads.
     fn dated(date: &str) -> NewsArticle {
         NewsArticle { date: date.to_string(), ..NewsArticle::default() }
+    }
+
+    #[test]
+    fn a_gallery_image_the_author_captioned_with_nothing_still_reads() {
+        // `GET /v2/project/rQiXwLhB` as the API answers it, trimmed to the
+        // gallery: the first image's `title` and `description` are `null`. Before
+        // `null_as_empty` was on them this whole document failed to parse -- the
+        // reader was shown `invalid type: null, expected a string at line 1
+        // column 9168`, and that column is this `null`'s last byte, so the
+        // project page drew the error instead of the project.
+        let body = r##"{
+            "id": "rQiXwLhB",
+            "slug": "battlearmorytacz",
+            "project_type": "modpack",
+            "title": "BattleArmory TACZ",
+            "description": "\u6218\u5730\u6b66\u5e93 TACZ",
+            "body": "# BattleArmory",
+            "downloads": 3507037,
+            "followers": 87,
+            "game_versions": ["1.20.1"],
+            "loaders": ["forge"],
+            "gallery": [{
+                "url": "https://cdn.modrinth.com/data/rQiXwLhB/images/1f8cafea.jpeg",
+                "raw_url": "https://cdn.modrinth.com/data/rQiXwLhB/images/1f8cafea.jpeg",
+                "featured": false,
+                "title": null,
+                "description": null,
+                "created": "2025-03-09T09:08:19.516923Z",
+                "ordering": 0
+            }]
+        }"##;
+        let project: ModrinthProject =
+            serde_json::from_str(body).expect("the project document");
+        assert_eq!(project.title, "BattleArmory TACZ");
+        assert_eq!(project.downloads, 3_507_037);
+        assert_eq!(project.gallery.len(), 1);
+        // The image is still drawable: its caption is simply empty, which is the
+        // fallback the page already had.
+        let image = &project.gallery[0];
+        assert!(image.url.ends_with("1f8cafea.jpeg"));
+        assert_eq!(image.title, "");
+        assert_eq!(image.description, "");
+        // And a caption that *is* there is not lost to the tolerance.
+        let captioned: ModrinthGalleryImage = serde_json::from_str(
+            r#"{"url":"https://cdn/x.png","title":"Banner","description":"A shot"}"#,
+        )
+        .expect("a captioned image");
+        assert_eq!(captioned.title, "Banner");
+        assert_eq!(captioned.description, "A shot");
+    }
+
+    #[test]
+    fn a_hit_with_no_icon_and_no_version_still_reads() {
+        // The same two fields on a *search hit*: a project with no icon and no
+        // published version has `null` in both, and one such hit would fail the
+        // whole page of results rather than one card.
+        let body = r#"{ "hits": [
+            { "project_id": "rQiXwLhB", "slug": "battlearmorytacz",
+              "title": "BattleArmory TACZ", "description": "\u6218\u5730\u6b66\u5e93",
+              "author": "JZ_zhenmeng", "downloads": 3507037, "follows": 87,
+              "icon_url": null, "latest_version": null,
+              "versions": ["1.20.1"], "categories": ["forge"] },
+            { "project_id": "sodium", "slug": "sodium", "title": "Sodium",
+              "description": "A rendering engine", "author": "jellysquid3",
+              "downloads": 1, "follows": 1,
+              "icon_url": "https://cdn.modrinth.com/data/AANobbMI/icon.webp",
+              "latest_version": "mc1.21.1-0.6.0" }
+        ], "offset": 0, "limit": 20, "total_hits": 2 }"#;
+        let response: ModrinthSearchResponse =
+            serde_json::from_str(body).expect("the search response");
+        assert_eq!(response.hits.len(), 2);
+        assert_eq!(response.hits[0].project_ref(), "rQiXwLhB");
+        assert_eq!(response.hits[0].icon_url, "");
+        assert_eq!(response.hits[0].latest_version, "");
+        assert!(response.hits[1].icon_url.ends_with("icon.webp"));
+        assert_eq!(response.hits[1].latest_version, "mc1.21.1-0.6.0");
     }
 
     #[test]
