@@ -81,6 +81,132 @@ where
     Text::new(text.to_string()).shaping(Shaping::Advanced)
 }
 
+/// How wide a label draws, in the frame that will draw it.
+///
+/// The number the strips below are broken on, and it is measured with iced's own
+/// engine rather than estimated: `font_system` is the single
+/// `cosmic_text::FontSystem` the window draws every glyph from, and
+/// `to_attributes` is the very conversion the renderer applies to an
+/// [`iced::Font`] before it shapes. Counting characters would be a different
+/// number, and wrong by a whole word for a label like `English (United States)`.
+///
+/// Memoized because a view is rebuilt every frame while something is moving, and
+/// the same thirty labels would otherwise be shaped thirty times a frame. The
+/// table is bounded by what this interface draws: one entry per distinct string at
+/// one size and one font.
+pub fn advance(label: &str, font: iced::Font, size: f32) -> f32 {
+    type Key = (String, u32, iced::Font);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<Key, f32>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key: Key = (label.to_string(), size.to_bits(), font);
+    if let Ok(table) = cache.lock() {
+        if let Some(width) = table.get(&key) {
+            return *width;
+        }
+    }
+    let width = shape_width(label, font, size);
+    if let Ok(mut table) = cache.lock() {
+        table.insert(key, width);
+    }
+    width
+}
+
+/// The bounds a label is measured in: wider and taller than any control one is
+/// drawn in, so that a label is measured as one line. A wrapped measurement is a
+/// *smaller* number, and a row broken on one would then overflow after all.
+const MEASURE_SPAN: f32 = 4096.0;
+
+/// The leading the interface's text is measured at, which is
+/// `iced_core::text::LineHeight`'s own default and what every call site here
+/// draws with, since none of them sets one. It is not part of a width and is here
+/// because the metrics have to carry a leading to shape at all.
+const LEADING: f32 = 1.3;
+
+/// One line of `label`, shaped once and measured the way iced measures a widget.
+///
+/// This is iced's own arithmetic rather than a second opinion about it:
+/// `iced_graphics::text::Paragraph::with_text` -- the wrapper the text widget is
+/// laid out as -- builds a buffer with `Metrics::new(size, line_height)` and this
+/// very `LEADING`, sets its bounds, sets the attributes through the same
+/// `to_attributes`, and measures it with the same `measure`. The test at the
+/// bottom of this file holds the two to each other.
+fn shape_width(label: &str, font: iced::Font, size: f32) -> f32 {
+    use iced::advanced::graphics::text::{cosmic_text, font_system, measure, to_attributes};
+    let borrowed = font_system().write();
+    let mut guard = match borrowed {
+        Ok(guard) => guard,
+        // A panic while the window's system was borrowed somewhere else must not
+        // cost the layout its measurement: recover the guard and measure anyway.
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    // iced's own `FontSystem` is a wrapper around `cosmic_text`'s -- the version
+    // counter it keeps across a font load is the difference -- and `raw` is the
+    // documented way to the engine underneath it.
+    let system = guard.raw();
+    let mut buffer =
+        cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(size, size * LEADING));
+    buffer.set_size(system, MEASURE_SPAN, MEASURE_SPAN);
+    buffer.set_text(system, label, to_attributes(font), cosmic_text::Shaping::Advanced);
+    buffer.shape_until_scroll(system);
+    measure(&buffer).width
+}
+
+/// How much room a button with this label needs: the label and its own padding.
+///
+/// [`BUTTON_LABEL_SIZE`], [`BUTTON_PAD`] and [`heading`] are what [`button_text`]
+/// draws a label with, so this is the width that button will occupy rather than an
+/// approximation of it.
+pub fn button_width(label: &str) -> f32 {
+    BUTTON_PAD * 2.0 + advance(label, heading(), BUTTON_LABEL_SIZE)
+}
+
+/// The width a row of buttons occupies: the buttons, and the gaps between them.
+pub fn row_width(labels: &[impl AsRef<str>], gap: f32) -> f32 {
+    let mut width = 0.0;
+    for (index, label) in labels.iter().enumerate() {
+        if index > 0 {
+            width += gap;
+        }
+        width += button_width(label.as_ref());
+    }
+    width
+}
+
+/// The rows a strip of buttons carrying `labels` breaks into, as positions.
+///
+/// A browser never has to make this decision: flex box carries a strip of chips
+/// that does not fit onto the next line, and the reference's own grids are CSS
+/// grids that cannot overflow. iced has neither -- a `Row` whose children do not
+/// fit draws the last of them past its own right edge -- which is what a
+/// screenshot of this launcher's language list showed: `Finnish` clipped at the
+/// card's edge and `Russian` outside it, with two chips wrapping their own text
+/// because a row had given them the last of its room.
+///
+/// So the break is the caller's, and this is how it is decided: as many buttons
+/// per row as fit `avail` with `gap` between them, in order, and another row for
+/// the rest. A label wider than `avail` on its own gets a row to itself rather
+/// than being dropped: it is a language's name, and a name with nowhere to fit is
+/// still a name.
+pub fn wrap_labels(labels: &[impl AsRef<str>], avail: f32, gap: f32) -> Vec<Vec<usize>> {
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut row: Vec<usize> = Vec::new();
+    let mut used = 0.0;
+    for (index, label) in labels.iter().enumerate() {
+        let width = button_width(label.as_ref());
+        if !row.is_empty() && used + gap + width > avail {
+            rows.push(std::mem::take(&mut row));
+            used = 0.0;
+        }
+        used += if row.is_empty() { width } else { gap + width };
+        row.push(index);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
 /// A page's message type, as far as this kit needs it.
 ///
 /// The controls here are `mouse_area`s, and a crossing is a message more often
@@ -191,6 +317,15 @@ pub const CONTROL_RADIUS: f32 = 12.0;
 pub const CONTROL_ICON: f32 = 20.0;
 /// A tag's height and the pill it sits in.
 pub const TAG_HEIGHT: f32 = 24.0;
+/// The size a button's label is set at, which is `Button.vue`'s `text-sm`.
+///
+/// A constant rather than a literal at the builders below because [`button_width`]
+/// has to measure exactly what [`button_text`] draws: a strip of buttons is broken
+/// on the measured widths, and a size written in two places is a size that can be
+/// changed in one of them.
+pub const BUTTON_LABEL_SIZE: f32 = 14.0;
+/// A button's horizontal padding, which is `ButtonFrame.vue`'s `px-4`.
+pub const BUTTON_PAD: f32 = 16.0;
 
 /// The hairline around a project's avatar: `Avatar.vue`'s
 /// `outline: 1px solid rgb(255 255 255 / 15%)`.
@@ -600,7 +735,7 @@ pub fn button_text<'a, Message: Clone + Hovered + 'a>(
     let label = label.to_string();
     button_face(theme, key, kind, Length::Shrink, Some(on_press), move |ink| {
         text(label.clone())
-            .size(14.0)
+            .size(BUTTON_LABEL_SIZE)
             .font(heading())
             .style(iced::theme::Text::Color(ink))
             .into()
@@ -623,7 +758,7 @@ pub fn button_or<'a, Message: Clone + Hovered + 'a>(
 ) -> Element<'a, Message> {
     button_face(theme, key, kind, Length::Shrink, on_press, move |ink| {
         text(label.message())
-            .size(14.0)
+            .size(BUTTON_LABEL_SIZE)
             .font(heading())
             .style(iced::theme::Text::Color(ink))
             .into()
@@ -655,7 +790,7 @@ pub fn button_with_icon<'a, Message: Clone + Hovered + 'a>(
             .push(icon::icon(glyph, 20.0, ink))
             .push(
                 text(label.message())
-                    .size(14.0)
+                    .size(BUTTON_LABEL_SIZE)
                     .font(heading())
                     .style(iced::theme::Text::Color(ink)),
             )
@@ -722,7 +857,7 @@ fn button_face<'a, Message: Clone + Hovered + 'a>(
     let face = container(face(crate::theme::brightness(ink, factor)))
         .width(width)
         .height(Length::Fixed(CONTROL))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
+        .padding(Padding { top: 0.0, bottom: 0.0, left: BUTTON_PAD, right: BUTTON_PAD })
         // Centred on both axes because a button's face is `justify-center` in the
         // reference whatever the slot holds; `center_x` is the one the full-width
         // buttons need, and on a shrinking one it changes nothing.
@@ -1170,6 +1305,78 @@ mod tests {
         let mut found = Vec::new();
         walk(&root, &root, &mut found);
         found
+    }
+
+    #[test]
+    fn the_number_a_row_is_broken_on_is_the_width_iced_lays_the_label_out_at() {
+        // The one thing the test below cannot say by itself: that [`advance`] is the
+        // width iced will draw the label at, rather than a second opinion about it.
+        // `Paragraph` is the wrapper a text widget is laid out as, so this is that
+        // parity spelled out -- and it is the claim the whole fix rests on, because
+        // a row broken on a number smaller than the real one is a row drawn past
+        // the card again.
+        use iced::advanced::graphics::text::Paragraph;
+        use iced::advanced::text::{LineHeight, Paragraph as _, Text as Laid};
+
+        for label in ["Dark", "Sync with system", "English (United States)", "简体中文"] {
+            let font = heading();
+            let laid = Laid {
+                content: label,
+                bounds: iced::Size::new(MEASURE_SPAN, MEASURE_SPAN),
+                size: iced::Pixels(BUTTON_LABEL_SIZE),
+                line_height: LineHeight::default(),
+                font,
+                horizontal_alignment: iced::alignment::Horizontal::Left,
+                vertical_alignment: iced::alignment::Vertical::Top,
+                shaping: Shaping::Advanced,
+            };
+            let iced = Paragraph::with_text(laid).min_bounds().width;
+            let measured = advance(label, font, BUTTON_LABEL_SIZE);
+            assert!(
+                (iced - measured).abs() < 0.01,
+                "`{label}` measures {measured} here and {iced} in iced's own paragraph"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_of_buttons_broken_for_a_width_measures_within_that_width() {
+        // The gate behind [`wrap_labels`]: iced wraps nothing, so the break is
+        // arithmetic on the measured widths, and this is that arithmetic read
+        // back. Both halves of the claim, because either alone is satisfied by a
+        // grid that is wrong -- nothing dropped, reordered or doubled, and no row
+        // measuring wider than the space it was broken for.
+        let labels: Vec<String> = crate::locale::OFFERED
+            .iter()
+            .map(|tag| crate::locale::label(tag))
+            .collect();
+        assert!(
+            button_width(&labels[0]) > BUTTON_PAD * 2.0,
+            "a label with no width would make every wrap free and this gate empty"
+        );
+        // The dialog's own inner width, a column narrower, and a strip too narrow
+        // for one button: the last one is the case where a row holds a single
+        // label wider than the space it was broken for.
+        for avail in [512.0f32, 240.0, 100.0] {
+            let rows = wrap_labels(&labels, avail, ROW_GAP);
+            let flattened: Vec<usize> = rows.iter().flatten().copied().collect();
+            assert_eq!(
+                flattened,
+                (0..labels.len()).collect::<Vec<usize>>(),
+                "every label is offered once, in the reference's order, at {avail}"
+            );
+            for row in &rows {
+                let row_labels: Vec<&str> = row.iter().map(|&index| labels[index].as_str()).collect();
+                let width = row_width(&row_labels, ROW_GAP);
+                // A row of *one* label that is wider than the space is the case
+                // [`wrap_labels`] documents: a name with nowhere to fit still gets
+                // a row, and it is the only row this test lets past the edge.
+                assert!(
+                    width <= avail || row.len() == 1,
+                    "{row_labels:?} measures {width} at gap {ROW_GAP}, which does not fit {avail}"
+                );
+            }
+        }
     }
 
     #[test]

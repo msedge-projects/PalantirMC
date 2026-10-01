@@ -271,6 +271,37 @@ const STEP_SIDE: f32 = 16.0;
 /// The accordion's padding, which is `p-3` on both its header and its body.
 const CHECKLIST_PAD: f32 = 12.0;
 
+// ---- Modals ------------------------------------------------------------
+
+/// The width every dialog in this shell is drawn at, which is the reference's
+/// own `max-w-[35rem]` on a modal (`ConfirmModal.vue`).
+pub const DIALOG_WIDTH: f32 = 560.0;
+/// A dialog's padding on all four sides: `p-6`.
+pub const DIALOG_PAD: f32 = 24.0;
+/// What a dialog's body has to fit inside, which is what a row of controls in
+/// one is broken for.
+pub const DIALOG_INNER: f32 = DIALOG_WIDTH - 2.0 * DIALOG_PAD;
+/// The room a dialog leaves above and below itself, so that a dialog as tall as
+/// the window is not drawn flush against both of its edges.
+const DIALOG_MARGIN: f32 = 16.0;
+/// A dialog's head: its title, its close button, and the `gap-3` under them.
+///
+/// The arithmetic rather than a measurement, which is what it has to be: the
+/// height the body is allowed is decided before the head is built. The close
+/// button is the taller of the two (`HEAD_BUTTON`), and 40 is it plus the gap.
+const DIALOG_HEAD: f32 = 40.0;
+/// The shortest a dialog's body may be, whatever the window reports: below this
+/// a list is a peephole rather than something to read, and the window's own
+/// floor (`MINIMUM_SIZE` in `main.rs`) is 640 logical pixels tall.
+const DIALOG_BODY_MIN: f32 = 240.0;
+/// The window a shell starts believing it is in, until iced reports the real one.
+///
+/// The entry point's own preferred size -- `PREFERRED_SIZE` in `main.rs`, and a
+/// `--shot` run's default -- so that a modal opened on the first frame is sized
+/// by a number that is at worst the screen's, and [`window_size`] corrects it
+/// long before anyone opens one.
+const DIALOG_VIEWPORT: iced::Size = iced::Size::new(1280.0, 720.0);
+
 /// The `md` `IconButton`'s corner radius, `rounded-xl`.
 const CONTROL_RADIUS: f32 = 12.0;
 /// `rounded-lg` on the head's `!h-7` buttons.
@@ -335,6 +366,11 @@ pub struct Shell {
     modal: Option<Modal>,
     /// Whether the window is maximized, which the window controls' icon needs.
     maximized: bool,
+    /// The window's own size in logical pixels, from [`window_size`]. What the
+    /// modal layer caps a dialog's body with: a dialog is drawn centred, so one
+    /// taller than the window loses its head at the top and its last row at the
+    /// bottom with nothing to scroll them with.
+    viewport: iced::Size,
     /// Where a `--shot` run's picture is going, if this is one. The request is in
     /// place before the first frame, the timer [`Shell::capture`] asks for fires
     /// once the window has settled, and writing the frame is what ends the run.
@@ -1070,6 +1106,11 @@ pub enum Message {
     /// maximized now, or it is not, or the pointer moved on or off the maximize
     /// control. See [`window_state`] for why neither can be a widget's message.
     WindowStateChanged,
+    /// The window's own size, in logical pixels, reported by iced when it is
+    /// resized. See [`window_size`] for what needs to know it: a dialog taller
+    /// than the window it is centred in is a dialog whose own close button is off
+    /// the screen.
+    Viewport(iced::Size),
     /// A `--shot` run's settle timer fired: ask the window for its frame.
     ShotDue,
     /// The frame [`Message::ShotDue`] asked for, to be written and to end the run.
@@ -1097,6 +1138,7 @@ impl Shell {
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             modal: None,
             maximized: false,
+            viewport: DIALOG_VIEWPORT,
             shot: None,
             shot_taken: false,
             kicks: 0,
@@ -1414,6 +1456,14 @@ impl Shell {
                 self.maximized = crate::native::window_maximized().unwrap_or(self.maximized);
                 return iced::Command::none();
             }
+            // The window's own size, recorded because the modal layer is the one
+            // thing in this shell that has to know it and a widget cannot ask the
+            // window anything: what is drawn centred and taller than the window is
+            // clipped at both ends, and there is no scroll to reach it with.
+            Message::Viewport(size) => {
+                self.viewport = size;
+                return iced::Command::none();
+            }
             // The frame a window owes its own first one, which is the frame a page
             // is drawn in: see [`REPAINT_KICKS`]. The count is all this arm has to
             // do -- the message's own job is to *be* a message, because a message
@@ -1547,6 +1597,7 @@ impl Shell {
             // They are matched here so that adding a message is a compile error in
             // the one place that has to decide what to do with it.
             Message::WindowStateChanged
+            | Message::Viewport(_)
             | Message::ShotDue
             | Message::ShotTaken(_)
             | Message::Repaint => None,
@@ -5082,17 +5133,50 @@ impl Shell {
     fn theme_options(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let current = self.prefs.theme();
-        let mut grid = row![].spacing(ROW_GAP);
-        for option in ColorTheme::options(false, current) {
+        let options = self.themes_offered();
+        let labels = self.theme_labels();
+        self.chip_grid(&labels, |index| {
+            let option = options[index];
             let key = crate::ui::scoped("settings:theme", option.id());
             let kind = if option == current { crate::ui::Kind::Colored } else { crate::ui::Kind::Standard };
-            grid = grid.push(crate::ui::button(
-                theme,
-                key,
-                option.label_key(),
-                kind,
-                Message::ColorTheme(option),
-            ));
+            crate::ui::button(theme, key, option.label_key(), kind, Message::ColorTheme(option))
+        })
+    }
+
+    /// The themes this pane offers, by the reference's rule, read once.
+    ///
+    /// One list, so that a chip and the label its row was broken for are the same
+    /// position in two lists rather than two readings of the same rule that could
+    /// drift apart.
+    fn themes_offered(&self) -> Vec<ColorTheme> {
+        ColorTheme::options(false, self.prefs.theme())
+    }
+
+    /// The same list's labels, which is what the grid is broken on.
+    fn theme_labels(&self) -> Vec<&'static str> {
+        self.themes_offered().iter().map(|option| option.label_key().message()).collect()
+    }
+
+    /// A grid of chips: the labels broken into the rows this dialog has room for.
+    ///
+    /// `chip` builds one control from its position in `labels`, so a caller keeps
+    /// whatever a chip is *about* -- the theme it takes, the tag it records --
+    /// while the breaking stays here. Both grids in this pane go through it because
+    /// both had the same defect: a row of buttons wider than the card, drawn past
+    /// its right edge, because iced has no `flex-wrap` and a `Row` does not carry
+    /// what does not fit onto the next line. [`crate::ui::wrap_labels`] is the
+    /// arithmetic and the test below is the claim.
+    fn chip_grid<'a, F>(&self, labels: &[impl AsRef<str>], chip: F) -> Element<'a, Message>
+    where
+        F: Fn(usize) -> Element<'a, Message>,
+    {
+        let mut grid = column![].width(Length::Fill).spacing(ROW_GAP);
+        for row_of in crate::ui::wrap_labels(labels, DIALOG_INNER, ROW_GAP) {
+            let mut chips = row![].width(Length::Fill).spacing(ROW_GAP);
+            for index in row_of {
+                chips = chips.push(chip(index));
+            }
+            grid = grid.push(chips);
         }
         grid.into()
     }
@@ -5106,36 +5190,52 @@ impl Shell {
     /// reference's own `locale.<tag>` name in the language in force, which is how
     /// the app spells a language to somebody who does not read English.
     ///
-    /// Four to a row and no search field: the reference's language *page* has a
-    /// search box, a category list and a site/app platform switch, and this is a
-    /// section of a modal, so what is here is the list of languages and nothing
-    /// about its chrome. That is named in the gate rather than implied.
+    /// No search field: the reference's language *page* has a search box, a
+    /// category list and a site/app platform switch, and this is a section of a
+    /// modal, so what is here is the list of languages and nothing about its
+    /// chrome. That is named in the gate rather than implied.
+    ///
+    /// The row is as many languages as fit the dialog, which is a measurement and
+    /// not a count. A count was what this pane had -- four to a row -- and four is
+    /// wrong in both directions: German's names are longer than English's and a
+    /// row of four of them was drawn past the card's right edge, while a row of
+    /// one-word names left a third of the row empty.
     fn language_options(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let current = crate::locale::tag();
-        let mut grid = column![].spacing(ROW_GAP);
-        for chunk in crate::locale::OFFERED.chunks(4) {
-            let mut row_of_languages = row![].spacing(ROW_GAP);
+        let labels = Shell::language_labels();
+        self.chip_grid(&labels, |index| {
             // Destructured to `&'static str` rather than left as `&&str`: the
             // message carries a tag by value and a label is a `&str`.
-            for &tag in chunk {
-                let key = crate::ui::scoped("settings:locale", tag);
-                let kind = if tag == current {
-                    crate::ui::Kind::Colored
-                } else {
-                    crate::ui::Kind::Standard
-                };
-                row_of_languages = row_of_languages.push(crate::ui::button_text(
-                    theme,
-                    key,
-                    &crate::locale::label(tag),
-                    kind,
-                    Message::Locale(tag),
-                ));
-            }
-            grid = grid.push(row_of_languages);
-        }
-        grid.into()
+            let tag = crate::locale::OFFERED[index];
+            let key = crate::ui::scoped("settings:locale", tag);
+            let kind = if tag == current {
+                crate::ui::Kind::Colored
+            } else {
+                crate::ui::Kind::Standard
+            };
+            crate::ui::button_text(theme, key, &labels[index], kind, Message::Locale(tag))
+        })
+    }
+
+    /// The languages this pane offers, named the reference's way.
+    ///
+    /// A list of labels rather than a row of controls, so that the grid can be
+    /// broken -- and read back by the test below -- before anything is built from
+    /// it. The order is [`crate::locale::OFFERED`]'s, which is the reference's.
+    fn language_labels() -> Vec<String> {
+        crate::locale::OFFERED.iter().map(|&tag| crate::locale::label(tag)).collect()
+    }
+
+    /// How tall a dialog's body may be in the window this shell is drawing in.
+    ///
+    /// The window's height less the margin a centered dialog keeps at both ends,
+    /// its own padding and its head -- and no shorter than [`DIALOG_BODY_MIN`],
+    /// because a window smaller than this shell's arithmetic would otherwise give
+    /// a body a peephole rather than a list.
+    fn dialog_body_room(&self) -> f32 {
+        (self.viewport.height - 2.0 * DIALOG_MARGIN - 2.0 * DIALOG_PAD - DIALOG_HEAD)
+            .max(DIALOG_BODY_MIN)
     }
 
     /// The dialog's frame: the same width, padding, surface and close button
@@ -5167,10 +5267,21 @@ impl Shell {
                         .push(Space::with_width(Length::Fill))
                         .push(self.history_button(Glyph::X, true, Message::CloseModal)),
                 )
-                .push(body),
+                // The body scrolls when it is taller than the window leaves room
+                // for, and does not otherwise: a `max_height` on the wrapper is
+                // what turns the tree below it into a viewport -- iced clamps a
+                // `Shrink` height to the limits it was given, and a scrollable
+                // draws its content clipped to its own bounds -- so a dialog whose
+                // content fits is drawn at its content's height with no bar, and
+                // one that does not is drawn at the room it has and scrolls.
+                .push(
+                    container(scrollable(body))
+                        .width(Length::Fill)
+                        .max_height(self.dialog_body_room()),
+                ),
         )
-        .width(Length::Fixed(560.0))
-        .padding(24.0)
+        .width(Length::Fixed(DIALOG_WIDTH))
+        .padding(DIALOG_PAD)
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
             border: Border { radius: 16.0.into(), ..Border::default() },
@@ -6578,6 +6689,24 @@ fn window_state() -> Subscription<Message> {
     })
 }
 
+/// The window's own size, as iced reports it when the window is resized.
+///
+/// A message rather than a query for the same reason [`window_state`] is one: a
+/// widget cannot ask the window anything, and what needs the number is the modal
+/// layer -- [`Shell::dialog_body_room`], which caps a dialog's body so that a
+/// long list scrolls inside a window instead of being drawn past it. iced reports
+/// logical pixels, which is the space `view` builds in, so no scale factor is
+/// applied here; the event arrives in the window's first frames as well as on
+/// every resize, which is why the shell's own guess is only ever a fallback.
+fn window_size() -> Subscription<Message> {
+    iced::event::listen_with(|event, _status| match event {
+        iced::Event::Window(_, iced::window::Event::Resized { width, height }) => Some(
+            Message::Viewport(iced::Size::new(width as f32, height as f32)),
+        ),
+        _ => None,
+    })
+}
+
 /// The maximize control's rectangle, for the window procedure.
 ///
 /// [`Shell::window_controls`] draws the row from these constants -- `px-1.5`,
@@ -6725,11 +6854,12 @@ impl iced::Application for Shell {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // Five subscriptions and none is owed: the frame clock while something is
+        // Six subscriptions and none is owed: the frame clock while something is
         // moving, the launch while a game is being started or is up, the window's
-        // own state while Windows can change it, the settle timer while a capture
-        // is waiting, and the frames a window owes its own first one until they
-        // have arrived ([`REPAINT_KICKS`]). Each says `none` when it is not needed,
+        // own state while Windows can change it, the window's own size while it can
+        // be resized (see [`window_size`]), the settle timer while a capture is
+        // waiting, and the frames a window owes its own first one until they have
+        // arrived ([`REPAINT_KICKS`]). Each says `none` when it is not needed,
         // which is what keeps an idle window -- and a launcher with nothing running
         // -- from waking anything up.
         let frames = if self.animating() { self.frames() } else { Subscription::none() };
@@ -6738,6 +6868,7 @@ impl iced::Application for Shell {
             self.launching(),
             self.quick_create(),
             window_state(),
+            window_size(),
             self.capture(),
             self.repaint(),
         ])
@@ -8134,6 +8265,114 @@ mod tests {
         assert!(ColorTheme::options(false, shell.prefs.theme()).contains(&ColorTheme::Retro));
         // A test has no home, so nothing was written to anyone's preferences.
         assert!(shell.home.is_none());
+    }
+
+    #[test]
+    fn every_settings_grid_breaks_inside_the_dialog_in_every_language() {
+        // The screenshot this gate is named after: the language list drawn past
+        // the card's right edge, `Finnish` clipped at it and `Russian` outside the
+        // frame, with two chips wrapping their own text because their row had given
+        // them the last of its room. iced has no `flex-wrap`, so the break is this
+        // launcher's -- and it is measured, in the language the pane is being read
+        // in *and* in each of the 32 it can be read in, because a label is the
+        // reference's word for a language and German's are longer than English's.
+        let shell = shell_at("/");
+        // The worst row the walk below finds, which is what the line at the end
+        // reports: a gate that is only a verdict says nothing about how much room
+        // is left, and the next session's question is the margin rather than the
+        // pass.
+        let mut widest = 0.0f32;
+        let mut widest_at = crate::locale::ENGLISH;
+        let mut most_rows = 0usize;
+        for &tag in crate::locale::OFFERED.iter() {
+            crate::locale::set(tag);
+            let grids: [(&str, Vec<String>); 2] = [
+                ("theme", shell.theme_labels().iter().map(|label| label.to_string()).collect()),
+                ("language", Shell::language_labels()),
+            ];
+            for (grid, labels) in grids {
+                assert!(!labels.is_empty(), "the {grid} grid offers nothing in {tag}");
+                let rows = crate::ui::wrap_labels(&labels, DIALOG_INNER, ROW_GAP);
+                let offered: usize = rows.iter().map(|row| row.len()).sum();
+                assert_eq!(offered, labels.len(), "every {grid} is offered once in {tag}");
+                for row in &rows {
+                    let row_labels: Vec<&str> = row.iter().map(|&index| labels[index].as_str()).collect();
+                    let width = crate::ui::row_width(&row_labels, ROW_GAP);
+                    assert!(
+                        width <= DIALOG_INNER,
+                        "{grid} row {row_labels:?} measures {width} in {tag}, which does not fit {DIALOG_INNER}"
+                    );
+                    if width > widest {
+                        widest = width;
+                        widest_at = tag;
+                    }
+                }
+                most_rows = most_rows.max(rows.len());
+            }
+        }
+        // Printed rather than asserted: a run asked for its output says what the
+        // grid came to in the worst of the 32 languages, which is the number the
+        // margin is read from.
+        eprintln!(
+            "settings grids: at most {most_rows} row(s); widest row {widest:.1} of {DIALOG_INNER} px ({widest_at})"
+        );
+        // The language is ambient, and every other test in this file reads English.
+        crate::locale::set(crate::locale::ENGLISH);
+    }
+
+    #[test]
+    fn a_language_grid_taller_than_the_window_scrolls_rather_than_drawing_past_it() {
+        // The vertical half of the same defect, and it is this fix's own making: a
+        // dialog is drawn centred, so one taller than its window loses its head at
+        // the top and its last rows at the bottom with no scroll to reach either.
+        // The wrapped grid is taller than the counted one everywhere and in
+        // Indonesian it is thirteen rows against English's nine. The shell keeps
+        // the window's own size and caps a dialog's body with it; these are the two
+        // ends of that cap, in the numbers the grid actually comes to.
+        let mut shell = shell_at("/");
+        assert_eq!(
+            shell.viewport, DIALOG_VIEWPORT,
+            "the shell starts at the size the entry point opens it at"
+        );
+        press(&mut shell, Message::Viewport(iced::Size::new(1000.0, 600.0)));
+        assert_eq!(
+            shell.viewport,
+            iced::Size::new(1000.0, 600.0),
+            "the window's own report is what the shell keeps"
+        );
+        // A window whose arithmetic leaves nothing still leaves a body to read.
+        press(&mut shell, Message::Viewport(iced::Size::new(400.0, 200.0)));
+        assert_eq!(shell.dialog_body_room(), DIALOG_BODY_MIN);
+        // And the dialog is built at every one of them -- a scroll region the kit
+        // cannot build is a modal that panics.
+        press(&mut shell, Message::Rail(Rail::Settings));
+        for size in [DIALOG_VIEWPORT, iced::Size::new(980.0, 640.0), iced::Size::new(1920.0, 1080.0)] {
+            press(&mut shell, Message::Viewport(size));
+            drop(shell.render());
+        }
+        press(&mut shell, Message::Viewport(DIALOG_VIEWPORT));
+        // The grid's height in a language, which is the whole of what a language
+        // changes about how tall this dialog is: the theme block and the sentences
+        // above the list are the same in every one of them.
+        let grid_height = |tag: &str| {
+            crate::locale::set(tag);
+            let labels = Shell::language_labels();
+            let rows = crate::ui::wrap_labels(&labels, DIALOG_INNER, ROW_GAP).len() as f32;
+            rows * crate::ui::CONTROL + (rows - 1.0) * ROW_GAP
+        };
+        let english = grid_height(crate::locale::ENGLISH);
+        let indonesian = grid_height("id-ID");
+        crate::locale::set(crate::locale::ENGLISH);
+        let room = shell.dialog_body_room();
+        assert!(
+            english < room,
+            "English's {english} of grid has to fit the {room} a 720-pixel window leaves, \
+             or every reader gets a scrollbar for a list that fits"
+        );
+        assert!(
+            indonesian > room,
+            "Indonesian's {indonesian} of grid is the one that has to scroll rather than be cut off"
+        );
     }
 
     #[test]

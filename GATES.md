@@ -7445,6 +7445,114 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   a Chinese page draws are the machine's own fonts, so nothing CJK- sized came
   into the binary.
 
+- [x] G137: the settings grids wrap inside the dialog, broken on the width each chip
+  measures -- so a language list wider than the card wraps rather than being drawn
+  past its right edge
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: 655 passed / 0 failed in the desktop crate's own run (651 before this
+          slice), this slice's three among them: the parity of the measurement with
+          iced's own paragraph, the packing read back at three widths, and both
+          grids in all 32 offered languages -- with `tests/native.rs`'s four beside
+          it
+          clippy exits 0
+          progress exits 0, with G137 and G138 attributed to stage 3
+  EVIDENCE: the transcripts below, and the measurement in the paragraph after them.
+
+```text
+$ cargo test -p palantir-desktop --locked -- --nocapture
+settings grids: at most 13 row(s); widest row 512.0 of 512 px (zh-TW)
+test shell::tests::every_settings_grid_breaks_inside_the_dialog_in_every_language ... ok
+test ui::tests::the_number_a_row_is_broken_on_is_the_width_iced_lays_the_label_out_at ... ok
+test ui::tests::a_row_of_buttons_broken_for_a_width_measures_within_that_width ... ok
+test result: ok. 655 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.10s
+     Running tests\\native.rs
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+(exits 0)
+
+$ python tools/progress.py --check
+(exits 0)
+```
+
+  **What was wrong, and how it was read.** `Settings`' language list was four
+  buttons to a row -- `crate::locale::OFFERED.chunks(4)` -- and a row of four is
+  arithmetic that has nothing to do with how wide the four are. iced has no
+  `flex-wrap`: a `Row` whose children do not fit does not carry them to the next
+  line, it lays the last ones out past its own right edge, and it hands the child
+  before them whatever room is left. The screenshot that started this shows all
+  three at once in the language section -- `Finnish` clipped at the card's edge,
+  `Russian` and `Chinese (Traditional)` outside it, and `German (Germany)`,
+  `Spanish (Spain)` and `Chinese (Traditional)` wrapping their own text to two
+  lines because their row had handed them the last of its room.
+
+  **The measurement, taken for this slice and then removed.** A scratch test in
+  `ui.rs` (not committed) printed every grid: the dialog is 560 wide with 24
+  padding either side, so a row has **512** to fill, and the packing gives
+  **en-US 9 rows, de-DE 10, id-ID 13** against the 8 the counted version always
+  drew -- because the counted version drew chips off the edge. The longest chip of
+  all is Czech's own name for English, `Angličtina (Spojené státy americké)`,
+  **265.2 pixels**, which is more than half of the 512 a row has: the Czech list
+  breaks into rows of two where English's names let five share a row. Indonesian's
+  thirteen rows are the language this gate's twin below exists for.
+
+  **The width a row is broken on is iced's own.** `ui::advance` shapes one line in
+  `iced::advanced::graphics::text::font_system()` -- the single `FontSystem` the
+  window draws every glyph from -- with `to_attributes`, which is the conversion
+  `iced_graphics`' own text renderer applies, and measures it with
+  `iced_graphics::text::measure`, which is the function
+  `Paragraph::with_text` measures with (`iced_graphics-0.12.1/src/text.rs:107` and
+  `src/text/paragraph.rs:55`). So `advance` is not a second opinion about a
+  width: it is the same arithmetic on the same database, and
+  `the_number_a_row_is_broken_on_is_the_width_iced_lays_the_label_out_at` holds
+  the two to each other through `Paragraph` itself, at four labels including a
+  hanzi one. `button_width` is that plus `BUTTON_PAD` either side, and
+  `button_text` now draws with that same constant, so the number a row is broken
+  on and the number the button occupies cannot drift apart.
+
+  **The edge that is left.** A label wider than the whole row gets a row to
+  itself rather than being dropped or clipped, which is what
+  `a_row_of_buttons_broken_for_a_width_measures_within_that_width` says in its
+  third width (100 pixels, where a single chip measures 175): a name with nowhere
+  to fit is still drawn.
+
+- [x] G138: a dialog taller than its window scrolls inside it instead of being drawn
+  past it -- the language list is thirteen rows in Indonesian, and the window's own
+  height is what a centered dialog has to fit
+  CHECK: cargo test -p palantir-desktop --locked
+  EXPECT: the same 655 passed / 0 failed, this slice's fourth test among them: the
+          viewport the shell keeps, the floor a small window still leaves, and the
+          two ends of the cap -- English's nine rows inside it, Indonesian's
+          thirteen past it
+  EVIDENCE: the transcript above.
+
+  **Why wrapping needed this too.** The counted grid was always eight rows tall,
+  so this dialog never had a vertical problem; the measured one is as many rows as
+  the language's names need, and a dialog is drawn centered, which means one taller
+  than the window loses its head at the top and its last rows at the bottom with
+  nothing to scroll them with. So the shell keeps the window's own size: iced
+  reports it as `window::Event::Resized` in logical pixels, which is the space
+  `view` builds in, and `Shell::dialog_body_room` gives a dialog body the height
+  left after the margin it keeps at both ends, its own padding and its head. The
+  body is `container(scrollable(body)).max_height(room)`: iced clamps a `Shrink`
+  height to the limits it was given (`iced_core`'s `Limits::resolve`) and a
+  scrollable draws its content inside `renderer.with_layer(bounds)`, so a dialog
+  that fits is drawn at its content's height with no bar and one that does not is
+  drawn at the room it has and scrolls. The arithmetic at the size the entry point
+  opens (1280x720): room 600, English's grid 424, Indonesian's 616 -- inside for
+  one, past for the other, which is the pair the test asserts.
+
+  **Two things a reader should know about the numbers.** The room is the dialog's
+  *body*, so the sentences above the grids are inside it too; English's 424 is the
+  grid alone, and what makes 600 enough is that the rest of that pane's body is
+  some 140 pixels of description, theme row, headings and warning. And the shell's
+  own guess at the window -- `DIALOG_VIEWPORT`, 1280x720, the size the entry point
+  prefers -- is what a modal opened in the window's very first frame would be
+  sized by; the resize event arrives in the first frames of the window's life, so
+  a dialog opened later reads the real size.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
@@ -7484,6 +7592,20 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   a heading is body-sized text, which is what `.markdown-body` plus preflight comes
   to, and `**bold**` is drawn as its words. iced 0.12 has no per-run font, so that
   difference is a slice rather than a number.
+- **No gate lays a dialog out.** G137's rows and G138's cap are arithmetic on the
+  same measurement iced lays a label out with, and iced's own row and scroll
+  layout is trusted rather than probed: nothing here builds a renderer and reads
+  the nodes back, and no capture of this machine's window carries the page in it
+  (`PrintWindow` returns a surface without it, as G135's note says). What would
+  settle it is the modal photographed in a language with long names rather than in
+  English -- a `--shot` run with `id-ID` in force draws Indonesian's thirteen rows
+  -- and that is one command on a machine whose screen can be read.
+- **No gate says the Language section is the reference's own layout.** The
+  reference's language settings is a searchable list of check-circle rows, one per
+  language, with each language's name in the reader's own language and its coverage
+  percentage beside it; what this launcher draws is a grid of chips, which is a
+  reading of that list rather than a copy of it. The list, the order and the names
+  are the reference's; the chrome is not, and G121 said so first.
 - **One page is switched onto the engine.** Discover's search is the only request
   that goes through the seam; the right panel, the settings modal and every
   instance-facing list still answer from disk or from the copy, so this document
