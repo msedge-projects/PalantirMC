@@ -20,6 +20,15 @@ serde_json = "1"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 
+# The text engine, taken as source rather than from the registry because it needs
+# two edits: cosmic-text 0.10.0 looks for a missing glyph only among the faces
+# whose weight equals the request, and Windows publishes its CJK faces at 400 and
+# 700 alone, so every hanzi in a 500-weight body drew as `.notdef`. The patch is
+# `vendor/cosmic-text`, `THIRD_PARTY_NOTICES.md` says what it changes, and it is
+# meant to be merged upstream rather than carried.
+[patch.crates-io]
+cosmic-text = { path = "vendor/cosmic-text" }
+
 [profile.release]
 opt-level = "z"
 lto = true

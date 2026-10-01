@@ -65,3 +65,38 @@ in binary distributions alike. Adding an entry is part of taking the code.
 * **Changes**: none. Every file is byte-for-byte upstream. An edit to any of them
   would be recorded here and in `UPSTREAM.md` before it was made, and the tree is
   merged with upstream rather than re-derived.
+
+## cosmic-text
+
+* **What**: the text engine the interface is shaped by -- vendored **and patched**
+  at `vendor/cosmic-text/`. `iced`'s text stack is `cosmic-text` 0.10.0 (through
+  `iced_graphics` 0.12.1), and what travels here is that crate's `src/` (20 files,
+  241 KB), its `Cargo.toml` with the `[[bench]]` and dev-dependencies sections
+  removed because neither directory travels with it, and both licence texts.
+* **Why it is source rather than a registry dependency**: two files are edited, and
+  the edits are why a Chinese project page draws words instead of tofu.
+  * `src/font/system.rs` gains `FontSystem::get_fallback_font_matches` -- every face
+    in the database, nearest weight first.
+  * `src/shape.rs`'s `shape_run` builds its fallback candidates out of the faces
+    that match the request exactly, followed by that list.
+  Upstream asks `Attrs::matches` for a fallback candidate, and that is
+  `face.post_script_name.contains("Emoji") || (style, weight and stretch all
+  equal)`. The weight has to be *equal*, so a run at 500, 600 or 800 cannot reach a
+  face published at 400: Windows ships Microsoft YaHei at 400 and 700 and Yu Gothic
+  at 500, and the measurement taken through this engine paints four common
+  simplified-only hanzi -- 简 戏 组 载 -- as `.notdef` at 500 while the rest of the
+  line comes out of a Japanese face. The other half of the same defect is iced's,
+  not this crate's: `iced_core`'s `Text::new` sets `shaping: Shaping::Basic`, which
+  never asks for a fallback at all, and `crates/palantir-desktop/src/ui.rs`'s
+  `text` is where `Shaping::Advanced` is turned on for every string the shell
+  draws.
+* **From**: <https://crates.io/crates/cosmic-text> 0.10.0, the version `Cargo.lock`
+  already pinned. `Cargo.toml`'s `[patch.crates-io]` is what makes this copy the
+  one `iced` compiles against, and the vendored `Cargo.toml`'s header names the two
+  edited files.
+* **Licence**: MIT OR Apache-2.0, both texts travelling with the source as
+  `vendor/cosmic-text/LICENSE-MIT` and `vendor/cosmic-text/LICENSE-APACHE`.
+* **Changes**: exactly the two edits above. The patch is meant to be merged
+  upstream rather than carried -- offering the whole database to a fallback pass is
+  what a fallback pass should do -- and a later `iced` that asks for a newer
+  `cosmic-text` would have to bring it here again.
