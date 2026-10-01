@@ -14,18 +14,26 @@
 //! is dropped instead of drawn under the one they are looking at.
 //!
 //! The description is markdown in the reference -- it renders `project.body`
-//! through the same `markdown-body` stylesheet the web app uses. Drawing raw
-//! markdown as prose is deliberate and temporary: it shows the text the reference
-//! would show, minus its formatting, and a *wrong* rendering (bold as literal
-//! asterisks, say) is what a hand-rolled parser produces before it is finished.
-//! The subset renderer is the next piece of work on this page and says so here.
+//! through the same `markdown-body` stylesheet the web app uses -- and it is
+//! markdown with HTML left in it, because the reference's own XSS filter
+//! whitelists `details` and `summary`. [`crate::markdown`] is that renderer:
+//! blocks in, blocks drawn, and no tag ever drawn as text.
+//!
+//! The one piece of the page's own state the body needs is which `<details>` are
+//! open. It is a set of numbers rather than a flag per disclosure because the
+//! numbers come from the parse, which is a pure function of the body: the same
+//! body is the same numbering on every frame, and a disclosure does not move when
+//! the one above it opens.
 
-use iced::widget::{column, row, text};
+use std::collections::BTreeSet;
+
+use iced::widget::{column, row};
 use iced::{Element, Length};
 
 use palantir_net::modrinth::{ModrinthProject, ModrinthProjectVersion};
 
 use crate::icons_gen::Glyph;
+use crate::markdown;
 use crate::page::{self, Load, GAP, ROW_GAP};
 use crate::pages::Ask;
 use crate::route::{ProjectTab, ProjectType};
@@ -33,7 +41,7 @@ use crate::store::Store;
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+use crate::ui::{self, text};
 
 /// A project, as the API describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -219,6 +227,12 @@ pub enum Message {
         /// the test at the foot of this file says in bytes.
         result: Result<Box<Project>, String>,
     },
+    /// One of the description's `<details>` was opened or closed.
+    ///
+    /// The number is the parse's, not the drawing's: see [`crate::markdown`]'s
+    /// `Block::Details`. A `<details>` is collapsed until it is pressed, which
+    /// is what the element does in the reference.
+    ToggleDetails(usize),
     /// The pointer entered or left one of the page's controls, for the clock
     /// that carries a hover's 150 ms (see [`crate::ui`]).
     Hover {
@@ -251,6 +265,9 @@ pub struct State {
     pub project: Load<Project>,
     /// The last thing the page could not do.
     pub notice: Option<String>,
+    /// Which of the description's `<details>` are open, by the number
+    /// [`crate::markdown`] gave them.
+    pub details: BTreeSet<usize>,
     /// How many times this page has asked, which is how an answer is told apart
     /// from an answer to a question it has since replaced.
     round: u64,
@@ -264,6 +281,7 @@ impl State {
             tab,
             project: Load::Idle,
             notice: None,
+            details: BTreeSet::new(),
             round: 0,
         }
     }
@@ -305,6 +323,13 @@ impl State {
             // not do is drawn in: what worked is worth saying for the same reason
             // what failed is.
             Message::Noted(line) => self.notice = Some(line),
+            // An open disclosure is the page's, not the body's: the body is a
+            // string from the API and the reader's choice is not part of it.
+            Message::ToggleDetails(number) => {
+                if !self.details.remove(&number) {
+                    self.details.insert(number);
+                }
+            }
             Message::Found { round, result } => {
                 // An answer to a request this page has replaced is dropped. It is
                 // not an error and not worth a notice: the reader asked for
@@ -390,7 +415,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         Message::Tab(State::TABS.get(index).cloned().unwrap_or(ProjectTab::Description))
     }));
     blocks.push(match project {
-        Load::Ready(project) => body(theme, state.tab.clone(), project),
+        Load::Ready(project) => body(theme, state.tab.clone(), project, &state.details),
         other => page::draw(theme, other, "this project", |_project| {
             page::waiting(theme, "this project")
         }),
@@ -459,21 +484,29 @@ fn header<'a>(theme: Gen, project: &'a Project) -> Element<'a, Message> {
 }
 
 /// The tab's own body.
-fn body<'a>(theme: Gen, tab: ProjectTab, project: &'a Project) -> Element<'a, Message> {
+///
+/// `open` is the description's disclosure state; the two other tabs have no
+/// state of their own and do not read it.
+fn body<'a>(
+    theme: Gen,
+    tab: ProjectTab,
+    project: &'a Project,
+    open: &BTreeSet<usize>,
+) -> Element<'a, Message> {
     match tab {
-        // The reference renders the body as markdown. Until the subset renderer
-        // lands, this is the text itself, split into its paragraphs, which is the
-        // same words in the same order with the formatting left visible.
+        // The reference wraps the whole body in one `Card` and hands it to
+        // `ProjectPageDescription`, so this is one card around every block rather
+        // than a card per paragraph: `pages/project/Description.vue` is
+        // `<Card><ProjectPageDescription :description="project.body" /></Card>`.
         ProjectTab::Description => {
-            let source = project.body.as_str();
-            let mut blocks = column![].spacing(GAP).width(Length::Fill);
-            for paragraph in source.split("\n\n").filter(|part| !part.trim().is_empty()) {
-                blocks = blocks.push(ui::card(theme, ui::paragraph(theme, paragraph.trim())));
+            if project.body.trim().is_empty() {
+                return page::empty(theme, Key::BrowseNoResults);
             }
-            if source.trim().is_empty() {
-                blocks = blocks.push(page::empty(theme, Key::BrowseNoResults));
-            }
-            blocks.into()
+            let blocks = markdown::parse(&project.body);
+            ui::card(
+                theme,
+                markdown::render(theme, &blocks, open, Message::ToggleDetails),
+            )
         }
         ProjectTab::Gallery => {
             if project.gallery.is_empty() {

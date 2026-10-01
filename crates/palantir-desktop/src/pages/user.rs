@@ -26,7 +26,7 @@
 
 use iced::mouse::Interaction;
 use iced::widget::image::Handle;
-use iced::widget::{column, image, mouse_area, row, text, Space};
+use iced::widget::{column, image, mouse_area, row, Space};
 use iced::{Alignment, Element, Length};
 use palantir_net::modrinth::{ModrinthUser, ModrinthUserProject};
 
@@ -37,7 +37,7 @@ use crate::store::Store;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui::{self, Hovered};
+use crate::ui::{self, text, Hovered};
 
 /// The avatar's side on the page.
 ///

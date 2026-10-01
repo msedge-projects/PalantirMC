@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
-use iced::widget::{column, container, image, mouse_area, row, scrollable, text, text_input, Space};
+use iced::widget::{column, container, image, mouse_area, row, scrollable, text_input, Space};
 use iced::window;
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
@@ -71,7 +71,7 @@ use crate::pages::{self, discover, instance, project, skins, user, Screen};
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
-use crate::ui::Hovered;
+use crate::ui::{text, Hovered};
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
 
 /// What asking the reader for a file left to do.

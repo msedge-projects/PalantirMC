@@ -44,7 +44,7 @@
 use std::collections::HashMap;
 
 use iced::mouse::Interaction;
-use iced::widget::{column, mouse_area, row, text, Space};
+use iced::widget::{column, mouse_area, row, Space};
 use iced::{Alignment, Element, Length};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
@@ -62,7 +62,7 @@ use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
 // `Hovered` is in scope for the result cards below: a card names its own crossing
 // rather than going through one of the kit's controls.
-use crate::ui::{self, Hovered};
+use crate::ui::{self, text, Hovered};
 
 /// One project in the results.
 ///

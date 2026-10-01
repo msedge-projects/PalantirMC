@@ -18,7 +18,7 @@
 
 #![allow(dead_code)]
 
-use iced::widget::{column, container, scrollable, text, Space};
+use iced::widget::{column, container, scrollable, Space};
 use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icon;
@@ -26,6 +26,7 @@ use crate::icons_gen::Glyph;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Theme as Gen};
+use crate::ui::text;
 
 /// `p-6` on the pages that use the library layout.
 pub const INSET: f32 = 24.0;

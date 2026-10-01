@@ -67,7 +67,7 @@
 //! the modal's own Save (`afterSave`); this one lets the next run pay for it, and
 //! says so where the reader is about to press Save.
 
-use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input, Space};
+use iced::widget::{column, container, mouse_area, row, scrollable, text_input, Space};
 use iced::{mouse::Interaction, Alignment, Background, Border, Element, Length, Padding};
 
 use crate::catalog::LoaderKind;
@@ -81,7 +81,7 @@ use crate::store::{
 use crate::style::{medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Theme as Gen};
-use crate::ui::{self, Hovered};
+use crate::ui::{self, text, Hovered};
 
 /// A control's stable name on the hover clock: the tab strip's two.
 const JAVA_TAB_KEY: &str = "instance-settings:tab:java";

@@ -62,6 +62,15 @@ mod launch;
 /// NeoForge's processors patch the client jar their own profile names, and the
 /// plan that follows has to see those files as present.
 mod loader_install;
+/// A project's description: the markdown the reference renders, and the
+/// HTML its own filter lets a body carry.
+///
+/// Its own module rather than a corner of the page that draws it, because the
+/// two rules worth getting right are the reference's rather than a page's:
+/// `details` and `summary` are elements it renders, and `.markdown-body` sets
+/// a heading's colour and its rule while setting no size at all. See the
+/// module for both, and for what iced's one-font `Text` cannot draw.
+mod markdown;
 /// The language the interface is in: the tag, the table behind it, the fallback
 /// when the table has nothing to say, and the writing direction.
 ///
@@ -256,6 +265,9 @@ fn opening_size() -> (f32, f32) {
 /// Subset by `tools/make_fonts.py` from Inter 3.19, the release Modrinth's own
 /// stylesheet pins. All five together are ~292 KB.
 ///
+/// Crate-visible rather than private because `ui.rs`'s shaping test builds
+/// the same system out of the same five faces.
+///
 /// Each entry relies on the declared element type to unsize
 /// `&[u8; N]` into `&[u8]`. Writing that as `&include_bytes!(..)[..]` instead is
 /// the same bytes and is what this was first written as — and it does not
@@ -263,7 +275,7 @@ fn opening_size() -> (f32, f32) {
 /// which is not stable, so the table failed to compile on CI's toolchain while
 /// the identical code was fine on a slightly older one. The coercion is what
 /// const evaluation actually allows.
-static FONTS: [&[u8]; 5] = [
+pub(crate) static FONTS: [&[u8]; 5] = [
     include_bytes!("../assets/fonts/Inter-400.otf"),
     include_bytes!("../assets/fonts/Inter-500.otf"),
     include_bytes!("../assets/fonts/Inter-600.otf"),

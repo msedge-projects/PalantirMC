@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{column, row, text, Space};
+use iced::widget::{column, row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::page::{self, GAP, ROW_GAP};
@@ -20,7 +20,7 @@ use crate::store::{self, Store};
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+use crate::ui::{self, text};
 
 /// One screenshot found on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]

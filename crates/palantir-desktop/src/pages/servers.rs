@@ -21,7 +21,7 @@ use crate::page::{self, GAP, ROW_GAP};
 use crate::store::{self, Store};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+use crate::ui::{self, text};
 
 /// What the page can be told.
 #[derive(Debug, Clone)]
@@ -122,7 +122,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         column![]
             .spacing(4.0)
             .push(
-                iced::widget::text(Key::ServersManageErrorTitle.message())
+                text(Key::ServersManageErrorTitle.message())
                     .size(16.0)
                     .font(crate::style::heading())
                     .style(iced::theme::Text::Color(theme_gen::ink(

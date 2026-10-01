@@ -32,7 +32,7 @@
 //! chevron down instead, because this launcher has no drag widget -- the write
 //! underneath is the same one ([`Step`], [`Reorder`]).
 
-use iced::widget::{column, image, row, text, Space};
+use iced::widget::{column, image, row, Space};
 use iced::{Alignment, Element, Length};
 use palantir_net::SkinChange;
 
@@ -46,7 +46,7 @@ use crate::store::Store;
 use crate::style::{INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Theme as Gen};
-use crate::ui;
+use crate::ui::{self, text};
 
 /// The reference's bundled sections, in its own order.
 ///
@@ -717,7 +717,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             .spacing(ROW_GAP)
             .align_items(Alignment::Center)
             .push(
-                iced::widget::text(section.label())
+                text(section.label())
                     .size(16.0)
                     .font(crate::style::semibold())
                     .style(iced::theme::Text::Color(theme_gen::ink(

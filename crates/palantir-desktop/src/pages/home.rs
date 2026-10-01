@@ -26,7 +26,7 @@
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
-use iced::widget::{column, container, image, mouse_area, row, text, Space};
+use iced::widget::{column, container, image, mouse_area, row, Space};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Theme};
 
 use crate::icon;
@@ -39,7 +39,7 @@ use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 // `Hovered` is in scope for the instance cards below: a card names its own
 // crossing rather than going through one of the kit's controls.
-use crate::ui::{self, Hovered};
+use crate::ui::{self, text, Hovered};
 
 /// Which way the library is ordered.
 ///

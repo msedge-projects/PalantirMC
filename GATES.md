@@ -7319,6 +7319,122 @@ CONFIRMED: the page carries all 135 gates, 6 stage cards and every subject as wr
   them, same run group and `concurrency: cancel-in-progress`, and a cancelled job
   is not a passing one.
 
+- [x] G135: the interface's text is shaped with a fallback pass, and that pass can
+  reach a face whose weight the request does not name -- so a Chinese project's
+  own title, summary and description draw words rather than boxes
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: 651 passed / 0 failed in the desktop crate's own run, this slice's ten
+          among them -- the gate over every module's `text` import and the
+          measurement across the five weights, plus `markdown.rs`'s eight -- with
+          `tests/native.rs`'s four beside it, the four the crate had before
+          clippy exits 0, adding no warning in a line this slice wrote
+          progress exits 0, with G135 and G136 attributed to stage 3
+  EVIDENCE: the transcripts below, and the measurements in the two paragraphs
+          after them -- which are the reason the numbers are what they are.
+
+```text
+$ cargo test -p palantir-desktop --locked
+     Running unittests src\\main.rs (target\\debug\\deps\\PalantirMC-626be53fe2caa31e.exe)
+test result: ok. 651 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.81s
+     Running tests\\native.rs (target\\debug\\deps\\native-bf0104495c49d24c.exe)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+$ cargo test -p palantir-desktop --locked -- ui::tests
+running 8 tests
+test ui::tests::a_button_s_colours_follow_its_type ... ok
+test ui::tests::every_control_a_page_draws_carries_its_own_key ... ok
+test ui::tests::every_control_builds_in_every_theme ... ok
+test ui::tests::a_repeated_control_is_named_by_the_thing_it_names ... ok
+test ui::tests::a_control_tweens_its_hover_on_the_clock_it_was_given ... ok
+test ui::tests::every_string_the_shell_draws_is_shaped_through_this_module ... ok
+test ui::tests::a_hanzi_is_found_at_every_weight_the_interface_sets_text_at ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+$ cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+(exits 0)
+
+$ python tools/progress.py --check
+(exits 0)
+```
+
+  **What was measured, and with what.** iced's `Text` defaults to
+  `Shaping::Basic`, whose own documentation is "no font fallback ... will not try to
+  find missing glyphs in your system fonts"; `iced_core` 0.12.3 sets it in
+  `Text::new`. A scratch probe against `cosmic-text` 0.10.0 directly, with the five
+  bundled Inter faces and this machine's own font database, shaped
+  `简介僵尸入侵天中文字幕游戏模组下载` and counted `.notdef`: **Basic missed all 21
+  characters at every one of the five weights**, and **Advanced missed 4 of them at
+  500 and 600 and all 21 at 800**, because a fallback candidate has to match the
+  request's weight exactly (`Attrs::matches`) and Windows publishes Microsoft YaHei
+  at 400 and 700 and Yu Gothic at 500. Only `简 戏 组 载` -- simplified-only hanzi
+  that a Japanese face has none of -- were missing at 500; the rest came out of Yu
+  Gothic, which is the wrong script's glyph forms for a Chinese body. The probe is
+  not committed (`.scratch/fontprobe`), so what the gate itself measures is the end
+  of the chain: `ui.rs`'s
+  `a_hanzi_is_found_at_every_weight_the_interface_sets_text_at` builds the same
+  system the window draws in out of the same five faces and shapes `简体中文` at
+  400, 500, 600, 700 and 800, asserting no `.notdef` at any of them -- with 400 as
+  the control, because a machine with no CJK face at all has nothing to fall back
+  to, and the test says so rather than passing on a measurement it did not take.
+
+  **No pixel evidence from a running window, and why.** The intent was to capture
+  `/project/l9m9tuPN` from the exe the run below staged (`36833791996`, in
+  `dist/msvc`) and from this tree's own build, and compare them. Both captures came
+  back byte-identical, **172 distinct colours in the page pane** (x 64..1003,
+  y 70..720) -- the same number the previous session measured on a window whose
+  first frame had drawn nothing, and the signature of a grab that found no page at
+  all: `PrintWindow` on this GPU-composited window returns a surface without the
+  rendered content in it, and the screen fallback is unavailable in this session
+  (`ImageGrab.grab` raises `OSError: screen grab failed`). So the two captures are
+  evidence of nothing, and this gate rests on the engine measurement above and on
+  the source gate that puts every string through the shaped helper -- not on a
+  photograph.
+
+- [x] G136: a project's description is rendered from the markdown and the HTML the
+  reference renders it from -- blocks in, blocks drawn, and no tag drawn as text
+  CHECK: cargo test -p palantir-desktop --locked
+         python tools/progress.py --check
+  EXPECT: the same 651 passed / 0 failed, this slice's eight `markdown::tests`
+          among them: the block parse and its four prose cases, the inline markers,
+          the numbered disclosures, and the assertion that no tag of the body
+          reaches the renderer
+  EVIDENCE: the transcripts below.
+
+```text
+$ cargo test -p palantir-desktop --locked -- markdown::
+running 8 tests
+test markdown::tests::a_heading_keeps_its_level_because_the_rule_is_only_drawn_for_two_of_them ... ok
+test markdown::tests::a_fence_ends_at_its_own_marker_rather_than_at_the_body ... ok
+test markdown::tests::a_body_with_no_html_still_parses_as_the_markdown_it_is ... ok
+test markdown::tests::a_marker_iced_cannot_draw_is_not_drawn_as_a_character ... ok
+test markdown::tests::a_details_is_a_disclosure_rather_than_its_own_source ... ok
+test markdown::tests::a_tag_that_is_not_a_disclosure_is_dropped_and_its_text_kept ... ok
+test markdown::tests::every_disclosure_is_numbered_in_the_body_s_order ... ok
+test markdown::tests::prose_that_looks_like_markup_is_left_as_prose ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+  **Why the tags were there at all.** They are not a mistake in the body: the
+  reference's own renderer is markdown-it followed by `xss`, and
+  `packages/utils/parse.ts` whitelists `summary` while the list it extends already
+  carries `details`. A body that opens `<details>` is a disclosure in the reference
+  and was eleven characters here. What the parse draws instead is the element: the
+  caption on a bar with a chevron, collapsed until it is pressed, which is what a
+  `<details>` is; and everything the reference's whitelist allows but this launcher
+  cannot draw -- `div`, `img`, `kbd`, `iframe` -- is dropped with its text kept,
+  because the one thing a tag must not become is text.
+
+  **Still not drawn, and named here rather than discovered later.** Inline
+  emphasis: `**bold**` loses its asterisks and keeps its words, because iced 0.12's
+  `Text` is one font for one widget and has no span to set a run in another weight.
+  Images: a description's pictures are not fetched or drawn, and an `![alt](url)`
+  becomes its alt text. Both are the same class as the tab's own `Gallery` before
+  its icons landed, and both are one slice each.
+
 ## What these gates cannot say
 
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
@@ -7345,6 +7461,19 @@ CONFIRMED: the page carries all 135 gates, 6 stage cards and every subject as wr
   `ETag` would be believed, and no test can produce that from outside the
   engine: the only defence is the digest inside the document, which is the
   caller's to check.
+- **No gate photographs the shaped text.** G135's receipts are the engine's
+  numbers and the source gate; no capture of a running window carries the glyphs.
+  `PrintWindow` on this tree's window comes back without the page in it and the
+  screen fallback is unavailable in this session, so "it draws words on screen" is
+  argued from `Shaping::Advanced` plus the fallback measurement rather than
+  photographed. A machine whose screen can be read settles it in one command:
+  `python tools/appshot.py --page /project/l9m9tuPN --size 1280x720 --out then.png`,
+  which is the capture this session could not take.
+- **No gate says an emphasis is drawn.** The renderer knows six heading levels and
+  keeps them -- it has to, the rule under one is drawn for the first two only -- but
+  a heading is body-sized text, which is what `.markdown-body` plus preflight comes
+  to, and `**bold**` is drawn as its words. iced 0.12 has no per-run font, so that
+  difference is a slice rather than a number.
 - **One page is switched onto the engine.** Discover's search is the only request
   that goes through the seam; the right panel, the settings modal and every
   instance-facing list still answer from disk or from the copy, so this document

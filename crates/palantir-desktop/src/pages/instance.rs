@@ -35,7 +35,7 @@
 //! holding their place. A frame's cost is then a function of the *window*, not of
 //! the folder.
 
-use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::widget::{column, container, row, scrollable, Space};
 use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icons_gen::Glyph;
@@ -47,7 +47,7 @@ use crate::store::{self, LaunchState, Store};
 use crate::style::{semibold, INK_CONTRAST, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Theme as Gen};
-use crate::ui;
+use crate::ui::{self, text};
 
 /// What the page can be told.
 #[derive(Debug, Clone)]

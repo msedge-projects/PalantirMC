@@ -36,7 +36,9 @@
 
 #![allow(dead_code)]
 
-use iced::widget::{column, container, image, mouse_area, row, text, text_input, Space};
+use iced::advanced::text::Renderer as TextRenderer;
+use iced::widget::text::{Shaping, StyleSheet as TextStyle};
+use iced::widget::{column, container, image, mouse_area, row, text_input, Space, Text};
 use iced::{Alignment, Background, Border, Color, ContentFit, Element, Length, Padding};
 use iced::{Theme, mouse::Interaction};
 
@@ -48,6 +50,36 @@ use crate::page::ROW_GAP;
 use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
+
+/// The interface's text, shaped so a glyph the chosen face does not carry can
+/// still be found.
+///
+/// Every string the shell draws comes through this rather than through
+/// `iced::widget::text`, and the difference is a whole script's worth of pixels.
+/// iced's `Text` defaults to `Shaping::Basic`, which its own documentation
+/// describes as "no shaping and no font fallback ... will not try to find missing
+/// glyphs in your system fonts" -- so a Chinese project's title, summary and body
+/// drew every hanzi as `.notdef`, the filled boxes a reader calls tofu. The
+/// reference never had that choice to make: it is a web view, and a browser
+/// shapes through HarfBuzz and falls back through the system's fonts.
+/// `Shaping::Advanced` is iced's equivalent of that, and it is the whole of the
+/// difference here.
+///
+/// The fallback it then reaches for is `vendor/cosmic-text`'s, patched for the
+/// other half of the same defect -- a request at a weight no face of the script
+/// publishes had no candidate at all. See `THIRD_PARTY_NOTICES.md`.
+///
+/// `iced::widget::text` takes `impl ToString` and so does this, so a call site
+/// reads the same either way. The test below refuses any module that imports the
+/// original, which is what keeps "every string is shaped" true as pages are
+/// added.
+pub fn text<'a, Theme, Renderer>(text: impl ToString) -> Text<'a, Theme, Renderer>
+where
+    Theme: TextStyle,
+    Renderer: TextRenderer,
+{
+    Text::new(text.to_string()).shaping(Shaping::Advanced)
+}
 
 /// A page's message type, as far as this kit needs it.
 ///
@@ -1077,6 +1109,7 @@ pub fn paragraph<'a, Message: 'a>(theme: Gen, body: &str) -> Element<'a, Message
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::advanced::graphics::text::cosmic_text;
 
     /// A message type with nothing in it but the crossing a control publishes.
     ///
@@ -1111,6 +1144,167 @@ mod tests {
             ("skins", include_str!("pages/skins.rs")),
             ("user", include_str!("pages/user.rs")),
         ]
+    }
+
+    /// Every Rust file in this crate, so the gate below reads the tree that was
+    /// compiled rather than a list of modules that goes stale as pages are added.
+    fn crate_sources() -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, root: &std::path::Path, found: &mut Vec<(String, String)>) {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(_) => return,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, root, found);
+                } else if path.extension().is_some_and(|kind| kind == "rs") {
+                    if let Ok(source) = std::fs::read_to_string(&path) {
+                        let name = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+                        found.push((name, source));
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut found = Vec::new();
+        walk(&root, &root, &mut found);
+        found
+    }
+
+    #[test]
+    fn every_string_the_shell_draws_is_shaped_through_this_module() {
+        // The gate behind [`text`] above. iced's own `Text` draws with
+        // `Shaping::Basic`, which never looks a glyph up in another font, so one
+        // module that imports it is one page that draws tofu again -- and nothing
+        // about the widget, the size or the colour would say so. Read as text
+        // because that is what the mistake is, an import line, and read from the
+        // directory so a page added later cannot escape it.
+        let mut offenders = Vec::new();
+        for (path, source) in crate_sources() {
+            let mut importing = false;
+            for (index, line) in source.lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if trimmed.starts_with("use iced::widget") {
+                    importing = true;
+                }
+                let at = index + 1;
+                if importing {
+                    let names_text = line
+                        .split(',')
+                        .flat_map(|item| item.split_whitespace())
+                        .any(|item| item == "text");
+                    if names_text {
+                        offenders.push(format!("{path}:{at}: {}", trimmed.trim_end()));
+                    }
+                    if trimmed.ends_with(';') {
+                        importing = false;
+                    }
+                }
+                // The needle is spelled in two pieces so that this test does
+                // not read its own source as a call site.
+                if line.contains(concat!("iced::widget::", "text(")) {
+                    offenders.push(format!("{path}:{at}: {}", trimmed.trim_end()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these draw through iced's own `text`, which never falls back to a face \
+             that has the glyph; every string goes through `ui::text`: {:?}",
+            offenders
+        );
+        // And that helper is the shaped one -- the gate above only says whose
+        // door the strings come through.
+        assert!(
+            include_str!("ui.rs").contains(".shaping(Shaping::Advanced)"),
+            "`ui::text` is the whole reason every string is shaped; it is not shaped any more"
+        );
+    }
+
+    /// How many of `text`'s glyphs came out as `.notdef` at this weight, and
+    /// which faces drew it.
+    fn shape(
+        system: &mut cosmic_text::FontSystem,
+        weight: cosmic_text::Weight,
+        text: &str,
+    ) -> (usize, Vec<String>) {
+        let mut buffer = cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(16.0, 20.0));
+        buffer.set_size(system, 900.0, 900.0);
+        buffer.set_text(
+            system,
+            text,
+            cosmic_text::Attrs::new()
+                .family(cosmic_text::Family::Name(crate::style::FAMILY))
+                .weight(weight),
+            cosmic_text::Shaping::Advanced,
+        );
+        buffer.shape_until_scroll(system);
+        let mut missing = 0;
+        let mut faces = Vec::new();
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs {
+                if glyph.glyph_id == 0 {
+                    missing += 1;
+                }
+                if let Some(face) = system.db().face(glyph.font_id) {
+                    let name = format!(
+                        "{} {}",
+                        face.families.first().map(|(name, _)| name.as_str()).unwrap_or("?"),
+                        face.weight.0
+                    );
+                    if !faces.contains(&name) {
+                        faces.push(name);
+                    }
+                }
+            }
+        }
+        (missing, faces)
+    }
+
+    /// The system the launcher draws in: the five bundled Inter weights, and
+    /// whatever this machine has installed.
+    fn app_font_system() -> cosmic_text::FontSystem {
+        cosmic_text::FontSystem::new_with_fonts(crate::FONTS.iter().map(|bytes| {
+            cosmic_text::fontdb::Source::Binary(
+                std::sync::Arc::new(bytes.to_vec())
+                    as std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>,
+            )
+        }))
+    }
+
+    #[test]
+    fn a_hanzi_is_found_at_every_weight_the_interface_sets_text_at() {
+        // The measurement both halves of the fix rest on, taken through the same
+        // engine the window draws with.
+        //
+        // iced reaches another font only under `Shaping::Advanced`, which is what
+        // [`text`] above asks for, and the fallback it then looks for is only
+        // reachable because `vendor/cosmic-text` offers every installed face
+        // instead of the ones whose weight equals the request. Windows publishes
+        // its CJK faces at 400 and 700 alone while the interface sets text at
+        // five weights, so without either half a hanzi is a filled box: the
+        // screenshot that started this was a Chinese modpack's own description.
+        let mut system = app_font_system();
+        let hanzi = "简体中文";
+        let (control, control_faces) = shape(&mut system, cosmic_text::Weight::NORMAL, hanzi);
+        if control > 0 {
+            // A machine with no CJK face has nothing for a hanzi to fall back
+            // to. That is a fact about the machine, not a failure of this test,
+            // and saying so is better than a green test that measured nothing.
+            eprintln!("no installed face covers {hanzi}: {control_faces:?}");
+            return;
+        }
+        for weight in [500u16, 600, 700, 800] {
+            let (missing, faces) = shape(&mut system, cosmic_text::Weight(weight), hanzi);
+            assert_eq!(
+                missing, 0,
+                "weight {weight} draws {missing} tofu glyph(s) of {hanzi}, from {faces:?}"
+            );
+        }
     }
 
     #[test]
