@@ -120,14 +120,6 @@ const TAB_KEYS: [&str; 6] = [
 /// The sorting control's own name, and the one its results are filtered by.
 const FILTER_KEY: &str = "discover:filter";
 
-/// What a project's card brightens by when the pointer is on it.
-///
-/// `LegacyProjectCard.vue`'s `hover:brightness-90`, which is a *fixed* 0.9 rather
-/// than the theme's `--hover-brightness`: in the dark theme the global hover
-/// brightens and this card dims, and a port that used the global value would
-/// draw the one card in the list that goes the wrong way.
-const CARD_HOVER: f32 = 0.9;
-
 /// The five orders the search can be asked in.
 ///
 /// `ui/src/utils/search.ts`'s own list, literals and all.
@@ -481,6 +473,12 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
     // A card's identity is the project it names, so its key is derived from that
     // rather than from its position in the list: reordering the results must not
     // move a tween from one card to another.
+    //
+    // The card is a `ProjectCard.vue` in its list layout, whose hover is
+    // `smart-clickable:highlight-on-hover` -- `filter: brightness(1.25)` in the
+    // dark theme, the global `--hover-brightness`, not the 0.9 that
+    // `LegacyProjectCard.vue` dims a *grid* card by. The two are different cards
+    // in the reference and it was the grid one's constant that was ported here.
     let key = ui::scoped("discover:card", &hit.id);
     let (factor, _) = ui::interaction(key);
     let mut tags = row![].spacing(6.0);
@@ -525,8 +523,8 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit) -> Element<'a, Message> {
             ),
     ))
     .interaction(Interaction::Pointer)
-    .on_enter(Message::hover_with(key, true, CARD_HOVER))
-    .on_exit(Message::hover_with(key, false, CARD_HOVER))
+    .on_enter(Message::hover(key, true))
+    .on_exit(Message::hover(key, false))
     .on_press(Message::Open(hit.id.clone()))
     .into()
 }

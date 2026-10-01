@@ -754,17 +754,27 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
     let mut track = row![].align_items(Alignment::Center).spacing(2.0);
     for (index, ((label, selected), key)) in labels.iter().zip(keys.iter().copied()).enumerate() {
         let selected = *selected;
+        // `NavTabs.vue`'s two label colours exactly: the active label is
+        // `text-button-textSelected` -- the brand green, `#1bd96a` in the dark
+        // theme -- and an inactive one is `text-contrast`, which is the same ink
+        // the rest of the shell's headings use. The port had these the other way
+        // round: it plated the selected tab in `--button-bg` (`surface-4`, a
+        // grey) and inked its label in contrast, so the one tab the reader is on
+        // was the one tab drawn in no colour at all.
         let ink = if selected {
-            theme_gen::ink(theme, INK_CONTRAST)
+            theme_gen::ink(theme, Ink::ButtonTextSelected)
         } else {
-            theme_gen::ink(theme, INK_SECONDARY)
+            theme_gen::ink(theme, INK_CONTRAST)
         };
         // A selected tab is plated and an unselected one is not, and the
         // reference does not change that on hover: what a hover moves is the
         // *label* -- `text-secondary` to `text-primary` -- so the plate is left
         // alone and the ink is filtered.
         let (factor, _) = interaction(key);
-        let plate = selected.then(|| theme_gen::ink(theme, Ink::ButtonBg));
+        // The plate is `bg-button-bgSelected`, which is `--brand-highlight`:
+        // the same green at a quarter alpha, so the pill reads as green without
+        // becoming the solid call-to-action the Install button is.
+        let plate = selected.then(|| theme_gen::ink(theme, Ink::ButtonBgSelected));
         let tab = container(
             text(label.clone())
                 .size(14.0)

@@ -48,10 +48,6 @@ use crate::ui::{self, Hovered};
 /// recognize.
 const AVATAR: f32 = 96.0;
 
-/// The dim a project card takes under the pointer: `hover:brightness-90`, the same
-/// number Discover's cards use for the same reference class.
-const CARD_HOVER: f32 = 0.9;
-
 /// The header's own action.
 ///
 /// The reference's header also carries *Edit* (the reader's own profile) and an
@@ -628,8 +624,8 @@ fn project_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, 
             .push(facts),
     ))
     .interaction(Interaction::Pointer)
-    .on_enter(Message::hover_with(key, true, CARD_HOVER))
-    .on_exit(Message::hover_with(key, false, CARD_HOVER))
+    .on_enter(Message::hover(key, true))
+    .on_exit(Message::hover(key, false))
     .on_press(Message::Project(project.id.clone()))
     .into()
 }

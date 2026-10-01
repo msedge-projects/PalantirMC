@@ -1233,7 +1233,20 @@ fn our_font_weights() -> Vec<(&'static str, u32)> {
 /// `text-3xl` (32px), whose dialog is the closest thing the reference draws to
 /// one. The list is kept empty and the test keeps its shape: the next size that
 /// is neither a rung nor a class needs a reason, and this is where it goes.
-const MEASURED_SIZES: [(f32, &str); 0] = [];
+///
+/// The one entry it holds is the head's wordmark. The reference's own name in
+/// the status bar is not text at all: `TextLogo.vue` is one SVG carrying the mark
+/// and the wordmark together, 593 units tall with its letterforms occupying
+/// y 98..490 of that, so at the bar's own 28px height its cap height is 18.5px.
+/// Inter's cap height is 0.727 em, and 18.5 / 0.727 is 25.4 -- 25 is therefore
+/// the size at which this shell's capitals stand as tall as the reference's
+/// logotype does, which is as close as a substitute typeface can come to art it
+/// does not have.
+const MEASURED_SIZES: [(f32, &str); 1] = [(
+    25.0,
+    "the head's wordmark: `TextLogo.vue`'s cap height at the bar's 28px is 18.5px, \
+     which is Inter's 0.727 em at 25.4px",
+)];
 
 // ---- The tests ----------------------------------------------------------
 

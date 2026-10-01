@@ -3489,6 +3489,26 @@ impl Shell {
             .align_items(Alignment::Center)
             .padding(Padding { top: 0.0, bottom: 0.0, left: RAIL_PAD, right: 0.0 })
             .push(image(brand::logo_handle()).height(Length::Fixed(LOGO)))
+            // The wordmark beside the mark, which is the reference's own head:
+            // its `TextLogo` is one SVG carrying both -- the mark, then
+            // "modrinth" in `text-contrast` -- so the name is part of the
+            // identity the reader sees on every page, not only in the About
+            // page and the title bar.
+            //
+            // 25px is measured rather than picked. That SVG is 593 units tall
+            // and its letterforms occupy y 98..490 of it, so at the head's own
+            // 28px height the reference's wordmark has a cap height of
+            // 18.5px; Inter's is 0.727 em, and 18.5 / 0.727 is 25.4. The 2px
+            // space is optical: the mark's own art is a 28px square whose ink
+            // stops ~5.6px short of its right edge, so this lands the gap the
+            // reference's SVG has between the two.
+            .push(Space::with_width(2.0))
+            .push(
+                text(brand::APP_NAME)
+                    .size(25.0)
+                    .font(heading())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
             // The reference's `ml-2` then a `gap-2` group of the two history
             // buttons.
             .push(Space::with_width(8.0))
