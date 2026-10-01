@@ -342,6 +342,9 @@ pub struct Shell {
     /// Whether the frame has already been asked for, so a timer that fires twice
     /// cannot write the same file twice.
     shot_taken: bool,
+    /// How many of the extra frames a window owes its first one have arrived.
+    /// See [`REPAINT_KICKS`].
+    kicks: u8,
     /// The page in the pane, with its own state.
     screen: Screen,
     /// What the pages are answered with: the launcher's own filesystem, and the
@@ -1071,6 +1074,9 @@ pub enum Message {
     ShotDue,
     /// The frame [`Message::ShotDue`] asked for, to be written and to end the run.
     ShotTaken(iced::window::Screenshot),
+    /// A frame a window owes its own first one. See [`REPAINT_KICKS`] for the
+    /// measurement that asks for it, and [`Shell::repaint`] for how it arrives.
+    Repaint,
 }
 
 impl Shell {
@@ -1093,6 +1099,7 @@ impl Shell {
             maximized: false,
             shot: None,
             shot_taken: false,
+            kicks: 0,
             create_name: String::new(),
             create_error: None,
             creating: false,
@@ -1407,6 +1414,14 @@ impl Shell {
                 self.maximized = crate::native::window_maximized().unwrap_or(self.maximized);
                 return iced::Command::none();
             }
+            // The frame a window owes its own first one, which is the frame a page
+            // is drawn in: see [`REPAINT_KICKS`]. The count is all this arm has to
+            // do -- the message's own job is to *be* a message, because a message
+            // is what makes iced build a frame.
+            Message::Repaint => {
+                self.kicks = self.kicks.saturating_add(1);
+                return iced::Command::none();
+            }
             // The capture is taken here, at the point the runtime is asked for
             // the window's frame, rather than by a tool outside the process:
             // iced draws this window, so it is the only thing that can hand back
@@ -1526,12 +1541,15 @@ impl Shell {
                 self.back();
                 None
             }
-            // Neither is a request and neither reaches this far: `handle`
-            // answers the window's own state and the capture's timer before it
-            // asks `act` anything. They are matched here so that adding a
-            // message is a compile error in the one place that has to decide
-            // what to do with it.
-            Message::WindowStateChanged | Message::ShotDue | Message::ShotTaken(_) => None,
+            // Not one of these is a request the pages could answer, and none of
+            // them reaches this far: `handle` answers the window's own state, the
+            // capture's timer and the owed frames before it asks `act` anything.
+            // They are matched here so that adding a message is a compile error in
+            // the one place that has to decide what to do with it.
+            Message::WindowStateChanged
+            | Message::ShotDue
+            | Message::ShotTaken(_)
+            | Message::Repaint => None,
             Message::Forward => {
                 self.forward();
                 None
@@ -6497,6 +6515,31 @@ impl Flags {
 const WINDOW_STATE_ID: &str = "palantirmc-window-state";
 /// Subscription id of the `--shot` capture's settle timer.
 const SHOT_ID: &str = "palantirmc-shot";
+/// Subscription id of the extra frames a window owes its first one.
+const REPAINT_ID: &str = "palantirmc-repaint";
+/// How many extra frames the shell asks for when a window opens, and when.
+///
+/// This is a workaround, and the measurement behind it is the reason it exists.
+/// The **first** frame a window presents draws no page: the pane between the rail
+/// and the panel comes out as its own background with the page's scrollbar over
+/// it, and nothing draws again until an event arrives -- so a launcher opened and
+/// left alone is a launcher showing a blank page, and a capture is a picture of
+/// one, because nothing ever touches a `--shot` window. Measured on this machine
+/// at a pinned 1280x720 on `/browse/modpack`, from a window nobody has touched:
+/// 172 distinct colours in the pane's rectangle (x 64..1003, y 70..720), against
+/// 11,954 in the same rectangle after one click *posted* into the window, and
+/// 12,253 after a resize. Both of those are events, and both produce the second
+/// frame -- which is the frame with the page in it.
+///
+/// A message is enough to ask for that frame, because iced requests a redraw
+/// whenever its loop has messages to deliver; no input is needed. Two, because the
+/// first one only lands after the window's first frame on a machine that drew one
+/// quickly: the second lands on the far side of that frame whatever startup cost
+/// was, and the pair costs two repaints of a launcher that has just opened.
+const REPAINT_KICKS: u8 = 2;
+/// When each of [`REPAINT_KICKS`]'s frames is asked for, from the window opening.
+const KICK_AFTER: [Duration; REPAINT_KICKS as usize] =
+    [Duration::from_millis(300), Duration::from_millis(1200)];
 /// How long a `--shot` run gives the window before taking its picture.
 ///
 /// The number the old shell used, kept because the page gates were measured
@@ -6682,12 +6725,13 @@ impl iced::Application for Shell {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // Four subscriptions and none is owed: the frame clock while something is
+        // Five subscriptions and none is owed: the frame clock while something is
         // moving, the launch while a game is being started or is up, the window's
-        // own state while Windows can change it, and the settle timer while a
-        // capture is waiting. Each says `none` when it is not needed, which is
-        // what keeps an idle window -- and a launcher with nothing running -- from
-        // waking anything up.
+        // own state while Windows can change it, the settle timer while a capture
+        // is waiting, and the frames a window owes its own first one until they
+        // have arrived ([`REPAINT_KICKS`]). Each says `none` when it is not needed,
+        // which is what keeps an idle window -- and a launcher with nothing running
+        // -- from waking anything up.
         let frames = if self.animating() { self.frames() } else { Subscription::none() };
         Subscription::batch([
             frames,
@@ -6695,6 +6739,7 @@ impl iced::Application for Shell {
             self.quick_create(),
             window_state(),
             self.capture(),
+            self.repaint(),
         ])
     }
 }
@@ -6730,6 +6775,39 @@ impl Shell {
                 futures::future::pending::<()>().await;
             }
         })
+    }
+
+    /// The frames a window owes its own first one, if it has not drawn them yet.
+    ///
+    /// A thread and a channel rather than `iced::time::every` is the arrangement
+    /// the capture's settle timer uses, and for its reason; what is different here
+    /// is that the thread sends twice and then ends, and the subscription ends with
+    /// it -- iced drops the receiver once the shell stops asking, and the thread's
+    /// next send fails. See [`REPAINT_KICKS`] for what the two frames are for.
+    fn repaint(&self) -> Subscription<Message> {
+        if !self.repainting() {
+            return Subscription::none();
+        }
+        iced::subscription::channel(REPAINT_ID, 1, |mut sender| async move {
+            let _ = std::thread::spawn(move || {
+                let mut elapsed = Duration::ZERO;
+                for at in KICK_AFTER {
+                    std::thread::sleep(at.saturating_sub(elapsed));
+                    elapsed = at;
+                    if sender.try_send(Message::Repaint).is_err() {
+                        return;
+                    }
+                }
+            });
+            loop {
+                futures::future::pending::<()>().await;
+            }
+        })
+    }
+
+    /// Whether any of [`REPAINT_KICKS`]'s frames is still owed.
+    fn repainting(&self) -> bool {
+        self.kicks < REPAINT_KICKS
     }
 
     /// The capture a `--shot` run asked for: one settle timer, then the frame.
@@ -6913,6 +6991,26 @@ mod tests {
         press(&mut shell, Message::Go("/instance/atm10/worlds".into()));
         assert!(shell.address().marks().is_empty());
         assert_eq!(shell.plate(Rail::Servers).value(), 0.0);
+    }
+
+    #[test]
+    fn a_window_is_asked_for_the_frames_it_owes_its_own_first_one() {
+        // `REPAINT_KICKS`' own rule: the first frame a window presents has no page
+        // in it on this machine, and a message is what makes iced build the next
+        // one. The shell asks for exactly that pair and then stops, so an idle
+        // launcher is not a launcher drawing forever.
+        let mut shell = shell_at("/browse/modpack");
+        assert!(shell.repainting(), "a window that has just opened owes a frame");
+        press(&mut shell, Message::Repaint);
+        assert!(shell.repainting(), "one kick is not the pair");
+        press(&mut shell, Message::Repaint);
+        assert!(!shell.repainting(), "and the pair is where the asking ends");
+        press(&mut shell, Message::Repaint);
+        assert!(!shell.repainting(), "a stray kick does not start it again");
+        // The debt is a window's opening rather than a page's, so a shell that has
+        // navigated since does not owe one either.
+        press(&mut shell, Message::Go("/".into()));
+        assert!(!shell.repainting());
     }
 
     #[test]
