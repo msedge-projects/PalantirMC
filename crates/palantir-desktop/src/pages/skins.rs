@@ -1630,25 +1630,20 @@ pub fn edit_view<'a>(
     if edit.ears {
         body = body.push(ears_notice(theme));
     }
-    // The actions. Save is the reference's own button, and Forget is its danger preset
-    // -- the one colour the reference gives the single control that takes something
-    // away. Take-off has no key to be drawn unusable with, because the reference has no
+    // The actions. The reference's own row is `flex gap-2 justify-end` -- Cancel
+    // then Save, both at the right-hand end, 8 apart -- so the fill goes first and
+    // Save, which is the last control in the reference's row too, is the last
+    // control here. Cancel is the dialog's own close button, which the shell
+    // draws in the head above this body. Save is the reference's own button with
+    // its `SaveIcon` in front of the label, and Forget is its danger preset -- the
+    // one colour the reference gives the single control that takes something away.
+    // Take-off has no key to be drawn unusable with, because the reference has no
     // word for it at all; the page refuses a second press in `update`, which is the
     // rule where it cannot be sidestepped.
     body = body.push(
         row![]
             .spacing(ROW_GAP)
             .align_items(Alignment::Center)
-            .push(ui::button_or(
-                theme,
-                ui::scoped(EDIT_KEY, "save"),
-                Key::AppSkinsModalSaveSkinButton,
-                ui::Kind::Colored,
-                // Unusable while nothing has been changed, which is the
-                // reference's `disableSave`: a save that writes the row back
-                // exactly as it was is a write a reader did not ask for.
-                (!wearing && has_edits(edit)).then_some(Message::Act(Act::Save)),
-            ))
             .push(Space::with_width(Length::Fill))
             .push(ui::button_text(
                 theme,
@@ -1663,6 +1658,18 @@ pub fn edit_view<'a>(
                 Key::AppSkinsDeleteButton,
                 ui::Kind::Danger,
                 (!wearing).then_some(Message::Act(Act::Forget)),
+            ))
+            .push(ui::button_with_icon(
+                theme,
+                ui::scoped(EDIT_KEY, "save"),
+                Glyph::Save,
+                Key::AppSkinsModalSaveSkinButton,
+                ui::Kind::Colored,
+                Length::Shrink,
+                // Unusable while nothing has been changed, which is the
+                // reference's `disableSave`: a save that writes the row back
+                // exactly as it was is a write a reader did not ask for.
+                (!wearing && has_edits(edit)).then_some(Message::Act(Act::Save)),
             )),
     );
     body.into()
@@ -2482,6 +2489,20 @@ mod tests {
             url: String::new(),
             alias: alias.to_string(),
         }
+    }
+
+    #[test]
+    fn the_editors_actions_are_three_controls_with_three_names() {
+        // The hover clock is keyed per control, so two buttons that shared a name
+        // would light together on one hover. The reference's own Save and Delete
+        // and this launcher's take-off each take a name of their own, and all
+        // three live under the editor's own namespace.
+        let names = ["save", "takeoff", "forget"];
+        let scoped: Vec<&str> = names.iter().map(|name| ui::scoped(EDIT_KEY, name)).collect();
+        let mut unique = scoped.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "got {scoped:?}");
     }
 
     #[test]
