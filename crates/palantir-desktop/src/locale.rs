@@ -46,6 +46,8 @@
 //! decision read from the other side.
 
 use std::cell::Cell;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use crate::locale_gen;
 use crate::text_gen::Key;
@@ -235,8 +237,89 @@ pub fn label(tag: &str) -> String {
     }
 }
 
-/// The plural category a count falls into, for a language.
+/// How much of the interface a language carries, as the reference's own language
+/// settings print it beside each name.
 ///
+/// `language-settings-coverage.generated.ts` is written by a generator that counts
+/// exactly what this counts -- a key the table carries is a key that language
+/// translates -- and `CheckCircleButton` rows show the number with
+/// `{percentage}% supported`. So the count is real rather than decorative: German
+/// falls back for 54 of the 3,846 keys, `ar-SA` for 2,269.
+///
+/// One walk per language, and once: the table is walked 33 times the first time a
+/// settings pane asks, which is 127 thousand binary searches and then no more.
+/// Recomputing it on every repaint would be a settings dialog that walks its whole
+/// corpus sixty times a second.
+pub fn coverage(tag: &str) -> Option<u32> {
+    static TABLE: std::sync::OnceLock<std::sync::Mutex<BTreeMap<&'static str, u32>>> =
+        std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()));
+    let mut table = table.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // The table is keyed by the tag *it* carries rather than by the one that was
+    // asked about, so the key is the reference's own `&'static str`.
+    let Some(locale) = locale_gen::ALL.iter().find(|locale| locale.tag == tag) else {
+        return None;
+    };
+    if let Some(found) = table.get(locale.tag) {
+        return Some(*found);
+    }
+    let total = crate::text_gen::ALL.len();
+    if total == 0 {
+        return None;
+    }
+    // English is `None` for every key by the fallback's own shape, so it is
+    // counted here rather than through the table: the language the interface
+    // ships in carries all of it.
+    let carried = crate::text_gen::ALL
+        .into_iter()
+        .filter(|key| locale.tag == ENGLISH || translated_in(locale, *key as usize).is_some())
+        .count();
+    let percent = ((carried * 100) / total) as u32;
+    table.insert(locale.tag, percent);
+    Some(percent)
+}
+
+/// The offered languages in the order the reference's own list draws them.
+///
+/// `language-settings-selector.vue` sorts what it builds --
+/// `result.sort((a, b) => (b.coverage?.percentage ?? -1) - (a.coverage?.percentage ?? -1))`
+/// -- so the pane reads most-covered first and the language in force is at the
+/// top of it, which is where the capture finds it. A language with no coverage
+/// sorts last, as `?? -1` says.
+///
+/// The sort is stable on both sides: `Array.prototype.sort` and [`slice::sort_by`]
+/// keep equal elements in the order they arrived, so languages that tie keep
+/// [`OFFERED`]'s order and two runs of this cannot disagree.
+pub fn offered_by_coverage() -> Vec<&'static str> {
+    // `?? -1` rather than a plain `Option` order, which would put a language the
+    // corpus cannot measure *first*: `None` is below every number here.
+    let mut offered: Vec<&'static str> = OFFERED.to_vec();
+    offered.sort_by(|a, b| match (coverage(a), coverage(b)) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    });
+    offered
+}
+
+/// A language's own name in itself, which the reference prints beside the name in
+/// the language in force when the two are not the same words.
+///
+/// The reference reads it as `loc.translatedName` -- a message per locale that is
+/// rendered in *that* locale, so German reads "Deutsch" while an English reader
+/// reads the same message as "German". It is the one string in the list that
+/// differs by definition between the two readings, which is why it is `None`
+/// rather than the same words twice.
+pub fn translated_label(tag: &str) -> Option<String> {
+    let key = label_key(tag)?;
+    let locale = locale_gen::ALL.iter().find(|locale| locale.tag == tag)?;
+    let in_itself = translated_in(locale, key as usize)?.to_string();
+    let in_force = label(tag);
+    (in_itself != in_force).then_some(in_itself)
+}
+
+/// The plural category a count falls into, for a language.///
 /// This is CLDR's cardinal rule for the languages in this corpus, and it is the
 /// runtime half of the table `tools/gen_locale.py` validates against -- that
 /// tool's `CLDR_CATEGORIES` is the other half, and a Rust test in this module
@@ -534,6 +617,33 @@ mod tests {
             .filter(|tag| !OFFERED.contains(tag))
             .collect();
         assert_eq!(extra, ["ar-SA"]);
+    }
+
+    #[test]
+    fn the_pane_s_order_is_most_covered_first_and_keeps_the_offer_s_order_within_a_tie() {
+        let offered = offered_by_coverage();
+        assert_eq!(offered.len(), OFFERED.len(), "every offered language is still offered");
+        assert_eq!(
+            offered[0], ENGLISH,
+            "the language the interface ships in carries every key, so it sorts first \
+             and the pane opens on it -- which is where the capture finds it"
+        );
+        // Descending by the same number the row prints, and nothing dropped: a
+        // sort that lost a language would be a list the search cannot find.
+        let percentages: Vec<u32> = offered.iter().filter_map(|tag| coverage(tag)).collect();
+        let mut descending = percentages.clone();
+        descending.sort_by(|a, b| b.cmp(a));
+        assert_eq!(percentages, descending);
+        assert!(offered.contains(&"he-IL"), "the RTL language is offered and sorted");
+        // `Array.prototype.sort` is stable, so two languages that measure the
+        // same keep the order `LOCALES` lists them in.
+        for pair in offered.windows(2) {
+            if coverage(pair[0]) == coverage(pair[1]) {
+                let first = OFFERED.iter().position(|tag| *tag == pair[0]);
+                let second = OFFERED.iter().position(|tag| *tag == pair[1]);
+                assert!(first < second, "{:?} and {:?} tie and are out of order", pair[0], pair[1]);
+            }
+        }
     }
 
     #[test]

@@ -1331,6 +1331,232 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
     }
 }
 
+/// A field at one row of [`InputSize`], which is `InputFrame.vue`'s own table.
+///
+/// A row is a height, a radius, a horizontal padding, a gap and a label size --
+/// the same shape as [`Size`], which is [`ButtonFrame.vue`'s] -- and the two are
+/// kept apart because they disagree: the frame's `lg` is 40 pixels with 16 of
+/// padding, the input's `medium` is 40 pixels with 12.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSize {
+    /// `h-8`: 32, `rounded-xl`, `px-3`, `gap-1.5`, a `text-sm` label.
+    Small,
+    /// `h-9`: 36, `rounded-xl`, `px-3`, `gap-2`, `text-base`. The reference's
+    /// own default -- `Input.vue` defaults its `size` prop to `'standard'`.
+    Standard,
+    /// `h-10`: 40, `rounded-[14px]`, `px-4`, `gap-2`.
+    Medium,
+    /// `h-12`: 48, `rounded-[14px]`, `px-4`, `gap-2`.
+    Large,
+}
+
+impl InputSize {
+    /// The row's height: `h-8` through `h-12`.
+    pub const fn height(self) -> f32 {
+        match self {
+            InputSize::Small => 32.0,
+            InputSize::Standard => 36.0,
+            InputSize::Medium => 40.0,
+            InputSize::Large => 48.0,
+        }
+    }
+
+    /// The row's radius: `rounded-xl` below 40 pixels and `rounded-[14px]` at it.
+    pub const fn radius(self) -> f32 {
+        match self {
+            InputSize::Small | InputSize::Standard => 12.0,
+            InputSize::Medium | InputSize::Large => 14.0,
+        }
+    }
+
+    /// The row's horizontal padding: `px-3` or `px-4`.
+    pub const fn pad(self) -> f32 {
+        match self {
+            InputSize::Small | InputSize::Standard => 12.0,
+            InputSize::Medium | InputSize::Large => 16.0,
+        }
+    }
+
+    /// The gap between a leading icon and the value: `gap-1.5` or `gap-2`.
+    pub const fn gap(self) -> f32 {
+        match self {
+            InputSize::Small => 6.0,
+            InputSize::Standard | InputSize::Medium | InputSize::Large => 8.0,
+        }
+    }
+
+    /// The size a label is set at: `text-sm` on the smallest row, `text-base`
+    /// above it.
+    pub const fn label(self) -> f32 {
+        match self {
+            InputSize::Small => 14.0,
+            InputSize::Standard | InputSize::Medium | InputSize::Large => 16.0,
+        }
+    }
+}
+
+/// An input at one row of [`InputSize`], which is `Input.vue`'s own field.
+///
+/// The frame is `InputFrame.vue`'s: a 1-pixel `border-surface-5` hairline over a
+/// `bg-surface-4` fill, the value in `font-medium text-primary` with its
+/// placeholder in `text-secondary`, and a leading icon at `size-5` (20 pixels) in
+/// the secondary ink at 60%. Those two surface tokens are the reference's and they
+/// are not the pair this module's [`framed`] draws (a `bg-surface-5` fill over a
+/// `border-surface-4` hairline), which is why this is its own builder rather than a
+/// size on that one: a field has to be one or the other.
+pub fn input_sized<'a, Message: Clone + 'a>(
+    theme: Gen,
+    size: InputSize,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    let field = text_input(placeholder, value)
+        .on_input(on_input)
+        .padding(Padding { top: 0.0, bottom: 0.0, left: 0.0, right: 0.0 })
+        .size(size.label())
+        .font(medium())
+        .style(iced::theme::TextInput::Custom(Box::new(Field { theme, chrome: Chrome::Bare })));
+    container(
+        row![]
+            .align_items(Alignment::Center)
+            .spacing(size.gap())
+            .push(icon::icon(Glyph::Search, 20.0, theme_gen::ink(theme, INK_SECONDARY)))
+            .push(field),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(size.height()))
+    .padding(Padding { top: 0.0, bottom: 0.0, left: size.pad(), right: size.pad() })
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        // `appearanceClass`: `border-surface-5 bg-surface-4`.
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: size.radius().into(),
+        },
+        ..container::Appearance::default()
+    })
+    .into()
+}
+
+/// One row of the reference's language list: `CheckCircleButton.vue`.
+///
+/// `ButtonFrame` at `lg` -- 40 pixels, `rounded-[14px]`, the label face of
+/// `font-semibold` -- with `interaction="none"` (so the frame's brightness filter
+/// is off) and the row's own overrides: `w-full`, `!gap-4`, `!px-2`, a 1-pixel
+/// border and `text-left`, and a check circle at the end. Chosen, the row is
+/// `!border-brand !bg-brand-highlight !text-contrast`; otherwise its border is
+/// transparent and `enabled:hover:!bg-surface-3` fades a surface in.
+///
+/// The circle is `size-6`: a `bg-brand` disc with a 16-pixel `CheckIcon` in
+/// `--color-accent-contrast` (which the Tailwind preset also calls
+/// `brand-inverted`), or an empty ring in `border-surface-5`.
+///
+/// Two things the reference draws here are recorded rather than invented: the
+/// 24x16 flag image in front of the name comes from `flagcdn.com`, and the names
+/// are `truncate`d rather than wrapped -- iced has no ellipsis.
+pub fn check_row<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    checked: bool,
+    name: &str,
+    translated: Option<&str>,
+    coverage: Option<&str>,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let (factor, _) = interaction(key);
+    // The row's hover is a colour rather than the frame's filter, so the clock's
+    // travel is read as a plate fading in instead of as a brightness.
+    let travel = crate::theme::hover_brightness() - 1.0;
+    let amount = if travel == 0.0 {
+        0.0
+    } else {
+        ((factor - 1.0) / travel).clamp(0.0, 1.0)
+    };
+    let (fill, edge) = if checked {
+        (
+            theme_gen::ink(theme, Ink::ColorBrandHighlight),
+            theme_gen::ink(theme, Ink::Brand),
+        )
+    } else {
+        (Color { a: amount, ..theme_gen::ink(theme, Ink::Surface3) }, Color::TRANSPARENT)
+    };
+    let contrast = theme_gen::ink(theme, INK_CONTRAST);
+    let secondary = theme_gen::ink(theme, INK_SECONDARY);
+    let mut names = row![].spacing(8.0).align_items(Alignment::Center);
+    names = names.push(
+        text(name.to_string())
+            .size(16.0)
+            .font(semibold())
+            .style(iced::theme::Text::Color(contrast)),
+    );
+    if let Some(translated) = translated {
+        // `text-xs sm:text-sm font-normal text-secondary`: the same line, one
+        // step smaller and in the tertiary ink.
+        names = names.push(
+            text(translated.to_string())
+                .size(14.0)
+                .font(crate::style::regular())
+                .style(iced::theme::Text::Color(secondary)),
+        );
+    }
+    names = names.push(Space::with_width(Length::Fill));
+    if let Some(coverage) = coverage {
+        names = names.push(
+            text(coverage.to_string())
+                .size(14.0)
+                .font(crate::style::regular())
+                .style(iced::theme::Text::Color(secondary)),
+        );
+    }
+    let circle = if checked {
+        container(icon::icon(Glyph::Check, 16.0, theme_gen::ink(theme, Ink::AccentContrast)))
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0))
+            .center_x()
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
+                border: Border { radius: 999.0.into(), ..Border::default() },
+                ..container::Appearance::default()
+            })
+    } else {
+        container(Space::new(Length::Fixed(24.0), Length::Fixed(24.0)))
+            .style(move |_theme: &Theme| container::Appearance {
+                border: Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: theme_gen::ink(theme, Ink::Surface5),
+                },
+                ..container::Appearance::default()
+            })
+    };
+    let face = container(
+        row![]
+            .spacing(16.0)
+            .align_items(Alignment::Center)
+            .push(names.width(Length::Fill))
+            .push(circle),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(40.0))
+    .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(fill)),
+        border: Border { color: edge, width: 1.0, radius: 14.0.into() },
+        ..container::Appearance::default()
+    });
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(on_press)
+        .into()
+}
+
 /// A quiet icon button, the square one the reference uses in a bar.
 ///
 /// `Message: Clone` because [`mouse_area`]'s press handler holds its message and
@@ -1698,6 +1924,75 @@ impl Severity {
             Severity::Critical => (Glyph::CircleAlert, theme_gen::ink(theme, Ink::Red)),
         }
     }
+
+    /// The severity's own box: the border its rule names and the fill under it.
+    ///
+    /// `Admonition.vue`'s `typeClasses`: `border-brand-orange bg-bg-orange` for a
+    /// warning, and the same pair in blue or red for the other two. The fill is
+    /// the ten-odd-percent brand token itself, which composites over whatever the
+    /// box sits on -- the capture's measured (76, 58, 43) is `--color-orange-bg`
+    /// over this modal's own raised surface.
+    fn surface(self, theme: Gen) -> (Color, Color) {
+        match self {
+            Severity::Info => (theme_gen::ink(theme, Ink::Blue), theme_gen::ink(theme, Ink::BlueBg)),
+            Severity::Warning => {
+                (theme_gen::ink(theme, Ink::Orange), theme_gen::ink(theme, Ink::OrangeBg))
+            }
+            Severity::Critical => {
+                (theme_gen::ink(theme, Ink::Red), theme_gen::ink(theme, Ink::RedBg))
+            }
+        }
+    }
+}
+
+/// An admonition with only a body, which is `Admonition.vue` with no header.
+///
+/// The reference's own box: `relative grid grid-cols-[1.5rem_minmax(0,1fr)_auto]
+/// gap-x-2 rounded-2xl border border-solid p-4` with the severity's pair of
+/// tokens, a 24-pixel `h-6 w-6` icon in the severity's colour beside the text, and
+/// the body in `font-normal text-contrast/85 leading-tight` -- 16 pixels on
+/// `leading-tight`'s own 20.
+///
+/// This is the shape the settings dialog's language warning takes: the reference
+/// passes that pane an `Admonition` with nothing but the slot in it, and the
+/// capture's own box measures 114 rows -- 16 of padding, four 20-pixel lines,
+/// 16 more, and the two border pixels.
+pub fn admonition_body<'a, Message: 'a>(theme: Gen, severity: Severity, body: &str) -> Element<'a, Message> {
+    let (glyph, ink) = severity.icon_and_ink(theme);
+    let (edge, fill) = severity.surface(theme);
+    container(
+        row![]
+            .spacing(8.0)
+            .align_items(Alignment::Start)
+            .push(icon::icon(glyph, 24.0, ink))
+            .push(
+                text(body.to_string())
+                    .size(16.0)
+                    // `leading-tight` is 1.25 of 16, and iced reads a bare number
+                    // as a multiple of the size (see [`NAV_LABEL_LINE`]).
+                    .line_height(iced::Pixels(20.0))
+                    .font(crate::style::regular())
+                    .style(iced::theme::Text::Color(crate::style::at_opacity(
+                        theme_gen::ink(theme, INK_CONTRAST),
+                        0.85,
+                    )))
+                    .width(Length::Fill),
+            ),
+    )
+    .width(Length::Fill)
+    // `p-4` inside a `border border-solid`, which in CSS is sixteen of padding
+    // with the border *outside* it -- seventeen rows before the text on every
+    // side. iced paints a container's border inside its bounds and does not
+    // spend a row on it, so the seventeen is the padding here: the box measures
+    // 114 rows, which is what the reference's own capture measures. See
+    // [`Shell::tabbed_dialog`] for the same border drawn the other way round.
+    .padding(Padding::from(17.0))
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(fill)),
+        border: Border { color: edge, width: 1.0, radius: 16.0.into() },
+        ..container::Appearance::default()
+    })
+    .into()
 }
 
 /// An admonition: `h-6 w-6` severity icon, a header, and a body.

@@ -704,6 +704,12 @@ pub struct Shell {
     /// dropped: a launcher that silently forgot which account was signed in is the
     /// failure that reporting it exists to prevent.
     accounts_warning: Option<String>,
+    /// What the language list's search field holds, which is the only thing about
+    /// that pane this shell remembers between repaints.
+    ///
+    /// The reference's own field is `Input` with a search icon over the list, and
+    /// the list it filters is the pane's whole body; a string is all a field is.
+    locale_query: String,
     /// Whether the accounts card's body is open. The reference's accordion is
     /// `open-by-default: false`, so the panel shows a header until it is pressed.
     accounts_open: bool,
@@ -1164,6 +1170,12 @@ pub enum Message {
     /// what both sides already name a language with. An unknown one resolves to
     /// English in [`crate::locale::set`] rather than being refused here.
     Locale(&'static str),
+    /// The language list's search field changed, by its own text.
+    ///
+    /// The reference's language pane searches its list as the reader types
+    /// (`language-settings-selector.vue`'s `Input` over a Fuse index), and this
+    /// is the text that decides which rows are drawn.
+    LocaleSearch(String),
     /// A control drawn by the shell itself published a pointer crossing.
     ///
     /// The rail has its own tween and its own message ([`Message::Hover`]); the
@@ -1427,6 +1439,7 @@ impl Shell {
             next_run_id: 0,
             accounts: None,
             accounts_warning: None,
+            locale_query: String::new(),
             accounts_open: false,
             accounts_note: None,
             checklist_open: true,
@@ -1923,6 +1936,10 @@ impl Shell {
             }
             Message::Locale(tag) => {
                 self.choose_locale(tag);
+                None
+            }
+            Message::LocaleSearch(query) => {
+                self.locale_query = query;
                 None
             }
             Message::InstallInto(instance) => {
@@ -5911,74 +5928,166 @@ impl Shell {
         self.themes_offered().iter().map(|option| option.label_key().message()).collect()
     }
 
-    /// A grid of chips: the labels broken into the rows this dialog has room for.
+    /// The languages Settings offers, as the reference's own language page draws
+    /// them.
     ///
-    /// `chip` builds one control from its position in `labels`, so a caller keeps
-    /// whatever a chip is *about* -- the tag it records -- while the breaking stays
-    /// here. It exists because of a defect: a row of buttons wider than the card,
-    /// drawn past its right edge, because iced has no `flex-wrap` and a `Row` does
-    /// not carry what does not fit onto the next line.
-    /// [`crate::ui::wrap_labels`] is the arithmetic and the test below is the claim;
-    /// `width` is the pane the chips are drawn in, which is the settings dialog's
-    /// own content width and not a dialog's body.
-    fn chip_grid<'a, F>(&self, width: f32, labels: &[impl AsRef<str>], chip: F) -> Element<'a, Message>
-    where
-        F: Fn(usize) -> Element<'a, Message>,
-    {
-        let mut grid = column![].width(Length::Fill).spacing(ROW_GAP);
-        for row_of in crate::ui::wrap_labels(labels, width, ROW_GAP) {
-            let mut chips = row![].width(Length::Fill).spacing(ROW_GAP);
-            for index in row_of {
-                chips = chips.push(chip(index));
-            }
-            grid = grid.push(chips);
-        }
-        grid.into()
-    }
-
-    /// The languages Settings offers, by the reference's own list.
+    /// `language-settings/index.vue` and its selector, in that order and in the
+    /// reference's own arithmetic: a `text-xl` heading, the language warning as an
+    /// `Admonition` with nothing but a body in it, the description under it, a
+    /// search field, and then the list -- a category heading over one
+    /// `CheckCircleButton` row per language.
     ///
-    /// Two readings of "the reference's own list" are in play and only one is
-    /// offered: [`crate::locale::OFFERED`] is its `LOCALES`, 32 codes, and
-    /// `ar-SA` -- which has a compiled table -- is not one of them, because the
-    /// reference comments it out as RTL. Each button is labelled with the
-    /// reference's own `locale.<tag>` name in the language in force, which is how
-    /// the app spells a language to somebody who does not read English.
-    ///
-    /// No search field: the reference's language *page* has a search box, a
-    /// category list and a site/app platform switch, and this is a section of a
-    /// modal, so what is here is the list of languages and nothing about its
-    /// chrome. That is named in the gate rather than implied.
-    ///
-    /// The row is as many languages as fit the dialog, which is a measurement and
-    /// not a count. A count was what this pane had -- four to a row -- and four is
-    /// wrong in both directions: German's names are longer than English's and a
-    /// row of four of them was drawn past the card's right edge, while a row of
-    /// one-word names left a third of the row empty.
+    /// Two readings are recorded rather than imitated. The rows search on a Fuse
+    /// index with a 0.4 threshold over a display name, a translated name and the
+    /// locale's own search terms, which is fuzzy matching; this is a
+    /// case-insensitive containment test over the same three strings, because fuzzy
+    /// matching is a scoring algorithm and a launcher should not carry one for a
+    /// list of 32. And the reference's Crowdin link inside the description is drawn
+    /// here as the words it names -- the markup is stripped, the way the
+    /// checklist's own link is -- because the sentence's only press in the
+    /// reference opens a translator in a browser, which is not this launcher's.
     fn language_options(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let current = crate::locale::tag();
-        let labels = Shell::language_labels();
-        let width = self.settings_content_width();
-        self.chip_grid(width, &labels, |index| {
-            // Destructured to `&'static str` rather than left as `&&str`: the
-            // message carries a tag by value and a label is a `&str`.
-            let tag = crate::locale::OFFERED[index];
-            let key = crate::ui::scoped("settings:locale", tag);
-            let kind = if tag == current {
-                crate::ui::Kind::Colored
-            } else {
-                crate::ui::Kind::Standard
-            };
-            crate::ui::button_text(theme, key, &labels[index], kind, Message::Locale(tag))
-        })
+        let platform = Key::SettingsLanguagePlatformApp.message();
+        let warning = crate::text_gen::settings_language_warning(platform);
+        let description = crate::text_gen::settings_language_description(platform);
+        let plain = match crate::text::tagged(&description, "crowdin-link") {
+            Some((before, slot, after)) => format!("{before}{slot}{after}"),
+            None => description.to_string(),
+        };
+        let query = self.locale_query.trim().to_lowercase();
+        let matches = self.language_matches(&query);
+        let mut pane = column![]
+            .width(Length::Fill)
+            // `<h2 class="m-0 text-xl font-semibold text-contrast">`: 20 pixels on
+            // that class's own 28-pixel line.
+            .push(
+                text(Key::SettingsLanguageTitle.message())
+                    .size(20.0)
+                    // `text-xl`'s own line, 1.75rem, on a 20-pixel heading.
+                    .line_height(iced::Pixels(28.0))
+                    .font(heading())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            // `class="mb-4 mt-2"` on the admonition: eight above, sixteen under.
+            .push(Space::new(Length::Fill, Length::Fixed(8.0)))
+            .push(crate::ui::admonition_body(theme, crate::ui::Severity::Warning, &warning))
+            .push(Space::new(Length::Fill, Length::Fixed(16.0)))
+            // `<p class="m-0 mb-4 text-secondary">`, which inherits the body line.
+            .push(
+                text(plain)
+                    .size(16.0)
+                    .line_height(iced::Pixels(THEME_BODY_LINE))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            )
+            .push(Space::new(Length::Fill, Length::Fixed(16.0)))
+            .push(crate::ui::input_sized(
+                theme,
+                crate::ui::InputSize::Standard,
+                &Key::SettingsLanguageLanguagesSearchFieldPlaceholder.message(),
+                &self.locale_query,
+                Message::LocaleSearch,
+            ));
+        // The list itself, `flex flex-col gap-1`: the heading, and then either the
+        // no-results box or one row per language, four pixels between every pair
+        // of its children. The heading is a child whatever the list holds -- the
+        // reference's template puts it above the `v-if` -- so a search that
+        // matches nothing still says which category matched nothing.
+        //
+        // `<strong class="pt-3 pb-1 font-semibold text-contrast">`: twelve above,
+        // four under, and the category's own name.
+        let category = if query.is_empty() {
+            Key::SettingsLanguageCategoriesDefault
+        } else {
+            Key::SettingsLanguageCategoriesSearchResult
+        };
+        pane = pane.push(
+            container(
+                text(category.message())
+                    .size(16.0)
+                    .line_height(iced::Pixels(THEME_BODY_LINE))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
+            )
+            .width(Length::Fill)
+            .padding(Padding { top: 12.0, bottom: 4.0, left: 0.0, right: 0.0 }),
+        );
+        if matches.is_empty() {
+            // `<div class="p-4 text-secondary">No languages match your search.</div>`
+            pane = pane
+                .push(Space::new(Length::Fill, Length::Fixed(4.0)))
+                .push(
+                    container(
+                        text(Key::SettingsLanguageLanguagesSearchNoResults.message().to_string())
+                            .size(16.0)
+                            .line_height(iced::Pixels(THEME_BODY_LINE))
+                            .font(medium())
+                            .style(iced::theme::Text::Color(theme_gen::ink(
+                                theme,
+                                INK_SECONDARY,
+                            ))),
+                    )
+                    .padding(Padding::from(16.0)),
+                );
+        } else {
+            // The first row's plate lands on 467 with this four spent and on 463
+            // without it: `gap-1` is between the heading and the first row too.
+            let current = crate::locale::tag();
+            for &tag in matches.iter() {
+                pane = pane.push(Space::new(Length::Fill, Length::Fixed(4.0)));
+                let name = crate::locale::label(tag);
+                let translated = crate::locale::translated_label(tag);
+                let coverage = crate::locale::coverage(tag).map(|percent| format!("{percent}%"));
+                pane = pane.push(crate::ui::check_row(
+                    theme,
+                    crate::ui::scoped("settings:locale", tag),
+                    tag == current,
+                    &name,
+                    translated.as_deref(),
+                    coverage.as_deref(),
+                    Message::Locale(tag),
+                ));
+            }
+        }
+        pane.into()
+    }
+
+    /// The languages the search field leaves standing, in the reference's order.
+    ///
+    /// The order is [`crate::locale::offered_by_coverage`]'s rather than
+    /// [`crate::locale::OFFERED`]'s: the reference's selector sorts what it
+    /// builds by coverage before it draws any of it, so the pane opens on the
+    /// language the interface ships in and every language under it is one the
+    /// interface mostly speaks.
+    ///
+    /// An empty query is every language: the reference's selector draws the whole
+    /// list until the field says otherwise, and its `Fuse` index is only built
+    /// once there is a query to run against it.
+    fn language_matches(&self, query: &str) -> Vec<&'static str> {
+        crate::locale::offered_by_coverage()
+            .into_iter()
+            .filter(|tag| {
+                if query.is_empty() {
+                    return true;
+                }
+                crate::locale::label(tag).to_lowercase().contains(query)
+                    || crate::locale::translated_label(tag)
+                        .is_some_and(|translated| translated.to_lowercase().contains(query))
+                    || tag.to_lowercase().contains(query)
+            })
+            .collect()
     }
 
     /// The languages this pane offers, named the reference's way.
     ///
-    /// A list of labels rather than a row of controls, so that the grid can be
-    /// broken -- and read back by the test below -- before anything is built from
-    /// it. The order is [`crate::locale::OFFERED`]'s, which is the reference's.
+    /// A list of labels rather than a row of controls, so that the gate below can
+    /// measure every language's own name against the room a row has for it. The
+    /// order is [`crate::locale::OFFERED`]'s, which is the reference's.
+    #[cfg(test)]
     fn language_labels() -> Vec<String> {
         crate::locale::OFFERED.iter().map(|&tag| crate::locale::label(tag)).collect()
     }
@@ -6174,42 +6283,24 @@ impl Shell {
         match self.settings_tab {
             SettingsTab::Appearance => self.appearance_settings(),
             SettingsTab::Language => {
-                let mut body = column![]
-                    .spacing(12.0)
-                    .push(
-                        text(Key::SettingsLanguageTitle.message())
-                            .size(20.0)
-                            .font(heading())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                    )
-                    // The reference's own sentence about falling back, with the
-                    // platform it names filled in from its own word for the app. It
-                    // is the right warning here for a reason worth writing down: this
-                    // launcher now ships every locale the reference has, and a
-                    // language is still *partly* translated -- `ar-SA` carries 1,577
-                    // of 3,846 keys -- so the sentence is about this launcher's
-                    // behaviour, not a leftover.
-                    .push(
-                        text(crate::text_gen::settings_language_warning(
-                            Key::SettingsLanguagePlatformApp.message(),
-                        ))
-                        .size(14.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-                    )
-                    .push(self.language_options());
+                let mut body = self.language_options();
                 if let Some(warning) = &self.accounts_warning {
                     // A warning rather than a failure: the launcher works, and what
                     // the reader needs to know is that it does not know which account
-                    // was signed in.
-                    body = body.push(crate::ui::admonition(
-                        theme,
-                        crate::ui::Severity::Warning,
-                        "accounts",
-                        warning,
-                    ));
+                    // was signed in. It is under the list because the reference's
+                    // pane has no such box and this one is the launcher's own.
+                    body = column![]
+                        .width(Length::Fill)
+                        .push(body)
+                        .push(crate::ui::admonition(
+                            theme,
+                            crate::ui::Severity::Warning,
+                            "accounts",
+                            warning,
+                        ))
+                        .into();
                 }
-                body.into()
+                body
             }
         }
     }
@@ -9517,46 +9608,58 @@ mod tests {
     }
 
     #[test]
-    fn every_settings_grid_breaks_inside_the_dialog_in_every_language() {
-        // The screenshot this gate is named after: the language list drawn past
-        // the card's right edge, `Finnish` clipped at it and `Russian` outside the
-        // frame, with two chips wrapping their own text because their row had given
-        // them the last of its room. iced has no `flex-wrap`, so the break is this
-        // launcher's -- and it is measured, in the language the pane is being read
-        // in *and* in each of the 32 it can be read in, because a label is the
-        // reference's word for a language and German's are longer than English's.
+    fn every_language_row_fits_its_own_room_in_every_language() {
+        // The language pane is a column of rows now rather than a grid of chips, so
+        // there is no row to break and nothing to wrap: `CheckCircleButton` gives
+        // each language a full-width 40-pixel row, and its name, its own name in
+        // itself and its coverage share the room in front of the check circle. What
+        // the reference does with more text than that is `truncate`, and this
+        // renderer has no ellipsis, so the margin is measured instead -- over every
+        // language in every one of the 32 it can be read in, because a name is the
+        // reference's word for a language and Arabic's are longer than English's.
         let shell = shell_at("/");
-        // The worst row the walk below finds, which is what the line at the end
-        // reports: a gate that is only a verdict says nothing about how much room
-        // is left, and the next session's question is the margin rather than the
-        // pass.
+        // A row's own room: the pane's width less the row's 1-pixel border on each
+        // side, its `!px-2` padding, the `!gap-4` before the circle and the circle
+        // itself (`size-6`).
+        let room = shell.settings_content_width() - 2.0 - 16.0 - 16.0 - 24.0;
+        // The worst row the walk below finds, which is what the lines at the end
+        // report: a gate that is only a verdict says nothing about how much room is
+        // left, and the next session's question is the margin rather than the pass.
         let mut widest = 0.0f32;
         let mut widest_at = crate::locale::ENGLISH;
-        let mut most_rows = 0usize;
         // The worst a theme card's name overflows its own room, over the same walk.
         let mut theme_overflow = 0.0f32;
         let mut theme_overflow_at = crate::locale::ENGLISH;
+        // English, read in English: the claim the capture makes, and the one that
+        // has to hold before the margins beside it mean anything.
+        let mut english_widest = 0.0f32;
         for &tag in crate::locale::OFFERED.iter() {
             crate::locale::set(tag);
-            let grids: [(&str, Vec<String>); 1] = [("language", Shell::language_labels())];
-            for (grid, labels) in grids {
-                assert!(!labels.is_empty(), "the {grid} grid offers nothing in {tag}");
-                let rows = crate::ui::wrap_labels(&labels, DIALOG_INNER, ROW_GAP);
-                let offered: usize = rows.iter().map(|row| row.len()).sum();
-                assert_eq!(offered, labels.len(), "every {grid} is offered once in {tag}");
-                for row in &rows {
-                    let row_labels: Vec<&str> = row.iter().map(|&index| labels[index].as_str()).collect();
-                    let width = crate::ui::row_width(&row_labels, ROW_GAP);
-                    assert!(
-                        width <= DIALOG_INNER,
-                        "{grid} row {row_labels:?} measures {width} in {tag}, which does not fit {DIALOG_INNER}"
-                    );
-                    if width > widest {
-                        widest = width;
-                        widest_at = tag;
-                    }
+            for &offered in crate::locale::OFFERED.iter() {
+                // The row's three texts in the reference's own sizes and faces: the
+                // name at `text-sm sm:text-base` in the row's `font-semibold`, the
+                // translated name and the coverage at `text-xs sm:text-sm` in
+                // `font-normal`, with `gap-2` between them.
+                let mut runs: Vec<(String, f32, iced::Font)> =
+                    vec![(crate::locale::label(offered), 16.0, semibold())];
+                if let Some(translated) = crate::locale::translated_label(offered) {
+                    runs.push((translated, 14.0, crate::style::regular()));
                 }
-                most_rows = most_rows.max(rows.len());
+                if let Some(coverage) = crate::locale::coverage(offered) {
+                    runs.push((format!("{coverage}%"), 14.0, crate::style::regular()));
+                }
+                let width = runs
+                    .iter()
+                    .map(|(run, size, font)| crate::ui::advance(run, *font, *size))
+                    .sum::<f32>()
+                    + (runs.len() as f32 - 1.0) * 8.0;
+                if tag == crate::locale::ENGLISH {
+                    english_widest = english_widest.max(width);
+                }
+                if width > widest {
+                    widest = width;
+                    widest_at = tag;
+                }
             }
             // The theme cards do not wrap: each is a fixed column with one name in
             // it, so what is measured is a name inside the label's own room -- the
@@ -9583,11 +9686,15 @@ mod tests {
                 }
             }
         }
+        assert!(
+            english_widest <= room,
+            "the widest language row in English measures {english_widest:.1} against {room:.0}"
+        );
         // Printed rather than asserted: a run asked for its output says what the
-        // grid came to in the worst of the 32 languages, which is the number the
+        // pane came to in the worst of the 32 languages, which is the number the
         // margin is read from.
         eprintln!(
-            "settings grids: at most {most_rows} row(s); widest row {widest:.1} of {DIALOG_INNER} px ({widest_at})"
+            "language rows: widest {widest:.1} of {room:.0} px ({widest_at}), English {english_widest:.1}"
         );
         eprintln!(
             "theme cards: widest name overflow {theme_overflow:.1} px over {:.0} ({theme_overflow_at})",
@@ -9599,13 +9706,12 @@ mod tests {
 
     #[test]
     fn a_language_grid_taller_than_the_window_scrolls_rather_than_drawing_past_it() {
-        // The vertical half of the same defect, and it is this fix's own making: a
-        // dialog is drawn centred, so one taller than its window loses its head at
-        // the top and its last rows at the bottom with no scroll to reach either.
-        // The wrapped grid is taller than the counted one everywhere and in
-        // Indonesian it is thirteen rows against English's nine. The shell keeps
-        // the window's own size and caps a dialog's body with it; these are the two
-        // ends of that cap, in the numbers the grid actually comes to.
+        // The vertical half of the same defect: a dialog is drawn centred, so one
+        // taller than its window loses its head at the top and its last rows at the
+        // bottom with no scroll to reach either. The language pane is a column of
+        // 40-pixel rows now -- 32 of them is nearly 1,400 pixels, which is more than
+        // this window has twice over -- and the shell keeps the window's own size
+        // and caps a dialog's body with it; these are the two ends of that cap.
         let mut shell = shell_at("/");
         assert_eq!(
             shell.viewport, DIALOG_VIEWPORT,

@@ -1737,6 +1737,69 @@ ring, its four soft drop shadows (this backend's blurred-rectangle cost is the n
 and `colored-text` type's `inset 0 0 0 1px var(--surface-5)` *is* drawn -- as the
 1-pixel border it is.
 
+### The language pane, which was a grid of chips
+
+The Language tab is the settings dialog's second ported pane, and its first one was
+drawn from the wrong component. It was a grid of language chips, wrapped into
+rows by `wrap_labels`, because the pane that was read (`LanguageSettings.vue`, a
+two-line wrapper) says nothing about how the list is drawn. The list is
+`language-settings-selector.vue`, and what it draws is the reference's own page: a
+`text-xl` heading, the fallback warning as an `Admonition` with nothing but a body
+in it, the description under it with a link inside it, a search field, and then one
+`CheckCircleButton` row per language -- full width, 40 pixels, a 1-pixel border
+that is `--color-brand` and a `--color-brand-highlight` fill when that language is
+the one in force, the name at 16 pixels in the row's `font-semibold`, its own name
+in itself beside it at 14, and a coverage percentage at 14, all in front of a
+24-pixel check circle.
+
+The reference's own capture measures it: the warning's box is 114 rows (16 of
+padding, four 20-pixel `leading-tight` lines, 16 more, two border pixels) over a
+`--color-orange-bg` fill on a `--color-orange` border; the search field is 36
+pixels -- `InputFrame`'s own `standard` row, `h-9 rounded-xl px-3` over a
+`bg-surface-4` fill and a `border-surface-5` hairline; the category heading is
+`pt-3 pb-1` over its 16-pixel `font-semibold` name; and the first row's plate
+lands on rows 467..506 with the next two at 511..551 and 555..595, which is the
+40-pixel row and `gap-1` exactly. Our chips were a 40-pixel row with a 14-pixel
+label and no circle, in a grid the reference does not draw at all.
+
+The 114 is `p-4` *inside* a `border border-solid`, which is seventeen rows before
+the text on every side rather than sixteen: a browser puts the border outside the
+padding, and iced paints a container's border inside its bounds without spending
+a row on it, so the seventeen is the padding here. Two rows is the whole distance
+between the warning landing on 211..322 and the field landing on 393..428, and
+every row under it.
+
+The list is the reference's order and not the offered list's. The selector sorts
+what it builds -- `result.sort((a, b) => (b.coverage?.percentage ?? -1) -
+(a.coverage?.percentage ?? -1))` -- so the pane opens on the language the
+interface ships in, which carries every key and is therefore the first row, and
+the capture finds its plate, its check circle and the word *English* in the first
+row rather than somewhere below the fold. `crate::locale::offered_by_coverage` is
+that comparison, stable on ties the way `Array.prototype.sort` is, and
+`OFFERED` itself is untouched: it is still `LOCALES`' own order, which is what the
+rows fall back to.
+
+Three things are drawn differently and say so here rather than in the drawing. The
+rows search on a Fuse index at a 0.4 threshold over a display name, a translated
+name and the locale's own search terms, which is fuzzy matching; this is
+case-insensitive containment over the same three strings, because fuzzy matching is
+a scoring algorithm and a list of 32 does not need one. The Crowdin link inside the
+description is drawn as the words it names rather than as a link, the markup
+stripped -- the way the checklist's own link is -- because the reference's press
+there opens a translator in a browser. And the 24x16 flag in front of each name
+comes from `flagcdn.com`, which this launcher's settings pane does not fetch.
+That is 33 pixels and every row shows it: the reference's names start at x=555
+inside a row that begins at 513, and this one's start at 522 -- the row's own
+eight of `!px-2` and one of border, with the flag's 24 and `gap-2`'s 8 not
+drawn. Everything else in the row is the reference's own: the coverage percentage
+at x=996..1028 against this one's 997..1029, and the check circle at the row's
+right edge in both.
+
+The coverage percentage is a real count rather than a decoration: it is how many of
+the 3,846 keys the language's own table carries, which is what the reference's
+generated coverage file is a generator writing, and the first port of the pane had
+the data and did not draw it.
+
 ### The line height that was read backwards
 
 The first port of this dialog came out with no title, a 204-pixel category heading and
