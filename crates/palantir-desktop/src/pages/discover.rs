@@ -6,11 +6,16 @@
 //!    labelled with its category messages;
 //! 2. the search field, whose placeholder is `browse.search.placeholder` --
 //!    *"Search {projectType}..."* -- with the tab's own name in it;
-//! 3. the controls row: `label.sort-by` with the five orders `useSearch` declares,
-//!    and `browse.view-prefix` with the view sizes `[5, 10, 15, 20, 50, 100]`, of
-//!    which 20 is the reference's default;
-//! 4. the results, or the sentence for having none: *"No results found for your
-//!    query!"*.
+//! 3. the two controls of `browse-tab/layout.vue`'s own row, each with its
+//!    prefix: `label.sort-by` with the five orders `useSearch` declares, and
+//!    `browse.view-prefix` with the view sizes `[5, 10, 15, 20, 50, 100]`, of
+//!    which 20 is the reference's default. Nothing else is in that row on the
+//!    desktop: the *Filter results...* button is inside a `lg:hidden` div and
+//!    the row's right end is `Pagination`, which needs a page count this page
+//!    does not have;
+//! 4. the results; while the first answer is on the way, the three loading
+//!    blocks of `base/LoadingIndicator.vue`; and, with none, the sentence
+//!    *"No results found for your query!"*.
 //!
 //! The five names in the sort control are *not* in the locale: `ui/src/utils/search.ts`
 //! writes them as literals (`{ display: 'Relevance', name: 'relevance' }`, and so
@@ -45,7 +50,7 @@ use std::collections::HashMap;
 
 use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Background, Border, Element, Font, Length, Padding};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
@@ -58,9 +63,11 @@ use crate::pages::Ask;
 use crate::route::ProjectType;
 use crate::scroll::{self, Geometry};
 use crate::store::Store;
-use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{
+    at_opacity, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY,
+};
 use crate::text_gen::{self, Key};
-use crate::theme_gen::{self, Theme as Gen};
+use crate::theme_gen::{self, Ink, Theme as Gen};
 // `Hovered` is in scope for the result cards below: a card names its own crossing
 // rather than going through one of the kit's controls.
 use crate::ui::{self, text, Hovered};
@@ -140,9 +147,6 @@ const TAB_KEYS: [&str; 6] = [
     "discover:tab:shader",
     "discover:tab:server",
 ];
-
-/// The sorting control's own name, and the one its results are filtered by.
-const FILTER_KEY: &str = "discover:filter";
 
 /// The five orders the search can be asked in.
 ///
@@ -583,39 +587,99 @@ fn tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     })
 }
 
-/// The controls row: the order, the view size, and the filter button.
+/// The controls row: the order and the view size, and nothing else.
+///
+/// `browse-tab/layout.vue`'s own row (`flex flex-wrap items-center gap-2`)
+/// holds exactly the two Comboboxes on the desktop -- `!w-[16rem]` (256) for
+/// the sort and `!w-[9rem]` (144) for the view size -- each with its prefix
+/// (`commonMessages.sortByLabel` and `browse.view-prefix`). The row here carried
+/// two more things than the reference has: a *Filter results...* button, which
+/// is inside the reference's `lg:hidden` div (it is the narrow layout's), and a
+/// "*Modpacks* · relevance" caption, which is nobody's. Both are gone, and what
+/// is left is the reference's own pair.
 fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
         .push(ui::select(theme, Key::LabelSortBy, state.sort.label(), 256.0))
         .push(ui::select(theme, Key::BrowseViewPrefix, &state.view_label(), 144.0))
-        .push(ui::button(
-            theme,
-            FILTER_KEY,
-            Key::BrowseFilterResults,
-            ui::Kind::Standard,
-            Message::Search,
-        ))
-        .push(Space::with_width(Length::Fill))
-        .push(
-            text(format!("{} · {}", state.project_type.label(), state.sort.token()))
-                .size(13.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        )
         .into()
 }
 
-/// The results, or the sentence for having none of them.
+/// The results, the blocks for an answer still on the way, or the sentence for
+/// having none of them.
+///
+/// The empty arm is the reference's own sentence. The waiting one is its own
+/// blocks rather than [`crate::page::draw`]'s *Loading results…*, because
+/// `browse-tab/layout.vue` draws `LoadingIndicator` for that state and this is
+/// the page that owns the shape -- `crate::page`'s sentence stays the scaffold
+/// for the pages that have none of their own.
 fn results<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     match &state.results {
         Load::Ready(hits) if hits.is_empty() => page::empty(theme, Key::BrowseNoResults),
         Load::Ready(hits) => cards(theme, state, hits),
-        // The empty arm is the reference's own sentence; the other two are the
-        // scaffold's.
-        other => page::draw(theme, other, "results", |hits| cards(theme, state, hits)),
+        Load::Empty => page::empty(theme, Key::BrowseNoResults),
+        Load::Failed(reason) => page::failed(theme, reason),
+        Load::Idle | Load::Loading => loading(theme),
     }
+}
+
+/// `h-16` on each block of the reference's loading indicator, in pixels.
+const LOADING_BLOCK: f32 = 64.0;
+/// `opacity-25` on each of them.
+const LOADING_BLOCK_OPACITY: f32 = 0.25;
+
+/// What the page shows while its first answer is on the way:
+/// `base/LoadingIndicator.vue`'s own three blocks under its label.
+///
+/// The component is `w-full flex items-center justify-center flex-col gap-2`
+/// around a `font-bold text-contrast` *Loading* and three placeholders: `h-16`
+/// (64px) each, `rounded-lg` (16px), `opacity-25`, in `--color-raised-bg`. The
+/// label's dots are the component's own animation resting at `'...'` (its
+/// `::after` keyframes start and end there), so *Loading...* is the frame a
+/// still capture shows and the frame drawn here. The reference positions the
+/// label *over* the blocks (`position: absolute`); this toolkit has no stacking
+/// widget, so the label is drawn above them instead -- the one visible
+/// departure, and the one worth spending a stack on when a stack exists.
+fn loading<'a>(theme: Gen) -> Element<'a, Message> {
+    // The label is the reference's own literal rather than a locale key: its
+    // template writes `Loading` and the dots are CSS.
+    let label = text("Loading...".to_string())
+        .size(16.0)
+        // `font-bold` is weight 700, which is `Weight::Bold`; the kit's
+        // `semibold` is 600.
+        .font(Font { weight: iced::font::Weight::Bold, ..semibold() })
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+    column![
+        label,
+        loading_block(theme),
+        loading_block(theme),
+        loading_block(theme)
+    ]
+    .spacing(ROW_GAP)
+    .align_items(Alignment::Center)
+    .width(Length::Fill)
+    .into()
+}
+
+/// One of [`loading`]'s three blocks: `h-16 rounded-lg opacity-25` in
+/// `--color-raised-bg`.
+fn loading_block<'a>(theme: Gen) -> Element<'a, Message> {
+    container(Space::new(Length::Fill, Length::Fixed(LOADING_BLOCK)))
+        .width(Length::Fill)
+        .style(move |_theme: &iced::Theme| container::Appearance {
+            background: Some(Background::Color(at_opacity(
+                theme_gen::ink(theme, Ink::RaisedBg),
+                LOADING_BLOCK_OPACITY,
+            ))),
+            border: Border {
+                // `rounded-lg`, the reference's 16 (`Span::RadiusLg`).
+                radius: theme_gen::span(theme_gen::Span::RadiusLg).into(),
+                ..Border::default()
+            },
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// The result cards: the ones the region reports are on screen, the rest as
@@ -693,15 +757,29 @@ fn space<'a>(count: usize, row_height: f32) -> Element<'a, Message> {
 ///
 /// The card's own two gaps. The padding is [`ui::card_at`]'s (`p-4`, the same 16).
 const CARD_COLUMN_GAP: f32 = 12.0;
-/// `gap-y-2`, between the icon's row and the row of tags under it.
+/// `gap-y-2` between the card's grid rows: the info column's own spacing
+/// between the title row, the summary and the tag row.
 const CARD_ROW_GAP: f32 = 8.0;
 
-/// One card's height, from `ProjectCard.vue`'s list layout: the icon column
-/// ([`avatar::ICON_SIDE`], 100), the `gap-y-2` under it, the tag row
-/// ([`ui::TAG_HEIGHT`], 24) and the card's own `p-4` ([`ui::CARD_PAD`], 16 on
-/// each side).
-pub const CARD_HEIGHT: f32 =
-    avatar::ICON_SIDE as f32 + CARD_ROW_GAP + ui::TAG_HEIGHT + ui::CARD_PAD * 2.0;
+/// One card, as the reference's list layout draws it: 142 pixels of box.
+///
+/// Quoted from `ProjectCard.vue` and measured on the reference's own window
+/// (1280x720, 2026-10-02): the card is `p-4 grid grid-project-card-list gap-x-3
+/// gap-y-2` with a `size="100px"` avatar and a `text-sm`/`py-1` tag pill, and
+/// the *drawn* height is 142 -- the interior's 110 plus two 16-pixel paddings
+/// -- with the cards at y=231, 385, 539 and 693: a 154-pixel pitch, which is
+/// 142 plus the `gap-3` between two of them.
+///
+/// The 110-pixel interior is not a sum of the parts, and that is the point: the
+/// grid gives the icon area all three of its rows, so the tag row is drawn
+/// *inside* the icon's 100 pixels rather than under them. The card here used to
+/// be `100 + 8 + 24 + 32` -- every part in a column of its own -- which is 22
+/// pixels taller than the reference draws.
+pub const CARD_HEIGHT: f32 = 142.0;
+
+/// The card's inside: what [`CARD_HEIGHT`] leaves under its two `p-4` paddings
+/// ([`ui::CARD_PAD`], 16 each).
+const CARD_INNER: f32 = CARD_HEIGHT - ui::CARD_PAD * 2.0;
 
 /// One row of the results: a card plus the `gap-3` that separates it from the
 /// card under it ([`GAP`]).
@@ -709,7 +787,7 @@ pub const CARD_HEIGHT: f32 =
 /// This is the number the window is cut into ([`scroll::window`]), so it is the
 /// number the slots are ([`slot`]) and the spacers ([`space`]): a row that was
 /// laid out at its content's height would put the rows under it at offsets the
-/// window did not compute.
+/// window did not compute. Measured from the reference's own cards: 154.
 pub const CARD_ROW: f32 = CARD_HEIGHT + GAP;
 
 /// Where the results start inside the page's scroll content, in pixels.
@@ -740,9 +818,13 @@ const LIST_TOP: f32 = 181.0;
 /// grid-template-columns: auto 1fr auto auto;
 /// ```
 ///
-/// iced has no grid, so the same placement is two rows: the icon, the info column
-/// and the stats in one, and the tags indented by the icon's own column in the
-/// next, which is where the grid's third row puts them.
+/// iced has no grid, so the same placement is one row of three columns: the
+/// icon, the info column and the stats. The tags are the info column's last
+/// child, pinned to the bottom of a fixed interior: the icon's area spans all
+/// three of the grid's rows, so the tags are drawn *inside* the icon's own
+/// vertical span -- which is why the card is shorter than the icon stack plus a
+/// tag row, and why [`CARD_HEIGHT`] is a measurement of the drawn card rather
+/// than a sum of its parts.
 pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a, Message> {
     // A card's identity is the project it names, so its key is derived from that
     // rather than from its position in the list: reordering the results must not
@@ -778,17 +860,11 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
     // `project-card-summary m-0 font-normal`: the reference's root 16, normal
     // weight, the default ink, and clamped to two lines in CSS. The clamp is not
     // drawn: iced wraps a paragraph and has no line limit, so a very long summary
-    // makes a taller card than the reference's.
+    // runs past the card's measured interior rather than being cut at two lines.
     let summary = text(hit.summary.clone())
         .size(16.0)
         .font(regular())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)));
-    let info = column![]
-        .spacing(ROW_GAP)
-        .width(Length::Fill)
-        .push(row![title, author].spacing(ROW_GAP).align_items(Alignment::Center))
-        .push(summary);
-
     // `ProjectCardStats`: the two counts side by side, twelve pixels apart
     // (`gap-3`), right-aligned because the grid's stats column is `items-end`.
     let stats = row![stat(theme, Glyph::Download, hit.downloads), stat(theme, Glyph::Heart, hit.follows)]
@@ -808,25 +884,30 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         tags = tags.push(ui::tag(theme, version));
     }
 
-    let placed = column![]
+    // The info column with the tags at its bottom: the `Fill` between the
+    // summary and the tags is what puts them against the card's own bottom edge
+    // whatever the summary's line count, which is where the reference's grid
+    // draws them (its icon area spans all three of the grid's rows).
+    let info = column![]
         .spacing(CARD_ROW_GAP)
-        .push(
-            row![
-                ui::icon_box(theme, avatar::ICON_SIDE as f32, picture),
-                info,
-                stats
-            ]
-            .spacing(CARD_COLUMN_GAP)
-            // `Start` vertically, which is the grid's own top alignment: the icon's
-            // box and the stats sit against the first line of the info column.
-            .align_items(Alignment::Start),
-        )
-        .push(
-            // The indent is the icon's own width, and the row's gap is what follows
-            // it: 100 + 12, which is the 112 pixels the grid's second column starts
-            // at.
-            row![Space::with_width(avatar::ICON_SIDE as f32), tags].spacing(CARD_COLUMN_GAP),
-        );
+        .width(Length::Fill)
+        .height(Length::Fixed(CARD_INNER))
+        .push(row![title, author].spacing(ROW_GAP).align_items(Alignment::Center))
+        .push(summary)
+        .push(Space::with_height(Length::Fill))
+        .push(tags);
+
+    // The grid in one iced row: its three columns are the icon, the info column
+    // and the stats. `Start` vertically, which is the grid's own top alignment:
+    // the icon's box and the stats sit against the first line of the info
+    // column.
+    let placed = row![
+        ui::icon_box(theme, avatar::ICON_SIDE as f32, picture),
+        info,
+        stats
+    ]
+    .spacing(CARD_COLUMN_GAP)
+    .align_items(Alignment::Start);
 
     mouse_area(ui::card_at(theme, factor, placed))
         .interaction(Interaction::Pointer)
@@ -1150,14 +1231,37 @@ mod tests {
     #[test]
     fn a_card_is_exactly_one_row_of_the_window() {
         // The window's arithmetic is only as good as the row it is handed: a
-        // card is the icon column and the gaps around it, and a row is that plus
-        // the `gap-3` between two cards. The capture the head was measured on
-        // (1280x720, 2026-10-02) has cards at y=230, 406 and 582 -- a pitch of
-        // 176 -- and the first of them at 181 into the region.
-        assert_eq!(CARD_HEIGHT, 100.0 + 8.0 + 24.0 + 32.0);
-        assert_eq!(CARD_ROW, 176.0);
+        // card is the reference's own 142-pixel box and a row is that plus the
+        // `gap-3` between two cards. The capture the head was measured on
+        // (1280x720, 2026-10-02) has cards at y=231, 385, 539 and 693 -- a
+        // pitch of 154 -- and the first of them at 181 into the region.
+        assert_eq!(CARD_HEIGHT, 142.0);
+        assert_eq!(CARD_INNER, 110.0, "two p-4 paddings leave the interior");
+        assert_eq!(CARD_INNER, CARD_HEIGHT - 2.0 * ui::CARD_PAD);
+        assert_eq!(CARD_ROW, 154.0);
         assert_eq!(CARD_ROW - CARD_HEIGHT, GAP);
         assert_eq!(LIST_TOP, 230.0 - 49.0);
+        // And the interior is what the card's parts are drawn in: an icon or a
+        // tag row taller than it would push the card past its measured height.
+        assert!(CARD_INNER >= avatar::ICON_SIDE as f32);
+        assert!(CARD_INNER >= ui::TAG_HEIGHT);
+    }
+
+    #[test]
+    fn the_reference_s_loading_blocks_are_what_the_page_draws_while_it_waits() {
+        // `base/LoadingIndicator.vue`: three `h-16` blocks at `opacity-25` in
+        // `--color-raised-bg`, under a bold `Loading...`. They are what a frame
+        // builds for `Idle` and `Loading` alike -- the page opens on the blocks
+        // rather than on a sentence about asking.
+        for theme in Gen::ALL {
+            drop(loading(*theme));
+        }
+        assert_eq!(LOADING_BLOCK, 64.0);
+        assert_eq!(LOADING_BLOCK_OPACITY, 0.25);
+        let store = Store::default();
+        let waiting = State::new(ProjectType::Modpack);
+        assert!(waiting.results.waiting());
+        drop(view(Gen::Dark, &waiting, &store));
     }
 
     #[test]
