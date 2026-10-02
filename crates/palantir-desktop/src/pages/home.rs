@@ -5,11 +5,16 @@
 //! first instance, and a hint about the quick-create flow. With instances it draws
 //! the library: the title, its search field and sort control, and a grid of cards.
 //!
-//! The reference's own `RecentWorldsList` sits above the library when the
-//! `worlds_in_home` feature flag is on; it is off in the reference's defaults, and
-//! it is not drawn here, which is a decision rather than an omission -- it is the
-//! one block of that page whose data is a cross-instance scan of every `saves/`
-//! folder, and it would arrive before the page it decorates is worth reading.
+//! The reference's own `RecentWorldsList` sits above the library, and it is not
+//! drawn here, which is a decision rather than an omission. Its own gate is
+//! `v-if="recentInstances?.length > 0 && appSettings.getFeatureFlag('worlds_in_home')"`
+//! (`pages/Index.vue`), and the flag is **on** in the reference's defaults --
+//! `worlds_in_home: true` in `composables/use-app-settings.ts`, which the server's
+//! `behavior.show_jump_in` then overrides (`App.vue`) -- so the gate that actually
+//! decides is the length of the list. This launcher reads no worlds at all: the
+//! block is a cross-instance scan of every `saves/` folder, and with nothing to
+//! scan the reference would draw nothing here either. A capture of the reference
+//! with worlds in it would show a strip this page has no data for.
 //!
 //! What is real here is the library itself: the instance list, each instance's
 //! loader, game version, playtime and mod count come from disk by way of
