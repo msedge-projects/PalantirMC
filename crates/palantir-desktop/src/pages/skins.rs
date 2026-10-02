@@ -435,6 +435,46 @@ const DOLL_HEIGHT: f32 = 192.0;
 
 
 
+/// The top or bottom edge of the add cell's dashed ring: [`DASHES_ACROSS`]
+/// dashes and the gaps between them, the dash one share of the six-pixel
+/// period and the gap two.
+///
+/// One pixel tall, which is the border's own width: a `border` on the cell
+/// would have painted the same line in the same place.
+fn dash_row<'a>(theme: Gen) -> Element<'a, Message> {
+    let ink = theme_gen::ink(theme, Ink::Surface5);
+    let mut strip = row![].width(Length::Fill).height(Length::Fixed(1.0));
+    for _ in 0..DASHES_ACROSS {
+        strip = strip
+            .push(container(Space::with_width(Length::FillPortion(1))).style(
+                move |_theme: &Theme| container::Appearance {
+                    background: Some(iced::Background::Color(ink)),
+                    ..container::Appearance::default()
+                },
+            ))
+            .push(Space::with_width(Length::FillPortion(2)));
+    }
+    strip.into()
+}
+
+/// The left or right edge of the same ring: [`DASHES_DOWN`] of them, a pixel
+/// wide.
+fn dash_column<'a>(theme: Gen) -> Element<'a, Message> {
+    let ink = theme_gen::ink(theme, Ink::Surface5);
+    let mut strip = column![].height(Length::Fill).width(Length::Fixed(1.0));
+    for _ in 0..DASHES_DOWN {
+        strip = strip
+            .push(container(Space::with_height(Length::FillPortion(1))).style(
+                move |_theme: &Theme| container::Appearance {
+                    background: Some(iced::Background::Color(ink)),
+                    ..container::Appearance::default()
+                },
+            ))
+            .push(Space::with_height(Length::FillPortion(2)));
+    }
+    strip.into()
+}
+
 /// The demo banner's own button. One control, so one name for the hover
 /// clock -- the page's rows take theirs from [`ui::scoped`] because they repeat
 /// and this one does not.
@@ -519,6 +559,11 @@ const CARD_INSET: f32 = 8.0;
 /// The plus in the saved section's first cell: `size-8`.
 const ADD_ICON: f32 = 32.0;
 
+/// The add cell's own side padding, `px-3`, which the dashed ring does not
+/// change: the words are three pixels in from the *cell*, and the ring is the
+/// pixel the border was.
+const ADD_CARD_PAD: f32 = 12.0;
+
 
 
 /// The demo banner's own padding: `p-4 pt-0` on the block that holds it --
@@ -553,6 +598,25 @@ const BANNER_DESCRIPTION: f32 = 16.0;
 /// between the two lines themselves.
 const ADD_ICON_GAP: f32 = 16.0;
 const ADD_LINE_GAP: f32 = 2.0;
+
+/// The add cell's dashed edge, in the proportions the reference's own cell
+/// draws it: reading down the reference's left border at x361 from y131 gives
+/// `##....` over and over, two pixels of `--surface-5` and four of nothing --
+/// Chromium's dash pattern for a one-pixel dashed edge. iced's `Border` has no
+/// `style` to carry `border-dashed`, so the ring is drawn as what it is: four
+/// strips of dashes over the cell's own background.
+const DASH_ON: f32 = 2.0;
+const DASH_OFF: f32 = 4.0;
+/// The period those two make, six pixels, and the share of it a dash is:
+/// `DASH_ON / (DASH_ON + DASH_OFF)`, which is the one-and-two the strips below
+/// are built from.
+const DASH_PERIOD: f32 = DASH_ON + DASH_OFF;
+/// How many dashes across: 32 over the 190.3-pixel cell this shell's pane gives
+/// (the same arithmetic as [`CARD_HEIGHT`]'s), which is a 5.95-pixel period
+/// against the six a capture reads.
+const DASHES_ACROSS: usize = 32;
+/// And down: 41 over the 247 pixels inside the cell's own 249, a 6.02 period.
+const DASHES_DOWN: usize = 41;
 
 
 
@@ -1227,8 +1291,8 @@ fn saved_grid<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a,
 /// `gap-4` down to the two lines: `text-base font-semibold leading-6` over
 /// `text-sm font-medium leading-5 text-primary`. The drag-and-drop it also
 /// offers is not drawn -- this launcher's own file dialog is the only way a
-/// file arrives (G123) -- and neither is the dash, which iced's border has no
-/// style for; the border is the same colour, drawn solid.
+/// file arrives (G123) -- and the dash is drawn as strips rather than as a
+/// border style, for [`DASH_ON`]'s reason.
 fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
     let (_, fraction) = ui::interaction(ADD_KEY);
     let background = crate::theme::mix(
@@ -1253,22 +1317,36 @@ fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
     ]
     .spacing(ADD_ICON_GAP)
     .align_items(Alignment::Center);
-    let cell = container(words)
-        .width(Length::FillPortion(1))
-        .height(Length::Fixed(CARD_HEIGHT))
+    // The words sit inside the dashed ring rather than in the cell: the ring is
+    // a pixel of the cell's own height on each side, so the cell is still
+    // `CARD_HEIGHT` tall and the words are still `px-3` from its edge.
+    let body = container(words)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .center_x()
         .center_y()
         .padding(Padding {
             top: 0.0,
             bottom: 0.0,
-            left: 12.0,
-            right: 12.0,
-        })
+            left: ADD_CARD_PAD,
+            right: ADD_CARD_PAD,
+        });
+    let sides = row![dash_column(theme), body, dash_column(theme)]
+        .height(Length::Fixed(CARD_HEIGHT - 2.0));
+    let cell = container(
+        column![dash_row(theme), sides, dash_row(theme)]
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(CARD_HEIGHT))
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(iced::Background::Color(background)),
+            // No border of its own: the ring above is the border, and it is the
+            // dashed one.
             border: iced::Border {
-                color: theme_gen::ink(theme, Ink::Surface5),
-                width: 1.0,
+                color: iced::Color::TRANSPARENT,
+                width: 0.0,
                 radius: CARD_RADIUS.into(),
             },
             ..container::Appearance::default()
@@ -1768,6 +1846,30 @@ mod tests {
     }
 
     
+
+    #[test]
+    fn the_add_cell_s_dashed_ring_is_the_reference_s_own_pattern() {
+        // Reading down the reference's own left border at x 361 from y 131
+        // gives `##....` over and over: two pixels of `--surface-5` and four of
+        // nothing.
+        assert_eq!(DASH_ON, 2.0);
+        assert_eq!(DASH_OFF, 4.0);
+        assert_eq!(DASH_PERIOD, 6.0);
+        // The ring is two strips of the card's own height around the words, so
+        // the cell is still the 249 its own aspect gives at this pane.
+        assert_eq!(2.0 + (CARD_HEIGHT - 2.0), CARD_HEIGHT);
+        assert_eq!(DASHES_ACROSS, 32);
+        assert_eq!(DASHES_DOWN, 41);
+        // And the periods those counts give over this cell's own inside --
+        // 190.3 wide, 247 tall: 5.95 and 6.02, against the six a capture reads.
+        let across = 190.3 / DASHES_ACROSS as f32;
+        assert!((across - DASH_PERIOD).abs() < 0.1, "{across} is not six");
+        let down = (CARD_HEIGHT - 2.0) / DASHES_DOWN as f32;
+        assert!((down - DASH_PERIOD).abs() < 0.1, "{down} is not six");
+        // And the share a dash takes of its own period: one of the three, which
+        // is the one-and-two the strips are built from.
+        assert_eq!(DASH_ON / DASH_PERIOD, 1.0 / 3.0);
+    }
 
     #[test]
     fn the_banner_s_sign_in_says_what_it_cannot_do() {
