@@ -10,9 +10,10 @@
 //! What *is* real is the account's own half: the skins and capes Minecraft says it
 //! owns, the skin in force cut into a front view (G104), the ability to put any of
 //! them on (G106), and -- since G123 -- the ability to add one from a file: the
-//! header's Add opens the launcher's own file dialog, the chosen texture is padded to
-//! the 64x64 the service takes and its arm style is read from its own pixels, and the
-//! upload is one multipart write (`crate::pick`, `crate::skin`, `Ask::AddSkin`).
+//! saved section's add cell opens the launcher's own file dialog, the chosen
+//! texture is padded to the 64x64 the service takes and its arm style is read
+//! from its own pixels, and the upload is one multipart write (`crate::pick`,
+//! `crate::skin`, `Ask::AddSkin`).
 //!
 //! Three of those are a *write* to the reader's own Minecraft account -- putting a skin
 //! on, putting a cape on, and adding the file -- so what a press will do is written
@@ -634,8 +635,8 @@ const DASHES_DOWN: usize = 41;
 
 /// Which sections are open, in [`Section::ALL`]'s order.
 ///
-/// A flag per section rather than the one-open accordion this page had before
-/// G136: the reference keeps a *set* of open keys and puts every section it
+/// A flag per section rather than the one-open accordion this page carried
+/// before: the reference keeps a *set* of open keys and puts every section it
 /// knows into it on the first pass (`VirtualSkinSectionList.vue`'s watch over
 /// `sections` with `immediate: true`), so its page opens with every section
 /// expanded and its headers toggle one section at a time.
@@ -915,14 +916,13 @@ impl State {
 }
 
 /// Draw the page.
-/// Draw the page.
 ///
-/// The reference's frame is one grid and one sticky banner: `skin-layout` is
-/// `minmax(0, 1fr) minmax(0, 2.5fr)` with `gap` (2.5rem), holding the title
-/// and the model preview on the left and the sections on the right, and the
-/// demo banner is pinned to the bottom of the window when nobody is signed in
-/// (the second is the next slice; the account read that tells the two states
-/// apart arrives with it).
+/// The reference's frame is one grid and one band: `skin-layout` is
+/// `minmax(0, 1fr) minmax(0, 2.5fr)` with `gap` (2.5rem), holding the title and
+/// the model preview on the left and the sections on the right, and the demo
+/// banner sits below that grid -- a sibling of it, stuck to the bottom of the
+/// window -- for a reader nobody is signed in as. So the page here is a column
+/// of the scrolling layout and, in that state, the banner under it.
 ///
 /// The reference's `sticky top-6` on the left column is a departure this file
 /// carries rather than a number it picks: iced has no sticky, so the whole page
@@ -1794,8 +1794,8 @@ mod tests {
     #[test]
     fn a_section_header_toggles_its_own_section_and_leaves_the_others() {
         // The reference opens every section it knows on its first pass and each
-        // header toggles only itself; the one-open accordion this page had before
-        // G136 is gone with this state.
+        // header toggles only itself; the one-open accordion this page carried
+        // before is gone with this state.
         let mut state = State::default();
         assert!(state.open.is_open(Section::SavedSkins));
         assert!(state.open.is_open(Section::TheCopperAge));
