@@ -441,8 +441,35 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // follow it are `size="lg"` outlined buttons, one per chosen filter, and
     // there are none.
     let filter = icon::icon(Glyph::Filter, FILTER_MARK, theme_gen::ink(theme, INK_DEFAULT));
+    // `SortMenu`'s *second* combobox, which the row had been missing. It groups
+    // by `displayState.group`, whose stored default is `'Group'`
+    // (`use-library.ts`: `{ group: 'Group', sortBy: 'Last played', ... }`), and
+    // `sort-menu.vue`'s own `groupLabels` maps `Group` to
+    // `app.library.group-by.custom-group` -- "Custom group". So on a fresh
+    // profile the reference's row reads *Last played* then *Custom group*, and
+    // ours now says the same two things.
+    //
+    // Two halves of it are still missing and both are named here rather than
+    // faked: the `#prefix` slot is `<LayoutGridIcon class="size-5 text-primary" />`,
+    // a 20-pixel mark drawn *inside* the control's own frame, and `ui::select` --
+    // `ui.rs`, another file -- has nowhere to put one, so both comboboxes here are
+    // missing their mark (the sort one wants `ArrowUpDownIcon`); and the grouping
+    // itself has no model, so this is a display beside the sort control, which is
+    // one for the same reason.
+    let group_by = ui::select(
+        theme,
+        Key::AppLibraryGroupByLabel,
+        Key::AppLibraryGroupByCustomGroup.message(),
+        COMBOBOX_WIDTH,
+    );
     let second = row![
-        ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0),
+        ui::select(
+            theme,
+            Key::AppLibrarySortLabel,
+            state.sort.label(),
+            COMBOBOX_WIDTH
+        ),
+        group_by,
         rule,
         filter
     ]
@@ -473,6 +500,12 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 const TOOLBAR_RULE_WIDTH: f32 = 1.0;
 /// The same rule's height, `h-6` -- 24.
 const TOOLBAR_RULE_HEIGHT: f32 = 24.0;
+
+/// The width both of the toolbar's comboboxes are drawn at. `sort-menu.vue` gives
+/// each `class="w-max"`, which is the control's own content -- the 20-pixel prefix
+/// mark, the label and the chevron -- and this port's [`ui::select`] is a fixed
+/// box, so one number stands for both.
+const COMBOBOX_WIDTH: f32 = 200.0;
 
 /// `DropdownFilterBar.vue`'s mark with `use-filter-icon` set and nothing applied:
 /// `<FilterIcon class="size-5 text-primary" />`, and `size-5` is 1.25rem.
@@ -1075,6 +1108,34 @@ mod tests {
         // And the row draws, with the rule and the mark in it, over every theme.
         let cards = sample();
         let state = State::default();
+        for theme in Gen::ALL {
+            drop(library_view(*theme, &state, &cards));
+        }
+    }
+
+    #[test]
+    fn the_toolbar_s_row_reads_the_two_labels_a_fresh_profile_shows() {
+        // `use-library.ts` stores `{ group: 'Group', sortBy: 'Last played', ... }`
+        // as the grid's default display state, and `sort-menu.vue`'s own label
+        // tables turn those into what the two comboboxes read: *Last played* and
+        // `app.library.group-by.custom-group` = "Custom group". Both are drawn on
+        // one row, so both are held here.
+        assert_eq!(
+            Key::AppLibraryGroupByCustomGroup.message(),
+            "Custom group",
+            "`Group` is the stored default, and this is the label it carries"
+        );
+        assert_eq!(Key::AppLibraryGroupByLabel.message(), "Group by");
+        let state = State::default();
+        assert_eq!(
+            state.sort.label(),
+            Key::AppLibrarySortLastPlayed.message(),
+            "and the sort combobox opens on the order the reference stores"
+        );
+        // Both at one width, because `w-max` is the control's own content and this
+        // port's select is a fixed box.
+        assert_eq!(COMBOBOX_WIDTH, 200.0);
+        let cards = sample();
         for theme in Gen::ALL {
             drop(library_view(*theme, &state, &cards));
         }
