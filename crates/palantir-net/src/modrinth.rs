@@ -43,6 +43,32 @@ pub fn search_url_parts(
     limit: u32,
     offset: u32,
 ) -> String {
+    search_url_parts_with_facets(query, project_type, index, limit, offset, &[])
+}
+
+/// The same URL, with the caller's own facet groups beside the project type's.
+///
+/// Modrinth's `facets` parameter is a list of *or* groups -- `[["a","b"],["c"]]`
+/// matches a project tagged `a` or `b`, and also tagged `c` -- so a second
+/// constraint is a second group rather than a second parameter. The reference
+/// builds exactly that shape in `ui/src/utils/search.ts`, where every exclusion
+/// lands in one group per field (`project_id NOT IN ["a","b"]` is one group, not
+/// two), which is why the groups are taken whole and pre-spelled here: this is
+/// the shape a caller means, not a field/value pair for this module to re-derive.
+///
+/// A group goes inside one pair of quotes as it stands, which is what makes the
+/// exclusion syntax work at all: `project_id NOT IN ["AANobbMI"]` carries its own
+/// quotes and has to. Escaping them is therefore the caller's -- and there is
+/// nothing for this module to guess at, because a group is opaque on the way in
+/// and on the way out.
+pub fn search_url_parts_with_facets(
+    query: &str,
+    project_type: Option<&str>,
+    index: Option<&str>,
+    limit: u32,
+    offset: u32,
+    extra_facets: &[String],
+) -> String {
     let mut url = format!(
         "{}/search?query={}&limit={}",
         MODRINTH_BASE_URL,
@@ -52,8 +78,16 @@ pub fn search_url_parts(
     if offset > 0 {
         url.push_str(&format!("&offset={offset}"));
     }
+    let mut groups: Vec<String> = Vec::new();
     if let Some(project_type) = project_type.filter(|kind| !kind.is_empty()) {
-        let facets = format!(r#"[["project_type:{project_type}"]]"#);
+        groups.push(format!("project_type:{project_type}"));
+    }
+    groups.extend(extra_facets.iter().cloned());
+    if !groups.is_empty() {
+        // Every group is an array of its own: `facets` is a list of or-groups,
+        // and `[["a"]]` is one group of one while `["a"]` is the group itself.
+        let quoted: Vec<String> = groups.iter().map(|group| format!("[\"{group}\"]")).collect();
+        let facets = format!("[{}]", quoted.join(","));
         url.push_str(&format!("&facets={}", percent_encode(&facets)));
     }
     if let Some(index) = index.filter(|order| !order.is_empty()) {
@@ -810,6 +844,38 @@ mod tests {
         assert_eq!(
             search_url_with_project_type("faithful", "resourcepack"),
             "https://api.modrinth.com/v2/search?query=faithful&limit=50&facets=%5B%5B%22project_type%3Aresourcepack%22%5D%5D"
+        );
+    }
+
+    #[test]
+    fn a_search_url_carries_the_callers_own_facet_groups_beside_the_project_type() {
+        // `facets` is a list of or-groups, so a project type and a caller's own
+        // constraint are *two* groups -- both have to hold -- rather than two
+        // values in one group, which would mean "a project of this type or a
+        // project that is not this one".
+        let url = search_url_parts_with_facets(
+            "sodium",
+            Some("modpack"),
+            None,
+            20,
+            0,
+            &[r#"project_id NOT IN ["AANobbMI","fabric-api"]"#.to_string()],
+        );
+        assert_eq!(
+            url,
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20\
+             &facets=%5B%5B%22project_type%3Amodpack%22%5D%2C%5B%22project_id%20NOT%20IN%20%5B%22AANobbMI%22%2C%22fabric-api%22%5D%22%5D%5D"
+        );
+        // A group with no project type beside it is the whole of `facets`.
+        assert_eq!(
+            search_url_parts_with_facets("sodium", None, None, 20, 0, &["categories = \"forge\"".into()]),
+            "https://api.modrinth.com/v2/search?query=sodium&limit=20\
+             &facets=%5B%5B%22categories%20%3D%20%22forge%22%22%5D%5D"
+        );
+        assert_eq!(
+            search_url_parts_with_facets("sodium", None, None, 20, 0, &[]),
+            search_url_parts("sodium", None, None, 20, 0),
+            "no facets is the URL that had none"
         );
     }
 

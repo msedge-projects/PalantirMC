@@ -39,7 +39,8 @@ use crate::engine::cancel::Cancel;
 use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
-    project_members_url, project_url, search_url_parts, user_projects_url, user_url, version_url,
+    project_members_url, project_url, search_url_parts_with_facets, user_projects_url, user_url,
+    version_url,
     ModrinthMember, ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse,
     ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, NEWS_URL,
 };
@@ -71,13 +72,28 @@ pub struct Search {
     pub limit: u32,
     /// How far into the result set to start.
     pub offset: u32,
+    /// Facet groups to put on the request beside the project type's.
+    ///
+    /// Empty for most searches, and the shape is the API's rather than this
+    /// module's: one or more already-spelled or-groups, sent inside the one
+    /// `facets=` parameter ([`search_url_parts_with_facets`]). They are part of
+    /// the search rather than a decoration of it, which is why they travel in
+    /// the same value and the URL is still the whole cache key.
+    pub facets: Vec<String>,
 }
 
 impl Search {
     /// A search for `query`, with the page size the reference's Discover page
     /// uses.
     pub fn new(query: impl Into<String>) -> Search {
-        Search { query: query.into(), project_type: None, index: None, limit: 50, offset: 0 }
+        Search {
+            query: query.into(),
+            project_type: None,
+            index: None,
+            limit: 50,
+            offset: 0,
+            facets: Vec::new(),
+        }
     }
 
     /// The same search, constrained to one project type.
@@ -104,14 +120,25 @@ impl Search {
         self
     }
 
+    /// The same search, carrying `facets` as or-groups beside the project type's.
+    ///
+    /// One group per element: `["project_id NOT IN [\"AANobbMI\"]"]` asks for
+    /// everything except one project, and a caller that wants two exclusions in
+    /// one request spells both in one group rather than passing two.
+    pub fn with_facets(mut self, facets: Vec<String>) -> Search {
+        self.facets = facets;
+        self
+    }
+
     /// The URL this search is, which is also the key it is cached under.
     pub fn url(&self) -> String {
-        search_url_parts(
+        search_url_parts_with_facets(
             &self.query,
             self.project_type.as_deref(),
             self.index.as_deref(),
             self.limit,
             self.offset,
+            &self.facets,
         )
     }
 }
