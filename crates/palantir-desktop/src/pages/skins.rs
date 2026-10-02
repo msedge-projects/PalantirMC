@@ -433,6 +433,8 @@ const WEAR_KEY: &str = "skins:wear";
 const DOLL_WIDTH: f32 = 96.0;
 const DOLL_HEIGHT: f32 = 192.0;
 
+
+
 /// The demo banner's own button. One control, so one name for the hover
 /// clock -- the page's rows take theirs from [`ui::scoped`] because they repeat
 /// and this one does not.
@@ -448,8 +450,15 @@ const PAGE_INSET: f32 = 16.0;
 /// The two columns' gap: `skin-layout`'s `gap` is `2.5rem` (40).
 const COLUMN_GAP: f32 = 40.0;
 
-/// The left column's own padding: `p-2 pt-0` -- 8 on both sides and under the
-/// column, none above.
+/// The left column's own padding: `p-2` -- 8 on every side.
+///
+/// The template writes `p-2 pt-0`, and this is 8 above where that reads. A
+/// capture settles it: the reference's title glyphs are at y 78..95 with the
+/// page's own content top at 63, which is an eight-pixel offset from its
+/// content box -- the same eight the section list's own `pt-2 pt-1` puts its
+/// first header box at y75. With no top padding the title would sit at y71,
+/// seven pixels above the reference's, and the preview box under it would land
+/// at 111 rather than the 119 its `mt-4` gives the reference.
 const COLUMN_PAD: f32 = 8.0;
 
 /// The grid's two shares, from `grid-template-columns: minmax(0, 1fr)
@@ -510,6 +519,8 @@ const CARD_INSET: f32 = 8.0;
 /// The plus in the saved section's first cell: `size-8`.
 const ADD_ICON: f32 = 32.0;
 
+
+
 /// The demo banner's own padding: `p-4 pt-0` on the block that holds it --
 /// 16 on both sides and under it, none above, because the block sits against
 /// the pane it is stuck to.
@@ -542,6 +553,8 @@ const BANNER_DESCRIPTION: f32 = 16.0;
 /// between the two lines themselves.
 const ADD_ICON_GAP: f32 = 16.0;
 const ADD_LINE_GAP: f32 = 2.0;
+
+
 
 /// Which sections are open, in [`Section::ALL`]'s order.
 ///
@@ -990,12 +1003,7 @@ fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     );
     container(column![title, Space::with_height(PREVIEW_TOP), body].width(Length::Fill))
         .width(Length::FillPortion(PREVIEW_PORTION))
-        .padding(Padding {
-            top: 0.0,
-            right: COLUMN_PAD,
-            bottom: COLUMN_PAD,
-            left: COLUMN_PAD,
-        })
+        .padding(COLUMN_PAD)
         .into()
 }
 
@@ -1758,6 +1766,8 @@ mod tests {
         };
         assert!(demo_banner(Gen::ALL[0], &signed_in).is_none());
     }
+
+    
 
     #[test]
     fn the_banner_s_sign_in_says_what_it_cannot_do() {
