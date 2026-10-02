@@ -737,11 +737,27 @@ pub struct ModrinthUserProject {
     pub published: String,
     /// Total downloads.
     #[serde(default)]
-    pub downloads: u64,    /// Its icon, if it has one: `null` for a project that has not uploaded one,
+    pub downloads: u64,
+    /// How many accounts follow it -- the heart `ProjectCardStats` draws beside
+    /// the download count.
+    ///
+    /// Present on this document since `/v2/user/{id}/projects` started publishing
+    /// the same shape as `/v2/project/{id}`; it was simply not read, and a card
+    /// that printed downloads without it was printing half of what the reference
+    /// prints.
+    #[serde(default)]
+    pub followers: u64,
+    /// When it was last changed, ISO-8601.
+    ///
+    /// The date a card draws is `updated`, not `published`: `ProjectCard.vue`
+    /// picks `autoDisplayDate` as `'updated'` whenever the document has one, and
+    /// draws a history icon rather than a calendar.
+    #[serde(default)]
+    pub updated: String,
+    /// Its icon, if it has one: `null` for a project that has not uploaded one,
     /// which is the one field of this document the service marks nullable.
     #[serde(default, deserialize_with = "null_as_empty")]
     pub icon_url: String,
-
 
     /// Its type (`mod`, `modpack`, `resourcepack`, ...), as the document says.
     #[serde(default)]
