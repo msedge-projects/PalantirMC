@@ -546,11 +546,12 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
         // The placeholder this page replaces carried `app.library.sort.label` here,
         // which reads *Sort by* -- a button that said it sorted the page it
         // reloads.
-        .push(ui::button(
+        .push(ui::button_sized(
             theme,
             REFRESH_KEY,
             Key::ButtonRefresh,
             ui::Kind::Quiet,
+            ui::Size::Md,
             Message::Refresh,
         ));
     ui::card(theme, head.width(Length::Fill))

@@ -1145,7 +1145,7 @@ pub fn button_or_sized<'a, Message: Clone + Hovered + 'a>(
     size: Size,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    sized_face(theme, key, kind, size, Length::Shrink, on_press, move |ink| {
+    sized_face(theme, key, kind, size, Length::Shrink, false, false, on_press, move |ink| {
         text(label.message())
             .size(size.label())
             .line_height(iced::Pixels(size.line()))
@@ -1168,7 +1168,7 @@ pub fn button_text_sized<'a, Message: Clone + Hovered + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let label = label.to_string();
-    sized_face(theme, key, kind, size, Length::Shrink, Some(on_press), move |ink| {
+    sized_face(theme, key, kind, size, Length::Shrink, false, false, Some(on_press), move |ink| {
         text(label.clone())
             .size(size.label())
             .line_height(iced::Pixels(size.line()))
@@ -1190,7 +1190,7 @@ pub fn button_with_icon_sized<'a, Message: Clone + Hovered + 'a>(
     width: Length,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    sized_face(theme, key, kind, size, width, on_press, move |ink| {
+    sized_face(theme, key, kind, size, width, false, false, on_press, move |ink| {
         row![]
             .spacing(size.gap())
             .align_items(Alignment::Center)
@@ -1203,6 +1203,26 @@ pub fn button_with_icon_sized<'a, Message: Clone + Hovered + 'a>(
                     .style(iced::theme::Text::Color(ink)),
             )
             .into()
+    })
+}
+
+/// A square icon button: `IconButton.vue`, which is `ButtonFrame` with
+/// `icon-only` and, by its own default, `circular`.
+///
+/// The row's `w-7`..`w-12` class is the same number as its height, and `!px-0`
+/// throws the horizontal padding away, so the button is a square -- a circle at
+/// `rounded-full`. The reference's IconButton defaults to `md` and to circular,
+/// which is the 36-pixel round control the settings dialog's close is.
+pub fn icon_button_sized<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    kind: Kind,
+    size: Size,
+    on_press: Message,
+) -> Element<'a, Message> {
+    sized_face(theme, key, kind, size, Length::Shrink, true, true, Some(on_press), move |ink| {
+        icon::icon(glyph, size.icon(), ink).into()
     })
 }
 
@@ -1226,6 +1246,8 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
     kind: Kind,
     size: Size,
     width: Length,
+    icon_only: bool,
+    circular: bool,
     on_press: Option<Message>,
     face: impl FnOnce(Color) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
@@ -1275,9 +1297,17 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
     let fill = fill.map(|color| Background::Color(crate::theme::brightness(dim(color), factor)));
     let ring = ring.map(|color| crate::theme::brightness(dim(color), factor));
     let face = container(face(ink))
-        .width(width)
+        // `w-7`..`w-12` and `!px-0` on an icon-only button: the width is the
+        // row's own height and the padding is gone, which is what makes it a
+        // square -- a circle once `rounded-full` is on it.
+        .width(if icon_only { Length::Fixed(size.square()) } else { width })
         .height(Length::Fixed(size.height()))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: size.pad(), right: size.pad() })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: if icon_only { 0.0 } else { size.pad() },
+            right: if icon_only { 0.0 } else { size.pad() },
+        })
         .center_x()
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
@@ -1285,7 +1315,7 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
             border: Border {
                 color: ring.unwrap_or(Color::TRANSPARENT),
                 width: if ring.is_some() { 1.0 } else { 0.0 },
-                radius: size.radius().into(),
+                radius: (if circular { 999.0 } else { size.radius() }).into(),
             },
             ..container::Appearance::default()
         });

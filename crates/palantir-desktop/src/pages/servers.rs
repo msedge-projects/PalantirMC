@@ -107,18 +107,22 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             .align_items(Alignment::Center)
             .push(page::title(theme, Key::AppNavModrinthHosting))
             .push(Space::with_width(Length::Fill))
-            .push(ui::button(
+            // Both are the frame's default row: the reference states no `size`
+            // on these controls, and a button without one is `md`, 36 pixels.
+            .push(ui::button_sized(
                 theme,
                 MANAGE_BILLING_KEY,
                 Key::ServersListingManageBillingLabel,
                 ui::Kind::Standard,
+                ui::Size::Md,
                 Message::ManageBilling,
             ))
-            .push(ui::button(
+            .push(ui::button_sized(
                 theme,
                 NEW_SERVER_KEY,
                 Key::ServersListingNewLabel,
                 ui::Kind::Colored,
+                ui::Size::Md,
                 Message::NewServer,
             ))
             .into(),
@@ -143,11 +147,12 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             )
             .push(ui::paragraph(theme, &store::needs_account("The server listing"))),
     ));
-    blocks.push(ui::button(
+    blocks.push(ui::button_sized(
         theme,
         REFRESH_KEY,
         Key::AppLibraryContextMenuCreateInstance,
         ui::Kind::Quiet,
+        ui::Size::Md,
         Message::Refresh,
     ));
     page::body(blocks, GAP, Message::Wheel)

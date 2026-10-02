@@ -5293,12 +5293,16 @@ impl Shell {
         for article in shown {
             cards = cards.push(self.news_card(article));
         }
-        cards = cards.push(crate::ui::button_with_icon(
+        // The reference's own *View all* is a `ButtonLink` at `size="xl"` with
+        // its `NewspaperIcon` in front (`App.vue`'s news block), which is the
+        // 48-pixel row with a 24-pixel icon.
+        cards = cards.push(crate::ui::button_with_icon_sized(
             theme,
             NEWS_VIEW_ALL_KEY,
             Glyph::Newspaper,
             Key::AppNewsViewAll,
             crate::ui::Kind::Colored,
+            crate::ui::Size::Xl,
             Length::Fill,
             Some(Message::OpenUrl(NEWS_PAGE_URL.to_string())),
         ));
@@ -5423,12 +5427,16 @@ impl Shell {
                         .font(medium())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
                 )
-                .push(crate::ui::button_with_icon(
+                // `AccountsCard.vue`'s empty state: `<Button type="colored"
+                // color="brand">` with a `LogInIcon` -- no `size`, so the frame's
+                // own default `md` at a 20-pixel icon.
+                .push(crate::ui::button_with_icon_sized(
                     theme,
                     ACCOUNTS_SIGN_IN,
                     Glyph::LogIn,
                     Key::MinecraftAccountSignIn,
                     crate::ui::Kind::Colored,
+                    crate::ui::Size::Md,
                     Length::Shrink,
                     Some(Message::SignIn),
                 ));
@@ -5556,12 +5564,13 @@ impl Shell {
             );
         }
         rows = rows.push(
-            container(crate::ui::button_with_icon(
+            container(crate::ui::button_with_icon_sized(
                 theme,
                 ACCOUNTS_ADD,
                 Glyph::Plus,
                 Key::MinecraftAccountAddAccount,
                 crate::ui::Kind::Standard,
+                crate::ui::Size::Md,
                 Length::Fill,
                 Some(Message::SignIn),
             ))
@@ -6348,11 +6357,18 @@ impl Shell {
             row![]
                 .align_items(Alignment::Center)
                 .push(Space::with_width(Length::Fill))
-                .push(crate::ui::button_or(
+                // `MultiStageModal.vue`'s own footer: the create action is its
+                // right button, drawn as a `Button` with `color="brand"` -- no
+                // `size`, so the frame's default `md` -- with the stage's own
+                // `PlusIcon` before the label (`custom-setup-stage.ts`).
+                .push(crate::ui::button_with_icon_sized(
                     theme,
                     CREATE_BUTTON,
+                    Glyph::Plus,
                     Key::CreationFlowButtonCreateInstance,
                     crate::ui::Kind::Colored,
+                    crate::ui::Size::Md,
+                    Length::Shrink,
                     usable.then_some(Message::Create),
                 )),
         );
@@ -6841,11 +6857,12 @@ impl Shell {
                                 ),
                         )
                         .push(Space::with_width(Length::Fill))
-                        .push(crate::ui::button_or(
+                        .push(crate::ui::button_or_sized(
                             theme,
                             key,
                             Key::CreationFlowModalImportInstanceActionAdd,
                             crate::ui::Kind::Standard,
+                            crate::ui::Size::Md,
                             (!self.importing).then_some(Message::Import(candidate.source.clone())),
                         )),
                 );
@@ -6907,7 +6924,7 @@ impl Shell {
                 .font(medium())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
             );
-            body = body.push(crate::ui::button(
+            body = body.push(crate::ui::button_sized(
                 theme,
                 INSTALL_PACK_KEY,
                 // The reference's own word for it: its project cards install with
@@ -6915,6 +6932,7 @@ impl Shell {
                 // reference installing a project *is* creating an instance.
                 Key::AppLibraryContextMenuCreateInstance,
                 crate::ui::Kind::Colored,
+                crate::ui::Size::Md,
                 Message::InstallPack,
             ));
         } else {
@@ -6936,11 +6954,12 @@ impl Shell {
                             .font(medium())
                             .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
                     );
-                    body = body.push(crate::ui::button(
+                    body = body.push(crate::ui::button_sized(
                         theme,
                         INSTALL_CREATE_KEY,
                         Key::AppWelcomeScreenCreateInstance,
                         crate::ui::Kind::Standard,
+                        crate::ui::Size::Md,
                         Message::OpenCreate,
                     ));
                 }

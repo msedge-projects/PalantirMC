@@ -510,17 +510,19 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             .spacing(GAP)
             .align_items(Alignment::Center)
             .push(details.width(Length::Fill))
-            // The reference's own gear in the instance header, which is where a
-            // reader looks for an instance's settings; the modal it opens is the
-            // shell's (see [`crate::instance_settings`]).
-            .push(ui::icon_button(
+            // The reference's own order in `PageHeaderActions`: the launch button
+            // first and the gear to its right, both at its `size="xl"` -- a
+            // 48-pixel round `IconButton` carrying a 24-pixel icon. The modal the
+            // gear opens is the shell's (see [`crate::instance_settings`]).
+            .push(launch_control(theme, store.launch_state(&state.id)))
+            .push(ui::icon_button_sized(
                 theme,
                 SETTINGS_KEY,
                 Glyph::Settings,
-                ui::CONTROL_ICON,
+                ui::Kind::Standard,
+                ui::Size::Xl,
                 Message::Settings,
-            ))
-            .push(launch_control(theme, store.launch_state(&state.id))),
+            )),
     )
 }
 
@@ -532,35 +534,52 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
 /// -- there is nothing to stop yet), a red *Stop* once the game is up, and
 /// *Stopping…* while it is being taken down. Two of those are buttons that do
 /// something and the other two are the same button with its press removed, which
-/// is what [`crate::ui::button_or`] is for.
+/// is what [`crate::ui::button_or_sized`] is for.
+///
+/// All four are the reference's `size="xl"` row -- 48 pixels, `rounded-2xl`, a
+/// 24-pixel icon and its one `font-extrabold` label -- which is the same row the
+/// page's own *Play* and *Stop* are drawn at (`pages/project/Index.vue`). The
+/// icons are the reference's: its `PlayIcon` on the idle button and its
+/// `StopCircleIcon` on both stop states, with the disabled *Starting…* the one
+/// button it draws without one.
 fn launch_control(theme: Gen, state: LaunchState) -> Element<'static, Message> {
     match state {
-        LaunchState::Idle => ui::button(
+        LaunchState::Idle => ui::button_with_icon_sized(
             theme,
             PLAY_KEY,
+            Glyph::Play,
             Key::AppInstanceActionPlay,
             ui::Kind::Colored,
-            Message::Play,
+            ui::Size::Xl,
+            Length::Shrink,
+            Some(Message::Play),
         ),
-        LaunchState::Starting => ui::button_or(
+        LaunchState::Starting => ui::button_or_sized(
             theme,
             PLAY_KEY,
             Key::InstanceActionStarting,
             ui::Kind::Colored,
+            ui::Size::Xl,
             None,
         ),
-        LaunchState::Running => ui::button(
+        LaunchState::Running => ui::button_with_icon_sized(
             theme,
             STOP_KEY,
+            Glyph::StopCircle,
             Key::ButtonStop,
             ui::Kind::Danger,
-            Message::Stop,
+            ui::Size::Xl,
+            Length::Shrink,
+            Some(Message::Stop),
         ),
-        LaunchState::Stopping => ui::button_or(
+        LaunchState::Stopping => ui::button_with_icon_sized(
             theme,
             STOP_KEY,
+            Glyph::StopCircle,
             Key::InstanceActionStopping,
             ui::Kind::Danger,
+            ui::Size::Xl,
+            Length::Shrink,
             None,
         ),
     }

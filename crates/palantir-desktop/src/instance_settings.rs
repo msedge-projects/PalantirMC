@@ -854,6 +854,10 @@ fn pack_caption(pack: &LinkedModpack) -> String {
 /// the whole of what this button does -- the instance keeps its files and stops
 /// being updatable, because the thing that went is the link and not the content.
 ///
+/// The button is the reference's own row: `layout.vue` draws it as a default
+/// `Button` -- `md`, 36 pixels -- with its `UnlinkIcon` before the label at the
+/// row's own `size-5` (20 pixels), which is what [`ui::Size::Md`]'s icon is.
+///
 /// `'static` rather than borrowed, because everything in it is owned: the two
 /// sentences are the reference's words with its placeholders filled, so nothing
 /// here outlives the call.
@@ -864,12 +868,15 @@ fn unlink_section(theme: Gen) -> Element<'static, Message> {
             .spacing(8.0)
             .push(section_heading(theme, &unlink_title()))
             .push(paragraph(theme, &unlink_sentence()))
-            .push(row![ui::button(
+            .push(row![ui::button_with_icon_sized(
                 theme,
                 UNLINK_KEY,
+                Glyph::Unlink,
                 Key::ButtonUnlinkModpack,
                 ui::Kind::Danger,
-                Message::Unlink,
+                ui::Size::Md,
+                Length::Shrink,
+                Some(Message::Unlink),
             )]),
     )
 }
@@ -910,13 +917,33 @@ fn unlink_sentence() -> String {
 /// it: the reference answers through a notification, and a modal that is already
 /// open has a better place to be told.
 fn repair_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    // `layout.vue`'s repair control: a default `Button` (`md`, 36 pixels) with
+    // its `HammerIcon` at the row's own `size-5`, or -- while the check runs -- a
+    // spinner at the same place with the press gone. The icon stays on both sides
+    // of that swap here: this kit has no spinner, so the hammer is the row's shape
+    // and the disabled face is the state.
     let button = if state.repair == Load::Loading {
-        // The press is gone while the check runs, for [`crate::ui::button_or`]'s
-        // reason: a second press would start a second install over the first, and
-        // the reference draws a spinner here for the same one.
-        ui::button_or(theme, REPAIRING_KEY, Key::ButtonRepairing, ui::Kind::Standard, None)
+        ui::button_with_icon_sized(
+            theme,
+            REPAIRING_KEY,
+            Glyph::Hammer,
+            Key::ButtonRepairing,
+            ui::Kind::Standard,
+            ui::Size::Md,
+            Length::Shrink,
+            None,
+        )
     } else {
-        ui::button(theme, REPAIR_KEY, Key::ButtonRepair, ui::Kind::Standard, Message::Repair)
+        ui::button_with_icon_sized(
+            theme,
+            REPAIR_KEY,
+            Glyph::Hammer,
+            Key::ButtonRepair,
+            ui::Kind::Standard,
+            ui::Size::Md,
+            Length::Shrink,
+            Some(Message::Repair),
+        )
     };
     let mut section = column![]
         .spacing(8.0)
@@ -1026,23 +1053,34 @@ fn pack_version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// the property *Repair instance* already keeps (G130). A button that promised the
 /// reset and did not do it would be worse than one that promises what it does.
 fn reinstall_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    // `layout.vue`'s reinstall control is its repair control in red -- a default
+    // `Button` (`md`) with a `DownloadIcon` at `size-5`, a spinner while it runs --
+    // and the colour is the reference's, so this is [`ui::Kind::Danger`] rather
+    // than the standard face the first port drew. What the *button does* is still
+    // this launcher's own: see the sentence under it.
     let button = if state.reinstall == Load::Loading {
         // The press is gone while the pack is laid over, for the repair button's
         // reason: a second press would start a second fetch of the same archive.
-        ui::button_or(
+        ui::button_with_icon_sized(
             theme,
             REINSTALLING_KEY,
+            Glyph::Download,
             Key::InstallationSettingsReinstallingModpack,
-            ui::Kind::Standard,
+            ui::Kind::Danger,
+            ui::Size::Md,
+            Length::Shrink,
             None,
         )
     } else {
-        ui::button(
+        ui::button_with_icon_sized(
             theme,
             REINSTALL_KEY,
+            Glyph::Download,
             Key::ButtonReinstallModpack,
-            ui::Kind::Standard,
-            Message::ReinstallModpack,
+            ui::Kind::Danger,
+            ui::Size::Md,
+            Length::Shrink,
+            Some(Message::ReinstallModpack),
         )
     };
     let mut section = column![]
@@ -1320,11 +1358,15 @@ fn paragraph_ink<'a>(theme: Gen, sentence: &str, ink: Ink) -> Element<'a, Messag
 }
 
 /// The Save button at the end of a tab, on its own row.
+///
+/// The reference has no save: its instance settings write as they are edited, and
+/// this form is the one that writes a file on a press. The row is a default
+/// `Button` then -- `md`, 36 pixels, the reference's own when it states no size.
 fn save_row<'a>(theme: Gen, key: &'static str, message: Message) -> Element<'a, Message> {
     row![]
         .align_items(Alignment::Center)
         .push(Space::with_width(Length::Fill))
-        .push(ui::button(theme, key, Key::ButtonSave, ui::Kind::Colored, message))
+        .push(ui::button_sized(theme, key, Key::ButtonSave, ui::Kind::Colored, ui::Size::Md, message))
         .into()
 }
 
