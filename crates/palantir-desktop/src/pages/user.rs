@@ -166,11 +166,37 @@ const CARD_CONTENT: f32 = 109.0;
 /// of padding above them and none below. Seventeen above, sixteen below, is the
 /// pair that puts the content box at y=276..384.
 const CARD_PAD_TOP: f32 = ui::CARD_PAD + 1.0;
+/// The card's right padding, which is [`ui::CARD_PAD`] and one more.
+///
+/// The reference's content box is x=105..938 on a card that is x=88..955 -- a
+/// border and sixteen on each side -- and this card's own bounds begin at x=89
+/// rather than 88, because the shell's page edge draws its one-pixel rule at
+/// x=64 and starts the page at x=65 where the reference's page starts at the
+/// rule (see `crate::shell`'s page container). So the sixteen on the left
+/// already lands the content where the reference has it at 105, and the pixel the
+/// narrower card gives back has to be carried on the right: measured before, the
+/// *Install* button's ring ended at x=939 against the reference's 938 and its own
+/// content box's 938, which is the whole of what this constant is.
+const CARD_PAD_RIGHT: f32 = ui::CARD_PAD + 1.0;
 /// Where the tags row starts inside the content box: `360 - 276 = 84`, measured as
 /// the *bottom* of the row, which is where `mt-auto` puts it -- the row ends flush
 /// with the content box and [`ui::tag`] is 24 pixels tall inside the reference's
 /// 26-pixel row (the reference's carries an `h-4` icon; see the notes).
 const CARD_TAGS_TOP: f32 = 83.0;
+
+/// The gap between the header and the strip, which is [`GAP`] plus four.
+///
+/// [`page::body`] spaces a page's blocks with [`GAP`] -- twelve -- and this page
+/// has one boundary where that is not the number the reference uses.
+///
+/// `NormalPage` is `gap-y-4` -- sixteen -- and `NavTabs`' `page-nav` wrapper
+/// carries `-mx-6 -mt-2 mb-1 px-6 py-2`, whose `-8` and `+8` cancel: the strip's
+/// own pill therefore begins exactly one `gap-y-4` below the block above it.
+/// Measured at the reference's own 1280x720: the header's rule is y=184 and the
+/// strip's border is y=201, sixteen rows, and the strip's border to the first
+/// card's is twelve -- which is [`GAP`]. So the rule-to-strip boundary is the one
+/// that is sixteen and everything below the strip stays at twelve.
+const HEADER_STRIP_GAP: f32 = GAP + 4.0;
 
 /// `gap-1` on the tags row: `ProjectCard.vue`'s own
 /// `<div class="flex items-center gap-1">` around `ProjectCardEnvironment` and
@@ -627,11 +653,18 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
 }
 
 /// The header, the filter strip and the list, once there is a profile.
+///
+/// The header and the strip are one block rather than two because they are one
+/// gap apart and the rest of the page is not: [`HEADER_STRIP_GAP`] between the
+/// header's rule and the strip's own border, [`GAP`] everywhere below it, which
+/// is `NormalPage`'s `gap-y-4` and `NavTabs`' `mb-1` against the list.
 fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a, Message> {
-    let mut blocks: Vec<Element<'a, Message>> = vec![header(theme, profile)];
+    let mut head = column![].spacing(HEADER_STRIP_GAP).width(Length::Fill);
+    head = head.push(header(theme, profile));
     if let Some(strip) = filter_strip(theme, state, profile) {
-        blocks.push(strip);
+        head = head.push(strip);
     }
+    let mut blocks: Vec<Element<'a, Message>> = vec![head.into()];
     let shown = profile.shown(state.project_type);
     if shown.is_empty() {
         // The reference's own empty state, and the same sentence for a user with no
@@ -1086,7 +1119,10 @@ fn project_row<'a>(
             // its bounds and CSS's is not: see [`CARD_PAD_TOP`].
             .padding(Padding {
                 top: CARD_PAD_TOP,
-                right: ui::CARD_PAD,
+                // Sixteen on the left and seventeen on the right, and the extra
+                // pixel is the card's *own* one rather than a fudge: see
+                // [`CARD_PAD_RIGHT`].
+                right: CARD_PAD_RIGHT,
                 bottom: ui::CARD_PAD,
                 left: ui::CARD_PAD,
             })
@@ -2149,6 +2185,11 @@ mod tests {
         // where the reference's is. 17 + 109 + 16 is the 142.
         assert_eq!(CARD_CONTENT, 109.0);
         assert_eq!(CARD_PAD_TOP, ui::CARD_PAD + 1.0);
+        // The card's own one-pixel border is inside its bounds here and outside
+        // them in CSS, so the top padding carries it and the right padding
+        // carries it back: seventeen on the right is what puts the card's content
+        // box's right edge on 938 rather than 939.
+        assert_eq!(CARD_PAD_RIGHT, ui::CARD_PAD + 1.0);
         assert_eq!(CARD_PAD_TOP + CARD_CONTENT + ui::CARD_PAD, 142.0);
         assert_eq!(CARD_ICON, 100.0);
         // The right-hand column's own rows: the button's `h-9`, a `gap-y-2` and an
@@ -2177,9 +2218,13 @@ mod tests {
         // Two `gap-x-3` between the `1fr` column and the right-hand ones, because
         // the grid's third `auto` column is empty.
         assert_eq!(CARD_COL_GAP, CARD_GAP_X * 2.0);
-        // The tag row's own `gap-1` and its height, read off the reference's six
-        // pills: four pixels between each pair, and a row that is 26 tall because
-        // its tallest pill carries an `h-4` icon.
+        // The rule-to-strip gap is `NormalPage`'s `gap-y-4` rather than the
+        // `gap-y-3` the rest of the page is spaced with: measured, the
+        // reference's rule is y=184 and the strip's border y=201, and ours drew
+        // twelve rows there against its sixteen. The tag row's own `gap-1` and
+        // its height are the same two measurements read off the pills.
+        assert_eq!(HEADER_STRIP_GAP, GAP + 4.0);
+        assert_eq!(HEADER_STRIP_GAP, 16.0);
         assert_eq!(CARD_TAG_GAP, 4.0);
         assert_eq!(CARD_TAG_ROW, 26.0);
         // The summary inherits `text-base` on the stylesheet's own 18.4-pixel line,
