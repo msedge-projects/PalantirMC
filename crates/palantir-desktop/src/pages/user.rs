@@ -67,6 +67,15 @@ const HEADER_GROUP_GAP: f32 = 8.0;
 /// The summary and the metadata are both 16: measured, the `J` of *Just* and the
 /// `J` of *Joined* are each twelve rows tall.
 const HEADER_TEXT: f32 = 16.0;
+/// The line the header's own summary is set on.
+///
+/// `page-header/index.vue:20` gives the summary no size class, so it inherits the
+/// body size (16) and the stylesheet's `line-height: 1.15`, which is 18.4 pixels
+/// of CSS and 18 painted -- the same reading [`crate::ui::NAV_LABEL_LINE`] records
+/// for a tab label. Measured against the reference: its summary's ink occupies
+/// y=115..129 and the metadata row begins 18 pixels below the title's own block,
+/// which only works on an 18-pixel line.
+const HEADER_SUMMARY_LINE: f32 = 18.0;
 /// `gap-x-[1.625rem]` on the metadata row, which is also the width of the span
 /// each `BulletDivider` sits in -- so the gap and the divider are one number.
 const METADATA_GAP: f32 = 26.0;
@@ -82,6 +91,14 @@ const HEADER_PAD_BOTTOM: f32 = 16.0;
 /// `gap-x-3` and `gap-y-2` on a project card's own grid.
 const CARD_GAP_X: f32 = 12.0;
 const CARD_GAP_Y: f32 = 8.0;
+/// The room between a card's `1fr` info column and its right-hand columns.
+///
+/// `grid-template-columns: auto 1fr auto auto` with `gap-x-3` puts *three* gaps
+/// across a card: icon | info | (empty `actions`/`dummy`) | stats. The third
+/// column is `auto` and holds nothing, because `__actions` spans columns three
+/// and four and pushes its button to the right with `ml-auto` -- so the space a
+/// card's summary actually has to stop in is two `gap-x-3`, not one.
+const CARD_COL_GAP: f32 = 24.0;
 /// `gap-3` on `ProjectCardList`, between the cards of the list.
 const LIST_GAP: f32 = 12.0;
 /// `text-xl` on `ProjectCardTitle`, which is the list layout's own size.
@@ -90,28 +107,54 @@ const CARD_TITLE: f32 = 20.0;
 const CARD_ICON: f32 = crate::avatar::ICON_SIDE as f32;
 /// `gap-3` between a card's stats and its date, and on the stats row.
 const CARD_STATS_GAP: f32 = 12.0;
+/// The room between a card's *Install* button and the stats below it.
+///
+/// `__stats` spans grid rows two and three and carries `:class="{ 'mt-3': ... }"`,
+/// so its first row starts a `gap-y-2` below the button's row *and* an `mt-3` into
+/// it: `8 + 12 = 20`. Measured: the button's ring is y=276..311 and the downloads
+/// icon's 20-pixel box begins at y=332.
+const CARD_STATS_LEAD: f32 = CARD_GAP_Y + 12.0;
 /// `gap-2` inside `__info`, between a card's title and its summary.
 const CARD_INFO_GAP: f32 = 8.0;
-/// `text-sm` on a card's summary: 14 pixels on a 20-pixel line.
-const CARD_SUMMARY: f32 = 14.0;
-const CARD_SUMMARY_LINE: f32 = 20.0;
+/// `text-base` on a card's summary.
+///
+/// `ProjectCard.vue:120`'s list layout gives `.project-card-summary` no size class
+/// at all, so it inherits the body size; the `@container (width < 550px)` block is
+/// the only thing that would make it `text-sm`, and an 868-pixel card is nowhere
+/// near it. Measured on the reference's own first card: the summary's ink is 16
+/// pixels tall on an 18-pixel line.
+const CARD_SUMMARY: f32 = 16.0;
+const CARD_SUMMARY_LINE: f32 = 18.0;
 /// `size-5` on `ProjectCardStats`' and `ProjectCardDate`'s icons.
 const CARD_STAT_ICON: f32 = 20.0;
 /// The card's own content box.
 ///
-/// The reference's card measures y=259..400 at its own window -- 142 including its
-/// two 1-pixel borders -- so the box inside the padding is
-/// `142 - 2 - 32 = 108`: the icon's 100 plus the eight pixels its last row takes,
-/// which is what `mt-auto` on the tags row means when the icon spans every row.
+/// `ProjectCard.vue`'s list card measures y=259..400 at the reference's own window
+/// -- 142 including its two 1-pixel borders -- so the box inside the padding is
+/// `142 - 2 - 32 = 108`... except that the box runs from y=276 to y=384 *inclusive*,
+/// which is 109. The extra pixel is the border: CSS puts a `border-1px` outside the
+/// padding edge and iced paints one inside its bounds, so the card asks for one
+/// more of content (see [`CARD_PAD_TOP`]) to land its children where the
+/// reference's do. The row heights then fall out of the reference's own grid:
+/// 36 for the button's row, 8 of `gap-y-2`, 12 of `mt-3`, the 20-pixel stats row,
+/// 12 of `gap-3` and the 20-pixel date row -- `36 + 8 + 12 + 20 + 12 + 20 = 108`,
+/// and the one pixel the tags row's last row takes is the 109th.
+const CARD_CONTENT: f32 = 109.0;
+/// The card's top padding, which is [`ui::CARD_PAD`] and one more.
 ///
-/// It is 110 here because iced draws a container's border *inside* its bounds, so
-/// it eats a pixel of padding at each end where CSS puts it outside: 110 + 32 = 142,
-/// where 108 + 32 drew a 140-pixel card. The audit measured ours at 138 against the
-/// reference's 140 for the same reason.
-const CARD_CONTENT: f32 = 110.0;
-/// Where the tags row starts inside the content box: `358 - 276 = 82`, measured, and
-/// the `mt-auto` this draws it with.
-const CARD_TAGS_TOP: f32 = 82.0;
+/// iced draws a container's border *inside* its bounds, so a card padded at 16
+/// starts its content at `border + 16` where CSS starts it at `border + 1 + 16`:
+/// measured, our icon was at x=105 against the reference's 105 and our card's own
+/// rule 1 pixel narrower on the left, because the whole content column is a pixel
+/// narrower -- but its *rows* were each a pixel high, because the border ate a pixel
+/// of padding above them and none below. Seventeen above, sixteen below, is the
+/// pair that puts the content box at y=276..384.
+const CARD_PAD_TOP: f32 = ui::CARD_PAD + 1.0;
+/// Where the tags row starts inside the content box: `360 - 276 = 84`, measured as
+/// the *bottom* of the row, which is where `mt-auto` puts it -- the row ends flush
+/// with the content box and [`ui::tag`] is 24 pixels tall inside the reference's
+/// 26-pixel row (the reference's carries an `h-4` icon; see the notes).
+const CARD_TAGS_TOP: f32 = 83.0;
 
 /// The header's own action.
 ///
@@ -124,8 +167,11 @@ const CARD_TAGS_TOP: f32 = 82.0;
 /// that reloads itself.
 const MORE_KEY: &str = "user:more";
 
-/// A card's *Install*, whose identity is the project rather than the row: the
-/// button is one per card and every card's button must not light together.
+/// A card's *Install*, whose identity is the project rather than the row.
+///
+/// Namespaced per project with [`ui::scoped`], because a card's own hover and its
+/// button's hover are two controls: one key for both would light a button the
+/// pointer has not reached.
 const INSTALL_KEY: &str = "user:install";
 
 /// What the overflow holds here.
@@ -286,14 +332,34 @@ impl Profile {
     /// `None` is the strip's *All* tab, which is the reference's own reading of an
     /// address with no type in it. The filter is compared against the project's own
     /// type string, as the reference's `filterProjectsByType` does.
+    ///
+    /// The order is the reference's too, and it is not the service's:
+    /// `layout.vue:746` is `filterProjectsByType(...).slice().sort(projectUserSorting)`,
+    /// and `user-profile/utils.ts:33` orders by a `status` priority first and by
+    /// `downloads` descending within a priority. This tree's
+    /// `ModrinthUserProject` does not read `status` -- that field lives in
+    /// `palantir-net`, which this pass does not own -- so the priority table cannot
+    /// be evaluated and the comparator collapses to its `downloads` branch, which is
+    /// what every project on *somebody else's* profile is: `/v2/user/{id}/projects`
+    /// answers an unlisted or private project only to its owner. What is left is
+    /// still the reference's rule rather than the service's, and it matters: the API
+    /// returns the list ordered by id, so without it the first card was whichever
+    /// project happened to sort first in the alphabet -- measured as *Random Island*
+    /// where the reference draws *Zombie Invade 100 Days*, the account's largest.
     pub fn shown(&self, filter: Option<ProjectType>) -> Vec<&ModrinthUserProject> {
-        self.projects
+        let mut shown: Vec<&ModrinthUserProject> = self
+            .projects
             .iter()
             .filter(|project| match filter {
                 Some(kind) => ProjectType::from_token(&project.project_type) == Some(kind),
                 None => true,
             })
-            .collect()
+            .collect();
+        // `getProjectSortValue(second, ..) - getProjectSortValue(first, ..)`: the
+        // larger count first. The sort is stable, so a tie keeps the service's own
+        // order rather than inventing one.
+        shown.sort_by_key(|project| std::cmp::Reverse(project.downloads));
+        shown
     }
 }
 
@@ -623,6 +689,7 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
                                 .push(
                                     text(profile.summary().to_string())
                                         .size(HEADER_TEXT)
+                                        .line_height(iced::Pixels(HEADER_SUMMARY_LINE))
                                         .font(medium())
                                         .style(iced::theme::Text::Color(theme_gen::ink(
                                             theme,
@@ -644,17 +711,29 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
             ui::Size::Xl,
             Message::More,
         ));
-    container(block)
+    // The rule is its own element rather than the container's border.
+    //
+    // `page-header/index.vue:60` is `border-0 border-b border-solid`, and iced's
+    // `Border` is symmetric: giving this container `width: 1.0` drew three rules
+    // the reference has none of -- 865 pixels across the top at y=73, 110 down
+    // each side, and the real one along the bottom -- 1085 spurious pixels against
+    // the reference's 868. A `Space` one pixel tall paints the one rule, and it
+    // lands *below* the `pb-4` because CSS puts the border outside the padding.
+    let rule = container(Space::with_width(Length::Fill).height(Length::Fixed(1.0)))
         .width(Length::Fill)
-        .padding(Padding { top: 0.0, right: 0.0, bottom: HEADER_PAD_BOTTOM, left: 0.0 })
+        .height(Length::Fixed(1.0))
         .style(move |_theme: &iced::Theme| iced::widget::container::Appearance {
-            border: Border {
-                color: theme_gen::ink(theme, theme_gen::Ink::Divider),
-                width: 1.0,
-                ..Border::default()
-            },
+            background: Some(iced::Background::Color(theme_gen::ink(
+                theme,
+                theme_gen::Ink::Divider,
+            ))),
             ..iced::widget::container::Appearance::default()
-        })
+        });
+    column![]
+        .width(Length::Fill)
+        .push(block)
+        .push(Space::with_height(Length::Fixed(HEADER_PAD_BOTTOM)))
+        .push(rule)
         .into()
 }
 
@@ -721,13 +800,16 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
 /// The 26-pixel slot one item's divider occupies, with the dot centred in it.
 ///
 /// `absolute right-full flex h-full w-[1.625rem] items-center justify-center` --
-/// the span is as wide as the gap it replaces, so the dot lands 10 pixels either
-/// side of its own centre. Measured at the reference's own 1280x720: the first
-/// item's words end at x=305, the dot is x=316..321 and the next item's icon
-/// starts at x=332.
+/// the span is as wide as the gap it replaces, and `justify-center` is the half of
+/// that the port had been leaving out: a slot centred only on its vertical axis
+/// put the dot against the item that follows it, measured 10 pixels left of where
+/// the reference draws it (its own centre at x=308.5 against the reference's 319).
+/// Measured at the reference's own 1280x720: the first item's words end at x=305,
+/// the dot is x=316..321 and the next item's icon starts at x=332.
 fn slot<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     container(bullet(theme))
         .width(Length::Fixed(METADATA_GAP))
+        .center_x()
         .center_y()
         .into()
 }
@@ -805,11 +887,16 @@ fn filter_strip<'a>(
 /// That template is the whole reason this function is not a column of two things.
 /// The icon column is named in *all three* rows, so it runs the card's full
 /// height, and the tags sit on the card's last row -- which is inside the icon's
-/// span, not after it. Drawn as a column instead (which is what this page did, and
-/// what the audit measured at a 63-pixel error on the stats and an 8-pixel one on
-/// the card pitch) the tags end up below the icon and the card grows by a whole
-/// row. So the grid is built as a [`Stack`]: the first layer is the icon beside
-/// the right-hand rows, the second is the tags at the card's own bottom.
+/// span, not after it. So the head is a [`Stack`]: the first layer is the icon
+/// beside the `1fr` info column and the two right-hand columns, the second is the
+/// tags at the card's own bottom.
+///
+/// `__stats` spans rows two *and* three, which is the other thing a row-and-column
+/// reading gets wrong. It is one `flex flex-col gap-3 items-end` holding the
+/// downloads line and then the date, right-aligned, and its `mt-3` puts it a
+/// `gap-y-2` and twelve more pixels below the button's row. Drawn as two
+/// independent rows the audit measured the downloads at rel y 95 against the
+/// reference's 75, the date at 101 against 106, and the two overlapping by ten.
 ///
 /// Every landmark below is measured off `/tmp/ref/user-ref.png` at the
 /// reference's own 1280x720: the card is x=88..955 and y=259..400 (868 x 142), its
@@ -827,8 +914,10 @@ fn project_row<'a>(
     let (factor, _) = ui::interaction(key);
     let now = now_millis();
 
-    // Row 1: the title and the summary, which `__info` holds across rows 1 and 2,
-    // and the actions, which `__actions` holds in the top right.
+    // `__info`, the `1fr` column: the title, then the summary. It is width-
+    // constrained rather than laid out at its natural width, because the column it
+    // has to stop in is what wraps it: on the reference's own first card the
+    // summary's first line ends at x=739, 47 pixels short of the stats.
     let info = column![]
         .width(Length::Fill)
         .spacing(CARD_INFO_GAP)
@@ -840,67 +929,44 @@ fn project_row<'a>(
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         )
         .push(
-            // `line-clamp-2` at `text-sm`: 14 pixels on a 20-pixel line. The audit
-            // measured our pitch at 19 because `ui::paragraph` leaves iced's default
-            // line height, which is the face's own metrics rather than the
-            // stylesheet's.
-            text(project.description.clone())
-                .size(CARD_SUMMARY)
-                .line_height(iced::Pixels(CARD_SUMMARY_LINE))
-                .font(crate::style::regular())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            // `ProjectCard.vue:120`'s `project-card-summary m-0 font-normal
+            // line-clamp-2` carries no size class, so it inherits `text-base` --
+            // sixteen pixels on the stylesheet's own 18.4-pixel line. `text-sm` is
+            // only reached from the `@container (width < 550px)` block, and an
+            // 868-pixel card never trips it.
+            //
+            // `line-clamp-2` is a *height*, and iced has no line clamp: what it
+            // does have is cosmic-text's own line budget, which
+            // `LayoutRunIter::new` computes as `(height / line_height) as i32`
+            // (vendor/cosmic-text/src/buffer.rs:215). Pinning the box to two lines
+            // therefore pins the paragraph to two lines -- and to two lines of
+            // *height*, which is what `__info`'s own height is: measured, the
+            // reference's summary occupies y=305..340 and nothing below it. Without
+            // the box the summary ran to a fourth line and printed a stray word at
+            // y=358, inside the tags row.
+            container(
+                text(project.description.clone())
+                    .size(CARD_SUMMARY)
+                    .line_height(iced::Pixels(CARD_SUMMARY_LINE))
+                    .width(Length::Fill)
+                    .font(crate::style::regular())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(CARD_SUMMARY_LINE * 2.0)),
         );
-    // `ProjectCardStats`: downloads, then a heart and the followers. It sits in
-    // `__stats`, which the template puts on the card's second row at the right.
-    let stats = row![]
+    // `__stats`: downloads and then followers on one line, the date under it, the
+    // pair right-aligned against the card's own right edge.
+    let stats = column![]
         .spacing(CARD_STATS_GAP)
-        .align_items(Alignment::Center)
-        .push(stat(theme, Glyph::Download, &compact_stat(project.downloads)))
-        .push(stat(theme, Glyph::Heart, &compact_stat(project.followers)));
-    let head = row![]
-        .width(Length::Fill)
-        .spacing(CARD_GAP_X)
-        .align_items(Alignment::Start)
-        // `Avatar size="100px"`, the icon column every reference card opens with.
-        // Measured: x=105..204 and y=276..375, which is the 100 its container query
-        // keeps above 850 pixels of card width.
-        .push(icon_box(theme, profile.icon(project)))
+        .align_items(Alignment::End)
         .push(
-            column![]
-                .width(Length::Fill)
-                .spacing(CARD_GAP_Y)
-                .align_items(Alignment::Start)
-                .push(
-                    row![]
-                        .width(Length::Fill)
-                        .spacing(CARD_GAP_X)
-                        .align_items(Alignment::Start)
-                        .push(info)
-                        // `User.vue`'s `#project-actions` slot: an outlined brand
-                        // button, a download icon for a pack and a plus for
-                        // anything else.
-                        .push(install_button(theme, project)),
-                )
-                // Row 2 of the template, whose third column is the `dummy` cell and
-                // whose fourth is `stats`: measured at y=334..349, which is 58
-                // pixels below the card's content top.
-                .push(
-                    row![]
-                        .width(Length::Fill)
-                        .align_items(Alignment::Start)
-                        .push(Space::with_width(Length::Fill))
-                        .push(stats),
-                ),
+            row![]
+                .spacing(CARD_STATS_GAP)
+                .align_items(Alignment::Center)
+                .push(stat(theme, Glyph::Download, &compact_stat(project.downloads)))
+                .push(stat(theme, Glyph::Heart, &compact_stat(project.followers))),
         );
-
-    // Row 2: `__stats`, right-aligned, downloads and then followers on one line.
-
-    // Row 3: the tags at the left and the date at the right, which is where
-    // `__tags` and the tail of `__stats` put them.
-    let mut tags = row![].width(Length::Fill).spacing(4.0).align_items(Alignment::Center);
-    if let Some(kind) = ProjectType::from_token(&project.project_type) {
-        tags = tags.push(ui::tag(theme, kind.label()));
-    }
     // `ProjectCardDate` with `autoDisplayDate`, which is `'updated'` whenever the
     // document carries one and `HistoryIcon` for that case.
     let date_key = if project.updated.is_empty() {
@@ -909,44 +975,82 @@ fn project_row<'a>(
         (Glyph::History, project.updated.as_str())
     };
     let when = how_ago(date_key.1, now);
-    // The indent is *inside* this row rather than being the overlay's offset: a
-    // translated layer still lays out at the stack's full width, so offsetting the
-    // row by 112 gave it 112 pixels more than the card has and pushed the date off
-    // its right edge. The audit caught it as a date that ended at x=938 clipped to
-    // "10 m".
-    let tail = row![]
+    let stats = if when.is_empty() {
+        stats
+    } else {
+        stats.push(stat(theme, date_key.0, &when))
+    };
+    // `__actions` and `__stats` are the grid's third and fourth columns, both
+    // flush right, so they share one column here and one column's width: the
+    // wider of the two, which is what an `auto` track takes. Measured on the
+    // reference's first card: the button's ring is 94 pixels and the stats' ink
+    // 152, so the track is 152 and the button sits at x=845..938.
+    let right = column![]
+        .spacing(CARD_STATS_LEAD)
+        .align_items(Alignment::End)
+        // `User.vue`'s `#project-actions` slot: an outlined brand button, a
+        // download icon for a pack and a plus for anything else.
+        .push(install_button(theme, ui::scoped(INSTALL_KEY, &project.id), project))
+        .push(stats);
+    let head = row![]
         .width(Length::Fill)
-        .spacing(CARD_GAP_X)
-        .align_items(Alignment::Center)
-        .push(Space::with_width(Length::Fixed(CARD_ICON + CARD_GAP_X)))
-        .push(tags)
-        .push(Space::with_width(Length::Fill))
-        .push(if when.is_empty() {
-            Space::with_width(Length::Shrink).into()
-        } else {
-            stat(theme, date_key.0, &when)
-        });
-
-    let body = Stack::at(
-        Vector::ZERO,
-        container(
+        // Two `gap-x-3`: the grid's third column is `auto` and empty, because
+        // `__actions` spans columns three and four and pushes itself right.
+        .spacing(CARD_COL_GAP)
+        .push(
             row![]
                 .width(Length::Fill)
                 .spacing(CARD_GAP_X)
                 .align_items(Alignment::Start)
-                .push(head),
+                // `Avatar size="100px"`, the icon column every reference card opens
+                // with. Measured: x=105..204 and y=276..375, which is the 100 its
+                // container query keeps above 850 pixels of card width.
+                .push(icon_box(theme, profile.icon(project)))
+                .push(info),
         )
+        .push(right);
+
+    // Row 3: `__tags`, which spans columns two to four and is pushed to the
+    // bottom of its row by `mt-auto`, and so ends flush with the content box.
+    let mut tags = row![].spacing(4.0).align_items(Alignment::Start);
+    if let Some(kind) = ProjectType::from_token(&project.project_type) {
+        tags = tags.push(ui::tag(theme, kind.label()));
+    }
+    // The indent is *inside* this row rather than being the overlay's offset: a
+    // translated layer still lays out at the stack's full width, so offsetting the
+    // row by 112 gave it 112 pixels more than the card has and pushed whatever sat
+    // at its right edge off the card.
+    let tail = row![]
         .width(Length::Fill)
-        .height(Length::Fixed(CARD_CONTENT)),
+        .height(Length::Fixed(26.0))
+        .spacing(CARD_GAP_X)
+        // The icon column, with the grid's own `gap-x-3` after it: `100 + 12 = 112`
+        // from the content box's left edge, which is `1 + 16 + 100 + 12 = 129` from
+        // the card's own -- the reference's x=217. Indenting by `112` *and*
+        // spacing by 12 put the first pill at x=229, twelve too far.
+        .push(Space::with_width(Length::Fixed(CARD_ICON)))
+        .push(tags);
+
+    let body = Stack::at(
+        Vector::ZERO,
+        container(head).width(Length::Fill).height(Length::Fixed(CARD_CONTENT)),
     )
-    // The tags row, `mt-auto` to the bottom of the content box and indented by the
-    // icon column plus the grid's own gap: `100 + 12 = 112`.
+    // The tags row, `mt-auto` to the bottom of the content box, 26 pixels tall --
+    // the reference's own row, which its `h-4` tag icon makes 26 -- so the row's
+    // last row is the content box's last row.
     .over(Vector::new(0.0, CARD_TAGS_TOP), tail);
 
     mouse_area(
         container(body)
             .width(Length::Fill)
-            .padding(ui::CARD_PAD)
+            // Seventeen above and sixteen below, because iced's border is inside
+            // its bounds and CSS's is not: see [`CARD_PAD_TOP`].
+            .padding(Padding {
+                top: CARD_PAD_TOP,
+                right: ui::CARD_PAD,
+                bottom: ui::CARD_PAD,
+                left: ui::CARD_PAD,
+            })
             .style(move |_theme: &iced::Theme| container::Appearance {
                 background: Some(iced::Background::Color(crate::theme::brightness(
                     theme_gen::ink(theme, theme_gen::Ink::Surface3),
@@ -977,6 +1081,17 @@ fn project_row<'a>(
 /// and paints the text in `--color-text-secondary`, where `ProjectCardStats` names
 /// no colour and so inherits `--color-text-primary`. The audit measured both as
 /// exact inversions.
+///
+/// The line is pinned and not left to the default, and that is not tidiness.
+/// cosmic-text crops a paragraph to `(height / line_height) as i32` lines
+/// (vendor/cosmic-text/src/buffer.rs:215), and iced's own default line height is
+/// `Relative(1.3)` -- 20.8 pixels at this size. `__stats`' date row is given 21
+/// pixels of height by the grid above it, and 41 - 20.8 leaves it 20.2: with a
+/// 20.8-pixel line that is *zero* lines, so the words measured 0 wide, the row
+/// measured 28, and the date drew as its icon alone at the card's right edge. An
+/// 18-pixel line -- the stylesheet's own `1.15`, the same number
+/// [`CARD_SUMMARY_LINE`] is -- gives every row its `size-5` icon's own twenty
+/// pixels and one full line of words, which is what the reference measures.
 fn stat<'a, Message: 'a>(theme: Gen, glyph: Glyph, value: &str) -> Element<'a, Message> {
     row![]
         .spacing(METADATA_TEXT_GAP)
@@ -985,6 +1100,7 @@ fn stat<'a, Message: 'a>(theme: Gen, glyph: Glyph, value: &str) -> Element<'a, M
         .push(
             text(value.to_string())
                 .size(HEADER_TEXT)
+                .line_height(iced::Pixels(CARD_SUMMARY_LINE))
                 .font(medium())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
         )
@@ -993,28 +1109,79 @@ fn stat<'a, Message: 'a>(theme: Gen, glyph: Glyph, value: &str) -> Element<'a, M
 
 /// `User.vue`'s `#project-actions`: outlined, brand ink, a brand hairline.
 ///
-/// `type="outlined"` with `!text-brand` and `!shadow-[inset_0_0_0_1px_var(--color-brand)]`,
-/// and a `DownloadIcon` when the project is a pack and a `PlusIcon` when it is not
-/// -- the two arms of the reference's own ternary. It is `size` md, the frame's
-/// default, which measured 36 pixels tall at y=276..311.
-fn install_button<'a>(theme: Gen, project: &ModrinthUserProject) -> Element<'a, Message> {
+/// `User.vue:13-19` is a `Button` with `type="outlined"` and
+/// `class="!text-brand [&>svg]:!text-brand !shadow-[inset_0_0_0_1px_var(--color-brand)]"`,
+/// which is `ButtonFrame.vue`'s own `outlined` type with its `--button-color` set to
+/// the brand: a transparent plate, a 1-pixel brand ring and a brand label and icon.
+/// Measured on the reference's own first card: 344 exact `#1BD96A` pixels on the
+/// button alone -- ring `x=845..938, y=276..311`, corners rounded at `rounded-xl`'s
+/// twelve -- and 1247 across the three cards, none of which `ui::Kind::Outlined`
+/// drew, because that kind's ring is `Ink::Surface5` and its label is contrast ink.
+///
+/// So the frame is built here rather than taken from [`ui::Kind::Outlined`], which
+/// is reserved to the control kit. Every number below is `ui::Size::Md`'s own --
+/// `ButtonFrame.vue`'s `md` row reads `h-9 gap-1.5 rounded-xl px-2.5 text-base
+/// font-semibold leading-5 [&>svg]:size-5`, and `ui.rs` already carries all seven.
+/// The ring is a `Border` on the button's own 36-pixel box rather than an outer
+/// shadow, which is what the reference's own 36 rows of ring measure.
+fn install_button<'a>(
+    theme: Gen,
+    key: &'static str,
+    project: &ModrinthUserProject,
+) -> Element<'a, Message> {
     let pack = ProjectType::from_token(&project.project_type) == Some(ProjectType::Modpack);
     // `commonMessages.installButton` for a pack and `messages.installToInstance`
     // for anything else: the reference's own ternary over `project.project_types`,
     // which is why a pack's button reads *Install* and a mod's reads *Install to
     // instance*.
-    let label =
-        if pack { Key::ButtonInstall } else { Key::AppUserProjectInstallToInstance };
-    ui::button_with_icon_sized(
-        theme,
-        INSTALL_KEY,
-        if pack { Glyph::Download } else { Glyph::Plus },
-        label,
-        ui::Kind::Outlined,
-        ui::Size::Md,
-        Length::Shrink,
-        Some(Message::Install(project.id.clone(), project.title.clone(), pack)),
+    let label = if pack { Key::ButtonInstall } else { Key::AppUserProjectInstallToInstance };
+    let size = ui::Size::Md;
+    // One ink for the ring, the label and the icon in front of it, which is what
+    // `!text-brand [&>svg]:!text-brand` says and what a CSS `filter` on the element
+    // does to all three together.
+    let (factor, _) = ui::interaction(key);
+    let ink = crate::theme::brightness(theme_gen::ink(theme, theme_gen::Ink::Brand), factor);
+    let face = container(
+        row![]
+            .spacing(size.gap())
+            .align_items(Alignment::Center)
+            .push(icon::icon(
+                if pack { Glyph::Download } else { Glyph::Plus },
+                size.icon(),
+                ink,
+            ))
+            .push(
+                text(label.message())
+                    .size(size.label())
+                    .line_height(iced::Pixels(size.line()))
+                    .font(size.font())
+                    .style(iced::theme::Text::Color(ink)),
+            ),
     )
+    .height(Length::Fixed(size.height()))
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: size.pad(),
+        right: size.pad(),
+    })
+    .center_x()
+    .center_y()
+    .style(move |_theme: &iced::Theme| container::Appearance {
+        // `bg-transparent`: the card's own surface shows through, as the reference's
+        // 199 interior pixels of `#27292E` between the ring's arms do.
+        border: Border { color: ink, width: 1.0, radius: size.radius().into() },
+        ..container::Appearance::default()
+    });
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        // The same crossing `ui::sized_face` publishes, so the 150 ms clock
+        // (`crate::ui::pointer_with`, reached through [`Message::hover`]) carries
+        // this button's brightness filter exactly as it carries every other's.
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(Message::Install(project.id.clone(), project.title.clone(), pack))
+        .into()
 }
 
 /// The 100-pixel square a card's icon is drawn in, whether or not one arrived.
@@ -1304,6 +1471,17 @@ mod tests {
         assert_eq!(mods.len(), 2);
         assert!(mods.iter().all(|project| project.project_type == "mod"));
         assert_eq!(profile.shown(Some(ProjectType::Shader)).len(), 0);
+        // `projectUserSorting`: the most-downloaded project first, which is not the
+        // order the service answered in (the fixture's is Sodium, Phosphor, then
+        // Fabulously Optimized, and Phosphor has the fewest downloads of the two
+        // mods). Measured against the reference on FlameFire, whose API answer was
+        // ordered by id and whose reference list led with its 14.8M-download pack.
+        let titles: Vec<&str> =
+            profile.shown(None).iter().map(|project| project.title.as_str()).collect();
+        assert_eq!(titles, vec!["Sodium", "Phosphor", "Fabulously Optimized"]);
+        let mods: Vec<&str> =
+            profile.shown(Some(ProjectType::Mod)).iter().map(|project| project.title.as_str()).collect();
+        assert_eq!(mods, vec!["Sodium", "Phosphor"]);
     }
 
     #[test]
@@ -1523,19 +1701,46 @@ mod tests {
     #[test]
     fn the_card_is_the_height_the_reference_measures_and_not_the_one_the_box_asks_for() {
         // `ProjectCard.vue`'s list card measures 142 including its two 1-pixel
-        // borders, so the box inside the padding is 108 -- and iced's border is
-        // drawn inside the bounds, eating a pixel of padding at each end. So the
-        // content is asked for 110 and the card comes out 142 rather than 140.
-        assert_eq!(CARD_CONTENT, 110.0);
-        assert_eq!(CARD_CONTENT + ui::CARD_PAD * 2.0, 142.0);
+        // borders and its content box y=276..384 *inclusive*, so the box is 109 and
+        // the padding above it is 17: iced's border is drawn inside the bounds, so
+        // it eats a pixel of padding above the content and none below, and
+        // seventeen above with sixteen below is the pair that puts the content
+        // where the reference's is. 17 + 109 + 16 is the 142.
+        assert_eq!(CARD_CONTENT, 109.0);
+        assert_eq!(CARD_PAD_TOP, ui::CARD_PAD + 1.0);
+        assert_eq!(CARD_PAD_TOP + CARD_CONTENT + ui::CARD_PAD, 142.0);
         assert_eq!(CARD_ICON, 100.0);
-        // The tags row sits 82 pixels down the content box, which is `358 - 276`
-        // off the reference's own capture.
-        assert_eq!(CARD_TAGS_TOP, 82.0);
+        // The right-hand column's own rows: the button's `h-9`, a `gap-y-2` and an
+        // `mt-3` down to `__stats`, the 20-pixel stats row, a `gap-3`, and the
+        // 20-pixel date row. They come to 108 of the content box's 109 -- the
+        // ninth pixel is the one the tags row's last row takes -- which is why the
+        // column needs no offset of its own: the button lands at the content box's
+        // top and the date at its bottom.
+        assert_eq!(
+            ui::Size::Md.height() + CARD_STATS_LEAD + CARD_STAT_ICON + CARD_STATS_GAP + CARD_STAT_ICON,
+            CARD_CONTENT - 1.0
+        );
+        // The tags row is the reference's own 26, `mt-auto` to the content box's
+        // bottom, so it starts one pixel above our 24-pixel pill's own bottom.
+        assert_eq!(CARD_TAGS_TOP + 26.0, CARD_CONTENT);
+        // And the kit's own 24-pixel pill still sits inside that 26-pixel row.
         assert!(CARD_TAGS_TOP + ui::TAG_HEIGHT <= CARD_CONTENT, "the tags row is inside the box");
-        // And the icon column plus the grid's own gap is the indent the last row
-        // starts at.
+        // And the icon column is the indent the tags row starts at, with the
+        // grid's own `gap-x-3` after it -- which together put the first pill at the
+        // card's left + 129, the reference's x=217. Indenting by the sum *and*
+        // spacing again is what put ours at x=229.
         assert_eq!(CARD_ICON + CARD_GAP_X, 112.0);
+        assert_eq!(CARD_ICON + CARD_GAP_X + 17.0, 129.0);
+        // And `line-clamp-2` is two of the summary's own lines.
+        assert_eq!(CARD_SUMMARY_LINE * 2.0, 36.0);
+        // Two `gap-x-3` between the `1fr` column and the right-hand ones, because
+        // the grid's third `auto` column is empty.
+        assert_eq!(CARD_COL_GAP, CARD_GAP_X * 2.0);
+        // The summary inherits `text-base` on the stylesheet's own 18.4-pixel line,
+        // which paints as 18 -- measured, the reference's two summary lines are 18
+        // pixels apart.
+        assert_eq!(CARD_SUMMARY, 16.0);
+        assert_eq!(CARD_SUMMARY_LINE, 18.0);
     }
 
     #[test]
