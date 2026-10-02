@@ -4441,7 +4441,13 @@ impl Shell {
         } else {
             None
         };
-        let ink = if primary {
+        // The profile slot is `LogInIcon class="!text-brand"` whenever there is
+        // no account to show, and the `!` is doing work: the reference's
+        // `hover:text-contrast` is overridden, so a pointer over it changes the
+        // background and leaves the icon brand green.
+        let ink = if slot == Rail::Profile {
+            theme_gen::ink(theme, Ink::Brand)
+        } else if primary {
             theme_gen::ink(theme, INK_PLATE_TEXT)
         } else if hovered || mark.is_some() {
             theme_gen::ink(theme, INK_CONTRAST)
