@@ -100,3 +100,49 @@ in binary distributions alike. Adding an entry is part of taking the code.
   upstream rather than carried -- offering the whole database to a fallback pass is
   what a fallback pass should do -- and a later `iced` that asks for a newer
   `cosmic-text` would have to bring it here again.
+
+## Art adopted from the reference's own picture
+
+* **What**: the art `ServerListEmpty.vue` and `ServerListEmptyPreview.vue` draw
+  inside the *Servers* page's empty state, copied into
+  `crates/palantir-desktop/assets/hosting/` and embedded with `include_bytes!`
+  from `crates/palantir-desktop/src/pages/servers.rs`. Twelve PNGs, 1,160,895
+  bytes in total:
+
+  | File | Bytes | Where it is drawn | Box |
+  | --- | --- | --- | --- |
+  | `icon-texture.png` | 959,049 | the plate's three inner layers | `h-[6.25rem] w-[9.8125rem]` at `opacity-40` |
+  | `josh.png`, `prospector.png`, `fetch.png`, `imb11.png`, `truman.png`, `boris.png`, `saya.png`, `michael.png` | 38,446 / 10,820 / 27,094 / 27,301 / 2,860 / 23,653 / 28,627 / 4,936 | one friend row each | `Avatar size="1.5rem" circle` |
+  | `geometrically.png` | 13,639 | the invite toast | `Avatar size="2.25rem" circle` |
+  | `modrinth-smp.png` | 23,919 | the toast's server line | `Avatar size="1.25rem"` |
+  | `Pointer.png` | 551 | the badge on the *Prospector* row | `size-4` in a `size-8` badge |
+
+* **Why**: the reference draws this page as a *picture* of its invite dialog --
+  `ServerListEmptyPreview.vue` is `inert aria-hidden` -- and the picture is made of
+  photographs. A port that drew the same picture with glyphs is a different
+  picture: the eight rows are matched by photograph, so an account glyph cannot
+  stand in for one of them. This adopts the picture rather than describing it.
+* **From**: the same tree and the same commit as everything else above --
+  `vendor/modrinth-app/`, <https://github.com/modrinth/code> at
+  `8966b5e2e7951e83651fbebbf2fb6d7608a94a33`, taken from
+  `ui/src/assets/welcome/icon-texture.png`,
+  `ui/src/assets/servers/server-list-empty/*.png` and
+  `ui/src/components/servers/server-list-empty/Pointer.png`. `modrinth-smp.png` is
+  the Modrinth wordmark and `geometrically.png` is a photograph of a person; both
+  are covered by the licence and *not* by it in the way the next paragraph sets
+  out.
+* **Licence**: GPL-3.0, the same licence as the vendored tree and as this
+  repository, with the text travelling with the source in
+  `vendor/modrinth-app/LICENSE-GPL-3.0.txt`.
+* **Trademarks, again**: Modrinth's wordmark is Modrinth's mark, and GPL-3.0 grants
+  rights in the copy and not in the identity. The *Modrinth SMP* mark is here for
+  the same reason the icon set above is: it is what the reference draws in that
+  slot, and `REFERENCE.md` records which. `REFERENCE.md`'s standing rule -- that
+  the launcher draws its own mark and its own illustrations -- is *not* followed
+  for these twelve files, and this entry is where that departure is recorded.
+* **Changes**: none. Every file is byte-for-byte upstream, verified with `md5sum`
+  against its source. Every transform happens at draw time, in
+  `servers.rs`: `avatar::Icon::of` and `Icon::circle` do the reference's `contain`
+  fit and its corner masks, and the plate's texture is cropped to the window the
+  reference's `object-cover` shows before it is composited -- none of it writes to
+  the files.
