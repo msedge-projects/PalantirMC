@@ -3684,8 +3684,17 @@ impl Shell {
         if self.downloads && !self.jobs.is_empty() {
             window = window.push(self.download_panel());
         }
-        window
-            .push(row![self.rail(), self.pane()].height(Length::Fill))
+        // The window behind everything is `--bg-raised`, the reference's own
+        // root: wherever a page does not reach, the raised colour is what shows,
+        // and the page's rounded corner is a cut into the chrome rather than
+        // into another copy of the page. iced clears a window with its theme's
+        // `background`, and that palette entry is `--bg` -- the colour unstyled
+        // widgets sit on -- so the root is drawn as a chrome surface here
+        // instead of reaching into the palette every widget reads.
+        container(window.push(row![self.rail(), self.pane()].height(Length::Fill)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(chrome)
             .into()
     }
 
@@ -4458,7 +4467,7 @@ impl Shell {
             .into()
     }
 
-    /// The page pane: the page's container, and the page in it.
+    /// The page pane: the page's edge, the page's container, and the page in it.
     fn pane(&self) -> Element<'_, Message> {
         let theme = self.theme;
         // The page speaks `pages::Message` and the shell speaks its own, so the
@@ -4472,11 +4481,40 @@ impl Shell {
         } else {
             vec![body.into()]
         };
-        container(row(elements).height(Length::Fill))
+        let page = container(row(elements).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
+                border: Border {
+                    radius: iced::border::Radius::from([PAGE_RADIUS, 0.0, 0.0, 0.0]),
+                    ..Border::default()
+                },
+                ..container::Appearance::default()
+            });
+        // `.app-contents` carries a 1px `--surface-5` edge over its top and left
+        // inside the `--radius-xl` corner, and the page's own background starts
+        // one pixel in: in the reference's capture the rule is at x=64 and y=48,
+        // and the page's `--bg` begins at x=65 and y=49. Two straight rules
+        // would leave the corner's arc unlined, and iced 0.12's border width is
+        // one width on all four sides, so the edge is drawn the way the
+        // reference paints it: this container covers the whole pane in the
+        // rule's colour, the page is laid over all of it but that 1px, and the
+        // arc is the sliver the two rounded corners' own radii show between
+        // them. The page is a pixel narrower and shorter than the pane for the
+        // same reason the reference's content is: it starts after its border,
+        // not under it.
+        container(page)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: 1.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 1.0,
+            })
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
                 border: Border {
                     radius: iced::border::Radius::from([PAGE_RADIUS, 0.0, 0.0, 0.0]),
                     ..Border::default()
