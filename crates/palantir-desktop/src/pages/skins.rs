@@ -345,6 +345,15 @@ pub enum Message {
     },
     /// The notice's own link was pressed: open the Ears mod's project page.
     OpenEars,
+    /// The demo banner's button was pressed: sign in to Minecraft.
+    ///
+    /// The reference's `login()`, which opens its sign-in modal. That flow is a
+    /// later stage here and it belongs to the shell -- the shell's own account
+    /// card asks for it -- but a page cannot ask for it, so the press is the
+    /// page's and what it says is the page's own sentence. Pressing it must not
+    /// be silent: the reference's button opens a window, and a button that
+    /// swallows its press is a button that looks like it is broken.
+    SignIn,
     /// The modal was dismissed without doing anything.
     CloseEdit,
     /// The modal asked for one of its three actions.
@@ -424,6 +433,11 @@ const WEAR_KEY: &str = "skins:wear";
 const DOLL_WIDTH: f32 = 96.0;
 const DOLL_HEIGHT: f32 = 192.0;
 
+/// The demo banner's own button. One control, so one name for the hover
+/// clock -- the page's rows take theirs from [`ui::scoped`] because they repeat
+/// and this one does not.
+const SIGN_IN_KEY: &str = "skins:sign-in";
+
 /// The mark beside the skin or cape that is in force.
 const WORN_MARK: f32 = 14.0;
 
@@ -495,6 +509,34 @@ const CARD_INSET: f32 = 8.0;
 
 /// The plus in the saved section's first cell: `size-8`.
 const ADD_ICON: f32 = 32.0;
+
+/// The demo banner's own padding: `p-4 pt-0` on the block that holds it --
+/// 16 on both sides and under it, none above, because the block sits against
+/// the pane it is stuck to.
+const BANNER_PAD: f32 = 16.0;
+
+/// The banner's box: `rounded-[20px] border border-surface-5 bg-surface-3 p-4`.
+const BANNER_RADIUS: f32 = 20.0;
+const BANNER_INSET: f32 = 16.0;
+
+/// `max-w-5xl` -- 1024. Wider than this shell's pane at any size it is
+/// opened at, so the box is the pane's own width less its own padding, which
+/// is what the reference's is at 1280 as well (916 - 32 = 884 of 1024).
+const BANNER_MAX: f32 = 1024.0;
+
+/// `gap-3` (12) between the icon and the words, and `gap-1` (4) between the two
+/// lines of words (`flex-col gap-1`).
+const BANNER_GAP: f32 = 12.0;
+const BANNER_LINE_GAP: f32 = 4.0;
+
+/// `size-6` on the `InfoIcon` that opens the banner, in `text-blue`.
+const BANNER_ICON: f32 = 24.0;
+
+/// The two lines of words: `text-lg font-semibold leading-6` over `text-base
+/// leading-6` -- 18 and 16 on a 24-pixel line.
+const BANNER_TITLE: f32 = 18.0;
+const BANNER_LINE: f32 = 24.0;
+const BANNER_DESCRIPTION: f32 = 16.0;
 
 /// `gap-4` between that icon and the words under it, and `gap-0.5` (2)
 /// between the two lines themselves.
@@ -719,6 +761,12 @@ impl State {
                 return Some(Ask::Open(Open::Project(EARS_PROJECT.to_string())));
             }
             Message::CloseEdit => self.edit = None,
+            // The sign-in the banner's button asks for. The sentence is the
+            // shell's own for this flow (`Shell`'s `Message::SignIn`), said here
+            // because this page has no way to raise it.
+            Message::SignIn => {
+                self.notice = Some(crate::store::not_implemented("Signing in to Minecraft"));
+            }
             Message::Act(act) => {
                 // One at a time, like every other write this page can ask for: a
                 // second press while the first is out would be a second request
@@ -809,7 +857,115 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
         .align_items(Alignment::Start)
         .into(),
     );
-    page::body_padded(blocks, GAP, PAGE_INSET, Message::Wheel)
+    let layout = page::body_padded(blocks, GAP, PAGE_INSET, Message::Wheel);
+    // The reference's demo banner is a *sibling* of the layout root, not a
+    // third child of its grid: `sticky bottom-0 w-full` inside a
+    // `grid-template-columns` root would be one column wide. Here that is the
+    // shape too -- the layout scrolls above it and the banner is always at the
+    // bottom of the pane -- so this is one column rather than the one region a
+    // page used to return.
+    match demo_banner(theme, state) {
+        Some(banner) => column![layout, banner].into(),
+        None => layout,
+    }
+}
+
+/// The banner under the page when nobody is signed in, if that is the state.
+///
+/// The reference's own `v-if="!currentUser"`, and this launcher cannot read an
+/// account of its own -- a page has never seen one -- so what it goes by is the
+/// answer the shell gives a read with no Microsoft session, which is a sentence
+/// rather than a request (`Shell::skins`). That is the same state: the shell
+/// answers exactly the way the reference's own gate does, where a reader who is
+/// not signed into Minecraft is told to sign in rather than shown an empty
+/// gallery.
+///
+/// Idle and Loading draw nothing, which is the one difference: the reference
+/// knows there is no user before it has asked, and this page only finds out
+/// when the read answers.
+fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
+    if state.appearance.failure().is_none() {
+        return None;
+    }
+    // The words: `text-contrast` on the title and `text-primary` on the
+    // description, which is what `--color-text-default` resolves to -- the same
+    // pair the reference's headings use and the same one [`INK_CONTRAST`] and
+    // `INK_DEFAULT` are.
+    let words: Element<'a, Message> = column![
+        text(Key::AppSkinsDemoTitle.message())
+            .size(BANNER_TITLE)
+            .line_height(iced::Pixels(BANNER_LINE))
+            .font(crate::style::semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+        text(Key::AppSkinsDemoDescription.message())
+            .size(BANNER_DESCRIPTION)
+            .line_height(iced::Pixels(BANNER_LINE))
+            .font(crate::style::regular())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+    ]
+    .spacing(BANNER_LINE_GAP)
+    .into();
+    let words = row![
+        icon::icon(Glyph::Info, BANNER_ICON, theme_gen::ink(theme, Ink::Blue)),
+        words,
+    ]
+    .spacing(BANNER_GAP)
+    // `items-start`: the icon sits on the title's line rather than centred on
+    // the pair of them, which at 24 against 52 is a nine-pixel difference at the
+    // top of the box.
+    .align_items(Alignment::Start)
+    .width(Length::Fill);
+    // The button is the reference's own `<Button type="colored" color="brand">`
+    // with `messages.signInButton` in it, at no `size` attribute -- so
+    // `Button.vue`'s own default, `md`: `h-9`, `rounded-xl`, `px-2.5`, `gap-1.5`,
+    // a 20-pixel slot icon and a 16-pixel label. A capture of the reference
+    // measures that frame at 36 tall and 202 wide, y 643..679 of a 720-pixel
+    // window, its fill the brand green (27,217,106).
+    let button: Element<'a, Message> = ui::button_with_icon_sized(
+        theme,
+        SIGN_IN_KEY,
+        Glyph::LogIn,
+        Key::AppSkinsSignInButton,
+        ui::Kind::Colored,
+        ui::Size::Md,
+        Length::Shrink,
+        Some(Message::SignIn),
+    );
+    // `max-w-5xl` is the one number this cannot honour: a page is never told how
+    // wide its pane is (`crate::scroll::Geometry` carries an offset and a height
+    // and nothing else), so the box is the pane's own width less its padding --
+    // 905 - 32 = 873 here, against the reference's 884 -- and a window wide
+    // enough to reach the cap is the one size where this would be wrong.
+    let inner: Element<'a, Message> = container(
+        row![words, button]
+            .align_items(Alignment::Center)
+            // `justify-between` with `gap-3`: the words take the room that is
+            // left, and the button sits at the far end of the box.
+            .spacing(BANNER_GAP)
+            .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .padding(BANNER_INSET)
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(iced::Background::Color(theme_gen::ink(theme, Ink::Surface3))),
+        border: iced::Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: BANNER_RADIUS.into(),
+        },
+        ..container::Appearance::default()
+    })
+    .into();
+    Some(
+        container(inner)
+            .padding(Padding {
+                top: 0.0,
+                right: BANNER_PAD,
+                bottom: BANNER_PAD,
+                left: BANNER_PAD,
+            })
+            .into(),
+    )
 }
 
 /// The left column: the page's own title over the model preview.
@@ -1551,6 +1707,71 @@ mod tests {
     }
 
     #[test]
+    fn the_demo_banner_is_the_reference_s_own_box() {
+        // `p-4 pt-0` on the block, `rounded-[20px] border border-surface-5
+        // bg-surface-3 p-4` on the box inside it, `gap-3` between the icon and
+        // the words, `gap-1` between the two lines, `size-6` on the icon, and
+        // `text-lg` over `text-base` on a `leading-6` line.
+        assert_eq!(BANNER_PAD, 16.0);
+        assert_eq!(BANNER_RADIUS, 20.0);
+        assert_eq!(BANNER_INSET, 16.0);
+        assert_eq!(BANNER_GAP, 12.0);
+        assert_eq!(BANNER_LINE_GAP, 4.0);
+        assert_eq!(BANNER_ICON, 24.0);
+        assert_eq!(BANNER_TITLE, 18.0);
+        assert_eq!(BANNER_DESCRIPTION, 16.0);
+        assert_eq!(BANNER_LINE, 24.0);
+        // `max-w-5xl`, the one number the box cannot honour -- and the reason
+        // that is a number rather than a guess: this shell's pane is 905 at a
+        // 1280-pixel window (1280 less the 64 rail and the 300 panel), and 873
+        // after the banner's own padding, which is under the cap by 151.
+        assert_eq!(BANNER_MAX, 1024.0);
+        assert!(BANNER_MAX > 905.0 - 2.0 * BANNER_PAD);
+    }
+
+    #[test]
+    fn the_demo_banner_is_drawn_only_where_the_reference_draws_it() {
+        // The reference's own `v-if="!currentUser"`, and this page's reading of
+        // the same state: the answer a read with no Microsoft session gets,
+        // which is a sentence rather than a request.
+        let store = Store::default();
+        assert!(demo_banner(Gen::ALL[0], &State::default()).is_none(), "not asked for yet");
+        let waiting = State { appearance: Load::Loading, ..State::default() };
+        assert!(demo_banner(Gen::ALL[0], &waiting).is_none(), "still waiting on the read");
+        let signed_out = State {
+            appearance: Load::Failed("Sign in to a Microsoft account to see the skins it owns.".into()),
+            ..State::default()
+        };
+        for theme in Gen::ALL {
+            assert!(demo_banner(*theme, &signed_out).is_some(), "nobody is signed in");
+            drop(view(*theme, &signed_out, &store));
+        }
+        // An account's own appearance in hand is the other state, and the
+        // banner is not in it.
+        let signed_in = State {
+            appearance: Load::Ready(crate::skin::Appearance::of(
+                "Steve",
+                palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+                Err("the network is down".into()),
+            )),
+            ..State::default()
+        };
+        assert!(demo_banner(Gen::ALL[0], &signed_in).is_none());
+    }
+
+    #[test]
+    fn the_banner_s_sign_in_says_what_it_cannot_do() {
+        // The reference's button opens a sign-in window; this launcher's flow is
+        // not built, so the press says so in the page's own notice rather than
+        // being swallowed.
+        let mut state = State::default();
+        assert_eq!(state.update(Message::SignIn), None, "and it asks nobody for it");
+        let notice = state.notice.clone().expect("the press says something");
+        assert!(notice.contains("Signing in to Minecraft"), "got {notice}");
+        assert!(notice.ends_with("is not implemented yet."), "got {notice}");
+    }
+
+    #[test]
     fn the_page_asks_once_and_keeps_the_answer_that_answers_it() {
         let mut state = State::default();
         assert_eq!(state.appearance, Load::Idle, "nothing asked for yet");
@@ -1790,6 +2011,7 @@ mod tests {
             drop(view(*theme, &state, &store));
         }
     }
+
     #[test]
     fn opening_the_editor_reads_the_row_it_was_pressed_on() {
         let row = SavedRow {
