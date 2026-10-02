@@ -1138,12 +1138,22 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
     )
 }
 
+/// The gap between the model and the block the renderer draws under it.
+///
+/// `gap-6` on `.skin-preview-subtitle`, the block's own spacing. The distance
+/// between the *model* and that block is the reference renderer's own -- 79
+/// between the model's ink at y485 and the nametag at y564 on a capture -- and
+/// it is the one number here that is the renderer's rather than a class, since
+/// the model is a WebGL canvas and the block is DOM over it.
+const PREVIEW_SUBTITLE_GAP: f32 = 24.0;
+
 /// The left column: the page's own title over the model preview.
 ///
 /// `sticky top-6 self-start p-2` and the preview's `ml-5 mt-4
 /// h-[calc(80vh-1rem)]`: the title at the column's own edge and the box 16
-/// below it, 560 tall, with whatever is in it centred -- which is
-/// [`preview_box`]'s shape in every state, not only the one with a model in it.
+/// below it, 560 tall, with the model and the block under it centred together
+/// -- which is [`preview_box`]'s shape in every state, not only the one with a
+/// model in it.
 ///
 /// [`page::draw`] would do the four states, but it hands the ready arm a
 /// closure and nothing else, and the other three have to go *in the box* rather
@@ -1151,6 +1161,10 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
 /// the reference's box is at all. So the match is here, and it calls the same
 /// three blocks [`page::draw`] calls.
 fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    // The three states with no account to draw are the box and one sentence in
+    // it, which is `preview_box`'s own shape with no block under the model.
+    // The three states with no account to draw are the box and one sentence in
+    // it, which is `preview_box`'s own shape with no block under the model.
     let title: Element<'a, Message> = text(Key::AppSkinsTitle.message())
         .size(TITLE_SIZE)
         // `font-bold` (700) rather than [`page::title`]'s `font-extrabold`
@@ -1161,9 +1175,9 @@ fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .into();
     let body: Element<'a, Message> = match &state.appearance {
         Load::Ready(appearance) => preview_body(theme, appearance, state.wearing),
-        Load::Empty => preview_box(page::empty(theme, Key::BrowseNoResults)),
-        Load::Failed(reason) => preview_box(page::failed(theme, reason)),
-        Load::Idle | Load::Loading => preview_box(page::waiting(theme, "your skins")),
+        Load::Empty => preview_box(page::empty(theme, Key::BrowseNoResults), None),
+        Load::Failed(reason) => preview_box(page::failed(theme, reason), None),
+        Load::Idle | Load::Loading => preview_box(page::waiting(theme, "your skins"), None),
     };
     container(column![title, Space::with_height(PREVIEW_TOP), body].width(Length::Fill))
         .width(Length::FillPortion(PREVIEW_PORTION))
@@ -1180,11 +1194,33 @@ fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// a model, so it never has a state to place here, and a state that drew
 /// nothing but a line of text would be a different shape from the one the
 /// reference's own column has.
-fn preview_box<'a>(inside: Element<'a, Message>) -> Element<'a, Message> {
+/// The reference's render box: the model, and under it the block the renderer
+/// draws beneath itself.
+///
+/// `SkinPreviewRenderer` fills the box and lays its `#subtitle` slot and its
+/// nametag *inside* it -- on a signed-out capture of the reference the box is
+/// y119..679, the model's ink y255..485, the nametag y564..580 and the Edit
+/// button y608..644, all inside those 560 pixels. This drew the model in the box
+/// and everything else under it, which put the account's own rows below the
+/// bottom of the pane: the box alone is 560 tall and the pane is 671, so nothing
+/// after it was ever on screen.
+///
+/// The gap between the two is this launcher's own. The reference's is the space
+/// its WebGL model leaves, measured at 79 between the model's ink and the
+/// nametag; the block's own spacing is `gap-6` on `.skin-preview-subtitle`, and
+/// 24 is what the two are held apart by here.
+fn preview_box<'a>(
+    model: Element<'a, Message>,
+    subtitle: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut inner = column![model].spacing(PREVIEW_SUBTITLE_GAP).width(Length::Fill);
+    if let Some(subtitle) = subtitle {
+        inner = inner.push(subtitle);
+    }
     container(
         row![
             Space::with_width(PREVIEW_LEFT),
-            container(inside)
+            container(inner)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center_x()
@@ -1198,14 +1234,15 @@ fn preview_box<'a>(inside: Element<'a, Message>) -> Element<'a, Message> {
 
 /// The preview box and the account's own half under it.
 ///
-/// The reference's box holds its `SkinPreviewRenderer` and nothing else; this
-/// launcher's own two lists are drawn under it because the reference has no
-/// page-level list for them at all -- its sections are store skins, and the
-/// cape choice lives in a modal that opens from a selected skin. Keeping them
-/// here is what keeps "wear one of the account's capes" reachable with nothing
-/// stored; the words are the reference's own section labels.
+/// The reference's box holds its `SkinPreviewRenderer` and nothing else *besides*
+/// what that renderer draws inside itself; this launcher's own two lists are
+/// drawn in the same block, under the model, because the reference has no
+/// page-level list for them at all -- its sections are store skins, and the cape
+/// choice lives in a modal that opens from a selected skin. Keeping them here is
+/// what keeps "wear one of the account's capes" reachable with nothing stored;
+/// the words are the reference's own section labels.
 fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> Element<'a, Message> {
-    let doll: Element<'a, Message> = match &appearance.front {
+    let model: Element<'a, Message> = match &appearance.front {
         Some(front) => image(front.handle())
             .width(Length::Fixed(DOLL_WIDTH))
             .height(Length::Fixed(DOLL_HEIGHT))
@@ -1221,9 +1258,10 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
         .into(),
     };
-    let boxed = preview_box(doll);
+    // The block under the model: the nametag, the sentence about what Minecraft
+    // says is in force, the notice, and the account's own rows -- the reference's
+    // nametag and subtitle, which its renderer draws inside the box.
     let mut body = column![
-        boxed,
         text(appearance.username.clone())
             .size(16.0)
             .font(crate::style::semibold())
@@ -1289,7 +1327,11 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
             (!wearing).then_some(Message::Wear(SkinChange::NoCape)),
         ));
     }
-    body.into()
+    // The model and the block are centred together, which is what the reference's
+    // renderer does with the two: on a signed-out capture its box is y119..679,
+    // the model y255..485 and the nametag y564..580, so the group sits above the
+    // middle rather than the model alone doing so.
+    preview_box(model, Some(body.into()))
 }
 
 /// The right column: the reference's sections, in its own order and at its own
