@@ -784,8 +784,25 @@ mod tests {
             plan.files[0].relative_path(),
             Some(PathBuf::from("mods").join("sodium.jar"))
         );
-        assert!(PackFile {
+        // The drive-prefixed path is absolute on the platform that has drive
+        // prefixes, and a file name like any other on the one that does not:
+        // `relative_path` refuses what the *host* calls absolute, so this asserts
+        // the host's answer rather than a Windows answer everywhere. The rooted
+        // path below is the portable half of the same rule and is refused on
+        // both.
+        let drive = PackFile {
             path: "C:\\windows\\x.jar".to_string(),
+            downloads: vec!["u".to_string()],
+            sha1: None,
+            size: 0,
+        };
+        if cfg!(windows) {
+            assert!(drive.relative_path().is_none(), "a drive path is not relative");
+        } else {
+            assert_eq!(drive.relative_path(), Some(PathBuf::from("C:\\windows\\x.jar")));
+        }
+        assert!(PackFile {
+            path: "/etc/x.jar".to_string(),
             downloads: vec!["u".to_string()],
             sha1: None,
             size: 0,
