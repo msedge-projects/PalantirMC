@@ -118,6 +118,116 @@ pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String
     search_url_parts(query, Some(project_type), Some(index), 50, 0)
 }
 
+/// The URL of the tag list: `GET /v2/tags`.
+///
+/// The three lists a browse page's filters are built from -- game versions,
+/// loaders and categories -- come out of one document rather than three, which is
+/// why this is a single route and not a family of them. It is a *list* document:
+/// it never changes within a release cycle, so the engine holds it on the slow
+/// clock rather than the search one.
+pub fn tags_url() -> String {
+    format!("{MODRINTH_BASE_URL}/tags")
+}
+
+/// One game version Modrinth knows about.
+///
+/// `version` is what a filter option's `query_value` carries and `version_type`
+/// is what decides whether it sits under the *Show all versions* toggle group
+/// (`search.ts`: anything that is not a `release`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct GameVersionTag {
+    /// The version number, e.g. `1.21.4`.
+    ///
+    /// Named `game_version` on the wire, which is the API's word for the same
+    /// thing `search.ts` calls `version` in a filter option.
+    #[serde(rename = "game_version")]
+    pub version: String,
+    /// `release`, `snapshot`, `beta` or `alpha`.
+    pub version_type: String,
+}
+
+/// One loader Modrinth knows about.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct LoaderTag {
+    /// The loader's name as the API spells it, e.g. `fabric`.
+    pub name: String,
+    /// Which project types this loader is offered for.
+    ///
+    /// Not decoration: `search.ts` reads it to decide which filter lists a loader
+    /// belongs in, so `fabric` (mods) and `mrpack`'s loaders are different rows
+    /// from the same list.
+    pub supported_project_types: Vec<String>,
+}
+
+/// One category Modrinth knows about.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct CategoryTag {
+    /// The category's name as the API spells it, e.g. `technology`.
+    pub name: String,
+    /// Which project type it describes.
+    pub project_type: String,
+    /// The header it is filed under, e.g. `technical` or `gameplay`.
+    ///
+    /// The header is what the browse sidebar's own sections are named from
+    /// (`formatCategoryHeader`), so two categories sharing one are two rows of
+    /// the same list.
+    pub header: String,
+}
+
+/// `GET /v2/tags`, as the browse page's filters read it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+pub struct Tags {
+    /// Every game version Modrinth lists.
+    pub game_versions: Vec<GameVersionTag>,
+    /// Every loader Modrinth lists.
+    pub loaders: Vec<LoaderTag>,
+    /// Every category Modrinth lists.
+    pub categories: Vec<CategoryTag>,
+}
+
+impl Tags {
+    /// The categories of one project type, filed under `header`.
+    ///
+    /// The reference builds one `FilterType` per `(project_type, header)` pair
+    /// (`search.ts`'s `category_${project_type}_${header}`), so this is the query
+    /// behind one of the sidebar's sections.
+    pub fn categories_under(&self, project_type: &str, header: &str) -> Vec<&CategoryTag> {
+        self.categories
+            .iter()
+            .filter(|category| category.project_type == project_type && category.header == header)
+            .collect()
+    }
+
+    /// Every header one project type has categories under, in the order the API
+    /// first lists them.
+    pub fn headers(&self, project_type: &str) -> Vec<&str> {
+        let mut headers: Vec<&str> = Vec::new();
+        for category in &self.categories {
+            if category.project_type == project_type && !headers.contains(&category.header.as_str())
+            {
+                headers.push(category.header.as_str());
+            }
+        }
+        headers
+    }
+
+    /// The loaders offered for one project type.
+    pub fn loaders_for(&self, project_type: &str) -> Vec<&LoaderTag> {
+        self.loaders
+            .iter()
+            .filter(|loader| loader.supported_project_types.iter().any(|kind| kind == project_type))
+            .collect()
+    }
+
+    /// The game versions of one release type, newest first as the API lists them.
+    pub fn game_versions_of(&self, version_type: &str) -> Vec<&GameVersionTag> {
+        self.game_versions
+            .iter()
+            .filter(|version| version.version_type == version_type)
+            .collect()
+    }
+}
+
 /// Build the version-list URL for a project id or slug.
 ///
 /// Calls `GET /v2/project/{project}/version` (all loaders/game versions;

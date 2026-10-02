@@ -39,10 +39,10 @@ use crate::engine::cancel::Cancel;
 use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
-    project_members_url, project_url, search_url_parts_with_facets, user_projects_url, user_url,
-    version_url,
+    project_members_url, project_url, search_url_parts_with_facets, tags_url, user_projects_url,
+    user_url, version_url,
     ModrinthMember, ModrinthProject, ModrinthProjectVersion, ModrinthSearchResponse,
-    ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, NEWS_URL,
+    ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, Tags, NEWS_URL,
 };
 use crate::Error;
 
@@ -280,6 +280,23 @@ impl ModrinthApi {
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
+    /// The tag list: every game version, loader and category Modrinth knows.
+    ///
+    /// One document rather than three, because `GET /v2/tags` is one document --
+    /// the reference's `get_game_versions`, `get_loaders` and `get_categories` are
+    /// three names for three fields of the same answer. It is what a browse page's
+    /// filter sections are built from, and what this launcher had no use for until
+    /// Discover grew a sidebar.
+    ///
+    /// Believed for the project TTL: the list changes when Modrinth ships a
+    /// release, not when a release happens, so the search clock would be a request
+    /// per tab change for an answer that was the same all afternoon.
+    pub fn tags(&self, cancel: &Cancel, backoff: &Backoff) -> Result<Tags, Error> {
+        let url = tags_url();
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
     /// Modrinth's news feed, newest first.
     ///
     /// The one document here that is not the API: the panel's news section is
@@ -406,6 +423,28 @@ mod tests {
 
     /// The profile shape `GET /v2/user/{name}` answers with, and the two projects
     /// `GET /v2/user/{id}/projects` answers for that account.
+    /// One `GET /v2/tags` body, trimmed to the shapes the filter lists read: two
+    /// release versions and one snapshot (the split *Show all versions* makes), two
+    /// loaders with different project-type support, and four categories across two
+    /// headers of modpacks and one of mods.
+    const TAGS_BODY: &str = r#"{
+        "game_versions": [
+            {"game_version": "1.21.4", "version_type": "release"},
+            {"game_version": "1.21.1", "version_type": "release"},
+            {"game_version": "24w14potato", "version_type": "snapshot"}
+        ],
+        "loaders": [
+            {"icon": "/i/fabric.png", "name": "fabric", "supported_project_types": ["mod", "modpack"]},
+            {"icon": "/i/forge.png", "name": "forge", "supported_project_types": ["mod"]}
+        ],
+        "categories": [
+            {"name": "technology", "project_type": "mod", "header": "technology"},
+            {"name": "kitchen-sink", "project_type": "modpack", "header": "technical"},
+            {"name": "adventure", "project_type": "modpack", "header": "gameplay"},
+            {"name": "multiplayer", "project_type": "modpack", "header": "gameplay"}
+        ]
+    }"#;
+
     const USER_BODY: &str = r#"{
         "id": "2REoufqX",
         "username": "Modrinth",
@@ -447,6 +486,53 @@ mod tests {
         let urls: Vec<String> = fetch.requests().iter().map(|r| r.url.clone()).collect();
         assert!(urls.contains(&user_url("2REoufqX")));
         assert!(urls.contains(&user_projects_url("2REoufqX")));
+    }
+
+    #[test]
+    fn the_tag_list_is_one_document_and_the_filter_lists_are_queries_on_it() {
+        // The reference's three helpers are three fields of one answer, so this
+        // is one request and one cache entry for all of them.
+        let (api, fetch) = api("tags", DEFAULT_TTL);
+        fetch.set_route(&tags_url(), Route::text(TAGS_BODY));
+
+        let tags = api.tags(&Cancel::new(), &Backoff::with_attempts(1)).expect("the tag list");
+        assert_eq!(tags.game_versions.len(), 3);
+        assert_eq!(tags.loaders.len(), 2);
+        assert_eq!(tags.categories.len(), 4);
+
+        // A browse sidebar's section is one (project type, header) pair, and its
+        // `FilterType` id is spelled out of the two -- which is why `headers`
+        // exists and why it is the API's order rather than an alphabetical one.
+        assert_eq!(tags.headers("modpack"), vec!["technical", "gameplay"]);
+        assert_eq!(tags.headers("mod"), vec!["technology"]);
+        let technical: Vec<&str> = tags
+            .categories_under("modpack", "technical")
+            .iter()
+            .map(|category| category.name.as_str())
+            .collect();
+        assert_eq!(technical, vec!["kitchen-sink"]);
+
+        // And the loaders are filtered by the project types they are offered for,
+        // because `fabric` and the modpack loaders are rows of different lists.
+        let modpack: Vec<&str> =
+            tags.loaders_for("modpack").iter().map(|loader| loader.name.as_str()).collect();
+        assert_eq!(modpack, vec!["fabric"]);
+        let mods: Vec<&str> =
+            tags.loaders_for("mod").iter().map(|loader| loader.name.as_str()).collect();
+        assert_eq!(mods, vec!["fabric", "forge"]);
+
+        // A version's type is what puts it under *Show all versions*, so it has to
+        // survive the read rather than being flattened to a string.
+        let releases: Vec<&str> = tags
+            .game_versions_of("release")
+            .iter()
+            .map(|version| version.version.as_str())
+            .collect();
+        assert_eq!(releases, vec!["1.21.4", "1.21.1"]);
+
+        // Asked again, it comes from the cache.
+        api.tags(&Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        assert_eq!(fetch.count(), 1, "one request, and not a second for the second read");
     }
 
     #[test]
