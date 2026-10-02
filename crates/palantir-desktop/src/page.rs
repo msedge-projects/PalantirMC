@@ -139,6 +139,20 @@ pub fn body<'a, Message: 'a>(
     gap: f32,
     on_wheel: impl Fn(&'static str, crate::scroll::Wheel) -> Message + 'a,
 ) -> Element<'a, Message> {
+    body_padded(blocks, gap, INSET, on_wheel)
+}
+
+/// The same body at a page's own inset.
+///
+/// `body` is `p-6` because the library pages are; `Skins.vue`'s root is `p-4`,
+/// so its frame is 8 pixels tighter on every side and it says so here rather
+/// than at whatever number its own file happened to pick.
+pub fn body_padded<'a, Message: 'a>(
+    blocks: Vec<Element<'a, Message>>,
+    gap: f32,
+    inset: f32,
+    on_wheel: impl Fn(&'static str, crate::scroll::Wheel) -> Message + 'a,
+) -> Element<'a, Message> {
     let mut items = column![].spacing(gap).width(Length::Fill);
     for block in blocks {
         items = items.push(block);
@@ -147,7 +161,7 @@ pub fn body<'a, Message: 'a>(
         crate::scroll::PAGE,
         container(items)
             .width(Length::Fill)
-            .padding(Padding { top: INSET, right: INSET, bottom: INSET, left: INSET }),
+            .padding(Padding { top: inset, right: inset, bottom: inset, left: inset }),
         on_wheel,
     )
     .width(Length::Fill)

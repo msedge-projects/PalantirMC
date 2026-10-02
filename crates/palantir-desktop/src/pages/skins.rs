@@ -32,8 +32,8 @@
 //! chevron down instead, because this launcher has no drag widget -- the write
 //! underneath is the same one ([`Step`], [`Reorder`]).
 
-use iced::widget::{column, image, row, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{column, container, image, mouse_area, row, Space};
+use iced::{Alignment, ContentFit, Element, Length, Padding, Theme};
 use palantir_net::SkinChange;
 
 use crate::icon;
@@ -43,16 +43,19 @@ use crate::pages::{Ask, Open};
 use crate::saved_skins;
 use crate::skin::Appearance;
 use crate::store::Store;
-use crate::style::{INK_CONTRAST, INK_SECONDARY};
+use crate::style::{INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Theme as Gen};
 use crate::ui::{self, text};
 
-/// The reference's bundled sections, in its own order.
+/// The reference's sections, in the order its page lays them out.
 ///
-/// `Skins.vue` draws these from a constant list of skin packs; the names here are
-/// the locale's, so the section headings are the reference's words rather than a
-/// paraphrase of them.
+/// `Skins.vue` builds the list as the reader's own saved skins first, then the
+/// pack sections sorted by `getDefaultSkinSectionSortIndex`, whose
+/// `DEFAULT_SKIN_SECTION_SORT_ORDER` is `['Default skins', 'Modrinth Pride']`
+/// and whose ties keep the order the store listed them in. The names here are
+/// the locale's, so the section headings are the reference's words rather than
+/// a paraphrase of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     /// The skins a new account starts with.
@@ -86,10 +89,10 @@ pub enum Section {
 impl Section {
     /// Every section, in the reference's order.
     pub const ALL: [Section; 13] = [
-        Section::DefaultSkins,
-        Section::Modrinth,
-        Section::ModrinthPride,
         Section::SavedSkins,
+        Section::DefaultSkins,
+        Section::ModrinthPride,
+        Section::Modrinth,
         Section::BuildersAndBiomes,
         Section::ChaosCubed,
         Section::ChaseTheSkies,
@@ -424,6 +427,80 @@ const DOLL_HEIGHT: f32 = 192.0;
 /// The mark beside the skin or cape that is in force.
 const WORN_MARK: f32 = 14.0;
 
+/// The page's own inset: `Skins.vue`'s root is `p-4` (16), where the library
+/// pages are `p-6`.
+const PAGE_INSET: f32 = 16.0;
+
+/// The two columns' gap: `skin-layout`'s `gap` is `2.5rem` (40).
+const COLUMN_GAP: f32 = 40.0;
+
+/// The left column's own padding: `p-2 pt-0` -- 8 on both sides and under the
+/// column, none above.
+const COLUMN_PAD: f32 = 8.0;
+
+/// The grid's two shares, from `grid-template-columns: minmax(0, 1fr)
+/// minmax(0, 2.5fr)`: portions 2 and 5 are the same 1:2.5 at any width, which
+/// is why they are not written as pixel widths.
+const PREVIEW_PORTION: u16 = 2;
+const LIST_PORTION: u16 = 5;
+
+/// The title's size: `text-2xl` (24) over the reference's own `font-bold`, which
+/// is why it is not drawn by [`page::title`] -- that one is `font-extrabold`.
+const TITLE_SIZE: f32 = 24.0;
+
+/// The preview box: `ml-5 mt-4 h-[calc(80vh-1rem)]` around a centred doll --
+/// 20 from the left of the column, 16 below the title, and 576 - 16 = 560 tall
+/// at this shell's 720-pixel window.
+const PREVIEW_LEFT: f32 = 20.0;
+const PREVIEW_TOP: f32 = 16.0;
+const PREVIEW_HEIGHT: f32 = 560.0;
+
+/// The section list: `pt-2` (8) above its first row, then `pt-1` (4) on the
+/// first section and `pt-6` (24) on every other one.
+const LIST_TOP: f32 = 8.0;
+const SECTION_FIRST_TOP: f32 = 4.0;
+const SECTION_TOP: f32 = 24.0;
+
+/// A section's header row: `size-6` on the chevron (24), `gap-[6px]` after it,
+/// and the title's `text-xl font-semibold leading-7` -- 20 over 28.
+const SECTION_ICON: f32 = 24.0;
+const SECTION_ICON_GAP: f32 = 6.0;
+const SECTION_TITLE: f32 = 20.0;
+const SECTION_HEIGHT: f32 = 28.0;
+
+/// `content-class="pt-2"` (8) between a header and its cards.
+const SECTION_CONTENT_TOP: f32 = 8.0;
+
+/// The cards: `aspect-[31/40]`, `rounded-[20px]`, in a `grid-cols-3 gap-3` --
+/// three columns and 12 between any two cells.
+const CARD_COLUMNS: usize = 3;
+const CARD_GAP: f32 = 12.0;
+const CARD_RADIUS: f32 = 20.0;
+
+/// The cells' height at this shell's own pane. The window is 1280, the rail 64
+/// and the panel 300, so the page is 916; `p-4` leaves 884, the 40 between the
+/// columns leaves 844, and the list's 2.5/3.5 share is 602.9. A cell is
+/// (602.9 - 2 * 12) / 3 = 193.0 wide, and the reference's own `aspect-[31/40]`
+/// makes it 193.0 * 40/31 = 249.0 tall. The width is a `FillPortion` so the
+/// columns stay equal whatever the pane does; the height cannot be, because
+/// iced has no aspect-ratio, which is the one number here a resize would
+/// change.
+const CARD_HEIGHT: f32 = 249.0;
+
+/// A card's own padding around its picture and footer. The reference's
+/// `SkinButton` carries none -- its picture is the whole card -- but its name
+/// is a tooltip and this launcher has no tooltip widget, so the name is a line
+/// under the picture and the card needs the room for it.
+const CARD_INSET: f32 = 8.0;
+
+/// The plus in the saved section's first cell: `size-8`.
+const ADD_ICON: f32 = 32.0;
+
+/// `gap-4` between that icon and the words under it, and `gap-0.5` (2)
+/// between the two lines themselves.
+const ADD_ICON_GAP: f32 = 16.0;
+const ADD_LINE_GAP: f32 = 2.0;
+
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
 pub struct State {
@@ -661,7 +738,19 @@ impl State {
 }
 
 /// Draw the page.
-pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, Message> {
+/// Draw the page.
+///
+/// The reference's frame is one grid and one sticky banner: `skin-layout` is
+/// `minmax(0, 1fr) minmax(0, 2.5fr)` with `gap` (2.5rem), holding the title
+/// and the model preview on the left and the sections on the right, and the
+/// demo banner is pinned to the bottom of the window when nobody is signed in
+/// (the second is the next slice; the account read that tells the two states
+/// apart arrives with it).
+///
+/// The reference's `sticky top-6` on the left column is a departure this file
+/// carries rather than a number it picks: iced has no sticky, so the whole page
+/// scrolls and the title leaves the window where the reference's would stay.
+pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
     let mut blocks: Vec<Element<'a, Message>> = Vec::new();
     if let Some(notice) = &state.notice {
         blocks.push(ui::admonition(
@@ -672,81 +761,430 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         ));
     }
     blocks.push(
-        row![]
-            .spacing(ROW_GAP)
-            .align_items(Alignment::Center)
-            .push(page::title(theme, Key::AppSkinsTitle))
-            .push(Space::with_width(Length::Fill))
-            // The reference's header has Add and Apply side by side, and the Apply
-            // acts on whatever its preview panel is showing. This page has no
-            // preview panel -- a candidate skin is never rendered here, because
-            // the doll draws what Minecraft says is in force -- so the Apply that
-            // wears something lives on the row that *is* something, and the header
-            // keeps the one control that is about the page rather than about a skin:
-            // Add, which since G123 opens this launcher's own file dialog, pads what
-            // it returns to the shape the service takes and uploads it (G106).
-            .push(ui::button_or(
-                theme,
-                ADD_KEY,
-                Key::AppSkinsAddButton,
-                ui::Kind::Standard,
-                // Unusable while a change is in flight, like the rows' Apply: this
-                // one opens a modal dialog, and what it uploads afterwards is a
-                // write to the reader's own account.
-                (!state.wearing).then_some(Message::AddSkin),
-            ))
-            .into(),
+        row![
+            preview_column(theme, state),
+            Space::with_width(COLUMN_GAP),
+            section_list(theme, state, store),
+        ]
+        .align_items(Alignment::Start)
+        .into(),
     );
-    // The account's own appearance, which is what this page is for: the skin in
-    // force drawn, and the two lists Minecraft publishes. The reference renders its
-    // model through a plugin this tree does not have -- see [`crate::skin`] for what
-    // is drawn instead and what that costs -- but the *lists* are the same service's
-    // answer here as there.
-    blocks.push(page::draw(theme, &state.appearance, "your skins", |appearance| {
-        account_block(theme, appearance, state.wearing)
-    }));
-    // The sections, each a card that opens and closes. The skins inside them come
-    // from Modrinth's own skin store, which is an account service this launcher
-    // does not hold (G118): the sentence is inside the card that would draw them
-    // rather than over the account's own skins above, and it says which of the two
-    // kinds of gap it is. The account's own half above is Minecraft's service and
-    // is not affected -- it is what the reader's own upload writes to.
-    let mut sections = column![].spacing(GAP).width(Length::Fill);
-    for (index, section) in Section::ALL.iter().enumerate() {
-        let open = state.open == Some(index);
-        // The one section whose contents this launcher *has*: the reference's skin
-        // packs come from Modrinth's own skin store, which this tree has never been
-        // given, but the skins the reader has added are a folder it owns.
-        let body: Element<'a, Message> = if !open {
-            Space::with_height(Length::Fixed(0.0)).into()
-        } else if *section == Section::SavedSkins {
-            saved_block(theme, &state.saved, state.wearing)
-        } else {
-            caption(theme, &crate::store::needs_account("The skin store"))
+    page::body_padded(blocks, GAP, PAGE_INSET, Message::Wheel)
+}
+
+/// The left column: the page's own title over the model preview.
+///
+/// `sticky top-6 self-start p-2 pt-0` and the preview's
+/// `ml-5 mt-4 h-[calc(80vh-1rem)]`: the title at the column's own edge, the
+/// box 20 further in and 16 below, and the doll centred in 560.
+fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let title: Element<'a, Message> = text(Key::AppSkinsTitle.message())
+        .size(TITLE_SIZE)
+        // `font-bold` (700) rather than [`page::title`]'s `font-extrabold`
+        // (800): both headings are the reference's, and the reference's own
+        // classes differ by exactly this.
+        .font(crate::style::inter(iced::font::Weight::Bold))
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .into();
+    let body: Element<'a, Message> = page::draw(
+        theme,
+        &state.appearance,
+        "your skins",
+        move |appearance| preview_body(theme, appearance, state.wearing),
+    );
+    container(column![title, Space::with_height(PREVIEW_TOP), body].width(Length::Fill))
+        .width(Length::FillPortion(PREVIEW_PORTION))
+        .padding(Padding {
+            top: 0.0,
+            right: COLUMN_PAD,
+            bottom: COLUMN_PAD,
+            left: COLUMN_PAD,
+        })
+        .into()
+}
+
+/// The preview box and the account's own half under it.
+///
+/// The reference's box holds its `SkinPreviewRenderer` and nothing else; this
+/// launcher's own two lists are drawn under it because the reference has no
+/// page-level list for them at all -- its sections are store skins, and the
+/// cape choice lives in a modal that opens from a selected skin. Keeping them
+/// here is what keeps "wear one of the account's capes" reachable with nothing
+/// stored; the words are the reference's own section labels.
+fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> Element<'a, Message> {
+    let doll: Element<'a, Message> = match &appearance.front {
+        Some(front) => image(front.handle())
+            .width(Length::Fixed(DOLL_WIDTH))
+            .height(Length::Fixed(DOLL_HEIGHT))
+            .into(),
+        None => text(
+            appearance
+                .note
+                .clone()
+                .unwrap_or_else(|| crate::store::not_implemented("This skin")),
+        )
+        .size(13.0)
+        .font(crate::style::medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .into(),
+    };
+    let boxed = container(doll)
+        .width(Length::Fill)
+        .height(Length::Fixed(PREVIEW_HEIGHT))
+        .center_x()
+        .center_y();
+    let mut body = column![
+        row![Space::with_width(PREVIEW_LEFT), boxed].width(Length::Fill),
+        text(appearance.username.clone())
+            .size(16.0)
+            .font(crate::style::semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+        caption(theme, &wearing_line(appearance)),
+    ]
+    .spacing(ROW_GAP)
+    .width(Length::Fill);
+    // The account's own skins: drawn only where one is *not* already on, which
+    // is the rule [`wear_skin`] is; an account normally owns exactly the one it
+    // wears (`MinecraftSkins::equipped`), and a row with no action would be a
+    // line saying what the sentence above already says.
+    for (index, skin) in appearance.skins.iter().enumerate() {
+        let Some(action) = wear_skin(skin, wearing) else {
+            continue;
         };
-        let head = row![]
-            .spacing(ROW_GAP)
-            .align_items(Alignment::Center)
-            .push(
-                text(section.label())
-                    .size(16.0)
-                    .font(crate::style::semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(
-                        theme,
-                        crate::style::INK_CONTRAST,
-                    ))),
-            )
-            .push(Space::with_width(Length::Fill));
-        let plain = iced::widget::mouse_area(column![head, body].spacing(ROW_GAP).width(Length::Fill))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .on_press(Message::Select(*section));
-        // Into the column, not straight onto the page: the sections are one block
-        // of it, and pushing the cards onto `blocks` left the column empty behind
-        // them.
-        sections = sections.push(ui::card(theme, plain));
+        let identity = if skin.id.is_empty() { index.to_string() } else { skin.id.clone() };
+        body = body.push(owned_row(
+            theme,
+            &variant_label(&skin.variant),
+            false,
+            Key::AppSkinsApplyButton,
+            ui::scoped(WEAR_KEY, &identity),
+            Some(action),
+        ));
     }
-    blocks.push(sections.into());
-    page::body(blocks, GAP, Message::Wheel)
+    body = body.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
+    if appearance.capes.is_empty() {
+        body = body.push(caption(theme, Key::AppSkinsModalNoneCapeOption.message()));
+    }
+    for cape in &appearance.capes {
+        let name = if cape.alias.is_empty() { cape.id.as_str() } else { cape.alias.as_str() };
+        // One answer for which cape is in force rather than each row's own state:
+        // asked once, the rows and the doll above cannot disagree about it.
+        let worn = appearance.equipped_cape().is_some_and(|worn| worn.id == cape.id);
+        let identity = if cape.id.is_empty() { name.to_string() } else { cape.id.clone() };
+        body = body.push(owned_row(
+            theme,
+            name,
+            worn,
+            Key::AppSkinsApplyButton,
+            ui::scoped(WEAR_KEY, &identity),
+            wear_cape(cape, worn, wearing),
+        ));
+    }
+    // The reference's own "no cape" choice, drawn only when something has to be
+    // taken off: a row that hides a cape the account is not wearing would be a
+    // button whose only effect is a request to change nothing.
+    if let Some(cape) = appearance.equipped_cape() {
+        body = body.push(owned_row(
+            theme,
+            Key::AppSkinsModalNoneCapeOption.message(),
+            false,
+            Key::AppSkinsApplyButton,
+            ui::scoped(WEAR_KEY, &format!("none:{}", cape.id)),
+            (!wearing).then_some(Message::Wear(SkinChange::NoCape)),
+        ));
+    }
+    body.into()
+}
+
+/// The right column: the reference's sections, in its own order and at its own
+/// spacing.
+///
+/// `pt-2` above the first row, the open section's cards under its header, and
+/// 24 between one section and the next. Only one section is open at a time
+/// here where the reference opens every section it knows; that is the
+/// accordion this page has had since G118, and the next slice is the set of
+/// open sections the reference keeps.
+fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
+    let mut list = column![].width(Length::FillPortion(LIST_PORTION));
+    for (index, section) in Section::ALL.iter().enumerate() {
+        let first = index == 0;
+        list = list.push(Space::with_height(if first {
+            LIST_TOP + SECTION_FIRST_TOP
+        } else {
+            SECTION_TOP
+        }));
+        let open = state.open == Some(index);
+        // The header is the reference's `Accordion` button: a `size-6` chevron
+        // turned when the section is open, then its `text-xl font-semibold`
+        // title in the default ink -- `text-primary`, which is what the
+        // reference's Tailwind calls `--color-text-default`.
+        let head = row![
+            icon::icon(
+                if open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                SECTION_ICON,
+                theme_gen::ink(theme, INK_DEFAULT),
+            ),
+            Space::with_width(SECTION_ICON_GAP),
+            text(section.label())
+                .size(SECTION_TITLE)
+                .font(crate::style::semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        ]
+        .height(Length::Fixed(SECTION_HEIGHT))
+        .align_items(Alignment::Center)
+        .width(Length::Fill);
+        list = list.push(
+            mouse_area(head)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .on_press(Message::Select(*section)),
+        );
+        if open {
+            list = list.push(Space::with_height(SECTION_CONTENT_TOP));
+            list = list.push(section_content(theme, state, store, *section));
+        }
+    }
+    list.into()
+}
+
+/// One open section's content.
+///
+/// The saved section is the grid; every other one is the sentence that says
+/// where its skins come from. The reference draws those from Modrinth's own
+/// skin store, an account service this launcher does not hold (G118), and the
+/// sentence is inside the section that would draw them rather than over the
+/// whole page.
+fn section_content<'a>(
+    theme: Gen,
+    state: &'a State,
+    store: &'a Store,
+    section: Section,
+) -> Element<'a, Message> {
+    match section {
+        Section::SavedSkins => saved_grid(theme, state, store),
+        _ => caption(theme, &crate::store::needs_account("The skin store")),
+    }
+}
+
+/// The saved skins' grid: `grid-cols-3 gap-3` with the add cell first.
+///
+/// The reference's own column count is 4, 5 or 6 on windows 1300, 1750 and
+/// 2050 wide (`VirtualSkinSectionList.vue`); this shell's pane is 916 and iced
+/// has no window width to branch on, so the three-column layout a 980-pixel
+/// viewport gets is the one this draws at every size.
+fn saved_grid<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
+    let live = !state.wearing;
+    let last = state.saved.len().saturating_sub(1);
+    let mut cells: Vec<Element<'a, Message>> = Vec::with_capacity(state.saved.len() + 1);
+    cells.push(add_card(theme, live));
+    for (index, row) in state.saved.iter().enumerate() {
+        // The two controls this launcher has instead of the reference's drag:
+        // drawn only where a move would do something -- the first row has no up,
+        // the last no down -- and only while no write is out, because the order
+        // they would ask the store for is the order it is about to be read back
+        // in anyway.
+        let up = (index > 0 && live).then_some(Message::Move {
+            key: row.entry.key.clone(),
+            step: Step::Up,
+        });
+        let down = (index < last && live).then_some(Message::Move {
+            key: row.entry.key.clone(),
+            step: Step::Down,
+        });
+        cells.push(saved_card(theme, row, live, up, down, store));
+    }
+    let mut grid = column![].spacing(CARD_GAP).width(Length::Fill);
+    let mut line = row![].spacing(CARD_GAP).width(Length::Fill);
+    let mut filled = 0;
+    for cell in cells {
+        line = line.push(cell);
+        filled += 1;
+        if filled == CARD_COLUMNS {
+            grid = grid.push(line);
+            line = row![].spacing(CARD_GAP).width(Length::Fill);
+            filled = 0;
+        }
+    }
+    if filled > 0 {
+        // The cells that are not there keep their share: a row of three columns
+        // with two skins in it draws two cards of the same width, not stretched
+        // ones, which is what the reference's own grid does.
+        for _ in filled..CARD_COLUMNS {
+            line = line.push(Space::with_width(Length::FillPortion(1)));
+        }
+        grid = grid.push(line);
+    }
+    grid.into()
+}
+
+/// The saved section's first cell: the reference's `SkinLikeTextButton` as a
+/// dropzone.
+///
+/// `aspect-[31/40]`, `rounded-[20px]`, a dashed `border-surface-5` over
+/// `bg-surface-2` (hovering raises it to `bg-surface-3`), a `size-8` plus, and
+/// `gap-4` down to the two lines: `text-base font-semibold leading-6` over
+/// `text-sm font-medium leading-5 text-primary`. The drag-and-drop it also
+/// offers is not drawn -- this launcher's own file dialog is the only way a
+/// file arrives (G123) -- and neither is the dash, which iced's border has no
+/// style for; the border is the same colour, drawn solid.
+fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
+    let (_, fraction) = ui::interaction(ADD_KEY);
+    let background = crate::theme::mix(
+        theme_gen::ink(theme, Ink::Surface2),
+        theme_gen::ink(theme, Ink::Surface3),
+        fraction,
+    );
+    let words = column![
+        icon::icon(Glyph::Plus, ADD_ICON, theme_gen::ink(theme, INK_CONTRAST)),
+        column![
+            text(Key::AppSkinsAddButton.message())
+                .size(16.0)
+                .font(crate::style::semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            text(Key::AppSkinsAddButtonDragAndDrop.message())
+                .size(14.0)
+                .font(crate::style::medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        ]
+        .spacing(ADD_LINE_GAP)
+        .align_items(Alignment::Center),
+    ]
+    .spacing(ADD_ICON_GAP)
+    .align_items(Alignment::Center);
+    let cell = container(words)
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(CARD_HEIGHT))
+        .center_x()
+        .center_y()
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: 12.0,
+            right: 12.0,
+        })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(background)),
+            border: iced::Border {
+                color: theme_gen::ink(theme, Ink::Surface5),
+                width: 1.0,
+                radius: CARD_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        });
+    let area = mouse_area(cell)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_enter(Message::Hover { key: ADD_KEY, over: true, hover: None })
+        .on_exit(Message::Hover { key: ADD_KEY, over: false, hover: None });
+    // Unusable while a change is in flight, like every other write on this
+    // page: the dialog is modal, so a second press would be a second dialog.
+    if live {
+        area.on_press(Message::AddSkin).into()
+    } else {
+        area.into()
+    }
+}
+
+/// One stored skin, as the reference's `SkinButton`.
+///
+/// `aspect-[31/40]`, `rounded-[20px]`, `border-surface-4` over `bg-surface-3`,
+/// with the hover swapping them for `surface-5` and `surface-4` -- drawn as a
+/// mix by the hover's own fraction, so the card arrives at exactly the two
+/// colours the reference names. What the reference puts in the cell is the
+/// forward render its preview service makes; this launcher's own store holds
+/// the texture and nothing renders it, so the picture is the stored PNG drawn
+/// to fit. The name is the reference's tooltip, which iced has no widget for,
+/// so it is a line under the picture, and the two chevrons are the reorder this
+/// launcher draws instead of the reference's drag.
+fn saved_card<'a>(
+    theme: Gen,
+    row: &'a SavedRow,
+    live: bool,
+    up: Option<Message>,
+    down: Option<Message>,
+    store: &'a Store,
+) -> Element<'a, Message> {
+    let key = ui::scoped(EDIT_KEY, &row.entry.key);
+    let (_, fraction) = ui::interaction(key);
+    let background = crate::theme::mix(
+        theme_gen::ink(theme, Ink::Surface3),
+        theme_gen::ink(theme, Ink::Surface4),
+        fraction,
+    );
+    let border = crate::theme::mix(
+        theme_gen::ink(theme, Ink::Surface4),
+        theme_gen::ink(theme, Ink::Surface5),
+        fraction,
+    );
+    // The picture is the store's own file, handed to iced as a path so the
+    // renderer loads it once and keeps it; a store with no home (a test) draws
+    // no picture rather than a broken one.
+    let picture: Element<'a, Message> = match store.paths() {
+        Some(home) => image(image::Handle::from_path(saved_skins::texture_path(home, &row.entry)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .content_fit(ContentFit::Contain)
+            .into(),
+        None => Space::with_height(Length::Fill).into(),
+    };
+    // A press on the picture opens the editor, the way the reference's hover
+    // buttons do; a press on the footer does not, or a chevron beside it would
+    // open the editor as well as move the row.
+    let picture: Element<'a, Message> = if live {
+        mouse_area(picture)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .on_press(Message::Edit { key: row.entry.key.clone() })
+            .into()
+    } else {
+        picture
+    };
+    let mut footer = row![
+        text(row.entry.name.clone())
+            .size(13.0)
+            .font(crate::style::medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        Space::with_width(Length::Fill),
+    ]
+    .spacing(4.0)
+    .align_items(Alignment::Center)
+    .width(Length::Fill);
+    // The reference draws these two controls only under the pointer and only on
+    // a skin that is not in force; this launcher draws them whenever they would
+    // move something, which is where they can be found rather than guessed at.
+    if let Some(message) = up {
+        footer = footer.push(ui::icon_button(
+            theme,
+            ui::scoped(MOVE_UP_KEY, &row.entry.key),
+            Glyph::ChevronUp,
+            MOVE_MARK,
+            message,
+        ));
+    }
+    if let Some(message) = down {
+        footer = footer.push(ui::icon_button(
+            theme,
+            ui::scoped(MOVE_DOWN_KEY, &row.entry.key),
+            Glyph::ChevronDown,
+            MOVE_MARK,
+            message,
+        ));
+    }
+    let cell = container(column![picture, footer].spacing(6.0).width(Length::Fill))
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(CARD_HEIGHT))
+        .padding(Padding {
+            top: CARD_INSET,
+            bottom: CARD_INSET,
+            left: CARD_INSET,
+            right: CARD_INSET,
+        })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(background)),
+            border: iced::Border { color: border, width: 1.0, radius: CARD_RADIUS.into() },
+            ..container::Appearance::default()
+        });
+    mouse_area(cell)
+        .on_enter(Message::Hover { key, over: true, hover: None })
+        .on_exit(Message::Hover { key, over: false, hover: None })
+        .into()
 }
 
 /// The editor's body: the arm style, the cape, the Ears notice, and three actions.
@@ -893,150 +1331,6 @@ fn ears_notice<'a>(theme: Gen) -> Element<'a, Message> {
         .into()
 }
 
-/// The skins the reader has added: one row per stored skin, and the way into the
-/// editor.
-///
-/// The reference's rows select and its *preview panel* carries the Edit button; this
-/// page has no panel for a candidate skin -- the doll above draws what Minecraft says
-/// is in force -- so the row itself is the way in. What it draws is the store's own:
-/// the name the skin was added under and the arm style it was read with. It does not
-/// draw which of the reference's two sources the row came in as, because the
-/// reference's own rows do not either; that field is in the index and named in the
-/// gate.
-fn saved_block<'a>(theme: Gen, rows: &'a [SavedRow], wearing: bool) -> Element<'a, Message> {
-    if rows.is_empty() {
-        return caption(
-            theme,
-            "Nothing saved yet -- Add keeps every skin you pick from here on.",
-        );
-    }
-    let mut block = column![].spacing(ROW_GAP).width(Length::Fill);
-    let last = rows.len() - 1;
-    for (index, row) in rows.iter().enumerate() {
-        let facts = format!("{} -- {}", row.entry.name, variant_label(&row.entry.variant));
-        // A press while a write is out is refused rather than queued: the answer to
-        // the write closes the modal, so an editor opened behind it would vanish.
-        let action = (!wearing).then_some(Message::Edit { key: row.entry.key.clone() });
-        // The two controls this launcher has instead of the reference's drag: drawn
-        // only where a move would do something -- the first row has no up, the last
-        // no down -- and only while no write is out, because the order they would ask
-        // the store for is the order it is about to be read back in anyway.
-        let up = (index > 0 && !wearing).then_some(Message::Move {
-            key: row.entry.key.clone(),
-            step: Step::Up,
-        });
-        let down = (index < last && !wearing).then_some(Message::Move {
-            key: row.entry.key.clone(),
-            step: Step::Down,
-        });
-        block = block.push(saved_row(theme, &facts, &row.entry.key, action, up, down));
-    }
-    block.into()
-}
-
-/// The account's own appearance, as the page draws it.
-///
-/// Two halves that come from different places and meet here: the *picture*, which is
-/// this launcher's own arithmetic over a texture (see [`crate::skin`]), and the two
-/// lists, which are Minecraft's own document. A skin whose texture would not come
-/// back is not a failure of the page -- the account still owns every skin it owns --
-/// so the reason is drawn where the picture would be and the lists are drawn
-/// underneath it.
-fn account_block<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> Element<'a, Message> {
-    let doll: Element<'a, Message> = match &appearance.front {
-        Some(front) => image(front.handle())
-            .width(Length::Fixed(DOLL_WIDTH))
-            .height(Length::Fixed(DOLL_HEIGHT))
-            .into(),
-        None => text(
-            appearance
-                .note
-                .clone()
-                .unwrap_or_else(|| crate::store::not_implemented("This skin")),
-        )
-        .size(14.0)
-        .font(crate::style::medium())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
-        .into(),
-    };
-    let hero = row![]
-        .spacing(GAP)
-        .align_items(Alignment::Center)
-        .push(doll)
-        .push(
-            column![]
-                .spacing(ROW_GAP)
-                .push(
-                    text(appearance.username.clone())
-                        .size(20.0)
-                        .font(crate::style::semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                )
-                .push(caption(theme, &wearing_line(appearance))),
-        );
-    // Named rather than inferred, for the same reason `owned_row`'s is: `card`
-    // takes `impl Into<Element>`.
-    let hero: Element<'a, Message> = hero.into();
-    let mut blocks: Vec<Element<'a, Message>> = vec![ui::card(theme, hero)];
-
-    // The account's own skins. Minecraft's document names each one by its id and
-    // its variant and nothing else -- the reference's names come from the bundles
-    // *it* ships, and this launcher has none of those -- so a row says which
-    // variant it is and whether it is the one in force.
-    blocks.push(heading(theme, Key::AppSkinsSectionSavedSkins.message()));
-    for (index, skin) in appearance.skins.iter().enumerate() {
-        // The row's own identity for the clock that carries its hover: two skins can
-        // be the same variant, and an index is the only thing that tells them apart
-        // when the document names neither a texture nor an id they share. The id is
-        // preferred when there is one, because a list that arrives in another order
-        // is the same list.
-        let identity = if skin.id.is_empty() { index.to_string() } else { skin.id.clone() };
-        let key = ui::scoped(WEAR_KEY, &identity);
-        blocks.push(owned_row(
-            theme,
-            &variant_label(&skin.variant),
-            skin.equipped(),
-            Key::AppSkinsApplyButton,
-            key,
-            wear_skin(skin, wearing),
-        ));
-    }
-    blocks.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
-    if appearance.capes.is_empty() {
-        blocks.push(caption(theme, Key::AppSkinsModalNoneCapeOption.message()));
-    }
-    for cape in &appearance.capes {
-        let name = if cape.alias.is_empty() { cape.id.as_str() } else { cape.alias.as_str() };
-        // One answer for which cape is in force rather than each row's own state:
-        // asked once, the rows and the hero block cannot disagree about it.
-        let worn = appearance.equipped_cape().is_some_and(|worn| worn.id == cape.id);
-        let identity = if cape.id.is_empty() { name.to_string() } else { cape.id.clone() };
-        let key = ui::scoped(WEAR_KEY, &identity);
-        blocks.push(owned_row(
-            theme,
-            name,
-            worn,
-            Key::AppSkinsApplyButton,
-            key,
-            wear_cape(cape, worn, wearing),
-        ));
-    }
-    // The reference's own "no cape" choice, drawn only when something has to be
-    // taken off: a row that hides a cape the account is not wearing would be a
-    // button whose only effect is a request to change nothing.
-    if let Some(cape) = appearance.equipped_cape() {
-        blocks.push(owned_row(
-            theme,
-            Key::AppSkinsModalNoneCapeOption.message(),
-            false,
-            Key::AppSkinsApplyButton,
-            ui::scoped(WEAR_KEY, &format!("none:{}", cape.id)),
-            (!wearing).then_some(Message::Wear(SkinChange::NoCape)),
-        ));
-    }
-    column(blocks).spacing(GAP).width(Length::Fill).into()
-}
-
 /// The change that puts one of the account's own skins on, or nothing when there
 /// is nothing to do.
 ///
@@ -1068,7 +1362,7 @@ fn wear_cape(cape: &palantir_net::MinecraftCape, worn: bool, wearing: bool) -> O
 /// rather than something to be inferred from a drawn list. The two ends answer
 /// `None` rather than an order equal to the one on screen, because a press there
 /// would be a write that changes nothing, and the row is drawn without the control
-/// that would send it (see [`saved_block`]).
+/// that would send it (see [`saved_grid`]).
 fn moved(rows: &[SavedRow], key: &str, step: Step) -> Option<Vec<String>> {
     let index = rows.iter().position(|row| row.entry.key == key)?;
     let to = match step {
@@ -1138,65 +1432,6 @@ fn owned_row<'a>(
     ));
     // Named rather than inferred: `ui::card` takes `impl Into<Element>`, and an
     // `into()` inside that is a conversion with two possible targets.
-    let row: Element<'a, Message> = line.into();
-    ui::card(theme, row)
-}
-
-/// One row of the launcher's own store: what it is called, the two controls that
-/// move it, and the press that opens its editor.
-///
-/// [`owned_row`] with the two move controls rather than a wider [`owned_row`]: the
-/// account's rows have nothing to reorder -- Minecraft's document is a set, not an
-/// order -- and a parameter that is empty for every caller but one is the kind of
-/// widening that leaves the next reader asking which callers use it.
-fn saved_row<'a>(
-    theme: Gen,
-    name: &str,
-    key: &str,
-    edit: Option<Message>,
-    up: Option<Message>,
-    down: Option<Message>,
-) -> Element<'a, Message> {
-    let mut line = row![]
-        .spacing(ROW_GAP)
-        .align_items(Alignment::Center)
-        .push(
-            text(name.to_string())
-                .size(14.0)
-                .font(crate::style::medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        )
-        .push(Space::with_width(Length::Fill));
-    // The reference reorders this list by dragging a row; this launcher has no drag
-    // widget, so a row has a chevron up and a chevron down, drawn exactly where they
-    // would move something (`saved_block`) and gone while a write is out.
-    if let Some(message) = up {
-        line = line.push(ui::icon_button(
-            theme,
-            ui::scoped(MOVE_UP_KEY, key),
-            Glyph::ChevronUp,
-            MOVE_MARK,
-            message,
-        ));
-    }
-    if let Some(message) = down {
-        line = line.push(ui::icon_button(
-            theme,
-            ui::scoped(MOVE_DOWN_KEY, key),
-            Glyph::ChevronDown,
-            MOVE_MARK,
-            message,
-        ));
-    }
-    let line = line.push(ui::button_or(
-        theme,
-        ui::scoped(EDIT_KEY, key),
-        Key::AppSkinsEditButton,
-        ui::Kind::Standard,
-        edit,
-    ));
-    // Named rather than inferred, for [`owned_row`]'s reason: `ui::card` takes
-    // `impl Into<Element>`, and an `into()` inside that has two possible targets.
     let row: Element<'a, Message> = line.into();
     ui::card(theme, row)
 }
@@ -1665,13 +1900,14 @@ mod tests {
     #[test]
     fn the_saved_section_draws_a_row_per_stored_skin_and_an_empty_state() {
         let store = Store::default();
-        // The Saved-skins section is the fourth card, and with nothing stored it draws
-        // its own sentence rather than an empty column.
-        assert_eq!(Section::ALL[3], Section::SavedSkins);
-        let state = State { open: Some(3), ..State::default() };
+        // The Saved-skins section is the first the list draws -- `Skins.vue` puts
+        // it before every pack section -- and with nothing stored it draws its add
+        // cell, which is the reference's own empty state.
+        assert_eq!(Section::ALL[0], Section::SavedSkins);
+        let state = State { open: Some(0), ..State::default() };
         drop(view(Gen::ALL[0], &state, &store));
         let state = State {
-            open: Some(3),
+            open: Some(0),
             saved: vec![stored("abc")],
             ..State::default()
         };
