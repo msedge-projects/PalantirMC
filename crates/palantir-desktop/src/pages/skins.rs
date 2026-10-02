@@ -1705,6 +1705,17 @@ fn forget_confirm<'a>(
 /// all.
 const CANCEL_LABEL: &str = "Cancel";
 
+/// The icon the editor's Save button carries.
+///
+/// `<SpinnerIcon v-if="isSaving" class="animate-spin" />`, then
+/// `<CheckIcon v-else-if="mode === 'new'" />`, then `<SaveIcon v-else />`. This
+/// editor is always the `edit` mode, so it is the last of the three, and the
+/// first while a write of this page's is on its way. The spin is the part iced
+/// cannot draw: nothing redraws a frame without an event to draw it for.
+fn save_glyph(saving: bool) -> Glyph {
+    if saving { Glyph::Spinner } else { Glyph::Save }
+}
+
 /// Whether the editor holds an edit worth saving.
 ///
 /// `hasEdits` in `EditSkinModal.vue`, with the one condition it cannot have
@@ -1850,7 +1861,7 @@ pub fn edit_view<'a>(
             .push(ui::button_with_icon(
                 theme,
                 ui::scoped(EDIT_KEY, "save"),
-                Glyph::Save,
+                save_glyph(wearing),
                 Key::AppSkinsModalSaveSkinButton,
                 ui::Kind::Colored,
                 Length::Shrink,
@@ -2740,6 +2751,14 @@ mod tests {
             url: String::new(),
             alias: alias.to_string(),
         }
+    }
+
+    #[test]
+    fn the_editors_save_carries_its_own_icon_and_the_spinners_while_a_write_is_out() {
+        // `<SaveIcon v-else/>` in edit mode, `<SpinnerIcon v-if="isSaving"/>` while
+        // the write is on its way.
+        assert_eq!(save_glyph(false), Glyph::Save);
+        assert_eq!(save_glyph(true), Glyph::Spinner);
     }
 
     #[test]
