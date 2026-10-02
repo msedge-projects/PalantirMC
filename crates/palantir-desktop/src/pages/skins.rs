@@ -916,9 +916,6 @@ impl State {
                 return Some(Ask::Open(Open::Project(EARS_PROJECT.to_string())));
             }
             Message::CloseEdit => self.edit = None,
-            // The sign-in the banner's button asks for. The sentence is the
-            // shell's own for this flow (`Shell`'s `Message::SignIn`), said here
-            // because this page has no way to raise it.
             Message::Forget => {
                 // The question, which asks nobody: the write is still one press
                 // away and one press back from here.
@@ -936,6 +933,9 @@ impl State {
                 self.notice = Some(crate::store::not_implemented("Replacing a skin's texture"));
             }
             Message::SignIn => {
+                // The sign-in the banner's button asks for. The sentence is the
+                // shell's own for this flow (`Shell`'s `Message::SignIn`), said here
+                // because this page has no way to raise it.
                 self.notice = Some(crate::store::not_implemented("Signing in to Minecraft"));
             }
             Message::Act(act) => {
@@ -1831,7 +1831,9 @@ pub fn edit_view<'a>(
                 ui::scoped(EDIT_KEY, "forget"),
                 Key::AppSkinsDeleteButton,
                 ui::Kind::Danger,
-                (!wearing).then_some(Message::Act(Act::Forget)),
+                // A question, not the write: the reference's delete goes through its
+                // `ConfirmModal`, and this one asks in the same body.
+                (!wearing).then_some(Message::Forget),
             ))
             .push(ui::button_with_icon(
                 theme,
