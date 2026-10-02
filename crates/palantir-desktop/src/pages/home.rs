@@ -319,10 +319,30 @@ fn library<'a>(
         drawn_title(theme, Key::AppLibraryTitle),
         toolbar(theme, state),
     ];
+    // `library/index.vue`'s own branch:
+    //
+    // ```html
+    // <div v-if="libraryGroupsLoaded && isSearching && visibleInstanceGroups.length === 0"
+    //      class="text-base text-primary">{{ formatMessage(messages.noSearchResults) }}</div>
+    // <Transition v-else ...>
+    // ```
+    //
+    // `isSearching` is `search.value.length > 0` (`use-library.ts`), so the line
+    // belongs to a search that matched nothing and *replaces* the groups rather
+    // than joining them -- which is what `visible.is_empty()` says here, because a
+    // library with no instances in it is the first run and never reaches this
+    // branch. `text-primary` is `--color-text-default` in the app's own preset
+    // (`tooling-config/tailwind-preset.ts`, `primary: 'var(--color-text-default)'`,
+    // with `contrast` on `--color-text-primary`), which is [`INK_DEFAULT`] and not
+    // the white [`INK_CONTRAST`] the word "primary" suggests.
+    //
+    // Measured on our own frame with the search filled (`/tmp/home-empty3.png`,
+    // 1280x720, the library data root): the ink band is y221..234 at x91, in
+    // (176,186,197) -- `#b0bac5`, `--color-text-default` -- 12 below the toolbar's
+    // own bottom edge at y204, which is the section's `gap-3`, and at the page's
+    // own 89-pixel inset (65 of rail plus the `p-6`), the same x the first tile
+    // starts at. A 16-pixel line: the band is 14 tall, its ascender to descender.
     if visible.is_empty() {
-        // `app.library.search.no-results.title` in the reference's own shape:
-        // `text-base text-primary`, a line under the toolbar rather than a
-        // sentence centred in the page.
         blocks.push(
             container(
                 text(Key::AppLibrarySearchNoResultsTitle.message())
@@ -972,6 +992,39 @@ mod tests {
             // cannot make a `Store` hold cards without a filesystem, so the card's
             // page goes through the same body the library arm builds.
             drop(library_view(*theme, &state, &sample()));
+        }
+    }
+
+    #[test]
+    fn a_search_that_matched_nothing_draws_the_reference_s_own_line() {
+        // The empty state is `library/index.vue`'s own branch, and it has two
+        // halves that a test can hold without a screen: the gate and the words.
+        //
+        // The gate is `isSearching && visibleInstanceGroups.length === 0`, where
+        // `isSearching` is `search.value.length > 0`. A library with instances in
+        // it and a search that matches none is the only way to reach it, so the
+        // test needs both: cards that exist, and a needle that finds none.
+        let cards = sample();
+        let mut state = State::default();
+        assert!(!state.visible(&cards).is_empty(), "no search, so the grid");
+        state.update(Message::Search("zzzqqq".to_string()));
+        assert!(
+            state.visible(&cards).is_empty(),
+            "a needle nothing answers, which is `isSearching` here"
+        );
+
+        // The words are the message table's own, with the period the source's
+        // `defaultMessage` carries: `app.library.search.no-results.title` is
+        // "No instances match your search." A page that wrote its own sentence
+        // would still look right in a capture.
+        assert_eq!(
+            Key::AppLibrarySearchNoResultsTitle.message(),
+            "No instances match your search."
+        );
+        // And the branch is the one that draws: the library with nothing to show
+        // renders, over every theme, without a card.
+        for theme in Gen::ALL {
+            drop(library_view(*theme, &state, &cards));
         }
     }
 
