@@ -5157,12 +5157,17 @@ fn tags(&self) -> iced::Command<Message> {
                     .font(medium())
                     .style(iced::theme::Text::Color(ink)),
             );
-        let upgrade = mouse_area(container(link).padding(Padding {
-            top: PROMO_LINK_PAD_Y,
-            bottom: PROMO_LINK_PAD_Y,
-            left: PANEL_SECTION_PAD,
-            right: PANEL_SECTION_PAD,
-        }))
+        let upgrade = mouse_area(
+            container(link)
+                .padding(Padding {
+                    top: PROMO_LINK_PAD_Y,
+                    bottom: PROMO_LINK_PAD_Y,
+                    left: PANEL_SECTION_PAD,
+                    right: PANEL_SECTION_PAD,
+                })
+                .width(Length::Shrink)
+                .center_x(),
+        )
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
@@ -5193,8 +5198,15 @@ fn tags(&self) -> iced::Command<Message> {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
                 ..container::Appearance::default()
             });
+        // The link is centred: the reference's `<a>` is `absolute w-full` with
+        // `justify-center` over a panel whose only box model is its own 300
+        // pixels. A column lays its children out at their own widths from the
+        // left, so without this the whole block -- link included -- would sit
+        // against the panel's edge rather than in the middle of it. The fade and
+        // the plate are `Fill`, so centring the column moves only the link.
         column![upgrade, fade, plate]
             .width(Length::Fill)
+            .align_items(Alignment::Center)
             .into()
     }
 
