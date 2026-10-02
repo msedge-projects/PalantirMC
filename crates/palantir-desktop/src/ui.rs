@@ -1703,21 +1703,62 @@ pub fn checkbox<'a, Message: Clone + Hovered + 'a>(
 /// The width and height of a [`checkbox`]: `w-5 h-5`.
 pub const CHECK_SIZE: f32 = 20.0;
 
+/// `NavTabs.vue`'s own tab measurements: `size-5` on the icon, `gap-2` between it
+/// and the label, `px-4` on both sides of the tab, and `text-sm` -- fourteen
+/// pixels on `text-sm`'s own twenty-pixel line -- for the label itself.
+pub const TAB_ICON: f32 = 20.0;
+pub const TAB_GAP: f32 = 8.0;
+pub const TAB_PAD: f32 = 16.0;
+pub const TAB_LABEL: f32 = 14.0;
+pub const TAB_LINE: f32 = 20.0;
+
 /// The tabs a page switches between: a pill of buttons, the selected one plated.
 ///
-/// `NavTabs.vue`'s own arrangement: a `rounded-full bg-bg-raised p-1` track with
-/// `px-4 py-2` tabs inside it. The labels are strings because a page's tabs are
-/// not always locale keys of their own: an instance's are, and Discover's are the
-/// project-type names `route.rs` already asserts against the reference.
+/// `NavTabs.vue`'s own arrangement: a `relative flex w-fit rounded-full
+/// bg-bg-raised p-1 text-xs sm:text-sm font-bold` track with `px-4 py-2` tabs
+/// inside it and **no gap between them** -- the `p-1` is the only space, which is
+/// why the track's own tabs touch. The labels are strings because a page's tabs
+/// are not always locale keys of their own: an instance's are, and Discover's are
+/// the project-type names `route.rs` already asserts against the reference.
+///
+/// A tab with no icon is a shape the reference has: the icon is `v-if="link.icon"`
+/// on the link, and the two pages that pass none pass none.
 pub fn tabs<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     keys: &[&'static str],
     labels: &[(String, bool)],
     on_select: impl Fn(usize) -> Message,
 ) -> Element<'a, Message> {
-    let mut track = row![].align_items(Alignment::Center).spacing(2.0);
+    let glyphs: Vec<Option<Glyph>> = vec![None; labels.len()];
+    tabs_with_glyphs(theme, keys, &glyphs, labels, on_select)
+}
+
+/// The same strip with the icon each tab registers, which is `NavTabs.vue`'s
+/// `size-5` icon in front of the label.
+///
+/// The icon is `tab-color hidden sm:block size-5` in navigation mode and a plain
+/// `size-5` in local mode: `hidden` below Tailwind's `sm` -- 640 pixels -- and
+/// shown above it, which is every window this launcher opens at. Its ink is
+/// `getIconClasses`' own rule and it is *not* the label's rule: a selected icon
+/// is `text-button-textSelected` like its label, but an inactive one is
+/// `text-secondary` where the label is `text-contrast`. The label itself is
+/// `text-nowrap` at the track's `text-sm`, and the pair sit in the link's own
+/// `gap-2`.
+pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    keys: &[&'static str],
+    glyphs: &[Option<Glyph>],
+    labels: &[(String, bool)],
+    on_select: impl Fn(usize) -> Message,
+) -> Element<'a, Message> {
+    // `v-if="filteredLinks.length > 1"`: a strip of one is not a strip.
+    if labels.len() < 2 {
+        return Space::new(Length::Shrink, Length::Shrink).into();
+    }
+    let mut track = row![].align_items(Alignment::Center);
     for (index, ((label, selected), key)) in labels.iter().zip(keys.iter().copied()).enumerate() {
         let selected = *selected;
+        let glyph = glyphs.get(index).copied().flatten();
         // `NavTabs.vue`'s two label colours exactly: the active label is
         // `text-button-textSelected` -- the brand green, `#1bd96a` in the dark
         // theme -- and an inactive one is `text-contrast`, which is the same ink
@@ -1730,6 +1771,12 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
         } else {
             theme_gen::ink(theme, INK_CONTRAST)
         };
+        // The icon's own rule, which is a different ink from the label's.
+        let icon_ink = if selected {
+            theme_gen::ink(theme, Ink::ButtonTextSelected)
+        } else {
+            theme_gen::ink(theme, INK_SECONDARY)
+        };
         // A selected tab is plated and an unselected one is not, and the
         // reference does not change that on hover: what a hover moves is the
         // *label* -- `text-secondary` to `text-primary` -- so the plate is left
@@ -1739,15 +1786,27 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
         // the same green at a quarter alpha, so the pill reads as green without
         // becoming the solid call-to-action the Install button is.
         let plate = selected.then(|| theme_gen::ink(theme, Ink::ButtonBgSelected));
+        let mut face = row![].align_items(Alignment::Center).spacing(TAB_GAP);
+        if let Some(glyph) = glyph {
+            face = face.push(icon::icon(
+                glyph,
+                TAB_ICON,
+                crate::theme::brightness(icon_ink, factor),
+            ));
+        }
         let tab = container(
-            text(label.clone())
-                .size(14.0)
-                .font(heading())
-                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
+            face.push(
+                text(label.clone())
+                    .size(TAB_LABEL)
+                    // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
+                    .line_height(iced::Pixels(TAB_LINE))
+                    .font(heading())
+                    .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
+            ),
         )
-        .height(Length::Fixed(32.0))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 16.0, right: 16.0 })
-        .center_y()
+        // `py-2` around the line, which is a 36-pixel tab; the port fixed it at 32
+        // and let the label sit wherever the leftover space put it.
+        .padding(Padding { top: 8.0, bottom: 8.0, left: TAB_PAD, right: TAB_PAD })
         .style(move |_theme: &Theme| container::Appearance {
             background: plate.map(Background::Color),
             border: Border { radius: 999.0.into(), ..Border::default() },
@@ -1761,6 +1820,8 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
                 .on_press(on_select(index)),
         );
     }
+    // `p-1`: the track's own four pixels, which is the whole of the space
+    // between the strip and the tabs in it.
     container(track)
         .padding(4.0)
         .style(move |_theme: &Theme| container::Appearance {

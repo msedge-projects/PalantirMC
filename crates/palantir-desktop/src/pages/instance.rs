@@ -110,10 +110,25 @@ crate::hovered!(Message);
 const TAB_KEYS: [&str; 6] = [
     "instance:tab:content",
     "instance:tab:files",
-    "instance:tab:worlds",
     "instance:tab:screenshots",
+    "instance:tab:worlds",
     "instance:tab:logs",
     "instance:tab:share",
+];
+
+/// The icon each tab registers, in [`State::TABS`]' order.
+///
+/// `layout.vue`'s own `tabs` computed, which pushes *Screenshots* before *Worlds*
+/// -- the order the strip is drawn in, and not the order this file's enum
+/// declares them in: `BoxesIcon`, `FolderOpenIcon`, `ImageIcon`, `GlobeIcon`,
+/// `TerminalSquareIcon`, `UserPlusIcon`.
+const TAB_GLYPHS: [Option<Glyph>; 6] = [
+    Some(Glyph::Boxes),
+    Some(Glyph::FolderOpen),
+    Some(Glyph::Image),
+    Some(Glyph::Globe),
+    Some(Glyph::TerminalSquare),
+    Some(Glyph::UserPlus),
 ];
 
 /// How tall one row of the Content tab's listing is, in pixels.
@@ -280,15 +295,18 @@ impl State {
 
     /// The tabs the strip shows, in the reference's order.
     ///
-    /// The five always-visible ones: the reference hides Mods and Datapacks
-    /// inside an instance and Servers outside it, which is a rule about *content
-    /// filters* rather than about tabs, so the strip is fixed and the filter lives
-    /// on the Content tab.
+    /// `layout.vue`'s `tabs` computed pushes Content, then Files, then
+    /// **Screenshots**, then Worlds, then Logs, then Share -- the two settings-gated
+    /// ones in the order that computed pushes them, which is not the order this
+    /// crate's enum declares. The strip is fixed here: the reference hides Mods and
+    /// Datapacks inside an instance and Servers outside it, which is a rule about
+    /// *content filters* rather than about tabs, so the filter lives on the
+    /// Content tab.
     pub const TABS: [InstanceTab; 6] = [
         InstanceTab::Content,
         InstanceTab::Files,
-        InstanceTab::Worlds,
         InstanceTab::Screenshots,
+        InstanceTab::Worlds,
         InstanceTab::Logs,
         InstanceTab::Share,
     ];
@@ -309,11 +327,13 @@ impl State {
 
     /// The tab a strip press selects.
     pub const fn tab_at(index: usize) -> InstanceTab {
+        // [`State::TABS`]' own order, which is `layout.vue`'s: Screenshots is
+        // the third tab and Worlds the fourth.
         match index {
             0 => InstanceTab::Content,
             1 => InstanceTab::Files,
-            2 => InstanceTab::Worlds,
-            3 => InstanceTab::Screenshots,
+            2 => InstanceTab::Screenshots,
+            3 => InstanceTab::Worlds,
             4 => InstanceTab::Logs,
             _ => InstanceTab::Share,
         }
@@ -416,9 +436,13 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     if let Some(notice) = &state.notice {
         above = above.push(ui::admonition(theme, ui::Severity::Warning, &state.id, notice));
     }
-    above = above.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
-        Message::Tab(State::tab_at(index))
-    }));
+    above = above.push(ui::tabs_with_glyphs(
+        theme,
+        &TAB_KEYS,
+        &TAB_GLYPHS,
+        &state.labels(),
+        |index| Message::Tab(State::tab_at(index)),
+    ));
     // The pinned part keeps the page's own inset; the body below it keeps the
     // gap that used to separate them, and the inset the whole page used to put
     // inside the scroll region, so what a reader sees is where it was.
@@ -852,7 +876,9 @@ mod tests {
     #[test]
     fn the_strip_is_the_six_tabs_the_reference_shows_and_the_keys_are_its_own() {
         assert_eq!(State::TABS.len(), 6);
-        let expected = ["Content", "Files", "Worlds", "Screenshots", "Logs", "Share"];
+        // `layout.vue`'s own order, Screenshots before Worlds -- the order its
+        // `tabs` computed pushes them in, not the order the enum declares.
+        let expected = ["Content", "Files", "Screenshots", "Worlds", "Logs", "Share"];
         let labels: Vec<&str> =
             State::TABS.iter().map(|tab| State::key_for(tab.clone()).message()).collect();
         assert_eq!(labels, expected);
@@ -871,6 +897,20 @@ mod tests {
             assert_eq!(State::tab_at(index), *tab);
         }
         assert_eq!(State::tab_at(99), InstanceTab::Share);
+        // Each tab's icon is the one `layout.vue` registers with it, in the same
+        // order, so a strip whose glyphs were shuffled would still be the right
+        // six glyphs beside the wrong six labels.
+        assert_eq!(
+            TAB_GLYPHS,
+            [
+                Some(Glyph::Boxes),
+                Some(Glyph::FolderOpen),
+                Some(Glyph::Image),
+                Some(Glyph::Globe),
+                Some(Glyph::TerminalSquare),
+                Some(Glyph::UserPlus),
+            ]
+        );
     }
 
     #[test]

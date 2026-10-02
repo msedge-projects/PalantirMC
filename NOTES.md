@@ -1899,3 +1899,40 @@ not about the vendored tree: at this pin the reference's Skins crumb reads
 *Skins*, where `Skins.vue` registers the literal `'Skin selector'`. The vendored
 source is what this port takes its numbers and strings from, so the label stays
 *Skin selector* and the difference is written down rather than papered over.
+
+### The tab strip, which was 32 pixels tall and had no icons on it
+
+`NavTabs.vue` draws a link as `flex flex-row items-center gap-2 px-4 py-2` with
+a `size-5` icon in front of a `text-nowrap` label, inside a
+`relative flex w-fit rounded-full bg-bg-raised p-1 text-xs sm:text-sm font-bold`
+track. Three things were wrong with ours.
+
+The strip was **32 pixels** tall, fixed, with the label centred in the leftover
+space and no line height of its own. `py-2` around `text-sm`'s own twenty-pixel
+line is 36, and that is the number the reference has.
+
+The tabs had a **two-pixel gap** between them. The reference's nav has none: the
+`p-1` is the only space in the strip, so its links touch.
+
+And the strip had **no icons**, because `ui::tabs` took labels and nothing else.
+`link.icon` is `v-if`-ed on the reference's link, so an iconless tab is a shape it
+has -- and two of its pages use it: the project page's Description/Versions/
+Gallery and the project-type strips on Discover and on a profile. The instance
+page registers one for each of its six, and the glyphs are the reference's:
+`BoxesIcon`, `FolderOpenIcon`, `ImageIcon`, `GlobeIcon`, `TerminalSquareIcon`,
+`UserPlusIcon`. The icon's ink is a *different* rule from the label's --
+`getIconClasses` gives an inactive icon `text-secondary` where `getLabelClasses`
+gives the label `text-contrast` -- and both go to
+`text-button-textSelected` when the tab is the one in force.
+
+That reading also moved a tab. `layout.vue`'s `tabs` computed pushes Content,
+Files, **Screenshots**, Worlds, Logs, Share: the two settings-gated ones come out
+in the order that computed pushes them, which is not the order this crate's enum
+declares them in, and our strip had them the other way round. `State::TABS`,
+`State::tab_at`, `TAB_KEYS` and `TAB_GLYPHS` are one list now, in the reference's
+order, and the strip's test asserts all four together so a tab cannot be moved in
+one of them and not the others.
+
+One more of `NavTabs.vue`'s own rules came with it: `v-if="filteredLinks.length >
+1"`. A strip of one tab is not a strip, and this draws nothing rather than a pill
+around a single word.
