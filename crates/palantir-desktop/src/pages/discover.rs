@@ -242,7 +242,17 @@ pub enum Message {
         /// The hits, or the reason there are none.
         result: Result<Vec<Hit>, String>,
     },
-    /// The icons of the results on screen, from the shell.
+    /// The tag list, from the shell.
+    ///
+    /// The answer to [`crate::pages::Ask::Tags`], and the one thing the sidebar
+    /// cannot draw a single option without. A store with no engine answers with a
+    /// sentence, which is a section that knows it has nothing rather than one
+    /// that drew itself empty.
+    Tags {
+        /// The three lists, or the reason there are none.
+        result: Result<palantir_net::Tags, String>,
+    },
+/// The icons of the results on screen, from the shell.
     ///
     /// No round, unlike [`Message::Found`], and that is the type of the answer
     /// rather than an omission: an icon is keyed by the URL it was fetched from, so
@@ -343,6 +353,13 @@ pub struct State {
     pub hide_installed: bool,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
+    /// The tag list, which is what the sidebar's filter options are made of.
+    ///
+    /// Asked before the first search and kept for the life of the page: it is one
+    /// document that changes when Modrinth ships a release, and re-asking it on
+    /// every tab change would be a request per click for an answer that was the
+    /// same all afternoon.
+    pub tags: Load<palantir_net::Tags>,
     /// The icons of those results, decoded, by the `icon_url` each answers.
     ///
     /// A map rather than a field on the [`Hit`] it belongs to, and by the URL rather
@@ -379,6 +396,7 @@ impl State {
             // so `Idle` is a state that lasts one message rather than a page that
             // sits there.
             results: Load::Idle,
+            tags: Load::Idle,
             icons: HashMap::new(),
             round: 0,
             geometry: Geometry::default(),
@@ -484,6 +502,21 @@ impl State {
                     return self.icons_ask();
                 }
             }
+            // The tag list, kept. Nothing about it is a round: it is one document
+            // with no question in it, so there is nothing for a later answer to be
+            // stale against.
+            Message::Tags { result } => {
+                self.tags = match result {
+                    Ok(tags) => {
+                        if tags.categories.is_empty() {
+                            Load::Empty
+                        } else {
+                            Load::Ready(tags)
+                        }
+                    }
+                    Err(reason) => Load::Failed(reason),
+                };
+            }
             // Decoration, and the page keeps it either way: what the map holds is
             // what the cards on screen look up, so an icon no card names is one
             // that is never drawn and is dropped when the next results land.
@@ -511,12 +544,21 @@ impl State {
     /// message: the shell calls this after every message it handles and gets
     /// nothing for the ninety-nine out of a hundred that are not "this page was
     /// just built".
-    pub fn opening(&mut self) -> Option<Asked> {
-        if self.results == Load::Idle {
-            Some(self.ask())
-        } else {
-            None
+    pub fn opening(&mut self) -> Option<Ask> {
+        // The tag list first, then the search. `SearchSidebarFilter`'s options are
+        // all read out of it, and the shell's `opening` hands back one request at a
+        // time -- so the page asks in the order it can draw something in, and the
+        // first results land a request after the sidebar is able to fill itself.
+        // This is the reference's order too: `Browse.vue` fetches `get_categories`,
+        // `get_loaders` and `get_game_versions` when it mounts.
+        if self.tags == Load::Idle {
+            self.tags = Load::Loading;
+            return Some(Ask::Tags);
         }
+        if self.results == Load::Idle {
+            return Some(Ask::Search(self.ask()));
+        }
+        None
     }
 
     /// The icons the results on screen are missing, as a request, if any.
@@ -1087,6 +1129,19 @@ fn stat<'a>(theme: Gen, glyph: Glyph, count: u64) -> Element<'a, Message> {
 mod tests {
     use super::*;
 
+    /// The search a fresh page owes, past the tag list it asks for first.
+    ///
+    /// [`State::opening`] asks for the tags and then, on the next turn, for the
+    /// results; a test that only wants the second has to walk the first out of
+    /// the way, and this is that walk.
+    fn opening_search(state: &mut State) -> Asked {
+        assert_eq!(state.opening(), Some(Ask::Tags), "the tag list is asked for first");
+        let Some(Ask::Search(asked)) = state.opening() else {
+            panic!("and then the search");
+        };
+        asked
+    }
+
     fn hit(title: &str) -> Hit {
         Hit {
             id: title.to_lowercase(),
@@ -1220,6 +1275,44 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_list_is_asked_before_the_first_search_and_kept() {
+        let mut state = State::new(ProjectType::Modpack);
+        // Two requests, in the order the page can draw something in.
+        assert_eq!(state.opening(), Some(Ask::Tags));
+        assert_eq!(state.tags, Load::Loading);
+        assert_eq!(state.results, Load::Idle, "and nothing has been searched for yet");
+
+        let tags = palantir_net::Tags {
+            categories: vec![palantir_net::CategoryTag {
+                name: "kitchen-sink".to_string(),
+                project_type: "modpack".to_string(),
+                header: "technical".to_string(),
+            }],
+            ..palantir_net::Tags::default()
+        };
+        state.update(Message::Tags { result: Ok(tags.clone()) });
+        assert_eq!(state.tags, Load::Ready(tags));
+        let Some(Ask::Search(first)) = state.opening() else {
+            panic!("and then the search");
+        };
+        assert_eq!(first.query.project_type.as_deref(), Some("modpack"));
+
+        // A second search does not ask for it again: the document changes when
+        // Modrinth ships a release, not when the reader types.
+        state.update(Message::Query("sodium".to_string()));
+        assert_eq!(state.tags, Load::Ready(state.tags.ready().expect("kept").clone()));
+
+        // A store with no engine answers with a reason, which is a section that
+        // knows it has nothing rather than one that drew itself empty.
+        let mut bare = State::new(ProjectType::Modpack);
+        bare.update(Message::Tags { result: Err("no engine".to_string()) });
+        assert_eq!(bare.tags, Load::Failed("no engine".to_string()));
+        let mut empty = State::new(ProjectType::Modpack);
+        empty.update(Message::Tags { result: Ok(palantir_net::Tags::default()) });
+        assert_eq!(empty.tags, Load::Empty, "a tag list with nothing in it is Empty");
+    }
+
+    #[test]
     fn the_hide_installed_switch_is_a_control_the_request_carries() {
         // It changes what the API is asked rather than which rows are drawn, so
         // it asks like the sort and the view size do -- and it asks with the
@@ -1261,7 +1354,7 @@ mod tests {
         // And the request it owes is its own controls, read as a query: the tab as
         // the project type, the sort as the API's index, the view size as the
         // limit, the page as the offset.
-        let asked = state.opening().expect("the request the page owes");
+        let asked = opening_search(&mut state);
         assert_eq!(asked.round, 1);
         assert_eq!(asked.query.query, "");
         assert_eq!(asked.query.project_type.as_deref(), Some("modpack"));
@@ -1271,7 +1364,7 @@ mod tests {
         assert_eq!(state.results, Load::Loading);
         // Asking is once: a page that has asked does not ask again on every
         // message the shell handles.
-        assert!(state.opening().is_none());
+        assert!(state.opening().is_none(), "asked once, and the refresh button is what asks again");
     }
 
     #[test]
@@ -1294,7 +1387,7 @@ mod tests {
     #[test]
     fn an_answer_lands_on_the_question_it_was_asked() {
         let mut state = State::new(ProjectType::Modpack);
-        let first = state.opening().expect("a request");
+        let first = opening_search(&mut state);
         state.update(Message::Found { round: first.round, result: Ok(vec![hit("Sodium")]) });
         assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
 
@@ -1325,7 +1418,7 @@ mod tests {
         // The results on screen belong to the tab the user has left, so they go;
         // the shell asks for the new tab on the way out of the message.
         let mut state = State::new(ProjectType::Modpack);
-        state.opening();
+        opening_search(&mut state);
         state.update(Message::Found { round: 1, result: Ok(vec![hit("Sodium")]) });
         // A page change is a request of its own now -- the reference's watcher
         // refreshes on it -- so that is round 2, and the tab change below is 3.
@@ -1333,7 +1426,9 @@ mod tests {
         assert_eq!(state.update(Message::ProjectType(ProjectType::Mod)), None);
         assert_eq!(state.page, 1);
         assert_eq!(state.results, Load::Idle);
-        let asked = state.opening().expect("the new tab's request");
+        let Some(Ask::Search(asked)) = state.opening() else {
+            panic!("the new tab asks for its own results");
+        };
         assert_eq!(asked.round, 3);
         assert_eq!(asked.query.project_type.as_deref(), Some("mod"));
         // And the tab already on screen is not a change, so nothing is thrown away.
@@ -1516,7 +1611,7 @@ mod tests {
     #[test]
     fn the_icons_of_a_page_of_results_are_asked_for_once_and_each_one_alone() {
         let mut state = State::new(ProjectType::Modpack);
-        let first = state.opening().expect("a request");
+        let first = opening_search(&mut state);
         let hits = vec![
             Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium") },
             Hit { icon_url: LITHIUM_ICON.to_string(), ..hit("Lithium") },

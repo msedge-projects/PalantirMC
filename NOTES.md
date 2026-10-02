@@ -2060,3 +2060,37 @@ section is a `SearchSidebarFilter` for one filter type -- Category,
 Environment, Game version, Loader, License -- and every option in them is
 read out of `GET /tags`, which this launcher does not ask for. That is the
 next slice, and it needs the tags endpoint rather than another widget.
+
+### The tag list, which is what the filter sections are made of
+
+`GET /v2/tags` is one document, and the reference's `get_game_versions`,
+`get_loaders` and `get_categories` are three names for three fields of it --
+which is the whole reason it is a single route here too, and a single cache
+entry. Believed on the metadata clock rather than the search one: the list
+changes when Modrinth ships a release, not when a release happens.
+
+Three of its queries are the ones `search.ts` builds its filter lists out of,
+and they are queries rather than filters because the sidebar's *sections* are
+made of them:
+
+* `categories_under(project_type, header)` -- `search.ts`'s filter id is
+  `category_${project_type}_${header}`, so one section is one such pair;
+* `headers(project_type)` -- the same sections, in the order the API first lists
+  them. The reference sorts these with `sortedCategories` from
+  `@modrinth/utils`, which this tree does not vendor, so the API's own order is
+  what is used;
+* `loaders_for(project_type)` -- a loader is in the lists its
+  `supported_project_types` name, which is why `fabric` (mods) and the modpack
+  loaders are rows of different sections;
+* `game_versions_of(version_type)` -- a version's type is what puts it under
+  *Show all versions*.
+
+On the page side this is `Ask::Tags`, and it is asked **before** the first
+search rather than beside it: the shell's `opening` hands back one request at a
+time, and the tag list is the one whose answer the sidebar cannot draw a
+single option without. The reference fetches it on mount too. It is asked once
+for the life of the page.
+
+Nothing draws from it yet. `State::tags` is a `Load` of its own so that a store
+with no engine draws a section that knows it has nothing rather than one that
+drew itself empty.

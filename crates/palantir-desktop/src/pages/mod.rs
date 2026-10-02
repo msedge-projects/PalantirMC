@@ -128,6 +128,16 @@ pub enum Ask {
     /// still coming. That is what makes this the one ask whose answer is decoration
     /// -- the page reserves the box either way ([`crate::ui::icon_box`]).
     Icons(discover::Icons),
+    /// Ask the store, through the engine, for the tag list: every game version,
+    /// loader and category Modrinth knows.
+    ///
+    /// Not decoration and not decoration-adjacent either: the browse sidebar's
+    /// filter sections are *made* of it, and a section with no options is not a
+    /// section that drew badly -- it is a section with nothing in it. It is asked
+    /// before the first search rather than beside it because the shell's
+    /// `opening` hands back one request at a time, and the tag list is the one
+    /// whose answer the page cannot draw anything without.
+    Tags,
     /// Ask the store, through the engine, for one project: its own document, the
     /// people on its team, and its version list.
     ///
@@ -255,6 +265,15 @@ impl Message {
     /// for a project the page has stopped showing is one nothing ever looks up.
     pub fn search_icons(arrived: Vec<crate::avatar::Fetched>) -> Message {
         Message::Discover(discover::Message::Icons { arrived })
+    }
+
+    /// The message that carries the tag list back to Discover.
+    ///
+    /// Named here rather than built in the shell for the same reason the two above
+    /// are: the answer's type is the page's, and the shell has never seen a
+    /// `FilterType` in its life.
+    pub fn tags(result: Result<palantir_net::Tags, String>) -> Message {
+        Message::Discover(discover::Message::Tags { result })
     }
 
     /// The message that carries one tab's listing back to the instance page.
@@ -537,7 +556,7 @@ impl Screen {
     /// has never had a message of its own.
     pub fn opening(&mut self) -> Option<Ask> {
         match self {
-            Screen::Discover(state) => state.opening().map(Ask::Search),
+            Screen::Discover(state) => state.opening(),
             Screen::Project(state) => state.opening().map(Ask::Project),
             // The page a window can open straight on -- `/skins` is on the rail --
             // so a reader who never presses anything still gets their own skin.
@@ -827,9 +846,12 @@ mod tests {
         let store = Store::default();
         let mut screen = Screen::at(&Address::parse("/browse/modpack").expect("browse"));
         // A page that has been drawn owes its first request before anything is
-        // pressed.
+        // pressed -- and the first is the tag list, because the sidebar's
+        // filter sections are made of it and the shell hands back one ask at
+        // a time.
+        assert_eq!(screen.opening(), Some(Ask::Tags), "the tag list comes first");
         let Some(Ask::Search(first)) = screen.opening() else {
-            panic!("a freshly drawn Discover page owes a request");
+            panic!("and then the search");
         };
         assert_eq!(first.round, 1);
         // Asked once, and asking again is the button's.

@@ -105,6 +105,8 @@ enum Asked {
     /// state turns on it, and a picture that will not come back leaves a card's box
     /// empty rather than a page half drawn (see [`crate::avatar`]).
     Icons(discover::Icons),
+    /// The tag list, as the browse sidebar's filter options are made of.
+    Tags,
     /// A project, as the project page describes it.
     Project(project::Asked),
     /// A profile, as the user page describes it.
@@ -1835,6 +1837,7 @@ impl Shell {
             return match asked {
                 Asked::Search(asked) => self.search(asked),
                 Asked::Icons(asked) => self.icons(asked),
+                Asked::Tags => self.tags(),
                 Asked::Instance(asked) => self.instance(asked),
                 Asked::Project(asked) => self.project(asked),
                 Asked::User(asked) => self.user(asked),
@@ -2341,6 +2344,7 @@ impl Shell {
                     }
                     Some(pages::Ask::Search(asked)) => Some(Asked::Search(asked)),
                     Some(pages::Ask::Icons(asked)) => Some(Asked::Icons(asked)),
+                    Some(pages::Ask::Tags) => Some(Asked::Tags),
                     Some(pages::Ask::Instance(asked)) => Some(Asked::Instance(asked)),
                     Some(pages::Ask::Project(asked)) => Some(Asked::Project(asked)),
                     Some(pages::Ask::User(asked)) => Some(Asked::User(asked)),
@@ -3116,6 +3120,7 @@ impl Shell {
             // cannot make one until a set of results has landed, and the one that
             // made it is the message that delivered them.
             Some(pages::Ask::Icons(_)) => iced::Command::none(),
+            Some(pages::Ask::Tags) => self.tags(),
             Some(pages::Ask::Instance(asked)) => self.instance(asked),
             Some(pages::Ask::Project(asked)) => self.project(asked),
             Some(pages::Ask::User(asked)) => self.user(asked),
@@ -3467,7 +3472,22 @@ impl Shell {
         })
     }
 
-    /// The same search with the projects this launcher already has taken out.
+    /// Read the tag list the browse sidebar's options are made of.
+///
+/// Blocking for the reason every other read here is: the request is a network
+/// round trip and this runs on the frame thread, so it goes through
+/// [`crate::store::off_thread`] like its siblings. It is asked once per page, not
+/// once per search -- the answer changes when Modrinth ships a release -- and the
+/// engine holds it, so a second visit to Discover costs no request at all.
+fn tags(&self) -> iced::Command<Message> {
+    let store = self.store.clone();
+    iced::Command::perform(
+        crate::store::off_thread(move || store.tags()),
+        |result| Message::Screen(pages::Message::tags(result)),
+    )
+}
+
+/// The same search with the projects this launcher already has taken out.
     ///
     /// `Browse.vue`'s `instanceFilters` pushes `{ type: 'project_id', option:
     /// 'project_id:<id>', negative: true }` for every installed project while the

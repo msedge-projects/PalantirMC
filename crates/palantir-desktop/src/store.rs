@@ -49,7 +49,9 @@ use palantir_net::engine::{
     MetadataCache, ModrinthApi, PistonMeta, Request,
 };
 use palantir_net::engine::Search as ApiSearch;
-use palantir_net::modrinth::{ModrinthMember, ModrinthProject, ModrinthProjectVersion, NewsArticle};
+use palantir_net::modrinth::{
+    ModrinthMember, ModrinthProject, ModrinthProjectVersion, NewsArticle, Tags,
+};
 use palantir_net::{
     MinecraftSkins, MicrosoftAuth, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
 };
@@ -1089,6 +1091,21 @@ impl Store {
             .api()
             .news(&cancel, &backoff)
             .map_err(|error| error.to_string())
+    }
+
+    /// The tag list a browse page's filter sections are built from.
+    ///
+    /// One request for the three lists -- game versions, loaders and categories --
+    /// because `GET /v2/tags` is one document and the reference's
+    /// `get_game_versions`, `get_loaders` and `get_categories` are three names for
+    /// three fields of it.
+    pub fn tags(&self) -> Result<Tags, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("The filter lists"));
+        };
+        let cancel = Cancel::new();
+        let backoff = Backoff::default();
+        engine.api().tags(&cancel, &backoff).map_err(|error| error.to_string())
     }
 
     /// The account's own appearance, ready for the Skins page to draw.
