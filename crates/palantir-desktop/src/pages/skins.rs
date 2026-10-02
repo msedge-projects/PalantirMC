@@ -34,7 +34,7 @@
 //! underneath is the same one ([`Step`], [`Reorder`]).
 
 use iced::widget::{column, container, image, mouse_area, row, Space};
-use iced::{Alignment, ContentFit, Element, Length, Padding, Theme};
+use iced::{Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Theme};
 use palantir_net::SkinChange;
 
 use crate::icon;
@@ -1908,16 +1908,7 @@ pub fn edit_view<'a>(
     body = body.push(section(
         theme,
         Key::AppSkinsModalArmStyleSection.message(),
-        ui::chips(
-            theme,
-            &[ui::scoped(EDIT_KEY, "arm:wide"), ui::scoped(EDIT_KEY, "arm:slim")],
-            &[(variant_label("CLASSIC"), !slim), (variant_label("SLIM"), slim)],
-            move |index| {
-                Some(Message::ArmStyle {
-                    variant: if index == 0 { "CLASSIC" } else { "SLIM" },
-                })
-            },
-        ),
+        arm_choices(theme, slim),
     ));
     // The cape: the reference's own "None" cell *first*, then one cell per cape the
     // account owns, four to a row. A choice's mark is the row's *stored* cape id, so a
@@ -2013,6 +2004,115 @@ pub fn edit_view<'a>(
 /// size argument at all, so a button drawn through one cannot be at this row
 /// however it is asked for.
 const MODAL_BUTTON: ui::Size = ui::Size::Md;
+
+/// The editor's two arm-style choices, as `RadioButtons.vue` draws them.
+///
+/// The component is a column of plain `<button>`s, not `Button.vue`, and the
+/// editor lays it out as a row with `!flex-row flex-wrap`, so what is here is a
+/// row of two with `gap-1` between them -- the component's own `gap-1`, which the
+/// wrap makes the gap on both axes.
+fn arm_choices<'a>(theme: Gen, slim: bool) -> Element<'a, Message> {
+    row![]
+        .spacing(ARM_ROW_GAP)
+        .align_items(Alignment::Center)
+        .push(arm_choice(
+            theme,
+            ui::scoped(EDIT_KEY, "arm:wide"),
+            &variant_label("CLASSIC"),
+            !slim,
+            Message::ArmStyle { variant: "CLASSIC".into() },
+        ))
+        .push(arm_choice(
+            theme,
+            ui::scoped(EDIT_KEY, "arm:slim"),
+            &variant_label("SLIM"),
+            slim,
+            Message::ArmStyle { variant: "SLIM".into() },
+        ))
+        .into()
+}
+
+/// One of those choices: a radio glyph in front of the word, and the two fills
+/// the component's own rule gives it.
+///
+/// `<button class="p-0 py-2 px-2 w-fit border-0 font-medium flex gap-2 ... rounded-xl
+/// hover:bg-button-bg">`, then `'text-contrast bg-button-bg'` for the one in force
+/// and `'text-primary bg-transparent'` for the other, with
+/// `<RadioButtonCheckedIcon class="text-brand h-5 w-5" />` in front of the chosen
+/// one and `<RadioButtonIcon class="h-5 w-5" />` -- which takes the button's own
+/// colour -- in front of the other. No border and no ring: this is not
+/// `ButtonFrame`'s `base` type, and the class list above gives it none, so the
+/// `inset 0 0 0 1px var(--surface-5)` a base button carries is not drawn here.
+///
+/// The hover is `hover:bg-button-bg` on the *unselected* fill, so it appears
+/// rather than moving: the same transparent-at-rest plate the kit's own button
+/// face builds (`crate::ui::sized_face`'s `Color { a: amount, ..surface-4 }`).
+fn arm_choice<'a>(
+    theme: Gen,
+    key: &'static str,
+    label: &str,
+    selected: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let (factor, _) = ui::interaction(key);
+    let ink = theme_gen::ink(theme, if selected { INK_CONTRAST } else { INK_DEFAULT });
+    let radio = theme_gen::ink(theme, if selected { Ink::Brand } else { INK_DEFAULT });
+    let plate = theme_gen::ink(theme, Ink::ButtonBg);
+    // `bg-transparent` at rest and `bg-button-bg` under the pointer, which is the
+    // plate appearing rather than one fill moving into another. The amount is
+    // the same travel `crate::ui::sized_face` derives from the brightness for a
+    // fill-less type, because that is the number that is 0 at rest and 1 under
+    // the pointer; the clock's own second number is the hover *end* it was told.
+    let travel = crate::theme::hover_brightness() - 1.0;
+    let over = if travel == 0.0 { 0.0 } else { ((factor - 1.0) / travel).clamp(0.0, 1.0) };
+    let fill = if selected { plate } else { Color { a: over, ..plate } };
+    let face = row![]
+        .spacing(ARM_GAP)
+        .align_items(Alignment::Center)
+        .width(Length::Shrink)
+        .push(icon::icon(
+            if selected { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+            ARM_RADIO,
+            crate::theme::brightness(radio, factor),
+        ))
+        .push(
+            text(label.to_string())
+                .size(ARM_LABEL)
+                .font(crate::style::medium())
+                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
+        );
+    let button = container(face)
+        .width(Length::Shrink)
+        .padding(Padding {
+            top: ARM_PAD,
+            bottom: ARM_PAD,
+            left: ARM_PAD,
+            right: ARM_PAD,
+        })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(crate::theme::brightness(fill, factor))),
+            // `border-0` in the class list, so a radius and nothing else.
+            border: Border { radius: ARM_RADIUS.into(), ..Border::default() },
+            ..container::Appearance::default()
+        });
+    mouse_area(button)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_enter(Message::Hover { key, over: true, hover: None })
+        .on_exit(Message::Hover { key, over: false, hover: None })
+        .on_press(on_press)
+        .into()
+}
+
+/// The numbers `RadioButtons.vue`'s own button is built from: `py-2 px-2` (8),
+/// `gap-2` (8) before the word, `h-5 w-5` (20) on the glyph, `rounded-xl` (12),
+/// the word at the app's own 16 in `font-medium`, and `gap-1` (4) between the
+/// choices once `!flex-row flex-wrap` has made it a row.
+const ARM_PAD: f32 = 8.0;
+const ARM_GAP: f32 = 8.0;
+const ARM_RADIO: f32 = 20.0;
+const ARM_RADIUS: f32 = 12.0;
+const ARM_LABEL: f32 = 16.0;
+const ARM_ROW_GAP: f32 = 4.0;
 
 /// The gap between the question's own parts.
 ///
@@ -2965,6 +3065,28 @@ mod tests {
         // editor's own heading gap and this column is not that one.
         assert_eq!(CONFIRM_GAP, 16.0);
         assert_eq!(CONFIRM_GAP, 2.0 * EDITOR_HEADING_GAP);
+    }
+
+    #[test]
+    fn the_arm_choices_are_the_reference_s_own_radio_buttons() {
+        // `RadioButtons.vue`'s button: `py-2 px-2` (8), `gap-2` (8) before the
+        // word, `h-5 w-5` (20) on the glyph, `rounded-xl` (12), the word at the
+        // app's own 16 in `font-medium`, and `gap-1` (4) between the choices once
+        // the editor's `!flex-row flex-wrap` has made the column a row.
+        assert_eq!(ARM_PAD, 8.0);
+        assert_eq!(ARM_GAP, 8.0);
+        assert_eq!(ARM_RADIO, 20.0);
+        assert_eq!(ARM_RADIUS, 12.0);
+        assert_eq!(ARM_LABEL, 16.0);
+        assert_eq!(ARM_ROW_GAP, 4.0);
+        // The two words are the section's own labels, not the service's two words.
+        assert_eq!(variant_label("CLASSIC"), "Wide");
+        assert_eq!(variant_label("SLIM"), "Slim");
+        // Both arms' rows draw, whichever one is in force.
+        for theme in Gen::ALL {
+            drop(arm_choices(*theme, false));
+            drop(arm_choices(*theme, true));
+        }
     }
 
     #[test]
