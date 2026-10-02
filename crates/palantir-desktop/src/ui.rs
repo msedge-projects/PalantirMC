@@ -4,7 +4,8 @@
 //! | Widget | Reference |
 //! | --- | --- |
 //! | [`card`] | `.base-card` in `assets/styles/classes.scss`: `padding: 1rem`, `background-color: var(--surface-3)`, `border-radius: var(--radius-lg)`, `border: 1px solid var(--surface-4)` |
-//! | [`tabs`] | `base/NavTabs.vue`: `rounded-full bg-bg-raised p-1`, each tab `px-4 py-2 font-bold` |
+//! | [`tabs`] | `base/NavTabs.vue`: `rounded-full bg-bg-raised p-1` inside `card-shadow border border-solid border-surface-4`, each tab `px-4 py-2 font-bold` |
+//! | [`tag`] | `base/TagItem.vue`: `bg-button-bg border-surface-5 border-[1px] px-2 py-1 leading-none rounded-full text-sm font-normal`, the label in `text-secondary` |
 //! | [`admonition`] | `base/Admonition.vue`: a 24px severity icon in its own colour, then a header and a body |
 //! | [`search`] | `base/inputs/Input.vue`: a 20px `text-secondary opacity-60` icon, value `text-primary`, placeholder `text-secondary`, focus `text-contrast` |
 //! | [`select`] | `base/Combobox.vue`: `rounded-xl`, a `font-medium text-primary` prefix, the value, and a chevron |
@@ -316,7 +317,16 @@ pub const CONTROL: f32 = 40.0;
 pub const CONTROL_RADIUS: f32 = 12.0;
 /// `size-5` on the icons inside a control.
 pub const CONTROL_ICON: f32 = 20.0;
-/// A tag's height and the pill it sits in.
+/// A tag's height: `border-[1px] border-solid` and `py-1` around a `text-sm`
+/// label on `leading-none`, which is 1 + 4 + 14 + 4 + 1.
+///
+/// It is 26 rather than 24 for a tag that carries an icon, and that is not a
+/// second height this port chooses between: `[&>svg]:shrink-0 [&>svg]:h-4
+/// [&>svg]:w-4` on the same `baseClass` puts a sixteen-pixel icon in front of a
+/// fourteen-pixel line, and the taller of the two is what the pill is. Measured
+/// on the reference's own /user/FlameFire capture: *Client and server*, *Forge*,
+/// *Server*, *Fabric*, *Modpack* and *Data Pack* are 26 rows, and *Challenging*,
+/// *Combat*, *Minigame*, *World Generation*, *Mods* and *+1* are 24.
 pub const TAG_HEIGHT: f32 = 24.0;
 /// The size a button's label is set at, which is `Button.vue`'s `text-sm`.
 ///
@@ -597,12 +607,37 @@ pub fn framed<'a, Message: 'a>(
 }
 
 /// A tag: a small pill in the raised surface.
+///
+/// `TagItem.vue`'s own `baseClass`, which is one string every tag in the
+/// reference is built from -- the project card's `TagTagItem`, the project
+/// header's categories, a version's platforms:
+///
+/// ```text
+/// bg-[--_bg-color,var(--color-button-bg)] border-[--_bg-color,var(--surface-5)]
+/// border-[1px] border-solid px-2 py-1 leading-none rounded-full font-normal
+/// text-sm inline-flex items-center gap-1 text-[--_color,var(--color-secondary)]
+/// ```
+///
+/// The label's ink is the one number in it that was wrong here: the port drew it
+/// in `--color-text-default` (`#B0BAC5`) and the class says `--color-secondary`,
+/// which the reference's own table resolves to `--color-text-tertiary`
+/// (`variables.scss:337`, `:321`) and measures as `#96A2B0` on every tag pill in
+/// the /user/FlameFire capture. Every caller of this function is a place the
+/// reference draws a plain `TagItem`, and no caller anywhere in the reference
+/// overrides `--_color` except `TagTagItem`, which sets it to the platform's own
+/// colour for a loader -- a token this kit's table does not carry, and recorded
+/// as the residual it is rather than guessed at here.
+///
+/// What is not drawn is the icon: `TagTagItem`'s `h-4` glyph, which is what
+/// makes the pill 26 rows instead of 24 ([`TAG_HEIGHT`]). Drawing it needs a
+/// per-tag icon mapping this file has no source for, and a caller passing the
+/// wrong one would put a 26-row pill where the reference has a 24-row one.
 pub fn tag<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
     container(
         text(label.to_string())
             .size(12.0)
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
     )
     .height(Length::Fixed(TAG_HEIGHT))
     .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
@@ -1772,6 +1807,84 @@ pub const TAB_PAD: f32 = 16.0;
 pub const TAB_LABEL: f32 = 14.0;
 pub const TAB_LINE: f32 = 20.0;
 
+/// The tab's own height: `py-2` around [`TAB_LINE`].
+pub const TAB_HEIGHT: f32 = TAB_LINE + 16.0;
+
+/// The strip's own height, which is the tab plus everything the track wraps it in.
+///
+/// `NavTabs.vue:9` puts a `p-1` around the tabs and `NavTabs.vue:11` adds
+/// `border border-solid border-surface-4` to the same element in navigation mode,
+/// so the pill is `1 + 4 + 36 + 4 + 1` -- forty-six, borders included. Measured on
+/// the reference's own capture of `/user/FlameFire` at 1280x720: the pill's rows
+/// are y=201..246 and the two border rows are y=201 and y=246.
+pub const TAB_STRIP: f32 = TAB_HEIGHT + 8.0 + 2.0;
+
+/// The `border-[1px]` `NavTabs.vue:11` puts on the strip, in `--surface-4`.
+pub const TAB_STRIP_BORDER: f32 = 1.0;
+
+/// `card-shadow`, the class `NavTabs.vue:11` puts on the strip.
+///
+/// It resolves to `--shadow-card` (`app-frontend/src/assets/stylesheets/global.scss:164`),
+/// which is `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` in the dark theme
+/// (`assets/styles/variables.scss:368`) and `rgba(50, 50, 100, 0.1) 0px 2px 4px 0px`
+/// in the light one (`:140`); `.oled-mode` and `.retro-mode` extend `.dark-mode`
+/// and so take dark's. All three numbers survive the crossing into iced's
+/// `Shadow` because the value's spread is `0px` and `Shadow` has no spread to
+/// lose it in; the *shape* does not, and is the residual the notes record: the
+/// backend ramps a blur with a smoothstep across the radius where Chromium runs a
+/// Gaussian, so the row under the pill is softer here than there.
+fn card_shadow(theme: Gen) -> iced::Shadow {
+    let color = match theme {
+        Gen::Light => Color::from_rgba(50.0 / 255.0, 50.0 / 255.0, 100.0 / 255.0, 0.1),
+        _ => Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+    };
+    iced::Shadow {
+        color,
+        offset: iced::Vector::new(0.0, TAB_SHADOW_OFFSET),
+        blur_radius: TAB_SHADOW_BLUR,
+    }
+}
+
+/// `0px 2px` in `--shadow-card`: how far the shadow sits below the pill.
+const TAB_SHADOW_OFFSET: f32 = 2.0;
+/// `4px` in `--shadow-card`, which is the blur radius and not a diameter.
+const TAB_SHADOW_BLUR: f32 = 4.0;
+
+/// The selected tab's plate, as the reference composites it.
+///
+/// `bg-button-bgSelected` is `--color-button-bg-selected`, which the dark theme
+/// resolves to `var(--color-brand-highlight)` = `#1BD96A40` (`variables.scss:376`,
+/// `:356`) -- the brand green at a quarter alpha, over the track's own
+/// `--color-bg-raised` = `#27292E`. The reference's capture measures the result as
+/// **`#24543D`**, and this is the function that gets there.
+///
+/// It is worked out here rather than handed to the rasteriser because iced passes
+/// the alpha straight through and the byte that comes back is the backend's
+/// choice, not ours: `tiny_skia` 0.11.4 picks its u16 pipeline by default and
+/// composites this exact pair to `#25553E`, and forced into its high-precision
+/// pipeline the same two colours give `#24543D`. One page, one colour, two
+/// answers, so the composite is done here and painted opaque.
+///
+/// Chromium's own blend of the pair is not a straight sRGB-space lerp, and the
+/// arithmetic below is fitted to that measurement rather than derived: the exact
+/// product at `64/255` is (36.0, 85.2, 61.1) and the reference measures (36, 84,
+/// 61), which no single rounding of the product produces. What does produce all
+/// three bytes is a source premultiplied to eight bits and rounded added to the
+/// backdrop scaled by one minus the alpha and truncated -- the shape of Skia's u8
+/// `source_over`. Each channel is read from the token table as the byte the
+/// stylesheet declared, so the same blend carries to any theme the way Chromium's
+/// compositor does.
+fn plate(theme: Gen) -> Color {
+    let [r, g, b, alpha] = theme_gen::ink_rgba(theme, Ink::ButtonBgSelected);
+    let [raised_r, raised_g, raised_b, _] = theme_gen::ink_rgba(theme, Ink::RaisedBg);
+    let over = |source: u8, backdrop: u8| -> f32 {
+        let premultiplied = (source as u32 * alpha as u32 + 127) / 255;
+        let behind = (backdrop as u32 * (255 - alpha as u32)) / 255;
+        (premultiplied + behind) as f32 / 255.0
+    };
+    Color::from_rgb(over(r, raised_r), over(g, raised_g), over(b, raised_b))
+}
+
 /// The tabs a page switches between: a pill of buttons, the selected one plated.
 ///
 /// `NavTabs.vue`'s own arrangement: a `relative flex w-fit rounded-full
@@ -1783,6 +1896,14 @@ pub const TAB_LINE: f32 = 20.0;
 ///
 /// A tab with no icon is a shape the reference has: the icon is `v-if="link.icon"`
 /// on the link, and the two pages that pass none pass none.
+///
+/// Every caller of this function is a `NavTabs` in the reference's *navigation*
+/// mode, which is what decides the strip's frame: `'card-shadow border
+/// border-solid border-surface-4': mode === 'navigation'` (`NavTabs.vue:11`), and
+/// nothing in the vendored tree passes `mode="local"` -- the three call sites are
+/// the profile's `page-nav` strip, the browse tab's, and the hosting manager's. So
+/// the border and the shadow belong on all five of this port's strips
+/// ([`TAB_STRIP`], [`card_shadow`]).
 pub fn tabs<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     keys: &[&'static str],
@@ -1816,6 +1937,9 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         return Space::new(Length::Shrink, Length::Shrink).into();
     }
     let mut track = row![].align_items(Alignment::Center);
+    // The plate is the same colour on every selected tab, so it is worked out
+    // once for the strip rather than per tab.
+    let plate = plate(theme);
     for (index, ((label, selected), key)) in labels.iter().zip(keys.iter().copied()).enumerate() {
         let selected = *selected;
         let glyph = glyphs.get(index).copied().flatten();
@@ -1837,15 +1961,16 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         } else {
             theme_gen::ink(theme, INK_SECONDARY)
         };
+        let (factor, _) = interaction(key);
         // A selected tab is plated and an unselected one is not, and the
         // reference does not change that on hover: what a hover moves is the
         // *label* -- `text-secondary` to `text-primary` -- so the plate is left
-        // alone and the ink is filtered.
-        let (factor, _) = interaction(key);
-        // The plate is `bg-button-bgSelected`, which is `--brand-highlight`:
-        // the same green at a quarter alpha, so the pill reads as green without
-        // becoming the solid call-to-action the Install button is.
-        let plate = selected.then(|| theme_gen::ink(theme, Ink::ButtonBgSelected));
+        // alone and the ink is filtered. The plate is `bg-button-bgSelected`
+        // composited over the track's own fill; see [`plate`] for why that
+        // composite is worked out here rather than left to the rasteriser, which
+        // answers `#25553E` on the backend this build selects where the
+        // reference measures `#24543D`.
+        let fill = selected.then_some(plate);
         let mut face = row![].align_items(Alignment::Center).spacing(TAB_GAP);
         if let Some(glyph) = glyph {
             face = face.push(icon::icon(
@@ -1868,7 +1993,7 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         // and let the label sit wherever the leftover space put it.
         .padding(Padding { top: 8.0, bottom: 8.0, left: TAB_PAD, right: TAB_PAD })
         .style(move |_theme: &Theme| container::Appearance {
-            background: plate.map(Background::Color),
+            background: fill.map(Background::Color),
             border: Border { radius: 999.0.into(), ..Border::default() },
             ..container::Appearance::default()
         });
@@ -1880,13 +2005,27 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
                 .on_press(on_select(index)),
         );
     }
-    // `p-1`: the track's own four pixels, which is the whole of the space
-    // between the strip and the tabs in it.
+    // `p-1` on `NavTabs.vue:9` plus the `border border-solid border-surface-4`
+    // that `NavTabs.vue:11` adds to the same element in navigation mode, which is
+    // what makes the pill [`TAB_STRIP`] tall rather than the forty-four it was:
+    // the port had the four pixels of `p-1` and none of the border.
+    //
+    // The border is drawn *inside* the strip's bounds -- CSS puts a border
+    // outside the padding and so does iced -- so the height is set rather than
+    // left to the padding, and it is the reference's own arithmetic:
+    // 1 + 4 + 36 + 4 + 1.
+    let shadow = card_shadow(theme);
     container(track)
+        .height(Length::Fixed(TAB_STRIP))
         .padding(4.0)
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
-            border: Border { radius: 999.0.into(), ..Border::default() },
+            border: Border {
+                radius: 999.0.into(),
+                width: TAB_STRIP_BORDER,
+                color: theme_gen::ink(theme, Ink::Surface4),
+            },
+            shadow,
             ..container::Appearance::default()
         })
         .into()
@@ -2674,6 +2813,83 @@ mod tests {
         let now = now + crate::anim::INTERACTION_DURATION;
         anim::clock().lock().expect("the clock").tick(now);
         assert_eq!(interaction(key), (1.0, 0.0));
+    }
+
+    #[test]
+    fn the_tab_strip_is_its_own_classes_added_up() {
+        // `NavTabs.vue:9` wraps the tabs in a `p-1`, `NavTabs.vue:11` puts a
+        // `border border-solid border-surface-4` around that, and a tab is a
+        // `text-sm` line under `py-2`. So the pill is forty-six rows tall and the
+        // reference measures forty-six: y=201..246 on its own 1280x720 capture of
+        // /user/FlameFire, both border rows included.
+        assert_eq!(TAB_HEIGHT, 36.0);
+        assert_eq!(TAB_HEIGHT, TAB_LINE + 16.0);
+        assert_eq!(TAB_STRIP, 46.0);
+        assert_eq!(TAB_STRIP, TAB_HEIGHT + 8.0 + 2.0);
+        assert_eq!(TAB_STRIP_BORDER, 1.0);
+        // The border is `--surface-4`, and the reference's dark token is
+        // `#34363c` (`assets/styles/variables.scss:238`) -- the byte at y=201 and
+        // at y=246 of that capture.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface4), [0x34, 0x36, 0x3c, 0xff]);
+        // And the shadow carries all three of `--shadow-card`'s numbers: iced's
+        // `Shadow` has no `spread_radius`, and this value's spread is 0px, so
+        // there is nothing of it to lose on the way across.
+        for theme in Gen::ALL {
+            let shadow = card_shadow(*theme);
+            assert_eq!(shadow.offset, iced::Vector::new(0.0, 2.0));
+            assert_eq!(shadow.blur_radius, 4.0);
+            assert!(shadow.color.a > 0.0, "{theme:?}: a shadow nobody can see");
+        }
+        // Dark's own colour, from `variables.scss:368`.
+        assert_eq!(card_shadow(Gen::Dark).color, Color::from_rgba(0.0, 0.0, 0.0, 0.25));
+    }
+
+    #[test]
+    fn the_selected_tabs_plate_is_the_reference_s_own_composite() {
+        // `--color-button-bg-selected` is the brand green at a quarter alpha over
+        // the track's own `#27292E`, and the reference's capture reads `#24543D`.
+        // The plate is worked out rather than handed to the rasteriser because the
+        // rasteriser's answer depends on which pipeline it picks: tiny-skia 0.11.4
+        // composites this pair to `#25553E` on its default u16 pipeline and to
+        // `#24543D` on its high-precision one, which is a one-byte difference in
+        // two of the three channels and nothing anybody could see in a code
+        // review.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBgSelected), [0x1b, 0xd9, 0x6a, 0x40]);
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg), [0x27, 0x29, 0x2e, 0xff]);
+        assert_eq!(&plate(Gen::Dark).into_rgba8()[..3], &[0x24, 0x54, 0x3d]);
+        // Opaque on purpose: the composite is already done, and a plate that
+        // still carried the alpha would ask the backend for the same answer twice.
+        assert_eq!(plate(Gen::Dark).a, 1.0);
+        // Every theme composites rather than panicking, and none of them lands on
+        // the plate of another: the blend is a compositor's, so it carries.
+        for theme in Gen::ALL {
+            let color = plate(*theme);
+            assert_eq!(color.a, 1.0, "{theme:?}");
+        }
+        assert_ne!(plate(Gen::Dark), plate(Gen::Light));
+    }
+
+    #[test]
+    fn a_tags_label_is_the_secondary_ink_and_not_the_default_one() {
+        // `TagItem.vue`'s `baseClass` ends in `text-[--_color,
+        // var(--color-secondary)]`, which the reference's own table resolves to
+        // `--color-text-tertiary` (`variables.scss:337`, `:321`). The port drew
+        // `--color-text-default` here and the capture reads `#96A2B0` on every tag
+        // pill of the /user/FlameFire page. Asserted on the token rather than on
+        // the widget because the number the reference fixes is the token's.
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Secondary),
+            [0x96, 0xa2, 0xb0, 0xff]
+        );
+        assert_eq!(theme_gen::ink(Gen::Dark, Ink::Secondary), theme_gen::ink(Gen::Dark, INK_SECONDARY));
+        assert_ne!(
+            theme_gen::ink(Gen::Dark, Ink::Secondary),
+            theme_gen::ink(Gen::Dark, INK_DEFAULT),
+            "the default ink is `--color-text-default`, which is not what TagItem sets"
+        );
+        // And the height is the no-icon one, because no caller draws the `h-4`
+        // glyph that would make it 26.
+        assert_eq!(TAG_HEIGHT, 24.0);
     }
 
     #[test]
