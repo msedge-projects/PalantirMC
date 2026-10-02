@@ -3648,22 +3648,6 @@ impl Shell {
         // rectangle is derived from this shell's own constants, so re-publishing
         // it is a store behind a lock rather than a measurement to keep in step.
         crate::native::set_caption_target(caption_target());
-        // A modal *replaces* the window's contents rather than covering them,
-        // and that is a limitation rather than a choice: iced 0.12 composites a
-        // tree in order and has no z-order, so a layer over a layer is not
-        // something the toolkit can express (the old shell hit the same wall and
-        // took the same way out). The reference composites its dialog over the
-        // chrome with a translucent scrim and a backdrop blur; what this draws
-        // is the dialog over a nearly opaque `--color-base`, so the difference
-        // is the blurred chrome behind the scrim instead of nothing -- the same
-        // class of deviation as `backdrop-filter` itself, and recorded rather
-        // than approximated.
-        // The Skins page's editor is a modal too, and it is not in `Modal`: it is the
-        // page's own state (`pages::Screen::skins_edit`), so the layer is drawn for it
-        // as well as for the shell's own modals.
-        if self.modal.is_some() || self.screen.skins_edit().is_some() {
-            return self.modal_layer();
-        }
         let theme = self.theme;
         let chrome = move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
@@ -3694,11 +3678,39 @@ impl Shell {
         // `background`, and that palette entry is `--bg` -- the colour unstyled
         // widgets sit on -- so the root is drawn as a chrome surface here
         // instead of reaching into the palette every widget reads.
-        container(window.push(row![self.rail(), self.pane()].height(Length::Fill)))
+        let window = container(window.push(row![self.rail(), self.pane()].height(Length::Fill)))
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(chrome)
-            .into()
+            .style(chrome);
+        // The Skins page's editor is a modal too, and it is not in `Modal`: it is the
+        // page's own state (`pages::Screen::skins_edit`), so the layer is drawn for it
+        // as well as for the shell's own modals.
+        if self.modal.is_some() || self.screen.skins_edit().is_some() {
+            // A modal covers the window rather than replacing it. The reference's
+            // overlay is `position: fixed` over the page it dims, and its own
+            // capture shows that: at y=350 the rail's chrome reads `(25, 34, 36)`
+            // through the scrim and the page beside it `(20, 29, 32)` -- two
+            // backdrops, one translucent layer. Drawing the layer *instead of*
+            // the window makes every row read the same whatever was under it, and
+            // measured exactly that: the bed solved to an alpha of `1.0` where
+            // the reference's solves to `0.647` at y=200, `0.706` at 350 and
+            // `0.824` at 600.
+            //
+            // iced 0.12 composites a tree in order and has no stack widget, so
+            // the covering is done by the layout: two `Fill` children of a column
+            // split twice the height it was given when its spacing is minus that
+            // height, which puts the second child back at the first one's own
+            // top. The alternative was a custom widget with `advanced`, which is
+            // a hundred lines of the same arithmetic plus an event path that a
+            // modal -- a thing that swallows presses -- would then have to get
+            // right.
+            return column![window, self.modal_layer()]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .spacing(-self.viewport.height)
+                .into();
+        }
+        window.into()
     }
 
     /// The head: the mark, the history, the breadcrumb, the panel toggle and
@@ -6669,15 +6681,14 @@ const MODAL_SCRIM_INSET: f32 = 5.0 * 16.0;
 /// shows `(32, 43, 43)` over its chrome at the top and `(18, 25, 29)` at the
 /// bottom, and both come back within a level.
 ///
-/// What the compositor then does with those stops is not CSS's arithmetic, and
-/// the difference is measurable: this renderer packs colours linear and mixes
-/// them in Oklab (`iced_graphics::color::GAMMA_CORRECTION`), where a browser
-/// blends straight-alpha in sRGB. Over the rail's `#27292e` chrome the captured
-/// window reads `(26, 37, 36)` at the top of the scrim against the reference's
-/// `(32, 43, 43)` -- six levels dark -- and the two converge as the ramp goes on: within one level from
-/// a third of the way down, and level at the bottom. Compensating for it would
-/// mean a stop colour chosen for one backdrop, and the scrim lies over the page
-/// and its cards as well as the chrome, so the stops stay the reference's.
+/// It is a *gradient* rather than a stack of tones, and its stops carry alpha,
+/// which is worth naming because a first capture of it read as opaque: the bed
+/// was right and the layer beneath it was missing -- [`Shell::render`] drew the
+/// modal *instead of* the window, so the ramp composited over the window's own
+/// clear colour at every row and solved to an alpha of exactly `1.0` against the
+/// reference's `0.647` at y=200, `0.706` at 350 and `0.824` at 600. The toolkit
+/// blends both of its quad pipelines with `SrcAlpha`/`OneMinusSrcAlpha`; what was
+/// wrong was what it had to blend with.
 fn modal_scrim(viewport: iced::Size) -> Background {
     // The line and the stops are literals in [`MODAL_SCRIM`], so this arm is
     // unreachable in practice; it exists so that a typo in that line shows the
