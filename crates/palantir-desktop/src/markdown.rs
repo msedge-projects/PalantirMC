@@ -56,6 +56,10 @@ use crate::ui::{self, text};
 /// paragraph around it.
 const CODE_SIZE: f32 = 11.2;
 
+/// The width of a blockquote's own rule: `border-left: 0.25em solid`, which is
+/// four pixels at the reference's sixteen-pixel root.
+const QUOTE_RULE: f32 = 4.0;
+
 /// How far a blockquote's text is inset from its own bar: `padding: 0 1em`.
 const QUOTE_INSET: f32 = 16.0;
 
@@ -517,18 +521,46 @@ where
         // Never at the top of a body, but a `<summary>` written outside a
         // `<details>` is text the reference draws, so it is drawn here too.
         Block::Summary(summary) => ui::paragraph(theme, summary),
-        Block::Quote(quoted) => row![]
-            .spacing(QUOTE_INSET)
-            .push(
-                container(Space::new(Length::Fixed(4.0), Length::Fill)).style(
-                    move |_theme: &Theme| container::Appearance {
-                        background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
-                        ..container::Appearance::default()
-                    },
-                ),
-            )
-            .push(ui::paragraph(theme, quoted))
-            .into(),
+        // `blockquote { padding: 0 1em; color: var(--color-base);
+        // border-left: 0.25em solid var(--color-button-bg); margin-inline: 0 }`.
+        //
+        // The rule is painted rather than laid out beside the text, which is how
+        // it was written first: a `Length::Fill`-height sibling in a row with the
+        // text. A row lays its children out before it knows how tall it will be,
+        // so the child that fills the cross axis takes the row's own *maximum* --
+        // and inside a page's scroll region that maximum is `f32::MAX`, because
+        // iced measures scroll content with an unbounded axis so it can be taller
+        // than the window. The card this body sits in is drawn with a rounded
+        // corner, and a corner on an `f32::MAX`-tall rectangle is a path the
+        // rasteriser cannot build: any project whose description quoted a line
+        // panicked with `Build rounded rectangle path` in `iced_tiny_skia` before
+        // a pixel of that page was drawn. Two containers give the same picture at
+        // a height each of them takes from its own content: the outer one paints
+        // the rule and holds the inner one back from its left edge, and the inner
+        // one paints the card's own surface across everything that is left.
+        Block::Quote(quoted) => container(
+            container(ui::paragraph(theme, quoted))
+                .width(Length::Fill)
+                .padding(Padding {
+                    top: 0.0,
+                    right: QUOTE_INSET,
+                    bottom: 0.0,
+                    left: QUOTE_INSET,
+                })
+                .style(move |_theme: &Theme| container::Appearance {
+                    // The card's own fill (`--surface-3`, `ui::card`), so what the
+                    // rule frames is the card and not a second surface.
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface3))),
+                    ..container::Appearance::default()
+                }),
+        )
+        .width(Length::Fill)
+        .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: QUOTE_RULE })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+            ..container::Appearance::default()
+        })
+        .into(),
         // `pre { bg-surface-2 rounded-xl p-4 }` with a `border-surface-5` hairline,
         // and `pre code { font-size: 80% }` inside it.
         Block::Code(source) => container(
