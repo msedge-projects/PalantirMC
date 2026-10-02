@@ -3515,7 +3515,14 @@ fn tags(&self) -> iced::Command<Message> {
             }
         }
         match exclusion_facet(&ids) {
-            Some(group) => query.with_facets(vec![group]),
+            Some(group) => {
+                // Pushed rather than *set*: the page's own facets (the categories
+                // chosen in the sidebar) are already on the search, and a
+                // replacement would drop them and answer a question nobody asked.
+                let mut query = query;
+                query.facets.push(group);
+                query
+            }
             None => query,
         }
     }

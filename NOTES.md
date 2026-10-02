@@ -2094,3 +2094,63 @@ for the life of the page.
 Nothing draws from it yet. `State::tags` is a `Load` of its own so that a store
 with no engine draws a section that knows it has nothing rather than one that
 drew itself empty.
+
+### The category sections, which are one section per header
+
+With the tag list in hand the rest of the sidebar is widgets rather than
+endpoints, and this is the slice that takes the sections `search.ts` builds out
+of it. A `FilterType` id is `category_${project_type}_${header}`, so one
+section is one `(project type, header)` pair, and `Tags::headers` and
+`Tags::categories_under` are that query.
+
+Each section is `SearchSidebarFilter` at the app variant own sizes: an
+`Accordion` whose button is the sidebar `buttonClass` -- `flex flex-col gap-1
+px-3 py-3 w-full hover:bg-button-bg` -- around a `flex items-center gap-1
+w-full text-contrast` row holding a `text-base` `h3` and a `size-5`
+`DropdownIcon` at `ml-auto` that turns over when the section is open. The first
+section button gets `pt-4` where the others get twelve from `py-3`, which is
+what `[&:first-child>button]:pt-4` is.
+
+The header slot class is `text-base m-0` **without** `font-semibold` here,
+where the web variant has it: the app leans on its own heading weight, and a
+port that added the weight would be drawing the web page.
+
+The options are `SearchFilterOption` rows -- `flex ... rounded-xl px-2 py-1
+text-sm font-semibold` with the label, a 16-pixel `CheckIcon` at `ml-auto`,
+`bg-brand-highlight text-contrast` when chosen and transparent with a
+`bg-button-bg` under the pointer when not. `bg-brand-highlight` is
+`Ink::ColorBrandHighlight`, which is `rgba(27, 217, 106, 0.25)` over the
+wash rather than an opaque green.
+
+**The category icon is not drawn.** `getCategoryIcon` hands out an SVG per
+category out of `@modrinth/assets`, and this launcher ships no icon set for the
+three hundred tags Modrinth publishes. A row with a box where a drawing
+belongs would be a worse lie than a row whose label starts eight pixels
+further left.
+
+Choosing is a request change, so it asks on the turn it changes and goes
+back to the first page. `search.ts` pushes one part per chosen option and
+joins the parts with ` AND ` into a **single** facet string, because the
+strings inside one `facets` group are alternatives to Modrinth: two chosen
+categories have to both hold, and two groups would ask for either. The set is
+a `BTreeSet` rather than the order the rows were pressed in, so the same
+choice is the same request -- and therefore the same cache entry -- whichever way
+round it happened.
+
+Opening a section is not a request. The reference opens every category section
+on arrival (`getFilterOpenByDefault` opens any id starting with `category`),
+so the state is `collapsed`: the ones the reader has shut, rather than the ones
+nobody has touched.
+
+The tag names themselves come from `ui/src/utils/tag-messages.ts`, which is
+vendored, so `locale::category_label`, `locale::loader_label` and
+`locale::category_header_label` are `formatCategory`, `formatLoader` and
+`formatCategoryHeader`: the reference own message for the tag when it
+publishes one (`kitchen-sink` is *Kitchen Sink*, `gui` is *GUI*), and
+`capitalizeString` when it does not. The lookup is by key name over the
+generated table (`Key::name` is the reference key verbatim), so a tag this
+launcher has never seen is still a lookup and not a table of its own.
+
+Still missing under these: Environment, Game version, Loader, License, and
+the two exclusion lists. Every one of them is a `SearchSidebarFilter` over the
+same document.

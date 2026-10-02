@@ -237,6 +237,62 @@ pub fn label(tag: &str) -> String {
     }
 }
 
+/// What the reference calls a category, in the language in force.
+///
+/// `ui/src/utils/tag-messages.ts`'s `formatCategory`: the reference's own message
+/// for the tag when it publishes one (`tag.category.kitchen-sink` is *Kitchen
+/// Sink*), and `capitalizeString` when it does not.
+///
+/// Both halves are the reference's rule rather than a convenience. Capitalising a
+/// tag that *has* a message would give *Gui* where the reference says *GUI*, and
+/// the fallback exists because Modrinth publishes tags the message table has not
+/// caught up with -- `formatCategory` is not a lookup that can fail, it is a
+/// lookup with an arm for the gap.
+pub fn category_label(name: &str) -> String {
+    tag_label("tag.category.", name)
+}
+
+/// [`category_label`] over a category *header* -- `technical` is *Technical*, and
+/// the header is what one of the browse sidebar's sections is named from.
+pub fn category_header_label(header: &str) -> String {
+    tag_label("header.category.", header)
+}
+
+/// What the reference calls a loader, in the language in force.
+///
+/// `formatLoader`, which is [`category_label`] over `tag.loader.` -- the two
+/// tables are separate in the reference because a name can be both a loader and
+/// a category (`minecraft` is a loader for resource packs and a category for
+/// mods), and the type is what says which one is meant.
+pub fn loader_label(name: &str) -> String {
+    tag_label("tag.loader.", name)
+}
+
+/// The one shape the three of them share: look the tag up as a message, and
+/// capitalise it if the reference has no message for it.
+///
+/// [`text_gen::from_name`] is a binary search over the generated key table, and
+/// the key is the reference's own (`Key::name` is it verbatim), so a tag this
+/// launcher has never seen is still a lookup rather than a table of its own.
+fn tag_label(prefix: &str, name: &str) -> String {
+    match crate::text_gen::from_name(&format!("{prefix}{name}")) {
+        Some(key) => lookup(key).unwrap_or_else(|| key.message()).to_string(),
+        None => capitalize(name),
+    }
+}
+
+/// `capitalizeString`: the first character up, the rest left alone.
+///
+/// Not a title case and not a sentence case -- *Mrpack*, *Modded*, *Gui* -- which
+/// is why it is a helper rather than `to_uppercase`.
+fn capitalize(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 /// How much of the interface a language carries, as the reference's own language
 /// settings print it beside each name.
 ///
@@ -566,6 +622,33 @@ pub fn group(language: &str, value: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tag_is_named_by_the_reference_s_own_message_or_by_its_first_letter() {
+        set("");
+        // The message arm: `tag.category.kitchen-sink` is *Kitchen Sink* in the
+        // reference, not *Kitchen-sink*.
+        assert_eq!(category_label("kitchen-sink"), "Kitchen Sink");
+        assert_eq!(category_label("optimization"), "Optimization");
+        // And the message arm is not a capitalisation: `gui` has a message and it
+        // is *GUI*.
+        assert_eq!(category_label("gui"), "GUI");
+        assert_eq!(category_label("pokemon"), "Pokémon");
+
+        // The fallback arm: Modrinth publishes tags the message table has not
+        // caught up with, and the reference capitalises those rather than
+        // printing the slug.
+        assert_eq!(category_label("not-a-real-category"), "Not-a-real-category");
+        assert_eq!(category_label(""), "");
+        assert_eq!(loader_label("not-a-real-loader"), "Not-a-real-loader");
+        assert_eq!(loader_label("legacy-fabric"), "Legacy Fabric");
+
+        // A header is its own table, and its own message.
+        assert_eq!(category_header_label("technical"), "Technical");
+        assert_eq!(category_header_label("performance-impact"), "Performance impact");
+        assert_eq!(category_header_label("resolutions"), "Resolution");
+        assert_eq!(category_header_label("game-mechanics"), "Game-mechanics");
+    }
 
     #[test]
     fn english_is_the_default_and_an_unknown_tag_opens_as_it() {

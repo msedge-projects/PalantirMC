@@ -46,7 +46,7 @@
 //! the query string are one thing read twice.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, Space};
@@ -224,6 +224,18 @@ pub enum Message {
     /// The page owns only the *flag*: which projects that hides is the shell's
     /// to read, because they are the instances it holds ([`Asked::hide_installed`]).
     HideInstalled(bool),
+    /// A category was chosen, or unchosen.
+    ///
+    /// The name, not the header: the header is which *section* the row is in and
+    /// the request does not know sections -- `search.ts` folds every chosen
+    /// category of every section into one `categories = "..."` part.
+    Category(String),
+    /// A category section was opened or closed.
+    ///
+    /// Not a request: opening a section changes what is on screen and not what
+    /// the API is asked, which is the same rule the reference's `Accordion`
+    /// follows.
+    Section(String),
     /// The search was asked for again.
     Search,
     /// One result was opened. Reported rather than applied: which page is in the
@@ -351,6 +363,19 @@ pub struct State {
     /// store says. It travels with the request ([`Asked::hide_installed`]) rather
     /// than filtering the answer here.
     pub hide_installed: bool,
+    /// The categories chosen in the sidebar, by name.
+    ///
+    /// A set rather than one choice per section because that is the shape the
+    /// reference keeps: `currentFilters` is a flat list, and choosing a category is
+    /// adding to it.
+    pub categories: BTreeSet<String>,
+    /// The category sections the reader has closed.
+    ///
+    /// The reference opens every category section when the page arrives
+    /// (`getFilterOpenByDefault` opens any id that starts with `category`), so the
+    /// state is the ones that are *not* open: a section nobody has touched needs
+    /// no state at all.
+    pub collapsed: BTreeSet<String>,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
     /// The tag list, which is what the sidebar's filter options are made of.
@@ -390,6 +415,8 @@ impl State {
             view: DEFAULT_VIEW,
             page: 1,
             hide_installed: false,
+            categories: BTreeSet::new(),
+            collapsed: BTreeSet::new(),
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
             // and an unmade *request* are different sentences on the screen. The
             // shell asks for this page as soon as it draws it (`Screen::opening`),
@@ -468,6 +495,23 @@ impl State {
                 if self.page != page {
                     self.page = page;
                     return Some(Ask::Search(self.ask()));
+                }
+            }
+            // A chosen category narrows the request, so it asks on the turn it
+            // changes and starts the first page over, for the same reason the
+            // sort does.
+            Message::Category(name) => {
+                if !self.categories.remove(&name) {
+                    self.categories.insert(name);
+                }
+                self.page = 1;
+                return Some(Ask::Search(self.ask()));
+            }
+            // Opening a section is not a change to the request: the reference's
+            // `Accordion` keeps its own state and the search does not move.
+            Message::Section(header) => {
+                if !self.collapsed.remove(&header) {
+                    self.collapsed.insert(header);
                 }
             }
             // The switch is a request-shaped control, like the sort and the view
@@ -616,11 +660,36 @@ impl State {
     /// the page number is the offset. One place, so a control that changes cannot
     /// fail to change the request.
     pub fn request(&self) -> ApiSearch {
-        ApiSearch::new(self.query.trim())
+        let search = ApiSearch::new(self.query.trim())
             .of_type(self.project_type.token())
             .sorted_by(self.sort.token())
             .with_limit(self.view as u32)
-            .from_row((self.page.saturating_sub(1) * self.view) as u32)
+            .from_row((self.page.saturating_sub(1) * self.view) as u32);
+        match self.category_filter() {
+            Some(group) => search.with_facets(vec![group]),
+            None => search,
+        }
+    }
+
+    /// The chosen categories, as the reference's one `categories = "..."` part.
+    ///
+    /// `search.ts`'s `newFilters` pushes one part per chosen option and joins the
+    /// parts with ` AND ' into a *single* facet string, because the strings inside
+    /// one `facets` group are alternatives to Modrinth and two chosen categories
+    /// have to both hold. Two chosen ones are therefore
+    /// `categories = "a" AND categories = "b"`, and they are sorted so that the
+    /// same choice is the same request whichever order the rows were pressed in --
+    /// which is also what keeps the engine's cache one entry rather than two.
+    fn category_filter(&self) -> Option<String> {
+        if self.categories.is_empty() {
+            return None;
+        }
+        let parts: Vec<String> = self
+            .categories
+            .iter()
+            .map(|name| format!("categories = \"{name}\""))
+            .collect();
+        Some(parts.join(" AND "))
     }
 
     /// The placeholder the search field shows.
@@ -706,39 +775,202 @@ fn body<'a>(blocks: Vec<Element<'a, Message>>) -> Element<'a, Message> {
 /// no route into, so the one that is left is the modpack tab, and nothing is drawn
 /// on the others rather than a switch that would hide nothing.
 ///
-/// **The sections under this one are not here.** Each is a `SearchSidebarFilter`
-/// for one filter type -- Category, Environment, Game version, Loader, License --
-/// and every option in them is read out of `GET /tags`, which this launcher does
-/// not ask for. That is the next slice, and it needs the tags endpoint rather
-/// than another widget.
+/// **What is under the switch is the category sections** -- one
+/// `SearchSidebarFilter` per (project type, header) pair the tag list has
+/// categories for, which is what `search.ts` builds its `FilterType` ids out of.
+/// Every one of them is open when the page arrives, because the app variant's
+/// `getFilterOpenByDefault` opens any id that starts with `category`.
+///
+/// The remaining sections -- Environment, Game version, Loader, License, and the
+/// two exclusion lists -- are not here. Each is a `SearchSidebarFilter` over a
+/// list the *same* tag document carries, so they need widgets rather than an
+/// endpoint; this is the slice that had to have the document first.
+/// Discover's own section of the right panel: `BrowseSidebar`'s first block.
+///
+/// `browse-tab/sidebar.vue`, in the app variant, is a column of sections and each
+/// one is a `border-0 border-b-[1px] border-[--brand-gradient-border] p-4
+/// last:border-b-0` block. The first is not a filter at all: `showHideInstalled`
+/// puts one `<label class="flex cursor-pointer items-center justify-between gap-3
+/// text-contrast font-medium">` in it, over a `Toggle small` -- which is
+/// [`ui::switch`] at `Toggle.vue`'s own 48x24.
+///
+/// It is drawn where the reference draws it, which is not in this page's column:
+/// `Browse.vue` ends with `<Teleport to="#sidebar-teleport-target">`, and `App.vue`
+/// puts that target *between* the onboarding checklist and the panel's own
+/// sections. [`crate::shell`]'s panel is where that ordering lives.
+///
+/// `showHideInstalled` is `projectType === 'modpack' || (isServerContext && !==
+/// 'modpack') || !!instance` -- two of the three arms are contexts this shell has
+/// no route into, so the one that is left is the modpack tab, and nothing is drawn
+/// on the others rather than a switch that would hide nothing.
+///
+/// **What is under the switch is the category sections** -- one
+/// `SearchSidebarFilter` per (project type, header) pair the tag list has
+/// categories for, which is what `search.ts` builds its `FilterType` ids out of.
+/// Every one of them is open when the page arrives, because the app variant's
+/// `getFilterOpenByDefault` opens any id that starts with `category`.
+///
+/// The remaining sections -- Environment, Game version, Loader, License, and the
+/// two exclusion lists -- are not here. Each is a `SearchSidebarFilter` over a
+/// list the *same* tag document carries, so they need widgets rather than an
+/// endpoint; this is the slice that had to have the document first.
 pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
-    if state.project_type != ProjectType::Modpack {
-        return Space::new(Length::Shrink, Length::Shrink).into();
-    }
-    let label = text(Key::AppBrowseHideInstalledModpacks.message())
+    let mut sections = column![].spacing(0.0).width(Length::Fill);
+    if state.project_type == ProjectType::Modpack {
+        let label = text(locale::lookup(Key::AppBrowseHideInstalledModpacks)
+            .unwrap_or_else(|| Key::AppBrowseHideInstalledModpacks.message())
+            .to_string())
         .size(16.0)
         .font(medium())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
-    let line = row![]
-        .spacing(12.0)
+        let line = row![]
+            .spacing(12.0)
+            .align_items(Alignment::Center)
+            .width(Length::Fill)
+            .push(label)
+            .push(Space::with_width(Length::Fill))
+            .push(ui::switch(
+                theme,
+                state.hide_installed,
+                Message::HideInstalled(!state.hide_installed)
+            ));
+        sections = sections.push(
+            container(line)
+                .width(Length::Fill)
+                .padding(Padding { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 }),
+        );
+        sections = sections.push(panel_rule(theme));
+    }
+    // The category sections, one per header the tag list has categories under for
+    // this tab. `SearchSidebarFilter` opens every one of them by default in the
+    // app variant (`getFilterOpenByDefault`: `filterId.startsWith('category')`),
+    // which is why the state is a set of the ones the reader has *closed*.
+    let Some(tags) = state.tags.ready() else { return sections.into() };
+    for header in tags.headers(state.project_type.token()) {
+        let options = tags.categories_under(state.project_type.token(), header);
+        if options.is_empty() {
+            continue;
+        }
+        let open = !state.collapsed.contains(header);
+        sections = sections.push(category_section(theme, state, header, &options, open));
+        sections = sections.push(panel_rule(theme));
+    }
+    sections.into()
+}
+
+/// One category section: `SearchSidebarFilter` at the app variant's own sizes.
+///
+/// The section is an `Accordion` whose button is the sidebar's \`buttonClass\` --
+/// \`flex flex-col gap-1 px-3 py-3 w-full hover:bg-button-bg\` -- around the header
+/// row \`flex items-center gap-1 w-full text-contrast\`, which is a \`text-base\`
+/// \`h3\` and a \`size-5\` \`DropdownIcon\` at \`ml-auto\` that turns over when the
+/// section is open. The first section's button gets \`pt-4\` rather than \`py-3\`'s
+/// twelve, which is what \`[&:first-child>button]:pt-4\` is.
+///
+/// The header slot's own class is \`text-base m-0\` *without* \`font-semibold\`
+/// here, where the web variant has it: the app leans on its own heading weight,
+/// and a port that added the weight would be drawing the web page.
+fn category_section<'a>(
+    theme: Gen,
+    state: &'a State,
+    header: &str,
+    options: &[&'a palantir_net::CategoryTag],
+    open: bool,
+) -> Element<'a, Message> {
+    let button = row![]
         .align_items(Alignment::Center)
         .width(Length::Fill)
-        .push(label)
+        .push(
+            text(locale::category_header_label(header))
+                .size(16.0)
+                .font(regular())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+        )
         .push(Space::with_width(Length::Fill))
-        .push(ui::switch(theme, state.hide_installed, Message::HideInstalled(!state.hide_installed)));
-    // `p-4` with a `border-b` under it: iced paints a `Border` on all four sides,
-    // so the panel's own edge is a separate one-pixel rule rather than a border
-    // width on a box that has no other edge.
-    column![
-        container(line)
+        .push(icon::icon(
+            Glyph::Dropdown,
+            SECTION_ICON,
+            theme_gen::ink(theme, INK_DEFAULT),
+        ));
+    let mut inner = column![].spacing(4.0).width(Length::Fill);
+    if open {
+        for category in options {
+            inner = inner.push(category_option(theme, state, category));
+        }
+    }
+    let mut body = column![].spacing(8.0).width(Length::Fill).push(button);
+    if open {
+        // `mt-2 mb-3` on the content and `ml-2 mr-3` on the panel inside it.
+        body = body.push(
+            container(inner)
+                .width(Length::Fill)
+                .padding(Padding { top: 8.0, right: 12.0, bottom: 12.0, left: 12.0 }),
+        );
+    }
+    mouse_area(
+        container(body)
             .width(Length::Fill)
-            .padding(Padding { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 }),
-        panel_rule(theme)
-    ]
-    .spacing(0.0)
-    .width(Length::Fill)
+            .padding(Padding { top: 12.0, right: 12.0, bottom: 12.0, left: 12.0 }),
+    )
+    .on_press(Message::Section(header.to_string()))
     .into()
 }
+
+/// One option of a category section: `SearchFilterOption`'s own row.
+///
+/// \`flex ... rounded-xl px-2 py-1 text-sm font-semibold\` around the label, with
+/// the 16-pixel \`CheckIcon\` at \`ml-auto\`. Chosen is \`bg-brand-highlight
+/// text-contrast\`; unchosen is transparent with the label in \`text-secondary\` and
+/// a \`bg-button-bg\` under the pointer.
+///
+/// **The category's own icon is not drawn.** \`getCategoryIcon\` hands out an SVG
+/// per category from \`@modrinth/assets\`, and this launcher ships no icon set for
+/// the three hundred tags Modrinth publishes; a row that had a box where a
+/// drawing belongs would be worse than a row whose label starts eight pixels
+/// further left.
+fn category_option<'a>(
+    theme: Gen,
+    state: &'a State,
+    category: &'a palantir_net::CategoryTag,
+) -> Element<'a, Message> {
+    let chosen = state.categories.contains(&category.name);
+    let ink = if chosen { INK_CONTRAST } else { INK_SECONDARY };
+    let label = text(locale::category_label(&category.name))
+        .size(14.0)
+        .font(semibold())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, ink)));
+    let row = row![]
+        .align_items(Alignment::Center)
+        .width(Length::Fill)
+        .push(Space::with_width(8.0))
+        .push(label)
+        .push(Space::with_width(Length::Fill))
+        .push(icon::icon(
+            Glyph::Check,
+            SECTION_ICON,
+            theme_gen::ink(theme, INK_SECONDARY),
+        ));
+    let background =
+        chosen.then(|| Background::Color(theme_gen::ink(theme, Ink::ColorBrandHighlight)));
+    mouse_area(
+        container(row)
+            .width(Length::Fill)
+            .padding(Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 0.0 })
+            .style(move |_t: &iced::Theme| container::Appearance {
+                background,
+                border: Border {
+                    radius: 12.0.into(),
+                    ..Border::default()
+                },
+                ..container::Appearance::default()
+            }),
+    )
+    .on_press(Message::Category(category.name.clone()))
+    .into()
+}
+
+/// \`size-5\`: the section's own dropdown icon.
+const SECTION_ICON: f32 = 20.0;
 
 /// The `border-b border-[--brand-gradient-border]` every one of the sidebar's
 /// sections carries, as the one thing iced will draw: a one-pixel `--surface-5`
@@ -1310,6 +1542,97 @@ mod tests {
         let mut empty = State::new(ProjectType::Modpack);
         empty.update(Message::Tags { result: Ok(palantir_net::Tags::default()) });
         assert_eq!(empty.tags, Load::Empty, "a tag list with nothing in it is Empty");
+    }
+
+    #[test]
+    fn a_chosen_category_is_one_and_ed_part_of_the_request() {
+        let mut state = State::new(ProjectType::Modpack);
+        assert!(state.category_filter().is_none(), "nothing chosen is no facet");
+
+        let Some(Ask::Search(first)) = state.update(Message::Category("technology".to_string()))
+        else {
+            panic!("choosing asks");
+        };
+        assert_eq!(
+            first.query.facets,
+            vec![r#"categories = "technology""#.to_string()],
+            "one chosen category is one part"
+        );
+
+        // Two chosen categories *both* hold, so they are joined into the one
+        // facet string -- two groups would be an "or", which is a different
+        // question.
+        let Some(Ask::Search(second)) =
+            state.update(Message::Category("adventure".to_string()))
+        else {
+            panic!("the second choice asks");
+        };
+        assert_eq!(second.query.facets.len(), 1, "one group, not two");
+        assert!(
+            second.query.facets[0].contains(" AND "),
+            "and the parts are joined with AND: {}",
+            second.query.facets[0]
+        );
+        assert_eq!(state.page, 1, "a different set of results starts at the first page");
+
+        // Unchoosing asks too, and the facet goes with it.
+        let Some(Ask::Search(third)) = state.update(Message::Category("adventure".to_string()))
+        else {
+            panic!("unchoosing asks");
+        };
+        assert_eq!(third.query.facets, vec![r#"categories = "technology""#.to_string()]);
+
+        // The order the rows were pressed in cannot change the request, or the
+        // engine's cache would hold two entries for one question.
+        let mut other = State::new(ProjectType::Modpack);
+        other.update(Message::Category("adventure".to_string()));
+        other.update(Message::Category("technology".to_string()));
+        assert_eq!(
+            other.request().facets,
+            second.query.facets,
+            "the same two categories are the same request whichever order they were pressed in"
+        );
+
+        // And opening a section is not a change to the request at all.
+        assert_eq!(state.update(Message::Section("technical".to_string())), None);
+        assert!(state.collapsed.contains("technical"));
+        assert_eq!(state.request().facets, vec![r#"categories = "technology""#.to_string()]);
+    }
+
+    #[test]
+    fn the_category_sections_are_the_headers_the_tab_has_and_all_of_them_start_open() {
+        let mut state = State::new(ProjectType::Modpack);
+        state.update(Message::Tags {
+            result: Ok(palantir_net::Tags {
+                categories: vec![
+                    palantir_net::CategoryTag {
+                        name: "kitchen-sink".to_string(),
+                        project_type: "modpack".to_string(),
+                        header: "technical".to_string(),
+                    },
+                    palantir_net::CategoryTag {
+                        name: "adventure".to_string(),
+                        project_type: "modpack".to_string(),
+                        header: "gameplay".to_string(),
+                    },
+                    palantir_net::CategoryTag {
+                        name: "optimization".to_string(),
+                        project_type: "mod".to_string(),
+                        header: "technology".to_string(),
+                    },
+                ],
+                ..palantir_net::Tags::default()
+            }),
+        });
+        assert!(state.collapsed.is_empty(), "every category section starts open");
+        for theme in Gen::ALL {
+            drop(sidebar(*theme, &state));
+        }
+        // Closing one and the tab's own headers both still draw.
+        state.update(Message::Section("technical".to_string()));
+        drop(sidebar(Gen::Dark, &state));
+        // And a page with no tag list yet draws the sidebar rather than failing.
+        drop(sidebar(Gen::Dark, &State::new(ProjectType::Modpack)));
     }
 
     #[test]
