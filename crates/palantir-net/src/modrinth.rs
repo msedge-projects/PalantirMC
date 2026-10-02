@@ -118,15 +118,26 @@ pub fn search_url_sorted(query: &str, project_type: &str, index: &str) -> String
     search_url_parts(query, Some(project_type), Some(index), 50, 0)
 }
 
-/// The URL of the tag list: `GET /v2/tags`.
+/// The URL of the category list: `GET /v2/tag/category`.
 ///
-/// The three lists a browse page's filters are built from -- game versions,
-/// loaders and categories -- come out of one document rather than three, which is
-/// why this is a single route and not a family of them. It is a *list* document:
-/// it never changes within a release cycle, so the engine holds it on the slow
-/// clock rather than the search one.
-pub fn tags_url() -> String {
-    format!("{MODRINTH_BASE_URL}/tags")
+/// There is no `/tags`: the three lists a browse page's filters are built from --
+/// categories, game versions and loaders -- are three routes, not one document,
+/// which is why the reference's `get_categories`, `get_game_versions` and
+/// `get_loaders` are three calls rather than three fields. Each is a *list*
+/// document that only changes when Modrinth ships, so the engine holds them on
+/// the slow clock rather than the search one.
+pub fn tag_categories_url() -> String {
+    format!("{MODRINTH_BASE_URL}/tag/category")
+}
+
+/// The URL of the game-version list: `GET /v2/tag/game_version`.
+pub fn tag_game_versions_url() -> String {
+    format!("{MODRINTH_BASE_URL}/tag/game_version")
+}
+
+/// The URL of the loader list: `GET /v2/tag/loader`.
+pub fn tag_loaders_url() -> String {
+    format!("{MODRINTH_BASE_URL}/tag/loader")
 }
 
 /// One game version Modrinth knows about.
@@ -137,10 +148,6 @@ pub fn tags_url() -> String {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct GameVersionTag {
     /// The version number, e.g. `1.21.4`.
-    ///
-    /// Named `game_version` on the wire, which is the API's word for the same
-    /// thing `search.ts` calls `version` in a filter option.
-    #[serde(rename = "game_version")]
     pub version: String,
     /// `release`, `snapshot`, `beta` or `alpha`.
     pub version_type: String,

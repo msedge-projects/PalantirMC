@@ -255,7 +255,39 @@ pub fn category_label(name: &str) -> String {
 /// [`category_label`] over a category *header* -- `technical` is *Technical*, and
 /// the header is what one of the browse sidebar's sections is named from.
 pub fn category_header_label(header: &str) -> String {
-    tag_label("header.category.", header)
+    match header_key(header) {
+        Some(key) => match crate::text_gen::from_name(key) {
+            Some(found) => lookup(found).unwrap_or_else(|| found.message()).to_string(),
+            None => capitalize(header),
+        },
+        None => capitalize(header),
+    }
+}
+
+/// The reference's own `categoryHeaderMessages`, as a lookup.
+///
+/// **Keyed by the API's header names, not by the message ids**, because the two
+/// differ: the API calls the header `categories` and the reference's table keys it
+/// that way while its *message id* is `header.category.category` -- singular --
+/// and the sentence it prints is *Category*. Building the id by pasting the header
+/// into `header.category.` gets that one wrong and would print *Categories*.
+///
+/// Transcribed rather than derived, because the reference's table is eight
+/// entries long and one of them is spelled differently from its id. A header the
+/// table does not have falls back to [`capitalize`], which is the reference's own
+/// fallback in `formatCategoryHeader`.
+fn header_key(header: &str) -> Option<&'static str> {
+    Some(match header {
+        "resolutions" => "header.category.resolutions",
+        "categories" => "header.category.category",
+        "features" => "header.category.feature",
+        "performance-impact" => "header.category.performance-impact",
+        "minecraft_server_community" => "header.category.minecraft-server-community",
+        "minecraft_server_features" => "header.category.minecraft-server-features",
+        "minecraft_server_gameplay" => "header.category.minecraft-server-gameplay",
+        "minecraft_server_meta" => "header.category.minecraft-server-meta",
+        _ => return None,
+    })
 }
 
 /// What the reference calls a loader, in the language in force.
@@ -643,10 +675,16 @@ mod tests {
         assert_eq!(loader_label("not-a-real-loader"), "Not-a-real-loader");
         assert_eq!(loader_label("legacy-fabric"), "Legacy Fabric");
 
-        // A header is its own table, and its own message.
+        // A header is its own table, and its own message. The live API calls the
+        // one every project type has `categories`, while the reference spells its
+        // message id in the singular -- so the sentence is *Category* and not
+        // *Categories*, which is what a pasted-together id would have printed.
+        assert_eq!(category_header_label("categories"), "Category");
         assert_eq!(category_header_label("technical"), "Technical");
         assert_eq!(category_header_label("performance-impact"), "Performance impact");
         assert_eq!(category_header_label("resolutions"), "Resolution");
+        assert_eq!(category_header_label("features"), "Feature");
+        assert_eq!(category_header_label("minecraft_server_gameplay"), "Gameplay");
         assert_eq!(category_header_label("game-mechanics"), "Game-mechanics");
     }
 

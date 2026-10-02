@@ -2063,11 +2063,20 @@ next slice, and it needs the tags endpoint rather than another widget.
 
 ### The tag list, which is what the filter sections are made of
 
-`GET /v2/tags` is one document, and the reference's `get_game_versions`,
-`get_loaders` and `get_categories` are three names for three fields of it --
-which is the whole reason it is a single route here too, and a single cache
-entry. Believed on the metadata clock rather than the search one: the list
-changes when Modrinth ships a release, not when a release happens.
+The first draft of this said `GET /v2/tags` is one document and that the
+reference's `get_game_versions`, `get_loaders` and `get_categories` are three
+names for three fields of it. **That was wrong, and the live service said so:**
+`GET /v2/tags` answers `{"error":"not_found"}`. The three lists are three routes
+-- `/v2/tag/category`, `/v2/tag/game_version`, `/v2/tag/loader` -- each a bare
+JSON array, which is why the reference's three helpers are three calls. The
+reference's `helpers/tags.ts` is not vendored, so this reading came from the
+service rather than from the tree, and it is written down here because the
+mistake is the kind that a class-list reading makes and a `curl` settles.
+
+What survived the correction is the join: a browse page wants all three at once,
+and the filter lists are queries over the three together. `Store::tags` is the
+join, and it is three requests. One failure fails the read -- a section with some
+of its options missing is a filter that quietly does not filter.
 
 Three of its queries are the ones `search.ts` builds its filter lists out of,
 and they are queries rather than filters because the sidebar's *sections* are
@@ -2087,7 +2096,7 @@ made of them:
 
 On the page side this is `Ask::Tags`, and it is asked **before** the first
 search rather than beside it: the shell's `opening` hands back one request at a
-time, and the tag list is the one whose answer the sidebar cannot draw a
+time, and the tag lists are the ones whose answer the sidebar cannot draw a
 single option without. The reference fetches it on mount too. It is asked once
 for the life of the page.
 
@@ -2097,7 +2106,7 @@ drew itself empty.
 
 ### The category sections, which are one section per header
 
-With the tag list in hand the rest of the sidebar is widgets rather than
+With the tag lists in hand the rest of the sidebar is widgets rather than
 endpoints, and this is the slice that takes the sections `search.ts` builds out
 of it. A `FilterType` id is `category_${project_type}_${header}`, so one
 section is one `(project type, header)` pair, and `Tags::headers` and
@@ -2154,3 +2163,67 @@ launcher has never seen is still a lookup and not a table of its own.
 Still missing under these: Environment, Game version, Loader, License, and
 the two exclusion lists. Every one of them is a `SearchSidebarFilter` over the
 same document.
+
+#### What the reference own capture says about the sidebar
+
+Both clients were on the box at once for this one: Modrinth App v0.21.6 on
+`:99` and this launcher on `:98`, both at 1280x720. The numbers below
+are read off the reference plate at `/tmp/ref-discover-panel.png`, not off a
+class list.
+
+| Thing | Measured on the reference |
+| --- | --- |
+| Panel left edge | page to x 979, the border at **980**, wash from 981 |
+| Panel wash | `(24, 32, 30)` |
+| The border | `--brand-gradient-border`, `(33, 50, 40)` at the top down to `(29, 41, 34)` at the bottom |
+| Switch section rule | one row at **y 322**, same colour as the left edge |
+| Switch row ink | y 286..305, label from x **998** (that is `p-4`) |
+| Section heading | ink y 341..355, from x **994** (`px-3`), chevron ink x 1251..1264 |
+| First option | ink y 385..400, label ink from x **1021** |
+| Option pitch | 33 (`385 -> 418`) |
+
+Three of those changed the drawing:
+
+* **The section rule is `--brand-gradient-border`, not `--divider`.** It
+  measures `(32, 48, 40)` and `--surface-5` would be `(66, 68, 74)` -- a
+  difference visible at a glance, and the first draft of this drew a
+  `--surface-5` rule. It is the same token as the panel own edge, so the
+  same `Ink::BrandGradientBorder` and the same one-pixel line.
+* **The heading face is semibold, though the class does not say so.** The
+  app-variant header slot is `text-base m-0` with no weight class, where the web
+  variant has `font-semibold`. On the plate *Category* reads heavier than
+  the `font-medium` *Hide already installed* above it, so the capture
+  decided it. Where a class list and a plate disagree about a face, the plate
+  is the authority.
+* **The option label is on `text-sm` own line** -- twenty pixels, not the
+  nineteen this toolkit would give a fourteen-pixel label -- which is what
+  makes the rows thirty-three pixels apart rather than thirty.
+
+One thing the plate settles about the option rows is the **icon**: each one has
+a sixteen-pixel drawing at x 998..1011, and the label starts at 1021 --
+sixteen pixels of icon and eight of gap. This launcher draws no icon and
+therefore leaves that sixteen pixels empty, putting the label where the
+reference has it and the icon where nothing is. That is the smaller lie; the
+alternatives were a placeholder box or a label eight pixels out.
+
+The gradient itself is the one part of that rule this toolkit cannot draw: the
+reference runs a vertical gradient along the panel edge and one flat colour
+sits in the middle of it. The panel own left edge already had that limit and
+says so.
+
+A correction to the section above, and one the live service settled.
+
+**There is no `/tags`.** `GET /v2/tags` answers `{"error":"not_found"}`;
+the three lists are three routes -- `/v2/tag/category`, `/v2/tag/game_version`,
+`/v2/tag/loader` -- each a bare JSON array. The first draft of this said
+otherwise, from the shape of the reference three helper names, and a `curl`
+took it apart in one line. That is worth recording because it is the second
+time in this tree that a reading from names rather than from the wire has been
+wrong, and both times the wire was one command away.
+
+**There is also exactly one category section, not several.** The live
+`/v2/tag/category` gives one header per project type -- `categories`, ten entries
+for `modpack` -- so the reference sidebar shows a single *Category* section
+with ten options, which is exactly what its plate shows. The other filter
+types `search.ts` declares (`environment`, `game_version`, the loaders,
+`license`) are real, and they are the sections still missing here.

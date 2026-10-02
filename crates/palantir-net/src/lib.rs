@@ -72,10 +72,11 @@ pub use engine::{
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
-    date_label, search_url, tags_url, user_projects_url, user_url, version_url, CategoryTag,
-    GameVersionTag, LoaderTag, ModrinthDependency, ModrinthProjectVersion, ModrinthSearchHit,
-    ModrinthSearchResponse, ModrinthUser, ModrinthUserProject, ModrinthVersionFile, NewsArticle,
-    NewsFeed, Tags, MODRINTH_BASE_URL, NEWS_PAGE_URL, NEWS_URL,
+    date_label, search_url, tag_categories_url, tag_game_versions_url, tag_loaders_url,
+    user_projects_url, user_url, version_url, CategoryTag, GameVersionTag, LoaderTag,
+    ModrinthDependency, ModrinthProjectVersion, ModrinthSearchHit, ModrinthSearchResponse,
+    ModrinthUser, ModrinthUserProject, ModrinthVersionFile, NewsArticle, NewsFeed, Tags,
+    MODRINTH_BASE_URL, NEWS_PAGE_URL, NEWS_URL,
 };
 
 use std::path::PathBuf;

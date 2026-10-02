@@ -254,7 +254,7 @@ pub enum Message {
         /// The hits, or the reason there are none.
         result: Result<Vec<Hit>, String>,
     },
-    /// The tag list, from the shell.
+    /// The tag lists, from the shell.
     ///
     /// The answer to [`crate::pages::Ask::Tags`], and the one thing the sidebar
     /// cannot draw a single option without. A store with no engine answers with a
@@ -378,12 +378,12 @@ pub struct State {
     pub collapsed: BTreeSet<String>,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
-    /// The tag list, which is what the sidebar's filter options are made of.
+    /// The tag lists, which is what the sidebar's filter options are made of.
     ///
-    /// Asked before the first search and kept for the life of the page: it is one
-    /// document that changes when Modrinth ships a release, and re-asking it on
-    /// every tab change would be a request per click for an answer that was the
-    /// same all afternoon.
+    /// Asked before the first search and kept for the life of the page: they
+    /// change when Modrinth ships a release, and re-asking on every tab change
+    /// would be three requests per click for an answer that was the same all
+    /// afternoon.
     pub tags: Load<palantir_net::Tags>,
     /// The icons of those results, decoded, by the `icon_url` each answers.
     ///
@@ -546,9 +546,9 @@ impl State {
                     return self.icons_ask();
                 }
             }
-            // The tag list, kept. Nothing about it is a round: it is one document
-            // with no question in it, so there is nothing for a later answer to be
-            // stale against.
+            // The tag lists, kept. Nothing about them is a round: they are three
+            // lists with no question in them, so there is nothing for a later
+            // answer to be stale against.
             Message::Tags { result } => {
                 self.tags = match result {
                     Ok(tags) => {
@@ -589,9 +589,9 @@ impl State {
     /// nothing for the ninety-nine out of a hundred that are not "this page was
     /// just built".
     pub fn opening(&mut self) -> Option<Ask> {
-        // The tag list first, then the search. `SearchSidebarFilter`'s options are
-        // all read out of it, and the shell's `opening` hands back one request at a
-        // time -- so the page asks in the order it can draw something in, and the
+        // The tag lists first, then the search. `SearchSidebarFilter`'s options are
+        // all read out of them, and the shell's `opening` hands back one request at
+        // a time -- so the page asks in the order it can draw something in, and the
         // first results land a request after the sidebar is able to fill itself.
         // This is the reference's order too: `Browse.vue` fetches `get_categories`,
         // `get_loaders` and `get_game_versions` when it mounts.
@@ -867,9 +867,13 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// section is open. The first section's button gets \`pt-4\` rather than \`py-3\`'s
 /// twelve, which is what \`[&:first-child>button]:pt-4\` is.
 ///
-/// The header slot's own class is \`text-base m-0\` *without* \`font-semibold\`
-/// here, where the web variant has it: the app leans on its own heading weight,
-/// and a port that added the weight would be drawing the web page.
+/// The header slot's own class is \`text-base m-0\` *without* a weight, where the
+/// web variant has \`font-semibold\` -- so the class list says the app leans on its
+/// own heading weight and does not say what that weight is. The reference's own
+/// capture settled it: at 1280x720 *Category* reads heavier than the
+/// \`font-medium\` *Hide already installed* above it, so the semibold face is what
+/// is drawn here. Where a class list and a capture disagree about a face the
+/// capture is the authority, because that is what a pixel-matched port is for.
 fn category_section<'a>(
     theme: Gen,
     state: &'a State,
@@ -883,7 +887,10 @@ fn category_section<'a>(
         .push(
             text(locale::category_header_label(header))
                 .size(16.0)
-                .font(regular())
+                // `text-base` own line: twenty-four pixels, which is what puts the
+                // section's options where the capture has them.
+                .line_height(iced::Pixels(24.0))
+                .font(semibold())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         )
         .push(Space::with_width(Length::Fill))
@@ -900,11 +907,13 @@ fn category_section<'a>(
     }
     let mut body = column![].spacing(8.0).width(Length::Fill).push(button);
     if open {
-        // `mt-2 mb-3` on the content and `ml-2 mr-3` on the panel inside it.
+        // `mt-2 mb-3` on the content and `ml-2 mr-3` on the panel inside it -- eight on
+        // the left and twelve on the right, which is what puts an option's own
+        // `px-2` at the reference's measured x 1010 and its label at 1018.
         body = body.push(
             container(inner)
                 .width(Length::Fill)
-                .padding(Padding { top: 8.0, right: 12.0, bottom: 12.0, left: 12.0 }),
+                .padding(Padding { top: 8.0, right: 12.0, bottom: 12.0, left: 8.0 }),
         );
     }
     mouse_area(
@@ -928,6 +937,16 @@ fn category_section<'a>(
 /// the three hundred tags Modrinth publishes; a row that had a box where a
 /// drawing belongs would be worse than a row whose label starts eight pixels
 /// further left.
+/// The space an option gives the icon the reference draws in front of its label.
+///
+/// The reference's rows carry a sixteen-pixel drawing at x 998..1011 and their
+/// labels start at 1021; this launcher draws no icon, so the space is here to put
+/// the label at the reference's own x rather than to fill a gap. It is measured
+/// off the plate rather than added up, which is the only honest way to set it: the
+/// classes (\`px-2\` on the row, \`ml-2\` on the panel, \`gap-2\` between icon and
+/// label) add up to a slightly different number than the pixels do.
+const OPTION_ICON: f32 = 20.0;
+
 fn category_option<'a>(
     theme: Gen,
     state: &'a State,
@@ -937,12 +956,16 @@ fn category_option<'a>(
     let ink = if chosen { INK_CONTRAST } else { INK_SECONDARY };
     let label = text(locale::category_label(&category.name))
         .size(14.0)
+        // `text-sm`'s own line, `1.25rem`: twenty pixels, and the reason the
+        // reference's option rows are thirty-three pixels apart rather than the
+        // twenty-nine a tighter line would give.
+        .line_height(iced::Pixels(20.0))
         .font(semibold())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, ink)));
     let row = row![]
         .align_items(Alignment::Center)
         .width(Length::Fill)
-        .push(Space::with_width(8.0))
+        .push(Space::with_width(OPTION_ICON))
         .push(label)
         .push(Space::with_width(Length::Fill))
         .push(icon::icon(
@@ -973,16 +996,29 @@ fn category_option<'a>(
 const SECTION_ICON: f32 = 20.0;
 
 /// The `border-b border-[--brand-gradient-border]` every one of the sidebar's
-/// sections carries, as the one thing iced will draw: a one-pixel `--surface-5`
-/// line under the block. The gradient border is what the app's *brand gradient*
-/// paints across the panel's edge, and this shell has no gradient to paint --
-/// `--brand-gradient-border` resolves to the same rule the rest of the panel uses.
+/// sections carries, as the one thing iced will draw: a one-pixel line under the
+/// block.
+///
+/// `--brand-gradient-border` rather than `--divider`, which is what the first
+/// draft of this drew and what the reference's capture settles: the rule under
+/// the switch section measures (32, 48, 40) at 1280x720 -- the same green as the
+/// panel's own left edge -- and `--surface-5` would be (66, 68, 74). It is the
+/// panel's [`crate::shell`] edge colour because it is the same token, drawn the
+/// same one-pixel way.
+///
+/// One colour for a gradient: the reference's is a vertical gradient running from
+/// (33, 50, 40) at the top of the panel to (29, 41, 34) at the bottom, and a
+/// single colour in the middle of that range is as close as this toolkit can get.
+/// The panel's own edge has the same limit and says so.
 fn panel_rule<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     container(Space::new(Length::Fill, 1.0))
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
         .style(move |_t: &iced::Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+            background: Some(Background::Color(theme_gen::ink(
+                theme,
+                Ink::BrandGradientBorder,
+            ))),
             ..container::Appearance::default()
         })
         .into()

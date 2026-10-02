@@ -128,15 +128,15 @@ pub enum Ask {
     /// still coming. That is what makes this the one ask whose answer is decoration
     /// -- the page reserves the box either way ([`crate::ui::icon_box`]).
     Icons(discover::Icons),
-    /// Ask the store, through the engine, for the tag list: every game version,
-    /// loader and category Modrinth knows.
+    /// Ask the store, through the engine, for the tag lists: every category, game
+    /// version and loader Modrinth knows.
     ///
     /// Not decoration and not decoration-adjacent either: the browse sidebar's
-    /// filter sections are *made* of it, and a section with no options is not a
+    /// filter sections are *made* of them, and a section with no options is not a
     /// section that drew badly -- it is a section with nothing in it. It is asked
     /// before the first search rather than beside it because the shell's
-    /// `opening` hands back one request at a time, and the tag list is the one
-    /// whose answer the page cannot draw anything without.
+    /// `opening` hands back one request at a time, and these are the ones whose
+    /// answer the page cannot draw anything without.
     Tags,
     /// Ask the store, through the engine, for one project: its own document, the
     /// people on its team, and its version list.
@@ -267,7 +267,7 @@ impl Message {
         Message::Discover(discover::Message::Icons { arrived })
     }
 
-    /// The message that carries the tag list back to Discover.
+    /// The message that carries the tag lists back to Discover.
     ///
     /// Named here rather than built in the shell for the same reason the two above
     /// are: the answer's type is the page's, and the shell has never seen a

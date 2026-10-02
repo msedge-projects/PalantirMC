@@ -3472,13 +3472,13 @@ impl Shell {
         })
     }
 
-    /// Read the tag list the browse sidebar's options are made of.
+    /// Read the tag lists the browse sidebar's options are made of.
 ///
-/// Blocking for the reason every other read here is: the request is a network
-/// round trip and this runs on the frame thread, so it goes through
+/// Blocking for the reason every other read here is: the requests are network
+/// round trips and this runs on the frame thread, so it goes through
 /// [`crate::store::off_thread`] like its siblings. It is asked once per page, not
 /// once per search -- the answer changes when Modrinth ships a release -- and the
-/// engine holds it, so a second visit to Discover costs no request at all.
+/// engine holds each list, so a second visit to Discover costs no request at all.
 fn tags(&self) -> iced::Command<Message> {
     let store = self.store.clone();
     iced::Command::perform(

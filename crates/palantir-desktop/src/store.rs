@@ -1093,19 +1093,34 @@ impl Store {
             .map_err(|error| error.to_string())
     }
 
-    /// The tag list a browse page's filter sections are built from.
+    /// The tag lists a browse page's filter sections are built from.
     ///
-    /// One request for the three lists -- game versions, loaders and categories --
-    /// because `GET /v2/tags` is one document and the reference's
-    /// `get_game_versions`, `get_loaders` and `get_categories` are three names for
-    /// three fields of it.
+    /// Three requests, because there is no `/tags`: Modrinth publishes categories,
+    /// game versions and loaders as three routes, which is why the reference's
+    /// `get_categories`, `get_game_versions` and `get_loaders` are three calls. They
+    /// are joined here because a browse page wants all three at once and because
+    /// the filter lists are queries over the three together -- a section is a
+    /// project type and a header, and a loader belongs to the lists its
+    /// `supported_project_types` name.
+    ///
+    /// One failure fails the read: a section with some of its options missing is
+    /// a filter that quietly does not filter.
     pub fn tags(&self) -> Result<Tags, String> {
         let Some(engine) = &self.engine else {
             return Err(not_implemented("The filter lists"));
         };
+        let api = engine.api();
         let cancel = Cancel::new();
         let backoff = Backoff::default();
-        engine.api().tags(&cancel, &backoff).map_err(|error| error.to_string())
+        Ok(Tags {
+            categories: api
+                .tag_categories(&cancel, &backoff)
+                .map_err(|error| error.to_string())?,
+            game_versions: api
+                .tag_game_versions(&cancel, &backoff)
+                .map_err(|error| error.to_string())?,
+            loaders: api.tag_loaders(&cancel, &backoff).map_err(|error| error.to_string())?,
+        })
     }
 
     /// The account's own appearance, ready for the Skins page to draw.
