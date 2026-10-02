@@ -3934,7 +3934,6 @@ impl Shell {
         // `move` closure that names `self` captures the borrow, and the element
         // it is attached to outlives the method.
         let theme = self.theme;
-        let crumb = breadcrumb(&self.address);
         let row = row![]
             .align_items(Alignment::Center)
             .padding(Padding { top: 0.0, bottom: 0.0, left: RAIL_PAD, right: 0.0 })
@@ -3969,13 +3968,11 @@ impl Shell {
                 !self.forward.is_empty(),
                 Message::Forward,
             ))
-            .push(Space::with_width(RAIL_PAD))
-            .push(
-                text(crumb)
-                    .size(14.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
+            // `Breadcrumbs.vue`'s own `pl-4`, which is the reference's whole gap
+            // between the history pair and the trail -- the head's flex row puts
+            // nothing between them and the trail pads itself.
+            .push(Space::with_width(CRUMB_INSET))
+            .push(self.breadcrumbs())
             // The reference's own order on the right of the status bar: the
             // action bar, then the panel toggle, then the window controls. The
             // action bar is what makes a run watchable from any page -- the
@@ -3996,6 +3993,69 @@ impl Shell {
                 ..container::Appearance::default()
             })
             .into()
+    }
+
+    /// The head's breadcrumb trail, as `Breadcrumbs.vue` draws it.
+    ///
+    /// One `flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base
+    /// font-medium leading-6` entry per crumb, each with its `size-5` visual in
+    /// `text-primary`, and a `size-5 text-primary` `ChevronRightIcon` between
+    /// entries in a `gap-2` row. The last entry's label is `text-contrast` and
+    /// every earlier one `text-primary`, which is the reference's own rule for
+    /// which of the two you are on.
+    ///
+    /// The reference fades the trail out at the row's own edge when it
+    /// overflows (`breadcrumb-fade-mask`) and scrolls it back into view; a head
+    /// that cannot scroll has one entry on every route this launcher has, so
+    /// there is nothing to fade.
+    fn breadcrumbs(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let trail = crumbs(&self.address, self.instance_name().as_deref());
+        let last = trail.len().saturating_sub(1);
+        let mut row = row![].align_items(Alignment::Center).spacing(CRUMB_GAP);
+        for (index, crumb) in trail.iter().enumerate() {
+            if index > 0 {
+                row = row.push(icon::icon(
+                    Glyph::ChevronRight,
+                    CRUMB_ICON,
+                    theme_gen::ink(theme, INK_DEFAULT),
+                ));
+            }
+            let mut entry = row![].align_items(Alignment::Center).spacing(CRUMB_ENTRY_GAP);
+            if let Some(glyph) = crumb.icon {
+                entry = entry.push(icon::icon(glyph, CRUMB_ICON, theme_gen::ink(theme, INK_DEFAULT)));
+            }
+            let ink = if index == last { INK_CONTRAST } else { INK_DEFAULT };
+            row = row.push(
+                entry.push(
+                    text(crumb.label.clone())
+                        .size(CRUMB_LABEL)
+                        // `leading-6` on `text-base`: `Pixels` rather than a bare
+                        // number, which iced reads as a multiple of the size.
+                        .line_height(iced::Pixels(CRUMB_LINE))
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, ink))),
+                ),
+            );
+        }
+        row.into()
+    }
+
+    /// The name of the instance the address is on, when the store has it.
+    ///
+    /// The reference's instance breadcrumb is `instance.value?.name` with a
+    /// `loadingLabel` beside it while the instance is still being read, because
+    /// the name is a field of the instance rather than of the address. This
+    /// reads the same field, and answers `None` when the scan has not produced
+    /// that card -- which is the state [`crumbs`] falls back to the id from.
+    fn instance_name(&self) -> Option<String> {
+        let route::Route::Instance { id, .. } = &self.address.route else {
+            return None;
+        };
+        match self.store.instance(id) {
+            Load::Ready(card) => Some(card.name.clone()),
+            _ => None,
+        }
     }
 
     /// The action bar: what this launcher is running, and how far the run is
@@ -7333,36 +7393,97 @@ fn rail_glyph(slot: Rail) -> Glyph {
     }
 }
 
-/// The breadcrumb the head shows, as one string.
+/// One entry of the head's breadcrumb trail.
 ///
-/// Stage 3 replaces this with the reference's `Breadcrumbs` component, which
-/// builds a trail of links from the route *and the things on it* (an instance's
-/// name, a project's title). Until pages exist there are no names to show, so
-/// this is the route's own shape: the section, then the id.
-fn breadcrumb(address: &Address) -> String {
+/// `Breadcrumbs.vue`'s own shape: a visual in front of the label, then the
+/// label. The visual is `size-5` and is either an *icon* the page registered or
+/// an *image* it fetched -- a project's icon, a user's avatar, an instance's own
+/// art -- and this launcher draws the icon half and leaves the fetched half
+/// empty rather than inventing art for it. That is why [`Crumb::icon`] is an
+/// `Option`: the reference's `visual` is optional too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Crumb {
+    icon: Option<Glyph>,
+    label: String,
+}
+
+impl Crumb {
+    /// An entry whose visual is one of the reference's own icons.
+    fn with_icon(glyph: Glyph, label: impl Into<String>) -> Self {
+        Crumb { icon: Some(glyph), label: label.into() }
+    }
+
+    /// An entry whose visual the reference fetches, so there is none here.
+    fn plain(label: impl Into<String>) -> Self {
+        Crumb { icon: None, label: label.into() }
+    }
+}
+
+/// `Breadcrumbs.vue`'s own measurements: `size-5` on both the visual and the
+/// chevron between entries, `gap-1.5` inside an entry and `gap-2` between them,
+/// and `text-base font-medium leading-6` on the label.
+const CRUMB_ICON: f32 = 20.0;
+const CRUMB_GAP: f32 = 8.0;
+const CRUMB_ENTRY_GAP: f32 = 6.0;
+const CRUMB_LABEL: f32 = 16.0;
+/// `leading-6`: the label's own line, twenty-four pixels of sixteen-pixel text.
+const CRUMB_LINE: f32 = 24.0;
+/// `Breadcrumbs.vue`'s own `pl-4`: the trail's left padding, which is the gap
+/// between it and the history pair in front of it.
+const CRUMB_INSET: f32 = 16.0;
+
+/// The trail the head shows, built the way the reference builds it.
+///
+/// Every page registers its own breadcrumb, and the reference's are one entry
+/// each: a `useRootBreadcrumb` for a page that is the root of its section
+/// (`Index.vue` *Home*, `Skins.vue`, `Screenshots.vue`, `Servers.vue`, `Browse.vue`
+/// *Discover*, `instance/layout.vue`), and a `useBreadcrumb` pushed under that
+/// root for a page that is *inside* one (`User.vue`, `project/Index.vue`,
+/// `hosting/manage/Index.vue`). This launcher has no instance context on its
+/// project and user pages and no server context on its server page, so one entry
+/// is what the reference's own trail would hold here too -- and where the
+/// reference pushes under a root, that root is the entry.
+///
+/// The labels are the reference's own, which is not what this used to say: the
+/// servers page calls itself *Hosting*, not *Servers*, and the instance,
+/// project and user pages are named after the thing rather than after the
+/// section and the id.
+fn crumbs(address: &Address, instance_name: Option<&str>) -> Vec<Crumb> {
     match &address.route {
-        route::Route::Home => String::new(),
-        route::Route::Discover { project_type } => {
-            format!("Discover {}", project_type.sentence(2))
+        // `Index.vue`'s `useRootBreadcrumb`: `app.navigation.home` with a
+        // `PlayIcon`.
+        route::Route::Home => vec![Crumb::with_icon(Glyph::Play, Key::AppNavigationHome.message())],
+        // `Browse.vue`'s own: `app.browse.discover-project-type` with a
+        // `CompassIcon`. This launcher's Discover is never browsing inside a
+        // server or an instance, so the label is always the project type.
+        route::Route::Discover { project_type } => vec![Crumb::with_icon(
+            Glyph::Compass,
+            crate::text_gen::app_browse_discover_project_type(project_type.sentence(2)),
+        )],
+        // `Skins.vue` registers the label as a literal rather than a message, so
+        // it is one here too.
+        route::Route::Skins => vec![Crumb::with_icon(Glyph::Shirt, "Skin selector")],
+        route::Route::Screenshots => {
+            vec![Crumb::with_icon(Glyph::Image, Key::AppScreenshotsHeading.message())]
         }
-        route::Route::Skins => "Skin selector".to_string(),
-        route::Route::Screenshots => "Screenshots".to_string(),
-        route::Route::Servers => "Servers".to_string(),
-        route::Route::Server { id, .. } => format!("Servers / {id}"),
-        route::Route::User { user, .. } => format!("Profile / {user}"),
-        route::Route::Project { id, .. } => format!("Project / {id}"),
-        route::Route::Instance { id, tab } => {
-            let page = match tab {
-                route::InstanceTab::Content => "Content",
-                route::InstanceTab::ContentFilter(kind) => kind.label(),
-                route::InstanceTab::Files => "Files",
-                route::InstanceTab::Worlds => "Worlds",
-                route::InstanceTab::Screenshots => "Screenshots",
-                route::InstanceTab::Logs => "Logs",
-                route::InstanceTab::Share => "Share",
-            };
-            format!("{id} / {page}")
+        // `Servers.vue`, which spells its own name "Hosting".
+        route::Route::Servers => vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")],
+        // `hosting/manage/Index.vue`: the server's own name, pushed under the
+        // servers root. The name is the only part this route does not have; the
+        // reference reads it from the server it loaded.
+        route::Route::Server { id, .. } => {
+            vec![Crumb::with_icon(Glyph::ServerStack, id.clone())]
         }
+        // `User.vue`: the user's name with their avatar. The avatar is fetched.
+        route::Route::User { user, .. } => vec![Crumb::plain(user.clone())],
+        // `project/Index.vue`: the project's title with its icon, pushed under
+        // an instance root when the project was reached from inside one.
+        route::Route::Project { id, .. } => vec![Crumb::plain(id.clone())],
+        // `instance/layout.vue`: the instance's name with its own art, and no
+        // tab -- the tabs are `NavTabs` under the head, not crumbs in it.
+        route::Route::Instance { id, .. } => vec![Crumb::plain(
+            instance_name.map(str::to_string).unwrap_or_else(|| id.clone()),
+        )],
     }
 }
 
@@ -10523,20 +10644,52 @@ mod tests {
     }
 
     #[test]
-    fn the_breadcrumb_names_the_section_and_then_the_thing() {
-        let crumb = |path: &str| breadcrumb(&Address::parse(path).expect(path));
-        assert_eq!(crumb("/"), "");
-        assert_eq!(crumb("/browse/mod"), "Discover mods");
-        assert_eq!(crumb("/browse/modpack"), "Discover modpacks");
-        assert_eq!(crumb("/skins"), "Skin selector");
-        assert_eq!(crumb("/screenshots"), "Screenshots");
-        assert_eq!(crumb("/hosting/manage/"), "Servers");
-        assert_eq!(crumb("/hosting/manage/srv/backups"), "Servers / srv");
-        assert_eq!(crumb("/project/sodium/versions"), "Project / sodium");
-        assert_eq!(crumb("/user/jelly"), "Profile / jelly");
-        assert_eq!(crumb("/instance/ATM10"), "ATM10 / Content");
-        assert_eq!(crumb("/instance/ATM10/projects/shader"), "ATM10 / Shaders");
-        assert_eq!(crumb("/instance/ATM10/logs"), "ATM10 / Logs");
+    fn the_breadcrumb_is_the_page_s_own_registration_and_nothing_else() {
+        let crumb = |path: &str| crumbs(&Address::parse(path).expect(path), None);
+        // One entry per route, which is what `useRootBreadcrumb` registers and
+        // what a `useBreadcrumb` pushes under it where there is no root.
+        for path in [
+            "/",
+            "/browse/mod",
+            "/browse/modpack",
+            "/skins",
+            "/screenshots",
+            "/hosting/manage/",
+            "/hosting/manage/srv/backups",
+            "/project/sodium/versions",
+            "/user/jelly",
+            "/instance/ATM10",
+            "/instance/ATM10/projects/shader",
+            "/instance/ATM10/logs",
+        ] {
+            assert_eq!(crumb(path).len(), 1, "{path} registers one entry");
+        }
+        // The labels are the reference's own, which is not what this used to
+        // say: the servers page is *Hosting*, and the instance, project and user
+        // pages are named after the thing rather than after a section and an id.
+        assert_eq!(crumb("/"), vec![Crumb::with_icon(Glyph::Play, "Home")]);
+        assert_eq!(crumb("/browse/mod"), vec![Crumb::with_icon(Glyph::Compass, "Discover mods")]);
+        assert_eq!(crumb("/browse/modpack").len(), 1);
+        assert_eq!(crumb("/skins"), vec![Crumb::with_icon(Glyph::Shirt, "Skin selector")]);
+        assert_eq!(crumb("/screenshots"), vec![Crumb::with_icon(Glyph::Image, "Screenshots")]);
+        assert_eq!(crumb("/hosting/manage/"), vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")]);
+        assert_eq!(crumb("/hosting/manage/srv/backups"), vec![Crumb::with_icon(Glyph::ServerStack, "srv")]);
+        assert_eq!(crumb("/project/sodium/versions"), vec![Crumb::plain("sodium")]);
+        assert_eq!(crumb("/user/jelly"), vec![Crumb::plain("jelly")]);
+        // The tabs are `NavTabs` under the head, not crumbs in it: an instance's
+        // crumb is the instance's name however the page was reached.
+        for tab in ["/instance/ATM10", "/instance/ATM10/projects/shader", "/instance/ATM10/logs"] {
+            assert_eq!(crumb(tab), vec![Crumb::plain("ATM10")], "{tab}");
+        }
+        // And the store's name for the instance is the reference's label, the
+        // address's id only standing in until the scan has produced it.
+        let address = Address::parse("/instance/ATM10").expect("the path parses");
+        assert_eq!(crumbs(&address, Some("All The Mods")), vec![Crumb::plain("All The Mods")]);
+        // The fetched visuals are `None`: an icon is one the reference registers,
+        // and these three are images.
+        assert_eq!(crumb("/user/jelly")[0].icon, None);
+        assert_eq!(crumb("/project/sodium")[0].icon, None);
+        assert_eq!(crumb("/instance/ATM10")[0].icon, None);
     }
 
     #[test]

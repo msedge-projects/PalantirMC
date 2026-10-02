@@ -1845,3 +1845,57 @@ install says *Install* instead of the library's *Create instance*, and it wears
 the download icon the reference gives it. The quiet one keeps its own label: the
 reference's menu holds copy-link, report and donate, and this launcher's has one
 thing in it, so a button says it and a menu would hide it.
+
+### The breadcrumb, which was one invented string per route
+
+The head's trail was a single string written out per route: `""` on Home,
+`Discover mods`, `Servers`, `Servers / srv`, `Profile / jelly`, `Project /
+sodium`, `ATM10 / Content`. Four of those are inventions, and the shape is not
+the reference's at all.
+
+The reference's `Breadcrumbs.vue` draws a *stack*, and the stack is built by the
+pages: `useRootBreadcrumb` for a page that is the root of its section,
+`useBreadcrumb` for one that sits inside a root. Every page in this launcher
+registers exactly one, so every trail here is one entry long -- which is what the
+reference's own trail holds on these routes too, since a project reached from
+inside an instance is the only thing that would push a second.
+
+| Route | The reference registers | Drawn |
+| --- | --- | --- |
+| `/` | `app.navigation.home`, a `PlayIcon` (`Index.vue`) | *Home* + play |
+| `/browse/:type` | `app.browse.discover-project-type`, a `CompassIcon` (`Browse.vue`) | *Discover mods* + compass |
+| `/skins` | the literal `'Skin selector'`, a `ShirtIcon` | *Skin selector* + shirt |
+| `/screenshots` | `app.screenshots.heading`, an `ImageIcon` | *Screenshots* + image |
+| `/hosting/manage/` | the literal `'Hosting'`, a `ServerStackIcon` | *Hosting* + server stack |
+| `/hosting/manage/:id` | the server's name, a `ServerStackIcon` | the id, the same icon |
+| `/user/:user` | the user's name, their avatar | the name, no icon |
+| `/project/:id` | the project's title, its icon | the id, no icon |
+| `/instance/:id` | the instance's name, its own art | the store's name, no icon |
+
+Three things came out of reading the table rather than the routes. *Servers* is
+*Hosting*, which is what the page calls itself. An instance's crumb is the
+instance and not the instance and its tab -- the tabs are `NavTabs` under the
+head, not crumbs in it, which is why `/instance/ATM10/logs` and
+`/instance/ATM10` are the same entry. And the last three have **no icon** here:
+the reference's visual for them is a fetched image (an avatar, a project icon, an
+instance's own art), and a missing icon is a smaller lie than a person or a box
+drawn where a picture belongs.
+
+The trail's own numbers are `Breadcrumbs.vue`'s: a `size-5` visual, `gap-1.5`
+inside an entry, a `size-5` `ChevronRightIcon` and `gap-2` between entries,
+`text-base font-medium leading-6` on the label -- 16 pixels on a 24-pixel line,
+which is why the old 14-pixel label was wrong -- the last entry in
+`text-contrast` and every earlier one in `text-primary`, and the trail's own
+`pl-4` as the gap in front of it.
+
+Measured against the reference's own head at 1280x720: its crumb's icon ink
+runs x 257..274 and its label x 283..381; ours runs 265..284 and 291..388. The
+eight pixels are the wordmark, which is this launcher's own and twelve pixels
+wider than Modrinth's -- the trail itself is at the reference's own offsets from
+the icon inwards.
+
+One reading is worth recording because it is a fact about the running client and
+not about the vendored tree: at this pin the reference's Skins crumb reads
+*Skins*, where `Skins.vue` registers the literal `'Skin selector'`. The vendored
+source is what this port takes its numbers and strings from, so the label stays
+*Skin selector* and the difference is written down rather than papered over.
