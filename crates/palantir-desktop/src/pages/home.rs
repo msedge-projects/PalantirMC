@@ -32,7 +32,7 @@ use iced::{Alignment, Background, Border, Element, Length, Padding, Theme};
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::instances::InstanceCard;
-use crate::page::{self, Load, GAP, GRID_GAP, ROW_GAP};
+use crate::page::{self, Load, GAP, ROW_GAP};
 use crate::store::Store;
 use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
@@ -139,8 +139,6 @@ const CREATE_KEY: &str = "home:create";
 const IMPORT_KEY: &str = "home:import";
 const WELCOME_CREATE_KEY: &str = "home:welcome:create";
 const WELCOME_IMPORT_KEY: &str = "home:welcome:import";
-/// The button inside an instance card, which is the same control on every card.
-const INSTANCE_OPEN_KEY: &str = "home:card:open";
 
 /// Home's own state: what the user has typed and chosen, and what could not be
 /// done.
@@ -286,17 +284,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     }
     match store.instances() {
         Load::Ready(cards) => {
-            let visible = state.visible(cards);
-            blocks.push(header(theme, state));
-            if visible.is_empty() {
-                blocks.push(page::empty(theme, Key::AppLibrarySearchNoResultsTitle));
-            } else {
-                let mut grid = column![].spacing(GAP).width(Length::Fill);
-                for card in visible {
-                    grid = grid.push(instance_card(theme, card));
-                }
-                blocks.push(grid.into());
-            }
+            blocks.extend(library(theme, state, cards));
             page::body(blocks, GAP, Message::Wheel)
         }
         _ => page::body(
@@ -309,31 +297,192 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     }
 }
 
-/// The title, the search field and the sort control of the library.
-fn header<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
-    let sort = row![]
-        .spacing(ROW_GAP)
-        .align_items(Alignment::Center)
-        .push(ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0))
-        .push(ui::button(
-            theme,
-            CREATE_KEY,
-            Key::AppLibraryContextMenuCreateInstance,
-            ui::Kind::Colored,
-            Message::CreateInstance,
-        ));
-    row![]
-        .spacing(ROW_GAP)
-        .align_items(Alignment::Center)
-        .push(drawn_title(theme, Key::AppLibraryTitle))
-        .push(Space::with_width(Length::Fill))
-        .push(sort)
-        .push(ui::search(
+/// The library: the heading, the toolbar and the tiles.
+///
+/// `library/index.vue`'s own section, `flex flex-col gap-3`: the h2, the
+/// toolbar, and the instances. The section's own `pb-16 min-h-[500px]` is not
+/// drawn: the page's inset at the bottom of a scroll region is the same room,
+/// and a 500-pixel minimum under two tiles is blank space with nothing in it.
+///
+/// The reference draws its instances as groups -- an `InstanceGroup` per custom
+/// group, the ungrouped ones under a header that hides itself when it is the
+/// only one. This launcher has one group's worth of instances and no model for
+/// the grouping controls yet, so what is drawn is the ungrouped group: the
+/// heading, the toolbar and the tiles, in the reference's own order.
+fn library<'a>(
+    theme: Gen,
+    state: &'a State,
+    cards: &'a [InstanceCard],
+) -> Vec<Element<'a, Message>> {
+    let visible = state.visible(cards);
+    let mut blocks: Vec<Element<'a, Message>> = vec![
+        drawn_title(theme, Key::AppLibraryTitle),
+        toolbar(theme, state),
+    ];
+    if visible.is_empty() {
+        // `app.library.search.no-results.title` in the reference's own shape:
+        // `text-base text-primary`, a line under the toolbar rather than a
+        // sentence centred in the page.
+        blocks.push(
+            container(
+                text(Key::AppLibrarySearchNoResultsTitle.message())
+                    .size(16.0)
+                    .font(regular())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            )
+            .width(Length::Fill)
+            .into(),
+        );
+    } else {
+        blocks.push(grid(theme, &visible));
+    }
+    blocks
+}
+
+/// `LibraryToolbar`: the search field with the create button, over the sort row.
+///
+/// The reference's toolbar is `flex flex-col gap-2` of two rows: the search
+/// (`min-w-[16rem] flex-1`), *New group* and the brand *New instance*; then the
+/// sort and group comboboxes, a `h-6 w-px` divider and the filter bar. Two of
+/// those controls have no model here yet and are not drawn rather than drawn
+/// dead: *New group* needs the group store (`InstanceCard.group` is read from
+/// disk but nothing writes one) and the filter bar needs the instance-type,
+/// game-version and loader filters. What the page can act on is the search, the
+/// create button and the sort control, on the rows the reference puts them on.
+fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let first = row![
+        ui::search(
             theme,
             Key::AppLibrarySearchPlaceholder.message(),
             &state.search,
             Message::Search,
-        ))
+        ),
+        ui::button_with_icon(
+            theme,
+            CREATE_KEY,
+            Glyph::Plus,
+            Key::AppLibraryInstanceNew,
+            ui::Kind::Colored,
+            Length::Shrink,
+            Some(Message::CreateInstance),
+        )
+    ]
+    .spacing(ROW_GAP)
+    .align_items(Alignment::Center);
+    // The sort control shows the chosen order; the combobox that opens to pick
+    // another is the piece of the control this page still draws as a display
+    // (see the module note above).
+    let second = row![ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0)]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center);
+    column![first, second].spacing(ROW_GAP).width(Length::Fill).into()
+}
+
+/// The reference's tile grid, as measured at the shell's own 1280-pixel window.
+///
+/// `instance-group/index.vue` measures its container and lays the tiles out at
+/// `floor((width + gap) / (10rem + gap))` columns of
+/// `(width - gap * (n - 1)) / n` with a `0.75rem` (12) gap, and a tile is
+/// `cardWidth + 3.375rem` (54) tall: `p-3` (12 each side), the square art
+/// (`cardWidth - 24`), `gap-3` (12) and the two text lines (a 20-pixel name and
+/// an 18-pixel meta under a 4-pixel gap). At 1280 the pane is 915 wide -- 65 of
+/// rail, 300 of right panel -- and the page's `p-6` leaves 867: five columns of
+/// 163.8 and tiles 217.8 tall.
+///
+/// The page is handed no width -- a scroll region reports where it is, not how
+/// wide it is (`scroll::Geometry`) -- so the count below is the reference's at
+/// that window rather than a function of the window's own size. A wider window
+/// keeps five wider tiles where the reference would add a column; the fix is a
+/// width on the geometry the shell reports, not a second guess here.
+const TILE_GAP: f32 = 12.0;
+const TILE_COLUMNS: usize = 5;
+/// 1280 - 65 (rail) - 300 (panel) - 2 * 24 (the page's inset).
+const GRID_WIDTH: f32 = 867.0;
+const TILE_WIDTH: f32 =
+    (GRID_WIDTH - TILE_GAP * (TILE_COLUMNS as f32 - 1.0)) / TILE_COLUMNS as f32;
+/// `p-3`, which is also the art's inset inside the tile.
+const TILE_PAD: f32 = 12.0;
+/// `aspect-square min-w-full`: the art is as wide as the tile's inside.
+const TILE_ART: f32 = TILE_WIDTH - TILE_PAD * 2.0;
+/// `rounded-[20px]` on the tile, where the project cards' `rounded-lg` is 16.
+const TILE_RADIUS: f32 = 20.0;
+
+/// The tiles, five to a row.
+fn grid<'a>(theme: Gen, cards: &[&'a InstanceCard]) -> Element<'a, Message> {
+    let mut rows = column![].spacing(TILE_GAP).width(Length::Fill);
+    for chunk in cards.chunks(TILE_COLUMNS) {
+        let mut line = row![].spacing(TILE_GAP).width(Length::Fill);
+        for card in chunk {
+            line = line.push(tile(theme, card));
+        }
+        // The slots a short last row does not fill, so its tiles keep the
+        // column's width instead of stretching across the row.
+        for _ in chunk.len()..TILE_COLUMNS {
+            line = line.push(Space::with_width(Length::Fixed(TILE_WIDTH)));
+        }
+        rows = rows.push(line);
+    }
+    rows.into()
+}
+
+/// One instance tile: `instance-card-view.vue`'s `flex-col items-start gap-3
+/// rounded-[20px] p-3 bg-surface-3 border-surface-4`, and the whole tile opens
+/// the instance.
+///
+/// The reference draws the instance's own icon in the art's square (`Avatar`,
+/// tinted by the instance's id for the instances that have none); this page
+/// cannot read a file -- a view gets no disk, and the launcher has no loader for
+/// the icons directory yet -- so the box is drawn in the raised surface rather
+/// than with borrowed art. The name and the `loader game-version` line under it
+/// are the reference's two `truncate` lines; iced has no ellipsis, so a name
+/// longer than the tile wraps and makes the tile taller, which is noted rather
+/// than hidden.
+fn tile<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
+    let key = crate::ui::scoped("home:tile", &card.id);
+    let (factor, _) = ui::interaction(key);
+    let fill = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface3), factor);
+    let border = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface4), factor);
+    let art_fill = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface5), factor);
+    let name_ink = crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor);
+    let meta_ink = crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor);
+    let art = container(Space::new(Length::Fixed(TILE_ART), Length::Fixed(TILE_ART))).style(
+        move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(art_fill)),
+            border: Border {
+                radius: theme_gen::span(Span::RadiusLg).into(),
+                ..Border::default()
+            },
+            ..container::Appearance::default()
+        },
+    );
+    let lines = column![]
+        .spacing(4.0)
+        .width(Length::Fill)
+        .push(
+            text(card.name.clone())
+                .size(16.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(name_ink)),
+        )
+        .push(
+            text(format!("{} {}", card.loader.label(), card.mc_version))
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(meta_ink)),
+        );
+    let body = container(column![art, lines].spacing(TILE_GAP).align_items(Alignment::Start))
+        .width(Length::Fixed(TILE_WIDTH))
+        .padding(TILE_PAD)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(fill)),
+            border: Border { color: border, width: 1.0, radius: TILE_RADIUS.into() },
+            ..container::Appearance::default()
+        });
+    mouse_area(body)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover_with(key, true, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
+        .on_exit(Message::hover_with(key, false, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
+        .on_press(Message::Open(card.id.clone()))
         .into()
 }
 
@@ -600,99 +749,6 @@ fn shortcut_chip<'a>(theme: Gen, key: &str) -> Element<'a, Message> {
     .into()
 }
 
-/// One instance, as the library draws it: its plate, its name, and what it is.
-///
-/// The *body* of the card is what opens the instance, and the button beside it is
-/// not inside that pressable region -- a deliberate difference from the reference,
-/// which makes the whole card a clickable `div` and stops the event inside its
-/// buttons. iced's [`mouse_area`] is not that: its own `update` never visits its
-/// content, so a button drawn inside one would never see a press. What is
-/// pressable is therefore the part of the card that is not a control, which draws
-/// the same picture and is a region a user can actually hit.
-fn instance_card<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
-    let open = Message::Open(card.id.clone());
-    // The pressable region is the card's body, so that is what names itself and
-    // what tweens; the button beside it has a key of its own and does not move
-    // when the body is hovered.
-    let key = crate::ui::scoped("home:card", &card.id);
-    let (factor, _) = crate::ui::interaction(key);
-    let plate = crate::ui::framed(
-        theme,
-        column![]
-            .align_items(Alignment::Center)
-            .push(icon::icon(Glyph::Play, 20.0, theme_gen::ink(theme, INK_CONTRAST))),
-    );
-    let mut details = column![]
-        .spacing(2.0)
-        .push(
-            text(card.name.clone())
-                .size(16.0)
-                .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-        )
-        .push(
-            text(card.subtitle())
-                .size(13.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        );
-    // A playtime of zero is the reference's own `never-played` state rather than
-    // `0m`, which is why the label comes from `InstanceCard` rather than from a
-    // formatter here.
-    let mut facts = row![].spacing(ROW_GAP);
-    facts = facts.push(ui::icon_label(theme, Glyph::Clock, &card.playtime_label()));
-    if card.mods_total > 0 {
-        facts = facts.push(ui::icon_label(
-            theme,
-            Glyph::Package,
-            &crate::text_gen::project_type_mod_lowercase(card.mods_total as u64),
-        ));
-    }
-    if let Some(problem) = &card.problem {
-        facts = facts.push(ui::icon_label(theme, Glyph::TriangleAlert, problem));
-    }
-    details = details.push(facts);
-    let body = row![]
-        .spacing(GRID_GAP)
-        .align_items(Alignment::Center)
-        .width(Length::Fill)
-        .push(plate)
-        .push(details.width(Length::Fill));
-    // `jump-back-in.view-instance` is the reference's label for the control that
-    // opens an instance, so the button and the card body say the same thing with
-    // the reference's own words.
-    let open_button = ui::button(
-        theme,
-        INSTANCE_OPEN_KEY,
-        Key::AppHomeJumpBackInViewInstance,
-        ui::Kind::Standard,
-        open.clone(),
-    );
-    ui::card_at(
-        theme,
-        factor,
-        row![]
-            .spacing(GRID_GAP)
-            .align_items(Alignment::Center)
-            .push(
-                mouse_area(body)
-                    .interaction(Interaction::Pointer)
-                    .on_enter(Message::hover_with(
-                        key,
-                        true,
-                        crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
-                    ))
-                    .on_exit(Message::hover_with(
-                        key,
-                        false,
-                        crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
-                    ))
-                    .on_press(open),
-            )
-            .push(open_button),
-    )
-}
-
 /// The loading arm's body, which is the cards' own frame without their contents.
 fn cards_placeholder<'a>(theme: Gen, cards: &Vec<InstanceCard>) -> Element<'a, Message> {
     let mut list = column![].spacing(GAP);
@@ -860,6 +916,33 @@ mod tests {
     }
 
     #[test]
+    fn a_library_row_holds_five_tiles_at_the_shell_s_own_width() {
+        // `instance-group/index.vue`'s own arithmetic: `floor((width + gap) /
+        // (10rem + gap))` columns of `(width - gap * (n - 1)) / n`, tiles
+        // `cardWidth + 3.375rem` tall, with a `0.75rem` gap. The pane inside a
+        // 1280-pixel window is 915 wide (65 rail, 300 panel) and the page's `p-6`
+        // leaves 867, which is five columns of 163.8 where the reference's own
+        // capture has its first card at x89 and its last ending at x780.
+        assert_eq!(GRID_WIDTH, 1280.0 - 65.0 - 300.0 - 48.0);
+        let columns = ((GRID_WIDTH + TILE_GAP) / (160.0 + TILE_GAP)).floor() as usize;
+        assert_eq!(columns, TILE_COLUMNS);
+        assert!((TILE_WIDTH - 163.8).abs() < 0.05, "five tiles of 163.8");
+        assert_eq!(TILE_ART, TILE_WIDTH - 24.0);
+        assert!(TILE_ART < TILE_WIDTH, "the art leaves the padding beside it");
+        // And every shape of list draws: empty, a short row, rows that are full,
+        // and a list that ends in the middle of one.
+        for count in [0, 1, 4, 5, 6, 13] {
+            let cards: Vec<InstanceCard> = (0..count)
+                .map(|index| card(&format!("i{index}"), "Instance", 0, "1.21.4", LoaderKind::Vanilla))
+                .collect();
+            let refs: Vec<&InstanceCard> = cards.iter().collect();
+            for theme in Gen::ALL {
+                drop(grid(*theme, &refs));
+            }
+        }
+    }
+
+    #[test]
     fn a_launcher_with_no_instances_at_all_draws_the_welcome_screen() {
         // The gate on its own, over every state a store can be in: this is the
         // whole of `Index.vue`'s own `isReady && !hasCreatedInstance` as this page
@@ -943,30 +1026,14 @@ mod tests {
     }
 
     /// The library's body without a `Store`, because a test cannot make one hold
-    /// instances without a filesystem.
-    /// The library's body without a `Store`, because a test cannot make one hold
-    /// instances without a filesystem that `instances::load` recognises. The
-    /// cards are built by the same function the page uses, so what this mirrors is
-    /// the *grid*, and only that.
-    ///
-    /// `Column::new()` rather than `column![]`, because the test module globs its
-    /// parent's names in and the macro and the function of that name then collide.
+    /// instances without a filesystem that `instances::load` recognises. It is
+    /// the page's own [`library`], so a test holds the blocks the page draws
+    /// rather than a second copy of them that could drift.
     fn library_view<'a>(
         theme: Gen,
         state: &'a State,
         cards: &'a [InstanceCard],
     ) -> Element<'a, Message> {
-        let mut blocks: Vec<Element<'a, Message>> = vec![header(theme, state)];
-        let visible = state.visible(cards);
-        if visible.is_empty() {
-            blocks.push(page::empty(theme, Key::AppLibrarySearchNoResultsTitle));
-        } else {
-            let mut grid = iced::widget::Column::new().spacing(GAP).width(Length::Fill);
-            for card in visible {
-                grid = grid.push(instance_card(theme, card));
-            }
-            blocks.push(grid.into());
-        }
-        page::body(blocks, GAP, Message::Wheel)
+        page::body(library(theme, state, cards), GAP, Message::Wheel)
     }
 }
