@@ -175,6 +175,21 @@ pub const PLATE_RADIUS: f32 = PLATE / 2.0;
 pub const RAIL_PAD: f32 = 8.0;
 /// The rail's `gap-[0.25rem]`.
 pub const RAIL_GAP: f32 = 4.0;
+/// `h-px w-8` on the switcher's separator rule.
+pub const RAIL_RULE: f32 = 32.0;
+/// The rail's link group, in `App.vue`'s order: the five slots above the
+/// quick-instance switcher. The two conditional ones are listed here anyway and
+/// left out when the settings turn them off; see [`Shell::nav_slots`].
+pub const RAIL_NAV: [Rail; 5] = [
+    Rail::Home,
+    Rail::Discover,
+    Rail::Skins,
+    Rail::Screenshots,
+    Rail::Servers,
+];
+/// The rail's foot, in `App.vue`'s order. The switcher's growth is what holds
+/// these two on the rail's floor; see [`Shell::rail`].
+pub const RAIL_FOOT: [Rail; 2] = [Rail::Settings, Rail::Profile];
 /// How far apart the centres of two rail buttons are. The pitch `REFERENCE.md`
 /// recorded as 52, kept as arithmetic so it cannot drift from its parts.
 #[cfg(test)]
@@ -4320,7 +4335,14 @@ impl Shell {
         mouse_area(face).interaction(Interaction::Pointer).on_press(message).into()
     }
 
-    /// The rail, with its eight slots at the reference's 52px pitch.
+    /// The rail: the link group, the switcher's growth under it, and the foot.
+    ///
+    /// `App.vue`'s rail is one `flex flex-col gap-1` whose middle child is the
+    /// quick-instance switcher, `flex min-h-0 flex-1 flex-col`: the switcher
+    /// takes every pixel the rail has left and holds it, so the two children
+    /// after it -- the settings button and the profile menu -- sit on the rail's
+    /// floor rather than under the buttons. The slots and the 52px pitch are the
+    /// same as before; what changed is where the height between them went.
     fn rail(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let mut items = column![].spacing(RAIL_GAP).padding(Padding {
@@ -4329,7 +4351,11 @@ impl Shell {
             bottom: RAIL_PAD,
             left: RAIL_PAD,
         });
-        for slot in self.slots() {
+        for slot in self.nav_slots() {
+            items = items.push(self.rail_button(slot));
+        }
+        items = items.push(self.switcher());
+        for slot in RAIL_FOOT {
             items = items.push(self.rail_button(slot));
         }
         container(items)
@@ -4342,10 +4368,30 @@ impl Shell {
             .into()
     }
 
-    /// The rail's slots, in `App.vue`'s order, with the two conditional ones
-    /// left out when the settings turn them off.
-    fn slots(&self) -> Vec<Rail> {
-        Rail::ALL
+    /// The switcher's strip of the rail: the separator, the create button under
+    /// it, and the height the rail had left.
+    ///
+    /// The reference's switcher is `flex min-h-0 flex-1`, and this is that claim
+    /// in iced: a `Fill` child of the rail's column takes the room between the
+    /// link group and the foot, so where the rail used to stack its buttons
+    /// contiguously the foot now lands on the floor. With no recent instances --
+    /// what a first run has -- the list above the separator is an empty wrapper
+    /// that still spends its `gap-1`, and what is left to draw is the separator
+    /// and the create button. At 720px that puts the rule at y=320 and the plus
+    /// at 356, which is where the reference's own capture measures them.
+    fn switcher(&self) -> Element<'_, Message> {
+        let strip = column![]
+            .spacing(RAIL_GAP)
+            .align_items(Alignment::Center)
+            .push(rail_separator(self.theme))
+            .push(self.rail_button(Rail::CreateInstance));
+        container(strip).width(Length::Fill).height(Length::Fill).into()
+    }
+
+    /// The rail's five link slots, in `App.vue`'s order, with the two
+    /// conditional ones left out when the settings turn them off.
+    fn nav_slots(&self) -> Vec<Rail> {
+        RAIL_NAV
             .iter()
             .copied()
             .filter(|slot| match slot {
@@ -4353,6 +4399,20 @@ impl Shell {
                 Rail::Screenshots => self.screenshots_slot,
                 _ => true,
             })
+            .collect()
+    }
+
+    /// Every slot the rail draws, in `App.vue`'s order: the link group, then the
+    /// switcher's create button, then the foot. The rail draws the three groups
+    /// itself -- the switcher's strip goes between the first and the last -- but
+    /// the order as a whole is the reference's, so one list can say what is
+    /// drawn without walking the three call sites.
+    #[cfg(test)]
+    fn slots(&self) -> Vec<Rail> {
+        self.nav_slots()
+            .into_iter()
+            .chain([Rail::CreateInstance])
+            .chain(RAIL_FOOT)
             .collect()
     }
 
@@ -6349,6 +6409,28 @@ fn keep_picked(store: &Store, change: &palantir_net::SkinChange) {
         "",
         crate::saved_skins::Source::Custom,
     );
+}
+
+/// The switcher's separator: `py-2` around an `h-px w-8` `--surface-5` rule.
+///
+/// The reference makes this strip the drag handle that resizes how many
+/// recent instances the rail shows, with its cursor, its hover colour and its
+/// overdrag flash; there are no recent instances to resize here, so this is the
+/// same strip without the behaviour. The rule does not sit at the strip's own
+/// top: the reference's switcher is a `gap-1` column and the recent-instances
+/// list above it is a wrapper that takes a gap even when it is empty, so the
+/// rule is `RAIL_GAP + 8` -- the empty wrapper's gap, then `py-2` -- below the
+/// strip's top edge, which is the 4px that puts the reference's rule at y=320.
+fn rail_separator(theme: Gen) -> Element<'static, Message> {
+    container(crate::page::rule(theme))
+        .width(Length::Fixed(RAIL_RULE))
+        .padding(Padding {
+            top: RAIL_GAP + 8.0,
+            right: 0.0,
+            bottom: 8.0,
+            left: 0.0,
+        })
+        .into()
 }
 
 /// The icon a rail slot draws, from `App.vue`'s own imports.
