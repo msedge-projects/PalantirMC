@@ -501,11 +501,54 @@ const ADD_ICON: f32 = 32.0;
 const ADD_ICON_GAP: f32 = 16.0;
 const ADD_LINE_GAP: f32 = 2.0;
 
+/// Which sections are open, in [`Section::ALL`]'s order.
+///
+/// A flag per section rather than the one-open accordion this page had before
+/// G136: the reference keeps a *set* of open keys and puts every section it
+/// knows into it on the first pass (`VirtualSkinSectionList.vue`'s watch over
+/// `sections` with `immediate: true`), so its page opens with every section
+/// expanded and its headers toggle one section at a time.
+///
+/// Not called `Open`: `crate::pages::Open` is the navigation this page already
+/// asks for (`Ask::Open`), and one name for both would be a shadow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expanded([bool; Section::ALL.len()]);
+
+impl Default for Expanded {
+    /// Every section open, which is the state the reference's own first pass
+    /// leaves it in.
+    fn default() -> Self {
+        Expanded([true; Section::ALL.len()])
+    }
+}
+
+impl Expanded {
+    /// Whether `section` is open. A section the list does not carry is closed
+    /// rather than a panic: the array is the list's own length, and a section
+    /// added without one here would be a compile error at `Section::ALL`.
+    pub fn is_open(&self, section: Section) -> bool {
+        Section::ALL
+            .iter()
+            .position(|candidate| *candidate == section)
+            .and_then(|index| self.0.get(index).copied())
+            .unwrap_or(false)
+    }
+
+    /// Toggle one section, leaving every other one where it is.
+    pub fn toggle(&mut self, section: Section) {
+        if let Some(index) = Section::ALL.iter().position(|candidate| *candidate == section) {
+            if let Some(flag) = self.0.get_mut(index) {
+                *flag = !*flag;
+            }
+        }
+    }
+}
+
 /// The page's own state.
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    /// Which section is open, if any.
-    pub open: Option<usize>,
+    /// Which sections are open.
+    pub open: Expanded,
     /// The last thing the page could not do, shown rather than swallowed.
     pub notice: Option<String>,
     /// The account's own appearance: what Minecraft says it owns, and the skin in
@@ -545,10 +588,7 @@ impl State {
             // A wheel is not this page's to apply: see `crate::scroll`.
             Message::Wheel(..) => {},
 
-            Message::Select(section) => {
-                let index = Section::ALL.iter().position(|candidate| *candidate == section);
-                self.open = if self.open == index { None } else { index };
-            }
+            Message::Select(section) => self.open.toggle(section),
             Message::AddSkin => {
                 // One at a time, like a row's Apply and for a stronger reason: the
                 // dialog this opens is modal, so a second press would be a second
@@ -900,10 +940,9 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
 /// spacing.
 ///
 /// `pt-2` above the first row, the open section's cards under its header, and
-/// 24 between one section and the next. Only one section is open at a time
-/// here where the reference opens every section it knows; that is the
-/// accordion this page has had since G118, and the next slice is the set of
-/// open sections the reference keeps.
+/// 24 between one section and the next. Which sections are open is
+/// [`Expanded`]'s: every one of them until a header is pressed, which is the state
+/// the reference's own first pass leaves it in.
 fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
     let mut list = column![].width(Length::FillPortion(LIST_PORTION));
     for (index, section) in Section::ALL.iter().enumerate() {
@@ -913,7 +952,7 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
         } else {
             SECTION_TOP
         }));
-        let open = state.open == Some(index);
+        let open = state.open.is_open(*section);
         // The header is the reference's `Accordion` button: a `size-6` chevron
         // turned when the section is open, then its `text-xl font-semibold`
         // title in the default ink -- `text-primary`, which is what the
@@ -1497,17 +1536,18 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_section_toggles_it_and_only_one_is_open_at_a_time() {
+    fn a_section_header_toggles_its_own_section_and_leaves_the_others() {
+        // The reference opens every section it knows on its first pass and each
+        // header toggles only itself; the one-open accordion this page had before
+        // G136 is gone with this state.
         let mut state = State::default();
-        assert_eq!(state.open, None);
+        assert!(state.open.is_open(Section::SavedSkins));
+        assert!(state.open.is_open(Section::TheCopperAge));
         state.update(Message::Select(Section::Modrinth));
-        assert_eq!(state.open, Section::ALL.iter().position(|s| *s == Section::Modrinth));
-        state.update(Message::Select(Section::TheCopperAge));
-        assert_eq!(state.open, Section::ALL.iter().position(|s| *s == Section::TheCopperAge));
-        // Pressing the open one closes it, which is what the reference's
-        // disclosure does.
-        state.update(Message::Select(Section::TheCopperAge));
-        assert_eq!(state.open, None);
+        assert!(!state.open.is_open(Section::Modrinth), "its own header closes it");
+        assert!(state.open.is_open(Section::SavedSkins), "and leaves the others");
+        state.update(Message::Select(Section::Modrinth));
+        assert!(state.open.is_open(Section::Modrinth), "pressing again opens it");
     }
 
     #[test]
@@ -1713,10 +1753,13 @@ mod tests {
     fn the_page_draws_in_every_theme_and_in_both_of_its_shapes() {
         let store = Store::default();
         for theme in Gen::ALL {
-            for open in [None, Some(0), Some(12)] {
-                let state = State { open, ..State::default() };
-                drop(view(*theme, &state, &store));
-            }
+            // Every section open, which is the reference's own first state, and
+            // then a page with two of them closed.
+            drop(view(*theme, &State::default(), &store));
+            let mut closed = State::default();
+            closed.open.toggle(Section::SavedSkins);
+            closed.open.toggle(Section::ModrinthPride);
+            drop(view(*theme, &closed, &store));
             let state = State { notice: Some("x".into()), ..State::default() };
             drop(view(*theme, &state, &store));
             // And with an account's appearance in hand, which is the shape the page
@@ -1741,7 +1784,6 @@ mod tests {
                 Err("the network is down".into()),
             );
             let state = State {
-                open: None,
                 appearance: Load::Ready(appearance),
                 ..State::default()
             };
@@ -1904,13 +1946,8 @@ mod tests {
         // it before every pack section -- and with nothing stored it draws its add
         // cell, which is the reference's own empty state.
         assert_eq!(Section::ALL[0], Section::SavedSkins);
-        let state = State { open: Some(0), ..State::default() };
-        drop(view(Gen::ALL[0], &state, &store));
-        let state = State {
-            open: Some(0),
-            saved: vec![stored("abc")],
-            ..State::default()
-        };
+        drop(view(Gen::ALL[0], &State::default(), &store));
+        let state = State { saved: vec![stored("abc")], ..State::default() };
         drop(view(Gen::ALL[0], &state, &store));
     }
 

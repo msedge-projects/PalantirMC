@@ -746,23 +746,25 @@ mod tests {
         let store = Store::default();
         let address = Address::parse("/skins").expect("skins");
         let mut screen = Screen::at(&address);
-        let before = format!("{:?}", match &screen {
-            Screen::Skins(state) => state.open,
-            _ => None,
-        });
+        // The whole set of open sections, printed: the page's own state is not
+        // `PartialEq` beyond the set, and what this test is about is that it did
+        // not move.
+        let read = |screen: &Screen| match screen {
+            Screen::Skins(state) => format!("{:?}", state.open),
+            other => format!("{other:?}"),
+        };
+        let before = read(&screen);
         assert_eq!(screen.update(Message::Home(home::Message::Search("x".to_string())), &store), None);
-        let after = format!("{:?}", match &screen {
-            Screen::Skins(state) => state.open,
-            _ => None,
-        });
+        let after = read(&screen);
         assert_eq!(before, after);
-        // And the page's own message does land.
+        // And the page's own message does land: its header closed the section it
+        // named, which every section starts open (the reference's own first pass).
         assert_eq!(
             screen.update(Message::Skins(skins::Message::Select(skins::Section::Modrinth)), &store),
             None
         );
         match &screen {
-            Screen::Skins(state) => assert!(state.open.is_some()),
+            Screen::Skins(state) => assert!(!state.open.is_open(skins::Section::Modrinth)),
             other => panic!("{other:?} is not skins"),
         }
     }
