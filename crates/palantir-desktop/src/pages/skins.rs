@@ -596,6 +596,37 @@ const SECTION_ICON_GAP: f32 = 6.0;
 const SECTION_TITLE: f32 = 20.0;
 const SECTION_HEIGHT: f32 = 28.0;
 
+/// The information mark's own glyph: `UnknownIcon class="size-5"`.
+///
+/// [`SECTION_ICON`] is the `size-6` box it is centred in, and the same 24 the
+/// chevron is drawn at -- the reference's button row is `gap-[6px] items-center`,
+/// so the mark sits 6 from the title on the same rhythm as the chevron.
+const SECTION_INFO: f32 = 20.0;
+
+/// Whether a section's header carries the reference's information mark.
+///
+/// `getDefaultSkinSectionInfoTooltip` in `Skins.vue` answers for exactly one
+/// section -- "Modrinth Pride" -- and `undefined` for the other twelve, and the
+/// header's `#button` slot draws the mark only under `v-if="section.infoTooltip"`.
+/// So one header of the thirteen has it, and this is that test rather than a
+/// rule about which sections could have one.
+fn info_mark(section: Section) -> bool {
+    section == Section::ModrinthPride
+}
+
+/// The hover key the mark's ink is drawn from.
+///
+/// `group-hover:text-primary` on the span: the whole header is the group, so the
+/// mark follows the pointer over the row rather than over itself. Keyed per
+/// section because the clock is per control, and a mark that lit with another
+/// section's would be two sections' hover answering for one pointer.
+fn info_key(section: Section) -> &'static str {
+    ui::scoped(INFO_KEY, section.key().name())
+}
+
+/// The namespace the section headers' hovers are keyed under.
+const INFO_KEY: &str = "skins-section";
+
 /// `content-class="pt-2"` (8) between a header and its cards.
 const SECTION_CONTENT_TOP: f32 = 8.0;
 
@@ -1392,7 +1423,7 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
         // turned when the section is open, then its `text-xl font-semibold`
         // title in the default ink -- `text-primary`, which is what the
         // reference's Tailwind calls `--color-text-default`.
-        let head = row![
+        let mut head = row![
             icon::icon(
                 if open { Glyph::ChevronUp } else { Glyph::ChevronDown },
                 SECTION_ICON,
@@ -1403,15 +1434,50 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
                 .size(SECTION_TITLE)
                 .font(crate::style::semibold())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-        ]
-        .height(Length::Fixed(SECTION_HEIGHT))
-        .align_items(Alignment::Center)
-        .width(Length::Fill);
-        list = list.push(
-            mouse_area(head)
-                .interaction(iced::mouse::Interaction::Pointer)
-                .on_press(Message::Select(*section)),
-        );
+        ];
+        // The information mark, on the one section that has one. Its span is
+        // `inline-flex size-6 items-center justify-center text-secondary`, so
+        // the glyph is 20 in a 24 box in the tertiary ink, and the whole header
+        // is its group: `group-hover:text-primary` is a tween from one ink to
+        // the other as the pointer crosses the row. The tooltip it hangs is
+        // `v-if`'d with the mark and is not drawn -- this toolkit has no tooltip
+        // widget -- which is the one half of the reference's own span that is
+        // missing, and the mark without it is the half that is on screen.
+        //
+        // A press on the mark opens the section here, where the reference's
+        // `@click.stop` keeps it closed. There is no widget here that takes a
+        // press and gives nothing back, so the mark cannot be the reference's
+        // silent span; it is inside the header's own press either way.
+        let marked = info_mark(*section);
+        if marked {
+            let (_, amount) = ui::interaction(info_key(*section));
+            let ink = crate::theme::mix(
+                theme_gen::ink(theme, INK_SECONDARY),
+                theme_gen::ink(theme, INK_DEFAULT),
+                amount,
+            );
+            head = head
+                .push(Space::with_width(SECTION_ICON_GAP))
+                .push(
+                    container(icon::icon(Glyph::Unknown, SECTION_INFO, ink))
+                        .width(Length::Fixed(SECTION_ICON))
+                        .height(Length::Fixed(SECTION_ICON))
+                        .center_x()
+                        .center_y(),
+                );
+        }
+        let head = head
+            .height(Length::Fixed(SECTION_HEIGHT))
+            .align_items(Alignment::Center)
+            .width(Length::Fill);
+        let mut area = mouse_area(head).interaction(iced::mouse::Interaction::Pointer);
+        if marked {
+            let key = info_key(*section);
+            area = area
+                .on_enter(Message::Hover { key, over: true, hover: None })
+                .on_exit(Message::Hover { key, over: false, hover: None });
+        }
+        list = list.push(area.on_press(Message::Select(*section)));
         if open {
             list = list.push(Space::with_height(SECTION_CONTENT_TOP));
             list = list.push(section_content(theme, state, store, *section));
@@ -2899,6 +2965,34 @@ mod tests {
         // editor's own heading gap and this column is not that one.
         assert_eq!(CONFIRM_GAP, 16.0);
         assert_eq!(CONFIRM_GAP, 2.0 * EDITOR_HEADING_GAP);
+    }
+
+    #[test]
+    fn one_header_carries_the_information_mark_and_its_own_numbers() {
+        // `getDefaultSkinSectionInfoTooltip` answers for "Modrinth Pride" and
+        // `undefined` for every other section, and the header draws the span only
+        // under `v-if="section.infoTooltip"` -- so one of the thirteen has it.
+        let marked: Vec<&str> = Section::ALL
+            .iter()
+            .filter(|section| info_mark(**section))
+            .map(|section| section.label())
+            .collect();
+        assert_eq!(marked, vec!["Modrinth Pride"]);
+        for section in Section::ALL {
+            assert_eq!(info_mark(section), section == Section::ModrinthPride);
+        }
+        // `inline-flex size-6 ... justify-center` with `<UnknownIcon class="size-5" />`
+        // in it: 20 in 24, on the header row's own `gap-[6px]`.
+        assert_eq!(SECTION_INFO, 20.0);
+        assert_eq!(SECTION_ICON, 24.0);
+        assert_eq!(SECTION_ICON_GAP, 6.0);
+        // The mark's hover is keyed per section, because the clock is per control.
+        assert_ne!(info_key(Section::ModrinthPride), info_key(Section::Modrinth));
+        assert!(info_key(Section::ModrinthPride).starts_with(INFO_KEY));
+        // And the page draws with the mark on screen.
+        for theme in Gen::ALL {
+            drop(view(*theme, &State::default(), &Store::default()));
+        }
     }
 
     #[test]
