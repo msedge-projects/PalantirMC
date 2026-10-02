@@ -1546,3 +1546,144 @@ fn every_font_weight_is_the_references() {
         );
     }
 }
+
+/// `ButtonFrame.vue`'s own size table, read a second time.
+///
+/// The frame's five rows are a table of Tailwind classes, and every number this
+/// shell draws a button with comes out of one of those rows. The classes that
+/// *could* be transcribed wrongly are the assignments -- which height goes with
+/// which radius, padding and icon -- so this reads the table straight out of the
+/// vendored component, maps the classes through the one scale below, and compares
+/// the whole set per row with [`crate::ui::Size`]. A row that gained or lost a
+/// class fails as a changed set, not as a missing property.
+#[test]
+fn every_button_size_is_the_frames_own() {
+    let path = vendored("ui/src/components/base/buttons/ButtonFrame.vue");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+
+    // One `const name: Record<ButtonSize, string> = { ... }` table, as rows of
+    // size name and class list.
+    fn rows(text: &str, marker: &str) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        let Some(start) = text.find(marker) else {
+            return out;
+        };
+        let body = &text[start..];
+        let body = &body[body.find('{').map_or(0, |index| index + 1)..];
+        let end = body.find("\n}").unwrap_or(body.len());
+        for line in body[..end].lines() {
+            let line = line.trim();
+            let Some((name, rest)) = line.split_once(':') else {
+                continue;
+            };
+            let Some(open) = rest.find('\'') else {
+                continue;
+            };
+            let Some(close) = rest[open + 1..].find('\'') else {
+                continue;
+            };
+            let classes = rest[open + 1..open + 1 + close].split_whitespace().map(str::to_string).collect();
+            out.push((name.trim().to_string(), classes));
+        }
+        out
+    }
+
+    let sizes = rows(&text, "const sizeClasses");
+    let icon_only = rows(&text, "const iconOnlySizeClasses");
+    assert_eq!(sizes.len(), 5, "the frame's size table should have five rows: {sizes:?}");
+    assert_eq!(
+        icon_only.len(),
+        5,
+        "the frame's icon-only table should have five rows: {icon_only:?}"
+    );
+
+    // The scale the classes name, which is the one thing this test has to know
+    // for itself; everything it compares is which class a row carries.
+    let pixels = |class: &str| -> Option<f32> {
+        Some(match class {
+            "h-7" | "w-7" => 28.0,
+            "h-8" | "w-8" => 32.0,
+            "h-9" | "w-9" => 36.0,
+            "h-10" | "w-10" => 40.0,
+            "h-12" | "w-12" => 48.0,
+            "gap-1" => 4.0,
+            "gap-1.5" => 6.0,
+            "gap-2" => 8.0,
+            "rounded-lg" => 8.0,
+            "rounded-[10px]" => 10.0,
+            "rounded-xl" => 12.0,
+            "rounded-[14px]" => 14.0,
+            "rounded-2xl" => 16.0,
+            "px-1.5" => 6.0,
+            "px-2.5" => 10.0,
+            "px-3.5" => 14.0,
+            "px-4" => 16.0,
+            "text-sm" => 14.0,
+            "text-base" => 16.0,
+            "leading-5" => 20.0,
+            "[&>svg]:size-4" => 16.0,
+            "[&>svg]:size-5" => 20.0,
+            "[&>svg]:size-6" => 24.0,
+            _ => return None,
+        })
+    };
+
+    let ours = [
+        ("xs", crate::ui::Size::Xs),
+        ("sm", crate::ui::Size::Sm),
+        ("md", crate::ui::Size::Md),
+        ("lg", crate::ui::Size::Lg),
+        ("xl", crate::ui::Size::Xl),
+    ];
+    let round = |mut values: Vec<f32>| {
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        values.dedup();
+        values
+    };
+
+    for (name, size) in ours {
+        let Some((_, classes)) = sizes.iter().find(|(row, _)| row == name) else {
+            panic!("`sizeClasses` has no `{name}` row");
+        };
+        let values = round(classes.iter().filter_map(|class| pixels(class)).collect());
+        let expected = round(vec![
+            size.height(),
+            size.radius(),
+            size.pad(),
+            size.gap(),
+            size.label(),
+            size.icon(),
+            size.line(),
+        ]);
+        assert_eq!(values, expected, "`{name}` row is {classes:?}");
+
+        let extrabold = classes.iter().any(|class| class == "font-extrabold");
+        assert_eq!(
+            extrabold,
+            size == crate::ui::Size::Xl,
+            "`{name}` should carry `font-extrabold` only on `xl`: {classes:?}"
+        );
+        let semibold = classes.iter().any(|class| class == "font-semibold");
+        assert_eq!(
+            semibold,
+            weight_number(size.font().weight) == 600,
+            "`{name}`'s own face should be the row's `font-semibold` class: {classes:?}"
+        );
+
+        let Some((_, classes)) = icon_only.iter().find(|(row, _)| row == name) else {
+            panic!("`iconOnlySizeClasses` has no `{name}` row");
+        };
+        let values = round(classes.iter().filter_map(|class| pixels(class)).collect());
+        assert_eq!(
+            values,
+            vec![size.square()],
+            "`{name}`'s icon-only width should be the row's own `w-` class: {classes:?}"
+        );
+        assert!(
+            classes.iter().any(|class| class == "!px-0"),
+            "`{name}`'s icon-only row should drop the padding: {classes:?}"
+        );
+    }
+}

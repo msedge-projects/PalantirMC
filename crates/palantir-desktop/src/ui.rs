@@ -326,7 +326,123 @@ pub const TAG_HEIGHT: f32 = 24.0;
 /// changed in one of them.
 pub const BUTTON_LABEL_SIZE: f32 = 14.0;
 /// A button's horizontal padding, which is `ButtonFrame.vue`'s `px-4`.
+///
+/// The legacy frame's: [`button`] and the three builders beside it draw every
+/// button as this one row, 40 pixels tall with a 14-pixel label, which is the
+/// geometry the kit had before [`Size`] was ported. Callers move onto the sized
+/// builders as their surface is measured, and the four legacy constructors go
+/// with the last of them.
 pub const BUTTON_PAD: f32 = 16.0;
+
+// ---- `ButtonFrame.vue`'s own size table ----------------------------------
+
+/// One row of `ButtonFrame.vue`'s own size table.
+///
+/// A button in the reference is not one size: `ButtonFrame.vue` declares five,
+/// `xs` through `xl`, and each row carries its own height, radius, horizontal
+/// padding, icon gap, label size and icon size. The row is read as a whole here
+/// -- the numbers are methods so that a caller cannot take a height from one row
+/// and an icon from another.
+///
+/// [`Size::Md`] is the reference's own default: `Button.vue` and `IconButton.vue`
+/// both default their `size` prop to `'md'`, so every button without a `size`
+/// attribute is that row -- `h-9`, 36 pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Size {
+    /// `h-7`: 28 pixels tall, `rounded-lg`, `text-sm`.
+    Xs,
+    /// `h-8`: 32, `rounded-[10px]`, `text-sm`.
+    Sm,
+    /// `h-9`: 36, `rounded-xl`, `text-base` -- the reference's default.
+    Md,
+    /// `h-10`: 40, `rounded-[14px]`, `text-base`.
+    Lg,
+    /// `h-12`: 48, `rounded-2xl`, `text-base` in `font-extrabold`.
+    Xl,
+}
+
+impl Size {
+    /// The row's height: `h-7` through `h-12`.
+    pub const fn height(self) -> f32 {
+        match self {
+            Size::Xs => 28.0,
+            Size::Sm => 32.0,
+            Size::Md => 36.0,
+            Size::Lg => 40.0,
+            Size::Xl => 48.0,
+        }
+    }
+
+    /// The row's corner radius: `rounded-lg` through `rounded-2xl`.
+    pub const fn radius(self) -> f32 {
+        match self {
+            Size::Xs => 8.0,
+            Size::Sm => 10.0,
+            Size::Md => 12.0,
+            Size::Lg => 14.0,
+            Size::Xl => 16.0,
+        }
+    }
+
+    /// The row's horizontal padding: `px-1.5`, `px-2.5`, `px-4` and `px-3.5`.
+    pub const fn pad(self) -> f32 {
+        match self {
+            Size::Xs | Size::Sm => 6.0,
+            Size::Md => 10.0,
+            Size::Lg => 16.0,
+            Size::Xl => 14.0,
+        }
+    }
+
+    /// The gap between the things a button carries: `gap-1`, `gap-1.5` and
+    /// `gap-2`.
+    pub const fn gap(self) -> f32 {
+        match self {
+            Size::Xs | Size::Sm => 4.0,
+            Size::Md => 6.0,
+            Size::Lg | Size::Xl => 8.0,
+        }
+    }
+
+    /// The label's size: `text-sm` on the two smallest rows, `text-base` above
+    /// them.
+    pub const fn label(self) -> f32 {
+        match self {
+            Size::Xs | Size::Sm => 14.0,
+            Size::Md | Size::Lg | Size::Xl => 16.0,
+        }
+    }
+
+    /// The size a slot's own icons are set at: `size-4` through `size-6`.
+    pub const fn icon(self) -> f32 {
+        match self {
+            Size::Xs | Size::Sm => 16.0,
+            Size::Md | Size::Lg => 20.0,
+            Size::Xl => 24.0,
+        }
+    }
+
+    /// The face a label is set in: `font-semibold` on four rows and
+    /// `font-extrabold` on `xl`, which is the one row the reference weights
+    /// differently from the rest of the table.
+    pub const fn font(self) -> iced::Font {
+        match self {
+            Size::Xl => heading(),
+            Size::Xs | Size::Sm | Size::Md | Size::Lg => semibold(),
+        }
+    }
+
+    /// The line a label takes: `leading-5`, twenty pixels, on every row.
+    pub const fn line(self) -> f32 {
+        20.0
+    }
+
+    /// The width an icon-only button takes: `w-7` through `w-12` with `!px-0`,
+    /// which is the row's own height again.
+    pub const fn square(self) -> f32 {
+        self.height()
+    }
+}
 
 // ---- The vertical tab list ---------------------------------------------
 
@@ -979,6 +1095,204 @@ fn button_face<'a, Message: Clone + Hovered + 'a>(
         });
     let area = mouse_area(face)
         .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false));
+    match on_press {
+        Some(on_press) => area.on_press(on_press).into(),
+        None => area.into(),
+    }
+}
+
+/// A button at one row of [`Size`], which is `ButtonFrame.vue`'s own frame.
+///
+/// The difference from [`button`] beyond the size is the paint, which is the
+/// reference's rather than the legacy frame's: `base` and `colored-text` carry
+/// `box-shadow: inset 0 0 0 1px var(--surface-5)`, drawn here as the 1-pixel
+/// border it is (iced paints a border inside the bounds, which is what an inset
+/// shadow is); an `outlined` button's `0 0 0 1px` ring and a `quiet` button's
+/// `hover:bg-surface-4` are drawn the same way; and a `quiet` button's ink is
+/// `--color-base`, the token its rule actually names, rather than the legacy
+/// frame's contrast ink.
+///
+/// What the reference draws that this does not is recorded rather than
+/// approximated: the `colored` type's outer 1-pixel `color-mix(... 30%,
+/// transparent)` ring, its four soft drop shadows, and the `::before` top-edge
+/// highlight are all blurred or outer paint, and this backend's own note on
+/// shadows (`crate::theme`'s, on `modal`) is that a blurred rectangle costs a
+/// per-pixel pass every frame.
+pub fn button_sized<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    label: Key,
+    kind: Kind,
+    size: Size,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button_or_sized(theme, key, label, kind, size, Some(on_press))
+}
+
+/// The same button with its press optional, which is the disabled form.
+///
+/// `ButtonFrame.vue` draws a disabled button as itself at `disabled:opacity-50`
+/// with the pointer's cursor forbidden and no hover. This renderer has no group
+/// opacity, so the fifty percent is applied to each colour the frame paints --
+/// fill, ring and ink -- which is the arithmetic the overlay does anyway.
+pub fn button_or_sized<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    label: Key,
+    kind: Kind,
+    size: Size,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    sized_face(theme, key, kind, size, Length::Shrink, on_press, move |ink| {
+        text(label.message())
+            .size(size.label())
+            .line_height(iced::Pixels(size.line()))
+            .font(size.font())
+            .style(iced::theme::Text::Color(ink))
+            .into()
+    })
+}
+
+/// The same button with a label that is a string rather than a generated key.
+///
+/// See [`button_text`]: the language rows are names the vendored tree carries,
+/// and a name upstream adds without a message must still draw.
+pub fn button_text_sized<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    label: &str,
+    kind: Kind,
+    size: Size,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let label = label.to_string();
+    sized_face(theme, key, kind, size, Length::Shrink, Some(on_press), move |ink| {
+        text(label.clone())
+            .size(size.label())
+            .line_height(iced::Pixels(size.line()))
+            .font(size.font())
+            .style(iced::theme::Text::Color(ink))
+            .into()
+    })
+}
+
+/// A button at one row of [`Size`] with an icon in front of its label, at the
+/// row's own icon size and gap.
+pub fn button_with_icon_sized<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    label: Key,
+    kind: Kind,
+    size: Size,
+    width: Length,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    sized_face(theme, key, kind, size, width, on_press, move |ink| {
+        row![]
+            .spacing(size.gap())
+            .align_items(Alignment::Center)
+            .push(icon::icon(glyph, size.icon(), ink))
+            .push(
+                text(label.message())
+                    .size(size.label())
+                    .line_height(iced::Pixels(size.line()))
+                    .font(size.font())
+                    .style(iced::theme::Text::Color(ink)),
+            )
+            .into()
+    })
+}
+
+/// How much room a button at `size` with this label needs: the label and its own
+/// padding, measured with the same face [`button_text_sized`] draws it in.
+pub fn button_width_sized(label: &str, size: Size) -> f32 {
+    size.pad() * 2.0 + advance(label, size.font(), size.label())
+}
+
+/// The face of a button at one row of [`Size`]: its frame, its fill, and the
+/// crossing it publishes.
+///
+/// One colour table for every sized builder, [`Kind`]-keyed, as `ButtonFrame`'s
+/// own `typeClasses` is: the fill, the 1-pixel ring, and the ink the label and
+/// the icon in front of it share. The hover is the reference's own two rules
+/// together -- the `brightness(--hover-brightness)` filter, and the
+/// `hover:bg-surface-4` plate a type with no fill fades in over the same 150 ms.
+fn sized_face<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    kind: Kind,
+    size: Size,
+    width: Length,
+    on_press: Option<Message>,
+    face: impl FnOnce(Color) -> Element<'a, Message>,
+) -> Element<'a, Message> {
+    let usable = on_press.is_some();
+    let (factor, _) = if usable { interaction(key) } else { (1.0, 0.0) };
+    // `ButtonFrame.vue`'s type table, resolved to colours.
+    let (fill, ring, ink) = match kind {
+        Kind::Standard => (
+            Some(theme_gen::ink(theme, Ink::ButtonBg)),
+            Some(theme_gen::ink(theme, Ink::Surface5)),
+            theme_gen::ink(theme, INK_CONTRAST),
+        ),
+        Kind::Colored => (
+            Some(theme_gen::ink(theme, Ink::Brand)),
+            None,
+            theme_gen::ink(theme, Ink::AccentContrast),
+        ),
+        Kind::Danger => (
+            Some(theme_gen::ink(theme, Ink::Red)),
+            None,
+            theme_gen::ink(theme, Ink::AccentContrast),
+        ),
+        Kind::Outlined => (
+            None,
+            Some(theme_gen::ink(theme, Ink::Surface5)),
+            theme_gen::ink(theme, INK_CONTRAST),
+        ),
+        Kind::Quiet => (None, None, theme_gen::ink(theme, Ink::Base)),
+    };
+    // The pointer's crossing, as the two rules it is: the filter's brightness
+    // travels 0..1 with the clock, and the plate under a fill-less type is that
+    // same travel as an alpha.
+    let travel = crate::theme::hover_brightness() - 1.0;
+    let amount = if travel == 0.0 {
+        0.0
+    } else {
+        ((factor - 1.0) / travel).clamp(0.0, 1.0)
+    };
+    let fill = match fill {
+        Some(color) => Some(color),
+        // Transparent at rest, so a quiet or outlined button keeps the surface
+        // it sits on until the pointer arrives.
+        None => Some(Color { a: amount, ..theme_gen::ink(theme, Ink::Surface4) }),
+    };
+    let dim = |color: Color| if usable { color } else { crate::style::at_opacity(color, 0.5) };
+    let ink = crate::theme::brightness(dim(ink), factor);
+    let fill = fill.map(|color| Background::Color(crate::theme::brightness(dim(color), factor)));
+    let ring = ring.map(|color| crate::theme::brightness(dim(color), factor));
+    let face = container(face(ink))
+        .width(width)
+        .height(Length::Fixed(size.height()))
+        .padding(Padding { top: 0.0, bottom: 0.0, left: size.pad(), right: size.pad() })
+        .center_x()
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: fill,
+            border: Border {
+                color: ring.unwrap_or(Color::TRANSPARENT),
+                width: if ring.is_some() { 1.0 } else { 0.0 },
+                radius: size.radius().into(),
+            },
+            ..container::Appearance::default()
+        });
+    let area = mouse_area(face)
+        // `disabled:cursor-not-allowed`: a button nobody may press draws the
+        // forbidden cursor rather than the pointer that says it can be pressed.
+        .interaction(if usable { Interaction::Pointer } else { Interaction::NotAllowed })
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false));
     match on_press {

@@ -1721,11 +1721,21 @@ purpose: the reference's 591 is a CSS half-pixel when centered in 720, which a b
 snaps to the same top border row (65) and a rasteriser draws as a soft edge; the one
 row comes out of the body's bottom padding, and only the dialog's last two rows differ.
 
-The button inventory is the part of this gap that is still open: the reference's own
-`ButtonFrame.vue` has five sizes (`xs` 28 through `xl` 48, each with its own radius,
-padding, icon and label size) and most of its buttons -- 61 `xl` and 43 `lg` among the
-397 uses on file -- are not the single 40-pixel, 14-pixel-label row this kit draws for
-all of them. That is the next slice.
+The button inventory is the next piece of it. The reference's `ButtonFrame.vue` has
+five sizes -- `xs` 28 through `xl` 48, each with its own radius, padding, gap, icon and
+label, and `xl` alone in `font-extrabold` -- and the vendored tree's own `Button` and
+`IconButton` tags number 612, of which 113 state a size (38 `xl`, 36 `lg`, 22 `sm`,
+11 `xs`, 6 `md`); the rest take the frame's own default, `md`. The kit now draws all
+five rows (`ui::Size`, `ui::button_sized` and the three builders beside it) and the
+table is gated against the component
+(`reference_tokens::every_button_size_is_the_frames_own`), but the legacy 40-pixel
+14-pixel-label row is still what most call sites draw: each surface moves over as it is
+measured. Three things `ButtonFrame.vue` paints that this does not, all recorded rather
+than approximated: the `colored` type's outer 1-pixel `color-mix(... 30%, transparent)`
+ring, its four soft drop shadows (this backend's blurred-rectangle cost is the note on
+`theme::modal`), and the `::before` top-edge highlight over a colored fill. The `base`
+and `colored-text` type's `inset 0 0 0 1px var(--surface-5)` *is* drawn -- as the
+1-pixel border it is.
 
 ### The line height that was read backwards
 
