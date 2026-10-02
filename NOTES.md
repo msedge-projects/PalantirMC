@@ -2398,4 +2398,36 @@ left, and what closed:
   each is the 189 transcribed tokens, not a screenshot.
 * **Animations.** Still open. Hover tweens (§29) and the scroll glide are in;
   the four §31 named are not, and two of them are attached to surfaces that do
-  not exist yet.
+  not exist yet.### The browse header's shadow, and a three-pixel offset under it
+
+Two things sit between the tab strip and the search field that this launcher
+does not draw. Measured at x 700, both clients at 1280x720:
+
+| Row | Reference | This launcher |
+| --- | --- | --- |
+| 117 | `(52, 54, 60)` -- the strip's own `border-b border-surface-5` | `(22, 24, 28)` |
+| 118..125 | `(18, 20, 23)` fading to `(22, 24, 28)` | `(22, 24, 28)` -- flat |
+| 126 | `(66, 68, 74)` -- the field's hairline | `(22, 24, 28)` |
+| 129 | -- | `(66, 68, 74)` -- the field's hairline |
+
+**The band is a drop shadow, not a fill.** Eight rows of a gradient from
+`(18, 20, 23)` up to the page background, immediately under the header's
+`border-b`. `browse-tab/layout.vue`'s header carries `sticky top-0 z-20`, and a
+`z-20` sticky header that pins under a scrolling page is what casts it. This
+shell's tab strip is not sticky at all -- it scrolls with the page -- so the
+shadow is a symptom of a missing behaviour rather than a missing decoration,
+and drawing the band without the stickiness would put a shadow under a strip
+that moves, which is worse than not drawing it.
+
+**The three pixels are the same cause.** The field's hairline is at 126 in the
+reference and 129 here. The class list does not account for the difference and
+neither reading does: the header's own `mb-4` is sixteen, and the reference's
+gap from its border row to the field is nine. Something between the two is
+doing arithmetic this tree cannot see -- most likely the `-mx-6 -mt-6` the header
+pulls itself by against the page's own inset, which is a negative margin
+against a container this shell's padding model does not have. The right fix is
+the header's own box model, not a padding number tuned until the gap is nine,
+and that is a slice rather than a constant.
+
+Not fixed, and written down with the numbers so the next pass starts from a
+measurement rather than from a guess about which padding is wrong.
