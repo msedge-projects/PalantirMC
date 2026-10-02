@@ -446,12 +446,14 @@ fn dash_row<'a>(theme: Gen) -> Element<'a, Message> {
     let mut strip = row![].width(Length::Fill).height(Length::Fixed(1.0));
     for _ in 0..DASHES_ACROSS {
         strip = strip
-            .push(container(Space::with_width(Length::FillPortion(1))).style(
-                move |_theme: &Theme| container::Appearance {
-                    background: Some(iced::Background::Color(ink)),
-                    ..container::Appearance::default()
-                },
-            ))
+            .push(
+                container(Space::with_height(Length::Fixed(1.0)))
+                    .width(Length::FillPortion(1))
+                    .style(move |_theme: &Theme| container::Appearance {
+                        background: Some(iced::Background::Color(ink)),
+                        ..container::Appearance::default()
+                    }),
+            )
             .push(Space::with_width(Length::FillPortion(2)));
     }
     strip.into()
@@ -464,12 +466,14 @@ fn dash_column<'a>(theme: Gen) -> Element<'a, Message> {
     let mut strip = column![].height(Length::Fill).width(Length::Fixed(1.0));
     for _ in 0..DASHES_DOWN {
         strip = strip
-            .push(container(Space::with_height(Length::FillPortion(1))).style(
-                move |_theme: &Theme| container::Appearance {
-                    background: Some(iced::Background::Color(ink)),
-                    ..container::Appearance::default()
-                },
-            ))
+            .push(
+                container(Space::with_width(Length::Fixed(1.0)))
+                    .height(Length::FillPortion(1))
+                    .style(move |_theme: &Theme| container::Appearance {
+                        background: Some(iced::Background::Color(ink)),
+                        ..container::Appearance::default()
+                    }),
+            )
             .push(Space::with_height(Length::FillPortion(2)));
     }
     strip.into()
