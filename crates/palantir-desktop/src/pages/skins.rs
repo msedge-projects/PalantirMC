@@ -1054,7 +1054,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
 /// knows there is no user before it has asked, and this page only finds out
 /// when the read answers.
 fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
-    if state.appearance.failure().is_none() {
+    if !state.appearance.failure().is_some_and(signed_out) {
         return None;
     }
     // The words: `text-contrast` on the title and `text-primary` on the
@@ -1153,6 +1153,31 @@ const NAMETAG_SIZE: f32 = 18.0;
 /// it is the one number here that is the renderer's rather than a class, since
 /// the model is a WebGL canvas and the block is DOM over it.
 const PREVIEW_SUBTITLE_GAP: f32 = 24.0;
+
+/// Whether what came back is the shell's sentence for an account with no session.
+///
+/// The reference's banner is `v-if="!currentUser"`: signed out, *not* broken.
+/// This page is only told that the read failed, and it was drawing the banner
+/// for every failure -- so an account whose Minecraft read had timed out was
+/// told to sign in to Microsoft.
+///
+/// [`Shell::skins`] answers an account with no session with a sentence that
+/// begins "Sign in to a Microsoft account" ([`Shell::wear`]'s begins the same),
+/// and a failure with an account is the network's own text -- [`crate::store`]
+/// maps `palantir_net`'s error with `to_string` and nothing else writes into
+/// that slot. So the words are what tells the two apart here. That is string
+/// matching on another file's sentence, and the honest fix is for `Loaded` to
+/// carry whether there was an account at all; this is the shape that fix takes
+/// in the meantime.
+fn signed_out(reason: &str) -> bool {
+    reason.starts_with(SIGNED_OUT)
+}
+
+/// The shell's own opening words for an account with no session.
+///
+/// `Shell::skins`: "Sign in to a Microsoft account to see the skins it owns."
+/// `Shell::wear`: "Sign in to a Microsoft account to change what it wears."
+const SIGNED_OUT: &str = "Sign in to a Microsoft account";
 
 /// The left column: the page's own title over the model preview.
 ///
@@ -2214,13 +2239,13 @@ mod tests {
         assert!(demo_banner(Gen::ALL[0], &State::default()).is_none(), "not asked for yet");
         let waiting = State { appearance: Load::Loading, ..State::default() };
         assert!(demo_banner(Gen::ALL[0], &waiting).is_none(), "still waiting on the read");
-        let signed_out = State {
+        let nobody = State {
             appearance: Load::Failed("Sign in to a Microsoft account to see the skins it owns.".into()),
             ..State::default()
         };
         for theme in Gen::ALL {
-            assert!(demo_banner(*theme, &signed_out).is_some(), "nobody is signed in");
-            drop(view(*theme, &signed_out, &store));
+            assert!(demo_banner(*theme, &nobody).is_some(), "nobody is signed in");
+            drop(view(*theme, &nobody, &store));
         }
         // An account's own appearance in hand is the other state, and the
         // banner is not in it.
@@ -2233,6 +2258,17 @@ mod tests {
             ..State::default()
         };
         assert!(demo_banner(Gen::ALL[0], &signed_in).is_none());
+        // And an account whose read failed for any other reason is not told to
+        // sign in: the banner is `!currentUser`, not "something went wrong".
+        let broken = State {
+            appearance: Load::Failed("error sending request for url (...)".into()),
+            ..State::default()
+        };
+        assert!(demo_banner(Gen::ALL[0], &broken).is_none(), "a failure is not a sign-out");
+        assert!(signed_out("Sign in to a Microsoft account to see the skins it owns."));
+        assert!(signed_out("Sign in to a Microsoft account to change what it wears."));
+        assert!(!signed_out("Minecraft does not say which skin is in force."));
+        assert!(!signed_out("error sending request for url (...)"));
     }
 
     
