@@ -260,10 +260,32 @@ pub struct Edit {
     pub variant: String,
     /// The cape the reader has chosen: a document id, or empty for none.
     pub cape: String,
+    /// The row as the store holds it, which is what "an edit" is measured against.
+    ///
+    /// `EditSkinModal.vue` keeps `currentSkin` beside the modal's own `variant` and
+    /// `selectedCape`, and its `hasEdits` is the difference between them. This
+    /// carries the store's half so the editor can be drawn with Save already
+    /// answering the same question, which is the whole of `hasEdits` once the
+    /// texture section is not there (departure 15).
+    pub stored: Stored,
     /// Whether the stored texture asks for Ears features.
     pub ears: bool,
     /// What the reader has asked for.
     pub act: Act,
+}
+
+/// The row an editor opened on, as the store holds it.
+///
+/// The two fields `EditSkinModal.vue` compares against: `currentSkin.variant`
+/// and `currentSkin.cape_id`, folded to an empty string when the row wears no
+/// cape, which is what `(selectedCape?.id || null) !== (currentSkin.cape_id ||
+/// null)` compares on its own side.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stored {
+    /// The arm style the row was stored with, in the service's own words.
+    pub variant: String,
+    /// The cape the row was stored with: a document id, or empty for none.
+    pub cape: String,
 }
 
 /// Which way a saved row was asked to move.
@@ -804,6 +826,10 @@ impl State {
                         name: row.entry.name.clone(),
                         variant: row.entry.variant.clone(),
                         cape: row.entry.cape.clone(),
+                        stored: Stored {
+                            variant: row.entry.variant.clone(),
+                            cape: row.entry.cape.clone(),
+                        },
                         ears: row.ears,
                         act: Act::Save,
                     });
@@ -1510,6 +1536,19 @@ fn saved_card<'a>(
         .into()
 }
 
+/// Whether the editor holds an edit worth saving.
+///
+/// `hasEdits` in `EditSkinModal.vue`, with the one condition it cannot have
+/// here left out: in `edit` mode it is true when a texture has been uploaded,
+/// when `variant` differs from `currentSkin.variant`, or when the chosen cape's
+/// id differs from the row's. The upload belongs to a texture section this
+/// launcher cannot draw (departure 15), so what is left is the two the modal's
+/// own controls can change -- and a reader who has touched neither is not asked
+/// to press Save.
+fn has_edits(edit: &Edit) -> bool {
+    edit.variant != edit.stored.variant || edit.cape != edit.stored.cape
+}
+
 /// The editor's body: the arm style, the cape, the Ears notice, and three actions.
 ///
 /// This is the reference's `EditSkinModal.vue`, drawn as the *body* of this launcher's
@@ -1605,7 +1644,10 @@ pub fn edit_view<'a>(
                 ui::scoped(EDIT_KEY, "save"),
                 Key::AppSkinsModalSaveSkinButton,
                 ui::Kind::Colored,
-                (!wearing).then_some(Message::Act(Act::Save)),
+                // Unusable while nothing has been changed, which is the
+                // reference's `disableSave`: a save that writes the row back
+                // exactly as it was is a write a reader did not ask for.
+                (!wearing && has_edits(edit)).then_some(Message::Act(Act::Save)),
             ))
             .push(Space::with_width(Length::Fill))
             .push(ui::button_text(
@@ -2322,6 +2364,7 @@ mod tests {
                 name: "my skin".to_string(),
                 variant: "CLASSIC".to_string(),
                 cape: String::new(),
+                stored: Stored::default(),
                 ears: false,
                 act: Act::Save,
             };
@@ -2351,6 +2394,7 @@ mod tests {
             name: "my skin".to_string(),
             variant: "CLASSIC".to_string(),
             cape: String::new(),
+            stored: Stored::default(),
             ears: false,
             act: Act::Save,
         };
@@ -2372,6 +2416,7 @@ mod tests {
             name: "my skin".to_string(),
             variant: "CLASSIC".to_string(),
             cape: String::new(),
+            stored: Stored::default(),
             ears: false,
             act: Act::Forget,
         });
@@ -2417,6 +2462,7 @@ mod tests {
                     name: "my skin".to_string(),
                     variant: "SLIM".to_string(),
                     cape: String::new(),
+                    stored: Stored { variant: "CLASSIC".to_string(), cape: String::new() },
                     ears,
                     act: Act::Save,
                 };
@@ -2439,6 +2485,31 @@ mod tests {
     }
 
     #[test]
+    fn save_is_only_offered_once_the_editor_holds_an_edit() {
+        // The modal opens on the row as the store holds it, so nothing has been
+        // changed and `hasEdits` is false: Save is the reference's own disabled
+        // button, which it draws rather than hides.
+        let mut state = State { saved: vec![stored("abc")], ..State::default() };
+        state.update(Message::Edit { key: "abc".to_string() });
+        let edit = state.edit.clone().expect("the editor opened on the row");
+        assert_eq!(edit.variant, edit.stored.variant, "it opened on the row's own arm style");
+        assert_eq!(edit.cape, edit.stored.cape, "and on the row's own cape");
+        assert!(!has_edits(&edit), "so there is nothing to save yet");
+        // The two choices the modal owns are the two that can make an edit.
+        state.update(Message::ArmStyle { variant: "SLIM" });
+        let edit = state.edit.as_ref().expect("still open");
+        assert!(has_edits(edit), "a different arm style is one");
+        state.update(Message::ArmStyle { variant: "CLASSIC" });
+        state.update(Message::Cape { id: "cape-9".to_string() });
+        let edit = state.edit.as_ref().expect("still open");
+        assert!(has_edits(edit), "and a different cape is the other");
+        // Putting both back is not an edit, and neither is choosing the row's own
+        // cape id where it already was.
+        state.update(Message::Cape { id: String::new() });
+        assert!(!has_edits(state.edit.as_ref().expect("still open")));
+    }
+
+    #[test]
     fn the_editors_blocks_are_the_reference_s_own_two_gaps_apart() {
         // `flex flex-col gap-4` between the sections, and `mb-2` under each of
         // their own headings -- so a heading is 8 from what it labels and 16 from
@@ -2454,6 +2525,7 @@ mod tests {
             name: "my skin".to_string(),
             variant: "CLASSIC".to_string(),
             cape: String::new(),
+            stored: Stored::default(),
             ears: true,
             act: Act::Save,
         };
