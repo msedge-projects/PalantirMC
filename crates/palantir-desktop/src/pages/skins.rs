@@ -1552,30 +1552,40 @@ pub fn edit_view<'a>(
             })
         },
     ));
-    // The cape: one choice per cape the account owns, and the reference's own "None"
-    // last. A choice's mark is the row's *stored* cape id, so a chip draws the check the
-    // other choices do only when it is the one this row asks for.
+    // The cape: the reference's own "None" cell *first*, then one cell per cape the
+    // account owns, four to a row. A choice's mark is the row's *stored* cape id, so a
+    // chip draws the check the other choices do only when it is the one this row asks
+    // for -- the none cell included, which is how a row with no cape says so.
     body = body.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
-    let mut cape_keys: Vec<&'static str> = capes
-        .iter()
-        .map(|cape| ui::scoped(EDIT_KEY, &format!("cape:{}", cape.id)))
-        .collect();
-    cape_keys.push(ui::scoped(EDIT_KEY, "cape:none"));
-    let mut cape_labels: Vec<(String, bool)> = capes
-        .iter()
-        .map(|cape| {
-            let name = if cape.alias.is_empty() { cape.id.clone() } else { cape.alias.clone() };
-            (name, edit.cape == cape.id)
-        })
-        .collect();
-    cape_labels.push((
-        Key::AppSkinsModalNoneCapeOption.message().to_string(),
-        edit.cape.is_empty(),
-    ));
-    let cape_ids: Vec<String> = capes.iter().map(|cape| cape.id.clone()).collect();
-    body = body.push(ui::chips(theme, &cape_keys, &cape_labels, move |index| {
-        Some(Message::Cape { id: cape_ids.get(index).cloned().unwrap_or_default() })
-    }));
+    let mut cape_list = column![].spacing(CAPE_GAP);
+    for row in cape_rows(capes) {
+        let mut keys: Vec<&'static str> = Vec::with_capacity(row.len());
+        let mut labels: Vec<(String, bool)> = Vec::with_capacity(row.len());
+        // The ids travel with the row so a press names a cape rather than a place in
+        // the list: the fourth cell of the second row is not index 4.
+        let mut ids: Vec<String> = Vec::with_capacity(row.len());
+        for choice in row {
+            match choice {
+                None => {
+                    keys.push(ui::scoped(EDIT_KEY, "cape:none"));
+                    labels.push((
+                        Key::AppSkinsModalNoneCapeOption.message().to_string(),
+                        edit.cape.is_empty(),
+                    ));
+                    ids.push(String::new());
+                }
+                Some(cape) => {
+                    keys.push(ui::scoped(EDIT_KEY, &format!("cape:{}", cape.id)));
+                    labels.push((cape_name(cape), edit.cape == cape.id));
+                    ids.push(cape.id.clone());
+                }
+            }
+        }
+        cape_list = cape_list.push(ui::chips(theme, &keys, &labels, move |index| {
+            Some(Message::Cape { id: ids.get(index).cloned().unwrap_or_default() })
+        }));
+    }
+    body = body.push(cape_list);
     if edit.ears {
         body = body.push(ears_notice(theme));
     }
@@ -1612,6 +1622,62 @@ pub fn edit_view<'a>(
             )),
     );
     body.into()
+}
+
+/// How many capes the reference's cape list draws to a row.
+///
+/// `EditSkinModal.vue`'s list is
+/// `grid grid-cols-[repeat(4,max-content)] auto-rows-max gap-2 overflow-y-auto pr-1`:
+/// four columns, each as wide as its widest cell, with `gap-2` -- 8px -- between
+/// cells and 8px between rows.
+const CAPE_COLUMNS: usize = 4;
+
+/// The gap between two cells of that grid, in both directions.
+///
+/// The same `gap-2` as [`CAPE_COLUMNS`]'s own line, and it is what
+/// [`crate::ui::chips`] already puts between the chips in one of its rows, so the
+/// rows this page draws need no gap of their own between cells -- only between
+/// the rows.
+const CAPE_GAP: f32 = 8.0;
+
+/// The cape list's own cells, in the reference's order and its own rows.
+///
+/// [`EditSkinModal.vue`] draws the no-cape cell ahead of its `v-for`, and the
+/// `v-for` runs over `sortedCapes`, which is
+/// `[...(props.capes || [])].sort((a, b) => (a.name || '').toLowerCase()
+/// .localeCompare((b.name || '').toLowerCase()))` -- the account's own capes, by
+/// their names, case-folded, with an unnamed cape first among them because its
+/// name is the empty string. `None` is the no-cape cell; it is only ever first,
+/// and a row is never padded out with copies of it.
+fn cape_rows(
+    capes: &[palantir_net::MinecraftCape],
+) -> Vec<Vec<Option<&palantir_net::MinecraftCape>>> {
+    let mut sorted: Vec<&palantir_net::MinecraftCape> = capes.iter().collect();
+    // `sort_by` is stable, so two capes the service gave the same name keep the
+    // order it listed them in -- which is what `Array.prototype.sort` does too.
+    sorted.sort_by(|left, right| cape_sort_name(left).cmp(&cape_sort_name(right)));
+    let mut cells: Vec<Option<&palantir_net::MinecraftCape>> = Vec::with_capacity(sorted.len() + 1);
+    cells.push(None);
+    cells.extend(sorted.into_iter().map(Some));
+    cells.chunks(CAPE_COLUMNS).map(|row| row.to_vec()).collect()
+}
+
+/// What `sortedCapes` compares: the cape's own name, folded.
+fn cape_sort_name(cape: &palantir_net::MinecraftCape) -> String {
+    cape.alias.to_lowercase()
+}
+
+/// What a cape cell is labelled with.
+///
+/// `CapeButton`'s `:name="cape.name || formatMessage(messages.capeFallbackName)"`
+/// -- the name the service gave it, and the reference's own word "Cape" when it
+/// gave none. This launcher's field for that name is the alias.
+fn cape_name(cape: &palantir_net::MinecraftCape) -> String {
+    if cape.alias.is_empty() {
+        Key::AppSkinsModalCapeFallbackName.message().to_string()
+    } else {
+        cape.alias.clone()
+    }
 }
 
 /// The take-off action's own words.
@@ -2331,6 +2397,60 @@ mod tests {
                 drop(edit_view(*theme, &edit, &[], true));
             }
         }
+    }
+
+    /// One cape, as the service names it.
+    fn cape(id: &str, alias: &str) -> palantir_net::MinecraftCape {
+        palantir_net::MinecraftCape {
+            id: id.to_string(),
+            state: "AVAILABLE".to_string(),
+            url: String::new(),
+            alias: alias.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_cape_list_is_ours_first_and_then_the_account_s_capes_by_name() {
+        // `sortedCapes` compares the names folded, and an unnamed cape has nothing to
+        // compare, so it sorts ahead of every named one.
+        let capes = vec![cape("z", "Zebra"), cape("m", "migrator"), cape("u", "")];
+        let rows = cape_rows(&capes);
+        let names: Vec<Option<String>> =
+            rows[0].iter().map(|cell| cell.map(cape_sort_name)).collect();
+        assert_eq!(
+            names,
+            vec![
+                None,
+                Some(String::new()),
+                Some("migrator".to_string()),
+                Some("zebra".to_string()),
+            ],
+            "none first, then the names folded, and an unnamed cape has nothing to compare"
+        );
+        // An account that owns no cape at all still gets the reference's own cell,
+        // and nothing beside it.
+        let rows = cape_rows(&[]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1);
+        assert!(rows[0][0].is_none(), "which is the no-cape cell");
+        // And a cell is labelled with the service's name, or the reference's own word.
+        assert_eq!(cape_name(&cape("m", "Migrator")), "Migrator");
+        assert_eq!(cape_name(&cape("u", "")), "Cape");
+    }
+
+    #[test]
+    fn the_cape_list_is_four_to_a_row_and_never_padded_with_a_second_none() {
+        let capes: Vec<palantir_net::MinecraftCape> =
+            (0..9).map(|n| cape(&format!("c{n}"), &format!("cape {n}"))).collect();
+        // Nine capes and the no-cape cell are ten cells, which is two rows of four
+        // and one of two.
+        let rows = cape_rows(&capes);
+        let lengths: Vec<usize> = rows.iter().map(Vec::len).collect();
+        assert_eq!(lengths, vec![4, 4, 2], "and the last row is short rather than padded");
+        let cells: usize = rows.iter().map(Vec::len).sum();
+        assert_eq!(cells, capes.len() + 1, "one cell per cape, and ours");
+        let nones: usize = rows.iter().flatten().filter(|cell| cell.is_none()).count();
+        assert_eq!(nones, 1, "the no-cape cell is drawn once, not once per row");
     }
 
     #[test]
