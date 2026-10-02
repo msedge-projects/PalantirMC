@@ -14,6 +14,7 @@
 pub mod discover;
 pub mod home;
 pub mod instance;
+pub mod overlay;
 pub mod project;
 pub mod screenshots;
 pub mod servers;
@@ -527,6 +528,12 @@ impl Screen {
             // is the *answer*, which is why a filter moves it without a request.
             (Screen::User(_), Message::User(user::Message::Project(id))) => {
                 return Some(Ask::Open(Open::Project(id)))
+            }
+            // A card's *Install*, reported rather than performed, and turned into
+            // the same ask the project page's own button makes -- so a profile
+            // installs a project by the one route rather than a second one.
+            (Screen::User(_), Message::User(user::Message::Install(id, title, pack))) => {
+                return Some(Ask::Install(project::Install { id, title, pack }))
             }
             (Screen::User(state), Message::User(user::Message::Filter(project_type))) => {
                 return Some(Ask::Open(Open::User {

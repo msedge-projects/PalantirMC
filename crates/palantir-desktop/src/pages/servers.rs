@@ -49,13 +49,11 @@
 
 use std::sync::OnceLock;
 
-use iced::advanced::widget::{tree, Tree};
-use iced::advanced::{layout, mouse, renderer, Layout, Widget};
 use iced::gradient::{self, Gradient};
 use iced::widget::{column, container, image, row, Space};
 use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Radians,
-    Rectangle, Theme, Vector,
+    Theme, Vector,
 };
 
 use crate::avatar;
@@ -66,6 +64,7 @@ use crate::store::{self, Store};
 use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
+use super::overlay::Stack;
 use crate::ui::{self, text};
 
 /// What the page can be told.
@@ -138,165 +137,6 @@ impl State {
     }
 }
 
-// ---- Layers over one another --------------------------------------------
-
-/// Elements drawn at the same place, each at an offset, the later over the
-/// earlier.
-///
-/// The one thing it stands in for is `position: absolute` inside a
-/// `position: relative` box, which is how `ServerListEmptyPreview.vue` puts its
-/// fade and its toast over a panel and how `ServerListEmpty.vue` puts a glyph
-/// over a plate's three layers. Two rules, both from that:
-///
-/// * **The first layer sets the box.** Its layout node *is* the stack's, so a
-///   layer placed at an offset that runs past it is the caller's to clip -- which
-///   is what the toast does, and what the reference's own clipped viewport does
-///   with it (`left-[32%]` of a 400 box is 128, and 128 + 336 = 464).
-/// * **Later layers take the pointer.** Events, hover and cursor are the first
-///   layer's, because every layer here is inside an element the reference marks
-///   `inert aria-hidden` -- a picture of a dialog, not a dialog.
-struct Stack<'a, Message, Theme, Renderer> {
-    /// `(offset from the stack's origin, the element)`, painted in this order.
-    layers: Vec<(Vector, Element<'a, Message, Theme, Renderer>)>,
-}
-
-impl<'a, Message, Theme, Renderer> Stack<'a, Message, Theme, Renderer> {
-    /// The layer the stack's own box is taken from.
-    fn at(offset: Vector, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
-        Stack { layers: vec![(offset, element.into())] }
-    }
-
-    /// One more layer, over everything laid down so far.
-    fn over(
-        mut self,
-        offset: Vector,
-        element: impl Into<Element<'a, Message, Theme, Renderer>>,
-    ) -> Self {
-        self.layers.push((offset, element.into()));
-        self
-    }
-}
-
-impl<'a, Message, Theme, Renderer> From<Stack<'a, Message, Theme, Renderer>>
-    for Element<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced::advanced::Renderer + 'a,
-{
-    fn from(stack: Stack<'a, Message, Theme, Renderer>) -> Self {
-        Element::new(stack)
-    }
-}
-
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Stack<'a, Message, Theme, Renderer>
-where
-    Message: 'a,
-    Theme: 'a,
-    Renderer: iced::advanced::Renderer + 'a,
-{
-    fn tag(&self) -> tree::Tag {
-        self.layers.first().map_or(tree::Tag::stateless(), |(_, base)| base.as_widget().tag())
-    }
-
-    fn state(&self) -> tree::State {
-        self.layers.first().map_or(tree::State::None, |(_, base)| base.as_widget().state())
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        self.layers
-            .iter()
-            .map(|(_, element)| Tree::new(element.as_widget()))
-            .collect()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        // iced's own idiom: build the children this frame, diff each into the
-        // matching one from last frame, then swap. Dropping the rest is what
-        // retires a layer that is no longer there.
-        let mut fresh: Vec<Tree> = self
-            .layers
-            .iter()
-            .map(|(_, element)| Tree::new(element.as_widget()))
-            .collect();
-        for (old, (_, element)) in tree.children.iter_mut().zip(self.layers.iter()) {
-            element.as_widget().diff(old);
-        }
-        std::mem::swap(&mut tree.children, &mut fresh);
-    }
-
-    fn size(&self) -> iced::Size<Length> {
-        self.layers.first().map_or(iced::Size::new(Length::Shrink, Length::Shrink), |(_, base)| {
-            base.as_widget().size()
-        })
-    }
-
-    fn layout(
-        &self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        let mut nodes: Vec<layout::Node> = Vec::with_capacity(self.layers.len());
-        for (index, (offset, element)) in self.layers.iter().enumerate() {
-            // `diff` keeps `tree.children` as long as `layers`, so the two only
-            // fall out of step if this runs before it -- and then there is nothing
-            // to draw anyway.
-            let Some(child) = tree.children.get_mut(index) else { break };
-            nodes.push(element.as_widget().layout(child, renderer, limits).translate(*offset));
-        }
-        let size = nodes.first().map_or(iced::Size::ZERO, layout::Node::size);
-        layout::Node::with_children(size, nodes)
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let mut children = layout.children();
-        for (index, (_, element)) in self.layers.iter().enumerate() {
-            let (Some(child), Some(node)) = (children.next(), tree.children.get(index)) else {
-                continue;
-            };
-            element.as_widget().draw(node, renderer, theme, style, child, cursor, viewport);
-        }
-    }
-
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
-        // The base layer's, and nothing else: every stack on this page is a
-        // picture of something inert, and an overlay that swallowed the pointer
-        // would make the picture feel like a control.
-        let (Some(base), Some(node)) = (self.layers.first(), tree.children.first()) else {
-            return mouse::Interaction::default();
-        };
-        let Some(child) = layout.children().next() else {
-            return mouse::Interaction::default();
-        };
-        base.1.as_widget().mouse_interaction(node, child, cursor, viewport, renderer)
-    }
-
-    fn operate(
-        &self,
-        _state: &mut Tree,
-        _layout: Layout<'_>,
-        _renderer: &Renderer,
-        _operation: &mut dyn iced::advanced::widget::Operation<Message>,
-    ) {
-    }
-}
 
 // ---- ServerListEmpty.vue, quoted ------------------------------------------
 
@@ -306,8 +146,6 @@ where
 const COLUMN: f32 = 320.0;
 /// `max-w-[25rem]` on `ServerListEmptyPreview`.
 const PREVIEW: f32 = 400.0;
-/// `gap-2` on the row that holds the column and the preview.
-const ROW_GAP: f32 = 8.0;
 /// `gap-8`, between the heading, the features and the buttons.
 const COLUMN_GAP: f32 = 32.0;
 /// `gap-8`, between the preview row and the sign-in at the foot.
@@ -345,6 +183,12 @@ const PREVIEW_MARGIN_BOTTOM: f32 = 40.0;
 /// The row the panel is centred in, once `-mb-10` is taken off its height.
 const PREVIEW_ROW: f32 = PREVIEW_HEIGHT - PREVIEW_MARGIN_BOTTOM;
 
+/// `gap-2` on the row that holds the column and the preview -- the one gap among
+/// the four auto margins, and the reason the middle spacer is wider than the two
+/// that bracket it.
+const ROW_GAP: f32 = 8.0;
+/// One of the four auto margins, in pixels, at the reference's own window.
+const MARGIN: u16 = 35;
 /// The free space the four `mx-auto` margins share, and the one gap between them.
 ///
 /// `ServerListEmpty`'s row is `flex-wrap items-center justify-center gap-2` and
@@ -361,7 +205,8 @@ const PREVIEW_ROW: f32 = PREVIEW_HEIGHT - PREVIEW_MARGIN_BOTTOM;
 /// margins and that gap: `35 + 8 + 35 = 78`, and `35 + 78 + 35 = 148` is the whole
 /// of the free space, so the picture lands on the reference's own pixels at the
 /// reference's own window and keeps its shape at another.
-const MARGIN_SHARE: [u16; 3] = [35, 78, 35];
+const MARGIN_SHARE: [u16; 3] =
+    [MARGIN, (MARGIN as f32 + ROW_GAP + MARGIN as f32) as u16, MARGIN];
 
 /// The three features `ServerListEmpty.vue` lists, in its own order.
 const FEATURES: [(Glyph, Key, Key); 3] = [
