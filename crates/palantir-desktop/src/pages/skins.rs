@@ -1059,9 +1059,16 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
 
 /// The left column: the page's own title over the model preview.
 ///
-/// `sticky top-6 self-start p-2 pt-0` and the preview's
-/// `ml-5 mt-4 h-[calc(80vh-1rem)]`: the title at the column's own edge, the
-/// box 20 further in and 16 below, and the doll centred in 560.
+/// `sticky top-6 self-start p-2` and the preview's `ml-5 mt-4
+/// h-[calc(80vh-1rem)]`: the title at the column's own edge and the box 16
+/// below it, 560 tall, with whatever is in it centred -- which is
+/// [`preview_box`]'s shape in every state, not only the one with a model in it.
+///
+/// [`page::draw`] would do the four states, but it hands the ready arm a
+/// closure and nothing else, and the other three have to go *in the box* rather
+/// than under the title: a sentence on its own line at y147 is not the shape
+/// the reference's box is at all. So the match is here, and it calls the same
+/// three blocks [`page::draw`] calls.
 fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     let title: Element<'a, Message> = text(Key::AppSkinsTitle.message())
         .size(TITLE_SIZE)
@@ -1071,16 +1078,41 @@ fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .font(crate::style::inter(iced::font::Weight::Bold))
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
         .into();
-    let body: Element<'a, Message> = page::draw(
-        theme,
-        &state.appearance,
-        "your skins",
-        move |appearance| preview_body(theme, appearance, state.wearing),
-    );
+    let body: Element<'a, Message> = match &state.appearance {
+        Load::Ready(appearance) => preview_body(theme, appearance, state.wearing),
+        Load::Empty => preview_box(page::empty(theme, Key::BrowseNoResults)),
+        Load::Failed(reason) => preview_box(page::failed(theme, reason)),
+        Load::Idle | Load::Loading => preview_box(page::waiting(theme, "your skins")),
+    };
     container(column![title, Space::with_height(PREVIEW_TOP), body].width(Length::Fill))
         .width(Length::FillPortion(PREVIEW_PORTION))
         .padding(COLUMN_PAD)
         .into()
+}
+
+/// The reference's preview box: `ml-5 mt-4 flex h-[calc(80vh-1rem)]
+/// items-center justify-center` -- 20 from the column's left edge (the 16 below
+/// the title is [`preview_column`]'s), [`PREVIEW_HEIGHT`] tall at this window,
+/// and whatever is inside it centred on both axes.
+///
+/// One box for every state is the point: the reference's renderer always draws
+/// a model, so it never has a state to place here, and a state that drew
+/// nothing but a line of text would be a different shape from the one the
+/// reference's own column has.
+fn preview_box<'a>(inside: Element<'a, Message>) -> Element<'a, Message> {
+    container(
+        row![
+            Space::with_width(PREVIEW_LEFT),
+            container(inside)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x()
+                .center_y(),
+        ]
+        .width(Length::Fill),
+    )
+    .height(Length::Fixed(PREVIEW_HEIGHT))
+    .into()
 }
 
 /// The preview box and the account's own half under it.
@@ -1108,13 +1140,9 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
         .into(),
     };
-    let boxed = container(doll)
-        .width(Length::Fill)
-        .height(Length::Fixed(PREVIEW_HEIGHT))
-        .center_x()
-        .center_y();
+    let boxed = preview_box(doll);
     let mut body = column![
-        row![Space::with_width(PREVIEW_LEFT), boxed].width(Length::Fill),
+        boxed,
         text(appearance.username.clone())
             .size(16.0)
             .font(crate::style::semibold())
