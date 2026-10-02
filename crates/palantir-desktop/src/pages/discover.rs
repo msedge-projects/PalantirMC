@@ -44,8 +44,8 @@
 use std::collections::HashMap;
 
 use iced::mouse::Interaction;
-use iced::widget::{column, mouse_area, row, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{column, container, mouse_area, row, Space};
+use iced::{Alignment, Element, Length, Padding};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
@@ -53,9 +53,10 @@ use crate::avatar::{self, Fetched, Icon};
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::locale;
-use crate::page::{self, Load, GAP, ROW_GAP};
+use crate::page::{self, Load, GAP, INSET, ROW_GAP};
 use crate::pages::Ask;
 use crate::route::ProjectType;
+use crate::scroll::{self, Geometry};
 use crate::store::Store;
 use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
@@ -259,6 +260,13 @@ pub enum Message {
         hover: Option<f32>,
     },
 
+    /// The page's scroll region reported where it is.
+    ///
+    /// The only thing that moves the window ([`scroll::window`]): a wheel, a
+    /// scrollbar drag and a keyboard scroll all report through it, and the frame
+    /// built from the report draws the cards that report puts on screen.
+    Scrolled(Geometry),
+
     /// A wheel over this page's scroll region.
     ///
     /// Reported rather than applied: iced moves a scrollable with a `scroll_to`
@@ -318,6 +326,14 @@ pub struct State {
     /// How many times this page has asked, which is how an answer is told apart
     /// from an answer to a question it has since replaced.
     round: u64,
+    /// Where the page's scroll region is, as it last reported.
+    ///
+    /// Defaulted rather than measured, because a region nobody has scrolled has
+    /// never reported: the first frame is drawn inside the window-sized guess
+    /// ([`scroll::INITIAL_VIEW`]), and the first event replaces it with the
+    /// truth. The *list's* own geometry is this less the head above it, which is
+    /// [`list_at`]'s whole job.
+    geometry: Geometry,
 }
 
 impl State {
@@ -337,6 +353,7 @@ impl State {
             results: Load::Idle,
             icons: HashMap::new(),
             round: 0,
+            geometry: Geometry::default(),
         }
     }
 
@@ -348,6 +365,10 @@ impl State {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
             Message::Wheel(..) => {},
+
+            // Nothing to do with it here: where the region is *is* the page's
+            // state, and the next frame ([`view`]) is the one that uses it.
+            Message::Scrolled(at) => self.geometry = at,
 
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
@@ -514,7 +535,37 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         controls(theme, state),
         results(theme, state),
     ];
-    page::body(blocks, GAP, Message::Wheel)
+    body(blocks)
+}
+
+/// The page's body: the inset, the spacing, and the scroll region that reports
+/// where it is.
+///
+/// [`crate::page::body`]'s own shape with one thing added, and the addition is
+/// why it is written here rather than called: the region is built there and comes
+/// back an `Element`, and `on_scroll` is the scrollable's own builder, so the one
+/// site that can attach it is the one that makes the scrollable. The report is
+/// the whole of the window's policy ([`cards`]): where the region is is what
+/// decides which cards a frame builds.
+fn body<'a>(blocks: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    let mut items = column![].spacing(GAP).width(Length::Fill);
+    for block in blocks {
+        items = items.push(block);
+    }
+    crate::scroll::region(
+        crate::scroll::PAGE,
+        container(items).width(Length::Fill).padding(Padding {
+            top: INSET,
+            right: INSET,
+            bottom: INSET,
+            left: INSET,
+        }),
+        Message::Wheel,
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .on_scroll(|viewport| Message::Scrolled(scroll::Geometry::of(viewport)))
+    .into()
 }
 
 /// The project-type tabs: `Browse.vue`'s own list, its own labels.
@@ -567,19 +618,75 @@ fn results<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     }
 }
 
-/// The result cards, stacked.
+/// The result cards: the ones the region reports are on screen, the rest as
+/// space.
 ///
 /// `ProjectCardList`'s own `gap-3` between the cards of a *list*, which is
 /// [`GAP`] -- 12 pixels -- and not the wider [`crate::page::GRID_GAP`] its grid
 /// layout is spaced with. The reference's browse opens on the list one
 /// (`use-browse-search.ts`'s `effectiveDisplayMode` defaults to `'list'`), so this
-/// is the gap a reader sees.
+/// is the gap a reader sees -- and it is inside [`CARD_ROW`], because the window
+/// places rows by multiplying one height, and a gap the layout added between
+/// them would be a height it did not account for.
+///
+/// **Windowed**: only the rows the report puts on screen are built, and the rest
+/// of the list is two spacers. The point is the frame's cost ([`scroll::window`],
+/// a port of the reference's own `useVirtualScroll`), and the spacers are what
+/// keeps the scrollbar honest: the content's *height* is what it is drawn
+/// against, so a window that dropped the rows it did not draw would be a list
+/// that scrolls as if it were one screen long. Their total is exact because a row
+/// is exactly [`CARD_ROW`] tall ([`slot`]).
 fn cards<'a>(theme: Gen, state: &'a State, hits: &'a [Hit]) -> Element<'a, Message> {
-    let mut list = column![].spacing(GAP).width(Length::Fill);
-    for hit in hits {
-        list = list.push(hit_card(theme, hit, state.icons.get(&hit.icon_url)));
+    let drawn = scroll::window(hits.len(), CARD_ROW, list_at(state.geometry));
+    let mut list = column![].spacing(0.0).width(Length::Fill);
+    if drawn.start > 0 {
+        list = list.push(space(drawn.start, CARD_ROW));
+    }
+    for hit in &hits[drawn.clone()] {
+        list = list.push(slot(
+            hit_card(theme, hit, state.icons.get(&hit.icon_url)),
+            CARD_ROW,
+        ));
+    }
+    if drawn.end < hits.len() {
+        list = list.push(space(hits.len() - drawn.end, CARD_ROW));
     }
     list.into()
+}
+
+/// The list's own geometry, out of the page's.
+///
+/// The region's offset counts from the page's first pixel and the list starts
+/// [`LIST_TOP`] below it, so what the window is owed is the page's offset less
+/// the head. The view height is left as the region reported it: while the head is
+/// still on screen the window computes a row more than it needs and never one
+/// fewer, and past the head the two are the same.
+fn list_at(page: Geometry) -> Geometry {
+    Geometry {
+        offset: (page.offset - LIST_TOP).max(0.0),
+        view_height: page.view_height,
+    }
+}
+
+/// One row's slot: exactly `row_height` tall, whatever the card inside it needs.
+///
+/// The window's arithmetic places each drawn card at `index * row_height`, so a
+/// card that took its own content's height would put every card under it
+/// somewhere the window did not compute. The card is drawn at the top of its slot
+/// and the gap under it is part of the slot ([`CARD_ROW`]), which is the shape a
+/// `gap-3` list has as well; the top of a container is `Vertical::Top` here, not
+/// `iced::Alignment::Start`, because it is the vertical one the widget asks for.
+fn slot<'a>(content: Element<'a, Message>, row_height: f32) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fixed(row_height))
+        .align_y(iced::alignment::Vertical::Top)
+        .into()
+}
+
+/// The room `count` rows would have taken, as one empty widget.
+fn space<'a>(count: usize, row_height: f32) -> Element<'a, Message> {
+    Space::with_height(Length::Fixed(count as f32 * row_height)).into()
 }
 
 /// `ProjectCard.vue`'s list grid: `p-4 grid-project-card-list gap-x-3 gap-y-2`.
@@ -588,6 +695,34 @@ fn cards<'a>(theme: Gen, state: &'a State, hits: &'a [Hit]) -> Element<'a, Messa
 const CARD_COLUMN_GAP: f32 = 12.0;
 /// `gap-y-2`, between the icon's row and the row of tags under it.
 const CARD_ROW_GAP: f32 = 8.0;
+
+/// One card's height, from `ProjectCard.vue`'s list layout: the icon column
+/// ([`avatar::ICON_SIDE`], 100), the `gap-y-2` under it, the tag row
+/// ([`ui::TAG_HEIGHT`], 24) and the card's own `p-4` ([`ui::CARD_PAD`], 16 on
+/// each side).
+pub const CARD_HEIGHT: f32 =
+    avatar::ICON_SIDE as f32 + CARD_ROW_GAP + ui::TAG_HEIGHT + ui::CARD_PAD * 2.0;
+
+/// One row of the results: a card plus the `gap-3` that separates it from the
+/// card under it ([`GAP`]).
+///
+/// This is the number the window is cut into ([`scroll::window`]), so it is the
+/// number the slots are ([`slot`]) and the spacers ([`space`]): a row that was
+/// laid out at its content's height would put the rows under it at offsets the
+/// window did not compute.
+pub const CARD_ROW: f32 = CARD_HEIGHT + GAP;
+
+/// Where the results start inside the page's scroll content, in pixels.
+///
+/// **Measured**, because there is nothing to quote: the head above the results
+/// -- the tab strip, the search field and the two controls, each between the
+/// page's own twelve-pixel gaps -- is laid out by [`ui`], and no constant of this
+/// page names its height. On a 1280x720 capture of this page (2026-10-02) the
+/// first card's top is at y=230 and the region starts at y=49, which is the 181
+/// here. What a drift in it costs is cover rather than a hole: the window draws
+/// [`scroll::OVERSCAN`] rows on each side of the visible one, a margin of five
+/// rows against a head that moves by pixels.
+const LIST_TOP: f32 = 181.0;
 
 /// One project card: its icon, its title, its author, its summary and its counts.
 ///
@@ -964,6 +1099,93 @@ mod tests {
             drop(view(*theme, &state, &store));
             state.results = Load::Empty;
             drop(view(*theme, &state, &store));
+        }
+    }
+
+    #[test]
+    fn the_region_s_report_is_what_the_window_is_computed_from() {
+        // The seam this slice is: the page draws a window, and the only thing
+        // that moves it is the report its own scroll region publishes. A page
+        // that kept no report would draw the same cards however far the reader
+        // had scrolled -- which is the failure that looks like a stuck list.
+        let mut state = State::new(ProjectType::Modpack);
+        assert_eq!(state.geometry, Geometry::default(), "nothing has reported yet");
+        state.update(Message::Scrolled(Geometry { offset: 10_000.0, view_height: 600.0 }));
+        assert_eq!(state.geometry.offset, 10_000.0);
+
+        // The list begins below the page's head, so its own offset is the
+        // page's less that: the report is ten thousand into the page and 9,819
+        // into the list.
+        let at = list_at(state.geometry);
+        assert_eq!(at.offset, 10_000.0 - LIST_TOP);
+        assert_eq!(at.view_height, 600.0);
+
+        // And the window is a screenful plus the margin either side of it, not
+        // the whole result set: five thousand cards, of which this frame builds
+        // twenty.
+        let window = scroll::window(5_000, CARD_ROW, at);
+        assert_eq!(
+            window.start,
+            ((10_000.0 - LIST_TOP) / CARD_ROW).floor() as usize - scroll::OVERSCAN
+        );
+        let slots = (600.0_f32 / CARD_ROW).ceil() as usize;
+        assert_eq!(window.len(), (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS));
+        assert!(window.end < 100, "{}", window.end);
+    }
+
+    #[test]
+    fn a_region_that_has_not_reached_the_list_opens_it_at_its_top() {
+        // The page opens with its head on screen: what a wheel up there has
+        // scrolled past is the head, not the list, and a window computed from
+        // the raw offset would already be a row into a list nobody has reached.
+        for offset in [0.0, 90.0, LIST_TOP] {
+            let at = list_at(Geometry { offset, view_height: 600.0 });
+            assert_eq!(at.offset, 0.0, "offset {offset} is still the head");
+            assert_eq!(at.view_height, 600.0);
+        }
+        let past = list_at(Geometry { offset: LIST_TOP + 500.0, view_height: 600.0 });
+        assert_eq!(past.offset, 500.0);
+    }
+
+    #[test]
+    fn a_card_is_exactly_one_row_of_the_window() {
+        // The window's arithmetic is only as good as the row it is handed: a
+        // card is the icon column and the gaps around it, and a row is that plus
+        // the `gap-3` between two cards. The capture the head was measured on
+        // (1280x720, 2026-10-02) has cards at y=230, 406 and 582 -- a pitch of
+        // 176 -- and the first of them at 181 into the region.
+        assert_eq!(CARD_HEIGHT, 100.0 + 8.0 + 24.0 + 32.0);
+        assert_eq!(CARD_ROW, 176.0);
+        assert_eq!(CARD_ROW - CARD_HEIGHT, GAP);
+        assert_eq!(LIST_TOP, 230.0 - 49.0);
+    }
+
+    #[test]
+    fn five_thousand_cards_draw_a_window_in_every_theme_and_scroll_state() {
+        // What the window is for: a card set of five thousand costs a screenful
+        // and the margin, drawn in the two states a frame can be in -- before
+        // the region has reported (the window-sized guess) and deep in a list
+        // that no element of which is anywhere near the screen -- for every
+        // theme a frame can be drawn in.
+        let store = Store::default();
+        let hits: Vec<Hit> = (0..5_000)
+            .map(|index| Hit {
+                id: format!("p{index:05}"),
+                title: format!("Project {index}"),
+                ..hit("Sodium")
+            })
+            .collect();
+        for theme in Gen::ALL {
+            let mut state = State::new(ProjectType::Modpack);
+            state.results = Load::Ready(hits.clone());
+            for at in [
+                Geometry::default(),
+                Geometry { offset: 0.0, view_height: 600.0 },
+                Geometry { offset: 200_000.0, view_height: 600.0 },
+            ] {
+                state.update(Message::Scrolled(at));
+                drop(view(*theme, &state, &store));
+            }
         }
     }
 
