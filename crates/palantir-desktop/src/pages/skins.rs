@@ -1702,18 +1702,20 @@ fn forget_confirm<'a>(
             .spacing(ROW_GAP)
             .align_items(Alignment::Center)
             .push(Space::with_width(Length::Fill))
-            .push(ui::button_text(
+            .push(ui::button_text_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "forget-cancel"),
                 CANCEL_LABEL,
                 ui::Kind::Outlined,
+                MODAL_BUTTON,
                 Message::CancelForget,
             ))
-            .push(ui::button_or(
+            .push(ui::button_or_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "forget"),
                 Key::AppSkinsDeleteButton,
                 ui::Kind::Danger,
+                MODAL_BUTTON,
                 (!wearing).then_some(Message::Act(Act::Forget)),
             )),
     )
@@ -1794,12 +1796,13 @@ pub fn edit_view<'a>(
     body = body.push(section(
         theme,
         Key::AppSkinsModalTextureSection.message(),
-        ui::button_with_icon(
+        ui::button_with_icon_sized(
             theme,
             ui::scoped(EDIT_KEY, "replace-texture"),
             Glyph::Upload,
             Key::AppSkinsModalReplaceTextureButton,
             ui::Kind::Standard,
+            MODAL_BUTTON,
             Length::Shrink,
             Some(Message::ReplaceTexture),
         ),
@@ -1867,28 +1870,31 @@ pub fn edit_view<'a>(
             .spacing(ROW_GAP)
             .align_items(Alignment::Center)
             .push(Space::with_width(Length::Fill))
-            .push(ui::button_text(
+            .push(ui::button_text_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "takeoff"),
                 TAKE_OFF_LABEL,
                 ui::Kind::Outlined,
+                MODAL_BUTTON,
                 Message::Act(Act::TakeOff),
             ))
-            .push(ui::button_or(
+            .push(ui::button_or_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "forget"),
                 Key::AppSkinsDeleteButton,
                 ui::Kind::Danger,
+                MODAL_BUTTON,
                 // A question, not the write: the reference's delete goes through its
                 // `ConfirmModal`, and this one asks in the same body.
                 (!wearing).then_some(Message::Forget),
             ))
-            .push(ui::button_with_icon(
+            .push(ui::button_with_icon_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "save"),
                 save_glyph(wearing),
                 Key::AppSkinsModalSaveSkinButton,
                 ui::Kind::Colored,
+                MODAL_BUTTON,
                 Length::Shrink,
                 // Unusable while nothing has been changed, which is the
                 // reference's `disableSave`: a save that writes the row back
@@ -1898,6 +1904,18 @@ pub fn edit_view<'a>(
     );
     body.into()
 }
+
+/// The row of `ButtonFrame.vue`'s own size table that this dialog's buttons are
+/// drawn at.
+///
+/// `Button.vue` and `IconButton.vue` both default their `size` prop to `md`,
+/// and not one button in `EditSkinModal.vue` or `ConfirmModal.vue` carries a
+/// `size` of its own -- so all six of them are that row, which is `h-9` (36
+/// pixels, not the 40 the kit's legacy frame drew), `rounded-xl`, `px-2.5`, a
+/// 16-pixel semibold label and a 20-pixel icon. The legacy constructors have no
+/// size argument at all, so a button drawn through one cannot be at this row
+/// however it is asked for.
+const MODAL_BUTTON: ui::Size = ui::Size::Md;
 
 /// The gap between two of the reference's own sections in the editor.
 ///
@@ -2810,6 +2828,26 @@ mod tests {
         unique.sort_unstable();
         unique.dedup();
         assert_eq!(unique.len(), names.len(), "got {scoped:?}");
+    }
+
+    #[test]
+    fn the_dialog_s_buttons_are_at_the_row_the_reference_defaults_to() {
+        // `Button.vue` and `IconButton.vue` both default `size` to `md`, and no
+        // button in `EditSkinModal.vue` or `ConfirmModal.vue` names a size, so
+        // every one of them is that row. Its own numbers, from the template's
+        // classes: `h-9`, `rounded-xl`, `px-2.5`, `text-base font-semibold
+        // leading-5`, `gap-1.5`, `[&>svg]:size-5`. The frame the kit's legacy
+        // constructors draw is 40 tall with a 14-pixel label, which is the row
+        // `Button.vue` no longer has.
+        assert_eq!(MODAL_BUTTON, ui::Size::Md);
+        assert_eq!(MODAL_BUTTON.height(), 36.0);
+        assert_eq!(MODAL_BUTTON.radius(), 12.0);
+        assert_eq!(MODAL_BUTTON.pad(), 10.0);
+        assert_eq!(MODAL_BUTTON.gap(), 6.0);
+        assert_eq!(MODAL_BUTTON.label(), 16.0);
+        assert_eq!(MODAL_BUTTON.icon(), 20.0);
+        assert!(MODAL_BUTTON.height() < ui::CONTROL, "not the legacy frame's row");
+        assert!(MODAL_BUTTON.label() > ui::BUTTON_LABEL_SIZE);
     }
 
     #[test]
