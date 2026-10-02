@@ -496,10 +496,21 @@ mod tests {
 
     #[test]
     fn platform_roots_match_qstandardpaths() {
-        assert_eq!(
-            platform_data_root(System::Windows),
-            std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_default().join("PalantirMC")
-        );
+        // `%APPDATA%` when the environment has it, and the home-relative fallback
+        // the function itself uses when it does not. That second arm is not
+        // decoration: this suite runs on Linux as well as on Windows, the
+        // variable is a Windows one, and asserting only the variable's arm is an
+        // assertion that passes on the platform the tests were first written on
+        // and fails on the other -- which is exactly what it did.
+        let windows = match std::env::var_os("APPDATA") {
+            Some(appdata) => PathBuf::from(appdata).join("PalantirMC"),
+            None => home_dir()
+                .unwrap_or_default()
+                .join("AppData")
+                .join("Roaming")
+                .join("PalantirMC"),
+        };
+        assert_eq!(platform_data_root(System::Windows), windows);
         assert_eq!(
             platform_data_root(System::MacOS),
             home_dir().unwrap_or_default().join("Library/Application Support/PalantirMC")
