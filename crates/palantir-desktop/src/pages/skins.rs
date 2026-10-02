@@ -269,6 +269,11 @@ pub struct Edit {
     /// texture section is not there (departure 15).
     pub stored: Stored,
     /// Whether the stored texture asks for Ears features.
+    ///
+    /// Carried because it is the row's own fact, read with the rest of it in one
+    /// place. The reference draws its Ears notice in the preview pane's subtitle
+    /// rather than in this dialog, and so does this page -- under the model, for
+    /// the skin in force -- so nothing in the editor reads this yet.
     pub ears: bool,
     /// What the reader has asked for.
     pub act: Act,
@@ -1227,6 +1232,13 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
     ]
     .spacing(ROW_GAP)
     .width(Length::Fill);
+    // The Ears notice, which the reference draws in the preview's own `#subtitle`
+    // slot -- under the model, not in the editor -- and only for a skin that asks
+    // for it. The one this can see is the skin in force, because that is the one
+    // the pane above is drawing (departure 18).
+    if appearance.ears.is_some() {
+        body = body.push(ears_notice(theme));
+    }
     // The account's own skins: drawn only where one is *not* already on, which
     // is the rule [`wear_skin`] is; an account normally owns exactly the one it
     // wears (`MinecraftSkins::equipped`), and a row with no action would be a
@@ -1750,9 +1762,6 @@ pub fn edit_view<'a>(
         }));
     }
     body = body.push(section(theme, Key::AppSkinsModalCapeSection.message(), cape_list.into()));
-    if edit.ears {
-        body = body.push(ears_notice(theme));
-    }
     // The actions. The reference's own row is `flex gap-2 justify-end` -- Cancel
     // then Save, both at the right-hand end, 8 apart -- so the fill goes first and
     // Save, which is the last control in the reference's row too, is the last
@@ -1898,6 +1907,11 @@ const TAKE_OFF_LABEL: &str = "Take it off";
 /// ([`crate::text::placeholder`]) and that link. A message that arrived without the
 /// placeholder is drawn whole rather than dropped: the reader still needs to know why
 /// their skin looks different.
+///
+/// The reference wraps that copy in a 40-pixel icon, a `max-w-[340px]` column and an
+/// outlined "Turn Ears features off" button beside a `Toggle` -- the runtime switch
+/// for the mod, which this launcher has no way to send. The sentence and its link are
+/// the part that carries the information, and they are drawn under the model.
 fn ears_notice<'a>(theme: Gen) -> Element<'a, Message> {
     let message = Key::AppSkinsEarsFeatureNotice.message();
     let Some((before, after)) = crate::text::placeholder_parts(message, "ears") else {
@@ -2567,6 +2581,60 @@ mod tests {
             None
         );
         assert!(state.notice.as_deref().unwrap_or_default().contains("gone"));
+    }
+
+    /// A 64x64 skin texture carrying the Ears marker, as the store would hold it.
+    ///
+    /// `skin::ears_of` reads the pixel at `(0, 32)` and ignores the alpha, so one
+    /// byte triple is the whole of a skin that asks for the mod.
+    fn ears_texture() -> Vec<u8> {
+        let mut texture = ::image::RgbaImage::from_pixel(64, 64, ::image::Rgba([0, 0, 0, 0]));
+        texture.put_pixel(0, 32, ::image::Rgba([0x3F, 0x23, 0xD8, 0xFF]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::ImageRgba8(texture)
+            .write_to(&mut bytes, ::image::ImageFormat::Png)
+            .expect("a texture this page can decode");
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn the_notice_is_drawn_under_the_model_and_not_in_the_editor() {
+        // The reference puts the Ears notice in the preview's `#subtitle` slot and
+        // nowhere else, and the pane can only see the skin in force -- so that is
+        // where it is drawn, for a texture that carries the marker.
+        let appearance = crate::skin::Appearance::of(
+            "Steve",
+            palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+            Ok(ears_texture()),
+        );
+        assert!(appearance.ears.is_some(), "the marker is read");
+        let ready = Load::Ready(appearance.clone());
+        let mut state = State { appearance: ready, ..State::default() };
+        state.saved = vec![stored("abc")];
+        drop(view(Gen::ALL[0], &state, &Store::default()));
+        // And an editor on that row draws the editor, with no notice in it: the
+        // dialog's own body is Texture, Arm style, Cape, the ears line and the
+        // actions, and the notice is not one of them in the reference either.
+        let edit = Edit {
+            round: 1,
+            key: "abc".to_string(),
+            name: "abc".to_string(),
+            variant: "CLASSIC".to_string(),
+            cape: String::new(),
+            stored: Stored::default(),
+            ears: true,
+            act: Act::Save,
+            confirm: false,
+        };
+        drop(edit_view(Gen::ALL[0], &edit, &[], false));
+        // The marker is what the notice is for, so a texture without it is a page
+        // without one.
+        let plain = crate::skin::Appearance::of(
+            "Steve",
+            palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+            Err("no texture".into()),
+        );
+        assert!(plain.ears.is_none());
     }
 
     #[test]
