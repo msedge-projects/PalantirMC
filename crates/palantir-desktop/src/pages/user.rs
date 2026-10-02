@@ -27,15 +27,16 @@
 use iced::mouse::Interaction;
 use iced::widget::container;
 use iced::widget::{column, mouse_area, row, Space};
-use iced::{Alignment, Border, Element, Length, Padding};
+use iced::{Alignment, Border, Element, Length, Padding, Vector};
 use palantir_net::modrinth::{ModrinthUser, ModrinthUserProject};
 
+use super::overlay::Stack;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP};
 use crate::route::ProjectType;
 use crate::store::Store;
-use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_SECONDARY};
+use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Theme as Gen};
 use crate::ui::{self, text, Hovered};
@@ -80,14 +81,37 @@ const HEADER_PAD_BOTTOM: f32 = 16.0;
 
 /// `gap-x-3` and `gap-y-2` on a project card's own grid.
 const CARD_GAP_X: f32 = 12.0;
+const CARD_GAP_Y: f32 = 8.0;
 /// `gap-3` on `ProjectCardList`, between the cards of the list.
 const LIST_GAP: f32 = 12.0;
 /// `text-xl` on `ProjectCardTitle`, which is the list layout's own size.
 const CARD_TITLE: f32 = 20.0;
 /// `Avatar size="100px"` in the list layout: the icon every card opens with.
 const CARD_ICON: f32 = crate::avatar::ICON_SIDE as f32;
-/// `gap-3` between a card's stats and its date, `gap-3` on the stats row.
+/// `gap-3` between a card's stats and its date, and on the stats row.
 const CARD_STATS_GAP: f32 = 12.0;
+/// `gap-2` inside `__info`, between a card's title and its summary.
+const CARD_INFO_GAP: f32 = 8.0;
+/// `text-sm` on a card's summary: 14 pixels on a 20-pixel line.
+const CARD_SUMMARY: f32 = 14.0;
+const CARD_SUMMARY_LINE: f32 = 20.0;
+/// `size-5` on `ProjectCardStats`' and `ProjectCardDate`'s icons.
+const CARD_STAT_ICON: f32 = 20.0;
+/// The card's own content box.
+///
+/// The reference's card measures y=259..400 at its own window -- 142 including its
+/// two 1-pixel borders -- so the box inside the padding is
+/// `142 - 2 - 32 = 108`: the icon's 100 plus the eight pixels its last row takes,
+/// which is what `mt-auto` on the tags row means when the icon spans every row.
+///
+/// It is 110 here because iced draws a container's border *inside* its bounds, so
+/// it eats a pixel of padding at each end where CSS puts it outside: 110 + 32 = 142,
+/// where 108 + 32 drew a 140-pixel card. The audit measured ours at 138 against the
+/// reference's 140 for the same reason.
+const CARD_CONTENT: f32 = 110.0;
+/// Where the tags row starts inside the content box: `358 - 276 = 82`, measured, and
+/// the `mt-auto` this draws it with.
+const CARD_TAGS_TOP: f32 = 82.0;
 
 /// The header's own action.
 ///
@@ -99,6 +123,10 @@ const CARD_STATS_GAP: f32 = 12.0;
 /// reference has none, and the one this page used to draw said it reloaded a page
 /// that reloads itself.
 const MORE_KEY: &str = "user:more";
+
+/// A card's *Install*, whose identity is the project rather than the row: the
+/// button is one per card and every card's button must not light together.
+const INSTALL_KEY: &str = "user:install";
 
 /// What the overflow holds here.
 ///
@@ -313,6 +341,12 @@ pub enum Message {
     Filter(Option<ProjectType>),
     /// The header's overflow was pressed.
     More,
+    /// A card's *Install* was pressed.
+    ///
+    /// Reported rather than performed, like the project page's own button: which
+    /// instances exist, which version fits one and where its folder is are all the
+    /// shell's, and [`crate::pages::Ask::Install`] is the ask that already says so.
+    Install(String, String, bool),
     /// The pointer entered or left one of the page's controls, for the clock that
     /// carries a hover's 150 ms (see [`crate::ui`]).
     Hover {
@@ -383,6 +417,11 @@ impl State {
             // directly means the shell did not route them, and the answer to that is
             // to change nothing rather than to invent a navigation.
             Message::Project(_) | Message::Filter(_) => {}
+            // A card's own button, reported rather than performed. `pages::mod`
+            // turns it into the same `Ask::Install` the project page's button
+            // makes, so this launcher installs a mod from a profile exactly as it
+            // does from a project.
+            Message::Install(..) => {}
             // The overflow's press: the reference's menu is drawn by
             // `TeleportOverflowMenu`, which needs a popover this page has no route
             // to, so what the reader gets is the sentence naming what is behind it.
@@ -575,13 +614,19 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
                                             INK_CONTRAST,
                                         ))),
                                 )
+                                // `index.vue:20` puts no colour on the summary, so
+                                // it inherits the body ink: `--color-text-primary`.
+                                // The metadata row below it *does* say
+                                // `text-secondary`, and the two measured #B0BAC5 and
+                                // #96A2B0 respectively -- which is the pair the audit
+                                // caught them swapped by.
                                 .push(
                                     text(profile.summary().to_string())
                                         .size(HEADER_TEXT)
                                         .font(medium())
                                         .style(iced::theme::Text::Color(theme_gen::ink(
                                             theme,
-                                            INK_SECONDARY,
+                                            INK_DEFAULT,
                                         ))),
                                 ),
                         )
@@ -643,12 +688,19 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
         ),
         (Glyph::Calendar, format!("{} {}", Key::ProfileLabelJoined.message(), how_ago(&profile.user.created, now))),
     ];
-    let mut row = row![].spacing(METADATA_GAP).align_items(Alignment::Center);
+    // The 26 pixels are the divider's *slot*, not a gap the divider also sits in:
+    // `page-header-metadata-item.vue` puts the divider in an `absolute right-full
+    // w-[1.625rem]` span, which is the same box as the row's `gap-x`. So the slot
+    // is one child -- the dot, centred, in 26 pixels -- and the row's own spacing
+    // is zero. Spacing the row at 26 *and* pushing a 6-pixel dot gave 26+6+26, and
+    // the audit measured the third item 65 pixels to the right of where the
+    // reference draws it.
+    let mut row = row![].spacing(0.0).align_items(Alignment::Center);
     for (index, (glyph, label)) in facts.into_iter().enumerate() {
         if index > 0 {
             // The divider is drawn *before* the item it belongs to, which is where
             // `right-full` puts it.
-            row = row.push(bullet(theme));
+            row = row.push(slot(theme));
         }
         row = row.push(
             row![]
@@ -666,20 +718,18 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
     row.into()
 }
 
-/// The 100-pixel square a card's icon is drawn in, whether or not one arrived.
+/// The 26-pixel slot one item's divider occupies, with the dot centred in it.
 ///
-/// [`crate::ui::icon_box`] is the control kit's own: the reference's box, its
-/// background and its hairline, with the picture composited onto it already
-/// rounded by [`crate::avatar`]. An account whose projects have no icons draws the
-/// empty box, which is the same box the reference's placeholder sits on.
-fn icon_box<'a>(
-    theme: Gen,
-    icon: Option<&crate::avatar::Icon>,
-) -> Element<'a, Message> {
-    // `ui::icon_box` draws the reference's box, its background and its hairline,
-    // and reserves the square whether or not a picture arrived -- which is the half
-    // of `Avatar.vue`'s placeholder this tree can draw without the hexagon path.
-    ui::icon_box(theme, CARD_ICON, icon)
+/// `absolute right-full flex h-full w-[1.625rem] items-center justify-center` --
+/// the span is as wide as the gap it replaces, so the dot lands 10 pixels either
+/// side of its own centre. Measured at the reference's own 1280x720: the first
+/// item's words end at x=305, the dot is x=316..321 and the next item's icon
+/// starts at x=332.
+fn slot<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
+    container(bullet(theme))
+        .width(Length::Fixed(METADATA_GAP))
+        .center_y()
+        .into()
 }
 
 /// `BulletDivider`: a 6-pixel `--surface-5` dot.
@@ -698,98 +748,9 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
         .into()
 }
 
-/// One project of the list.
-///
-/// `ProjectCard.vue`'s **list** layout, which is what `layout.vue` asks for:
-/// `p-4 grid` over `grid-project-card-list`, whose `has-actions` template puts the
-/// title and summary beside the card's actions, the downloads and followers under
-/// them, and the tags and the date on the last row.
-fn project_row<'a>(
-    theme: Gen,
-    profile: &'a Profile,
-    project: &'a ModrinthUserProject,
-) -> Element<'a, Message> {
-    // A row's identity is the project it names rather than its place in the list, so
-    // reordering the list must not move a tween from one row to another.
-    let key = ui::scoped("user:project", &project.id);
-    let (factor, _) = ui::interaction(key);
-    let mut info = column![].spacing(HEADER_GROUP_GAP).width(Length::Fill);
-    info = info
-        .push(
-            text(project.title.clone())
-                .size(CARD_TITLE)
-                .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-        )
-        .push(ui::paragraph(theme, &project.description));
-    // `ProjectCardTags` at the bottom row's left, and `ProjectCardStats` and
-    // `ProjectCardDate` at its right.
-    let mut tags = row![].spacing(4.0).align_items(Alignment::Center);
-    if let Some(kind) = ProjectType::from_token(&project.project_type) {
-        tags = tags.push(ui::tag(theme, kind.label()));
-    }
-    info = info.push(tags);
-    let mut stats = column![]
-        .spacing(CARD_STATS_GAP)
-        .align_items(Alignment::End);
-    stats = stats.push(ui::icon_label(
-        theme,
-        Glyph::Download,
-        &compact_stat(project.downloads),
-    ));
-    let relative = how_ago(&project.published, now_millis());
-    if !relative.is_empty() {
-        stats = stats.push(
-            row![]
-                .spacing(METADATA_TEXT_GAP)
-                .align_items(Alignment::Center)
-                .push(icon::icon(Glyph::History, METADATA_ICON, theme_gen::ink(theme, INK_SECONDARY)))
-                .push(
-                    text(relative)
-                        .size(HEADER_TEXT)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(
-                            theme,
-                            INK_SECONDARY,
-                        ))),
-                ),
-        );
-    }
-    mouse_area(
-        container(
-            row![]
-                .width(Length::Fill)
-                .spacing(CARD_GAP_X)
-                .align_items(Alignment::Start)
-                // `Avatar size="100px"`, the icon column every reference card opens
-                // with. Measured at the reference's own window: x=105..204 and
-                // y=276..375, which is the 100 its container query keeps above 850
-                // pixels of card width.
-                .push(icon_box(theme, profile.icon(project)))
-                .push(info)
-                .push(stats),
-        )
-        .width(Length::Fill)
-        .padding(ui::CARD_PAD)
-        .style(move |_theme: &iced::Theme| iced::widget::container::Appearance {
-            background: Some(iced::Background::Color(crate::theme::brightness(
-                theme_gen::ink(theme, theme_gen::Ink::Surface3),
-                factor,
-            ))),
-            border: Border {
-                color: crate::theme::brightness(theme_gen::ink(theme, theme_gen::Ink::Surface4), factor),
-                width: 1.0,
-                radius: theme_gen::span(theme_gen::Span::RadiusLg).into(),
-            },
-            ..iced::widget::container::Appearance::default()
-        }),
-    )
-    .interaction(Interaction::Pointer)
-    .on_enter(Message::hover(key, true))
-    .on_exit(Message::hover(key, false))
-    .on_press(Message::Project(project.id.clone()))
-    .into()
-}
+
+
+
 
 /// The strip of filters, or nothing when there is only one thing to filter by.
 ///
@@ -826,6 +787,244 @@ fn filter_strip<'a>(
         let chosen = if index == 0 { None } else { types.get(index - 1).copied() };
         Message::Filter(chosen)
     }))
+}
+
+/// One project of the list.
+///
+/// `ProjectCard.vue`'s **list** layout, which is what `layout.vue` asks for:
+/// `p-4 grid` over `grid-project-card-list`, whose `has-actions` template is
+///
+/// ```text
+/// 'icon info actions actions'
+/// 'icon info dummy   stats'
+/// 'icon tags  tags   stats'
+/// ```
+///
+/// with `grid-template-columns: auto 1fr auto auto` and `gap-x-3 gap-y-2`.
+///
+/// That template is the whole reason this function is not a column of two things.
+/// The icon column is named in *all three* rows, so it runs the card's full
+/// height, and the tags sit on the card's last row -- which is inside the icon's
+/// span, not after it. Drawn as a column instead (which is what this page did, and
+/// what the audit measured at a 63-pixel error on the stats and an 8-pixel one on
+/// the card pitch) the tags end up below the icon and the card grows by a whole
+/// row. So the grid is built as a [`Stack`]: the first layer is the icon beside
+/// the right-hand rows, the second is the tags at the card's own bottom.
+///
+/// Every landmark below is measured off `/tmp/ref/user-ref.png` at the
+/// reference's own 1280x720: the card is x=88..955 and y=259..400 (868 x 142), its
+/// content box is y=276..384, the icon is y=276..375, the *Install* button is
+/// y=276..311, the stats are y=334..349, the tags are y=358..383 and the date is
+/// y=365..382.
+fn project_row<'a>(
+    theme: Gen,
+    profile: &'a Profile,
+    project: &'a ModrinthUserProject,
+) -> Element<'a, Message> {
+    // A row's identity is the project it names rather than its place in the list, so
+    // reordering the list must not move a tween from one row to another.
+    let key = ui::scoped("user:project", &project.id);
+    let (factor, _) = ui::interaction(key);
+    let now = now_millis();
+
+    // Row 1: the title and the summary, which `__info` holds across rows 1 and 2,
+    // and the actions, which `__actions` holds in the top right.
+    let info = column![]
+        .width(Length::Fill)
+        .spacing(CARD_INFO_GAP)
+        .push(
+            text(project.title.clone())
+                .size(CARD_TITLE)
+                .line_height(iced::Pixels(CARD_TITLE))
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+        )
+        .push(
+            // `line-clamp-2` at `text-sm`: 14 pixels on a 20-pixel line. The audit
+            // measured our pitch at 19 because `ui::paragraph` leaves iced's default
+            // line height, which is the face's own metrics rather than the
+            // stylesheet's.
+            text(project.description.clone())
+                .size(CARD_SUMMARY)
+                .line_height(iced::Pixels(CARD_SUMMARY_LINE))
+                .font(crate::style::regular())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        );
+    // `ProjectCardStats`: downloads, then a heart and the followers. It sits in
+    // `__stats`, which the template puts on the card's second row at the right.
+    let stats = row![]
+        .spacing(CARD_STATS_GAP)
+        .align_items(Alignment::Center)
+        .push(stat(theme, Glyph::Download, &compact_stat(project.downloads)))
+        .push(stat(theme, Glyph::Heart, &compact_stat(project.followers)));
+    let head = row![]
+        .width(Length::Fill)
+        .spacing(CARD_GAP_X)
+        .align_items(Alignment::Start)
+        // `Avatar size="100px"`, the icon column every reference card opens with.
+        // Measured: x=105..204 and y=276..375, which is the 100 its container query
+        // keeps above 850 pixels of card width.
+        .push(icon_box(theme, profile.icon(project)))
+        .push(
+            column![]
+                .width(Length::Fill)
+                .spacing(CARD_GAP_Y)
+                .align_items(Alignment::Start)
+                .push(
+                    row![]
+                        .width(Length::Fill)
+                        .spacing(CARD_GAP_X)
+                        .align_items(Alignment::Start)
+                        .push(info)
+                        // `User.vue`'s `#project-actions` slot: an outlined brand
+                        // button, a download icon for a pack and a plus for
+                        // anything else.
+                        .push(install_button(theme, project)),
+                )
+                // Row 2 of the template, whose third column is the `dummy` cell and
+                // whose fourth is `stats`: measured at y=334..349, which is 58
+                // pixels below the card's content top.
+                .push(
+                    row![]
+                        .width(Length::Fill)
+                        .align_items(Alignment::Start)
+                        .push(Space::with_width(Length::Fill))
+                        .push(stats),
+                ),
+        );
+
+    // Row 2: `__stats`, right-aligned, downloads and then followers on one line.
+
+    // Row 3: the tags at the left and the date at the right, which is where
+    // `__tags` and the tail of `__stats` put them.
+    let mut tags = row![].width(Length::Fill).spacing(4.0).align_items(Alignment::Center);
+    if let Some(kind) = ProjectType::from_token(&project.project_type) {
+        tags = tags.push(ui::tag(theme, kind.label()));
+    }
+    // `ProjectCardDate` with `autoDisplayDate`, which is `'updated'` whenever the
+    // document carries one and `HistoryIcon` for that case.
+    let date_key = if project.updated.is_empty() {
+        (Glyph::Calendar, project.published.as_str())
+    } else {
+        (Glyph::History, project.updated.as_str())
+    };
+    let when = how_ago(date_key.1, now);
+    // The indent is *inside* this row rather than being the overlay's offset: a
+    // translated layer still lays out at the stack's full width, so offsetting the
+    // row by 112 gave it 112 pixels more than the card has and pushed the date off
+    // its right edge. The audit caught it as a date that ended at x=938 clipped to
+    // "10 m".
+    let tail = row![]
+        .width(Length::Fill)
+        .spacing(CARD_GAP_X)
+        .align_items(Alignment::Center)
+        .push(Space::with_width(Length::Fixed(CARD_ICON + CARD_GAP_X)))
+        .push(tags)
+        .push(Space::with_width(Length::Fill))
+        .push(if when.is_empty() {
+            Space::with_width(Length::Shrink).into()
+        } else {
+            stat(theme, date_key.0, &when)
+        });
+
+    let body = Stack::at(
+        Vector::ZERO,
+        container(
+            row![]
+                .width(Length::Fill)
+                .spacing(CARD_GAP_X)
+                .align_items(Alignment::Start)
+                .push(head),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(CARD_CONTENT)),
+    )
+    // The tags row, `mt-auto` to the bottom of the content box and indented by the
+    // icon column plus the grid's own gap: `100 + 12 = 112`.
+    .over(Vector::new(0.0, CARD_TAGS_TOP), tail);
+
+    mouse_area(
+        container(body)
+            .width(Length::Fill)
+            .padding(ui::CARD_PAD)
+            .style(move |_theme: &iced::Theme| container::Appearance {
+                background: Some(iced::Background::Color(crate::theme::brightness(
+                    theme_gen::ink(theme, theme_gen::Ink::Surface3),
+                    factor,
+                ))),
+                border: Border {
+                    color: crate::theme::brightness(
+                        theme_gen::ink(theme, theme_gen::Ink::Surface4),
+                        factor,
+                    ),
+                    width: 1.0,
+                    radius: theme_gen::span(theme_gen::Span::RadiusLg).into(),
+                },
+                ..container::Appearance::default()
+            }),
+    )
+    .interaction(Interaction::Pointer)
+    .on_enter(Message::hover(key, true))
+    .on_exit(Message::hover(key, false))
+    .on_press(Message::Project(project.id.clone()))
+    .into()
+}
+
+/// One statistic: an icon at `size-5` and the count beside it, in `font-medium`.
+///
+/// Drawn here rather than through `ui::icon_label` because the two disagree with
+/// the reference: that one draws a 16-pixel icon (the reference's is `size-5`, 20)
+/// and paints the text in `--color-text-secondary`, where `ProjectCardStats` names
+/// no colour and so inherits `--color-text-primary`. The audit measured both as
+/// exact inversions.
+fn stat<'a, Message: 'a>(theme: Gen, glyph: Glyph, value: &str) -> Element<'a, Message> {
+    row![]
+        .spacing(METADATA_TEXT_GAP)
+        .align_items(Alignment::Center)
+        .push(icon::icon(glyph, CARD_STAT_ICON, theme_gen::ink(theme, INK_DEFAULT)))
+        .push(
+            text(value.to_string())
+                .size(HEADER_TEXT)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        )
+        .into()
+}
+
+/// `User.vue`'s `#project-actions`: outlined, brand ink, a brand hairline.
+///
+/// `type="outlined"` with `!text-brand` and `!shadow-[inset_0_0_0_1px_var(--color-brand)]`,
+/// and a `DownloadIcon` when the project is a pack and a `PlusIcon` when it is not
+/// -- the two arms of the reference's own ternary. It is `size` md, the frame's
+/// default, which measured 36 pixels tall at y=276..311.
+fn install_button<'a>(theme: Gen, project: &ModrinthUserProject) -> Element<'a, Message> {
+    let pack = ProjectType::from_token(&project.project_type) == Some(ProjectType::Modpack);
+    // `commonMessages.installButton` for a pack and `messages.installToInstance`
+    // for anything else: the reference's own ternary over `project.project_types`,
+    // which is why a pack's button reads *Install* and a mod's reads *Install to
+    // instance*.
+    let label =
+        if pack { Key::ButtonInstall } else { Key::AppUserProjectInstallToInstance };
+    ui::button_with_icon_sized(
+        theme,
+        INSTALL_KEY,
+        if pack { Glyph::Download } else { Glyph::Plus },
+        label,
+        ui::Kind::Outlined,
+        ui::Size::Md,
+        Length::Shrink,
+        Some(Message::Install(project.id.clone(), project.title.clone(), pack)),
+    )
+}
+
+/// The 100-pixel square a card's icon is drawn in, whether or not one arrived.
+///
+/// [`crate::ui::icon_box`] is the control kit's own: the reference's box, its
+/// background and its hairline, with the picture composited onto it already
+/// rounded by [`crate::avatar`]. An account whose projects have no icons draws the
+/// empty box, which is the same box the reference's placeholder sits on.
+fn icon_box<'a>(theme: Gen, icon: Option<&crate::avatar::Icon>) -> Element<'a, Message> {
+    ui::icon_box(theme, CARD_ICON, icon)
 }
 
 // ---- The reference's own formatters ---------------------------------------
@@ -1319,6 +1518,24 @@ mod tests {
         assert!(filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &one_type).is_none());
         // Two, and the strip is there.
         assert!(filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &sample()).is_some());
+    }
+
+    #[test]
+    fn the_card_is_the_height_the_reference_measures_and_not_the_one_the_box_asks_for() {
+        // `ProjectCard.vue`'s list card measures 142 including its two 1-pixel
+        // borders, so the box inside the padding is 108 -- and iced's border is
+        // drawn inside the bounds, eating a pixel of padding at each end. So the
+        // content is asked for 110 and the card comes out 142 rather than 140.
+        assert_eq!(CARD_CONTENT, 110.0);
+        assert_eq!(CARD_CONTENT + ui::CARD_PAD * 2.0, 142.0);
+        assert_eq!(CARD_ICON, 100.0);
+        // The tags row sits 82 pixels down the content box, which is `358 - 276`
+        // off the reference's own capture.
+        assert_eq!(CARD_TAGS_TOP, 82.0);
+        assert!(CARD_TAGS_TOP + ui::TAG_HEIGHT <= CARD_CONTENT, "the tags row is inside the box");
+        // And the icon column plus the grid's own gap is the indent the last row
+        // starts at.
+        assert_eq!(CARD_ICON + CARD_GAP_X, 112.0);
     }
 
     #[test]
