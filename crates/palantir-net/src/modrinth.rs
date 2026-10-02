@@ -272,6 +272,19 @@ where
     Ok(<Option<String> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
 }
 
+/// Read a list field the service is allowed to answer `null`.
+///
+/// The same arm as [`null_as_empty`], for the same reason and with the same
+/// failure it prevents: `#[serde(default)]` covers a field that is *absent* and
+/// not one that is present and `null`, so a document that spells the key out as
+/// `null` fails to parse over a value that is not there at all.
+fn null_as_empty_vec<'de, D>(reader: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(<Option<Vec<String>> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
+}
+
 /// A `GET /v2/search` response body (subset; unknown fields ignored).
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ModrinthSearchResponse {
@@ -755,13 +768,69 @@ pub struct ModrinthUserProject {
     #[serde(default)]
     pub updated: String,
     /// Its icon, if it has one: `null` for a project that has not uploaded one,
-    /// which is the one field of this document the service marks nullable.
+    /// which is the field this type reads first through `null_as_empty`.
     #[serde(default, deserialize_with = "null_as_empty")]
     pub icon_url: String,
 
     /// Its type (`mod`, `modpack`, `resourcepack`, ...), as the document says.
     #[serde(default)]
     pub project_type: String,
+
+    /// The document's `categories`: the feature tags Modrinth publishes for the
+    /// project (`challenging`, `combat`, `minigame`, ...).
+    ///
+    /// The whole of a card's tag row is built from this and [`Self::loaders`] --
+    /// `getProjectCardTags` in the reference's `ui/src/utils/v3-projects.ts` is
+    /// `[...categories, ...loaders, ...mrpack_loaders]` -- and neither list was
+    /// read here, which is why a card drew the project's *type* where the
+    /// reference draws its tags.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub categories: Vec<String>,
+    /// The document's `additional_categories`: the tags a project declares
+    /// beyond its categories.
+    ///
+    /// What `getProjectCardAllTags` adds to `getProjectCardTags`, and therefore
+    /// what the row's `+N` pill counts -- a card whose own tags all fit still
+    /// shows the extra ones as an overflow rather than dropping them.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub additional_categories: Vec<String>,
+    /// The document's `loaders`: the loaders its versions are published for
+    /// (`forge`, `fabric`, `datapack`, `quilt`, ...).
+    ///
+    /// The same list the project's own document publishes and the same one the
+    /// card's tag row is composed from, so a project whose loaders nobody read
+    /// drew a tag row of nothing but its categories.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub loaders: Vec<String>,
+    /// The document's `client_side`: `required` / `optional` / `unsupported` /
+    /// `unknown`.
+    ///
+    /// `ProjectCardEnvironment.vue` reads this and [`Self::server_side`] for the
+    /// *legacy* `{ clientSide, serverSide }` shape a v2 caller may pass it, and
+    /// the reference's own `ProjectList.vue` passes `project.environment?.[0]`
+    /// instead -- so on a card this pair is the document's record of what the
+    /// project declares rather than something the row is composed from. Read
+    /// because it is the field the endpoint publishes, not because this page
+    /// draws it.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub client_side: String,
+    /// The document's `server_side`, the other half of [`Self::client_side`].
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub server_side: String,
+    /// The document's `environment`: `client_only` / `server_only` /
+    /// `client_and_server`, the two `*_prefers_*` values and
+    /// `client_only_server_optional` / `server_only_client_optional`.
+    ///
+    /// The one of the six a card's row is *composed* from, through
+    /// `ProjectList.vue`'s `project.environment?.[0]`. It is also the one the
+    /// service is known to answer `null` for: measured on FlameFire's own six
+    /// projects, v3 answers `environment: null` for *Zombie Invade Nether End*
+    /// where v2 answers `[]` for the same project. That is why none of these six
+    /// reads a bare `default` -- `default` covers a field that is *absent* and
+    /// not one that is present and `null`, and a `null` read as a parse failure
+    /// takes the whole profile's card list with it.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub environment: Vec<String>,
 }
 
 /// The profile document for one user, by username or by id.
@@ -903,6 +972,63 @@ mod tests {
         assert_eq!(response.hits[0].latest_version, "");
         assert!(response.hits[1].icon_url.ends_with("icon.webp"));
         assert_eq!(response.hits[1].latest_version, "mc1.21.1-0.6.0");
+    }
+
+    /// A project document off `/v2/user/FlameFire/projects`, trimmed to the fields a
+    /// card's tag row is composed from.
+    ///
+    /// The real answers, because the composition is only worth anything if it is fed
+    /// the shape the service publishes: *Zombie Invade 100 Days* is a modpack with
+    /// two categories, one loader, one extra category and a `client_and_server`
+    /// environment.
+    #[test]
+    fn a_project_document_carries_the_lists_a_card_s_tag_row_is_built_from() {
+        let pack = r#"{
+            "id": "l9m9tuPN", "slug": "zombie-invade-100-days",
+            "project_type": "modpack", "title": "Zombie Invade 100 Days",
+            "description": "Same as Forge Labs 100 Days", "downloads": 14848863,
+            "followers": 637, "published": "2021-01-01T00:00:00Z",
+            "updated": "2025-12-13T12:35:19.753501Z", "icon_url": null,
+            "categories": ["challenging", "combat"],
+            "additional_categories": ["multiplayer"],
+            "client_side": "required", "server_side": "required",
+            "loaders": ["forge"],
+            "environment": ["client_and_server"]
+        }"#;
+        let project: ModrinthUserProject = serde_json::from_str(pack).expect("the project document");
+        assert_eq!(project.project_type, "modpack");
+        assert_eq!(project.categories, ["challenging", "combat"]);
+        assert_eq!(project.additional_categories, ["multiplayer"]);
+        assert_eq!(project.loaders, ["forge"]);
+        assert_eq!(project.client_side, "required");
+        assert_eq!(project.server_side, "required");
+        assert_eq!(project.environment, ["client_and_server"]);
+    // `icon_url: null` is the shape `null_as_empty` already reads, and it is the
+    // reason this document parses at all.
+        assert_eq!(project.icon_url, "");
+
+    // The same six fields absent, and one of them present as `null`: `default`
+    // covers the first case and not the second, which is what the deserializers
+    // above are for. `null` in a list key is not hypothetical -- the *search*
+    // route answers `additional_categories: null` and `loaders: null` on all
+    // hundred of a sampled page of hits.
+        let bare: ModrinthUserProject =
+            serde_json::from_str(r#"{"id":"a","title":"Nothing"}"#).expect("a bare project");
+        assert!(bare.categories.is_empty());
+        assert!(bare.additional_categories.is_empty());
+        assert!(bare.loaders.is_empty());
+        assert!(bare.environment.is_empty());
+        assert_eq!(bare.client_side, "");
+        assert_eq!(bare.server_side, "");
+        let nulled: ModrinthUserProject = serde_json::from_str(
+            r#"{"id":"a","title":"Nothing","categories":null,"additional_categories":null,
+                "client_side":null,"server_side":null,"loaders":null,"environment":null}"#,
+        )
+        .expect("a project whose fields are null");
+        assert!(nulled.categories.is_empty());
+        assert!(nulled.additional_categories.is_empty());
+        assert!(nulled.loaders.is_empty());
+        assert!(nulled.environment.is_empty());
     }
 
     #[test]

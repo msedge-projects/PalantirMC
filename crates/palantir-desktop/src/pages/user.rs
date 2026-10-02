@@ -23,6 +23,22 @@
 //! projects list -- the count, the sum of its downloads, and which filters the strip
 //! has -- so they are computed here rather than asked for: the API publishes one
 //! document per request, and a total is not one of them.
+//!
+//! One card's tags row is the fourth, and it is the one place where reading v2
+//! costs the page something the reference draws. `ProjectList.vue` composes that
+//! row out of a **v3** project: `getProjectCardTags` is its `categories`, its
+//! `loaders` and its `mrpack_loaders`, and `catalogProjectTypes` is its
+//! `project_types` *array* -- which is where the strip's *Data Packs* comes from,
+//! against the v2 `project_type` string that says *Mods*. Both of those are fields
+//! `/v2/user/{id}/projects` does not publish, and the one request that would carry
+//! both is `GET /v3/user/{id}/projects` (public, and answering 200 for an
+//! unauthenticated read of a public account -- measured). Issuing it is the
+//! store's, not this page's: `Store::user` is what asks for the profile
+//! (`store.rs`), and a page in this tree has never held a connection. So
+//! [`card_tags`] puts back the one tag it can derive from what v2 *does* publish
+//! (a modpack's `mrpack` loader, measured across a hundred modpacks) and the strip
+//! still counts v2's single type -- both recorded where they are rather than
+//! papered over.
 
 use iced::mouse::Interaction;
 use iced::widget::container;
@@ -155,6 +171,30 @@ const CARD_PAD_TOP: f32 = ui::CARD_PAD + 1.0;
 /// with the content box and [`ui::tag`] is 24 pixels tall inside the reference's
 /// 26-pixel row (the reference's carries an `h-4` icon; see the notes).
 const CARD_TAGS_TOP: f32 = 83.0;
+
+/// `gap-1` on the tags row: `ProjectCard.vue`'s own
+/// `<div class="flex items-center gap-1">` around `ProjectCardEnvironment` and
+/// `ProjectCardTags`. Measured: six pills at 217..369, 374..469, 474..544,
+/// 549..625, 630..729 and 734..767 -- four pixels between each pair.
+const CARD_TAG_GAP: f32 = 4.0;
+/// The row's own height, which is the reference's tallest pill rather than a
+/// number of its own.
+///
+/// `TagItem.vue`'s `baseClass` is `py-1 leading-none text-sm` around a
+/// `[&>svg]:h-4` glyph, so a pill carrying an icon is 26 rows and one that does
+/// not is 24; the row is `items-center`, so the shorter pills sit a pixel lower
+/// inside it. Measured on the reference's first card: y=358..383 for the
+/// environment, *Forge* and *Modpack* pills and y=359..382 for *Challenging*,
+/// *Combat* and *+1*.
+const CARD_TAG_ROW: f32 = 26.0;
+
+/// The loaders `sortTagsForDisplay` puts ahead of every other loader.
+///
+/// `DEFAULT_MOD_LOADERS`, `DEFAULT_SHADER_LOADERS` and the two more that make
+/// `DEFAULT_LOADER_NAMES` (`tag-messages.ts:576-582`) -- which is why a card
+/// whose loaders are `datapack, fabric, forge, neoforge, quilt` draws *Fabric*
+/// and *Forge* before the *Data Pack*, and counts the other three in its `+N`.
+const DEFAULT_LOADERS: [&str; 6] = ["fabric", "forge", "neoforge", "iris", "optifine", "vanilla"];
 
 /// The header's own action.
 ///
@@ -1012,17 +1052,16 @@ fn project_row<'a>(
 
     // Row 3: `__tags`, which spans columns two to four and is pushed to the
     // bottom of its row by `mt-auto`, and so ends flush with the content box.
-    let mut tags = row![].spacing(4.0).align_items(Alignment::Start);
-    if let Some(kind) = ProjectType::from_token(&project.project_type) {
-        tags = tags.push(ui::tag(theme, kind.label()));
-    }
+    // The row is the reference's own composition: the environment pill, then
+    // `ProjectCardTags`' visible tags, then its `+N` pill -- see [`card_tags`].
+    let tags = tags_row(theme, project);
     // The indent is *inside* this row rather than being the overlay's offset: a
     // translated layer still lays out at the stack's full width, so offsetting the
     // row by 112 gave it 112 pixels more than the card has and pushed whatever sat
     // at its right edge off the card.
     let tail = row![]
         .width(Length::Fill)
-        .height(Length::Fixed(26.0))
+        .height(Length::Fixed(CARD_TAG_ROW))
         .spacing(CARD_GAP_X)
         // The icon column, with the grid's own `gap-x-3` after it: `100 + 12 = 112`
         // from the content box's left edge, which is `1 + 16 + 100 + 12 = 129` from
@@ -1072,6 +1111,246 @@ fn project_row<'a>(
     .on_exit(Message::hover(key, false))
     .on_press(Message::Project(project.id.clone()))
     .into()
+}
+
+/// What one card's tags row draws.
+///
+/// `ProjectCard.vue`'s list layout composes the row out of three things, in this
+/// order and no other: `ProjectCardEnvironment` (when the document names an
+/// environment), `ProjectCardTags` (its visible tags), and `TagsOverflow` (the
+/// `+N` pill, which stands for everything that did not fit). What used to be
+/// drawn here was the project's *type* in a single pill, which is none of the
+/// three -- and the reference's first card measures six pills where that was one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tags {
+    /// The icon `ProjectCardEnvironment` puts in front of the environment's own
+    /// message, and that message: `None` when the document names no environment,
+    /// which is the reference's `empty:hidden` on the same `TagItem`.
+    pub environment: Option<(Glyph, String)>,
+    /// The tags that fit, in the order `ProjectCardTags` draws them.
+    pub tags: Vec<String>,
+    /// How many tags the `+N` pill is standing in for.
+    pub overflow: usize,
+}
+
+impl Tags {
+    /// The pills' labels, in the order the reference's own `<template>` draws them:
+    /// the environment's message, then each visible tag's own, then `+N`.
+    ///
+    /// Every label is the reference's: `formatTag` (`tag-messages.ts:663`) is
+    /// `getTagMessage(tag)` -- the loader's table first, then the category's -- and
+    /// `capitalizeString` for a tag neither table has, which is
+    /// [`crate::locale`]'s `loader_label`/`category_label` and [`is_loader`]
+    /// choosing which of the two tables is meant (`minecraft` is a loader for
+    /// resource packs and a category for mods).
+    pub fn labels(&self) -> Vec<String> {
+        let mut labels: Vec<String> = Vec::with_capacity(self.tags.len() + 2);
+        if let Some((_, label)) = &self.environment {
+            labels.push(label.clone());
+        }
+        labels.extend(self.tags.iter().map(|tag| {
+            if is_loader(tag) {
+                crate::locale::loader_label(tag)
+            } else {
+                crate::locale::category_label(tag)
+            }
+        }));
+        if self.overflow > 0 {
+            labels.push(format!("+{}", self.overflow));
+        }
+        labels
+    }
+}
+
+/// One card's tag row, as `ProjectCard.vue`'s list layout composes it.
+///
+/// The composition is four steps, each from the reference's own source:
+///
+/// 1. `getProjectCardTags` (`v3-projects.ts:20`): the project's `categories`, then
+///    its `loaders`, then its `mrpack_loaders`.
+/// 2. `ProjectCardTags.vue`'s `uniqueSorted`: a `Set`, then `sortTagsForDisplay`
+///    (`tag-messages.ts:585`) -- the categories alphabetically, then the loaders
+///    with [`DEFAULT_LOADERS`] first and the rest after them, each group
+///    alphabetically.
+/// 3. `slice(0, maxTags)`, where `maxTags` is `(maxTags || (actions ? 4 : 5)) +
+///    (!!environment ? 0 : 1)` (`ProjectCard.vue:174`). `ProjectList.vue` passes no
+///    `maxTags` and `User.vue` does pass an `#actions` slot -- the *Install*
+///    button -- so the first term is four, and an environment pill, which is drawn
+///    outside `ProjectCardTags`, is what takes the fifth a card without one shows.
+/// 4. `extraTags` (`ProjectCard.vue:288`) is `allTags` less `tags`, which is
+///    `additional_categories` (`getProjectCardAllTags`), and `overflowTags`
+///    (`ProjectCardTags.vue:44`) is what is left of both -- so a card with no
+///    overflow of its own still shows a `+N` for the extra categories it declares.
+///
+/// Measured on the reference's own three cards at 1280x720, against the answers
+/// `GET /v2/user/FlameFire/projects` gives for the same three projects:
+///
+/// | card | tags | pills the reference draws |
+/// | --- | --- | --- |
+/// | Zombie Invade 100 Days | `challenging combat forge` + `mrpack` | *Client and server Challenging Combat Forge Modpack +1* |
+/// | Random Island | `minigame worldgen` + `fabric forge neoforge datapack quilt` | *Server Minigame World Generation Fabric Forge +3* |
+/// | Zombie Invade Nether End | `mobs datapack` | *Mobs Data Pack +1* |
+///
+/// The third is the one that says the environment is read as
+/// `project.environment?.[0]` and nothing else: its document publishes an empty
+/// `environment`, and the reference draws no environment pill for it even though
+/// its `client_side`/`server_side` pair would answer *Server*.
+pub fn card_tags(project: &ModrinthUserProject) -> Tags {
+    let environment = environment_tag(project);
+    // `(maxTags || (!!$slots.actions ? 4 : 5)) + (!!environment ? 0 : 1)`.
+    let max = if environment.is_some() { 4 } else { 5 };
+    let tags = sort_tags_for_display(&unique(&card_tag_ids(project)));
+    let shown = tags.len().min(max);
+    // `allTags.filter((tag) => !tags.includes(tag))`: the extra categories a
+    // project declares, less any the row already shows.
+    let extra: Vec<String> = project
+        .additional_categories
+        .iter()
+        .filter(|tag| !tags.contains(tag))
+        .cloned()
+        .collect();
+    Tags {
+        environment,
+        tags: tags[..shown].to_vec(),
+        // `[...new Set([...tags - visible, ...extra - visible])]`, and the two
+        // lists cannot share a tag by the filter above.
+        overflow: tags.len() - shown + extra.len(),
+    }
+}
+
+/// `getProjectCardTags`: the tags a card is composed from, before it is sorted.
+///
+/// The reference reads a **v3** project document here, which splits a modpack's
+/// loaders in two -- `loaders: ["mrpack"]` and `mrpack_loaders: ["forge"]` -- and
+/// the v2 document this page reads publishes neither key. What it does publish
+/// for the same project is `project_type: "modpack"` and `loaders: ["forge"]`,
+/// which is the same pair with the type spelled out, so the loader tag a modpack's
+/// own row is missing is put back from it. That is a derivation and it is
+/// measured rather than guessed: of the hundred most-downloaded modpacks
+/// `GET /v2/search?facets=[["project_type:modpack"]]` returns, all hundred
+/// publish `mrpack` in their v3 `loaders`, and for the thirty sampled against
+/// `GET /v2/project/{id}` those loaders are exactly `["mrpack"]` while the v2
+/// `loaders` are exactly the v3 `mrpack_loaders` -- so for every one of them
+/// this function returns what `getProjectCardTags` returns.
+///
+/// What it cannot be is a read, and the case it would get wrong is a project v2
+/// calls a mod that v3 also calls one: there the reference draws *Modpack* and
+/// this draws nothing, because v2's single `project_type` string has already lost
+/// the second type. That needs the v3 `project_types` array, which is the same
+/// second request as the strip's own *Data Packs* tab and neither can be asked
+/// for from this file -- see the module docs.
+fn card_tag_ids(project: &ModrinthUserProject) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    tags.extend(project.categories.iter().cloned());
+    tags.extend(project.loaders.iter().cloned());
+    if project.project_type == "modpack" {
+        tags.push(MRPACK_LOADER.to_string());
+    }
+    tags
+}
+
+/// `mrpack`, the loader tag `tag-messages.ts` gives the message *Modpack*.
+///
+/// Spelled out rather than taken from a table because it is the one tag this row
+/// adds that is in neither of the document's lists -- see [`card_tag_ids`].
+const MRPACK_LOADER: &str = "mrpack";
+
+/// `ProjectCardEnvironment.vue`'s `displayEnvironment`, for the value
+/// `ProjectList.vue:39` passes it.
+///
+/// The v3 environment is a *string* on the reference's page, and this function is
+/// its own `switch` (`ProjectCardEnvironment.vue:62-81`) with no fall-through:
+/// a project whose environment this port does not name draws no pill at all,
+/// which is what the reference's `empty:hidden` on the same `TagItem` does.
+///
+/// The icon is part of what the reference draws and is returned with the label
+/// rather than looked up again, because `ProjectCardEnvironment` chooses it per
+/// environment and a caller that picked its own would put a globe where the
+/// reference puts a drive.
+fn environment_tag(project: &ModrinthUserProject) -> Option<(Glyph, String)> {
+    // `project.environment?.[0]`, so a project whose `environment` is empty has
+    // none. Its `client_side`/`server_side` are deliberately not the fallback:
+    // `ProjectCardEnvironment` has a `{ clientSide, serverSide }` arm and
+    // `ProjectList.vue` never fills it in.
+    let environment = project.environment.first()?;
+    let (glyph, key) = match environment.as_str() {
+        "client_or_server" | "client_or_server_prefers_both" => {
+            (Glyph::Globe, Key::ProjectCardEnvironmentClientOrServer)
+        }
+        "client_and_server" => (Glyph::Globe, Key::ProjectCardEnvironmentClientAndServer),
+        "client_only" | "client_only_server_optional" => {
+            (Glyph::MonitorSmartphone, Key::ProjectCardEnvironmentClient)
+        }
+        "server_only" | "server_only_client_optional" => {
+            (Glyph::Server, Key::ProjectCardEnvironmentServer)
+        }
+        "singleplayer_only" => (Glyph::User, Key::ProjectCardEnvironmentSingleplayer),
+        "dedicated_server_only" => (Glyph::Server, Key::ProjectCardEnvironmentDedicatedServer),
+        _ => return None,
+    };
+    Some((glyph, key.message().to_string()))
+}
+
+/// `sortTagsForDisplay`'s own test for a loader.
+///
+/// `getTagMessage(tag, 'loader')` being a message *is* `tag.loader.<tag>` being a
+/// key in the generated table, so the lookup is the test rather than a list of
+/// loaders kept beside it -- and a loader the reference's table has not caught up
+/// with is one this row sorts as a category, which is what the reference does too.
+fn is_loader(tag: &str) -> bool {
+    text_gen::from_name(&format!("tag.loader.{tag}")).is_some()
+}
+
+/// `sortTagsForDisplay` (`tag-messages.ts:585`): the categories alphabetically,
+/// then the loaders with [`DEFAULT_LOADERS`] ahead of the rest, each group
+/// alphabetically.
+///
+/// `localeCompare` is a Unicode collation and this is a byte order, which for
+/// the lowercase kebab-case tags Modrinth publishes agree on every ordering the
+/// API is measured to answer -- the two part company on interior capitals, which
+/// no tag carries.
+fn sort_tags_for_display(tags: &[String]) -> Vec<String> {
+    let mut categories: Vec<String> =
+        tags.iter().filter(|tag| !is_loader(tag)).cloned().collect();
+    let mut loaders: Vec<String> = tags.iter().filter(|tag| is_loader(tag)).cloned().collect();
+    categories.sort();
+    // `aDefault !== bDefault ? aDefault ? -1 : 1 : a.localeCompare(b)`: a stable
+    // order either way, so the sort is by membership first and by name second.
+    loaders.sort_by(|a, b| {
+        let a_default = DEFAULT_LOADERS.contains(&a.as_str());
+        let b_default = DEFAULT_LOADERS.contains(&b.as_str());
+        b_default.cmp(&a_default).then_with(|| a.cmp(b))
+    });
+    categories.extend(loaders);
+    categories
+}
+
+/// `[...new Set(tags)]`, which is what `uniqueSorted` does before it sorts.
+fn unique(tags: &[String]) -> Vec<String> {
+    let mut seen: Vec<&String> = Vec::with_capacity(tags.len());
+    for tag in tags {
+        if !seen.contains(&tag) {
+            seen.push(tag);
+        }
+    }
+    seen.into_iter().cloned().collect()
+}
+
+/// One card's tag row, as the reference's `<template>` order draws it.
+///
+/// `items-center` is the row's own class, and it is why the row is
+/// [`CARD_TAG_ROW`] tall and the pills inside it are centred: a 24-row pill in a
+/// 26-row row sits one pixel lower, which is what the reference measures for every
+/// pill that carries no icon.
+///
+/// The pills themselves are [`ui::tag`]'s and their labels are [`Tags::labels`],
+/// so what this adds is the row and nothing else.
+fn tags_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, Message> {
+    let mut row = row![].spacing(CARD_TAG_GAP).align_items(Alignment::Center);
+    for label in card_tags(project).labels() {
+        row = row.push(ui::tag(theme, &label));
+    }
+    row.into()
 }
 
 /// One statistic: an icon at `size-5` and the count beside it, in `font-medium`.
@@ -1453,6 +1732,168 @@ mod tests {
         assert!(arrived.note.is_none());
     }
 
+    /// The environment a card's row draws, as its message.
+    fn environment_label(tags: &Tags) -> Option<String> {
+        tags.environment.as_ref().map(|(_, label)| label.clone())
+    }
+
+    /// A project of FlameFire's own six, by the answers
+    /// `GET /v2/user/FlameFire/projects` gives for it.
+    fn flamefire(
+        project_type: &str,
+        categories: &str,
+        loaders: &str,
+        extra: &str,
+        environment: &str,
+    ) -> ModrinthUserProject {
+        serde_json::from_str(&format!(
+            r#"{{"id":"x","title":"A project","project_type":"{project_type}",
+                "categories":[{categories}],"loaders":[{loaders}],
+                "additional_categories":[{extra}],"environment":[{environment}]}}"#
+        ))
+        .expect("the project")
+    }
+
+    #[test]
+    fn a_card_s_tag_row_is_the_reference_s_own_composition_of_the_document() {
+        // *Zombie Invade 100 Days*, the reference's first card: two categories,
+        // one loader, one extra category and a `client_and_server` environment.
+        // `maxTags` is `(maxTags || (actions ? 4 : 5)) + (!!environment ? 0 : 1)`
+        // = 4, so the two categories and the two loaders all fit and the extra
+        // category is the `+1`. Measured on the reference's own capture: six
+        // pills, *Client and server Challenging Combat Forge Modpack +1`, at
+        // x=217..369, 374..469, 474..544, 549..625, 630..729 and 734..767.
+        let pack = flamefire(
+            "modpack",
+            r#""challenging", "combat""#,
+            r#""forge""#,
+            r#""multiplayer""#,
+            r#""client_and_server""#,
+        );
+        let tags = card_tags(&pack);
+        // The categories alphabetically, then the loaders -- `forge` is one of
+        // the six `DEFAULT_LOADER_NAMES` and `mrpack` is not, so *Forge* comes
+        // first even though the modpack's own `loaders` lists it after.
+        assert_eq!(tags.tags, ["challenging", "combat", "forge", "mrpack"]);
+        assert_eq!(tags.overflow, 1);
+        assert_eq!(environment_label(&tags), Some("Client and server".to_string()));
+        assert_eq!(
+            tags.labels(),
+            ["Client and server", "Challenging", "Combat", "Forge", "Modpack", "+1"]
+        );
+
+        // *Random Island*: seven tags, an environment of its own, and nothing
+        // extra -- so four are drawn and the other three are counted. The
+        // loaders' order is the default six first (`fabric`, `forge`,
+        // `neoforge`) and the two that are not (`datapack`, `quilt`) after them.
+        let island = flamefire(
+            "mod",
+            r#""minigame", "worldgen""#,
+            r#""datapack", "fabric", "forge", "neoforge", "quilt""#,
+            "",
+            r#""server_only""#,
+        );
+        let tags = card_tags(&island);
+        assert_eq!(tags.tags, ["minigame", "worldgen", "fabric", "forge"]);
+        assert_eq!(tags.overflow, 3);
+        assert_eq!(tags.labels(), ["Server", "Minigame", "World Generation", "Fabric", "Forge", "+3"]);
+
+        // *Zombie Invade Nether End*: the one project of the six whose
+        // `environment` is empty, so there is no environment pill *and* the
+        // reference's `+1` in `maxTags` applies -- five tags would fit where a
+        // card with an environment shows four.
+        let end = flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, "");
+        let tags = card_tags(&end);
+        assert!(tags.environment.is_none());
+        assert_eq!(tags.tags, ["mobs", "datapack"]);
+        assert_eq!(tags.overflow, 1);
+        assert_eq!(tags.labels(), ["Mobs", "Data Pack", "+1"]);
+
+        // A document with no tags at all draws no pills rather than an empty
+        // one: `empty:hidden` is on the environment's `TagItem`, and a row of
+        // nothing is what the reference leaves behind.
+        let bare: ModrinthUserProject =
+            serde_json::from_str(r#"{"id":"y","title":"Nothing"}"#).expect("the project");
+        let tags = card_tags(&bare);
+        assert!(tags.labels().is_empty());
+        assert_eq!(tags.overflow, 0);
+    }
+
+    #[test]
+    fn the_environment_is_the_v3_strings_own_switch_and_nothing_else() {
+        // `ProjectCardEnvironment.vue:62-81`: six environments, two icons and one
+        // message each, and the two `*_prefers_*` values folded into the pair
+        // they prefer.
+        let of = |environment: &str| {
+            card_tags(&flamefire("mod", "", "", "", &format!("\"{environment}\"")))
+        };
+        assert_eq!(environment_label(&of("client_or_server")), Some("Client or server".to_string()));
+        // Both `*_prefers_*` values are the pair they prefer.
+        assert_eq!(
+            environment_label(&of("client_or_server_prefers_both")),
+            Some("Client or server".to_string())
+        );
+        assert_eq!(environment_label(&of("client_and_server")), Some("Client and server".to_string()));
+        assert_eq!(environment_label(&of("client_only")), Some("Client".to_string()));
+        assert_eq!(environment_label(&of("client_only_server_optional")), Some("Client".to_string()));
+        assert_eq!(environment_label(&of("server_only")), Some("Server".to_string()));
+        assert_eq!(environment_label(&of("server_only_client_optional")), Some("Server".to_string()));
+        assert_eq!(environment_label(&of("singleplayer_only")), Some("Singleplayer".to_string()));
+        assert_eq!(environment_label(&of("dedicated_server_only")), Some("Dedicated server".to_string()));
+        // A value this port does not name draws nothing, which is what the
+        // reference's `empty:hidden` does with an environment it cannot map.
+        assert_eq!(environment_label(&of("bedrock_only")), None);
+        // The globe is the globe: `client-and-server` and `client-or-server` both
+        // take `GlobeIcon`, and *Server* takes `ServerIcon`.
+        let glyph_of = |environment: &str| of(environment).environment.map(|(glyph, _)| glyph);
+        assert_eq!(glyph_of("client_and_server"), Some(Glyph::Globe));
+        assert_eq!(glyph_of("client_or_server"), Some(Glyph::Globe));
+        assert_eq!(glyph_of("server_only"), Some(Glyph::Server));
+        assert_eq!(glyph_of("singleplayer_only"), Some(Glyph::User));
+        // And the `client_side`/`server_side` pair is not the fallback: a
+        // document with an empty `environment` and `client_side: "optional"`,
+        // `server_side: "required"` draws no pill, because `ProjectList.vue`
+        // passes `project.environment?.[0]` and never the pair.
+        let legacy: ModrinthUserProject = serde_json::from_str(
+            r#"{"id":"z","title":"Legacy","client_side":"optional","server_side":"required",
+                "environment":[]}"#,
+        )
+        .expect("the project");
+        assert!(card_tags(&legacy).environment.is_none());
+    }
+
+    #[test]
+    fn a_loader_is_a_tag_the_loader_table_has_and_the_default_six_come_first() {
+        // `getTagMessage(tag, 'loader') !== undefined` is `tag.loader.<tag>` being
+        // in the generated table, so `minecraft` is a loader (the reference says
+        // *Resource Pack*) and `forge` is one too, while `mobs` is a category.
+        assert!(is_loader("forge"));
+        assert!(is_loader("mrpack"));
+        assert!(is_loader("datapack"));
+        assert!(!is_loader("mobs"));
+        assert!(!is_loader("multiplayer"));
+        assert_eq!(crate::locale::loader_label("mrpack"), "Modpack");
+        assert_eq!(crate::locale::loader_label("datapack"), "Data Pack");
+        assert_eq!(crate::locale::category_label("worldgen"), "World Generation");
+        // And a tag neither table has is capitalised rather than dropped, which
+        // is `formatTag`'s own fallback.
+        assert_eq!(crate::locale::category_label("not-a-tag-yet"), "Not-a-tag-yet");
+        assert_eq!(
+            sort_tags_for_display(&[
+                "quilt".to_string(),
+                "worldgen".to_string(),
+                "forge".to_string(),
+                "datapack".to_string(),
+                "minigame".to_string(),
+                "neoforge".to_string(),
+                "fabric".to_string(),
+            ]),
+            ["minigame", "worldgen", "fabric", "forge", "neoforge", "datapack", "quilt"]
+        );
+        // `uniqueSorted` is a `Set`, so a tag listed twice is one pill.
+        assert_eq!(unique(&["a".to_string(), "b".to_string(), "a".to_string()]), ["a", "b"]);
+    }
+
     #[test]
     fn the_strip_only_offers_the_types_the_user_actually_has() {
         let profile = sample();
@@ -1736,6 +2177,11 @@ mod tests {
         // Two `gap-x-3` between the `1fr` column and the right-hand ones, because
         // the grid's third `auto` column is empty.
         assert_eq!(CARD_COL_GAP, CARD_GAP_X * 2.0);
+        // The tag row's own `gap-1` and its height, read off the reference's six
+        // pills: four pixels between each pair, and a row that is 26 tall because
+        // its tallest pill carries an `h-4` icon.
+        assert_eq!(CARD_TAG_GAP, 4.0);
+        assert_eq!(CARD_TAG_ROW, 26.0);
         // The summary inherits `text-base` on the stylesheet's own 18.4-pixel line,
         // which paints as 18 -- measured, the reference's two summary lines are 18
         // pixels apart.
