@@ -2000,3 +2000,63 @@ every item a `ResizeObserver` marks `data-page-header-metadata-row-start`.
 The icon is 20 (`size-5`), the label 16 at `font-medium leading-none`
 in `text-secondary` (`page-header-metadata-item.vue`'s `baseClass`), and
 the icon sits eight from it (`gap-2` on `contentBaseClass`).
+
+### The Discover sidebar, which was not there at all
+
+§31 recorded the right panel as one of the items still different, and the
+recording was right: on Discover the reference draws a *Hide already installed*
+switch and a *Category* list with icons where this launcher draws *Getting
+started* and News and nothing else.
+
+Where it goes is `App.vue`, not the page. `Browse.vue`'s last two lines are
+`<Teleport v-if="browseRouteActive" to="#sidebar-teleport-target"><BrowseSidebar /></Teleport>`,
+and that target is a div in the *middle* of `app-sidebar-scrollable`:
+
+    <OnboardingChecklist ... />
+    <div id="sidebar-teleport-target" class="sidebar-teleport-content"></div>
+    <div class="sidebar-default-content" ...>
+
+so a page with a sidebar of its own adds a section to the panel rather than
+replacing it, and it lands between the checklist and the *Playing as* card.
+`Shell::panel` now draws `pages::discover::sidebar` at that point.
+
+`browse-tab/sidebar.vue` is a column of sections, and each one is
+`border-0 border-b-[1px] border-[--brand-gradient-border] p-4 last:border-b-0`.
+The first is not a filter: `showHideInstalled` puts one `<label class="flex
+cursor-pointer items-center justify-between gap-3 text-contrast font-medium">` in
+it over a `Toggle small`, which is `ui::switch` at `Toggle.vue`'s own 48x24.
+`showHideInstalled` is `projectType === 'modpack' || (isServerContext && !==
+'modpack') || !!instance` -- two of the three arms are contexts this shell has
+no route into, so the modpack tab is the one that draws it and the others draw
+nothing rather than a switch that would hide nothing.
+
+**The switch is a request filter, not a row filter**, which is the part that
+decided the shape of the port. `Browse.vue`'s `instanceFilters` pushes `{ type:
+'project_id', option: 'project_id:<id>', negative: true }` for every installed
+project, and `search.ts` renders that list into one `project_id NOT IN [...\]`
+group -- so the count the API answers is the count *after* the hiding. A page
+that dropped the rows it did not want would show a list of twenty beside a
+count of two hundred.
+
+That needed the one piece of `palantir-net` this tree had never wanted:
+facet groups beside the project type's. `facets` is a list of or-groups, so a
+second constraint is a second *group* and not a second parameter --
+`search_url_parts_with_facets` builds `[["project_type:modpack"],
+["project_id NOT IN [\"AANobbMI\"]"]]`, and `Search::with_facets` puts them on
+the value the shell already sends. A group goes inside one pair of quotes
+exactly as it stands, which is what lets the exclusion syntax carry quotes of
+its own; a group is opaque on the way in and on the way out.
+
+The page owns the *flag* and the shell owns the *ids*, which is what the
+seam already says: `Asked` carries `hide_installed` beside the query, and
+`Shell::without_installed` reads the project id out of each instance's
+link file (a few bytes, no request) and completes the facet. An instance with
+no link is not in the list -- there is no project id to hide by -- and a
+launcher with no instances at all asks the search unchanged, because
+`facets=[[]]` is a request for a project that satisfies nothing.
+
+**What is still missing is everything under the switch.** Each remaining
+section is a `SearchSidebarFilter` for one filter type -- Category,
+Environment, Game version, Loader, License -- and every option in them is
+read out of `GET /tags`, which this launcher does not ask for. That is the
+next slice, and it needs the tags endpoint rather than another widget.

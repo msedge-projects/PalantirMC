@@ -68,6 +68,7 @@ use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
 use crate::text_gen::Key;
 use crate::pages::{self, discover, home, instance, project, screenshots, servers, skins, user, Screen};
+use palantir_net::engine::Search as ApiSearch;
 use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
@@ -940,6 +941,25 @@ fn instance_name(store: &Store, id: &str) -> String {
         .ready()
         .map(|card| card.name.clone())
         .unwrap_or_else(|| id.to_string())
+}
+
+/// The one facet group a list of installed projects becomes.
+///
+/// `search.ts`'s `negativeByType` arm: every excluded project of a field goes
+/// into *one* group, `project_id NOT IN [...]`, because a second group would be
+/// a second thing the project has to match -- and a project that is not any of
+/// these ids is not a second thing, it is the other half of an "or".
+///
+/// `None` for an empty list, because `facets=[[]]` asks Modrinth for a project
+/// that satisfies nothing and answers with no results at all: a launcher with no
+/// instances has not hidden anything, and a search that hides everything is not
+/// the same honest answer as a search that was never narrowed.
+fn exclusion_facet(ids: &[String]) -> Option<String> {
+    if ids.is_empty() {
+        return None;
+    }
+    let list = ids.iter().map(|id| format!("\"{id}\"")).collect::<Vec<String>>().join(",");
+    Some(format!("project_id NOT IN [{list}]"))
 }
 
 /// The job the download chip and its panel are about.
@@ -3437,10 +3457,47 @@ impl Shell {
         let store = self.store.clone();
         // Cloned rather than borrowed: the worker takes the query, and the answer
         // still needs the round it came with.
-        let query = asked.query.clone();
+        let query = if asked.hide_installed {
+            self.without_installed(asked.query.clone())
+        } else {
+            asked.query.clone()
+        };
         iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
             Message::Screen(pages::Message::search_result(&asked, result))
         })
+    }
+
+    /// The same search with the projects this launcher already has taken out.
+    ///
+    /// `Browse.vue`'s `instanceFilters` pushes `{ type: 'project_id', option:
+    /// 'project_id:<id>', negative: true }` for every installed project while the
+    /// sidebar's *Hide already installed* switch is on, and `search.ts` renders
+    /// those into one `project_id NOT IN [...]` group. So this is a *request*
+    /// filter rather than a row filter: the count the API answers is the count
+    /// after the hiding, which dropping rows on the way to the screen could not
+    /// give -- it would report the unhidden total beside a shortened list.
+    ///
+    /// "Installed" is the reference's own reading: the Modrinth project an
+    /// instance was installed from, which is this launcher's [`store::InstanceLink`]
+    /// -- read out of the small file beside the instance, so this costs a file per
+    /// instance and no request at all. An instance with no link, or one whose link
+    /// cannot be read, is not in the list, because there is no project id to hide
+    /// by; the search is then asked unchanged rather than with an empty group,
+    /// which Modrinth would answer with nothing.
+    fn without_installed(&self, query: ApiSearch) -> ApiSearch {
+        let mut ids: Vec<String> = Vec::new();
+        if let Load::Ready(cards) = self.store.instances() {
+            for card in cards {
+                let Ok(Some(link)) = self.store.instance_link(&card.id) else { continue };
+                if !ids.contains(&link.project_id) {
+                    ids.push(link.project_id);
+                }
+            }
+        }
+        match exclusion_facet(&ids) {
+            Some(group) => query.with_facets(vec![group]),
+            None => query,
+        }
     }
 
     /// Fetch and decode a page of icons, and bring them back as a page message.
@@ -4878,6 +4935,18 @@ impl Shell {
         let mut sections = column![].width(Length::Fill);
         if let Some(checklist) = self.checklist_section() {
             sections = sections.push(checklist);
+        }
+        // `#sidebar-teleport-target`, which `App.vue` puts between the checklist
+        // and the sections below: Discover teleports its own `BrowseSidebar` into
+        // it (`Browse.vue`'s last two lines), so this is where a page that has a
+        // sidebar of its own puts it. It is drawn above the *Playing as* card and
+        // the news feed rather than instead of them, because the reference's
+        // target is a div in the middle of the column and not a replacement for
+        // it.
+        if let Some(pages::Screen::Discover(state)) = Some(&self.screen) {
+            sections = sections.push(
+                pages::discover::sidebar(theme, state).map(pages::Message::Discover).map(Message::Screen),
+            );
         }
         // *Playing as* is `v-show="hasLoggedIntoMinecraft"`, which is the
         // checklist's second fact: a launcher with no account signed in draws the
@@ -8396,6 +8465,26 @@ mod tests {
     /// what makes the drop explicit rather than an oversight.
     fn press(shell: &mut Shell, message: Message) {
         let _ = shell.handle(message);
+    }
+
+    #[test]
+    fn hiding_what_is_installed_is_one_facet_group_and_not_a_row_filter() {
+        // One group, because `facets` is a list of *or* groups: `[["project_id
+        // NOT IN ["A"]]]` and `[["project_id NOT IN ["A"],["project_id NOT IN
+        // ["B"]]]]` would ask for a project matching both exclusions, which is
+        // every project except none of them.
+        assert_eq!(
+            exclusion_facet(&["AANobbMI".to_string()]),
+            Some("project_id NOT IN [\"AANobbMI\"]".to_string())
+        );
+        assert_eq!(
+            exclusion_facet(&["AANobbMI".to_string(), "P7dR8mSH".to_string()]),
+            Some("project_id NOT IN [\"AANobbMI\",\"P7dR8mSH\"]".to_string())
+        );
+        // A launcher with nothing installed has hidden nothing, and `facets=[[]]`
+        // would be a request for a project that satisfies no facet -- an empty
+        // answer wearing the shape of a filter.
+        assert_eq!(exclusion_facet(&[]), None);
     }
 
     fn shell_at(address: &str) -> Shell {

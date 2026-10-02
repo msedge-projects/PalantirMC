@@ -219,6 +219,11 @@ pub enum Message {
     View(usize),
     /// A later page was asked for.
     Page(usize),
+    /// The sidebar's *Hide already installed* switch was pressed.
+    ///
+    /// The page owns only the *flag*: which projects that hides is the shell's
+    /// to read, because they are the instances it holds ([`Asked::hide_installed`]).
+    HideInstalled(bool),
     /// The search was asked for again.
     Search,
     /// One result was opened. Reported rather than applied: which page is in the
@@ -291,6 +296,17 @@ pub struct Asked {
     pub round: u64,
     /// What was asked for, as the engine takes it.
     pub query: ApiSearch,
+    /// Whether the sidebar's *Hide already installed* switch is on.
+    ///
+    /// Not a facet and not an id list: the reference's *hide installed* is a
+    /// server-side filter (`Browse.vue`'s `instanceFilters` pushes
+    /// `{ type: 'project_id', option: 'project_id:<id>', negative: true }` for
+    /// every installed project, which `search.ts` renders as one
+    /// `project_id NOT IN [...]` group), so a page that only dropped the rows
+    /// it did not want would show a different *count* from the one the API
+    /// counted. The page knows the switch; the ids are the shell's, so the
+    /// switch travels with the request and the shell completes it.
+    pub hide_installed: bool,
 }
 
 /// The icons of one page of results, to fetch.
@@ -318,6 +334,13 @@ pub struct State {
     pub view: usize,
     /// The current page, one-based.
     pub page: usize,
+    /// Whether the sidebar's *Hide already installed* switch is on.
+    ///
+    /// The reference's `hideInstalledModpacks`, kept in the same place: it is a
+    /// feature flag of the settings store, and Discover opens on whatever that
+    /// store says. It travels with the request ([`Asked::hide_installed`]) rather
+    /// than filtering the answer here.
+    pub hide_installed: bool,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
     /// The icons of those results, decoded, by the `icon_url` each answers.
@@ -349,6 +372,7 @@ impl State {
             sort: Sort::default(),
             view: DEFAULT_VIEW,
             page: 1,
+            hide_installed: false,
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
             // and an unmade *request* are different sentences on the screen. The
             // shell asks for this page as soon as it draws it (`Screen::opening`),
@@ -425,6 +449,18 @@ impl State {
                 let page = page.max(1);
                 if self.page != page {
                     self.page = page;
+                    return Some(Ask::Search(self.ask()));
+                }
+            }
+            // The switch is a request-shaped control, like the sort and the view
+            // size above it: it changes what the API is asked, so it asks again on
+            // the turn it changes and starts the first page over, because the page
+            // the reader was on means nothing once the set of results is a
+            // different one.
+            Message::HideInstalled(on) => {
+                if self.hide_installed != on {
+                    self.hide_installed = on;
+                    self.page = 1;
                     return Some(Ask::Search(self.ask()));
                 }
             }
@@ -524,7 +560,11 @@ impl State {
     fn ask(&mut self) -> Asked {
         self.round += 1;
         self.results = Load::Loading;
-        Asked { round: self.round, query: self.request() }
+        Asked {
+            round: self.round,
+            query: self.request(),
+            hide_installed: self.hide_installed,
+        }
     }
 
     /// The search this page's controls describe.
@@ -603,6 +643,75 @@ fn body<'a>(blocks: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     .height(Length::Fill)
     .on_scroll(|viewport| Message::Scrolled(scroll::Geometry::of(viewport)))
     .into()
+}
+
+/// Discover's own section of the right panel: `BrowseSidebar`'s first block.
+///
+/// `browse-tab/sidebar.vue`, in the app variant, is a column of sections and each
+/// one is a `border-0 border-b-[1px] border-[--brand-gradient-border] p-4
+/// last:border-b-0` block. The first is not a filter at all: `showHideInstalled`
+/// puts one `<label class="flex cursor-pointer items-center justify-between gap-3
+/// text-contrast font-medium">` in it, over a `Toggle small` -- which is
+/// [`ui::switch`] at `Toggle.vue`'s own 48x24.
+///
+/// It is drawn where the reference draws it, which is not in this page's column:
+/// `Browse.vue` ends with `<Teleport to="#sidebar-teleport-target">`, and `App.vue`
+/// puts that target *between* the onboarding checklist and the panel's own
+/// sections. [`crate::shell`]'s panel is where that ordering lives.
+///
+/// `showHideInstalled` is `projectType === 'modpack' || (isServerContext && !==
+/// 'modpack') || !!instance` -- two of the three arms are contexts this shell has
+/// no route into, so the one that is left is the modpack tab, and nothing is drawn
+/// on the others rather than a switch that would hide nothing.
+///
+/// **The sections under this one are not here.** Each is a `SearchSidebarFilter`
+/// for one filter type -- Category, Environment, Game version, Loader, License --
+/// and every option in them is read out of `GET /tags`, which this launcher does
+/// not ask for. That is the next slice, and it needs the tags endpoint rather
+/// than another widget.
+pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    if state.project_type != ProjectType::Modpack {
+        return Space::new(Length::Shrink, Length::Shrink).into();
+    }
+    let label = text(Key::AppBrowseHideInstalledModpacks.message())
+        .size(16.0)
+        .font(medium())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+    let line = row![]
+        .spacing(12.0)
+        .align_items(Alignment::Center)
+        .width(Length::Fill)
+        .push(label)
+        .push(Space::with_width(Length::Fill))
+        .push(ui::switch(theme, state.hide_installed, Message::HideInstalled(!state.hide_installed)));
+    // `p-4` with a `border-b` under it: iced paints a `Border` on all four sides,
+    // so the panel's own edge is a separate one-pixel rule rather than a border
+    // width on a box that has no other edge.
+    column![
+        container(line)
+            .width(Length::Fill)
+            .padding(Padding { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 }),
+        panel_rule(theme)
+    ]
+    .spacing(0.0)
+    .width(Length::Fill)
+    .into()
+}
+
+/// The `border-b border-[--brand-gradient-border]` every one of the sidebar's
+/// sections carries, as the one thing iced will draw: a one-pixel `--surface-5`
+/// line under the block. The gradient border is what the app's *brand gradient*
+/// paints across the panel's edge, and this shell has no gradient to paint --
+/// `--brand-gradient-border` resolves to the same rule the rest of the panel uses.
+fn panel_rule<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
+    container(Space::new(Length::Fill, 1.0))
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_t: &iced::Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// The project-type tabs: `Browse.vue`'s own list, its own labels.
@@ -1108,6 +1217,35 @@ mod tests {
         assert_eq!(state.update(Message::View(50)), None);
         assert_eq!(state.update(Message::Query("sodium".to_string())), None);
         assert_eq!(state.update(Message::Page(3)), None);
+    }
+
+    #[test]
+    fn the_hide_installed_switch_is_a_control_the_request_carries() {
+        // It changes what the API is asked rather than which rows are drawn, so
+        // it asks like the sort and the view size do -- and it asks with the
+        // *flag*, because which projects are hidden is the shell's to read (they
+        // are the instances it holds).
+        let mut state = State::new(ProjectType::Modpack);
+        assert!(!state.hide_installed, "the reference opens on the flag's default");
+        let Some(Ask::Search(asked)) = state.update(Message::HideInstalled(true)) else {
+            panic!("the switch asks");
+        };
+        assert!(asked.hide_installed);
+        assert!(asked.query.facets.is_empty(), "the page does not name the projects");
+        assert_eq!(state.page, 1, "a different set of results starts at the first page");
+
+        // Pressing it again is not a change.
+        assert_eq!(state.update(Message::HideInstalled(true)), None);
+
+        // And it draws on the tab the reference's `showHideInstalled` covers,
+        // which is the modpack one: two of its three arms are contexts this shell
+        // has no route into.
+        let modpack = State::new(ProjectType::Modpack);
+        drop(sidebar(Gen::Dark, &modpack));
+        for kind in [ProjectType::Mod, ProjectType::Shader, ProjectType::Server] {
+            let other = State::new(kind);
+            drop(sidebar(Gen::Dark, &other));
+        }
     }
 
     #[test]
