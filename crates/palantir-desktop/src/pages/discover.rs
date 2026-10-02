@@ -1214,6 +1214,14 @@ const LOADING_BLOCK: f32 = 64.0;
 /// `opacity-25` on each of them.
 const LOADING_BLOCK_OPACITY: f32 = 0.25;
 
+/// What the whole indicator is tall: three `h-16` blocks and the two `gap-2`
+/// between them, and **not** a fourth gap for the label -- see [`loading`].
+const LOADING_STACK: f32 = LOADING_BLOCK * 3.0 + ROW_GAP * 2.0;
+
+/// Which of the three blocks the label is drawn over. The middle one, because
+/// that is where the reference's lands.
+const LOADING_LABEL_BLOCK: usize = 1;
+
 /// What the page shows while its first answer is on the way:
 /// `base/LoadingIndicator.vue`'s own three blocks under its label.
 ///
@@ -1222,10 +1230,32 @@ const LOADING_BLOCK_OPACITY: f32 = 0.25;
 /// (64px) each, `rounded-lg` (16px), `opacity-25`, in `--color-raised-bg`. The
 /// label's dots are the component's own animation resting at `'...'` (its
 /// `::after` keyframes start and end there), so *Loading...* is the frame a
-/// still capture shows and the frame drawn here. The reference positions the
-/// label *over* the blocks (`position: absolute`); this toolkit has no stacking
-/// widget, so the label is drawn above them instead -- the one visible
-/// departure, and the one worth spending a stack on when a stack exists.
+/// still capture shows and the frame drawn here.
+///
+/// **The label is not in the flow.** Its rule is `position: absolute; z-index: 1`
+/// with no `top`/`left`, so the column's in-flow children are the three blocks
+/// alone: [`LOADING_STACK`] is 3 x 64 + 2 x 8 = **208**. Drawing the label above
+/// them -- which is what this port used to do -- spent 32 pixels on it, its own
+/// 24-pixel line and the `gap-2` above the first block, and put every block 32
+/// lower: measured on `/tmp/discover-loading.png` the three sat at y270, y342
+/// and y414 with the word at y245..259 above them, and on
+/// `/tmp/discover-loading2.png` they are y238, y310 and y382 -- 238..445, which
+/// is the 208. (Each block measures 63 or 64 because the stack lands on a
+/// fractional y; the fill is (27,28,33), which is `--color-raised-bg` at 25%
+/// over the page's (22,24,28).)
+///
+/// **Where it lands is a reading of flexbox, not a measurement.** An
+/// absolutely-positioned child of a flex container with `auto` insets is placed
+/// at the static position it *would* have had as the container's only item, and
+/// this container is `justify-center` on its main (vertical) axis and
+/// `items-center` on the cross one -- so the label is centred over the stack,
+/// which puts it over the middle block. That is where it is drawn
+/// ([`LOADING_LABEL_BLOCK`]). It could not be checked against the reference: its
+/// loading frame needs an answer that never arrives, `:99` belongs to another
+/// agent, and the alternative reading -- top of the stack, over the first block
+/// -- would put the same word 64 pixels higher. A container paints its fill and
+/// then its child, so drawing the label *inside* the middle block is the
+/// overlay without a stacking widget.
 fn loading<'a>(theme: Gen) -> Element<'a, Message> {
     // The label is the reference's own literal rather than a locale key: its
     // template writes `Loading` and the dots are CSS.
@@ -1235,23 +1265,33 @@ fn loading<'a>(theme: Gen) -> Element<'a, Message> {
         // `semibold` is 600.
         .font(Font { weight: iced::font::Weight::Bold, ..semibold() })
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
-    column![
-        label,
-        loading_block(theme),
-        loading_block(theme),
-        loading_block(theme)
-    ]
-    .spacing(ROW_GAP)
-    .align_items(Alignment::Center)
-    .width(Length::Fill)
-    .into()
+    let mut blocks = column![]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center)
+        .width(Length::Fill);
+    for index in 0..3 {
+        let over: Option<Element<'a, Message>> =
+            (index == LOADING_LABEL_BLOCK).then(|| label.clone().into());
+        blocks = blocks.push(loading_block(theme, over));
+    }
+    blocks.into()
 }
 
 /// One of [`loading`]'s three blocks: `h-16 rounded-lg opacity-25` in
-/// `--color-raised-bg`.
-fn loading_block<'a>(theme: Gen) -> Element<'a, Message> {
-    container(Space::new(Length::Fill, Length::Fixed(LOADING_BLOCK)))
+/// `--color-raised-bg`, with `over` drawn on top of it when it is the block the
+/// label belongs to.
+fn loading_block<'a>(theme: Gen, over: Option<Element<'a, Message>>) -> Element<'a, Message> {
+    // A `Container` holds one child, so the block is the child: the label where
+    // the label belongs, and a space that fills the box where it does not. The
+    // `h-16` is on the container either way, because a container sized by its
+    // child would be as tall as the word.
+    let block = match over {
+        Some(over) => container(over).center_x().center_y(),
+        None => container(Space::new(Length::Fill, Length::Fill)),
+    };
+    block
         .width(Length::Fill)
+        .height(Length::Fixed(LOADING_BLOCK))
         .style(move |_theme: &iced::Theme| container::Appearance {
             background: Some(Background::Color(at_opacity(
                 theme_gen::ink(theme, Ink::RaisedBg),
@@ -2095,6 +2135,25 @@ mod tests {
         }
         assert_eq!(LOADING_BLOCK, 64.0);
         assert_eq!(LOADING_BLOCK_OPACITY, 0.25);
+        // The label is `position: absolute`, so it spends no height: three blocks
+        // and the two gaps between them is the whole stack. Drawing it above the
+        // blocks -- what this port used to do -- added its 24-pixel line and a
+        // third gap, 32 pixels, and every block sat that much too low.
+        assert_eq!(LOADING_STACK, 208.0);
+        assert_eq!(LOADING_STACK, LOADING_BLOCK * 3.0 + ROW_GAP * 2.0);
+        assert_eq!(
+            LOADING_LABEL_BLOCK, 1,
+            "an auto-inset absolute child of a `justify-center` flex column \
+             lands on the stack's centre, which is the middle block"
+        );
+        // And every block draws, with and without the label on it.
+        for theme in Gen::ALL {
+            drop(loading_block(*theme, None));
+            drop(loading_block(
+                *theme,
+                Some(text("Loading...".to_string()).into()),
+            ));
+        }
         let store = Store::default();
         let waiting = State::new(ProjectType::Modpack);
         assert!(waiting.results.waiting());
