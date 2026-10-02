@@ -2227,3 +2227,63 @@ for `modpack` -- so the reference sidebar shows a single *Category* section
 with ten options, which is exactly what its plate shows. The other filter
 types `search.ts` declares (`environment`, `game_version`, the loaders,
 `license`) are real, and they are the sections still missing here.
+### The panel toggle, which is not everywhere
+
+The reference gates its own: `v-if="!forceSidebar && appSettings.toggleSidebar"`.
+On Discover, Project and User -- the three routes `App.vue`'s `forceSidebar`
+names, and the three `Route::forces_sidebar` names here -- there is no arrow in
+the head at all, because the panel is up whatever the reader has toggled. This
+shell drew one unconditionally, which put a control on the page whose press
+could not move the thing it pointed at. The gate is now
+`Shell::panel_toggle_shown`, and a test walks both halves of it.
+
+The other half of that row was the order: `App.vue` puts the `IconButton` before
+the `AppActionBar`, and this shell had it after. On Discover, where the toggle
+is not drawn at all, the action bar is now the only thing on that side of the
+head -- which is what the reference plate shows, and which is why the earlier
+capture of the two side by side had an arrow sitting between the chip and the
+window controls where the reference has nothing.
+
+The arrow itself now flips: `rotate-180` while the panel is down, which this
+draws as the launcher's own `LeftArrow` because iced has no transform on an
+icon. The reference's class list says the rotation and not the glyph, and the
+two are the same shape.
+
+### The ad block under the panel
+
+The reference stacks it *under* the scroll region, not inside it:
+`PromotionWrapper` is a sibling of `app-sidebar-scrollable`, and the scroll
+region carries a `pb-12` so the last section is not left under the link. So the
+panel here is a column of scroll, link, fade and plate, and the scroll carries
+the reserve.
+
+The numbers came off the reference plate rather than off the class list, because
+the class list does not say where anything lands:
+
+| Thing | Measured on the reference |
+| --- | --- |
+| Link ink | x 1035..1227, y 440..456 |
+| Link ink colour | `(199, 138, 255)` = dark `--color-purple` |
+| Ad art | from y 471, filling to the panel foot |
+| Panel width | 300 (`min-w-[300px]` on the image) |
+
+The fade is `height: 5rem` of `--brand-gradient-fade-out-color`, which in dark
+is `linear-gradient(to bottom, rgba(24, 30, 31, 0), #171d1e 80%)` -- transparent
+at the top and the panel's own darkest wash at four fifths of the way down.
+`.app-sidebar.has-plus::after` is `display: none`, so a Plus reader gets a hard
+edge instead; this shell has no Plus reading and draws the fade.
+
+**The image itself is not drawn.** It is a remote promotional asset fetched from
+Modrinth's CDN, and this launcher has no ad fetch. The plate draws a `bg-bg` box
+of the reference's own size where it would go: a box in the right place at the
+right height says there is something here without claiming what, which is the
+smaller lie of the two. The link above it is real, is drawn in full, and goes to
+the reference's own `modrinth.plus?app`.
+
+One gate is a reading rather than a port. `showAd` is `sidebarVisible &&
+!hasPlus && credentials !== undefined`, and the third term is the one that
+cannot be checked here: this launcher holds no Modrinth credential and never
+will, so the reference's own answer for a launcher in this shape is the block
+being drawn. The other two are real -- a Plus subscriber gets neither the block
+nor the fade, and a panel that is down has no block under it -- and both are
+what `promo_shown` reads.

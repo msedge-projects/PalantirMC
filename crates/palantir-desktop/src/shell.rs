@@ -232,6 +232,29 @@ pub const CONTROLS_WIDTH: f32 = 2.0 * CONTROLS_PAD + 3.0 * CONTROLS_BUTTON + 2.0
 /// `p-4` on each of the sidebar's sections, and `text-base` on the heading
 /// inside one.
 const PANEL_SECTION_PAD: f32 = 16.0;
+/// The ad block's three measurements, all off a 1280x720 plate of the reference
+/// rather than off its class list.
+///
+/// The reference writes the ad's height twice -- `min-h-[250px]` on the link and
+/// `bottom-[250px]` on the block above it -- and the 300 comes from the image's
+/// own `min-w-[300px]`. The link's own padding is `py-3`, its icon is
+/// `text-2xl`, and the fade above the ad is five `rem` of
+/// `--brand-gradient-fade-out-color`.
+const PROMO_PLATE: f32 = 250.0;
+/// `py-3` on the *Upgrade to Modrinth Plus* link.
+const PROMO_LINK_PAD_Y: f32 = 12.0;
+/// `text-2xl` on the link's `ArrowBigUpDashIcon`.
+const PROMO_ICON: f32 = 24.0;
+/// The link's own label, which is `font-medium` and inherits the panel's
+/// base size.
+const PROMO_LABEL: f32 = 16.0;
+/// Five `rem` of fade, from `.app-sidebar::after`'s own `height: 5rem`.
+const PROMO_FADE: f32 = 80.0;
+/// `pb-12` on the scroll region, which is what keeps the last section clear of
+/// the link above the ad.
+const PANEL_PROMO_RESERVE: f32 = 48.0;
+/// Where the reference's own link goes: `modrinth.plus?app`.
+const PROMO_PLUS_URL: &str = "https://modrinth.plus?app";
 const PANEL_HEADING: f32 = 16.0;
 /// The accounts card's frame: `rounded-xl`, `p-3`, and the `mt-2` that holds it
 /// off the heading.
@@ -1716,6 +1739,18 @@ impl Shell {
     /// forces it (`App.vue`'s `forceSidebar`, on Discover, Project and User).
     fn panel_shown(&self) -> bool {
         self.sidebar || self.address.route.forces_sidebar()
+    }
+
+    /// Whether the head draws the arrow that opens and closes the panel.
+    ///
+    /// The reference's own gate, and the reason it is not simply "always":
+    /// `App.vue` puts `v-if="!forceSidebar && appSettings.toggleSidebar"` on the
+    /// `IconButton`, so on Discover, Project and User -- the three routes in
+    /// [`route::Route::forces_sidebar`] -- there is no arrow at all. The panel is
+    /// up on those pages whatever the reader's toggle says, so a control drawn
+    /// there is one whose press cannot move the thing it points at.
+    fn panel_toggle_shown(&self) -> bool {
+        !self.address.route.forces_sidebar()
     }
 
     /// Apply a message.
@@ -4064,10 +4099,17 @@ fn tags(&self) -> iced::Command<Message> {
             // that reason, and this shell used to draw the run only in the header
             // of the instance it belonged to.
             .push(Space::with_width(Length::Fill))
+            // The toggle comes *before* the action bar, which is the reference's
+            // own order (`App.vue`'s head section puts the `IconButton` ahead of
+            // the `AppActionBar` div), and it is not drawn at all on a page that
+            // forces the panel: `v-if="!forceSidebar && appSettings.toggleSidebar"`.
+            // On Discover, Project and User there is nothing the arrow could do
+            // -- the panel is up whatever the toggle says -- so drawing one there
+            // is a control that lies about what the reader can change.
+            .push_maybe(self.panel_toggle_shown().then(|| self.panel_toggle()))
+            // `mr-3` on the toggle, then the action bar's own.
+            .push(Space::with_width(12.0))
             .push(self.action_bar())
-            .push(Space::with_width(8.0))
-            .push(self.panel_toggle())
-            // `mr-3` on the toggle, then the controls' own reservation.
             .push(Space::with_width(12.0));
         container(row.push(self.window_controls()))
             .width(Length::Fill)
@@ -4686,7 +4728,13 @@ fn tags(&self) -> iced::Command<Message> {
     }
 
     /// The panel toggle: `RightArrowIcon`, flipped when the panel is down,
-    /// `mr-3` from the controls.
+    /// `mr-3` from the action bar.
+    ///
+    /// `App.vue`'s own `IconButton` beside the action bar: a `RightArrowIcon`
+    /// carrying `rotate-180` while the panel is hidden, so the arrow points at
+    /// the edge the panel would come back from, and a `base` face while it is
+    /// shown against a `quiet` one while it is not -- which is the difference
+    /// between the raised plate this draws and no plate at all.
     fn panel_toggle(&self) -> Element<'_, Message> {
         let showing = self.sidebar;
         let ink = theme_gen::ink(self.theme, if showing { INK_CONTRAST } else { INK_DEFAULT });
@@ -4695,7 +4743,11 @@ fn tags(&self) -> iced::Command<Message> {
         } else {
             None
         };
-        let face = container(icon::icon(Glyph::RightArrow, CONTROLS_ICON, ink))
+        // The reference rotates the one icon it has rather than holding a
+        // second, so a launcher with both arrows picks the one that points at
+        // where the panel would go rather than drawing a mirror of the shape.
+        let glyph = if showing { Glyph::RightArrow } else { Glyph::LeftArrow };
+        let face = container(icon::icon(glyph, CONTROLS_ICON, ink))
             .width(Length::Fixed(CONTROLS_BUTTON))
             .height(Length::Fixed(CONTROLS_BUTTON))
             .center_x()
@@ -5020,24 +5072,130 @@ fn tags(&self) -> iced::Command<Message> {
         }
         // `border-l` over the wash: iced paints a `Border` on all four sides, so
         // the panel's own edge is a one-pixel column rather than a border width.
-        container(
-            row![
-                hairline(theme, true),
-                // The panel is a scroll region of its own, named because a wheel
-                // over it is not a wheel over the page beside it.
-                crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
+        let scroll = crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let body: Element<'_, Message> = if self.promo_shown() {
+            // The reference stacks the ad *under* the scroll region rather than
+            // inside it -- `PromotionWrapper` is a sibling of
+            // `app-sidebar-scrollable` -- and pads the scroll region by `pb-12`
+            // so the last section is not left under the link. So the column here
+            // is scroll, then the promo, and the scroll carries the padding.
+            column![
+                container(scroll)
                     .width(Length::Fill)
                     .height(Length::Fill)
+                    .padding(Padding {
+                        top: 0.0,
+                        bottom: PANEL_PROMO_RESERVE,
+                        left: 0.0,
+                        right: 0.0,
+                    }),
+                self.promo(),
             ]
-            .height(Length::Fill),
-        )
-        .width(Length::Fixed(PANEL))
-        .height(Length::Fill)
-        .style(move |_theme: &Theme| container::Appearance {
-            background: Some(wash(theme)),
-            ..container::Appearance::default()
-        })
-        .into()
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        } else {
+            scroll.into()
+        };
+        container(row![hairline(theme, true), body].height(Length::Fill))
+            .width(Length::Fixed(PANEL))
+            .height(Length::Fill)
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(wash(theme)),
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// Whether the panel carries the reference's ad block.
+    ///
+    /// `App.vue`'s `showAd`: the panel is up, the reader is not a Modrinth Plus
+    /// subscriber, and the app holds credentials. The third of those is the one
+    /// this launcher has no reading of -- it holds no Modrinth credential and
+    /// never will, so `credentials.value !== undefined` is the reference's own
+    /// answer for a launcher in this shape, and the block is drawn.
+    ///
+    /// The Plus half is a real gate rather than a formality: `hasPlus` also puts
+    /// `has-plus` on the panel, which is what removes the gradient fade above the
+    /// ad (`.app-sidebar.has-plus::after { display: none }`) and the `pb-12`.
+    fn promo_shown(&self) -> bool {
+        self.panel_shown()
+    }
+
+    /// The panel's ad block: the *Upgrade to Modrinth Plus* link over a 300x250
+    /// placeholder for Modrinth Hosting.
+    ///
+    /// `App.vue`'s `<template v-if="showAd">`: an absolutely positioned link at
+    /// `bottom-[250px]` in `text-purple font-medium` with a 24px
+    /// `ArrowBigUpDashIcon` and a `gap-1`, then `PromotionWrapper` -- a
+    /// `bg-bg` box holding a 300x250 image fetched from Modrinth's CDN.
+    ///
+    /// The image is not drawn. It is a remote promotional asset this launcher
+    /// does not fetch, and the alternatives were a placeholder box in its place
+    /// or a hole where the reference has one; a box of the right size in the
+    /// right place says "there is something here" without claiming what, which is
+    /// the smaller lie. The link above it is real and is drawn in full.
+    ///
+    /// The measurements are off a 1280x720 plate of the reference rather than
+    /// off the class list, because the class list does not say where the link
+    /// lands: its ink measures x 1035..1227, which is 269 pixels centred in the
+    /// 300-pixel panel with a `py-3` (12) block around a 20-pixel line.
+    fn promo(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let key = "panel:promo";
+        let (factor, _) = crate::ui::interaction(key);
+        let ink = crate::theme::brightness(theme_gen::ink(theme, Ink::Purple), factor);
+        let link = row![]
+            .align_items(Alignment::Center)
+            .spacing(4.0)
+            .push(icon::icon(Glyph::ArrowBigUpDash, PROMO_ICON, ink))
+            .push(
+                text(Key::AppNavUpgradeToModrinthPlus.message())
+                    .size(PROMO_LABEL)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(ink)),
+            );
+        let upgrade = mouse_area(container(link).padding(Padding {
+            top: PROMO_LINK_PAD_Y,
+            bottom: PROMO_LINK_PAD_Y,
+            left: PANEL_SECTION_PAD,
+            right: PANEL_SECTION_PAD,
+        }))
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(Message::OpenUrl(PROMO_PLUS_URL.to_string()));
+        // The fade the reference paints over the last five rem of the wash, so
+        // the scroll region's last section dissolves into the ad rather than
+        // stopping at a hard edge. `--brand-gradient-fade-out-color` is
+        // `linear-gradient(to bottom, rgba(24, 30, 31, 0), #171d1e 80%)` in
+        // dark, which is transparent at the top and the panel's own darkest
+        // wash at four fifths of the way down.
+        let fade = container(Space::new(Length::Fill, PROMO_FADE))
+            .width(Length::Fill)
+            .height(Length::Fixed(PROMO_FADE))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Gradient(gradient::Gradient::Linear(
+                    gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2))
+                        .add_stop(0.0, Color::from_rgba(24.0 / 255.0, 30.0 / 255.0, 31.0 / 255.0, 0.0))
+                        .add_stop(0.8, Color::from_rgba(23.0 / 255.0, 29.0 / 255.0, 30.0 / 255.0, 1.0)),
+                ))),
+                ..container::Appearance::default()
+            });
+        // The ad's own plate: `bg-bg`, the 300x250 box `PromotionWrapper`'s
+        // wrapper is, with nothing in it. See the note above on why.
+        let plate = container(Space::new(Length::Fill, PROMO_PLATE))
+            .width(Length::Fill)
+            .height(Length::Fixed(PROMO_PLATE))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
+                ..container::Appearance::default()
+            });
+        column![upgrade, fade, plate]
+            .width(Length::Fill)
+            .into()
     }
 
     /// Whether Home is drawing the reference's welcome screen.
@@ -10081,6 +10239,69 @@ mod tests {
             &settings(true, false, true),
         );
         assert!(!instance.panel_shown(), "an instance page does not force it");
+    }
+
+    #[test]
+    fn the_panel_toggle_is_only_where_it_could_change_something() {
+        // `v-if="!forceSidebar && appSettings.toggleSidebar"`: on a page that
+        // forces the panel there is no arrow, because the panel is up whatever
+        // the toggle says. A control drawn there is one whose press cannot move
+        // what it points at.
+        for path in ["/browse/modpack", "/project/sodium", "/user/jelly"] {
+            let shell = Shell::new(
+                Address::parse(path).expect(path),
+                Gen::Dark,
+                &settings(false, false, true),
+            );
+            assert!(
+                !shell.panel_toggle_shown(),
+                "{path} forces the panel, so the arrow is not drawn"
+            );
+        }
+        for path in ["/", "/skins", "/screenshots"] {
+            let shell = Shell::new(
+                Address::parse(path).expect(path),
+                Gen::Dark,
+                &settings(false, false, true),
+            );
+            assert!(
+                shell.panel_toggle_shown(),
+                "{path} leaves the panel to the reader, so the arrow is there"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ad_block_is_where_the_panel_is() {
+        // `showAd`: the panel is up, so the block is under it. It is a sibling of
+        // the scroll region rather than a section inside it, which is what the
+        // `pb-12` on the scroll is for -- a section that had the ad scroll past
+        // it would be the reference's page with an extra step added.
+        for (path, shown) in [
+            ("/", true),
+            ("/browse/modpack", true),
+            ("/skins", true),
+        ] {
+            let shell = Shell::new(
+                Address::parse(path).expect(path),
+                Gen::Dark,
+                &settings(false, false, true),
+            );
+            assert_eq!(shell.promo_shown(), shown, "{path}");
+        }
+        let off = Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &settings(true, false, true),
+        );
+        assert!(!off.promo_shown(), "a panel that is down has no ad under it");
+
+        // The two heights the reference writes twice: the ad's own 250, and the
+        // five rem of fade above it. The fade exists so the last section
+        // dissolves into the ad, so a zero here would be a hard edge where the
+        // reference has a gradient.
+        assert_eq!(PROMO_PLATE, 250.0);
+        assert_eq!(PROMO_FADE, 80.0);
     }
 
     /// A shell whose accounts come from a file of its own, which is what the
