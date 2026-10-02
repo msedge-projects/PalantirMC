@@ -1138,6 +1138,13 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
     )
 }
 
+/// The size of the name under the model.
+///
+/// The reference's renderer draws it as a sprite, so there is no class for it;
+/// 18 is what its cap height measures on a capture at 1280x720 -- 12 rows of ink
+/// at y563..577 against this font's 10 at 16.
+const NAMETAG_SIZE: f32 = 18.0;
+
 /// The gap between the model and the block the renderer draws under it.
 ///
 /// `gap-6` on `.skin-preview-subtitle`, the block's own spacing. The distance
@@ -1262,10 +1269,15 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
     // says is in force, the notice, and the account's own rows -- the reference's
     // nametag and subtitle, which its renderer draws inside the box.
     let mut body = column![
+        // The nametag, which the reference's renderer draws as a sprite under the
+        // model: on a capture of it the name is inked (176,186,197) --
+        // `--color-text-default`, the same ink every `text-primary` resolves to --
+        // over 12 rows of cap at y563..577, which at this font is 18 rather than
+        // the 16 this drew, and not the contrast white.
         text(appearance.username.clone())
-            .size(16.0)
-            .font(crate::style::semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            .size(NAMETAG_SIZE)
+            .font(crate::style::medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
         caption(theme, &wearing_line(appearance)),
     ]
     .spacing(ROW_GAP)
