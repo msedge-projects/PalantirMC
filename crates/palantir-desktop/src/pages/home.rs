@@ -363,12 +363,14 @@ fn library<'a>(
 ///
 /// The reference's toolbar is `flex flex-col gap-2` of two rows: the search
 /// (`min-w-[16rem] flex-1`), *New group* and the brand *New instance*; then the
-/// sort and group comboboxes, a `h-6 w-px` divider and the filter bar. Two of
-/// those controls have no model here yet and are not drawn rather than drawn
+/// sort and group comboboxes, a `h-6 w-px` divider and the filter bar. Of those,
+/// two need a model this launcher has not got and are not drawn rather than drawn
 /// dead: *New group* needs the group store (`InstanceCard.group` is read from
-/// disk but nothing writes one) and the filter bar needs the instance-type,
-/// game-version and loader filters. What the page can act on is the search, the
-/// create button and the sort control, on the rows the reference puts them on.
+/// disk but nothing writes one), and what the filter bar opens -- the
+/// instance-type, game-version and loader dropdowns -- needs the three filters.
+/// The divider and the filter mark around them are geometry, and are drawn; what
+/// the page can act on is the search, the create button and the sort control, on
+/// the rows the reference puts them on.
 fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     let first = row![
         ui::search(
@@ -392,9 +394,55 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // The sort control shows the chosen order; the combobox that opens to pick
     // another is the piece of the control this page still draws as a display
     // (see the module note above).
-    let second = row![ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0)]
-        .spacing(ROW_GAP)
-        .align_items(Alignment::Center);
+    //
+    // The row is the reference's three children and not one: `library-toolbar/
+    // index.vue` writes `<SortMenu />`, then
+    // `<div class="mx-2 h-6 w-px bg-surface-5" />`, then `<FilterMenu />`. The
+    // rule and the filter mark are the two pieces of that row that need no model
+    // to draw, so they are drawn; what the filter *opens* -- the instance-type,
+    // game-version and loader dropdown -- is the part with no model here, and is
+    // named in the comment on [`toolbar`] rather than faked with a menu of
+    // nothing.
+    //
+    // The rule is 1 wide and 24 tall (`h-6 w-px`, which is 1.5rem of `surface-5`).
+    // Its `mx-2` is not drawn around it: the row's own `gap-2` ([`ROW_GAP`], 8)
+    // already puts 8 on either side of a 1-pixel child, which is the same 8 the
+    // margins ask for and one number instead of two.
+    // A vertical rule fills whatever height it is given, and this one is `h-6`, so
+    // the box that gives it that height is a container 1 wide and 24 tall -- which
+    // is also the `w-px` the class asks for, so the two numbers are one box.
+    let rule_line: Element<'a, Message> = iced::widget::Rule::vertical(TOOLBAR_RULE_WIDTH)
+        .style(move |_theme: &Theme| iced::widget::rule::Appearance {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            // The line's thickness is `Appearance::width`; `Rule::vertical`'s
+            // own width is only the slot it is given.
+            width: 1,
+            radius: 0.0.into(),
+            fill_mode: iced::widget::rule::FillMode::Full,
+        })
+        .into();
+    let rule: Element<'a, Message> = container(rule_line)
+        .width(Length::Fixed(TOOLBAR_RULE_WIDTH))
+        .height(Length::Fixed(TOOLBAR_RULE_HEIGHT))
+        .into();
+    // `DropdownFilterBar.vue` with `use-filter-icon` set (which `filter-menu.vue`
+    // sets) and nothing applied: the `v-if="showLabel"` span is
+    // `flex h-10 items-center text-nowrap text-base font-medium text-primary`
+    // holding `<FilterIcon class="size-5 text-primary" />` *instead of* the label
+    // (`<template v-else>{{ effectiveLabel }}</template>`). So the whole control,
+    // with no filter chosen, is a 20-pixel mark in `--color-text-default` --
+    // [`INK_DEFAULT`], not the white [`INK_CONTRAST`], the class names aside (see
+    // the preset quote on the empty state). The applied-filter chips that would
+    // follow it are `size="lg"` outlined buttons, one per chosen filter, and
+    // there are none.
+    let filter = icon::icon(Glyph::Filter, FILTER_MARK, theme_gen::ink(theme, INK_DEFAULT));
+    let second = row![
+        ui::select(theme, Key::AppLibrarySortLabel, state.sort.label(), 200.0),
+        rule,
+        filter
+    ]
+    .spacing(ROW_GAP)
+    .align_items(Alignment::Center);
     column![first, second].spacing(ROW_GAP).width(Length::Fill).into()
 }
 
@@ -414,6 +462,17 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// that window rather than a function of the window's own size. A wider window
 /// keeps five wider tiles where the reference would add a column; the fix is a
 /// width on the geometry the shell reports, not a second guess here.
+/// `library-toolbar/index.vue`'s own rule between the sort group and the filter
+/// bar: `<div class="mx-2 h-6 w-px bg-surface-5" />`. `w-px` is one pixel and
+/// `h-6` is 1.5rem; the colour is `--surface-5` ([`Ink::Surface5`]).
+const TOOLBAR_RULE_WIDTH: f32 = 1.0;
+/// The same rule's height, `h-6` -- 24.
+const TOOLBAR_RULE_HEIGHT: f32 = 24.0;
+
+/// `DropdownFilterBar.vue`'s mark with `use-filter-icon` set and nothing applied:
+/// `<FilterIcon class="size-5 text-primary" />`, and `size-5` is 1.25rem.
+const FILTER_MARK: f32 = 20.0;
+
 const TILE_GAP: f32 = 12.0;
 const TILE_COLUMNS: usize = 5;
 /// 1280 - 65 (rail) - 300 (panel) - 2 * 24 (the page's inset).
@@ -992,6 +1051,27 @@ mod tests {
             // cannot make a `Store` hold cards without a filesystem, so the card's
             // page goes through the same body the library arm builds.
             drop(library_view(*theme, &state, &sample()));
+        }
+    }
+
+    #[test]
+    fn the_toolbar_s_own_rule_and_filter_mark_are_the_size_its_classes_say() {
+        // `library-toolbar/index.vue`'s row is three children, and two of them
+        // are geometry rather than behaviour: `<div class="mx-2 h-6 w-px
+        // bg-surface-5" />` and, with `use-filter-icon` set and nothing applied,
+        // `DropdownFilterBar`'s `<FilterIcon class="size-5 text-primary" />`.
+        assert_eq!(TOOLBAR_RULE_WIDTH, 1.0, "`w-px` is one pixel");
+        assert_eq!(TOOLBAR_RULE_HEIGHT, 24.0, "`h-6` is 1.5rem");
+        assert_eq!(FILTER_MARK, 20.0, "`size-5` is 1.25rem");
+        // The rule's own `mx-2` is not drawn around it: the row's `gap-2` puts
+        // [`ROW_GAP`] either side of a 1-pixel child, which is the 17 the
+        // reference's 8 + 1 + 8 comes to.
+        assert_eq!(ROW_GAP * 2.0 + TOOLBAR_RULE_WIDTH, 17.0);
+        // And the row draws, with the rule and the mark in it, over every theme.
+        let cards = sample();
+        let state = State::default();
+        for theme in Gen::ALL {
+            drop(library_view(*theme, &state, &cards));
         }
     }
 
