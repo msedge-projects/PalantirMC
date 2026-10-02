@@ -1658,3 +1658,63 @@ Two things are honest limits rather than plans: `tools/xshot.py` has never been 
 as a draft to fix and commit), and the four first jobs are named in `TRANSFER.md`
 rather than done -- capture the four surfaces, the crash, the windowed lists, and the
 parity inventory of section 31.
+
+## 33. Both clients on one box, read pixel by pixel
+
+`tools/xshot.py` works as written (it was run first for the reference, then for this
+launcher, and nothing in it needed changing). The reference runs on `:99` and this
+launcher on `:98`, both at 1280x720 on a 1920x1080 Xvfb, so neither window can occlude
+the other and a capture of either is a capture of a window nobody has touched. What
+follows is what the two screens said when read side by side, not what the source said.
+
+### The installed surface, measured
+
+| what | this launcher | reference |
+| --- | --- | --- |
+| rail's chrome | `(39, 41, 46)` at x=2, every row | identical |
+| page background | `(22, 24, 28)` | `(21, 23, 27)` |
+| head rule at y=48 | `(66, 68, 74)` from x=65 right | identical |
+| rail button centres | 72, 124, 176, 228, 280, Create ~356, Settings 636, Profile 688 | identical |
+| scrim over chrome, y=200 | `(30, 40, 41)` | `(28, 37, 39)` |
+| scrim over the page, y=200 | `(24, 35, 35)` | `(22, 31, 32)` |
+| scrim's solved alpha | 0.647 at y=200, 0.706 at 350, 0.836 at 600 | 0.647, 0.706, 0.836 |
+| settings dialog | 509 wide, no tabs | 928 x 588, centred, 8 tabs |
+| welcome call to action | 289 x 41, full brand green | 214 x 40, brand at half opacity |
+
+### The bed was right and the layer under it was missing
+
+The modal's scrim is the reference's own two-stop ramp, and a first capture of it read
+as a flat opaque fill: solved from two different backdrops, the dialog's bed gave an
+alpha of exactly `1.0` at every row. The stops were not the reason. `render` returned
+the modal layer *before* it built the window, so the ramp was compositing over the
+window's own clear colour -- the same colour at every row, which is exactly what a
+solve from two backdrops reports as an opaque layer. The comment that had been there
+said a modal replaces the window "and that is a limitation rather than a choice", and
+the limitation was in the code, not the toolkit: iced 0.12 has no stack widget, but a
+column of two `Fill` children whose spacing is minus the window's height lays the
+second child back at the first one's own top. With the window under it, the scrim now
+solves to the reference's alpha at every sampled row and composes within three levels
+of the reference's own frame over both backdrops.
+
+### The switch that was tested and not kept
+
+`iced`'s `web-colors` feature packs colours as sRGB and renders to a non-sRGB surface,
+which is what a browser does; this app's reference is a browser, so it was worth a
+measurement rather than an opinion. Built both ways at the same commit and read at the
+same 24 rows over the rail and the page: without it the worst channel difference to
+the reference was 5, with it 4, with the same bias in both. It is not kept -- a global
+change to how every colour in the app is packed, for a difference inside the sampling
+noise of an eight-bit composite, is not a trade this tree should make.
+
+### What the two screens still disagree about
+
+The settings dialog is the largest of them: the reference's is `min(928px, 95vw - 10rem)`
+wide with a 24-pixel body inset, a 288-wide tab column behind a 1-pixel `--surface-5`
+divider, an 81-pixel header (24-padding, 24-pixel title, 1-pixel rule) and a content
+area of `min(65vh, 600px)` -- 928 x 588 at this window -- and it carries eight tabs in
+two categories (Appearance, Features, Behavior, Language, Feature flags / Profile,
+Social, Privacy). This launcher's settings is a 509-wide column of theme and language
+options with no tabs at all. The button inventory has the same shape of gap: the
+reference's own `ButtonFrame.vue` has five sizes and most of its buttons -- 61 `xl` and
+43 `lg` among them -- are not the single 40-pixel row this kit draws for all of them.
+Both are ported by the slices that follow this note.
