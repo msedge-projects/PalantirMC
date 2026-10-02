@@ -1696,7 +1696,7 @@ fn forget_confirm<'a>(
         heading(theme, Key::AppSkinsDeleteModalTitle.message()),
         caption(theme, Key::AppSkinsDeleteModalDescription.message()),
     ]
-    .spacing(EDITOR_HEADING_GAP)
+    .spacing(CONFIRM_GAP)
     .push(
         row![]
             .spacing(ROW_GAP)
@@ -1947,6 +1947,14 @@ pub fn edit_view<'a>(
 /// size argument at all, so a button drawn through one cannot be at this row
 /// however it is asked for.
 const MODAL_BUTTON: ui::Size = ui::Size::Md;
+
+/// The gap between the question's own parts.
+///
+/// `ConfirmModal.vue`'s content is a `flex flex-col gap-4`, so the description
+/// and the row of buttons under it are 16 apart. This drew them at 8, which is
+/// the editor's own heading gap -- a number from `EditSkinModal.vue`'s `<h2
+/// class="... mb-2">`, and this is the other template's column.
+const CONFIRM_GAP: f32 = 16.0;
 
 /// The gap between two of the reference's own sections in the editor.
 ///
@@ -2886,6 +2894,11 @@ mod tests {
             ui::scoped(EDIT_KEY, "forget-cancel"),
             ui::scoped(EDIT_KEY, "forget")
         );
+        // `flex flex-col gap-4` above the buttons, so the description and the row
+        // under it are 16 apart -- twice the 8 this drew them at, which was the
+        // editor's own heading gap and this column is not that one.
+        assert_eq!(CONFIRM_GAP, 16.0);
+        assert_eq!(CONFIRM_GAP, 2.0 * EDITOR_HEADING_GAP);
     }
 
     #[test]
