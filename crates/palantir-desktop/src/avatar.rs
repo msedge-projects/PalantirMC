@@ -108,6 +108,27 @@ fn mask(side: u32) -> Vec<bool> {
     out
 }
 
+/// The same mask for a `circle`, which is what `Avatar.vue`'s `circle` prop asks
+/// for and what a profile's own avatar is drawn with.
+///
+/// A different shape rather than a different radius: the rounded rectangle above
+/// tests the distance from the corner box's centre, so it cannot become a circle
+/// by growing its radius -- at `side / 2` the straight edges would vanish and the
+/// corner boxes would meet, and the result would be a rounded square with no
+/// straight part at all rather than a disc. So the test is from the middle.
+fn circle_mask(side: u32) -> Vec<bool> {
+    let centre = side as f32 / 2.0;
+    let radius = centre;
+    let mut out = Vec::with_capacity((side * side) as usize);
+    for y in 0..side {
+        for x in 0..side {
+            let (dx, dy) = (x as f32 + 0.5 - centre, y as f32 + 0.5 - centre);
+            out.push(dx * dx + dy * dy <= radius * radius);
+        }
+    }
+    out
+}
+
 /// A picture on the box's canvas: `side * side` pixels of RGBA.
 ///
 /// Private, and only ever the input to one [`Icon`]: what a card is handed is the
@@ -123,6 +144,14 @@ struct Picture {
 /// empty -- which is the fetch having failed rather than a project having no icon,
 /// and both are the caller's to report.
 fn masked(bytes: &[u8], side: u32) -> Option<Picture> {
+    masked_as(bytes, side, false)
+}
+
+/// [`masked`], with the shape asked for rather than assumed.
+///
+/// `circle` is `Avatar.vue`'s own prop, which `UserPageHeader.vue` passes for a
+/// profile's avatar and which nothing else in the app's project pages uses.
+fn masked_as(bytes: &[u8], side: u32, circle: bool) -> Option<Picture> {
     if side == 0 || bytes.is_empty() {
         return None;
     }
@@ -154,7 +183,7 @@ fn masked(bytes: &[u8], side: u32) -> Option<Picture> {
         ((side - width) / 2) as i64,
         ((side - height) / 2) as i64,
     );
-    let kept = mask(side);
+    let kept = if circle { circle_mask(side) } else { mask(side) };
     let mut pixels = canvas.into_raw();
     for (index, kept) in kept.iter().enumerate() {
         if !kept {
@@ -174,7 +203,7 @@ fn masked(bytes: &[u8], side: u32) -> Option<Picture> {
 /// the source was -- and the pixels are deliberately not kept beside the handle: the
 /// handle already holds them, and the one thing this icon is for is being drawn at
 /// the size it was made at ([`crate::ui::icon_box`]).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Icon {
     /// The picture, rounded, as the renderer takes it.
     handle: Handle,
@@ -188,6 +217,17 @@ impl Icon {
     /// icon that is wrong.
     pub fn of(bytes: &[u8], side: u32) -> Option<Icon> {
         let picture = masked(bytes, side)?;
+        Some(Icon {
+            handle: Handle::from_pixels(picture.side, picture.side, picture.pixels),
+        })
+    }
+
+    /// `bytes` as the round avatar `UserPageHeader.vue` asks for: the same
+    /// `contain` fit, letterboxed and scaled, with the alpha outside a *circle* of
+    /// `side` cleared rather than outside the 16/96 rounded rectangle a project
+    /// icon takes.
+    pub fn circle(bytes: &[u8], side: u32) -> Option<Icon> {
+        let picture = masked_as(bytes, side, true)?;
         Some(Icon {
             handle: Handle::from_pixels(picture.side, picture.side, picture.pixels),
         })
