@@ -568,6 +568,14 @@ const ADD_ICON: f32 = 32.0;
 /// pixel the border was.
 const ADD_CARD_PAD: f32 = 12.0;
 
+/// The two lines' own heights: `leading-6` (24) over `leading-5` (20). Left to
+/// itself, iced gives a 16-pixel label a 19.2-pixel line and a 14-pixel
+/// subtitle a 16.8 one, which makes the group five pixels shorter than the
+/// reference's 94 -- and a group centred in the cell moves its top down with
+/// it: the capture reads the plus at y207 here against the reference's 203.
+const ADD_LABEL_LINE: f32 = 24.0;
+const ADD_SUBTITLE_LINE: f32 = 20.0;
+
 
 
 /// The demo banner's own padding: `p-4 pt-0` on the block that holds it --
@@ -1309,10 +1317,12 @@ fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
         column![
             text(Key::AppSkinsAddButton.message())
                 .size(16.0)
+                .line_height(iced::Pixels(ADD_LABEL_LINE))
                 .font(crate::style::semibold())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
             text(Key::AppSkinsAddButtonDragAndDrop.message())
                 .size(14.0)
+                .line_height(iced::Pixels(ADD_SUBTITLE_LINE))
                 .font(crate::style::medium())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
         ]
@@ -1873,6 +1883,24 @@ mod tests {
         // And the share a dash takes of its own period: one of the three, which
         // is the one-and-two the strips are built from.
         assert_eq!(DASH_ON / DASH_PERIOD, 1.0 / 3.0);
+    }
+
+    #[test]
+    fn the_add_cell_s_two_lines_take_the_reference_s_own_line_heights() {
+        // `leading-6` over `leading-5`, and the group's own 94: a 32-pixel plus,
+        // `gap-4`, a 24-pixel line, `gap-0.5` and a 20-pixel line.
+        assert_eq!(ADD_ICON + ADD_ICON_GAP + ADD_LABEL_LINE + ADD_LINE_GAP + ADD_SUBTITLE_LINE, 94.0);
+        // And which is what puts the plus where the reference puts it. The group is
+        // centred in the cell, so it starts 77.5 below the cell's top, and the
+        // plus's ink -- four rows of it in the reference's capture, y203..206 --
+        // sits in the middle of its own 32-pixel box, 14 further down:
+        // 112 + 77.5 + 14 = 203.5, which is the reference's 203. Left to
+        // iced's own lines the group is five shorter, its top is 2.5 lower and
+        // the capture reads y207.
+        let ink = 4.0;
+        let group_top = 112.0 + (CARD_HEIGHT - 94.0) / 2.0;
+        let ink_top = group_top + (ADD_ICON - ink) / 2.0;
+        assert!((ink_top - 203.0).abs() < 1.0, "{ink_top} is not the reference's 203");
     }
 
     #[test]
