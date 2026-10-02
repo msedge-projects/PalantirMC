@@ -6317,14 +6317,17 @@ impl Shell {
     /// the Skins page's editor -- and a second copy of these eight lines would be a
     /// second place the scrim's colour could be changed alone.
     fn scrim<'a>(&self, dialog: Element<'a, Message>) -> Element<'a, Message> {
-        let theme = self.theme;
+        // Read outside the closure: the ramp depends on the window's height, and
+        // a closure that reached back into `self` for it would borrow the shell
+        // for as long as the element lives.
+        let bed = modal_scrim(self.viewport);
         let scrim = container(dialog)
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x()
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(Color { a: 0.8, ..theme_gen::ink(theme, Ink::Base) })),
+                background: Some(bed),
                 ..container::Appearance::default()
             });
         mouse_area(scrim).on_press(Message::CloseModal).into()
@@ -6637,6 +6640,84 @@ fn card_crossing(key: &'static str, over: bool) -> Message {
     Message::Control { key, over, hover: Some(CARD_PRESS_HOVER) }
 }
 
+/// The bed a modal sits on, copied from `NewModal.vue`'s `.modal-overlay.standard`.
+///
+/// A constant rather than a theme token because the reference's overlay is the
+/// same ramp in every theme it has, and because it is not one of its variables:
+/// the value lives in the component's own `style` block.
+const MODAL_SCRIM: &str =
+    "linear-gradient(to bottom, rgba(29, 48, 43, 0.52) 0%, rgba(14, 21, 26, 0.95) 100%)";
+
+/// The same rule's `inset: -5rem`, at the reference's sixteen-pixel root.
+///
+/// It is why the window does not show the whole of [`MODAL_SCRIM`]: the overlay's
+/// box is five rem taller than the window at *each* end, so a window shows the
+/// ramp between `5rem / (height + 10rem)` and `(height + 5rem) / (height + 10rem)`
+/// of it -- at 720 pixels, nine percent in at the top and nine percent short of
+/// the bottom.
+const MODAL_SCRIM_INSET: f32 = 5.0 * 16.0;
+
+/// The bed a modal sits on: the reference's overlay, read at the window's own
+/// edges.
+///
+/// The reference composites its dialog over a `backdrop-filter: blur(5px)` this
+/// toolkit has no term for, and the blurred chrome behind the scrim is the one
+/// part of that picture which is not drawn here -- the same deviation the modal
+/// layer's own comment records. Everything else is its: the ramp, its two
+/// colours, and the box it is laid over. Measured against the captured window,
+/// which is what the numbers in the test below hold this to: a 720-pixel window
+/// shows `(32, 43, 43)` over its chrome at the top and `(18, 25, 29)` at the
+/// bottom, and both come back within a level.
+///
+/// What the compositor then does with those stops is not CSS's arithmetic, and
+/// the difference is measurable: this renderer packs colours linear and mixes
+/// them in Oklab (`iced_graphics::color::GAMMA_CORRECTION`), where a browser
+/// blends straight-alpha in sRGB. Over the rail's `#27292e` chrome the captured
+/// window reads `(26, 37, 36)` at the top of the scrim against the reference's
+/// `(32, 43, 43)` -- six levels dark -- and the two converge as the ramp goes on: within one level from
+/// a third of the way down, and level at the bottom. Compensating for it would
+/// mean a stop colour chosen for one backdrop, and the scrim lies over the page
+/// and its cards as well as the chrome, so the stops stay the reference's.
+fn modal_scrim(viewport: iced::Size) -> Background {
+    // The line and the stops are literals in [`MODAL_SCRIM`], so this arm is
+    // unreachable in practice; it exists so that a typo in that line shows the
+    // page rather than panicking in a paint.
+    let Some((angle, stops)) = parse_gradient(MODAL_SCRIM) else {
+        return Background::Color(Color::TRANSPARENT);
+    };
+    let span = viewport.height + 2.0 * MODAL_SCRIM_INSET;
+    let mut linear = gradient::Linear::new(Radians(angle));
+    linear = linear.add_stop(0.0, ramp_at(&stops, MODAL_SCRIM_INSET / span));
+    linear = linear.add_stop(
+        1.0,
+        ramp_at(&stops, (MODAL_SCRIM_INSET + viewport.height) / span),
+    );
+    Background::Gradient(gradient::Gradient::Linear(linear))
+}
+
+/// The colour a ramp's stops give `fraction` of the way along it.
+///
+/// Straight interpolation between the two stops that bracket the fraction, which
+/// is what a browser does between its own: the reference's overlays are written
+/// as two stops and read as one continuous ramp.
+fn ramp_at(stops: &[(f32, Color)], fraction: f32) -> Color {
+    let mut low = stops[0];
+    for &(offset, colour) in stops.iter().skip(1) {
+        if fraction <= offset {
+            let span = offset - low.0;
+            let amount = if span <= 0.0 { 1.0 } else { (fraction - low.0) / span };
+            return Color {
+                r: low.1.r + (colour.r - low.1.r) * amount,
+                g: low.1.g + (colour.g - low.1.g) * amount,
+                b: low.1.b + (colour.b - low.1.b) * amount,
+                a: low.1.a + (colour.a - low.1.a) * amount,
+            };
+        }
+        low = (offset, colour);
+    }
+    stops[stops.len() - 1].1
+}
+
 /// The right panel's background: `--brand-gradient-bg`, over the page's own
 /// colour.
 ///
@@ -6687,16 +6768,34 @@ fn parse_gradient(value: &str) -> Option<(f32, Vec<(f32, Color)>)> {
     if parts.is_empty() {
         return None;
     }
-    let angle = match parts[0].trim().strip_suffix("deg") {
-        Some(degrees) => degrees.trim().parse::<f32>().ok()?.to_radians(),
-        // A direction word (`to bottom`) is not in any of the reference's
-        // values, and guessing at one would be exactly the kind of plausible
-        // wrong answer the generator refuses to emit.
-        None => 0.0,
+    // CSS's four direction words, at the angles iced already measures: `to top`
+    // is `0deg` and the rest follow it clockwise, so `to right` is a quarter
+    // turn, `to bottom` half a turn and `to left` three quarters. A corner
+    // (`to bottom right`) is a different linear gradient -- its line is the
+    // box's diagonal -- and is left unparsed rather than read as one of these.
+    let angle = match parts[0].trim() {
+        "to top" => Some(Ok(0.0)),
+        "to right" => Some(Ok(std::f32::consts::FRAC_PI_2)),
+        "to bottom" => Some(Ok(std::f32::consts::PI)),
+        "to left" => Some(Ok(3.0 * std::f32::consts::FRAC_PI_2)),
+        spelled => spelled
+            .strip_suffix("deg")
+            .map(|degrees| degrees.trim().parse::<f32>().map(f32::to_radians)),
     };
-    if parts[0].trim().ends_with("deg") {
-        parts.remove(0);
-    }
+    let angle = match angle {
+        // The first part was the angle, so it is not also a colour stop.
+        Some(Ok(angle)) => {
+            parts.remove(0);
+            angle
+        }
+        // An angle that is not a number is a value this cannot read.
+        Some(Err(_)) => return None,
+        // No angle at all: the first part is the gradient's first colour, and
+        // CSS's own default for a `linear-gradient` is `to bottom` -- half a
+        // turn. None of the reference's values rely on it, but reading it as
+        // `to top` would turn one upside down rather than refusing it.
+        None => std::f32::consts::PI,
+    };
     let mut stops = Vec::with_capacity(parts.len());
     for part in parts {
         let (color, position) = split_stop(&part)?;
@@ -9157,6 +9256,59 @@ mod tests {
             Some(Color::from_rgb(1.0 / 255.0, 2.0 / 255.0, 3.0 / 255.0))
         );
         assert_eq!(parse_color("hsl(1, 2%, 3%)"), None);
+        // The four direction words, at the angles iced already measures: `to
+        // top` is `0deg`, and a corner is not read as one of them.
+        for (spelled, degrees) in [
+            ("to top", 0.0f32),
+            ("to right", 90.0),
+            ("to bottom", 180.0),
+            ("to left", 270.0),
+        ] {
+            let value = format!("linear-gradient({spelled}, #000000 0%, #ffffff 100%)");
+            let (angle, stops) = parse_gradient(&value).unwrap_or_else(|| panic!("{spelled}"));
+            assert!((angle - degrees.to_radians()).abs() < 1e-6, "{spelled}");
+            assert_eq!(stops.len(), 2, "{spelled}");
+        }
+        assert!(parse_gradient("linear-gradient(to bottom right, #000 0%, #fff 100%)").is_none());
+        // No angle at all is CSS's own default, `to bottom`, and not `to top`:
+        // reading it the other way would draw a gradient upside down.
+        let (angle, stops) = parse_gradient("linear-gradient(#000000, #ffffff)").expect("bare");
+        assert_eq!(angle, std::f32::consts::PI);
+        assert_eq!(stops.len(), 2);
+    }
+
+    #[test]
+    fn the_modal_scrim_is_the_reference_s_own_ramp() {
+        // `NewModal.vue`'s `.modal-overlay.standard`, read at the window's own
+        // edges: its `inset: -5rem` means a 720-pixel window shows the ramp from
+        // nine percent in to nine percent short of its end, and both of those
+        // tones are the ones the reference's captured window shows through the
+        // scrim -- (32, 43, 43) over the rail's chrome at the top of it, and
+        // (18, 25, 29) at the bottom.
+        let Background::Gradient(gradient::Gradient::Linear(linear)) =
+            modal_scrim(iced::Size::new(1280.0, 720.0))
+        else {
+            panic!("the scrim is a gradient");
+        };
+        let stops: Vec<Color> = linear.stops.iter().flatten().map(|stop| stop.color).collect();
+        assert_eq!(stops.len(), 2, "the reference's overlay has two stops");
+        // `to bottom`, which iced's `to_distance` turns into a direction down
+        // the box rather than up it.
+        assert_eq!(linear.angle, Radians(std::f32::consts::PI));
+
+        // The chrome the rail is in the theme the capture was taken in,
+        // `--color-bg-raised` in dark: #27292e. The level of tolerance is the
+        // one an eight-bit composite can differ by between two rasterisers.
+        let chrome = (39.0f32, 41.0f32, 46.0f32);
+        for (colour, measured) in [(stops[0], (32.0f32, 43.0f32, 43.0f32)), (stops[1], (18.0f32, 25.0, 29.0))] {
+            // `Color`'s channels are 0..1 and the measurements are 0..255.
+            let over =
+                |under: f32, ink: f32| ink * 255.0 * colour.a + under * (1.0 - colour.a);
+            let got = (over(chrome.0, colour.r), over(chrome.1, colour.g), over(chrome.2, colour.b));
+            for (near, want) in [(got.0, measured.0), (got.1, measured.1), (got.2, measured.2)] {
+                assert!((near - want).abs() <= 1.0, "{got:?} is not {measured:?}");
+            }
+        }
     }
 
     #[test]
