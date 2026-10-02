@@ -2287,3 +2287,41 @@ will, so the reference's own answer for a launcher in this shape is the block
 being drawn. The other two are real -- a Plus subscriber gets neither the block
 nor the fade, and a panel that is down has no block under it -- and both are
 what `promo_shown` reads.
+### The welcome screen's art, which is a raster this launcher does not ship
+
+The two welcome screens were captured side by side at 1280x720 -- Modrinth App
+on `:99`, this launcher on `:98`, both on the same state, no instances -- and
+they agree on everything except the hero's art:
+
+| Thing | Reference | This launcher |
+| --- | --- | --- |
+| Title ink y | 352..372 | 352..372 |
+| Description | y 393..406 | y 393..406 |
+| Create button | y 437..473 | y 437..473 |
+| Hint row | y 496..510 | y 496..510 |
+| Foot prompt | y 626..639 | y 626..639 |
+| Import button | y 658..694 | y 658..694 |
+| **Hero art** | **x 485..558, y 236..309** | **x 496..548, y 233..318** |
+
+Every line of the page lands where the reference has it. The art does not, and
+it is not a matter of size: `WelcomeScreen.vue` draws
+`<img :src="modrinthSocialIcon">` at `size-[6.25rem]`, and that asset is
+`app-frontend/src/assets/welcome/modrinth-social-icon.png` -- a 512x512 RGBA
+raster of Modrinth's spiral mark on its own dark plate. This launcher draws
+[`crate::brand::logo_handle`]`, the SVG wordmark mark from the head, which is a
+hexagon over three chevrons. They are different drawings, not different sizes
+of one drawing: the reference's ink is 73x73 and ours is 52x85, so it is not
+even the same aspect.
+
+**It is not copied, and the reason is the asset rather than the pixels.** That
+PNG is a third-party binary under Modrinth's own licence, and putting one in
+`crates/palantir-desktop/assets/` means a `THIRD_PARTY_NOTICES.md` entry and a
+decision about redistributing a brand raster inside a launcher that is not
+Modrinth's. The SVG mark this shell already ships is drawn from the vendored
+frontend's own SVG and carries no such question, so the art stays a vector and
+the plate is left undrawn rather than filled with a box that says "there is
+something here" in a shape the reference does not use.
+
+Recorded here because it is the one visible difference on the page and it is a
+licence decision rather than a port, which is the kind of thing a later reader
+would otherwise try to fix with a `sed`.
