@@ -719,7 +719,20 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     // controls row, the results.
     let blocks: Vec<Element<'a, Message>> = vec![
         tabs(theme, state),
-        ui::search(theme, &state.placeholder(), &state.query, Message::Query),
+        // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
+        // the one search field in the tree that does: 48 pixels, `px-4`, a
+        // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
+        // hairline. A capture of both clients at 1280x720 agrees on every
+        // number -- the reference's field runs y 126..173 and this one drew
+        // y 129..167, forty pixels of `h-10` where the template asks for
+        // `h-12`.
+        ui::input_sized(
+            theme,
+            ui::InputSize::Large,
+            &state.placeholder(),
+            &state.query,
+            Message::Query,
+        ),
         controls(theme, state),
         results(theme, state),
     ];
@@ -1724,6 +1737,23 @@ mod tests {
         // Asking is once: a page that has asked does not ask again on every
         // message the shell handles.
         assert!(state.opening().is_none(), "asked once, and the refresh button is what asks again");
+    }
+
+    #[test]
+    fn the_search_field_is_the_size_its_own_template_sets() {
+        // `browse-tab/layout.vue`'s `<Input size="large">`, which is `h-12`:
+        // forty-eight pixels at `px-4` and a `rounded-[14px]` frame. It is the
+        // one search field in the tree that is not the default -- the library's,
+        // the screenshots page's and the creation flow's are all `standard` or
+        // unstated -- so a field drawn at `ui::CONTROL` (40) is forty pixels of
+        // `h-10` where the template asks for `h-12`.
+        assert_eq!(ui::InputSize::Large.height(), 48.0);
+        assert_eq!(ui::InputSize::Large.pad(), 16.0);
+        assert_eq!(ui::InputSize::Large.radius(), 14.0);
+        // And the row that is *not* the large one, so the distinction is a
+        // distinction rather than a single number asserted twice.
+        assert_eq!(ui::InputSize::Standard.height(), 36.0);
+        assert_eq!(ui::CONTROL, 40.0, "what this drew before the size was read off");
     }
 
     #[test]

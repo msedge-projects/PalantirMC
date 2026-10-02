@@ -2324,4 +2324,78 @@ something here" in a shape the reference does not use.
 
 Recorded here because it is the one visible difference on the page and it is a
 licence decision rather than a port, which is the kind of thing a later reader
-would otherwise try to fix with a `sed`.
+would otherwise try to fix with a `sed`.### The browse search field is 48 pixels, not 40
+
+`browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is the
+one search field in the tree that does. It is `h-12`: forty-eight pixels at
+`px-4` in a `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
+hairline. Every other one -- the library toolbar's, the screenshots page's, the
+creation flow's version and build pickers, the language dialog's -- is
+`standard` or unstated, which is why [`crate::ui::search`] draws the `h-10` that
+is the majority reading of the component.
+
+A capture of both clients at 1280x720 settles it against the class list:
+
+| Thing | Reference | This launcher, before | After |
+| --- | --- | --- | --- |
+| Field rows | y 126..173 (48) | y 129..167 (40) | y 126..173 |
+| Fill | `(52, 54, 60)` = `--surface-4` | same | same |
+| Hairline | `(66, 68, 74)` = `--surface-5` | same | same |
+| Sort row | y 174..229 | y 169..232 | y 174..230 |
+
+The colours were already right -- the earlier draft of [`crate::ui::search`]
+happens to draw `--surface-4` under a `--surface-5` border too, though it
+documents them the other way round -- and only the height was wrong. The page
+now calls [`crate::ui::input_sized`] at [`crate::ui::InputSize::Large`], which
+is the row of the table the reference's own `InputFrame.vue` defines, rather
+than the majority-sized helper. The sort row's own 56 pixels are unchanged.
+
+The test asserts the four numbers and, deliberately, that `Standard` is *not*
+48 -- so the assertion is a distinction between two rows of the table rather
+than one number checked against itself.
+
+**The other four search fields are not changed**, and the reason is that their
+sources are not in the vendored pin: `creation-flow` has no directory under
+`app-frontend/src/components/`, so the version and build pickers have no
+template here to read a size out of. Guessing forty for them because it is the
+commonest would be a second reading from the majority rather than from the
+component, which is the mistake this section keeps having to correct.
+
+### The §31 list, brought back in line with the tree
+
+§31's "Still different, off the same two recordings" was written before any of
+the captures were possible and is now stale on five of its nine items. What is
+left, and what closed:
+
+* ~~**The titlebar has one control too many**~~ -- the launch arrow beside *No
+  instances running* is the panel toggle, and the reference gates it behind
+  `!forceSidebar`, so on the pages where §31 saw it there is none at all. Gone,
+  with the order corrected too (it belongs before the action bar).
+* ~~**Discover's sort row has two controls the reference does not draw**~~ -- the
+  *Filter results...* button and the *Modpacks* • relevance caption are gone,
+  and §31's own reading of the reference's `lg:hidden` wrapper was right.
+* ~~**Card art**~~ -- the thumbnails carry their project icons; the empty
+  squares §31 saw were the frame before the icon round landed.
+* ~~**The right panel carries different sections**~~ -- mostly. *Getting
+  started*, *Playing as*, News and the Discover filter sections are in, and the
+  ad block under the panel is in with the link, the fade and the plate at the
+  measurements above.
+* ~~**Home is a library grid**~~ -- heading, both toolbar rows and the tiles are
+  in `pages/home.rs`. What is *not* in is the *Jump in* strip, and that is a
+  decision rather than an omission: it is behind the `worlds_in_home` feature
+  flag, which is off in the reference's defaults, so the reference does not
+  draw it either.
+* **Loading states.** Still open, and now differently so: the vendored pin has
+  **no skeleton component at all** -- `grep -rl skeleton vendor/modrinth-app`
+  returns three files, all of them using the word for something else. So §31's
+  claim that the reference "draws skeleton result cards with a spinner" cannot
+  be checked against this pin, and drawing a skeleton nobody's template asks
+  for would be inventing a surface. Named, not built.
+* **Spacing and sizes.** §31 called these "eyeballed, not measured". The
+  browse field was exactly that: forty pixels where the template says
+  forty-eight. The ones measured off the plate since are in §33 and in the
+  sections above; the rest of the list is still eyeballed, and the fix for
+  each is the 189 transcribed tokens, not a screenshot.
+* **Animations.** Still open. Hover tweens (§29) and the scroll glide are in;
+  the four §31 named are not, and two of them are attached to surfaces that do
+  not exist yet.
