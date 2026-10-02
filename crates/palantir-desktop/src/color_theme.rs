@@ -91,14 +91,8 @@ impl ColorTheme {
     ///
     /// The reference uses it to remember which dark theme to return to when the
     /// user switches away from one, which is why it is a property of the setting
-    /// rather than of a palette.
-    ///
-    /// `#[cfg(test)]` because nothing in the product asks it: the setting the
-    /// shell reads is resolved through [`crate::shell::generated_theme`], and the
-    /// palette's own notion of dark went with the shell that painted from it.
-    /// What is left is the fixture whose test compares this list against
-    /// `DARK_THEMES`.
-    #[cfg(test)]
+    /// rather than of a palette; the settings modal asks it for the same reason,
+    /// to mark the card of the theme it would return to.
     pub const fn is_dark(self) -> bool {
         matches!(self, ColorTheme::Dark | ColorTheme::Oled | ColorTheme::Retro)
     }

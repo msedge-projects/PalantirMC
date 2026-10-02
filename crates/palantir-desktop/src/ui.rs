@@ -118,8 +118,9 @@ pub fn advance(label: &str, font: iced::Font, size: f32) -> f32 {
 const MEASURE_SPAN: f32 = 4096.0;
 
 /// The leading the interface's text is measured at, which is
-/// `iced_core::text::LineHeight`'s own default and what every call site here
-/// draws with, since none of them sets one. It is not part of a width and is here
+/// `iced_core::text::LineHeight`'s own default. A control that sets a line of its
+/// own sets an absolute one ([`NAV_LABEL_LINE`] and the theme cards' rows are the
+/// settings dialog's), and a line is not part of a width either way: it is here
 /// because the metrics have to carry a leading to shape at all.
 const LEADING: f32 = 1.3;
 
@@ -326,6 +327,44 @@ pub const TAG_HEIGHT: f32 = 24.0;
 pub const BUTTON_LABEL_SIZE: f32 = 14.0;
 /// A button's horizontal padding, which is `ButtonFrame.vue`'s `px-4`.
 pub const BUTTON_PAD: f32 = 16.0;
+
+// ---- The vertical tab list ---------------------------------------------
+
+/// A tab row's height: `py-2`'s own eight above and below, on the 18-pixel line a
+/// `text-base` label takes in the reference -- 34, which is the height its captured
+/// tab plate measures (y 207..240 of a settings dialog opened at 1280x720).
+pub const NAV_ITEM: f32 = 34.0;
+/// The same row when it carries a badge, which is 36: the badge's own pill is
+/// `text-xs`'s 16-pixel line plus `py-0.5` twice -- 20 pixels, taller than the
+/// label's line -- so it is the side that sets the row's content height. Measured
+/// on the reference's Language tab: its badge spans y 329..348 with the row's own
+/// eight-pixel padding above it, which puts that row at 321..356.
+pub const NAV_ITEM_BADGE: f32 = 36.0;
+/// `rounded-xl` on a tab row.
+pub const NAV_ITEM_RADIUS: f32 = 12.0;
+/// `px-4` on a tab row.
+pub const NAV_ITEM_PAD: f32 = 16.0;
+/// `gap-2` between a tab row's icon, label and badge.
+pub const NAV_ITEM_GAP: f32 = 8.0;
+/// `w-4 h-4` on the icon inside a tab row.
+pub const NAV_ICON: f32 = 16.0;
+/// `text-base` on a tab row's label: the size `ButtonFrame.vue` gives the label of
+/// every button from `md` up, and not [`BUTTON_LABEL_SIZE`].
+pub const NAV_LABEL_SIZE: f32 = 16.0;
+/// The line a tab row's own label is set on: an inherited 16-pixel name at the
+/// browser's root `line-height: 1.15` (18.4 pixels of CSS, painted as 18 -- the
+/// fraction is explained at [`crate::shell`]'s theme constants), which `py-2`
+/// around it turns into the 34-pixel row the reference's captured plate measures
+/// (y 207..240).
+///
+/// Every line height here is an [`iced::Pixels`] rather than a bare `f32`, because
+/// iced's `From<f32>` for `LineHeight` is a *multiple* of the text's size: a bare
+/// `18.0` on a 16-pixel label is a 288-pixel line.
+pub const NAV_LABEL_LINE: f32 = 18.0;
+/// `text-xs`'s own line, `1rem`, on a category heading.
+pub const NAV_HEADING_LINE: f32 = 16.0;
+/// `text-xs`'s own line on the badge beside a tab's label.
+pub const NAV_BADGE_LINE: f32 = 16.0;
 
 /// The hairline around a project's avatar: `Avatar.vue`'s
 /// `outline: 1px solid rgb(255 255 255 / 15%)`.
@@ -679,6 +718,70 @@ pub fn switch<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// The same switch, disabled: `Toggle.vue`'s `opacity-50` on a control nobody may
+/// press.
+///
+/// Group opacity is not something this renderer composites -- an element's `opacity`
+/// would have to reach every colour drawn under it, and iced has no layer whose
+/// alpha could carry it -- so the two colours the switch would draw are mixed
+/// halfway into the surface they sit on instead, which is the arithmetic a
+/// fifty-percent overlay does anyway. The knob is mixed into the track it sits on
+/// rather than into the surface, because that is the colour it would have covered.
+///
+/// Measured against the reference's capture, where the settings dialog's own
+/// *sync theme across devices* row is signed out: the track comes out at
+/// (45, 47, 53) of a dialog at a (39, 41, 46) surface and the knob at (101, 108,
+/// 118) over it, and both are under the pane's own fade in that capture.
+pub fn disabled_switch<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
+    const TRACK_W: f32 = 48.0;
+    const TRACK_H: f32 = 24.0;
+    const KNOB: f32 = 16.0;
+    const INSET: f32 = 4.0;
+    let behind = theme_gen::ink(theme, Ink::RaisedBg);
+    let track = mix(theme_gen::ink(theme, Ink::ButtonBg), behind, 0.5);
+    let line = mix(theme_gen::ink(theme, Ink::Surface5), behind, 0.5);
+    let knob = mix(theme_gen::ink(theme, INK_SECONDARY), track, 0.5);
+    let knob = container(Space::new(Length::Fixed(KNOB), Length::Fixed(KNOB))).style(
+        move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(knob)),
+            border: Border { radius: (KNOB / 2.0).into(), ..Border::default() },
+            ..container::Appearance::default()
+        },
+    );
+    let track = container(
+        row![]
+            .align_items(Alignment::Center)
+            .width(Length::Fixed(TRACK_W))
+            .height(Length::Fixed(TRACK_H))
+            .padding(Padding { top: INSET, bottom: INSET, left: INSET, right: INSET })
+            .push(knob)
+            .push(Space::with_width(Length::Fill)),
+    )
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(track)),
+        border: Border {
+            radius: (TRACK_H / 2.0).into(),
+            width: 1.0,
+            color: line,
+        },
+        ..container::Appearance::default()
+    });
+    track.into()
+}
+
+/// Two colours, `amount` of the way from the first to the second.
+///
+/// Straight component interpolation, which is what a browser's own compositing
+/// does between two opaque tones.
+fn mix(from: Color, to: Color, amount: f32) -> Color {
+    Color {
+        r: from.r + (to.r - from.r) * amount,
+        g: from.g + (to.g - from.g) * amount,
+        b: from.b + (to.b - from.b) * amount,
+        a: from.a + (to.a - from.a) * amount,
+    }
+}
+
 /// What kind of button this is, by the reference's own `type` prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -1029,6 +1132,126 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
         .into()
 }
 
+/// One row of a vertical tab list: `TabbedModal.vue`'s own tab button.
+///
+/// The reference's settings dialog is a `TabbedModal`, and its tabs are a column of
+/// buttons rather than a strip of pills ([`tabs`], which is `NavTabs.vue`): the
+/// classes are `flex min-w-0 shrink-0 gap-2 items-center rounded-xl px-4 py-2
+/// font-semibold`, `bg-button-bgSelected text-button-textSelected` while selected and
+/// `text-button-text hover:bg-button-bg hover:text-contrast` otherwise, with a
+/// `w-4 h-4` icon in front of a `min-w-0 flex-1 truncate` label. `py-2` on an 18-pixel
+/// line is a 34-pixel row, which is [`NAV_ITEM`]; a row whose badge is taller than
+/// that line is [`NAV_ITEM_BADGE`].
+///
+/// No `active:scale-[0.97]` and no `tracking-wide`: this kit has no press-scale and
+/// iced 0.12's text has no letter spacing. Both are recorded rather than approximated.
+pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    label: &str,
+    badge: Option<&str>,
+    selected: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let (factor, _) = interaction(key);
+    let ink = if selected {
+        theme_gen::ink(theme, Ink::ButtonTextSelected)
+    } else {
+        crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor)
+    };
+    let mut label_row = row![]
+        .align_items(Alignment::Center)
+        .spacing(NAV_ITEM_GAP)
+        .push(icon::icon(glyph, NAV_ICON, ink))
+        .push(
+            text(label.to_string())
+                .size(NAV_LABEL_SIZE)
+                // The line a tab row's label takes: 18 pixels of 16-pixel text,
+                // which with `py-2` is the 34-pixel row the capture measures.
+                // `Pixels` rather than a bare number: iced reads a `f32` line
+                // height as a *multiple* of the size, so `18.0` would be a
+                // 288-pixel line.
+                .line_height(iced::Pixels(NAV_LABEL_LINE))
+                .font(semibold())
+                .width(Length::Fill)
+                .style(iced::theme::Text::Color(ink)),
+        );
+    if let Some(badge) = badge {
+        // `shrink-0 rounded-full px-1.5 py-0.5 text-xs font-bold bg-brand-highlight
+        // text-brand-green`: the quarter-alpha brand pill behind the Language tab's
+        // `beta`.
+        label_row = label_row.push(
+            container(
+                text(badge.to_string())
+                    .size(12.0)
+                    .line_height(iced::Pixels(NAV_BADGE_LINE))
+                    .font(heading())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Brand))),
+            )
+            .padding(Padding { top: 2.0, bottom: 2.0, left: 6.0, right: 6.0 })
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(
+                    theme,
+                    Ink::ColorBrandHighlight,
+                ))),
+                border: Border { radius: 999.0.into(), ..Border::default() },
+                ..container::Appearance::default()
+            }),
+        );
+    }
+    // The pointer's crossing, as a plate that fades in: the reference transitions
+    // `bg-button-bg` in over a default 150ms, and this kit's clock carries one
+    // brightness factor whose travel from 1.0 to its hover end is the same 0..1.
+    let hover = theme_gen::ink(theme, Ink::ButtonBg);
+    let amount = ((factor - 1.0) / 0.25).clamp(0.0, 1.0);
+    let plate = if selected {
+        theme_gen::ink(theme, Ink::ButtonBgSelected)
+    } else {
+        Color { a: hover.a * amount, ..hover }
+    };
+    let row = container(label_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(if badge.is_some() { NAV_ITEM_BADGE } else { NAV_ITEM }))
+        .padding(Padding { top: 0.0, bottom: 0.0, left: NAV_ITEM_PAD, right: NAV_ITEM_PAD })
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(plate)),
+            border: Border { radius: NAV_ITEM_RADIUS.into(), ..Border::default() },
+            ..container::Appearance::default()
+        });
+    mouse_area(row)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(on_press)
+        .into()
+}
+
+/// A category heading above a run of [`nav_item`]s: `TabbedModal.vue`'s own
+/// `shrink-0 truncate px-4 pb-1 pt-2 text-xs font-bold uppercase tracking-wide
+/// text-secondary`.
+///
+/// The caller uppercases the label: the reference's text transform is a CSS one, and
+/// a locale's own casing is not something a drawing layer should decide.
+pub fn nav_heading<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
+    container(
+        text(label.to_string())
+            .size(12.0)
+            // `text-xs`'s own line, so the heading's box is the reference's
+            // `pt-2 pb-1` around 16 pixels. Absolute: see [`NAV_LABEL_LINE`].
+            .line_height(iced::Pixels(NAV_HEADING_LINE))
+            // `font-bold`, not the `font-semibold` the tab rows' own labels carry:
+            // the reference weights the category heading above a run of tabs one step
+            // heavier than the tabs.
+            .font(heading())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+    )
+    .width(Length::Fill)
+    .padding(Padding { top: 8.0, bottom: 4.0, left: 16.0, right: 16.0 })
+    .into()
+}
+
 /// A row of chips: `Chips.vue`, which is the reference's selectable pill.
 ///
 /// The creation flow's custom step makes both of its choices this way -- the
@@ -1305,6 +1528,30 @@ mod tests {
         let mut found = Vec::new();
         walk(&root, &root, &mut found);
         found
+    }
+
+    #[test]
+    fn a_line_height_is_an_absolute_length_and_never_a_multiplier() {
+        // iced's `From<f32> for LineHeight` is `Relative`: a bare number is a
+        // multiple of the text's size, so `18.0` on a 16-pixel label is a 288-pixel
+        // line. The settings dialog was drawn with five of those before this gate
+        // -- the tab headings, the card names and the modal's own title each
+        // measured their size times their line -- and a multiplier is not a typo
+        // the compiler can see. So the argument has to be `iced::Pixels`, iced's
+        // absolute form, and the scan covers every source in this crate rather than
+        // the two that had the defect. The needle is assembled from two pieces so
+        // that this test's own text is not one of the sites.
+        let needle = concat!(".line_height", "(");
+        for (name, source) in crate_sources() {
+            for (index, _) in source.match_indices(needle) {
+                let rest = &source[index + needle.len()..];
+                let argument = rest.split(')').next().unwrap_or("");
+                assert!(
+                    argument.contains("Pixels"),
+                    "{name}.rs: a line height of `{argument}` is a multiplier, not a length"
+                );
+            }
+        }
     }
 
     #[test]

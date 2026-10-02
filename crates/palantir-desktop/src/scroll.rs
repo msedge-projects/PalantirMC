@@ -580,6 +580,57 @@ pub fn wheel_notches(delta: &mouse::ScrollDelta) -> f32 {
     }
 }
 
+/// A scroll region whose bar is not drawn.
+///
+/// The reference's own scroll containers show no bar in either capture -- its
+/// stylesheet paints one only under the pointer -- while iced's stock appearance
+/// puts a low-alpha thumb at the region's right edge whether or not anybody is
+/// there, which in the settings pane is a grey band across the second theme card's
+/// corner. Nothing but the bar changes: the wheel still works, and a region's own
+/// layout does not read this appearance.
+///
+/// A site that wants it asks with [`no_bar`]; a site that wants the stock bar
+/// omits the call.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoBar;
+
+impl iced::widget::scrollable::StyleSheet for NoBar {
+    type Style = iced::Theme;
+
+    fn active(&self, _theme: &iced::Theme) -> iced::widget::scrollable::Appearance {
+        iced::widget::scrollable::Appearance {
+            container: iced::widget::container::Appearance::default(),
+            scrollbar: iced::widget::scrollable::Scrollbar {
+                background: None,
+                border: iced::Border::default(),
+                scroller: iced::widget::scrollable::Scroller {
+                    color: iced::Color::TRANSPARENT,
+                    border: iced::Border::default(),
+                },
+            },
+            gap: None,
+        }
+    }
+
+    fn hovered(
+        &self,
+        theme: &iced::Theme,
+        _is_mouse_over_scrollbar: bool,
+    ) -> iced::widget::scrollable::Appearance {
+        self.active(theme)
+    }
+}
+
+/// The style a scroll region that wants no bar hands to `Scrollable::style`.
+///
+/// [`NoBar`] is a stylesheet, while `Scrollable::style` takes the style enum of
+/// the theme it draws in, so the conversion lives here rather than at every call
+/// site: a site writes `.style(crate::scroll::no_bar())`. A region that wants
+/// iced's stock bar omits the call.
+pub fn no_bar() -> iced::theme::Scrollable {
+    iced::theme::Scrollable::custom(NoBar)
+}
+
 /// A scroll region: `content` wrapped so that the wheel over it is reported
 /// rather than applied, inside the scrollable that carries the region's id.
 ///

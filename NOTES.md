@@ -1708,13 +1708,42 @@ noise of an eight-bit composite, is not a trade this tree should make.
 
 ### What the two screens still disagree about
 
-The settings dialog is the largest of them: the reference's is `min(928px, 95vw - 10rem)`
-wide with a 24-pixel body inset, a 288-wide tab column behind a 1-pixel `--surface-5`
-divider, an 81-pixel header (24-padding, 24-pixel title, 1-pixel rule) and a content
-area of `min(65vh, 600px)` -- 928 x 588 at this window -- and it carries eight tabs in
-two categories (Appearance, Features, Behavior, Language, Feature flags / Profile,
-Social, Privacy). This launcher's settings is a 509-wide column of theme and language
-options with no tabs at all. The button inventory has the same shape of gap: the
-reference's own `ButtonFrame.vue` has five sizes and most of its buttons -- 61 `xl` and
-43 `lg` among them -- are not the single 40-pixel row this kit draws for all of them.
-Both are ported by the slices that follow this note.
+The settings dialog *was* the largest of them and is now ported, measured against the
+reference's own capture: `AppSettingsModal.vue`'s `min(928px, 95vw - 10rem)` modal is
+928 x 591 at this window (its surface y 66..654, x 177..1102), a 288-wide tab column
+behind a 1-pixel `--surface-5` divider at x=488, an 84-pixel header -- `p-6` around its
+own row, which is the close `IconButton`'s 36-pixel `h-9` rather than the 32-pixel line
+of the title inside it -- a 1-pixel rule at y=150, and a content floor of
+`min(65vh, 600px)` (468 here). Every row of both panes lands on the reference's own,
+including the theme cards' column transitions, row for row, and the *sync theme across
+devices* row with its disabled switch. This port's box is one row shorter -- 590 -- on
+purpose: the reference's 591 is a CSS half-pixel when centered in 720, which a browser
+snaps to the same top border row (65) and a rasteriser draws as a soft edge; the one
+row comes out of the body's bottom padding, and only the dialog's last two rows differ.
+
+The button inventory is the part of this gap that is still open: the reference's own
+`ButtonFrame.vue` has five sizes (`xs` 28 through `xl` 48, each with its own radius,
+padding, icon and label size) and most of its buttons -- 61 `xl` and 43 `lg` among the
+397 uses on file -- are not the single 40-pixel, 14-pixel-label row this kit draws for
+all of them. That is the next slice.
+
+### The line height that was read backwards
+
+The first port of this dialog came out with no title, a 204-pixel category heading and
+an empty content pane, and the cause was one line of iced's API rather than any of the
+transcribed numbers: `Text::line_height` takes `impl Into<LineHeight>`, and iced's
+`From<f32>` for that type is `LineHeight::Relative` -- a *multiple* of the text's size.
+`line_height(18.0)` on a 16-pixel label is a 288-pixel line; `line_height(32.0)` on the
+24-pixel title is 768, which pushed the header past the window and left the rows the
+capture compares adrift by 100 or more. Five call sites had written the reference's
+own pixel numbers into it. `iced::Pixels` is iced's absolute form, every site passes
+that now, and a gate scans every source in the crate for a bare number in that call
+(`ui::tests::a_line_height_is_an_absolute_length_and_never_a_multiplier`) so the next
+one cannot be written.
+
+The same pass found the second half of it: a browser pixel-snaps each box's edges after
+laying them out, and an unclassed paragraph in the reference is 16 pixels on
+`line-height: 1.15` -- 18.4 -- which paints as 18. This rasteriser draws the fraction,
+so the painted integer is what the port passes; the card grid's top border lands on the
+capture's own y=241 either way in a browser and only lands there here with the
+integer.

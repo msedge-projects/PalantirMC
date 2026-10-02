@@ -343,6 +343,124 @@ const DIALOG_BODY_MIN: f32 = 240.0;
 /// long before anyone opens one.
 const DIALOG_VIEWPORT: iced::Size = iced::Size::new(1280.0, 720.0);
 
+/// The settings dialog's width: `AppSettingsModal.vue`'s
+/// `min(928px, calc(95vw - 10rem))`.
+///
+/// The `10rem` is the reference's own reservation for the space either side of a
+/// dialog at a narrow window -- 160 pixels -- and it is why a settings dialog on a
+/// small window is narrower than 928 rather than overflowing it.
+const SETTINGS_WIDTH: f32 = 928.0;
+/// The width the reference's `TabbedModal` gives its tab column: the first track of
+/// `grid-cols-[minmax(12.5rem,18rem)_minmax(0,1fr)]`, at its own cap of `18rem`.
+///
+/// Measured against the reference's own settings dialog open at 1280x720, the column
+/// and its 1-pixel divider put the divider's column at x=488 of a dialog whose left
+/// edge is 177: 177 + 24 (the body's `p-6`) + 288 - 1 = 488.
+const SETTINGS_NAV: f32 = 288.0;
+/// The tab column's own padding: `TabbedModal.vue`'s `pr-4`, inside the track and
+/// to the left of its 1-pixel divider.
+const SETTINGS_NAV_PAD: f32 = 16.0;
+/// `rounded-2xl` on the modal's own box.
+const SETTINGS_RADIUS: f32 = 16.0;
+/// The 1-pixel `--surface-5` hairline around it, drawn as a padding rather than as
+/// an iced border so that it sits outside the content the way CSS puts it.
+const SETTINGS_BORDER: f32 = 1.0;
+/// The settings body's own horizontal padding: `TabbedModal.vue`'s `p-6`, whose
+/// `pr-0` cancels the right side, and then the content pane's own `px-6` inside the
+/// second track. Both sides come out at 24 against the capture.
+const SETTINGS_BODY_PAD: f32 = 24.0;
+
+// ---- The appearance settings' theme cards -------------------------------
+
+/// The height of a theme-preview card, a measurement of the reference's own: a
+/// 1-pixel border, 114 of preview (`1.5rem` of padding around a 66-pixel mock),
+/// 42 of label (`0.75rem 1rem` around a 16-pixel line) and the border again.
+const THEME_CARD_HEIGHT: f32 = 158.0;
+/// The preview card's `--radius-md`.
+const THEME_CARD_RADIUS: f32 = 12.0;
+/// The preview band's height: `1.5rem` of padding above and below the mock's 66.
+const THEME_PREVIEW_HEIGHT: f32 = 114.0;
+/// The preview's own padding, `1.5rem`.
+const THEME_PREVIEW_PAD: f32 = 24.0;
+/// The mock card's height: a 1-pixel border, `1rem` of padding, the `2rem` icon
+/// (which is the two grid rows and the gap between them), the padding and the
+/// border again.
+const THEME_MOCK_HEIGHT: f32 = 66.0;
+/// `button-base`'s hover: `filter: brightness(0.85)`, which is where the card's
+/// tween ends rather than at the kit's default brightening.
+const THEME_CARD_HOVER: f32 = 0.85;
+/// The mock card's padding, `1rem`, inside a 1-pixel `--surface-4` border.
+const THEME_MOCK_PAD: f32 = 16.0;
+/// The mock's icon, `2rem` square.
+const THEME_MOCK_ICON: f32 = 32.0;
+/// `rounded-lg` on the mock, its icon and its text bars.
+const THEME_MOCK_RADIUS: f32 = 8.0;
+/// The mock's text bars, `h-2`.
+const THEME_BAR_HEIGHT: f32 = 8.0;
+/// The second bar's width: `w-[60%]` of the column it is in.
+const THEME_BAR2_SHARE: f32 = 0.6;
+/// The mock's grid gap, `0.5rem`, which is also the label's `margin-right` on the
+/// radio and the gap around a tab row's icon.
+const THEME_MOCK_GAP: f32 = 8.0;
+/// The second bar's top, inside the mock: the icon's 32 pixels are two 12-pixel
+/// grid rows with the 8-pixel gap between them, so the bars start 12 + 8 = 20
+/// below the first.
+const THEME_BAR2_TOP: f32 = 20.0;
+/// The label row's height: `padding: 0.75rem 1rem` around the 16-pixel line the
+/// theme's name is set on -- `--gap-md` and `--gap-lg`.
+const THEME_LABEL_HEIGHT: f32 = 42.0;
+/// `--gap-lg`: the theme grid's gap, the label's horizontal padding and the card's
+/// own `mt-4`/`pr-4`-sized spacing.
+const THEME_GAP: f32 = 16.0;
+/// A radio button or a `theme-icon` in a card's label, `1rem`.
+const THEME_LABEL_ICON: f32 = 16.0;
+/// `margin-left: 0.25rem` on a card's `theme-icon`.
+const THEME_ICON_GAP: f32 = 4.0;
+/// The reference's `minmax(12rem, 1fr)` on the theme grid: the narrowest a card
+/// may be before the grid drops a column.
+const THEME_CARD_MIN: f32 = 192.0;
+/// `mt-6`, between the theme grid and the sync row under it.
+const THEME_SECTION_GAP: f32 = 24.0;
+/// `mt-4`, between a section's heading block and its control.
+const THEME_HEADING_GAP: f32 = 16.0;
+/// `gap-1`, between a section's heading and its own description.
+const THEME_HEADING_LEAD: f32 = 4.0;
+/// The title of a section: `text-xl`.
+const THEME_TITLE_SIZE: f32 = 20.0;
+/// A section's description and the theme cards' names: `text-base`.
+const THEME_BODY_SIZE: f32 = 16.0;
+/// The sync row's own title: `text-lg`.
+const THEME_ROW_TITLE_SIZE: f32 = 18.0;
+/// The line a `text-xl` or `text-lg` heading is set on, which Tailwind gives both:
+/// `1.75rem`.
+///
+/// Every line height here is an [`iced::Pixels`] rather than a bare `f32`, because
+/// iced's `From<f32>` for `LineHeight` is a *multiple* of the text's size: a bare
+/// `28.0` on a 20-pixel heading is a 560-pixel line.
+const THEME_TITLE_LINE: f32 = 28.0;
+/// The line an unclassed paragraph is set on: the body's own 16 pixels at the
+/// browser's root `line-height: 1.15` -- `modern-normalize`'s rule, which is what
+/// the reference's stylesheets inherit. That is 18.4 pixels of CSS, and this is 18,
+/// because 18 is what the reference *paints*.
+///
+/// **Not `text-base`'s `1.5rem`.** A `text-*` class carries a line with it, and
+/// the descriptions here have no size class: `text-secondary` is a colour. The
+/// capture is what says so: the heading block is `text-xl`'s 28 and one `gap-1`, so
+/// a line of this order puts the theme grid's top border on y=241, which is where
+/// the reference draws it; `text-base`'s 24 would put it on 247. And the fraction:
+/// a browser lays the 18.4 out and then pixel-snaps each box's edges, so every row
+/// it paints is a whole one -- the grid's border lands on 241, not 241.4 -- while
+/// this rasteriser draws the fractional position and softens the border across two
+/// rows. The painted value is the one to draw.
+const THEME_BODY_LINE: f32 = 18.0;
+/// The line a theme card's own name is set on: the inherited box a tab row's label
+/// takes ([`THEME_BODY_LINE`]).
+const THEME_LABEL_LINE: f32 = 18.0;
+/// The line the modal's title is set on: `text-2xl`'s own `2rem`.
+const THEME_MODAL_TITLE_LINE: f32 = 32.0;
+/// `h-16` on the fade the pane shows over content it cannot show at once.
+const SETTINGS_FADE: f32 = 64.0;
+
 /// The `md` `IconButton`'s corner radius, `rounded-xl`.
 const CONTROL_RADIUS: f32 = 12.0;
 /// `rounded-lg` on the head's `!h-7` buttons.
@@ -405,6 +523,12 @@ pub struct Shell {
     plates: Vec<Tween>,
     /// Which modal is open, if any.
     modal: Option<Modal>,
+    /// Which tab the settings dialog is showing.
+    ///
+    /// Shell state rather than the dialog's own, because the dialog is rebuilt from
+    /// the shell every frame and a tab that lived in an element would be forgotten
+    /// between them.
+    settings_tab: SettingsTab,
     /// Whether the window is maximized, which the window controls' icon needs.
     maximized: bool,
     /// The window's own size in logical pixels, from [`window_size`]. What the
@@ -927,6 +1051,72 @@ pub enum Modal {
     InstanceSettings(Box<crate::instance_settings::State>),
 }
 
+/// The settings dialog's tabs, in the reference's own order.
+///
+/// `AppSettingsModal.vue`'s tab list has eleven entries in three categories:
+/// `display` carries Appearance, Features, Behavior and Language (Feature flags too,
+/// on a developer build), `account` carries Profile, Social and Privacy, and
+/// `instances` carries Synced settings, Java installations and Resource management. The two listed here are the ones whose content this launcher has
+/// ported; a tab joins [`SettingsTab::ALL`] when its own component is ported, and the
+/// rest are named in `NOTES.md` as the work still owed rather than drawn as empty
+/// shells. The order is the reference's and is never sorted: it is the order a
+/// reader's eye travels down the column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    /// `AppearanceSettings.vue`.
+    Appearance,
+    /// `LanguageSettings.vue`.
+    Language,
+}
+
+impl SettingsTab {
+    /// Every tab this dialog offers, in the reference's order.
+    pub const ALL: [SettingsTab; 2] = [SettingsTab::Appearance, SettingsTab::Language];
+
+    /// The tab's own label, which is the reference's `app.settings.tabs.<name>`: the
+    /// same message the reference's `defineMessage` gives the tab's `name`.
+    fn label(self) -> Key {
+        match self {
+            SettingsTab::Appearance => Key::AppSettingsTabsAppearance,
+            SettingsTab::Language => Key::AppSettingsTabsLanguage,
+        }
+    }
+
+    /// The icon in front of the label: [`Glyph::Paintbrush`] and [`Glyph::Languages`],
+    /// which are `AppSettingsModal.vue`'s own `PaintbrushIcon` and `LanguagesIcon`.
+    fn glyph(self) -> Glyph {
+        match self {
+            SettingsTab::Appearance => Glyph::Paintbrush,
+            SettingsTab::Language => Glyph::Languages,
+        }
+    }
+
+    /// The badge the reference puts on the tab, which is `commonMessages.beta` on
+    /// Language and nothing on the others.
+    fn badge(self) -> Option<Key> {
+        match self {
+            SettingsTab::Appearance => None,
+            SettingsTab::Language => Some(Key::BadgeBeta),
+        }
+    }
+
+    /// The heading the tab sits under: `tabCategories.display`, "Display".
+    fn category(self) -> Key {
+        match self {
+            SettingsTab::Appearance | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
+        }
+    }
+
+    /// The tab's control name for the interaction clock: one per row, so that two
+    /// rows cannot light together.
+    fn key(self) -> &'static str {
+        match self {
+            SettingsTab::Appearance => "settings:tab:appearance",
+            SettingsTab::Language => "settings:tab:language",
+        }
+    }
+}
+
 /// What the instance-settings modal's installation tab still wants read.
 ///
 /// A private vocabulary rather than a shell field per question: [`Shell::act`]
@@ -965,6 +1155,8 @@ pub enum Message {
     Rail(Rail),
     /// A colour theme was chosen in Settings.
     ColorTheme(ColorTheme),
+    /// One of the settings dialog's tabs was chosen.
+    SettingsTab(SettingsTab),
     /// A language was chosen in Settings, by its BCP-47 tag.
     ///
     /// The tag rather than a type: the offer is the reference's own list of codes
@@ -1197,6 +1389,7 @@ impl Shell {
             hovered: None,
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             modal: None,
+            settings_tab: SettingsTab::Appearance,
             maximized: false,
             viewport: DIALOG_VIEWPORT,
             glides: crate::scroll::Glides::default(),
@@ -1722,6 +1915,10 @@ impl Shell {
             }
             Message::ColorTheme(choice) => {
                 self.choose_theme(choice);
+                None
+            }
+            Message::SettingsTab(tab) => {
+                self.settings_tab = tab;
                 None
             }
             Message::Locale(tag) => {
@@ -4291,6 +4488,42 @@ impl Shell {
         }
     }
 
+    /// The close button of the reference's `NewModal`: the `md` icon-only
+    /// `IconButton`, which `IconButton.vue` builds `circular` by default -- `h-9
+    /// w-9`, `!rounded-full`, `bg-surface-4` inside a 1-pixel `--surface-5`
+    /// ring, with a `size-5` glyph in `text-primary`.
+    ///
+    /// The header is `p-6` around this button and the title at `items-center`,
+    /// and the button is the taller of the two: its 36 pixels are the row's own
+    /// height, which is what puts the header's rule at y=150 of a dialog whose
+    /// border is at y=65 and every row of the body four pixels below where a
+    /// header sized to its title alone would have them. Measured in the
+    /// reference's own settings capture at x 1044..1079, y 90..125.
+    fn dialog_close(&self) -> Element<'_, Message> {
+        const CLOSE: &str = "modal:close";
+        let theme = self.theme;
+        let (factor, _) = crate::ui::interaction(CLOSE);
+        let plate = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface4), factor);
+        let ring = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface5), factor);
+        let ink = crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor);
+        let face = container(icon::icon(Glyph::X, CONTROLS_ICON, ink))
+            .width(Length::Fixed(CONTROLS_BUTTON))
+            .height(Length::Fixed(CONTROLS_BUTTON))
+            .center_x()
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(plate)),
+                border: Border { color: ring, width: 1.0, radius: 999.0.into() },
+                ..container::Appearance::default()
+            });
+        mouse_area(face)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover(CLOSE, true))
+            .on_exit(Message::hover(CLOSE, false))
+            .on_press(Message::CloseModal)
+            .into()
+    }
+
     /// The panel toggle: `RightArrowIcon`, flipped when the panel is down,
     /// `mr-3` from the controls.
     fn panel_toggle(&self) -> Element<'_, Message> {
@@ -5345,17 +5578,309 @@ impl Shell {
     /// chosen. `ColorTheme::options` owns that rule, and this launcher has no dev
     /// mode to hand it, so what the pane offers is the rule read once, with
     /// `false`.
-    fn theme_options(&self) -> Element<'_, Message> {
+    /// The Appearance pane: `layouts/shared/appearance-settings/layout.vue`.
+    ///
+    /// Its first two sections, which are the ones the reference draws in the pane
+    /// at 1280x720: the colour-theme selector -- `repeat(auto-fit, minmax(12rem,
+    /// 1fr))`, two 275-pixel columns of preview cards here -- and the *sync theme
+    /// across devices* row under it at `mt-6`. What the reference's sections
+    /// continue with (`Project list layouts`, the sidebar preferences, *Advanced
+    /// rendering*) is recorded in `NOTES.md` rather than drawn: each is its own
+    /// component with its own measurements, and none of them is on screen here.
+    fn appearance_settings(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let current = self.prefs.theme();
+        let heading = column![]
+            .width(Length::Fill)
+            .spacing(THEME_HEADING_LEAD)
+            .push(
+                text(Key::SettingsDisplayThemeTitle.message())
+                    .size(THEME_TITLE_SIZE)
+                    .line_height(iced::Pixels(THEME_TITLE_LINE))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Contrast))),
+            )
+            .push(
+                text(Key::SettingsDisplayThemeDescription.message())
+                    .size(THEME_BODY_SIZE)
+                    .line_height(iced::Pixels(THEME_BODY_LINE))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
+            );
+        column![]
+            .width(Length::Fill)
+            .push(heading)
+            .push(Space::with_height(Length::Fixed(THEME_HEADING_GAP)))
+            .push(self.theme_cards())
+            .push(Space::with_height(Length::Fixed(THEME_SECTION_GAP)))
+            .push(self.sync_theme_row())
+            .into()
+    }
+
+    /// The theme grid: the reference's `repeat(auto-fit, minmax(12rem, 1fr))` with
+    /// `--gap-lg` between cards.
+    ///
+    /// iced lays a row out and never wraps one, so the columns are counted here by
+    /// the grid's own rule -- `(available + gap) / (12rem + gap)`, floored, never
+    /// below one -- and a short last row is padded with blanks, which is how a grid
+    /// keeps its tracks' widths when it runs out of cards.
+    fn theme_cards(&self) -> Element<'_, Message> {
         let options = self.themes_offered();
-        let labels = self.theme_labels();
-        self.chip_grid(&labels, |index| {
-            let option = options[index];
-            let key = crate::ui::scoped("settings:theme", option.id());
-            let kind = if option == current { crate::ui::Kind::Colored } else { crate::ui::Kind::Standard };
-            crate::ui::button(theme, key, option.label_key(), kind, Message::ColorTheme(option))
-        })
+        let columns = theme_columns(self.settings_content_width());
+        let mut grid = column![].width(Length::Fill).spacing(THEME_GAP);
+        for chunk in options.chunks(columns) {
+            let mut row = row![].width(Length::Fill).spacing(THEME_GAP);
+            for option in chunk {
+                row = row.push(self.theme_card(*option));
+            }
+            for _ in chunk.len()..columns {
+                row = row.push(Space::with_width(Length::Fill));
+            }
+            grid = grid.push(row);
+        }
+        grid.into()
+    }
+
+    /// One theme-preview card: `appearance-settings-theme-selector.vue`'s button.
+    ///
+    /// The plate is the reference's `button-base` -- `--color-button-bg` behind a
+    /// 1-pixel `--color-divider` hairline, `--radius-md` -- and the mock inside it is
+    /// painted in the look the option *means*, not the one in force: `.preview`
+    /// carries the option's own mode class, so every colour comes from the generated
+    /// table read at that look's column. `selected` is the reference's own two
+    /// changes (the label to `--color-contrast`, the radio to `--color-brand`) and
+    /// the pointer dims the whole card to its `brightness(0.85)`.
+    fn theme_card(&self, option: ColorTheme) -> Element<'_, Message> {
+        let theme = self.theme;
+        let selected = self.prefs.theme() == option;
+        // The crossing is the card's own: `button-base`'s hover is a `filter` over
+        // the whole plate, so the tween's end is scoped here rather than left at the
+        // kit's default brightening.
+        let key = crate::ui::scoped("settings:theme", option.id());
+        let (factor, _) = crate::ui::interaction(key);
+        // `move`, so the closure owns its factor and is `Copy`: each of the styles
+        // below takes a copy of it rather than borrowing the one here.
+        let dim = move |colour: Color| crate::theme::brightness(colour, factor);
+        let skin = preview_colors(option, crate::native::system_prefers_light());
+        let card_line = dim(theme_gen::ink(theme, Ink::Divider));
+        let card_bg = dim(theme_gen::ink(theme, Ink::ButtonBg));
+        // `.preview .example-card`: `1rem` of padding inside a 1-pixel `--surface-4`
+        // border. This kit draws a border inside the box rather than around it, so
+        // the padding carries the reference's border as well -- one pixel each side --
+        // which is what puts the mock's own contents where the capture has them.
+        let inset = THEME_MOCK_PAD + 1.0;
+        let bar1 = theme_bar(dim(skin.bar1), Length::Fill);
+        // `w-[60%]` is a portion pair rather than a measurement: 60 against what is
+        // left, which is what the reference's own percentage does to a row this kit
+        // fills. iced's portions are whole numbers, and 60/40 is the exact pair.
+        let (portion, rest) = (THEME_BAR2_SHARE * 100.0, (1.0 - THEME_BAR2_SHARE) * 100.0);
+        let bar2 = row![
+            theme_bar(dim(skin.bar2), Length::FillPortion(portion as u16)),
+            Space::new(Length::FillPortion(rest as u16), Length::Fixed(THEME_BAR_HEIGHT)),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fixed(THEME_BAR_HEIGHT));
+        let mock = container(
+            row![
+                container(Space::new(
+                    Length::Fixed(THEME_MOCK_ICON),
+                    Length::Fixed(THEME_MOCK_ICON),
+                ))
+                .style(move |_theme: &Theme| container::Appearance {
+                    background: Some(Background::Color(dim(skin.line))),
+                    border: Border { radius: THEME_MOCK_RADIUS.into(), ..Border::default() },
+                    ..container::Appearance::default()
+                }),
+                column![]
+                    .width(Length::Fill)
+                    .push(bar1)
+                    .push(Space::with_height(Length::Fixed(
+                        THEME_BAR2_TOP - THEME_BAR_HEIGHT,
+                    )))
+                    .push(bar2),
+            ]
+            .align_items(Alignment::Start)
+            .spacing(THEME_MOCK_GAP),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(THEME_MOCK_HEIGHT))
+        .padding(Padding::from(inset))
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(dim(skin.card))),
+            border: Border {
+                color: dim(skin.line),
+                width: 1.0,
+                radius: THEME_MOCK_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        });
+        let preview = container(mock)
+            .width(Length::Fill)
+            .height(Length::Fixed(THEME_PREVIEW_HEIGHT))
+            .padding(Padding::from(THEME_PREVIEW_PAD))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(dim(skin.bg))),
+                border: Border {
+                    // Top corners rounded, bottom square: the card's own corners are
+                    // the only rounded ones the reference has, and this band's lower
+                    // two sit against the label under it.
+                    radius: [THEME_CARD_RADIUS - 1.0, THEME_CARD_RADIUS - 1.0, 0.0, 0.0].into(),
+                    ..Border::default()
+                },
+                ..container::Appearance::default()
+            });
+        // `.preview-radio .label`: `padding: 0.75rem 1rem`, the radio with its
+        // `margin-right: 0.5rem`, the name, and the `theme-icon` the reference adds
+        // after it -- a sun on the light card, a moon on the dark theme it would
+        // return to, and nothing on the others.
+        let mut label = row![]
+            .align_items(Alignment::Center)
+            .push(crate::icon::icon(
+                if selected { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+                THEME_LABEL_ICON,
+                dim(if selected {
+                    theme_gen::ink(theme, Ink::Brand)
+                } else {
+                    theme_gen::ink(theme, Ink::Base)
+                }),
+            ))
+            .push(Space::with_width(Length::Fixed(THEME_MOCK_GAP)))
+            .push(
+                // Left unconstrained, so the name is measured as one line and never
+                // wraps into a second one over the card's foot. The reference's card
+                // is `overflow: hidden`, so a name longer than the room it has --
+                // Czech's `Synchronizovat se systémem` measures 234 against 197 -- is
+                // clipped at the card's edge there; this renderer has no clip a text
+                // can ask for, so the name overflows instead, and the gate that walks
+                // the 32 locales reports the worst of them.
+                text(option.label_key().message())
+                    .size(THEME_BODY_SIZE)
+                    // The reference's tab-row line: `text-base` on an 18-pixel box,
+                    // which is what the card's 42-pixel label row wraps.
+                    .line_height(iced::Pixels(THEME_LABEL_LINE))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(dim(if selected {
+                        theme_gen::ink(theme, Ink::Contrast)
+                    } else {
+                        theme_gen::ink(theme, Ink::Base)
+                    }))),
+            );
+        if option == ColorTheme::Light || option == self.preferred_dark_theme() {
+            label = label.push(Space::with_width(Length::Fixed(THEME_ICON_GAP))).push(
+                crate::icon::icon(
+                    if option == ColorTheme::Light { Glyph::Sun } else { Glyph::Moon },
+                    THEME_LABEL_ICON,
+                    dim(theme_gen::ink(theme, Ink::Secondary)),
+                ),
+            );
+        }
+        let label = container(label)
+            .width(Length::Fill)
+            .height(Length::Fixed(THEME_LABEL_HEIGHT))
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: THEME_GAP,
+                right: THEME_GAP,
+            })
+            .center_y()
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(card_bg)),
+                ..container::Appearance::default()
+            });
+        let card = container(
+            container(column![preview, label])
+                .width(Length::Fill)
+                .height(Length::Fixed(THEME_CARD_HEIGHT - 2.0))
+                .style(move |_theme: &Theme| container::Appearance {
+                    background: Some(Background::Color(card_bg)),
+                    border: Border {
+                        radius: (THEME_CARD_RADIUS - 1.0).into(),
+                        ..Border::default()
+                    },
+                    ..container::Appearance::default()
+                }),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(THEME_CARD_HEIGHT))
+        .padding(Padding::from(1.0))
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(card_line)),
+            border: Border { radius: THEME_CARD_RADIUS.into(), ..Border::default() },
+            ..container::Appearance::default()
+        });
+        mouse_area(card)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover_with(key, true, THEME_CARD_HOVER))
+            .on_exit(Message::hover_with(key, false, THEME_CARD_HOVER))
+            .on_press(Message::ColorTheme(option))
+            .into()
+    }
+
+    /// The *sync theme across devices* row: `AppearanceSettingRow.vue` with the
+    /// toggle `AppearanceSettings.vue` disables while nobody is signed in.
+    ///
+    /// `flex items-center justify-between gap-4`: a heading at `text-lg` and its
+    /// description at `mt-1` on the left, the control on the right.
+    fn sync_theme_row(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let left = column![]
+            .width(Length::Fill)
+            .spacing(THEME_HEADING_LEAD)
+            .push(
+                text(Key::SettingsDisplayThemeSyncAcrossDevices.message())
+                    .size(THEME_ROW_TITLE_SIZE)
+                    .line_height(iced::Pixels(THEME_TITLE_LINE))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Contrast))),
+            )
+            .push(
+                text(Key::SettingsDisplayThemeSyncAcrossDevicesDescription.message())
+                    .size(THEME_BODY_SIZE)
+                    .line_height(iced::Pixels(THEME_BODY_LINE))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
+            );
+        row![left, crate::ui::disabled_switch::<Message>(theme)]
+            .align_items(Alignment::Center)
+            .spacing(THEME_GAP)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// The dark theme the reference marks with a moon: `preferredDarkTheme`, which
+    /// is the theme in force when it is one of the dark ones and the stored dark
+    /// preference otherwise. This launcher leaves that preference at the
+    /// reference's own default.
+    fn preferred_dark_theme(&self) -> ColorTheme {
+        let current = self.prefs.theme();
+        if current.is_dark() {
+            current
+        } else {
+            ColorTheme::Dark
+        }
+    }
+
+    /// The width a tab's content gets: the dialog less its two border pixels, the
+    /// body's own `p-6` on the left, the tab column with its divider, and the pane's
+    /// `px-6` on both sides -- 566 at the window both clients were captured in, which
+    /// is the two 275-pixel theme cards and the 16 between them.
+    fn settings_content_width(&self) -> f32 {
+        let dialog = SETTINGS_WIDTH.min(self.viewport.width - 160.0).max(320.0);
+        (dialog - 2.0 - SETTINGS_BODY_PAD - SETTINGS_NAV - 2.0 * SETTINGS_BODY_PAD).max(0.0)
+    }
+
+    /// How tall the tab in view is, where that is arithmetic this file knows.
+    ///
+    /// The reference shows its bottom fade when the pane's scroll container can
+    /// scroll, which is a reading (`scrollHeight > clientHeight`) a view does not
+    /// have; the one pane whose height this file can account for says it instead.
+    /// `None` is "no fade", which is what a pane this does not know has always
+    /// drawn.
+    fn settings_tab_height(&self) -> Option<f32> {
+        match self.settings_tab {
+            SettingsTab::Appearance => Some(appearance_settings_height(self.themes_offered().len(), theme_columns(self.settings_content_width()))),
+            SettingsTab::Language => None,
+        }
     }
 
     /// The themes this pane offers, by the reference's rule, read once.
@@ -5367,7 +5892,12 @@ impl Shell {
         ColorTheme::options(false, self.prefs.theme())
     }
 
-    /// The same list's labels, which is what the grid is broken on.
+    /// The labels the theme cards offer, in the reference's own order.
+    ///
+    /// `#[cfg(test)]`: a card names itself straight from [`ColorTheme::label_key`],
+    /// and this list exists for the localization gate, which measures every
+    /// language's names against the room a card has for one.
+    #[cfg(test)]
     fn theme_labels(&self) -> Vec<&'static str> {
         self.themes_offered().iter().map(|option| option.label_key().message()).collect()
     }
@@ -5375,18 +5905,19 @@ impl Shell {
     /// A grid of chips: the labels broken into the rows this dialog has room for.
     ///
     /// `chip` builds one control from its position in `labels`, so a caller keeps
-    /// whatever a chip is *about* -- the theme it takes, the tag it records --
-    /// while the breaking stays here. Both grids in this pane go through it because
-    /// both had the same defect: a row of buttons wider than the card, drawn past
-    /// its right edge, because iced has no `flex-wrap` and a `Row` does not carry
-    /// what does not fit onto the next line. [`crate::ui::wrap_labels`] is the
-    /// arithmetic and the test below is the claim.
-    fn chip_grid<'a, F>(&self, labels: &[impl AsRef<str>], chip: F) -> Element<'a, Message>
+    /// whatever a chip is *about* -- the tag it records -- while the breaking stays
+    /// here. It exists because of a defect: a row of buttons wider than the card,
+    /// drawn past its right edge, because iced has no `flex-wrap` and a `Row` does
+    /// not carry what does not fit onto the next line.
+    /// [`crate::ui::wrap_labels`] is the arithmetic and the test below is the claim;
+    /// `width` is the pane the chips are drawn in, which is the settings dialog's
+    /// own content width and not a dialog's body.
+    fn chip_grid<'a, F>(&self, width: f32, labels: &[impl AsRef<str>], chip: F) -> Element<'a, Message>
     where
         F: Fn(usize) -> Element<'a, Message>,
     {
         let mut grid = column![].width(Length::Fill).spacing(ROW_GAP);
-        for row_of in crate::ui::wrap_labels(labels, DIALOG_INNER, ROW_GAP) {
+        for row_of in crate::ui::wrap_labels(labels, width, ROW_GAP) {
             let mut chips = row![].width(Length::Fill).spacing(ROW_GAP);
             for index in row_of {
                 chips = chips.push(chip(index));
@@ -5419,7 +5950,8 @@ impl Shell {
         let theme = self.theme;
         let current = crate::locale::tag();
         let labels = Shell::language_labels();
-        self.chip_grid(&labels, |index| {
+        let width = self.settings_content_width();
+        self.chip_grid(width, &labels, |index| {
             // Destructured to `&'static str` rather than left as `&&str`: the
             // message carries a tag by value and a label is a `&str`.
             let tag = crate::locale::OFFERED[index];
@@ -5514,60 +6046,242 @@ impl Shell {
         .into()
     }
 
-    /// Settings: the appearance pane, which is the themes, and whatever reading
-    /// this launcher's own files could not do.
+    /// Settings: the reference's own tabbed modal.
+    ///
+    /// `AppSettingsModal.vue` is a `TabbedModal` inside a `NewModal`, and both are
+    /// taken at their own numbers rather than approximated. The modal is
+    /// `min(928px, calc(95vw - 10rem))` wide; its header is `p-6` around a
+    /// `text-2xl font-semibold` title with a 1-pixel `--surface-5` rule under it and
+    /// the close button at its right. The body is a two-column grid -- the first track
+    /// `minmax(12.5rem, 18rem)`, which is [`SETTINGS_NAV`] at this window, behind a
+    /// 1-pixel divider, and the second the tab's own content -- with a floor of
+    /// `min(65vh, 600px)` on the content. Measured against the reference's own settings
+    /// dialog open at 1280x720: 928 wide as a border box (x 176..1103, its surface
+    /// 177..1102) and 591 tall (y 65..655, its surface 66..654 = 589 rows), the
+    /// divider's column at x=488, and the title's ink at y 98..115. This port's box
+    /// is one row shorter on purpose -- [`Shell::tabbed_dialog`] has the arithmetic
+    /// -- and every content row inside it is the reference's.
     fn settings_dialog(&self) -> Element<'_, Message> {
         let theme = self.theme;
-        let mut body = column![]
-            .spacing(12.0)
-            .push(
-                text(Key::SettingsDisplayThemeDescription.message())
-                    .size(14.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-            )
-            .push(self.theme_options());
-        // The language section. The reference keeps Appearance and Language as two
-        // settings *pages*; this launcher's Settings is a modal, so the second one
-        // is a section of the first rather than a page this shell does not have.
-        // What it takes from that page is the part that changes the interface --
-        // the list of languages -- and not its search field, its category list or
-        // its site/app switch, which are named in the gate.
-        body = body
-            .push(Space::with_height(8.0))
-            .push(
-                text(Key::SettingsLanguageTitle.message())
-                    .size(20.0)
-                    .font(heading())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            // The reference's own sentence about falling back, with the platform
-            // it names filled in from its own word for the app. It is the right
-            // warning here for a reason worth writing down: this launcher now
-            // ships every locale the reference has, and a language is still
-            // *partly* translated -- `ar-SA` carries 1,577 of 3,846 keys -- so
-            // the sentence is about this launcher's behaviour, not a leftover.
-            .push(
-                text(crate::text_gen::settings_language_warning(
-                    Key::SettingsLanguagePlatformApp.message(),
-                ))
-                .size(14.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
-            )
-            .push(self.language_options());
-        if let Some(warning) = &self.accounts_warning {
-            // A warning rather than a failure: the launcher works, and what the
-            // reader needs to know is that it does not know which account was
-            // signed in.
-            body = body.push(crate::ui::admonition(
+        // `flex h-full flex-col gap-1`: the tab column's own four-pixel gap.
+        let mut nav = column![].width(Length::Fill).spacing(4.0);
+        let mut category = None;
+        for tab in SettingsTab::ALL {
+            if category != Some(tab.category()) {
+                category = Some(tab.category());
+                // The reference's heading is `text-xs font-bold uppercase
+                // tracking-wide`: the uppercasing is CSS's text transform and is done
+                // here, the tracking is not available (iced 0.12's text carries no
+                // letter spacing) and is recorded in `NOTES.md`.
+                nav = nav.push(crate::ui::nav_heading(
+                    theme,
+                    &tab.category().message().to_uppercase(),
+                ));
+            }
+            nav = nav.push(crate::ui::nav_item(
                 theme,
-                crate::ui::Severity::Warning,
-                "accounts",
-                warning,
+                tab.key(),
+                tab.glyph(),
+                tab.label().message(),
+                tab.badge().map(|key| key.message()),
+                self.settings_tab == tab,
+                Message::SettingsTab(tab),
             ));
         }
-        self.dialog(Key::SettingsAppearanceTitle, body.into())
+        // `min-h-[min(65vh,600px)]` on the content, capped by the room the window
+        // leaves: the reference's content pane grows with its content and scrolls once
+        // the modal reaches the window's edge, which is this same clamp.
+        let pane = settings_content_min(self.viewport).min(self.dialog_body_room());
+        // The tab column, `flex min-w-0 max-h-[min(65vh,600px)] flex-col border-0
+        // border-r-[1px] border-solid border-divider pr-4`: its own 16 pixels of
+        // padding are inside the 288-pixel track, so the divider's single pixel is
+        // the track's last one -- x=488 of a dialog at 1280x720, which is the column
+        // the capture shows, with the selected plate spanning 201..471.
+        let nav_column = container(nav)
+            .width(Length::Fixed(SETTINGS_NAV - 1.0))
+            .height(Length::Fixed(pane))
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+                right: SETTINGS_NAV_PAD,
+            });
+        let divider = container(Space::new(Length::Fixed(1.0), Length::Fixed(pane))).style(
+            move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Divider))),
+                ..container::Appearance::default()
+            },
+        );
+        // The content pane: `absolute inset-0 overflow-y-auto px-6`, and the fade
+        // over its last 64 pixels when the tab it is showing is taller than the pane.
+        let pane_content = crate::scroll::region(
+            crate::scroll::DIALOG,
+            self.settings_tab_view(),
+            Message::Wheel,
+        )
+        .style(crate::scroll::no_bar());
+        let pane_height = pane;
+        let pane_scrolled = self.settings_tab_height().map_or(false, |height| height > pane_height);
+        let pane_content: Element<'_, Message> = if pane_scrolled {
+            // Two children in a cell: the scroll region, then the fade drawn 64
+            // above the region's bottom edge. The negative spacing is how this kit
+            // places one element over another -- iced composites a tree in order and
+            // has no z-order -- and it is the same trick the modal layer uses.
+            column![
+                container(pane_content).height(Length::Fixed(pane_height)),
+                container(Space::new(Length::Fill, Length::Fixed(SETTINGS_FADE))).style(
+                    move |_theme: &Theme| container::Appearance {
+                        background: Some(settings_fade(theme)),
+                        ..container::Appearance::default()
+                    },
+                ),
+            ]
+            .spacing(-SETTINGS_FADE)
+            .width(Length::Fill)
+            .into()
+        } else {
+            container(pane_content).height(Length::Fixed(pane_height)).into()
+        };
+        let content = container(pane_content)
+            .width(Length::Fill)
+            .height(Length::Fixed(pane_height))
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: SETTINGS_BODY_PAD,
+                right: SETTINGS_BODY_PAD,
+            });
+        let body = row![nav_column, divider, content];
+        self.tabbed_dialog(body.into())
+    }
+
+    /// The body of the settings tab the dialog is showing.
+    ///
+    /// Each arm is one of the reference's own settings components: Appearance is
+    /// `layouts/shared/appearance-settings/layout.vue`, Language is
+    /// `LanguageSettings.vue`.
+    fn settings_tab_view(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        match self.settings_tab {
+            SettingsTab::Appearance => self.appearance_settings(),
+            SettingsTab::Language => {
+                let mut body = column![]
+                    .spacing(12.0)
+                    .push(
+                        text(Key::SettingsLanguageTitle.message())
+                            .size(20.0)
+                            .font(heading())
+                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    )
+                    // The reference's own sentence about falling back, with the
+                    // platform it names filled in from its own word for the app. It
+                    // is the right warning here for a reason worth writing down: this
+                    // launcher now ships every locale the reference has, and a
+                    // language is still *partly* translated -- `ar-SA` carries 1,577
+                    // of 3,846 keys -- so the sentence is about this launcher's
+                    // behaviour, not a leftover.
+                    .push(
+                        text(crate::text_gen::settings_language_warning(
+                            Key::SettingsLanguagePlatformApp.message(),
+                        ))
+                        .size(14.0)
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                    )
+                    .push(self.language_options());
+                if let Some(warning) = &self.accounts_warning {
+                    // A warning rather than a failure: the launcher works, and what
+                    // the reader needs to know is that it does not know which account
+                    // was signed in.
+                    body = body.push(crate::ui::admonition(
+                        theme,
+                        crate::ui::Severity::Warning,
+                        "accounts",
+                        warning,
+                    ));
+                }
+                body.into()
+            }
+        }
+    }
+
+    /// A dialog in the reference's `NewModal` frame around a body that brings its own
+    /// padding: the settings modal, whose `TabbedModal` is `p-6 pb-3 pr-0`.
+    ///
+    /// The frame is `NewModal.vue`'s own: `bg-bg-raised`, `rounded-2xl`, a 1-pixel
+    /// `--surface-5` border, a `p-6` header whose title is `text-2xl font-semibold
+    /// text-contrast` with the close button at its right, and a 1-pixel `--surface-5`
+    /// rule between the header and the content. Measured against the reference at
+    /// 1280x720: the title's ink sits at y 98..115 and the rule at y=150 of a dialog
+    /// whose border is at y=65 -- 65 + 1 (the border) + 24 (the header's padding) +
+    /// 36 (the row itself, which the close button's `h-9` is the tall side of) + 24
+    /// (padding again) = 150.
+    fn tabbed_dialog<'a>(&'a self, body: Element<'a, Message>) -> Element<'a, Message> {
+        let theme = self.theme;
+        let head = container(
+            row![]
+                .align_items(Alignment::Center)
+                .push(
+                    text(Key::LabelSettings.message())
+                        .size(24.0)
+                        // `text-2xl`'s own `2rem` line: `NewModal.vue`'s header is
+                        // `p-6` around it, and the dialog's whole height is that
+                        // arithmetic plus the body's `p-6 pb-3` around the content
+                        // floor -- 588 rows in the reference's capture.
+                        .line_height(iced::Pixels(THEME_MODAL_TITLE_LINE))
+                        .font(heading())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                )
+                .push(Space::with_width(Length::Fill))
+                .push(self.dialog_close()),
+        )
+        .width(Length::Fill)
+        .padding(DIALOG_PAD);
+        let rule = container(Space::new(Length::Fill, Length::Fixed(1.0))).style(
+            move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+                ..container::Appearance::default()
+            },
+        );
+        // The body's own padding, `TabbedModal.vue`'s `p-6 pb-3 pr-0`, with its
+        // bottom short by the one pixel the reference's own box does not have to
+        // spend. `pb-3` is 12; this is 11, and the reason is the dialog's own
+        // height. The reference's box is 591 rows of CSS (589 of content, its two
+        // border pixels outside that), centered in 720: 64.5, which a browser
+        // snaps to 65 and a rasteriser at a half-pixel cannot. Shortening the box
+        // by one gives an even 590, so the border lands on 65 exactly and every row
+        // above this padding is the reference's own -- only the dialog's last two
+        // rows (a padding row and the bottom border) sit one higher.
+        let body = container(body)
+            .width(Length::Fill)
+            .padding(Padding { top: 24.0, bottom: 11.0, left: 24.0, right: 0.0 });
+        // `NewModal.vue`'s own box: `rounded-2xl border border-solid
+        // border-surface-5` around the content. The border is *outside* the content
+        // here -- an outer container one pixel wider than the inner one on every
+        // side -- because that is what `box-sizing: border-box` does to an `auto`
+        // height in CSS: the border joins the box rather than sitting on top of the
+        // first and last rows of its content. Drawn the other way (iced's own, a
+        // border painted inside the bounds) every row of the header and body came
+        // out one pixel left and one up of the capture.
+        let frame = container(column![head, rule, body]).style(move |_theme: &Theme| {
+            container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
+                border: Border {
+                    radius: (SETTINGS_RADIUS - SETTINGS_BORDER).into(),
+                    ..Border::default()
+                },
+                ..container::Appearance::default()
+            }
+        });
+        container(frame)
+            .width(Length::Fixed(SETTINGS_WIDTH.min(self.viewport.width - 160.0).max(320.0)))
+            .padding(Padding::from(SETTINGS_BORDER))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+                border: Border { radius: SETTINGS_RADIUS.into(), ..Border::default() },
+                ..container::Appearance::default()
+            })
+            .into()
     }
 
     /// The creation dialog: a name, the modloader, the version the instance is
@@ -6668,6 +7382,121 @@ const MODAL_SCRIM: &str =
 /// of it -- at 720 pixels, nine percent in at the top and nine percent short of
 /// the bottom.
 const MODAL_SCRIM_INSET: f32 = 5.0 * 16.0;
+
+/// The floor the settings dialog's content pane keeps: `TabbedModal.vue`'s
+/// `min-h-[min(65vh,600px)]` on both of its tracks.
+///
+/// It is a *floor*, not a height: the reference's content grows with its tab and is
+/// clamped by the window, and this is the number the floor is read at -- 468 pixels in
+/// a 720-pixel window, which is what makes a settings dialog 588 tall there.
+fn settings_content_min(viewport: iced::Size) -> f32 {
+    (viewport.height * 0.65).min(600.0)
+}
+
+/// How many theme cards fit a row of `width`: the reference's own grid,
+/// `repeat(auto-fit, minmax(12rem, 1fr))` with `--gap-lg` between its tracks.
+fn theme_columns(width: f32) -> usize {
+    (((width + THEME_GAP) / (THEME_CARD_MIN + THEME_GAP)).floor()).max(1.0) as usize
+}
+
+/// The appearance pane's own height at a number of cards and columns: its heading
+/// block, the grid, and the sync row, added up from the constants that lay them
+/// out.
+///
+/// This is what the pane's fade is decided on: the reference shows that fade
+/// whenever its scroll container has somewhere to scroll, and this pane cannot fit
+/// its own content in the 468 pixels a 720-pixel window gives it.
+fn appearance_settings_height(options: usize, columns: usize) -> f32 {
+    let columns = columns.max(1);
+    let rows = ((options + columns - 1) / columns) as f32;
+    let section = THEME_TITLE_LINE + THEME_HEADING_LEAD + THEME_BODY_LINE;
+    let grid = rows * THEME_CARD_HEIGHT + (rows - 1.0) * THEME_GAP;
+    section + THEME_HEADING_GAP + grid + THEME_SECTION_GAP + section
+}
+
+/// One of a theme card's mock text bars: `h-2`, `rounded-[--radius-sm]`, and the
+/// colour the previewed look gives `--color-base` or `--color-secondary`.
+fn theme_bar(colour: Color, width: Length) -> Element<'static, Message> {
+    container(Space::new(Length::Fill, Length::Fixed(THEME_BAR_HEIGHT)))
+        .width(width)
+        .height(Length::Fixed(THEME_BAR_HEIGHT))
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(colour)),
+            border: Border { radius: THEME_MOCK_RADIUS.into(), ..Border::default() },
+            ..container::Appearance::default()
+        })
+        .into()
+}
+
+/// The colours a theme card's mock is drawn in -- in the look the card is
+/// *previewing*, not the one in force.
+///
+/// `.preview` carries a mode class built from the option's own name, so its
+/// background is that mode's `--color-bg`; the mock inside it is the reference's
+/// `border border-solid border-surface-4 bg-surface-3`, and its two bars are
+/// `--color-base` and `--color-secondary`. Every one of them is read out of the
+/// generated table at that mode's own column.
+struct PreviewColors {
+    /// `.preview`'s `background-color: var(--color-bg)`.
+    bg: Color,
+    /// `.example-card`'s `bg-surface-3`.
+    card: Color,
+    /// Its `border-surface-4`, which is also the icon's `var(--color-button-bg)`:
+    /// the reference's two names for one surface.
+    line: Color,
+    /// The first bar, `--color-base`.
+    bar1: Color,
+    /// The second, `--color-secondary`.
+    bar2: Color,
+}
+
+/// The room a theme card's name has at a given content width: its column less the
+/// card's two border pixels, the label's `1rem` of padding on each side, the radio,
+/// the `0.5rem` after it, and the `theme-icon` the light and preferred-dark cards
+/// add (`margin-left: 0.25rem` and its own `1rem`). 197 of a 275-pixel card at the
+/// window both clients were captured in.
+///
+/// `#[cfg(test)]`: what it measures is what the localization gate compares the 32
+/// locales' names against. The cards themselves do not clip -- this renderer has
+/// no clip for a text -- so there is nothing for the drawing layer to do with the
+/// number.
+#[cfg(test)]
+fn theme_label_room(content: f32) -> f32 {
+    let columns = theme_columns(content) as f32;
+    let card = ((content - (columns - 1.0) * THEME_GAP) / columns).max(0.0);
+    card - 2.0
+        - 2.0 * THEME_GAP
+        - THEME_LABEL_ICON
+        - THEME_MOCK_GAP
+        - THEME_ICON_GAP
+        - THEME_LABEL_ICON
+}
+
+fn preview_colors(option: ColorTheme, system_prefers_light: bool) -> PreviewColors {
+    let look = generated_theme(option, system_prefers_light);
+    PreviewColors {
+        bg: theme_gen::ink(look, Ink::Bg),
+        card: theme_gen::ink(look, Ink::RaisedBg),
+        line: theme_gen::ink(look, Ink::ButtonBg),
+        bar1: theme_gen::ink(look, Ink::Base),
+        bar2: theme_gen::ink(look, Ink::Secondary),
+    }
+}
+
+/// The fade the settings pane draws over content it cannot show at once:
+/// `TabbedModal.vue`'s bottom indicator, `h-16 bg-gradient-to-t from-bg-raised
+/// to-transparent`.
+///
+/// `to top` means `bg-raised` at the *bottom* edge of the box with transparent 64
+/// pixels above it, which is the down-the-box direction iced gives `to bottom`'s
+/// angle -- the ramp climbs in the same direction the dialog's own overlay does.
+fn settings_fade(theme: Gen) -> Background {
+    let raised = theme_gen::ink(theme, Ink::RaisedBg);
+    let mut linear = gradient::Linear::new(Radians(std::f32::consts::PI));
+    linear = linear.add_stop(0.0, Color { a: 0.0, ..raised });
+    linear = linear.add_stop(1.0, raised);
+    Background::Gradient(gradient::Gradient::Linear(linear))
+}
 
 /// The bed a modal sits on: the reference's overlay, read at the window's own
 /// edges.
@@ -8685,12 +9514,12 @@ mod tests {
         let mut widest = 0.0f32;
         let mut widest_at = crate::locale::ENGLISH;
         let mut most_rows = 0usize;
+        // The worst a theme card's name overflows its own room, over the same walk.
+        let mut theme_overflow = 0.0f32;
+        let mut theme_overflow_at = crate::locale::ENGLISH;
         for &tag in crate::locale::OFFERED.iter() {
             crate::locale::set(tag);
-            let grids: [(&str, Vec<String>); 2] = [
-                ("theme", shell.theme_labels().iter().map(|label| label.to_string()).collect()),
-                ("language", Shell::language_labels()),
-            ];
+            let grids: [(&str, Vec<String>); 1] = [("language", Shell::language_labels())];
             for (grid, labels) in grids {
                 assert!(!labels.is_empty(), "the {grid} grid offers nothing in {tag}");
                 let rows = crate::ui::wrap_labels(&labels, DIALOG_INNER, ROW_GAP);
@@ -8710,12 +9539,40 @@ mod tests {
                 }
                 most_rows = most_rows.max(rows.len());
             }
+            // The theme cards do not wrap: each is a fixed column with one name in
+            // it, so what is measured is a name inside the label's own room -- the
+            // card less its borders, its padding, the radio and the icon a couple of
+            // the cards carry. This is the one claim of the walk that is reported and
+            // not asserted, and the reason is in the drawing layer: the reference's
+            // card is `overflow: hidden`, so a longer name is *clipped* there, and a
+            // clip is the one thing a text here cannot be asked for. English fits
+            // (that is the capture's own claim and it is asserted); the rest are
+            // printed, so a locale that outgrows its card is a number in the run
+            // rather than a surprise on a screen.
+            let room = theme_label_room(shell.settings_content_width());
+            for label in shell.theme_labels() {
+                let width = crate::ui::row_width(&[label], 0.0);
+                if label == shell.theme_labels()[0] {
+                    assert!(
+                        width <= room,
+                        "the first theme card {label:?} measures {width} against {room}"
+                    );
+                }
+                if width - room > theme_overflow {
+                    theme_overflow = width - room;
+                    theme_overflow_at = tag;
+                }
+            }
         }
         // Printed rather than asserted: a run asked for its output says what the
         // grid came to in the worst of the 32 languages, which is the number the
         // margin is read from.
         eprintln!(
             "settings grids: at most {most_rows} row(s); widest row {widest:.1} of {DIALOG_INNER} px ({widest_at})"
+        );
+        eprintln!(
+            "theme cards: widest name overflow {theme_overflow:.1} px over {:.0} ({theme_overflow_at})",
+            theme_label_room(shell.settings_content_width())
         );
         // The language is ambient, and every other test in this file reads English.
         crate::locale::set(crate::locale::ENGLISH);
@@ -9286,6 +10143,127 @@ mod tests {
         let (angle, stops) = parse_gradient("linear-gradient(#000000, #ffffff)").expect("bare");
         assert_eq!(angle, std::f32::consts::PI);
         assert_eq!(stops.len(), 2);
+    }
+
+    #[test]
+    fn the_settings_tabs_are_the_reference_s_own() {
+        // `AppSettingsModal.vue`'s `tabs` array, read in its own order. Two of its
+        // eight are ported here -- Appearance, which is `PaintbrushIcon` and
+        // `app.settings.tabs.appearance`, and Language, which is `LanguagesIcon`, the
+        // same id under `language`, and the `commonMessages.beta` badge -- and the
+        // list is asserted rather than described because the *order* is the tab
+        // order: a tab inserted in the wrong place would still draw.
+        assert_eq!(SettingsTab::ALL, [SettingsTab::Appearance, SettingsTab::Language]);
+        assert_eq!(SettingsTab::Appearance.label(), Key::AppSettingsTabsAppearance);
+        assert_eq!(SettingsTab::Appearance.label().message(), "Appearance");
+        assert_eq!(SettingsTab::Appearance.glyph(), Glyph::Paintbrush);
+        assert_eq!(SettingsTab::Appearance.badge(), None);
+        assert_eq!(SettingsTab::Language.label(), Key::AppSettingsTabsLanguage);
+        assert_eq!(SettingsTab::Language.label().message(), "Language");
+        assert_eq!(SettingsTab::Language.glyph(), Glyph::Languages);
+        assert_eq!(SettingsTab::Language.badge(), Some(Key::BadgeBeta));
+        // Both are `tabCategories.display`, whose message is `Display` -- the
+        // reference uppercases it in CSS, and the drawing layer does that itself.
+        for tab in SettingsTab::ALL {
+            assert_eq!(tab.category(), Key::SettingsSidebarLabelDisplay);
+            assert_eq!(tab.category().message(), "Display");
+        }
+        // Two tabs cannot share a control name, or a hover on one would light both.
+        assert_ne!(SettingsTab::Appearance.key(), SettingsTab::Language.key());
+    }
+
+    #[test]
+    fn the_theme_cards_are_the_reference_s_own_grid() {
+        // `appearance-settings-theme-selector.vue`'s own numbers, against the
+        // reference's captured dialog: the grid is `repeat(auto-fit, minmax(12rem,
+        // 1fr))` with `--gap-lg`, which is two tracks of 275 in the 566-pixel pane
+        // the settings dialog gives a tab at 1280x720 -- the capture's cards span
+        // x 513..787 and 804..1078.
+        let shell = shell_at("/");
+        assert_eq!(shell.settings_content_width(), 566.0, "the pane's inner width");
+        assert_eq!(theme_columns(566.0), 2, "two tracks at the captured window");
+        assert_eq!(theme_columns(THEME_CARD_MIN), 1, "one track cannot be two");
+        assert_eq!(theme_columns(THEME_CARD_MIN * 2.0 + THEME_GAP), 2);
+        assert_eq!(theme_columns(THEME_CARD_MIN * 3.0 + 2.0 * THEME_GAP), 3);
+        // A card: the panel's 566 less the two gaps and the between, halved.
+        let card = (566.0 - THEME_GAP) / 2.0;
+        assert_eq!(card, 275.0);
+        // The card's own stack: a border, the preview band, the label row, a border.
+        assert_eq!(THEME_PREVIEW_HEIGHT + THEME_LABEL_HEIGHT + 2.0, THEME_CARD_HEIGHT);
+        // The preview band: `1.5rem` around the mock, whose 66 pixels are a border,
+        // `1rem`, the `2rem` icon, `1rem` and the border again.
+        assert_eq!(THEME_PREVIEW_PAD * 2.0 + THEME_MOCK_HEIGHT, THEME_PREVIEW_HEIGHT);
+        assert_eq!(2.0 + THEME_MOCK_PAD * 2.0 + THEME_MOCK_ICON, THEME_MOCK_HEIGHT);
+        // And the mock's own contents, against the capture's own columns: the mock
+        // is 225 wide (x 538..762), and its first bar starts 82 pixels into the card
+        // -- the card's border, the preview's 24, the mock's border and 16, the icon
+        // and the grid's gap -- which is where the capture's bars begin (595), and
+        // runs to the mock's inner right edge. The capture's own bars measure 150 of
+        // that; a browser's fractional card width rounds it to 149 or 150 and this
+        // kit's whole pixels come to 151.
+        let mock = card - 2.0 - 2.0 * THEME_PREVIEW_PAD;
+        assert_eq!(mock, 225.0, "the mock's own width, against the capture's 225");
+        let bars = mock - 2.0 - 2.0 * THEME_MOCK_PAD - THEME_MOCK_ICON - THEME_MOCK_GAP;
+        assert_eq!(bars, 151.0, "the bars' column, against the capture's 150");
+        assert_eq!(1.0 + THEME_PREVIEW_PAD + 1.0 + THEME_MOCK_PAD + THEME_MOCK_ICON + THEME_MOCK_GAP, 82.0);
+        // The second bar's top is the icon's own grid: two rows and the gap between
+        // them are its 32 pixels, so a row is 12 and the second bar starts at 12 + 8.
+        assert_eq!(THEME_BAR2_TOP, (THEME_MOCK_ICON - THEME_MOCK_GAP) / 2.0 + THEME_MOCK_GAP);
+        // A name has to fit one card's label: the capture puts `Sync with system`
+        // inside 197 pixels of room.
+        let room = theme_label_room(566.0);
+        assert!(room > 0.0 && room < card);
+        assert_eq!(room, 197.0, "the reference's own label room at this window");
+        // And the pane the cards sit in is taller than the 468 the window gives it,
+        // which is why the reference's capture shows the pane's bottom fade over the
+        // sync row. 472 = 50 (the heading block: 28 + gap-1 + the inherited
+        // 18-pixel description) + 16 (`mt-4`) + 332 (two 158-pixel card rows and
+        // their 16-pixel gap) + 24 (`mt-6`) + 50 (the sync row's own block).
+        let height = appearance_settings_height(shell.themes_offered().len(), 2);
+        assert_eq!(height, 472.0, "the pane's own height");
+        assert!(height > settings_content_min(iced::Size::new(1280.0, 720.0)));
+    }
+
+    #[test]
+    fn the_settings_dialog_is_the_reference_s_own_size() {
+        // `AppSettingsModal.vue`'s `:width="'min(928px, calc(95vw - 10rem))'"` and
+        // `TabbedModal.vue`'s `min-h-[min(65vh,600px)]`, at the window the two clients
+        // were captured in. The height is the reference's own arithmetic on top of
+        // them: `NewModal.vue`'s `p-6` header around its own row -- 36 pixels, the
+        // close IconButton's `h-9`, which is the taller side of an `items-center`
+        // row whose title is set on 32 (24 + 36 + 24) -- its 1-pixel rule, then the
+        // body's `p-6 pb-3` around the content floor (24 + 468 + 12): 589 rows of
+        // surface, which is the captured dialog's own y 66..654, and 591 with its
+        // two border pixels, y 65..655. This box is one row shorter than that, with
+        // the pixel given back at the body's *bottom* padding: 588 of content inside
+        // 590, so that the box is even and its top border is the reference's own
+        // row 65 (the 591-row original is a 64.5-pixel offset in CSS, which a
+        // browser pixel-snaps and a rasteriser cannot). Every row from the top
+        // border down to the pane's floor is the reference's; only the bottom
+        // padding's last row and the bottom border sit one higher.
+        let window = iced::Size::new(1280.0, 720.0);
+        assert_eq!(SETTINGS_NAV, 288.0, "`minmax(12.5rem, 18rem)` at its cap");
+        assert_eq!(SETTINGS_WIDTH, 928.0);
+        // 65vh of 720 is 468, and it is a *float* 468: `720.0 * 0.65` is
+        // 467.99997 in f32, which is the value the layout will use and the value a
+        // tolerance has to admit.
+        assert!((settings_content_min(window) - 468.0).abs() < 0.001, "65vh of 720");
+        let interior = 24.0 + 36.0 + 24.0 + 1.0 + 24.0 + settings_content_min(window) + 11.0;
+        // 588 of content, 590 as a border box. The reference's box is 591 (589 of
+        // content and the browser's two border pixels), which is a half-pixel when
+        // centered in a 720-pixel window and is painted from row 65 all the same;
+        // 590 is even, so this box lands on 65 without a half-pixel anywhere.
+        assert!((interior - 588.0).abs() < 0.01, "{interior} is not the content's 588");
+        assert!((interior + 2.0 - 590.0).abs() < 0.01, "nor the border box's 590");
+        let top = (window.height - (interior + 2.0)) / 2.0;
+        assert!((top - 65.0).abs() < 0.01, "the top border lands on {top}");
+        // And the divider's column, which the reference's capture puts at x=488: the
+        // dialog's box starts at 176 in a 1280-pixel window, its 1-pixel border is
+        // the box's own first pixel (which is why the captured surface starts at
+        // 177), the body's own `p-6` is 24, and the divider is the last pixel of the
+        // 288-wide track -- 176 + 1 + 24 + 288 - 1 = 488.
+        let left = (window.width - SETTINGS_WIDTH) / 2.0;
+        assert_eq!(left + 1.0 + 24.0 + SETTINGS_NAV - 1.0, 488.0, "the captured divider");
     }
 
     #[test]
