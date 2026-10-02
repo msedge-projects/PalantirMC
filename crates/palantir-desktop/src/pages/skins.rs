@@ -1535,28 +1535,30 @@ pub fn edit_view<'a>(
     wearing: bool,
 ) -> Element<'a, Message> {
     let slim = edit.variant.eq_ignore_ascii_case("SLIM");
-    let mut body = column![].spacing(GAP).width(Length::Fill);
+    let mut body = column![].spacing(EDITOR_SECTION_GAP).width(Length::Fill);
     // The name the row is stored under. The reference's own title is the sentence
     // "Editing skin"; *which* skin is the row's, and a reader who opened the wrong one
     // needs to see that before they press Save.
     body = body.push(caption(theme, &edit.name));
     // Arm style: the reference's own `RadioButtons` over the service's two words.
-    body = body.push(heading(theme, Key::AppSkinsModalArmStyleSection.message()));
-    body = body.push(ui::chips(
+    body = body.push(section(
         theme,
-        &[ui::scoped(EDIT_KEY, "arm:wide"), ui::scoped(EDIT_KEY, "arm:slim")],
-        &[(variant_label("CLASSIC"), !slim), (variant_label("SLIM"), slim)],
-        move |index| {
-            Some(Message::ArmStyle {
-                variant: if index == 0 { "CLASSIC" } else { "SLIM" },
-            })
-        },
+        Key::AppSkinsModalArmStyleSection.message(),
+        ui::chips(
+            theme,
+            &[ui::scoped(EDIT_KEY, "arm:wide"), ui::scoped(EDIT_KEY, "arm:slim")],
+            &[(variant_label("CLASSIC"), !slim), (variant_label("SLIM"), slim)],
+            move |index| {
+                Some(Message::ArmStyle {
+                    variant: if index == 0 { "CLASSIC" } else { "SLIM" },
+                })
+            },
+        ),
     ));
     // The cape: the reference's own "None" cell *first*, then one cell per cape the
     // account owns, four to a row. A choice's mark is the row's *stored* cape id, so a
     // chip draws the check the other choices do only when it is the one this row asks
     // for -- the none cell included, which is how a row with no cape says so.
-    body = body.push(heading(theme, Key::AppSkinsModalCapeSection.message()));
     let mut cape_list = column![].spacing(CAPE_GAP);
     for row in cape_rows(capes) {
         let mut keys: Vec<&'static str> = Vec::with_capacity(row.len());
@@ -1585,7 +1587,7 @@ pub fn edit_view<'a>(
             Some(Message::Cape { id: ids.get(index).cloned().unwrap_or_default() })
         }));
     }
-    body = body.push(cape_list);
+    body = body.push(section(theme, Key::AppSkinsModalCapeSection.message(), cape_list.into()));
     if edit.ears {
         body = body.push(ears_notice(theme));
     }
@@ -1622,6 +1624,33 @@ pub fn edit_view<'a>(
             )),
     );
     body.into()
+}
+
+/// The gap between two of the reference's own sections in the editor.
+///
+/// `EditSkinModal.vue`'s right column is `flex flex-col gap-4`, so one section
+/// and the next are 16 apart -- which is what this drew as [`crate::page::GAP`]
+/// before, and 4 short of it.
+const EDITOR_SECTION_GAP: f32 = 16.0;
+
+/// The gap between a section's own heading and the control under it.
+///
+/// Every `<h2 class="text-base font-semibold mb-2">` in that column, so the
+/// heading sits 8 above its own control and 8 closer to it than to the section
+/// above -- the reference's two numbers, and the reason the blocks read as
+/// pairs rather than as a list.
+const EDITOR_HEADING_GAP: f32 = 8.0;
+
+/// One of the reference's own sections: its heading and the control beneath it.
+///
+/// The `<section>` element itself, which is a `flex-col` child of the column
+/// with nothing between it and its own contents except the heading's `mb-2`.
+fn section<'a>(
+    theme: Gen,
+    label: &str,
+    control: Element<'a, Message>,
+) -> Element<'a, Message> {
+    column![heading(theme, label), control].spacing(EDITOR_HEADING_GAP).into()
 }
 
 /// How many capes the reference's cape list draws to a row.
@@ -2407,6 +2436,28 @@ mod tests {
             url: String::new(),
             alias: alias.to_string(),
         }
+    }
+
+    #[test]
+    fn the_editors_blocks_are_the_reference_s_own_two_gaps_apart() {
+        // `flex flex-col gap-4` between the sections, and `mb-2` under each of
+        // their own headings -- so a heading is 8 from what it labels and 16 from
+        // the section above it, which is the pairing the reference's column reads as.
+        assert_eq!(EDITOR_SECTION_GAP, 16.0, "`gap-4`");
+        assert_eq!(EDITOR_HEADING_GAP, 8.0, "`mb-2`");
+        assert_ne!(EDITOR_SECTION_GAP, GAP, "which is the page-wide 12 it was before");
+        // And the two numbers are what the editor is built from: two sections and
+        // the actions, each a block of its own.
+        let edit = Edit {
+            round: 1,
+            key: "abc".to_string(),
+            name: "my skin".to_string(),
+            variant: "CLASSIC".to_string(),
+            cape: String::new(),
+            ears: true,
+            act: Act::Save,
+        };
+        drop(edit_view(Gen::ALL[0], &edit, &[], false));
     }
 
     #[test]
