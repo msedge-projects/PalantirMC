@@ -113,7 +113,12 @@ pub struct Prefs {
     #[serde(skip_serializing_if = "is_true")]
     pub show_all_screenshots_in_sidebar: bool,
     /// Put a skin selector in the left rail.
-    #[serde(skip_serializing_if = "is_false")]
+    ///
+    /// On by default, like the reference's own copy of the setting, and so the
+    /// predicate is the true-sided one: the file is the diff from the defaults,
+    /// and a field whose default changes has to change its predicate with it or
+    /// every file starts carrying a line that says nothing.
+    #[serde(skip_serializing_if = "is_true")]
     pub show_skin_selector_in_sidebar: bool,
     /// Put the recently-played instances at the foot of the left rail.
     #[serde(skip_serializing_if = "is_true")]
@@ -646,7 +651,9 @@ mod tests {
             show_files_tab: false,
             show_screenshots_tab: false,
             show_all_screenshots_in_sidebar: false,
-            show_skin_selector_in_sidebar: true,
+            // Off, which is now the side away from the default: this file has to
+            // exercise the value the predicate *keeps*, whichever it is.
+            show_skin_selector_in_sidebar: false,
             quick_instances_in_sidebar: false,
             show_jump_in_section: false,
             minimize_on_launch: false,
