@@ -1700,6 +1700,66 @@ pub fn checkbox<'a, Message: Clone + Hovered + 'a>(
         .into()
 }
 
+/// One row of a page header's metadata: the reference's `PageHeaderMetadata`.
+///
+/// `page-header/metadata/index.vue` lays the row out as `flex min-w-0 flex-wrap
+/// items-center gap-x-[1.625rem] gap-y-2` -- 26 pixels between items -- and every
+/// item carries its own `BulletDivider` in an `absolute right-full flex h-full
+/// w-[1.625rem]` span, which puts a 6-pixel `--surface-5` dot in the middle of the
+/// gap *behind* it. The scoped rule hides that dot on the first child and on any
+/// item that starts a row (`data-page-header-metadata-row-start`), so in a
+/// one-row strip the first fact has no dot and every other one does.
+///
+/// The item itself is `relative flex min-w-0 items-center font-medium leading-none
+/// text-secondary text-nowrap` around an `inline-flex items-center gap-2`, with
+/// the icon at `block size-5 shrink-0 text-current`.
+pub fn metadata_row<'a, Message: 'a>(
+    theme: Gen,
+    items: &[(Glyph, String)],
+) -> Element<'a, Message> {
+    let mut row = row![].align_items(Alignment::Center);
+    for (index, (glyph, label)) in items.iter().enumerate() {
+        // The dot is drawn in front of the item rather than behind it, which is
+        // the same picture: nothing else in the row occupies the gap.
+        if index > 0 {
+            row = row.push(container(Space::new(Length::Fixed(METADATA_DOT), Length::Fixed(METADATA_DOT))).center_y().style(
+                move |_theme: &Theme| container::Appearance {
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+                    border: Border { radius: 999.0.into(), ..Border::default() },
+                    ..container::Appearance::default()
+                },
+            ));
+            // `gap-x-[1.625rem]` is the whole gap, dot included: 26 less the
+            // dot's own six, halved either side of it.
+            row = row.push(Space::with_width((METADATA_GAP - METADATA_DOT) / 2.0));
+        }
+        let item = row![]
+            .align_items(Alignment::Center)
+            .spacing(8.0)
+            .push(icon::icon(*glyph, METADATA_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+            .push(
+                text(label.clone())
+                    .size(METADATA_LABEL)
+                    // `leading-none`: the item's line is the text's own size, and
+                    // the row is as tall as the icon beside it either way.
+                    .line_height(iced::Pixels(METADATA_LABEL))
+                    .font(crate::style::medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        row = row.push(item);
+    }
+    row.into()
+}
+
+/// `gap-x-[1.625rem]`: the space between two metadata items, dot included.
+pub const METADATA_GAP: f32 = 26.0;
+/// `BulletDivider`'s `min-w-1.5 min-h-1.5`: the dot's own size.
+pub const METADATA_DOT: f32 = 6.0;
+/// The item's `size-5` icon.
+pub const METADATA_ICON: f32 = 20.0;
+/// The label's `font-medium` at the interface's base size.
+pub const METADATA_LABEL: f32 = 16.0;
+
 /// The width and height of a [`checkbox`]: `w-5 h-5`.
 pub const CHECK_SIZE: f32 = 20.0;
 

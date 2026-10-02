@@ -1936,3 +1936,67 @@ one of them and not the others.
 One more of `NavTabs.vue`'s own rules came with it: `v-if="filteredLinks.length >
 1"`. A strip of one tab is not a strip, and this draws nothing rather than a pill
 around a single word.
+
+### The instance header, which was a card with three loose facts on it
+
+The instance page's header was the one header in this tree still wearing
+`ui::card`, and the row under the name was three things this launcher
+chose: a pill of the loader and game version, the playtime, and a count of
+enabled mods out of all of them. None of that is what
+`page-header/index.vue` draws.
+
+`base/page-header/index.vue` is a plain block. Its root is `flex flex-col
+gap-2`, and the one child in it sits above a `border-0 border-b border-solid
+border-divider` hairline with `pb-4` under it -- a rule under the header, not a
+box around it. `border-divider` resolves to `--surface-5` in the light
+variable set (`variables.scss` line 102), which is why the rule is
+`Ink::Surface5` and not `Surface2`. The row is `flex flex-wrap items-start
+gap-4`, so the name's column and the actions both sit at the *top* of it,
+and the name's column is `flex min-w-0 flex-1 flex-col justify-center gap-2`.
+The title is `text-2xl font-semibold leading-none text-contrast` -- twenty-four
+pixels at the semibold face on a line exactly as tall as itself, so `TITLE` is
+both the size and the line height.
+
+Under it, `pages/instance/components/page-header/index.vue` fills
+`PageHeaderMetadata`, which is `flex min-w-0 flex-wrap items-center
+gap-x-[1.625rem] gap-y-2` with a `BulletDivider` on every item. Four arms, in
+this order:
+
+* the loader and the game version, over a `TagIcon`;
+* the playtime, over a `TimerIcon` -- but only `v-if="showInstancePlayTime
+&& playtimeLabel"`, so an instance with no seconds has no such fact at all;
+* a `ClockIcon` and the relative age when there is a last-played stamp;
+* a `ClockIcon` and *Never played* when there is not.
+
+`show_instance_play_time` defaults to true (`use-app-settings.ts` line 16),
+so the playtime is drawn whenever there is any -- which is why the clock
+never has to say it twice.
+
+Three of those four were being drawn in this launcher's own words, and they
+were being drawn as abbreviations. `loaderLabel` is
+`[loaderDisplayName, game_version].filter(Boolean).join(' ')` and
+`formatLoaderLabel` is the loader's *name* -- *Fabric*, *Vanilla* -- with no
+build on it, so `InstanceCard::loader_label` says *Fabric 1.21.1* where the old
+pill said *Fabric 0.19.5 · 1.21.1*. The playtime counts down and says
+the largest unit it reaches, spelled out: *3 hours*, not *3h 12m*.
+`PageHeaderMetadataTimeItem` joins `useRelativeTime` -- `Intl.RelativeTimeFormat`
+over dayjs's thresholds -- to its own `label`, so the age reads *Last played 2
+hours ago* against a stamp of zero reading *Never played*; the two arms are one
+function now (`instances::last_played_label`). `InstanceCard` carries the
+stamp itself (`lastLaunchTime`), which is why it grew a
+`last_launch_millis`.
+
+The mods count is not one of the four. The reference's header says what an
+instance *is*; what is in it is the Content tab's list, and the row under
+the title no longer carries a number that belongs somewhere else.
+
+`ui::metadata_row` draws the row at `PageHeaderMetadata`'s own
+measurements: `METADATA_GAP` is 26 (`gap-x-[1.625rem]`), the dot is
+`METADATA_DOT` = 6 (`BulletDivider`'s `min-w-1.5`), and the gap is split
+ten either side of the dot rather than measured twice -- which is what
+`absolute right-full w-[1.625rem]` puts there. The first item has no dot,
+because `metadata/index.vue`'s scoped rule hides it on `:first-child` and on
+every item a `ResizeObserver` marks `data-page-header-metadata-row-start`.
+The icon is 20 (`size-5`), the label 16 at `font-medium leading-none`
+in `text-secondary` (`page-header-metadata-item.vue`'s `baseClass`), and
+the icon sits eight from it (`gap-2` on `contentBaseClass`).

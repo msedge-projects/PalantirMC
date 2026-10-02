@@ -36,6 +36,7 @@
 //! the folder.
 
 use iced::widget::{column, container, row, Space};
+use iced::{Background, Theme};
 use iced::{Alignment, Element, Font, Length, Padding};
 
 use crate::icons_gen::Glyph;
@@ -483,6 +484,19 @@ fn scrolling<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 }
 
 /// The header: the instance's name, what it is, and Play.
+///
+/// `page-header/index.vue` is a plain block and not a card: a `flex flex-col gap-2`
+/// root whose one child sits above a `border-b border-divider` hairline with
+/// `pb-4` under it -- `border-0 border-b border-solid border-divider`, which is
+/// `--color-divider` and therefore `--surface-5` ([`crate::theme_gen::Ink::Surface5`]).
+/// The row itself is `flex flex-wrap items-start gap-4`, so the name's column and
+/// the actions are both at the *top* of the row rather than centred in it, and the
+/// name's column is `flex min-w-0 flex-1 flex-col justify-center gap-2`: the title
+/// first, then the metadata strip.
+///
+/// The title is `m-0 min-w-0 max-w-full text-2xl font-semibold leading-none
+/// text-contrast` -- twenty-four pixels, the semibold face, and a line no taller
+/// than the text itself, which is why [`TITLE`] is both the size and the line.
 fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Message> {
     let card = store.instance(&state.id);
     let title = match &card {
@@ -490,25 +504,34 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
         _ => state.id.clone(),
     };
     let mut details = column![]
-        .spacing(4.0)
+        .spacing(ROW_GAP)
         .push(
             text(title)
-                .size(24.0)
-                .font(crate::style::heading())
+                .size(TITLE)
+                .font(semibold())
+                .line_height(iced::Pixels(TITLE))
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         );
     if let Some(card) = card.ready() {
-        let mut facts = row![].spacing(ROW_GAP);
-        facts = facts.push(ui::tag(theme, &card.subtitle()));
-        facts = facts.push(ui::icon_label(theme, Glyph::Clock, &card.playtime_label()));
-        if card.mods_total > 0 {
-            facts = facts.push(ui::icon_label(
-                theme,
-                Glyph::Package,
-                &format!("{} / {}", card.mods_enabled, card.mods_total),
-            ));
+        // The instance header's own metadata slot, in its own order and in its own
+        // four arms (`pages/instance/components/page-header/index.vue`): the loader
+        // and game version, then the playtime *while there is any* -- its
+        // `v-if="showInstancePlayTime && playtimeLabel"` skips the fact rather than
+        // showing a zero -- and then the clock either way. The mods count this row
+        // used to carry is not one of them: the reference's header says what an
+        // instance *is*, and what is in it is the Content tab's list.
+        let mut facts: Vec<(Glyph, String)> = vec![(Glyph::Tag, card.loader_label())];
+        if card.playtime_secs > 0 {
+            facts.push((Glyph::Timer, card.playtime_label()));
         }
-        details = details.push(facts);
+        facts.push((
+            Glyph::Clock,
+            crate::instances::last_played_label(
+                card.last_launch_millis,
+                palantir_core::util::now_millis(),
+            ),
+        ));
+        details = details.push(ui::metadata_row(theme, &facts));
     } else {
         details = details.push(ui::paragraph(
             theme,
@@ -528,26 +551,57 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
         );
     }
-    ui::card(
-        theme,
-        row![]
-            .spacing(GAP)
-            .align_items(Alignment::Center)
-            .push(details.width(Length::Fill))
-            // The reference's own order in `PageHeaderActions`: the launch button
-            // first and the gear to its right, both at its `size="xl"` -- a
-            // 48-pixel round `IconButton` carrying a 24-pixel icon. The modal the
-            // gear opens is the shell's (see [`crate::instance_settings`]).
-            .push(launch_control(theme, store.launch_state(&state.id)))
-            .push(ui::icon_button_sized(
+    // `PageHeaderActions`'s own `flex flex-wrap items-center gap-2`: the launch
+    // button first and the gear to its right, both at its `size="xl"` -- a
+    // 48-pixel round `IconButton` carrying a 24-pixel icon. The modal the gear
+    // opens is the shell's (see [`crate::instance_settings`]).
+    let actions = row![]
+        .spacing(ROW_GAP)
+        .align_items(Alignment::Center)
+        .push(launch_control(theme, store.launch_state(&state.id)))
+        .push(ui::icon_button_sized(
+            theme,
+            SETTINGS_KEY,
+            Glyph::Settings,
+            ui::Kind::Standard,
+            ui::Size::Xl,
+            Message::Settings,
+        ));
+    let root = container(row![]
+        .spacing(page::GRID_GAP)
+        .align_items(Alignment::Start)
+        .push(details.width(Length::Fill))
+        .push(actions))
+    .width(Length::Fill)
+    .padding(Padding { top: 0.0, right: 0.0, bottom: HEADER_PAD, left: 0.0 });
+    // The hairline is the root's *bottom* border, which iced draws around all four
+    // sides -- so it is a separate one-pixel line under the block rather than a
+    // border on it. `border-b` is the only edge this header has.
+    column![root, rule(theme)]
+        .spacing(0.0)
+        .width(Length::Fill)
+        .into()
+}
+
+/// `text-2xl`: the header title's size, and -- because the title is
+/// `leading-none` -- its line height too.
+const TITLE: f32 = 24.0;
+/// `pb-4` on `PageHeader`'s own root, the space under the header's row.
+const HEADER_PAD: f32 = 16.0;
+
+/// The header's `border-b border-divider`: a one-pixel `--surface-5` rule.
+fn rule<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
+    container(Space::new(Length::Fill, 1.0))
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_t: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(
                 theme,
-                SETTINGS_KEY,
-                Glyph::Settings,
-                ui::Kind::Standard,
-                ui::Size::Xl,
-                Message::Settings,
-            )),
-    )
+                crate::theme_gen::Ink::Surface5,
+            ))),
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// The header's launch control, in whichever of the reference's four states the

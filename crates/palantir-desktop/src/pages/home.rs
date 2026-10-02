@@ -787,6 +787,7 @@ mod tests {
             loader,
             loader_version,
             playtime_secs: playtime,
+            last_launch_millis: 0,
             mods_total: 0,
             mods_enabled: 0,
             max_mem_mb: 4096,

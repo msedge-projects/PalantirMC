@@ -40,6 +40,14 @@ pub struct InstanceCard {
     pub loader_version: String,
     /// Seconds played, from `totalTimePlayed`.
     pub playtime_secs: i64,
+    /// Milliseconds since the epoch at the last launch, from `lastLaunchTime`.
+    ///
+    /// The instance header's third fact: `page-header/index.vue` draws a
+    /// `PageHeaderMetadataTimeItem` over `instance.last_played` and falls back to
+    /// `neverPlayed` when there is none, so the header needs the *time* and not
+    /// only the *duration*. Zero is "never launched", which is what a pack that
+    /// has never been started reads as.
+    pub last_launch_millis: i64,
     /// Mod files present in `mods/`.
     pub mods_total: usize,
     /// Of those, the enabled ones.
@@ -60,21 +68,53 @@ impl InstanceCard {
         }
     }
 
-    /// Human playtime ("3h 12m", "45m", "—" when never played).
+    /// The header's own second fact: the total playtime, in words.
+    ///
+    /// `pages/instance/components/page-header/index.vue` counts the seconds down
+    /// and says the largest unit it reaches, spelled out rather than abbreviated:
+    /// `3 hours`, `1 hour`, `45 minutes`, `1 minute`, `30 seconds`, `1 second`.
+    /// An instance with no playtime has no label at all -- the header's `v-if="...
+    /// && playtimeLabel"` skips the fact rather than showing a zero -- so the one
+    /// word that reaches the header when the seconds are zero is `neverPlayed`,
+    /// which is the same word its clock arm says.
     pub fn playtime_label(&self) -> String {
         let secs = self.playtime_secs.max(0);
         if secs == 0 {
             return "Never played".to_string();
         }
+        let plural = |count: i64, unit: &str| {
+            if count == 1 {
+                format!("1 {unit}")
+            } else {
+                format!("{count} {unit}s")
+            }
+        };
         let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        if hours >= 48 {
-            format!("{}d {}h", hours / 24, hours % 24)
-        } else if hours > 0 {
-            format!("{hours}h {minutes}m")
-        } else {
-            format!("{minutes}m")
+        if hours >= 1 {
+            return plural(hours, "hour");
         }
+        let minutes = secs / 60;
+        if minutes >= 1 {
+            return plural(minutes, "minute");
+        }
+        plural(secs, "second")
+    }
+
+    /// `loaderLabel`: the loader's display name and the game version, one space
+    /// apart.
+    ///
+    /// The header's first fact is `[loaderDisplayName, game_version].filter(Boolean)
+    /// .join(' ')`, and `formatLoaderLabel` is the loader's *name* -- "Fabric",
+    /// "Vanilla" -- with no build on it. A header that put the loader's build here
+    /// would be saying something the reference does not say; the build is what the
+    /// instance's own Content tab lists.
+    pub fn loader_label(&self) -> String {
+        let mut label = self.loader.label().to_string();
+        if !self.mc_version.is_empty() {
+            label.push(' ');
+            label.push_str(&self.mc_version);
+        }
+        label
     }
 
     /// Whether a mod loader is installed.
@@ -83,6 +123,66 @@ impl InstanceCard {
         self.loader.loads_mods() && !self.loader_version.is_empty()
     }
 }
+
+/// When the instance was last launched, in the header's third fact.
+///
+/// `page-header-metadata-time-item.vue` renders `useRelativeTime`, which is
+/// `Intl.RelativeTimeFormat` over dayjs's thresholds, and joins it to its own
+/// `label` prop: *Last played 2 hours ago*. The header only reaches for that arm
+/// when `instance.last_played` is set, and its `v-else` is the same clock icon
+/// over `neverPlayed` -- so the two arms are one function, and a stamp of zero is
+/// the second of them.
+///
+/// The thresholds are dayjs's, which are the same numbers `Intl` ships with
+/// behind the default locale: 44 seconds is "a few seconds", 45 is "a minute",
+/// 90 seconds is two minutes, 45 minutes is an hour, 22 hours is a day, 26 days
+/// is a month, 26 more is a year. A future stamp is not a thing an instance
+/// carries -- a clock that has moved backwards would be -- so it reads as
+/// "just now" rather than as a negative age.
+pub fn last_played_label(millis: i64, now_millis: i64) -> String {
+    if millis <= 0 {
+        return "Never played".to_string();
+    }
+    let seconds = ((now_millis - millis).max(0) / 1000) as i64;
+    let ago = |count: i64, unit: &str| {
+        if count == 1 {
+            format!("1 {unit} ago")
+        } else {
+            format!("{count} {unit}s ago")
+        }
+    };
+    let relative = if seconds <= 44 {
+        "a few seconds ago".to_string()
+    } else if seconds <= 89 {
+        "a minute ago".to_string()
+    } else if seconds <= 44 * MINUTE {
+        ago((seconds / MINUTE).max(1), "minute")
+    } else if seconds <= 89 * MINUTE {
+        "an hour ago".to_string()
+    } else if seconds <= 21 * HOUR {
+        ago(seconds / HOUR, "hour")
+    } else if seconds <= 35 * HOUR {
+        "a day ago".to_string()
+    } else if seconds <= 25 * DAY {
+        ago(seconds / DAY, "day")
+    } else if seconds <= 45 * DAY {
+        "a month ago".to_string()
+    } else if seconds <= 319 * DAY {
+        ago(seconds / (30 * DAY), "month")
+    } else if seconds <= 547 * DAY {
+        "a year ago".to_string()
+    } else {
+        ago(seconds / (365 * DAY), "year")
+    };
+    format!("Last played {relative}")
+}
+
+/// The three units dayjs's thresholds are counted in. They are named so the
+/// ladder above reads as the one in `Intl.RelativeTimeFormat` -- `s`, `m`, `mm`,
+/// `h`, `hh`, `d`, `dd`, `M`, `MM`, `y` -- rather than as a wall of digit runs.
+const MINUTE: i64 = 60;
+const HOUR: i64 = 60 * MINUTE;
+const DAY: i64 = 24 * HOUR;
 
 /// Result of a full background scan: the cards, and the directory they came
 /// from.
@@ -115,6 +215,7 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
         loader: LoaderKind::Vanilla,
         loader_version: String::new(),
         playtime_secs: entry.playtime_secs,
+        last_launch_millis: 0,
         mods_total: 0,
         mods_enabled: 0,
         max_mem_mb: defaults::MAX_MEM_ALLOC,
@@ -128,6 +229,7 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
         }
     };
     card.max_mem_mb = instance.settings().get_i64("MaxMemAlloc", defaults::MAX_MEM_ALLOC);
+    card.last_launch_millis = instance.last_launch_millis().max(0);
     match PackProfile::load(&instance.mmc_pack_path()) {
         Ok(profile) => {
             for component in profile.components() {
@@ -749,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn playtime_labels_are_human() {
+    fn the_header_s_three_facts_are_the_reference_s_own_words() {
         let mut card = InstanceCard {
             id: "x".into(),
             name: "x".into(),
@@ -759,18 +861,54 @@ mod tests {
             loader: LoaderKind::Vanilla,
             loader_version: String::new(),
             playtime_secs: 0,
+            last_launch_millis: 0,
             mods_total: 0,
             mods_enabled: 0,
             max_mem_mb: 4096,
             problem: None,
         };
+
+        // The loader's *name*, then the game version: `loaderLabel` is
+        // `[loaderDisplayName, game_version].filter(Boolean).join(' ')`, and no
+        // loader build is in it.
+        assert_eq!(card.loader_label(), "Vanilla 26.2");
+        card.loader = LoaderKind::Fabric;
+        card.loader_version = "0.19.5".into();
+        assert_eq!(card.loader_label(), "Fabric 26.2", "the build is not the header's fact");
+        card.mc_version.clear();
+        assert_eq!(card.loader_label(), "Fabric", "an empty half is dropped, not padded");
+
+        // The playtime counts down and says the largest unit it reaches, in words.
         assert_eq!(card.playtime_label(), "Never played");
+        card.playtime_secs = 1;
+        assert_eq!(card.playtime_label(), "1 second");
         card.playtime_secs = 90;
-        assert_eq!(card.playtime_label(), "1m");
+        assert_eq!(card.playtime_label(), "1 minute");
         card.playtime_secs = 3 * 3600 + 12 * 60;
-        assert_eq!(card.playtime_label(), "3h 12m");
-        card.playtime_secs = 50 * 3600;
-        assert_eq!(card.playtime_label(), "2d 2h");
+        assert_eq!(card.playtime_label(), "3 hours", "and not 3 hours 12 minutes");
+
+        // The clock has two arms: the relative age, or the one word.
+        let now = 1_700_000_000_000;
+        assert_eq!(last_played_label(0, now), "Never played");
+        assert_eq!(last_played_label(now - 30_000, now), "Last played a few seconds ago");
+        assert_eq!(last_played_label(now - 90_000, now), "Last played 1 minute ago");
+        assert_eq!(last_played_label(now - 3 * 3_600_000, now), "Last played 3 hours ago");
+        assert_eq!(last_played_label(now + 60_000, now), "Last played a few seconds ago");
+    }
+
+    #[test]
+    fn the_header_s_clock_reads_the_last_launch_stamp() {
+        let (_dir, paths) = test_paths();
+        let created = create(&paths, &fabric_spec("Stamped", "1.21.1", "0.19.5")).unwrap();
+        let model = crate::model::InstanceListModel::load(&paths).unwrap();
+        let card = summarize(&paths.instances_dir(), &model.entries()[0]);
+        assert_eq!(card.last_launch_millis, 0, "a pack that has never run has no stamp");
+
+        let mut instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
+        instance.set_last_launch_millis(1_700_000_000_000);
+        instance.save().unwrap();
+        let card = summarize(&paths.instances_dir(), &model.entries()[0]);
+        assert_eq!(card.last_launch_millis, 1_700_000_000_000);
     }
 
     #[test]
