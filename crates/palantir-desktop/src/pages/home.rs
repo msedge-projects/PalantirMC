@@ -34,7 +34,7 @@ use crate::icons_gen::Glyph;
 use crate::instances::InstanceCard;
 use crate::page::{self, Load, GAP, GRID_GAP, ROW_GAP};
 use crate::store::Store;
-use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 // `Hovered` is in scope for the instance cards below: a card names its own
@@ -325,7 +325,7 @@ fn header<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
-        .push(page::title(theme, Key::AppLibraryTitle))
+        .push(drawn_title(theme, Key::AppLibraryTitle))
         .push(Space::with_width(Length::Fill))
         .push(sort)
         .push(ui::search(
@@ -389,12 +389,15 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
             column![]
                 .align_items(Alignment::Center)
                 .spacing(TITLE_GAP)
-                .push(page::title(theme, Key::AppWelcomeScreenTitle))
+                .push(drawn_title(theme, Key::AppWelcomeScreenTitle))
                 .push(
                     text(Key::AppWelcomeScreenDescription.message())
                         .size(16.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        // `text-base leading-6 text-primary`: the preset's
+                        // `primary` is `--color-text-default`, so this is the
+                        // default ink at body weight, not white and not medium.
+                        .font(regular())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
                 ),
         )
         .push(
@@ -402,14 +405,14 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
                 .width(Length::Fixed(WELCOME_COLUMN))
                 .align_items(Alignment::Center)
                 .spacing(WELCOME_GAP)
-                .push(ui::button_with_icon(
+                .push(welcome_button(
                     theme,
                     WELCOME_CREATE_KEY,
                     Glyph::Plus,
                     Key::AppWelcomeScreenCreateInstance,
-                    ui::Kind::Colored,
-                    Length::Fill,
-                    Some(Message::CreateInstance),
+                    true,
+                    semibold(),
+                    Message::CreateInstance,
                 ))
                 .push(quick_create_hint(theme)),
         );
@@ -420,17 +423,20 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
         .push(
             text(Key::AppWelcomeScreenImportPrompt.message())
                 .size(14.0)
-                .font(medium())
+                .font(regular())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
         )
-        .push(ui::button_with_icon(
+        .push(welcome_button(
             theme,
             WELCOME_IMPORT_KEY,
             Glyph::Import,
             Key::AppWelcomeScreenImportFromLauncher,
-            ui::Kind::Standard,
-            Length::Shrink,
-            Some(Message::ImportFromLauncher),
+            false,
+            // The reference overrides this one with `!font-medium`, which is
+            // where a coloured button's `font-semibold` label differs from a
+            // standard one's.
+            medium(),
+            Message::ImportFromLauncher,
         ));
     column![]
         .width(Length::Fill)
@@ -446,6 +452,82 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
         // in the middle of it.
         .push(container(hero).width(Length::Fill).height(Length::Fill).center_y())
         .push(foot)
+        .into()
+}
+
+/// The welcome screen's title: `WelcomeScreen.vue`'s h1 is `text-2xl
+/// font-semibold text-contrast` -- 24 at weight 600.
+///
+/// Drawn here rather than through [`page::title`] because that helper draws at
+/// `--font-weight-heading` (800), the reference's default for a heading, which
+/// this screen and the library's own h2 both override with `font-semibold`.
+fn drawn_title<'a>(theme: Gen, key: Key) -> Element<'a, Message> {
+    text(key.message())
+        .size(24.0)
+        .font(semibold())
+        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .into()
+}
+
+/// One of the welcome screen's two buttons, at the reference's own `lg` size.
+///
+/// `ButtonFrame.vue`'s `lg` row is `h-10 gap-2 rounded-[14px] px-4 text-base
+/// font-semibold leading-5 [&>svg]:size-5`: 40 high, 16 of padding a side, 8
+/// between the icon and the label, a 20-pixel icon and a 16-pixel label, a
+/// 14-pixel corner. The kit's [`ui::button_with_icon`] draws the reference's
+/// `md` row instead -- a 14-pixel label at 800, a 12-pixel corner, a 6-pixel
+/// gap -- and draws it at whatever width it is handed, which is why the
+/// reference's own 214x40 call to action was 289x41 here. `crate::ui` is
+/// another agent's file in this slice, so the welcome's two buttons are built
+/// at their own size here; when the kit grows the reference's five sizes, this
+/// belongs inside it.
+fn welcome_button<'a>(
+    theme: Gen,
+    key: &'static str,
+    glyph: Glyph,
+    label: Key,
+    brand: bool,
+    label_font: iced::Font,
+    message: Message,
+) -> Element<'a, Message> {
+    let (factor, _) = ui::interaction(key);
+    let ink = if brand {
+        theme_gen::ink(theme, Ink::AccentContrast)
+    } else {
+        theme_gen::ink(theme, INK_CONTRAST)
+    };
+    let ink = crate::theme::brightness(ink, factor);
+    let fill = if brand {
+        theme_gen::ink(theme, Ink::Brand)
+    } else {
+        theme_gen::ink(theme, Ink::ButtonBg)
+    };
+    let face = container(
+        row![
+            icon::icon(glyph, 20.0, ink),
+            text(label.message())
+                .size(16.0)
+                .font(label_font)
+                .style(iced::theme::Text::Color(ink))
+        ]
+        .spacing(8.0)
+        .align_items(Alignment::Center),
+    )
+    .height(Length::Fixed(ui::CONTROL))
+    .padding(Padding { top: 0.0, bottom: 0.0, left: ui::BUTTON_PAD, right: ui::BUTTON_PAD })
+    // `Shrink`, which is what content-sized means: the box is the row's own
+    // width rather than the column's 288.
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(crate::theme::brightness(fill, factor))),
+        border: Border { radius: 14.0.into(), ..Border::default() },
+        ..container::Appearance::default()
+    });
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(message)
         .into()
 }
 
@@ -479,19 +561,29 @@ fn quick_create_hint<'a>(theme: Gen) -> Element<'a, Message> {
 fn hint_run<'a>(theme: Gen, run: &str) -> Element<'a, Message> {
     text(run.to_string())
         .size(14.0)
-        .font(medium())
+        .font(regular())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
         .into()
 }
 
 /// The `<shortcut>` slot: a key, in the reference's chip.
+///
+/// `h-5 min-w-5 rounded-md border border-surface-5 bg-button-bg px-1 text-xs
+/// font-normal leading-4 text-primary`: 20 tall and at least 20 wide, four of
+/// padding a side, and a 12-pixel label at normal weight. `text-primary` is the
+/// preset's `primary`, which is `--color-text-default` -- the default ink, not
+/// the white `text-contrast` this drew before.
 fn shortcut_chip<'a>(theme: Gen, key: &str) -> Element<'a, Message> {
+    let label = ui::advance(key, regular(), 12.0);
     container(
         text(key.to_string())
             .size(12.0)
-            .font(medium())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            .font(regular())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
     )
+    // `min-w-5` is the chip's own height, so a one-character key is square and a
+    // longer one grows rather than wraps.
+    .width(Length::Fixed((label + 8.0).max(SHORTCUT_HEIGHT)))
     .height(Length::Fixed(SHORTCUT_HEIGHT))
     .padding(Padding { top: 0.0, bottom: 0.0, left: 4.0, right: 4.0 })
     .center_x()
@@ -744,6 +836,27 @@ mod tests {
         for theme in Gen::ALL {
             drop(welcome(*theme));
         }
+    }
+
+    #[test]
+    fn the_welcome_call_to_action_is_content_sized_and_no_wider_than_the_reference_s() {
+        // The reference's own capture (1280x720, 2026-10-02): the call to action
+        // is 214x40 at x415..628 and the hint's chip is 20 tall at y491..510. This
+        // page drew the button at `Length::Fill`, which inside the `w-72` column is
+        // 289 wide. What is asserted here is the arithmetic that replaced it -- the
+        // label, its icon, the 8 between them and twice the button's padding,
+        // which is `ButtonFrame.vue`'s `lg` row -- and the chip's own minimum.
+        let cta = 2.0 * ui::BUTTON_PAD
+            + 20.0
+            + 8.0
+            + ui::advance("Create an instance", semibold(), 16.0);
+        assert!(
+            cta <= 214.0,
+            "the call to action measures {cta:.1}, wider than the reference's 214"
+        );
+        assert!(cta >= 190.0, "the call to action measures {cta:.1}, narrower than its own parts");
+        // `min-w-5`: a one-character chip is square rather than 16 wide.
+        assert!(ui::advance("N", regular(), 12.0) + 8.0 <= SHORTCUT_HEIGHT);
     }
 
     #[test]
