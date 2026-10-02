@@ -387,17 +387,50 @@ impl State {
                     self.results = Load::Idle;
                 }
             }
+            // Every control that changes the request re-asks on the turn it
+            // changes, which is what `use-browse-search.ts` does: it watches the
+            // request's parameters (`query`, `maxResults`, the sort, the page) and
+            // refreshes on a 200 ms debounce, so in the reference the search
+            // follows the controls without a button to apply them. The row here
+            // used to carry that button; with it gone, a control that changes and
+            // does not ask would leave the search field typing at nothing. A page
+            // can report a request but not schedule one -- the shell runs the
+            // command, and there is no timer on this side of the seam -- so there
+            // is no debounce to rest on and each change asks on its own turn.
+            // [`Message::Found`]'s round is what keeps that honest: only the
+            // newest answer is drawn, and the rest are dropped.
             Message::Query(query) => {
-                self.query = query;
-                // Typing starts a new search, so the page goes back to the first.
-                self.page = 1;
+                if self.query != query {
+                    self.query = query;
+                    // Typing starts a new search, so the page goes back to the
+                    // first.
+                    self.page = 1;
+                    return Some(Ask::Search(self.ask()));
+                }
             }
             Message::Sort(sort) => {
-                self.sort = sort;
-                self.page = 1;
+                if self.sort != sort {
+                    self.sort = sort;
+                    self.page = 1;
+                    return Some(Ask::Search(self.ask()));
+                }
             }
-            Message::View(view) => self.view = view,
-            Message::Page(page) => self.page = page.max(1),
+            Message::View(view) => {
+                if self.view != view {
+                    self.view = view;
+                    return Some(Ask::Search(self.ask()));
+                }
+            }
+            Message::Page(page) => {
+                let page = page.max(1);
+                if self.page != page {
+                    self.page = page;
+                    return Some(Ask::Search(self.ask()));
+                }
+            }
+            // The explicit ask, for a caller that wants one without changing a
+            // control: the flood above is kept honest by the round, and this is the
+            // message the tests drive that with.
             Message::Search => return Some(Ask::Search(self.ask())),
             Message::Found { round, result } => {
                 // An answer to a question this page has replaced is dropped. It
@@ -1046,6 +1079,38 @@ mod tests {
     }
 
     #[test]
+    fn a_control_that_changes_the_request_asks_for_it() {
+        // `use-browse-search.ts` refreshes whenever the request's parameters
+        // change. The page's half of that is the `Ask` each changing control
+        // returns: with the *Filter results...* button gone, a control that did
+        // not ask would leave the reader with no way to run their own search.
+        let mut state = State::new(ProjectType::Modpack);
+        let Some(Ask::Search(asked)) = state.update(Message::Query("sodium".to_string())) else {
+            panic!("typing asks");
+        };
+        assert_eq!(asked.query.query, "sodium");
+        assert_eq!(state.results, Load::Loading);
+        let Some(Ask::Search(asked)) = state.update(Message::Sort(Sort::Downloads)) else {
+            panic!("a new order asks");
+        };
+        assert_eq!(asked.query.index.as_deref(), Some("downloads"));
+        let Some(Ask::Search(asked)) = state.update(Message::View(50)) else {
+            panic!("a new view size asks");
+        };
+        assert_eq!(asked.query.limit, 50);
+        let Some(Ask::Search(asked)) = state.update(Message::Page(3)) else {
+            panic!("a new page asks");
+        };
+        assert_eq!(asked.query.offset, 100);
+        // Choosing what is already chosen is not a change, and asking again for
+        // the same request would throw the answer on screen away for nothing.
+        assert_eq!(state.update(Message::Sort(Sort::Downloads)), None);
+        assert_eq!(state.update(Message::View(50)), None);
+        assert_eq!(state.update(Message::Query("sodium".to_string())), None);
+        assert_eq!(state.update(Message::Page(3)), None);
+    }
+
+    #[test]
     fn a_page_that_has_not_asked_yet_is_waiting_rather_than_empty() {
         // The page opens unasked, which draws as "Loading results…" rather than as
         // "no results": the two are different sentences and only one of them is
@@ -1108,7 +1173,7 @@ mod tests {
         // drawn: the newer request's results are the ones that match the controls
         // on screen.
         let Some(Ask::Search(second)) = state.update(Message::Search) else {
-            panic!("the button asks again");
+            panic!("the message asks again");
         };
         assert!(second.round > first.round);
         state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) });
@@ -1124,15 +1189,17 @@ mod tests {
         let mut state = State::new(ProjectType::Modpack);
         state.opening();
         state.update(Message::Found { round: 1, result: Ok(vec![hit("Sodium")]) });
+        // A page change is a request of its own now -- the reference's watcher
+        // refreshes on it -- so that is round 2, and the tab change below is 3.
         state.update(Message::Page(4));
         assert_eq!(state.update(Message::ProjectType(ProjectType::Mod)), None);
         assert_eq!(state.page, 1);
         assert_eq!(state.results, Load::Idle);
         let asked = state.opening().expect("the new tab's request");
-        assert_eq!(asked.round, 2);
+        assert_eq!(asked.round, 3);
         assert_eq!(asked.query.project_type.as_deref(), Some("mod"));
         // And the tab already on screen is not a change, so nothing is thrown away.
-        state.update(Message::Found { round: 2, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::Found { round: asked.round, result: Ok(vec![hit("Sodium")]) });
         state.update(Message::ProjectType(ProjectType::Mod));
         assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
     }
