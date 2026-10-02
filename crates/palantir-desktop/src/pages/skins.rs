@@ -366,6 +366,17 @@ pub enum Message {
         /// The cape's own id, or empty for none.
         id: String,
     },
+    /// The editor's own texture section was asked to replace the row's file.
+    ///
+    /// The reference's press opens a file browser over a hidden
+    /// `<input type="file" accept="image/png">` and hands the chosen file to
+    /// `onTextureFileInputChange`, which normalises it and writes it onto the skin
+    /// it is editing. The write underneath is the shell's, and the ask this page
+    /// can raise for a file is [`Ask::AddSkin`] -- which *adds* a row rather than
+    /// replacing one, so a press here would leave the reader with two of the skin
+    /// they were editing. The control is drawn anyway, with its own words, and
+    /// says what it cannot do, which is the same answer the sign-in button gives.
+    ReplaceTexture,
     /// The notice's own link was pressed: open the Ears mod's project page.
     OpenEars,
     /// The demo banner's button was pressed: sign in to Minecraft.
@@ -880,6 +891,9 @@ impl State {
             // The sign-in the banner's button asks for. The sentence is the
             // shell's own for this flow (`Shell`'s `Message::SignIn`), said here
             // because this page has no way to raise it.
+            Message::ReplaceTexture => {
+                self.notice = Some(crate::store::not_implemented("Replacing a skin's texture"));
+            }
             Message::SignIn => {
                 self.notice = Some(crate::store::not_implemented("Signing in to Minecraft"));
             }
@@ -1579,6 +1593,23 @@ pub fn edit_view<'a>(
     // "Editing skin"; *which* skin is the row's, and a reader who opened the wrong one
     // needs to see that before they press Save.
     body = body.push(caption(theme, &edit.name));
+    // The texture section, which the reference draws first and only in `edit` mode
+    // for a skin whose `source` is not `default`. A stored row's source is
+    // `custom` or `custom_external` -- the store holds nothing else -- so the
+    // section is here for every row this editor opens.
+    body = body.push(section(
+        theme,
+        Key::AppSkinsModalTextureSection.message(),
+        ui::button_with_icon(
+            theme,
+            ui::scoped(EDIT_KEY, "replace-texture"),
+            Glyph::Upload,
+            Key::AppSkinsModalReplaceTextureButton,
+            ui::Kind::Standard,
+            Length::Shrink,
+            Some(Message::ReplaceTexture),
+        ),
+    ));
     // Arm style: the reference's own `RadioButtons` over the service's two words.
     body = body.push(section(
         theme,
@@ -2496,13 +2527,27 @@ mod tests {
         // The hover clock is keyed per control, so two buttons that shared a name
         // would light together on one hover. The reference's own Save and Delete
         // and this launcher's take-off each take a name of their own, and all
-        // three live under the editor's own namespace.
-        let names = ["save", "takeoff", "forget"];
+        // three live under the editor's own namespace. The texture section's
+        // button is a fourth, and takes a fourth.
+        let names = ["save", "takeoff", "forget", "replace-texture"];
         let scoped: Vec<&str> = names.iter().map(|name| ui::scoped(EDIT_KEY, name)).collect();
         let mut unique = scoped.clone();
         unique.sort_unstable();
         unique.dedup();
         assert_eq!(unique.len(), names.len(), "got {scoped:?}");
+    }
+
+    #[test]
+    fn the_texture_sections_press_says_what_it_cannot_do() {
+        // The control is the reference's own, and it cannot be wired: the only ask
+        // this page can raise for a file adds a row, and a replace would leave the
+        // reader with two of the skin they were editing. So it says so, the way the
+        // sign-in button does.
+        let mut state = State::default();
+        assert_eq!(state.update(Message::ReplaceTexture), None, "and it asks nobody");
+        let notice = state.notice.clone().expect("the press says something");
+        assert!(notice.contains("Replacing a skin's texture"), "got {notice}");
+        assert!(notice.ends_with("is not implemented yet."), "got {notice}");
     }
 
     #[test]
