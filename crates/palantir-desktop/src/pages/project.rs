@@ -474,21 +474,35 @@ fn header<'a>(theme: Gen, project: &'a Project) -> Element<'a, Message> {
             .push(facts)
             .push(tags)
             .push(
+                // `ProjectPageHeader`'s own actions slot, at its own sizes: the
+                // install action is `<Button type="colored" color="brand"
+                // size="xl">` with a `DownloadIcon` in front of
+                // `commonMessages.installButton`, which is `button.install` --
+                // "Install", and not the library's *Create instance* this row used
+                // to say. The second control in that slot is a
+                // `TeleportOverflowMenu type="quiet" size="xl"`, so the quiet
+                // button beside it is `xl` too; it stays a labelled button rather
+                // than becoming a menu because there is one thing to refresh and
+                // no menu to put it in.
                 row![]
                     .spacing(ROW_GAP)
-                    .push(ui::button(
+                    .push(ui::button_with_icon_sized(
                         theme,
                         INSTALL_KEY,
-                        Key::AppLibraryContextMenuCreateInstance,
+                        Glyph::Download,
+                        Key::ButtonInstall,
                         ui::Kind::Colored,
-                        Message::Install,
+                        ui::Size::Xl,
+                        Length::Shrink,
+                        Some(Message::Install),
                     ))
-                    .push(ui::button(
+                    .push(ui::button_or_sized(
                         theme,
                         REFRESH_KEY,
-                        Key::AppLibrarySortLabel,
+                        Key::ButtonRefresh,
                         ui::Kind::Quiet,
-                        Message::Refresh,
+                        ui::Size::Xl,
+                        Some(Message::Refresh),
                     )),
             ),
     )

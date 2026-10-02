@@ -645,17 +645,16 @@ fn listing_body<'a>(
     match listing {
         store::Listing::Content(mods) => rows(mods.len(), CONTENT_ROW, state.geometry, |index| {
             let entry = &mods[index];
-            let toggle = ui::button(
+            // `ContentCardTable.vue`'s own control, at the row's own start: a
+            // `Checkbox` with `shrink-0` in front of the name, which is where the
+            // reference puts it and not a labelled button at the row's end.
+            let toggle = ui::checkbox(
                 theme,
                 // The name came out of the clock's table when the listing
                 // arrived rather than on this frame: see [`CONTENT_TOGGLE`].
                 state.keys.get(index).copied().unwrap_or(CONTENT_TOGGLE),
-                if entry.enabled {
-                    Key::AppScreenshotsDeselect
-                } else {
-                    Key::AppScreenshotsEdit
-                },
-                if entry.enabled { ui::Kind::Standard } else { ui::Kind::Quiet },
+                entry.enabled,
+                false,
                 Message::ToggleContent {
                     file_name: entry.file_name.clone(),
                     enabled: !entry.enabled,
@@ -666,9 +665,9 @@ fn listing_body<'a>(
                 row![]
                     .spacing(ROW_GAP)
                     .align_items(Alignment::Center)
+                    .push(toggle)
                     .push(ui::icon_label(theme, Glyph::Package, &entry.display_name))
-                    .push(Space::with_width(Length::Fill))
-                    .push(toggle),
+                    .push(Space::with_width(Length::Fill)),
             ), CONTENT_ROW)
         }),
         store::Listing::Files(entries) => {

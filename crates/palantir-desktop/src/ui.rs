@@ -1634,6 +1634,75 @@ pub fn icon_button_kind<'a, Message: Clone + Hovered + 'a>(
         .into()
 }
 
+/// The reference's own checkbox: `Checkbox.vue`.
+///
+/// The control is a `button` with no frame of its own around a 20x20
+/// `rounded-md` square with a 1-pixel border -- `bg-brand border-button-border
+/// text-brand-inverted` when it is on, `bg-surface-2 border-surface-5` when it is
+/// off -- and a 16-pixel `CheckIcon` or `MinusIcon` in the middle. The hover is
+/// the same `brightness(--hover-brightness)` filter every other control here
+/// uses, and the press scale (`checkbox-shadow group-active:scale-95`) is the one
+/// this kit has no way to draw.
+///
+/// The indeterminate state is the reference's own: a `MinusIcon` where the tick
+/// would be, and a caller that has both a checked and an unchecked child passes
+/// `true` for the row and `Some(true)` here. A checkbox is the Content tab's
+/// enable control, so the content row's old *Deselect*/*Edit* button pair was a
+/// control the reference does not draw at all.
+pub fn checkbox<'a, Message: Clone + Hovered + 'a>(
+    theme: Gen,
+    key: &'static str,
+    checked: bool,
+    indeterminate: bool,
+    on_toggle: Message,
+) -> Element<'a, Message> {
+    let (factor, _) = interaction(key);
+    let (fill, edge, ink) = if checked {
+        (
+            theme_gen::ink(theme, Ink::Brand),
+            theme_gen::ink(theme, Ink::ButtonBorder),
+            // `text-brand-inverted` is the same token the Tailwind preset also
+            // calls `--color-accent-contrast`.
+            theme_gen::ink(theme, Ink::AccentContrast),
+        )
+    } else {
+        (
+            theme_gen::ink(theme, Ink::Surface2),
+            theme_gen::ink(theme, Ink::Surface5),
+            theme_gen::ink(theme, INK_DEFAULT),
+        )
+    };
+    let glyph = if indeterminate { Glyph::Minus } else { Glyph::Check };
+    let face = container(icon::icon(
+        glyph,
+        CHECK_SIZE,
+        crate::theme::brightness(ink, factor),
+    ))
+    .width(Length::Fixed(CHECK_SIZE))
+    .height(Length::Fixed(CHECK_SIZE))
+    .center_x()
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(crate::theme::brightness(fill, factor))),
+        border: Border {
+            color: edge,
+            width: 1.0,
+            // `rounded-md`: the 6-pixel step of Tailwind's own radius scale.
+            radius: 6.0.into(),
+        },
+        ..container::Appearance::default()
+    });
+    mouse_area(face)
+        .interaction(Interaction::Pointer)
+        .on_enter(Message::hover(key, true))
+        .on_exit(Message::hover(key, false))
+        .on_press(on_toggle)
+        .into()
+}
+
+/// The width and height of a [`checkbox`]: `w-5 h-5`.
+pub const CHECK_SIZE: f32 = 20.0;
+
 /// The tabs a page switches between: a pill of buttons, the selected one plated.
 ///
 /// `NavTabs.vue`'s own arrangement: a `rounded-full bg-bg-raised p-1` track with

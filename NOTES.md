@@ -1820,3 +1820,28 @@ laying them out, and an unclassed paragraph in the reference is 16 pixels on
 so the painted integer is what the port passes; the card grid's top border lands on the
 capture's own y=241 either way in a browser and only lands there here with the
 integer.
+
+### The two buttons that were a control the reference does not draw
+
+The Content tab's row had a *Deselect*/*Edit* button at its right end, switching
+between a standard and a quiet frame. The reference has no such control: what
+`ContentCardTable.vue` puts in that row is a `Checkbox` with `shrink-0` in front
+of the name, and a checkbox is not a button at all -- a bare `button` around a
+20x20 `rounded-md` square with a 1-pixel border, `bg-brand border-button-border`
+and a 16-pixel `CheckIcon` when it is on, `bg-surface-2 border-surface-5` when it
+is off, and a `MinusIcon` where the tick would be for a row that has some of its
+children on. `ui::checkbox` is that, including the indeterminate arm and the
+`brightness(--hover-brightness)` hover every other control here uses; the press
+scale (`checkbox-shadow group-active:scale-95`) is the one thing it cannot draw,
+and says so. The row's own two labels went with it: a checkbox is not labelled
+*Deselect*.
+
+The project card's two buttons were the reference's controls at the reference's
+default size instead of the frame's. `ProjectPageHeader`'s actions slot is a
+`<Button type="colored" color="brand" size="xl">` with a `DownloadIcon` in front
+of `commonMessages.installButton` -- `button.install`, "Install" -- and beside it
+a `TeleportOverflowMenu type="quiet" size="xl"`. So both are `xl` now, the
+install says *Install* instead of the library's *Create instance*, and it wears
+the download icon the reference gives it. The quiet one keeps its own label: the
+reference's menu holds copy-link, report and donate, and this launcher's has one
+thing in it, so a button says it and a menu would hide it.
