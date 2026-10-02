@@ -2430,4 +2430,56 @@ the header's own box model, not a padding number tuned until the gap is nine,
 and that is a slice rather than a constant.
 
 Not fixed, and written down with the numbers so the next pass starts from a
-measurement rather than from a guess about which padding is wrong.
+measurement rather than from a guess about which padding is wrong.### The browse header is pinned, and the shadow under it is not decoration
+
+`browse-tab/layout.vue`'s header is `sticky top-0 z-20 -mx-6 -mt-6 mb-4
+rounded-tl-[--radius-xl] border-0 border-b border-solid bg-surface-1 px-6 py-4
+border-surface-5`. That is a pinned band: it holds its place while the results
+scroll under it, and it casts a shadow doing so. This page was one scroll
+region, so the strip scrolled away with the results and there was nothing for a
+shadow to belong to — which is why the band was *named* in the previous section
+rather than drawn.
+
+It is pinned now, in the arrangement `pages::instance` already uses — a pinned
+part above, a scroll region below — and the reason is the same one that page
+gives: a page that scrolled as a whole cannot report where its list starts.
+
+Measured at x 300, both clients at 1280x720:
+
+| Row | Reference | This launcher |
+| --- | --- | --- |
+| Band | y 73..116, `(39, 41, 46)` | y 73..116, `(39, 41, 46)` |
+| Rule | y 117, `(52, 54, 60)` | y 117, `(52, 54, 60)` |
+| Shadow | y 118..125, `(18, 19, 23)` → `(22, 24, 28)` | y 118..125, same, within 1/255 |
+| Field hairline | y 126 | y 126 |
+
+Four things were wrong on the way there, and each is a mistake worth naming
+because the class list does not flag any of them.
+
+**The band is `--bg-raised`, not `bg-surface-1`.** The header's own
+`bg-surface-1` is `(22, 24, 28)` in this theme, which *is* the page background —
+drawing it would be drawing the page over itself, which is what the first draft
+did and why the band was invisible. The `(39, 41, 46)` a capture measures is the
+strip's own `--bg-raised`, the same colour as the head bar. It is also exactly as
+wide as the tab track: at x 900, past the last tab, the reference's page is
+already `(22, 24, 28)`, so the `-mx-6` full-bleed is not something this port
+reproduces.
+
+**The rule is `--surface-4`, not `border-surface-5`.** `(52, 54, 60)` against
+the `(66, 68, 74)` that `--surface-5` would give — the same class-list-versus-
+plate disagreement that turned the sidebar's section rules green.
+
+**The page's inset goes *above* the band, not inside it.** Padding the strip by
+`INSET` put twenty-four rows of page background inside the band instead of
+before it, so the band started at 49 and ran twenty-four pixels too far down.
+
+**A downwards fade is a half turn, not a quarter.** iced measures a linear
+gradient's angle from the positive x axis and walks it *up* the box, so
+`FRAC_PI_2` rendered the eight-row shadow as one flat `(19, 21, 24)`. `PI` gives
+the reference's own ramp. This is the same trap as the panel's fade and the same
+fix, and the second time is the one that says it should have been checked
+against a capture before the first.
+
+The rule and the shadow are two elements rather than one gradient with a stop
+placed at 1/9: a hand-placed stop is a fraction of the box's *diagonal*, not of
+its height, so it came out as a flat band at the first colour.

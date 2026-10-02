@@ -47,10 +47,15 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeSet, HashMap};
+use std::f32::consts::PI;
+
+use iced::gradient;
 
 use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, Space};
-use iced::{Alignment, Background, Border, Element, Font, Length, Padding};
+use iced::{
+    Alignment, Background, Border, Color, Element, Font, Length, Padding, Radians, Theme,
+};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
@@ -205,6 +210,26 @@ impl Sort {
 pub const VIEW_SIZES: [usize; 6] = [5, 10, 15, 20, 50, 100];
 /// The size the reference opens on.
 pub const DEFAULT_VIEW: usize = 20;
+
+/// The pinned header's own hairline, and the colour it measures.
+///
+/// `border-b border-solid border-surface-5` is what the class list says, and
+/// `--surface-5` is `(66, 68, 74)` -- but a capture of the reference has the row
+/// under its strip at `(52, 54, 60)`, which is `--surface-4`. Where the class
+/// list and a plate disagree about a colour the plate is the authority, which is
+/// the same rule the section rules on the sidebar's sections turned on.
+const HEADER_RULE: f32 = 1.0;
+const HEADER_RULE_INK: Color = Color::from_rgba(52.0 / 255.0, 54.0 / 255.0, 60.0 / 255.0, 1.0);
+
+/// The shadow the pinned header casts, and where it starts from.
+///
+/// Eight rows, and a top colour of `(18, 20, 23)` fading into the page's own
+/// `--bg`. Both are read off a 1280x720 capture of the reference rather than
+/// off a class list, because the header carries no shadow class: this is
+/// `--shadow-lg`, whose blur the class list does not state, and the band is the
+/// only account of it this tree has.
+const HEADER_SHADOW: f32 = 8.0;
+const HEADER_SHADOW_FROM: Color = Color::from_rgba(18.0 / 255.0, 20.0 / 255.0, 23.0 / 255.0, 1.0);
 
 /// What Discover can be told.
 #[derive(Debug, Clone)]
@@ -716,9 +741,15 @@ impl State {
 /// Draw the page.
 pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, Message> {
     // The reference's own order, top to bottom: the tabs, the search field, the
-    // controls row, the results.
-    let blocks: Vec<Element<'a, Message>> = vec![
-        tabs(theme, state),
+    // controls row, the results -- with the tabs *pinned*, which is the
+    // arrangement `browse-tab/layout.vue` actually uses and not a decoration:
+    // its header is `sticky top-0 z-20 -mx-6 -mt-6 mb-4 ... border-b
+    // border-solid border-surface-5`, so the strip holds its place under a
+    // scrolling results list and casts the shadow below itself. This is the
+    // same split `pages::instance` already draws -- pinned header above, scroll
+    // region below -- and for the same reason: a page that scrolled as a whole
+    // could not report where its list starts.
+    column![pinned_tabs(theme, state), body(vec![
         // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
         // the one search field in the tree that does: 48 pixels, `px-4`, a
         // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
@@ -735,8 +766,92 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         ),
         controls(theme, state),
         results(theme, state),
-    ];
-    body(blocks)
+    ])]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// The pinned header: the tab strip, its `border-b` hairline, and the shadow
+/// that hairline casts.
+///
+/// The reference's header is `sticky top-0 z-20` over a `bg-surface-1` page, so
+/// what sits under the hairline as the results scroll past is a fade from
+/// `(18, 20, 23)` to the page's own background. That band is not decoration
+/// this port can add on its own: without the pin there is nothing for a shadow
+/// to be under, and a shadow drawn under a strip that scrolls away with the
+/// results would be a shadow following the wrong thing.
+///
+/// The `-mx-6 -mt-6` in the reference's own class list is what makes the header
+/// full-bleed against a page that insets its content by 24, and it is why the
+/// reference's gap from the hairline to the field is nine pixels rather than
+/// the `mb-4` the list says. Here the pin carries the page's own inset instead,
+/// so the strip is inset rather than full-bleed -- the one thing this does not
+/// draw, and it says so rather than faking the geometry.
+fn pinned_tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
+    let strip = container(tabs(theme, state)).width(Length::Fill)
+        // The header carries `bg-surface-1`, and the strip is what sits on it --
+        // so the band behind the tabs is the strip's own `--bg-raised`, and the
+        // header adds nothing underneath it. A capture at x 690 puts the band at
+        // `(39, 41, 46)`, which is the same colour as the head bar, and at
+        // x 900 -- past the last tab -- the page is already `(22, 24, 28)`, so
+        // the band is exactly as wide as the track rather than full-bleed.
+        // (`--surface-1` in this theme is `(22, 24, 28)`, which is the page
+        // background: drawing it here would be drawing the page over itself.)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
+            ..container::Appearance::default()
+        });
+    // The hairline, then the shadow, both flush under the strip. A capture of the
+    // reference at x 690 puts the strip's own surface at y 73..116, one rule at
+    // 117, eight rows of fade at 118..125 and the search field's own hairline at
+    // 126 -- so there is no room between the shadow and the field at all, and the
+    // reference's own `mb-4` is accounted for inside the strip's `py-4` rather
+    // than added under it. An earlier draft of this put sixteen pixels of padding
+    // under the strip, which pushed the shadow to y 133 and the field to 153.
+    // The rule and the shadow as two elements rather than one gradient with
+    // three stops: a stop at 0.111 along iced's own axis is not the same pixel
+    // as one pixel down this box, so a hand-placed stop came out as a flat band
+    // at the first colour. Two boxes, each with its own fade, is what the
+    // reference's nine rows actually are.
+    //
+    // The angle is [`PI`] and not a quarter turn. iced measures a linear
+    // gradient's angle from the positive x axis and walks it *up* the box, so a
+    // fade that has to run downwards is a half turn; a quarter turn renders as
+    // a single flat colour, which is what the first draft of this drew. The
+    // reference's own `--brand-gradient-bg` is `0deg` bottom-to-top for the same
+    // reason.
+    let rule = container(Space::new(Length::Fill, HEADER_RULE))
+        .width(Length::Fill)
+        .height(Length::Fixed(HEADER_RULE))
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(HEADER_RULE_INK)),
+            ..container::Appearance::default()
+        });
+    let shadow = container(Space::new(Length::Fill, HEADER_SHADOW))
+        .width(Length::Fill)
+        .height(Length::Fixed(HEADER_SHADOW))
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Gradient(gradient::Gradient::Linear(
+                gradient::Linear::new(Radians(PI))
+                    .add_stop(0.0, HEADER_SHADOW_FROM)
+                    .add_stop(1.0, theme_gen::ink(theme, Ink::Bg)),
+            ))),
+            ..container::Appearance::default()
+        });
+    // The page's own inset sits *above* the band rather than inside it. A capture
+    // has twenty-four rows of page background at y 49..72 and the strip's own
+    // surface at 73..116; padding the strip by [`INSET`] put those twenty-four
+    // rows *inside* the band instead, which made it start at 49 and run twenty-
+    // four pixels too far down.
+    column![
+        Space::new(Length::Fill, INSET),
+        strip,
+        rule,
+        shadow
+    ]
+    .width(Length::Fill)
+    .into()
 }
 
 /// The page's body: the inset, the spacing, and the scroll region that reports
@@ -756,7 +871,12 @@ fn body<'a>(blocks: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     crate::scroll::region(
         crate::scroll::PAGE,
         container(items).width(Length::Fill).padding(Padding {
-            top: INSET,
+            // The top inset moved onto the pinned strip above, and so did the gap:
+            // the reference's shadow ends on the row before its field begins, so
+            // there is nothing between them to pad. Its horizontal inset stays
+            // here, which is what puts the field and the results at the
+            // reference's own x.
+            top: 0.0,
             right: INSET,
             bottom: INSET,
             left: INSET,
@@ -1737,6 +1857,34 @@ mod tests {
         // Asking is once: a page that has asked does not ask again on every
         // message the shell handles.
         assert!(state.opening().is_none(), "asked once, and the refresh button is what asks again");
+    }
+
+    #[test]
+    fn the_pinned_header_is_the_reference_s_own_arrangement() {
+        // `browse-tab/layout.vue`'s header is `sticky top-0 z-20 ... border-b
+        // border-solid border-surface-5`, and `pages::instance` already splits its
+        // page the same way. The test is about the two numbers that make it a
+        // pin rather than a decoration: the strip's own hairline and the shadow it
+        // casts. Without the pin there is nothing for a shadow to be under, which
+        // is why the band is not drawn as a fill.
+        assert_eq!(HEADER_RULE, 1.0, "the header's own border-b");
+        assert_eq!(HEADER_SHADOW, 8.0, "eight rows, off the reference's plate");
+        // And the rule's ink is `--surface-4`, not the `--surface-5` the class
+        // list names: the row under the reference's strip measures (52, 54, 60).
+        assert_eq!(
+            HEADER_RULE_INK,
+            Color::from_rgba(52.0 / 255.0, 54.0 / 255.0, 60.0 / 255.0, 1.0)
+        );
+        // The shadow starts at (18, 20, 23) and ends at the page background,
+        // which is what makes it a fade rather than a plate.
+        assert_eq!(
+            HEADER_SHADOW_FROM,
+            Color::from_rgba(18.0 / 255.0, 20.0 / 255.0, 23.0 / 255.0, 1.0)
+        );
+        // The scroll region below starts flush: the reference's shadow ends on the
+        // row before its field begins, so a gap here would be one the reference
+        // does not have -- which is where the three-pixel offset came from.
+        assert_eq!(GAP, 12.0, "the gap the pages below still use");
     }
 
     #[test]
