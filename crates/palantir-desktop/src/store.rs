@@ -1280,7 +1280,16 @@ impl Store {
                 .get(&Request::get(&user.avatar_url), &cancel)
                 .map_err(|error| format!("fetching the avatar failed: {error}"))
         };
-        Ok(Profile::of(user, projects, avatar))
+        // Each project's own icon, decoded off the frame thread for
+        // `project_icons`'s reason and for `crate::avatar`'s: a card's picture is a
+        // PNG decode, and a page redraws every frame.
+        let urls: Vec<String> = projects
+            .iter()
+            .filter(|project| !project.icon_url.is_empty())
+            .map(|project| project.icon_url.clone())
+            .collect();
+        let icons = self.project_icons(&urls);
+        Ok(Profile::of(user, projects, avatar, icons))
     }
 
     /// Install one project into one instance.

@@ -248,7 +248,7 @@ impl Icon {
 /// an icon up by: a search's hits each carry an `icon_url` and nothing else about
 /// their icon, so an answer keyed by anything but the URL would have to be matched
 /// to a hit a second time, by a rule the fetch did not use.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fetched {
     /// The `icon_url` this answers.
     pub url: String,

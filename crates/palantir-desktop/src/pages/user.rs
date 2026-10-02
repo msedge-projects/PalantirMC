@@ -84,6 +84,8 @@ const CARD_GAP_X: f32 = 12.0;
 const LIST_GAP: f32 = 12.0;
 /// `text-xl` on `ProjectCardTitle`, which is the list layout's own size.
 const CARD_TITLE: f32 = 20.0;
+/// `Avatar size="100px"` in the list layout: the icon every card opens with.
+const CARD_ICON: f32 = crate::avatar::ICON_SIDE as f32;
 /// `gap-3` between a card's stats and its date, `gap-3` on the stats row.
 const CARD_STATS_GAP: f32 = 12.0;
 
@@ -143,6 +145,13 @@ pub struct Profile {
     /// Their avatar, when it could be fetched and decoded -- already rounded into
     /// the circle `UserPageHeader.vue` asks for, by [`crate::avatar`].
     pub avatar: Option<crate::avatar::Icon>,
+    /// Each project's own icon, as it arrived: the URL it answers and the picture.
+    ///
+    /// Keyed by URL rather than by position because that is the only key a project
+    /// document carries, and fetched by [`crate::store::Store::project_icons`] on
+    /// the frame thread's behalf -- a PNG decode per card per frame is the work
+    /// [`crate::avatar`]'s module docs warn about.
+    pub icons: Vec<crate::avatar::Fetched>,
     /// Why there is no avatar, when there is none.
     pub note: Option<String>,
 }
@@ -161,6 +170,7 @@ impl Profile {
         user: ModrinthUser,
         projects: Vec<ModrinthUserProject>,
         avatar: Result<Vec<u8>, String>,
+        icons: Vec<crate::avatar::Fetched>,
     ) -> Profile {
         let (avatar, note) = match avatar {
             Ok(picture) => match crate::avatar::Icon::circle(&picture, AVATAR as u32) {
@@ -172,7 +182,7 @@ impl Profile {
             },
             Err(reason) => (None, Some(reason)),
         };
-        Profile { user, projects, avatar, note }
+        Profile { user, projects, avatar, note, icons }
     }
 
     /// Everything this user's projects have been downloaded.
@@ -222,6 +232,25 @@ impl Profile {
                 })
             })
             .collect()
+    }
+
+    /// One project's icon, when it arrived.
+    ///
+    /// `None` is the reference's own case rather than a hole: `Avatar.vue` draws a
+    /// placeholder there, and [`crate::ui::icon_box`]'s empty box is the same box,
+    /// its same background and its same hairline without the hexagon.
+    pub fn icon(&self, project: &ModrinthUserProject) -> Option<&crate::avatar::Icon> {
+        // A project with no `icon_url` matches nothing, including another project
+        // with no `icon_url`: the empty string is not an address, and a list where
+        // every unanswered project drew the first answer's picture would be worse
+        // than no pictures at all.
+        if project.icon_url.is_empty() {
+            return None;
+        }
+        self.icons
+            .iter()
+            .find(|fetched| fetched.url == project.icon_url)
+            .map(|fetched| &fetched.icon)
     }
 
     /// The projects one filter shows.
@@ -473,7 +502,7 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
     } else {
         let mut list = column![].spacing(LIST_GAP).width(Length::Fill);
         for project in shown {
-            list = list.push(project_row(theme, project));
+            list = list.push(project_row(theme, profile, project));
         }
         blocks.push(list.into());
     }
@@ -637,6 +666,22 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
     row.into()
 }
 
+/// The 100-pixel square a card's icon is drawn in, whether or not one arrived.
+///
+/// [`crate::ui::icon_box`] is the control kit's own: the reference's box, its
+/// background and its hairline, with the picture composited onto it already
+/// rounded by [`crate::avatar`]. An account whose projects have no icons draws the
+/// empty box, which is the same box the reference's placeholder sits on.
+fn icon_box<'a>(
+    theme: Gen,
+    icon: Option<&crate::avatar::Icon>,
+) -> Element<'a, Message> {
+    // `ui::icon_box` draws the reference's box, its background and its hairline,
+    // and reserves the square whether or not a picture arrived -- which is the half
+    // of `Avatar.vue`'s placeholder this tree can draw without the hexagon path.
+    ui::icon_box(theme, CARD_ICON, icon)
+}
+
 /// `BulletDivider`: a 6-pixel `--surface-5` dot.
 fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     container(Space::with_width(Length::Fixed(METADATA_DOT)).height(Length::Fixed(METADATA_DOT)))
@@ -659,7 +704,11 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
 /// `p-4 grid` over `grid-project-card-list`, whose `has-actions` template puts the
 /// title and summary beside the card's actions, the downloads and followers under
 /// them, and the tags and the date on the last row.
-fn project_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, Message> {
+fn project_row<'a>(
+    theme: Gen,
+    profile: &'a Profile,
+    project: &'a ModrinthUserProject,
+) -> Element<'a, Message> {
     // A row's identity is the project it names rather than its place in the list, so
     // reordering the list must not move a tween from one row to another.
     let key = ui::scoped("user:project", &project.id);
@@ -712,6 +761,11 @@ fn project_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, 
                 .width(Length::Fill)
                 .spacing(CARD_GAP_X)
                 .align_items(Alignment::Start)
+                // `Avatar size="100px"`, the icon column every reference card opens
+                // with. Measured at the reference's own window: x=105..204 and
+                // y=276..375, which is the 100 its container query keeps above 850
+                // pixels of card width.
+                .push(icon_box(theme, profile.icon(project)))
                 .push(info)
                 .push(stats),
         )
@@ -961,14 +1015,16 @@ mod tests {
         .expect("the user document");
         let projects: Vec<ModrinthUserProject> = serde_json::from_str(
             r#"[{"id":"AANobbMI","slug":"sodium","project_type":"mod","title":"Sodium",
-                 "description":"Modern rendering engine","published":"2020-06-15T00:00:00Z","downloads":41000000},
+                 "description":"Modern rendering engine","published":"2020-06-15T00:00:00Z","downloads":41000000,
+                 "icon_url":"https://cdn.modrinth.com/data/AANobbMI/icon.png"},
                 {"id":"hEOCdOgW","slug":"phosphor","project_type":"mod","title":"Phosphor",
-                 "description":"Lighting engine","published":"2021-01-03T00:58:54.900351Z","downloads":865848},
+                 "description":"Lighting engine","published":"2021-01-03T00:58:54.900351Z","downloads":865848,
+                 "icon_url":"https://cdn.modrinth.com/data/hEOCdOgW/icon.png"},
                 {"id":"P7dR8mSH","slug":"fabulously-optimized","project_type":"modpack","title":"Fabulously Optimized",
                  "description":"A pack","published":"2022-02-02T00:00:00Z","downloads":1234}]"#,
         )
         .expect("the project list");
-        Profile::of(user, projects, Err("no avatar on this machine".to_string()))
+        Profile::of(user, projects, Err("no avatar on this machine".to_string()), Vec::new())
     }
 
     /// A PNG of one colour, in memory, the way `skin.rs`'s tests make one.
@@ -1026,7 +1082,7 @@ mod tests {
         // match, so one of them cannot be stale beside the other.
         let user: ModrinthUser =
             serde_json::from_str(r#"{"username":"jelly"}"#).expect("the user document");
-        let arrived = Profile::of(user, Vec::new(), Ok(picture(32)));
+        let arrived = Profile::of(user, Vec::new(), Ok(picture(32)), Vec::new());
         assert!(arrived.avatar.is_some());
         assert!(arrived.note.is_none());
     }
@@ -1266,10 +1322,36 @@ mod tests {
     }
 
     #[test]
+    fn an_icon_is_looked_up_by_the_url_its_project_carries() {
+        // `avatar::Fetched` is keyed by URL because that is the only thing a
+        // project document says about its own icon, and a lookup that had to be
+        // matched to a project a second time would be a second set of rules.
+        let mut profile = sample();
+        let url = profile.projects[0].icon_url.clone();
+        assert!(profile.icon(&profile.projects[0]).is_none(), "no icon has arrived yet");
+        profile.icons.push(crate::avatar::Fetched {
+            url: url.clone(),
+            icon: crate::avatar::Icon::of(&picture(64), crate::avatar::ICON_SIDE)
+                .expect("a picture"),
+        });
+        assert!(profile.icon(&profile.projects[0]).is_some());
+        // A project whose URL nothing answered for draws the same row: the box is
+        // reserved either way, which is what keeps a card from reflowing when one
+        // icon is late.
+        assert!(profile.icon(&profile.projects[1]).is_none());
+        let stray: ModrinthUserProject = serde_json::from_str(
+            r#"{"id":"y","title":"Other","project_type":"mod","icon_url":"https://example.invalid/x.png"}"#,
+        )
+        .expect("the project");
+        assert!(profile.icon(&stray).is_none());
+        assert_eq!(CARD_ICON, crate::avatar::ICON_SIDE as f32);
+    }
+
+    #[test]
     fn every_project_row_draws_in_every_theme() {
         for theme in Gen::ALL {
             for project in sample().projects.iter() {
-                drop(project_row(*theme, project));
+                drop(project_row(*theme, &sample(), project));
             }
             // A row whose project names no type this tree knows still draws: the tag
             // is the part that is absent, not the row.
@@ -1277,7 +1359,7 @@ mod tests {
                 r#"{"id":"x","title":"Something","project_type":"minecraft_java_server"}"#,
             )
             .expect("the project");
-            drop(project_row(*theme, &odd));
+            drop(project_row(*theme, &sample(), &odd));
         }
     }
 }
