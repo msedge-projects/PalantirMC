@@ -695,9 +695,12 @@ pub struct RailSettings {
 }
 
 impl Default for RailSettings {
-    /// The reference's own defaults, from `helpers/settings.ts`.
+    /// The reference's own defaults: `toggleSidebar` off, the skin selector on
+    /// -- a fresh install of the reference draws the shirt in its rail, and
+    /// `use-app-settings.ts` ships `showSkinSelectorInSidebar: true` -- and
+    /// screenshots on as well.
     fn default() -> RailSettings {
-        RailSettings { hide_sidebar: false, show_skins: false, show_screenshots: true }
+        RailSettings { hide_sidebar: false, show_skins: true, show_screenshots: true }
     }
 }
 
@@ -7350,32 +7353,29 @@ mod tests {
     #[test]
     fn the_rail_offers_the_slots_the_settings_ask_for() {
         // The reference's two conditional slots: `showSkinSelectorInSidebar` on
-        // the shirt, and the screenshots sync option on the image.
+        // the shirt, which its own defaults turn on, and the screenshots sync
+        // option on the image, which is on too. A fresh install of the reference
+        // draws all eight.
         let all = shell_at("/").slots();
-        assert_eq!(all.len(), Rail::ALL.len() - 1, "skins is off by default");
-        assert!(!all.contains(&Rail::Skins));
+        assert_eq!(all.len(), Rail::ALL.len(), "a fresh install draws every slot");
+        assert!(all.contains(&Rail::Skins));
         assert!(all.contains(&Rail::Screenshots));
         // The order is the reference's, whatever is hidden.
-        let order: Vec<Rail> = all.iter().copied().filter(|slot| *slot != Rail::Screenshots).collect();
-        assert_eq!(
-            order,
-            vec![
-                Rail::Home,
-                Rail::Discover,
-                Rail::Servers,
-                Rail::CreateInstance,
-                Rail::Settings,
-                Rail::Profile,
-            ]
-        );
+        assert_eq!(all.as_slice(), Rail::ALL);
+        // Either slot can be turned off on its own, and the settings are the
+        // only thing that changes the list.
         let mut shell =
+            Shell::new(Address::at(Route::Home), Gen::Dark, &settings(false, false, true));
+        assert!(!shell.slots().contains(&Rail::Skins));
+        assert!(shell.slots().contains(&Rail::Screenshots));
+        assert_eq!(shell.slots().len(), Rail::ALL.len() - 1, "the shirt is hidden");
+        press(&mut shell, Message::Sidebar(true));
+        assert_eq!(shell.slots().len(), Rail::ALL.len() - 1);
+        let shell =
             Shell::new(Address::at(Route::Home), Gen::Dark, &settings(false, true, false));
         assert!(shell.slots().contains(&Rail::Skins));
         assert!(!shell.slots().contains(&Rail::Screenshots));
-        assert_eq!(shell.slots().len(), 7);
-        // And the settings are the only thing that changes the list.
-        press(&mut shell, Message::Sidebar(true));
-        assert_eq!(shell.slots().len(), 7);
+        assert_eq!(shell.slots().len(), Rail::ALL.len() - 1, "the image is hidden");
     }
 
     #[test]

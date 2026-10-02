@@ -246,7 +246,10 @@ impl Default for Prefs {
             show_files_tab: true,
             show_screenshots_tab: true,
             show_all_screenshots_in_sidebar: true,
-            show_skin_selector_in_sidebar: false,
+            // On, which is the reference's own default: `use-app-settings.ts`
+            // ships `showSkinSelectorInSidebar: true`, and a fresh install's
+            // rail draws the shirt slot.
+            show_skin_selector_in_sidebar: true,
             quick_instances_in_sidebar: true,
             show_jump_in_section: true,
             // Off, and it was on. Minimizing on launch reads as the launcher
