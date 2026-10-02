@@ -272,6 +272,15 @@ pub struct Edit {
     pub ears: bool,
     /// What the reader has asked for.
     pub act: Act,
+    /// Whether the reader has been asked to confirm the deletion.
+    ///
+    /// The reference puts a `ConfirmModal` between the delete button and
+    /// `remove_custom_skin`, with the question as its title and "This will
+    /// permanently delete the selected skin. This action cannot be undone." as
+    /// its description. A dialog inside a dialog is the shell's, so the question
+    /// is drawn in this body instead and the flag is what says which of the two
+    /// the body is.
+    pub confirm: bool,
 }
 
 /// The row an editor opened on, as the store holds it.
@@ -366,6 +375,19 @@ pub enum Message {
         /// The cape's own id, or empty for none.
         id: String,
     },
+    /// The editor's own delete button was pressed, which is a question and not a
+    /// write.
+    ///
+    /// The reference's `deleteSkin` is reached through a `ConfirmModal` and not
+    /// by pressing the trash once, so this press only asks; [`Act::Forget`] is
+    /// what the write answers to.
+    Forget,
+    /// The reader changed their mind about deleting the skin.
+    ///
+    /// The reference's confirm is its own modal over the editor, so its Cancel
+    /// leaves the editor exactly as it was; this one goes back to the editor
+    /// rather than closing it, which is why it is not [`Message::CloseEdit`].
+    CancelForget,
     /// The editor's own texture section was asked to replace the row's file.
     ///
     /// The reference's press opens a file browser over a hidden
@@ -843,6 +865,7 @@ impl State {
                         },
                         ears: row.ears,
                         act: Act::Save,
+                        confirm: false,
                     });
                 }
             }
@@ -891,6 +914,19 @@ impl State {
             // The sign-in the banner's button asks for. The sentence is the
             // shell's own for this flow (`Shell`'s `Message::SignIn`), said here
             // because this page has no way to raise it.
+            Message::Forget => {
+                // The question, which asks nobody: the write is still one press
+                // away and one press back from here.
+                if let Some(edit) = self.edit.as_mut() {
+                    self.notice = None;
+                    edit.confirm = true;
+                }
+            }
+            Message::CancelForget => {
+                if let Some(edit) = self.edit.as_mut() {
+                    edit.confirm = false;
+                }
+            }
             Message::ReplaceTexture => {
                 self.notice = Some(crate::store::not_implemented("Replacing a skin's texture"));
             }
@@ -1550,6 +1586,59 @@ fn saved_card<'a>(
         .into()
 }
 
+/// The question `remove_custom_skin` is only asked after.
+///
+/// `Skins.vue`'s `ConfirmModal`: `app.skins.delete-modal.title` as the modal's
+/// own title, `app.skins.delete-modal.description` under it, and `Delete` beside
+/// Cancel in the actions row. A dialog inside a dialog is the shell's to draw
+/// (`Shell::modal_layer` answers one modal at a time, and the editor is the one
+/// it is answering), so the question is this body's heading instead of the
+/// frame's title, with the reference's two sentences and the reference's two
+/// buttons in the reference's own order: proceed last, at the right-hand end
+/// where `justify-end` puts it.
+fn forget_confirm<'a>(
+    theme: Gen,
+    edit: &Edit,
+    wearing: bool,
+) -> Element<'a, Message> {
+    column![
+        heading(theme, Key::AppSkinsDeleteModalTitle.message()),
+        caption(theme, Key::AppSkinsDeleteModalDescription.message()),
+    ]
+    .spacing(EDITOR_HEADING_GAP)
+    .push(
+        row![]
+            .spacing(ROW_GAP)
+            .align_items(Alignment::Center)
+            .push(Space::with_width(Length::Fill))
+            .push(ui::button_text(
+                theme,
+                ui::scoped(EDIT_KEY, "forget-cancel"),
+                CANCEL_LABEL,
+                ui::Kind::Outlined,
+                Message::CancelForget,
+            ))
+            .push(ui::button_or(
+                theme,
+                ui::scoped(EDIT_KEY, "forget"),
+                Key::AppSkinsDeleteButton,
+                ui::Kind::Danger,
+                (!wearing).then_some(Message::Act(Act::Forget)),
+            )),
+    )
+    .width(Length::Fill)
+    .into()
+}
+
+/// The question's own "Cancel".
+///
+/// `commonMessages.cancelButton` in the reference, which the vendored message
+/// table does not carry -- the generator took the app's own ids and this is the
+/// shared package's -- so the word is written here, as
+/// [`TAKE_OFF_LABEL`] is for the one control the reference has no words for at
+/// all.
+const CANCEL_LABEL: &str = "Cancel";
+
 /// Whether the editor holds an edit worth saving.
 ///
 /// `hasEdits` in `EditSkinModal.vue`, with the one condition it cannot have
@@ -1589,6 +1678,9 @@ pub fn edit_view<'a>(
 ) -> Element<'a, Message> {
     let slim = edit.variant.eq_ignore_ascii_case("SLIM");
     let mut body = column![].spacing(EDITOR_SECTION_GAP).width(Length::Fill);
+    if edit.confirm {
+        return forget_confirm(theme, edit, wearing);
+    }
     // The name the row is stored under. The reference's own title is the sentence
     // "Editing skin"; *which* skin is the row's, and a reader who opened the wrong one
     // needs to see that before they press Save.
@@ -2405,6 +2497,7 @@ mod tests {
                 stored: Stored::default(),
                 ears: false,
                 act: Act::Save,
+                confirm: false,
             };
             let mut state = State { edit: Some(opened), ..State::default() };
             let Some(Ask::EditSkin(edit)) = state.update(Message::Act(act)) else {
@@ -2435,6 +2528,7 @@ mod tests {
             stored: Stored::default(),
             ears: false,
             act: Act::Save,
+            confirm: false,
         };
         let mut state = State { round: 3, edit: Some(opened), wearing: true, ..State::default() };
         let Some(Ask::Skins(asked)) = state.update(Message::Edited { round: 3, result: Ok(()) })
@@ -2457,6 +2551,7 @@ mod tests {
             stored: Stored::default(),
             ears: false,
             act: Act::Forget,
+            confirm: false,
         });
         state.wearing = true;
         assert_eq!(
@@ -2503,6 +2598,7 @@ mod tests {
                     stored: Stored { variant: "CLASSIC".to_string(), cape: String::new() },
                     ears,
                     act: Act::Save,
+                    confirm: false,
                 };
                 // With capes to choose and with none: an account that owns no cape still
                 // gets the modal's own "None".
@@ -2535,6 +2631,33 @@ mod tests {
         unique.sort_unstable();
         unique.dedup();
         assert_eq!(unique.len(), names.len(), "got {scoped:?}");
+    }
+
+    #[test]
+    fn forgetting_a_skin_asks_first_and_the_answer_goes_back_to_the_editor() {
+        let mut state = State { saved: vec![stored("abc")], ..State::default() };
+        state.update(Message::Edit { key: "abc".to_string() });
+        // The delete button asks, and asking is not a write: nothing leaves and
+        // the editor stays open.
+        assert_eq!(state.update(Message::Forget), None, "a question asks nobody");
+        let edit = state.edit.as_ref().expect("the editor is still open");
+        assert!(edit.confirm, "and it is asking");
+        // Changing your mind goes back to the editor rather than closing it, which
+        // is what the reference's own Cancel does over its editor.
+        assert_eq!(state.update(Message::CancelForget), None);
+        let edit = state.edit.as_ref().expect("still open");
+        assert!(!edit.confirm, "and it stops asking");
+        // And the second time round, the write is one press from the ask.
+        state.update(Message::Forget);
+        let Some(Ask::EditSkin(edit)) = state.update(Message::Act(Act::Forget)) else {
+            panic!("proceeding is the write");
+        };
+        assert_eq!(edit.act, Act::Forget);
+        assert!(state.wearing, "and the page waits on it");
+        // A press with nothing open is nothing, in either direction.
+        let mut empty = State::default();
+        assert_eq!(empty.update(Message::Forget), None);
+        assert_eq!(empty.update(Message::CancelForget), None);
     }
 
     #[test]
@@ -2594,6 +2717,7 @@ mod tests {
             stored: Stored::default(),
             ears: true,
             act: Act::Save,
+            confirm: false,
         };
         drop(edit_view(Gen::ALL[0], &edit, &[], false));
     }
