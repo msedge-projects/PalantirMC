@@ -1702,20 +1702,36 @@ fn forget_confirm<'a>(
             .spacing(ROW_GAP)
             .align_items(Alignment::Center)
             .push(Space::with_width(Length::Fill))
-            .push(ui::button_text_sized(
+            .push(ui::button_with_icon_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "forget-cancel"),
-                CANCEL_LABEL,
-                ui::Kind::Outlined,
+                cancel_glyph(),
+                Key::ButtonCancel,
+                // `<Button @click="hide()">` with no `type` of its own, which
+                // `Button.vue`'s default takes to `base`: a raised surface, not a
+                // hairline. The editor's own Cancel is `type="outlined"`, and this
+                // is the other template's button.
+                ui::Kind::Standard,
                 MODAL_BUTTON,
-                Message::CancelForget,
+                Length::Shrink,
+                Some(Message::CancelForget),
             ))
-            .push(ui::button_or_sized(
+            .push(ui::button_with_icon_sized(
                 theme,
                 ui::scoped(EDIT_KEY, "forget"),
-                Key::AppSkinsDeleteButton,
+                // `proceedIcon` defaults to `TrashIcon` and `Skins.vue` passes no
+                // icon of its own, so the prop's own default is the glyph on
+                // screen.
+                proceed_glyph(),
+                // `Skins.vue` passes `:proceed-label="formatMessage(commonMessages
+                // .deleteLabel)"`, which is `label.delete` -- so this dialog says
+                // "Delete" where the row's own button says "Delete skin".
+                Key::LabelDelete,
+                // `danger` defaults to true and this dialog is the one that takes
+                // something away, so `:color="danger ? 'red' : 'brand'"` is `red`.
                 ui::Kind::Danger,
                 MODAL_BUTTON,
+                Length::Shrink,
                 (!wearing).then_some(Message::Act(Act::Forget)),
             )),
     )
@@ -1723,14 +1739,29 @@ fn forget_confirm<'a>(
     .into()
 }
 
-/// The question's own "Cancel".
+/// The icon the question's own Cancel carries.
 ///
-/// `commonMessages.cancelButton` in the reference, which the vendored message
-/// table does not carry -- the generator took the app's own ids and this is the
-/// shared package's -- so the word is written here, as
-/// [`TAKE_OFF_LABEL`] is for the one control the reference has no words for at
-/// all.
-const CANCEL_LABEL: &str = "Cancel";
+/// `ConfirmModal.vue`'s `<Button @click="hide()">` opens with `<XIcon />` -- the
+/// same glyph `EditSkinModal.vue` puts in front of its own Cancel. Two
+/// templates, one control: this dialog is the reference's `ConfirmModal` and
+/// that one is its `EditSkinModal`, and both spell the word the same way, which
+/// is [`Key::ButtonCancel`]: `commonMessages.cancelButton` is the shared
+/// package's `button.cancel`, and the generated table does carry it. The
+/// hand-written `CANCEL_LABEL` this replaces was written because the table was
+/// read as the app's own ids alone, and the shared package's ids are in it too.
+fn cancel_glyph() -> Glyph {
+    Glyph::X
+}
+
+/// The icon the question's own Delete carries.
+///
+/// `ConfirmModal.vue` draws `<component :is="proceedIcon" />` before the label,
+/// and `proceedIcon` is a prop whose default is `TrashIcon`. `Skins.vue` opens
+/// this dialog with a title, a description and a label, and passes no icon, so
+/// the default is the one on screen.
+fn proceed_glyph() -> Glyph {
+    Glyph::Trash
+}
 
 /// The icon the editor's Save button carries.
 ///
@@ -2828,6 +2859,33 @@ mod tests {
         unique.sort_unstable();
         unique.dedup();
         assert_eq!(unique.len(), names.len(), "got {scoped:?}");
+    }
+
+    #[test]
+    fn the_question_s_own_buttons_carry_the_icons_its_template_gives_them() {
+        // `ConfirmModal.vue`: `<Button @click="hide()"><XIcon /> Cancel</Button>`,
+        // then `<component :is="proceedIcon" />{{ proceedLabel }}` with
+        // `proceedIcon` defaulting to `TrashIcon`.
+        assert_eq!(cancel_glyph(), Glyph::X);
+        assert_eq!(proceed_glyph(), Glyph::Trash);
+        // The word is the reference's own rather than this launcher's:
+        // `commonMessages.cancelButton` is `button.cancel`, and the generated
+        // table carries that id, so the hand-written string is gone.
+        assert_eq!(Key::ButtonCancel.name(), "button.cancel");
+        assert_eq!(Key::ButtonCancel.message(), "Cancel");
+        // The second label is the shared package's own delete word rather than
+        // the prop's default of "Proceed": `Skins.vue` passes
+        // `:proceed-label="commonMessages.deleteLabel"`, which is `label.delete`.
+        // The row's own button keeps the app's longer "Delete skin".
+        assert_eq!(Key::LabelDelete.name(), "label.delete");
+        assert_eq!(Key::LabelDelete.message(), "Delete");
+        assert_eq!(Key::AppSkinsDeleteButton.message(), "Delete skin");
+        // And the two keep their own names, so a press in one does not light the
+        // other's clock.
+        assert_ne!(
+            ui::scoped(EDIT_KEY, "forget-cancel"),
+            ui::scoped(EDIT_KEY, "forget")
+        );
     }
 
     #[test]
