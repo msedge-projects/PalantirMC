@@ -258,8 +258,31 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     if first_run(store.instances()) {
         // The welcome screen's two buttons are the only way out of it, and there
         // is nothing else on the page: no toolbar, no search, nothing to sort.
-        blocks.push(welcome(theme));
-        return page::body(blocks, GAP, Message::Wheel);
+        //
+        // **Drawn outside the page's scroll region, and that is the fix for a
+        // defect rather than a style.** The reference's welcome is
+        // `min-h-full`: the page is the viewport, the hero is centred in what
+        // the header leaves, and the foot sits on the page's floor. That
+        // minimum is exactly what a scroll region cannot give -- `iced_widget`
+        // lays a scrollable's content out with `f32::MAX` on the axis it
+        // scrolls, so a column asking for a vertical `Fill` inside one resolves
+        // against an unbounded height, and what it draws is nothing. The screen
+        // shipped that way: invisible on every platform, and unphotographed
+        // because the machine it was written on could not capture its own
+        // window (`PrintWindow` returns a surface without the page in it). The
+        // pane's own container *is* bounded, so the same `Fill` below means the
+        // minimum the reference means, at whatever height the window has. What
+        // the page gives up is a scrollbar on a window shorter than the
+        // welcome; at every size this shell opens at, the welcome fits, and
+        // `min-h-full` draws no scrollbar at those sizes either.
+        let mut page = column![].width(Length::Fill).height(Length::Fill).spacing(GAP);
+        for block in blocks {
+            page = page.push(block);
+        }
+        return container(page.push(welcome(theme)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
     match store.instances() {
         Load::Ready(cards) => {
