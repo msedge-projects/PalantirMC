@@ -502,6 +502,8 @@ const PROMO_ICON: f32 = 24.0;
 const PROMO_LABEL: f32 = 16.0;
 /// Five `rem` of fade, from `.app-sidebar::after`'s own `height: 5rem`.
 const PROMO_FADE: f32 = 80.0;
+/// The link's own height: its `text-2xl` icon with the `py-3` either side of it.
+const PROMO_LINK_H: f32 = PROMO_ICON + 2.0 * PROMO_LINK_PAD_Y;
 /// `pb-12` on the scroll region, which is what keeps the last section clear of
 /// the link above the ad.
 const PANEL_PROMO_RESERVE: f32 = 48.0;
@@ -5368,31 +5370,59 @@ fn tags(&self) -> iced::Command<Message> {
         // track, inset two from the container's edge, ends fully rounded. The
         // panel ends at the window's edge, so this bar is the window's — which is
         // where the reference's capture puts it, at `x=1272..1277`.
+        // `pb-12` on the scroll region, which is what keeps the last section
+        // clear of the link above the ad -- and which belongs *inside* the
+        // scrollable rather than beside it. `.app-sidebar-scrollable` carries
+        // the padding itself (`App.vue:2491-2494`), so the region's own height
+        // is the whole column above the ad and its content height is the
+        // sections plus the reserve. That is the pair the handle is computed
+        // from, so a reserve taken outside the region would take 48 pixels off
+        // the numerator and none off the denominator.
+        let sections = container(sections)
+            .width(Length::Fill)
+            .padding(Padding {
+                top: 0.0,
+                bottom: PANEL_PROMO_RESERVE,
+                left: 0.0,
+                right: 0.0,
+            });
         let scroll = crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
             .direction(bar_direction())
             .style(bar(theme))
             .width(Length::Fill)
             .height(Length::Fill);
         let body: Element<'_, Message> = if self.promo_shown() {
-            // The reference stacks the ad *under* the scroll region rather than
-            // inside it -- `PromotionWrapper` is a sibling of
-            // `app-sidebar-scrollable` -- and pads the scroll region by `pb-12`
-            // so the last section is not left under the link. So the column here
-            // is scroll, then the promo, and the scroll carries the padding.
-            column![
-                container(scroll)
+            // The ad is *under* the scroll region and nothing else is: the
+            // reference's `.app-sidebar` is a flex column holding
+            // `app-sidebar-scrollable` (flex-grow) and `PromotionWrapper`, and
+            // the ad's own two hundred and fifty pixels are the whole of what
+            // the second one takes. The link and the fade are not in that flow
+            // at all -- `App.vue:2554-2564` puts the link at
+            // `absolute bottom-[250px] ... z-10` and `.app-sidebar::after`
+            // (`App.vue:2705-2712`) puts the fade at `bottom: 250px; height:
+            // 5rem` -- so they go over the column rather than under it, and the
+            // scroll region above them is `672 - 250 = 422` tall where it was
+            // `672 - 48 - 48 - 80 - 250 = 246`.
+            crate::pages::overlay::Stack::at(
+                Vector::ZERO,
+                column![container(scroll).width(Length::Fill).height(Length::Fill), self.promo()]
                     .width(Length::Fill)
-                    .height(Length::Fill)
-                    .padding(Padding {
-                        top: 0.0,
-                        bottom: PANEL_PROMO_RESERVE,
-                        left: 0.0,
-                        right: 0.0,
-                    }),
-                self.promo(),
-            ]
-            .width(Length::Fill)
-            .height(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .over(
+                Vector::ZERO,
+                // The overlay block is [`PROMO_PLATE`] tall itself, so the
+                // plate's own height is reserved *under* it: the block then ends
+                // where the plate begins, which is the `bottom: 250px` both the
+                // link and the fade are measured from.
+                column![
+                    Space::with_height(Length::Fill),
+                    self.promo_overlay(),
+                    Space::with_height(Length::Fixed(PROMO_PLATE)),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
             .into()
         } else {
             scroll.into()
@@ -5422,25 +5452,51 @@ fn tags(&self) -> iced::Command<Message> {
         self.panel_shown()
     }
 
-    /// The panel's ad block: the *Upgrade to Modrinth Plus* link over a 300x250
-    /// placeholder for Modrinth Hosting.
+    /// The panel's ad block: the 300x250 plate `PromotionWrapper` holds.
     ///
-    /// `App.vue`'s `<template v-if="showAd">`: an absolutely positioned link at
-    /// `bottom-[250px]` in `text-purple font-medium` with a 24px
-    /// `ArrowBigUpDashIcon` and a `gap-1`, then `PromotionWrapper` -- a
-    /// `bg-bg` box holding a 300x250 image fetched from Modrinth's CDN.
+    /// `App.vue:2565` puts `PromotionWrapper` after `app-sidebar-scrollable` in
+    /// `.app-sidebar`'s flex column, so its two hundred and fifty pixels are in
+    /// that column's flow and nothing else is: the link above it and the fade
+    /// over it are both positioned out of it ([`Self::promo_overlay`]).
     ///
-    /// The image is not drawn. It is a remote promotional asset this launcher
-    /// does not fetch, and the alternatives were a placeholder box in its place
-    /// or a hole where the reference has one; a box of the right size in the
-    /// right place says "there is something here" without claiming what, which is
-    /// the smaller lie. The link above it is real and is drawn in full.
-    ///
-    /// The measurements are off a 1280x720 plate of the reference rather than
-    /// off the class list, because the class list does not say where the link
-    /// lands: its ink measures x 1035..1227, which is 269 pixels centred in the
-    /// 300-pixel panel with a `py-3` (12) block around a 20-pixel line.
+    /// The image inside is not drawn. It is a remote promotional asset this
+    /// launcher does not fetch, and the alternatives were a placeholder box in
+    /// its place or a hole where the reference has one; a box of the right size
+    /// in the right place says "there is something here" without claiming what,
+    /// which is the smaller lie. The link above it is real and is drawn in full.
     fn promo(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        // `bg-bg`, the 300x250 box `PromotionWrapper`'s wrapper is, with nothing
+        // in it. See the note above on why.
+        container(Space::new(Length::Fill, PROMO_PLATE))
+            .width(Length::Fill)
+            .height(Length::Fixed(PROMO_PLATE))
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
+                ..container::Appearance::default()
+            })
+            .into()
+    }
+
+    /// The ad's own two layers over it: the fade above the plate and the
+    /// *Upgrade to Modrinth Plus* link over that.
+    ///
+    /// `App.vue:2554-2564` is the link -- `absolute bottom-[250px] w-full flex
+    /// justify-center items-center gap-1 px-4 py-3 text-purple font-medium
+    /// hover:underline z-10` with a `text-2xl` `ArrowBigUpDashIcon` -- and
+    /// `.app-sidebar::after` (`App.vue:2705-2712`) is the fade: `bottom: 250px;
+    /// left: 0; right: 0; height: 5rem` in
+    /// `--brand-gradient-fade-out-color`, which is
+    /// `linear-gradient(to bottom, rgba(24, 30, 31, 0), #171d1e 80%)` in dark.
+    ///
+    /// Both are measured against the *bottom* of the panel, which is the bottom
+    /// of the plate, so both land at `y=470` in a 1280x720 window -- and the
+    /// reference's own capture reads them there: the plate's flat `--surface-1`
+    /// starts at y=470 in `x=1200` and the link's ink at x=1100 runs y=444..452.
+    /// So the block is a [`PROMO_PLATE`]-tall spacer with the two laid over the
+    /// top of it, and neither of them is in the flow that decides how tall the
+    /// scroll region is.
+    fn promo_overlay(&self) -> Element<'_, Message> {
         let theme = self.theme;
         let key = "panel:promo";
         let (factor, _) = crate::ui::interaction(key);
@@ -5455,6 +5511,10 @@ fn tags(&self) -> iced::Command<Message> {
                     .font(medium())
                     .style(iced::theme::Text::Color(ink)),
             );
+        // `justify-center` over a panel whose only box model is its own 300
+        // pixels. A column lays its children out at their own widths from the
+        // left, so without centring the whole block would sit against the panel's
+        // edge rather than in the middle of it.
         let upgrade = mouse_area(
             container(link)
                 .padding(Padding {
@@ -5463,7 +5523,7 @@ fn tags(&self) -> iced::Command<Message> {
                     left: PANEL_SECTION_PAD,
                     right: PANEL_SECTION_PAD,
                 })
-                .width(Length::Shrink)
+                .width(Length::Fill)
                 .center_x(),
         )
         .interaction(Interaction::Pointer)
@@ -5472,10 +5532,7 @@ fn tags(&self) -> iced::Command<Message> {
         .on_press(Message::OpenUrl(PROMO_PLUS_URL.to_string()));
         // The fade the reference paints over the last five rem of the wash, so
         // the scroll region's last section dissolves into the ad rather than
-        // stopping at a hard edge. `--brand-gradient-fade-out-color` is
-        // `linear-gradient(to bottom, rgba(24, 30, 31, 0), #171d1e 80%)` in
-        // dark, which is transparent at the top and the panel's own darkest
-        // wash at four fifths of the way down.
+        // stopping at a hard edge.
         let fade = container(Space::new(Length::Fill, PROMO_FADE))
             .width(Length::Fill)
             .height(Length::Fixed(PROMO_FADE))
@@ -5487,25 +5544,18 @@ fn tags(&self) -> iced::Command<Message> {
                 ))),
                 ..container::Appearance::default()
             });
-        // The ad's own plate: `bg-bg`, the 300x250 box `PromotionWrapper`'s
-        // wrapper is, with nothing in it. See the note above on why.
-        let plate = container(Space::new(Length::Fill, PROMO_PLATE))
-            .width(Length::Fill)
-            .height(Length::Fixed(PROMO_PLATE))
-            .style(move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
-                ..container::Appearance::default()
-            });
-        // The link is centred: the reference's `<a>` is `absolute w-full` with
-        // `justify-center` over a panel whose only box model is its own 300
-        // pixels. A column lays its children out at their own widths from the
-        // left, so without this the whole block -- link included -- would sit
-        // against the panel's edge rather than in the middle of it. The fade and
-        // the plate are `Fill`, so centring the column moves only the link.
-        column![upgrade, fade, plate]
-            .width(Length::Fill)
-            .align_items(Alignment::Center)
-            .into()
+        // The link over the fade: `z-10` against an unnumbered `::after`, so it
+        // is the later of the two layers in the reference and the later of the
+        // two here.
+        crate::pages::overlay::Stack::at(
+            Vector::ZERO,
+            container(Space::with_height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fixed(PROMO_PLATE)),
+        )
+        .over(Vector::new(0.0, PROMO_PLATE - PROMO_FADE), fade)
+        .over(Vector::new(0.0, PROMO_PLATE - PROMO_LINK_H), upgrade)
+        .into()
     }
 
     /// Whether Home is drawing the reference's welcome screen.
