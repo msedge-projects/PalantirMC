@@ -237,6 +237,15 @@ pub enum Message {
     /// into that filter's own part, and the option's id is the value it carries
     /// (`environment:client`, `open_source:true`, `categories:fabric`).
     Filter { filter: String, option: String },
+    /// A filter option was excluded, or unexcluded.
+    ///
+    /// The second press of a row, beside the one that chooses it, and a request
+    /// like the first: `supports: ['include', 'exclude']` is on every category
+    /// section and on the loaders and the license, and what an exclusion asks for
+    /// is a `NOT IN` group rather than nothing at all. The section's id is the
+    /// reference's own `category_<project_type>_<header>` where the row is a
+    /// category, because that is what `search.ts` keys its filters by.
+    Exclude { filter: String, option: String },
     /// A sidebar section was opened or closed.
     ///
     /// Not a request: opening a section changes what is on screen and not what
@@ -393,6 +402,15 @@ pub struct State {
     /// are carried under fields of their own, so the section has to travel with
     /// the choice or two of them are the same string meaning two things.
     pub filters: BTreeSet<(String, String)>,
+    /// The options that are *excluded*, by the same key as [`filters`](Self::filters).
+    ///
+    /// A set of its own rather than a flag on [`filters`](Self::filters) because
+    /// the two are the same question with opposite answers and never both: the
+    /// reference's row shows one mark or the other, and the press that excludes
+    /// an option unchooses it (`primaryAction === 'exclude'` makes the row's own
+    /// press the exclusion once it is excluded). One option is in one set or the
+    /// other, never both.
+    pub excluded: BTreeSet<(String, String)>,
     /// The sidebar sections whose open state the reader has changed.
     ///
     /// One set for both kinds of default, because a default is a fact about the
@@ -452,6 +470,7 @@ impl State {
             hide_installed: false,
             categories: BTreeSet::new(),
             filters: BTreeSet::new(),
+            excluded: BTreeSet::new(),
             touched: BTreeSet::new(),
             expanded: BTreeSet::new(),
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
@@ -539,7 +558,27 @@ impl State {
             // sort does.
             Message::Category(name) => {
                 if !self.categories.remove(&name) {
-                    self.categories.insert(name);
+                    self.categories.insert(name.clone());
+                    // Choosing a category unexcludes it, and the other way round:
+                    // the reference's row carries one mark, and the press that
+                    // excludes what is chosen drops the choice.
+                    let id = category_filter_id(self.project_type, self.header_of(&name));
+                    self.excluded.remove(&(id, name.clone()));
+                }
+                self.page = 1;
+                return Some(Ask::Search(self.ask()));
+            }
+            // The exclusion is the same question with the opposite answer, and it
+            // asks the same way. `environment` is the one filter whose rows carry
+            // no exclusion at all -- `supports: ['include']` -- so it has no press
+            // to send this.
+            Message::Exclude { filter, option } => {
+                if !self.excluded.remove(&(filter.clone(), option.clone())) {
+                    self.excluded.insert((filter.clone(), option.clone()));
+                    self.filters.remove(&(filter.clone(), option.clone()));
+                    if category_filter_id(self.project_type, &option) == filter {
+                        self.categories.remove(&option);
+                    }
                 }
                 self.page = 1;
                 return Some(Ask::Search(self.ask()));
@@ -550,6 +589,8 @@ impl State {
             Message::Filter { filter, option } => {
                 if !self.filters.remove(&(filter.clone(), option.clone())) {
                     self.filters.insert((filter.clone(), option.clone()));
+                    // And choosing drops the exclusion, as above.
+                    self.excluded.remove(&(filter.clone(), option.clone()));
                 }
                 self.page = 1;
                 return Some(Ask::Search(self.ask()));
@@ -765,6 +806,24 @@ impl State {
         if let Some(part) = any_of("categories", &group.into_iter().collect::<Vec<&str>>()) {
             parts.push(part);
         }
+        // Then the exclusions, which `newFilters` appends after the groups and
+        // which are the one place it does not collapse a list of one: a single
+        // excluded loader is `categories NOT IN ["fabric"]`, not `= `. The field
+        // is the option's own value field -- `categories` for a category and a
+        // loader, `open_source` for the license's one option.
+        let mut none: Vec<&str> = self
+            .excluded
+            .iter()
+            .filter(|(filter, _)| filter.as_str() != LICENSE)
+            .map(|(_, option)| option.as_str())
+            .collect();
+        none.sort_unstable();
+        if let Some(part) = none_of("categories", &none) {
+            parts.push(part);
+        }
+        if self.excluded.contains(&(LICENSE.to_string(), OPEN_SOURCE.to_string())) {
+            parts.push("open_source NOT IN [true]".to_string());
+        }
         parts.extend(self.environment_parts());
         (!parts.is_empty()).then(|| parts.join(" AND "))
     }
@@ -772,6 +831,12 @@ impl State {
     /// Whether the option `option` of the section `filter` is chosen.
     pub fn chosen(&self, filter: &str, option: &str) -> bool {
         self.filters.iter().any(|(f, o)| f == filter && o == option)
+    }
+
+    /// Whether the option `option` of the section `filter` is excluded, which is
+    /// what `isExcluded` is in `SearchSidebarFilter.vue`'s visibility test.
+    pub fn is_excluded(&self, filter: &str, option: &str) -> bool {
+        self.excluded.iter().any(|(f, o)| f == filter && o == option)
     }
 
     /// The chosen options of the section `filter`, in the order the set keeps
@@ -1065,7 +1130,7 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             if options.is_empty() {
                 continue;
             }
-            let rows = category_rows(state, &options);
+            let rows = category_rows(state, header, &options);
             let open = state.is_open(header, true);
             blocks.push(section(theme, header, locale::category_header_label(header), &rows, open, None));
         }
@@ -1258,19 +1323,49 @@ struct Row {
     /// Whether it is in the request already, which is what decides its ink, its
     /// fill and whether its check is drawn at all.
     chosen: bool,
+    /// Whether it is excluded instead, which swaps the check for a ban and the
+    /// brand highlight for the red one.
+    excluded: bool,
+    /// Whether the section's filter declares `supports: ['include', 'exclude']`,
+    /// which is what puts the second press at the row's end. `environment` is
+    /// `['include']` and has none.
+    excludes: bool,
     /// The message that chooses it, or unchooses it.
     press: Message,
+    /// The message that excludes it, or unexcludes it.
+    exclude: Message,
+}
+
+/// The id `search.ts` gives a category section's filter, which is what an
+/// exclusion of one of its rows is keyed by.
+///
+/// `` `category_${category.project_type}_${category.header}` `` -- the header, not
+/// the project's own spelling of it, so the mod tab's *technical* section is
+/// `category_mod_technical` on every project type that has one.
+fn category_filter_id(kind: ProjectType, header: &str) -> String {
+    format!("category_{}_{}", kind.token(), header)
 }
 
 /// The category rows of one section, in the order the API lists them.
-fn category_rows(state: &State, options: &[&palantir_net::CategoryTag]) -> Vec<Row> {
+///
+/// A category section is `supports: ['include', 'exclude']` like the loaders, so
+/// every row carries the second press -- keyed by the section's own filter id,
+/// which is what `search.ts` would have in `currentFilters`.
+fn category_rows(state: &State, header: &str, options: &[&palantir_net::CategoryTag]) -> Vec<Row> {
+    let filter = category_filter_id(state.project_type, header);
     options
         .iter()
         .map(|category| Row {
             id: category.name.clone(),
             label: locale::category_label(&category.name),
             chosen: state.categories.contains(&category.name),
+            excluded: state.excluded.contains(&(filter.clone(), category.name.clone())),
+            excludes: true,
             press: Message::Category(category.name.clone()),
+            exclude: Message::Exclude {
+                filter: filter.clone(),
+                option: category.name.clone(),
+            },
         })
         .collect()
 }
@@ -1464,20 +1559,31 @@ fn filter_rows(
                 id: "client".to_string(),
                 label: message(Key::SearchFilterTypeEnvironmentClient),
                 chosen: state.chosen(ENVIRONMENT, "client"),
+                excluded: state.is_excluded(ENVIRONMENT, "client"),
+                // `supports: ['include']` is the whole of the reference's answer
+                // for this filter, so its rows have no second press at all.
+                excludes: false,
                 press: press("client"),
+                exclude: Message::Filter { filter: ENVIRONMENT.to_string(), option: "client".to_string() },
             },
             Row {
                 id: "server".to_string(),
                 label: message(Key::SearchFilterTypeEnvironmentServer),
                 chosen: state.chosen(ENVIRONMENT, "server"),
+                excluded: state.is_excluded(ENVIRONMENT, "server"),
+                excludes: false,
                 press: press("server"),
+                exclude: Message::Filter { filter: ENVIRONMENT.to_string(), option: "server".to_string() },
             },
         ],
         LICENSE => vec![Row {
             id: OPEN_SOURCE.to_string(),
             label: message(Key::SearchFilterTypeLicenseOpenSource),
             chosen: state.chosen(LICENSE, OPEN_SOURCE),
+            excluded: state.is_excluded(LICENSE, OPEN_SOURCE),
+            excludes: true,
             press: press(OPEN_SOURCE),
+            exclude: Message::Exclude { filter: LICENSE.to_string(), option: OPEN_SOURCE.to_string() },
         }],
         // Every loader filter is `tags.value.loaders` narrowed to the project
         // types the filter declares, which is what `Tags::loaders_for` answers,
@@ -1491,7 +1597,13 @@ fn filter_rows(
                     id: loader.clone(),
                     label: locale::loader_label(&loader),
                     chosen: state.chosen(filter.id, &loader),
+                    excluded: state.is_excluded(filter.id, &loader),
+                    excludes: true,
                     press: press(&loader),
+                    exclude: Message::Exclude {
+                        filter: filter.id.to_string(),
+                        option: loader.clone(),
+                    },
                 })
                 .collect();
             visible_rows(filter, state, chosen)
@@ -1549,7 +1661,7 @@ fn visible_rows(filter: &Filter, state: &State, rows: Vec<Row>) -> Vec<Row> {
         rows
     } else {
         rows.iter()
-            .filter(|row| filter.defaults.contains(&row.id.as_str()) || row.chosen)
+            .filter(|row| filter.defaults.contains(&row.id.as_str()) || row.chosen || row.excluded)
             .cloned()
             .collect()
     };
@@ -1612,9 +1724,20 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
         .line_height(iced::Pixels(20.0))
         .font(semibold())
         .style(iced::theme::Text::Color(theme_gen::ink(theme, ink)));
-    let check = (row.chosen || lifted).then(|| {
-        icon::icon(Glyph::Check, OPTION_CHECK, theme_gen::ink(theme, INK_SECONDARY))
-    });
+    let check = if row.excluded {
+        // `<BanIcon v-if="excluded || primaryAction === 'exclude'">`, and it
+        // takes the button's own ink, which on the excluded arm is `text-contrast`
+        // over `bg-highlight-red`.
+        Some(icon::icon(Glyph::Ban, OPTION_CHECK, theme_gen::ink(theme, INK_CONTRAST)))
+    } else if row.chosen {
+        // The chosen arm is `bg-brand-highlight text-contrast`, so the check
+        // inherits that ink -- not the section ink it was drawn in before.
+        Some(icon::icon(Glyph::Check, OPTION_CHECK, theme_gen::ink(theme, INK_CONTRAST)))
+    } else {
+        lifted.then(|| {
+            icon::icon(Glyph::Check, OPTION_CHECK, theme_gen::ink(theme, INK_SECONDARY))
+        })
+    };
     let mut line = row![]
         .align_items(Alignment::Center)
         .width(Length::Fill)
@@ -1624,8 +1747,31 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     if let Some(check) = check {
         line = line.push(check);
     }
-    let background =
-        row.chosen.then(|| Background::Color(theme_gen::ink(theme, Ink::ColorBrandHighlight)));
+    // The second press, at the row's end: a one-pixel divider and a ban button
+    // with their own `px-2 py-1` face, both of which the reference keeps at zero
+    // opacity until the row is hovered (`[@media(hover:hover)]:opacity-0` and the
+    // component's own `:hover button { opacity: 1 }`), and the divider is hidden
+    // outright once the row is chosen (`{'opacity-0': included}`).
+    if row.excludes && !row.excluded && lifted {
+        line = line.push(
+            container(Space::new(Length::Fill, OPTION_DIVIDER))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(OPTION_DIVIDER))
+                .style(move |_t: &iced::Theme| container::Appearance {
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+                    ..container::Appearance::default()
+                }),
+        );
+        line = line.push(exclude_button(theme, row));
+    }
+    let background = if row.chosen {
+        Some(Background::Color(theme_gen::ink(theme, Ink::ColorBrandHighlight)))
+    } else if row.excluded {
+        // `excluded ? 'bg-highlight-red text-contrast'`.
+        Some(Background::Color(theme_gen::ink(theme, Ink::RedHighlight)))
+    } else {
+        None
+    };
     mouse_area(
         container(line)
             .width(Length::Fill)
@@ -1651,6 +1797,32 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
 /// \`h-4 w-4\` on \`SearchFilterOption.vue\`'s check, which is a quarter of the
 /// section's own \`size-5\`.
 const OPTION_CHECK: f32 = 16.0;
+
+/// The height of the divider that separates a row from its exclude press:
+/// `h-[1.75rem]`, twenty-eight pixels, which is a little taller than the row's
+/// own twenty-eight pixels of padding and label and so is the row's own height.
+const OPTION_DIVIDER: f32 = 28.0;
+
+/// The second press of an option row: `SearchFilterOption.vue`'s exclude button.
+///
+/// A ban icon at sixteen pixels in a `px-2 py-1` button of its own, in
+/// `text-secondary` and turning `--color-red` under its own pointer -- so it
+/// takes a hover key of its own rather than sharing the row's, which is what the
+/// reference's separate button is for.
+fn exclude_button<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
+    let key = crate::ui::scoped("discover:exclude", &row.id);
+    let (_, hover) = crate::ui::interaction(key);
+    let ink = if hover > 0.0 { Ink::Red } else { INK_SECONDARY };
+    let ban = icon::icon(Glyph::Ban, OPTION_CHECK, theme_gen::ink(theme, ink));
+    mouse_area(
+        container(row![].align_items(Alignment::Center).push(ban))
+            .padding(Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 8.0 }),
+    )
+    .on_enter(Message::hover_with(key, true, 1.0))
+    .on_exit(Message::hover_with(key, false, 1.0))
+    .on_press(row.exclude.clone())
+    .into()
+}
 
 /// \`size-5\`: the section's own dropdown icon.
 const SECTION_ICON: f32 = 20.0;
@@ -1681,11 +1853,27 @@ fn any_of(field: &str, values: &[&str]) -> Option<String> {
     match values {
         [] => None,
         [one] => Some(format!("{field} = \"{one}\"")),
-        many => Some(format!(
-            "{field} IN [{}]",
-            many.iter().map(|value| format!("\"{value}\"")).collect::<Vec<String>>().join(", ")
-        )),
+        _ => Some(format!("{field} IN [{}]", quoted(values))),
     }
+}
+
+/// The excluded values of one field, as `newFilters` writes `negativeByType`.
+///
+/// A list even for one value: this is the only part of the facet string where
+/// the reference does not collapse to `field = value` for a single option, and
+/// an exclusion of exactly one is the case that reads as a typo otherwise.
+fn none_of(field: &str, values: &[&str]) -> Option<String> {
+    (!values.is_empty()).then(|| format!("{field} NOT IN [{}]", quoted(values)))
+}
+
+/// A list of values the way `formatSearchFilterValue` writes one.
+///
+/// The quoted form is this tree's own, and it is what the engine's tests are
+/// written in; the reference quotes with backticks, which its parser takes too.
+/// The difference is a character in a string Modrinth reads, not a different
+/// question.
+fn quoted(values: &[&str]) -> String {
+    values.iter().map(|value| format!("\"{value}\"")).collect::<Vec<String>>().join(", ")
 }
 
 /// The environment values that satisfy the chosen pair, as `search.ts`'s
@@ -3297,6 +3485,109 @@ mod tests {
         assert_eq!(order(ProjectType::Mod), vec![MOD_LOADER, ENVIRONMENT, LICENSE]);
         assert_eq!(order(ProjectType::Modpack), vec![ENVIRONMENT, MODPACK_LOADER, LICENSE]);
         assert_eq!(order(ProjectType::Shader), vec![SHADER_LOADER, LICENSE]);
+    }
+
+    #[test]
+    fn an_exclusion_is_a_not_in_group_and_never_both_answers_at_once() {
+        // `supports: ['include', 'exclude']` is on every category section and on
+        // the loaders and the license, and the exclusion is the row's second
+        // press: `newFilters` collects it into `negativeByType` and appends
+        // `field NOT IN [...]` after the `orGroups`. It is a list even for one
+        // value -- the one place the reference does not collapse to `= `.
+        let mut state = state_of(ProjectType::Mod);
+        state.update(Message::Tags {
+            result: Ok(palantir_net::Tags {
+                categories: vec![palantir_net::CategoryTag {
+                    name: "technology".to_string(),
+                    project_type: "mod".to_string(),
+                    header: "technical".to_string(),
+                }],
+                ..tags_with(&[("fabric", &["mod"]), ("forge", &["mod"]), ("quilt", &["mod"]), (
+                    "neoforge",
+                    &["mod"],
+                )])
+            }),
+        });
+
+        let category = category_filter_id(ProjectType::Mod, "technical");
+        let Some(Ask::Search(first)) =
+            state.update(Message::Exclude { filter: category.clone(), option: "technology".to_string() })
+        else {
+            panic!("excluding asks");
+        };
+        assert_eq!(first.query.facets, vec![r#"categories NOT IN ["technology"]"#.to_string()]);
+
+        // A loader excludes under the same field, and the two go into one group:
+        // `newFilters` keys by field, so the list is one `NOT IN`, not two.
+        let Some(Ask::Search(second)) =
+            state.update(Message::Exclude { filter: MOD_LOADER.to_string(), option: "quilt".to_string() })
+        else {
+            panic!("excluding a loader asks");
+        };
+        assert_eq!(
+            second.query.facets,
+            vec![r#"categories NOT IN ["quilt", "technology"]"#.to_string()],
+            "one group, ordered by the option id so the same choices are the same string"
+        );
+
+        // Choosing what is excluded is the same as not excluding it: the
+        // reference's row carries one mark, and the press that includes drops the
+        // exclusion.
+        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
+        assert!(!state.is_excluded(MOD_LOADER, "quilt"), "choosing it unexcluded it");
+        assert!(state.chosen(MOD_LOADER, "quilt"), "and it is chosen instead");
+
+        // And the license's own field, with the boolean left unquoted as
+        // `formatSearchFilterValue` leaves it.
+        let Some(Ask::Search(third)) =
+            state.update(Message::Exclude { filter: LICENSE.to_string(), option: OPEN_SOURCE.to_string() })
+        else {
+            panic!("excluding the license asks");
+        };
+        assert_eq!(
+            third.query.facets,
+            vec![concat!(
+                r#"categories = "quilt""#,
+                " AND categories NOT IN [\"technology\"]",
+                " AND open_source NOT IN [true]",
+            )
+            .to_string()],
+            "the and-part, then the categories group, then the license's own field"
+        );
+
+        // An excluded option stays a row even in a section that shows only its
+        // defaults, so it can be unexcluded: `isVisible(option) || isExcluded(option)`.
+        state.update(Message::Exclude { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
+        let loader = SIDEBAR_FILTERS.iter().find(|f| f.id == MOD_LOADER).expect("the mod tab has a loader filter");
+        let ids: Vec<String> =
+            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
+                .iter()
+                .map(|row| row.id.clone())
+                .collect();
+        assert!(ids.contains(&"quilt".to_string()), "the excluded loader is still a row: {ids:?}");
+        drop(sidebar(Gen::Dark, &state));
+    }
+
+    #[test]
+    fn the_environment_rows_have_no_second_press() {
+        // `search.ts`'s `environment` is `supports: ['include']`, the only filter
+        // in the table that is: its two rows carry no exclude button at all, which
+        // is what the reference draws beside them -- nothing.
+        let mut state = state_of(ProjectType::Modpack);
+        state.update(Message::Tags { result: Ok(tags_with(&[])) });
+        let environment = SIDEBAR_FILTERS.iter().find(|f| f.id == ENVIRONMENT).expect("the filter exists");
+        for row in filter_rows(&state, environment, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+            assert!(!row.excludes, "{} has no second press", row.id);
+        }
+        // And the loaders and the license do have one.
+        let loaders = SIDEBAR_FILTERS.iter().find(|f| f.id == MODPACK_LOADER).expect("the filter exists");
+        for row in filter_rows(&state, loaders, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+            assert!(row.excludes, "{} has one", row.id);
+        }
+        let license = SIDEBAR_FILTERS.iter().find(|f| f.id == LICENSE).expect("the filter exists");
+        for row in filter_rows(&state, license, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+            assert!(row.excludes, "{} has one", row.id);
+        }
     }
 
     fn tags_with(loaders: &[(&str, &[&str])]) -> palantir_net::Tags {
