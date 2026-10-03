@@ -2117,7 +2117,7 @@ fn unique(tags: &[String]) -> Vec<String> {
 ///
 /// The one exception is a loader the reference paints in its own platform
 /// colour, which is [`platform_tag`] rather than either of them: see
-/// [`pill_ink`].
+/// [`platform_colour`].
 fn tags_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, Message> {
     let mut row = row![].spacing(CARD_TAG_GAP).align_items(Alignment::Center);
     for pill in card_tags(project).pills() {
@@ -2216,7 +2216,9 @@ fn platform_ink(tag: &str) -> Option<Ink> {
 }
 
 /// The `--color-platform-*` one of this page's pills is painted in, if it is
-/// painted in one at all: `TagTagItem`'s `isLoader` ternary over one pill.
+/// painted in one at all: `TagTagItem`'s `isLoader` ternary over one pill, and
+/// `None` for every other pill on the page, which is
+/// `text-[--_color,var(--color-secondary)]`'s own fallback.
 ///
 /// The two halves are kept apart on purpose: [`platform_ink`] is what the
 /// stylesheet declares, and [`ui::is_loader_tag`] is what
@@ -2229,14 +2231,6 @@ fn platform_colour(pill: &Pill) -> Option<Ink> {
         .as_deref()
         .filter(|id| ui::is_loader_tag(id))
         .and_then(platform_ink)
-}
-
-/// The ink a pill ends up in, which is [`INK_SECONDARY`] unless
-/// [`platform_colour`] has one: `text-[--_color,var(--color-secondary)]` and its
-/// fallback, spelled the way a gate can ask about a pill rather than about a
-/// widget.
-fn pill_ink(pill: &Pill) -> Ink {
-    platform_colour(pill).unwrap_or(INK_SECONDARY)
 }
 
 /// One of this page's tag pills, in an ink of the caller's choosing.
@@ -3080,29 +3074,24 @@ mod tests {
         // `--color-secondary` whatever a loader of a similar name has, and the
         // two pills that are not tags at all take the fallback because there is
         // nothing to name a token after.
-        let ink_of = |id: Option<&str>, label: &str| {
-            let pill = Pill { label: label.to_string(), icon: None, id: id.map(str::to_string) };
-            (platform_colour(&pill), pill_ink(&pill))
+        let of = |id: Option<&str>, label: &str, icon: Option<Glyph>| {
+            let pill = Pill { label: label.to_string(), icon, id: id.map(str::to_string) };
+            platform_colour(&pill)
         };
-        assert_eq!(ink_of(Some("forge"), "Forge"), (Some(Ink::PlatformForge), Ink::PlatformForge));
-        assert_eq!(ink_of(Some("fabric"), "Fabric"), (Some(Ink::PlatformFabric), Ink::PlatformFabric));
+        assert_eq!(of(Some("forge"), "Forge", None), Some(Ink::PlatformForge));
+        assert_eq!(of(Some("fabric"), "Fabric", None), Some(Ink::PlatformFabric));
         // A loader with a token but no glyph in it still gets the colour, and
         // still a 24-row pill: *Purpur* and *Quilt* are the two that are both.
-        let quilt = Pill {
-            label: "Quilt".to_string(),
-            icon: ui::tag_icon("quilt"),
-            id: Some("quilt".to_string()),
-        };
-        assert_eq!(pill_ink(&quilt), Ink::PlatformQuilt);
-        assert_eq!(ui::tag_height(quilt.icon.is_some()), ui::TAG_HEIGHT);
+        assert_eq!(of(Some("quilt"), "Quilt", ui::tag_icon("quilt")), Some(Ink::PlatformQuilt));
+        assert_eq!(ui::tag_height(ui::tag_icon("quilt").is_some()), ui::TAG_HEIGHT);
         // A category, a loader with no token, and the two pills that are not
-        // tags: all four are the fallback, which is `#96A2B0`.
-        assert_eq!(ink_of(Some("mobs"), "Mobs"), (None, INK_SECONDARY));
-        assert_eq!(ink_of(Some("multiplayer"), "Multiplayer"), (None, INK_SECONDARY));
-        assert_eq!(ink_of(Some("mrpack"), "Modpack"), (None, INK_SECONDARY));
-        assert_eq!(ink_of(Some("datapack"), "Data Pack"), (None, INK_SECONDARY));
-        assert_eq!(ink_of(None, "Client and server"), (None, INK_SECONDARY));
-        assert_eq!(ink_of(None, "+1"), (None, INK_SECONDARY));
+        // tags: all four are `None`, which the row draws as `INK_SECONDARY`.
+        assert_eq!(of(Some("mobs"), "Mobs", None), None);
+        assert_eq!(of(Some("multiplayer"), "Multiplayer", None), None);
+        assert_eq!(of(Some("mrpack"), "Modpack", ui::tag_icon("mrpack")), None);
+        assert_eq!(of(Some("datapack"), "Data Pack", ui::tag_icon("datapack")), None);
+        assert_eq!(of(None, "Client and server", Some(Glyph::Globe)), None);
+        assert_eq!(of(None, "+1", None), None);
     }
 
     #[test]
@@ -3114,7 +3103,9 @@ mod tests {
             card_tags(project)
                 .pills()
                 .iter()
-                .map(|pill| (pill.label.clone(), pill_ink(pill)))
+                .map(|pill| {
+                    (pill.label.clone(), platform_colour(pill).unwrap_or(INK_SECONDARY))
+                })
                 .collect()
         };
         assert_eq!(
