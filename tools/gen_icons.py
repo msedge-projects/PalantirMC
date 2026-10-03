@@ -2,7 +2,8 @@
 """Compile the reference client's icon set into geometry a native window can stroke.
 
 The shell's icons are PNGs carved out of another launcher's binary. The reference
-keeps 313 SVG files, and they are outlines rather than pictures: 305 of them are
+keeps 313 SVG files at the top of `assets/icons`, plus 132 in `tags/categories`
+and `tags/loaders`, and they are outlines rather than pictures: 305 of the 313 are
 stroked `currentColor` at width 2 with round caps and joins, which is what makes
 them take the colour of whatever they sit in. A rasterised bitmap cannot do that,
 and neither can a filled outline -- both are the wrong shape for the job, so this
@@ -29,6 +30,29 @@ transform this cannot parse -- raises and names the file. Silently drawing an ic
 almost right is worse than not drawing it, because nobody goes looking for a
 corner that is off by two units.
 
+## The three sets, and the two directories this reads besides the top level
+
+`assets/icons` is not one directory. It is three:
+
+| Set | Where | Prefix | Count |
+| --- | --- | --- | --- |
+| `ALL` | `icons/*.svg` | none | 313 |
+| `TAG_CATEGORIES` | `icons/tags/categories/*.svg` | `TagCategory` | 102 |
+| `TAG_LOADERS` | `icons/tags/loaders/*.svg` | `TagLoader` | 30 |
+
+`icons/tags/categories/badge-check.svg` and `icons/badge-check.svg` are two
+different pictures that would both be `BadgeCheck`, so each tag set carries the
+prefix the reference's own `assets/build/generate-exports.ts` gives it -- it walks
+the same two directories and writes `TagCategory${stem}` and `TagLoader${stem}`
+for exactly this reason. The port drops the `Icon` suffix that one appends, because
+its variants read `BadgeCheck` and not `BadgeCheckIcon`, so `Glyph::TagLoaderForge`
+is the reference's `TagLoaderForgeIcon`. Nothing that is not a tag set is prefixed,
+which is the property that keeps the 313 existing variant names exactly as they
+are.
+
+The four that this tool cannot parse are named, not skipped quietly: see
+`REFUSED_TAGS` below, and the test in the generated file that writes the list down.
+
 ## What it emits
 
 A command list per icon, not a closure per icon: `Cmd::Move/Line/Cubic/Close` over
@@ -44,6 +68,7 @@ from __future__ import annotations
 import argparse
 import math
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -51,6 +76,54 @@ ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "modrinth-app"
 ICONS = VENDOR / "assets" / "icons"
 OUT = ROOT / "crates" / "palantir-desktop" / "src" / "icons_gen.rs"
+
+# One entry per set the reference keeps under `assets/icons`, in the order the
+# generated file declares them.
+#
+# `directory` is relative to `assets/icons`; `glob` is the file pattern inside it;
+# `prefix` is what every variant in the set is named with, which is how the tag
+# sets stop colliding with the top-level set (see the module docstring), and it is
+# empty for the top level because those 313 names are referenced by name across the
+# whole tree and one of them changing is an invisible break in every one of them.
+#
+# `complete` is the policy that makes adding a set with an unparsable file in it a
+# decision rather than an accident: the top level is all-or-nothing, exactly as it
+# was before these two existed, because every one of its 313 parses. A tag set is
+# allowed to be incomplete, and the gap is written into the generated file instead
+# of being swallowed -- see `REFUSED_TAGS`.
+SOURCES = (
+    {"table": "ALL", "directory": "", "glob": "*.svg", "prefix": "", "complete": True},
+    {"table": "TAG_CATEGORIES", "directory": "tags/categories", "glob": "*.svg",
+     "prefix": "TagCategory", "complete": False},
+    {"table": "TAG_LOADERS", "directory": "tags/loaders", "glob": "*.svg",
+     "prefix": "TagLoader", "complete": False},
+)
+
+# The tag icons this tool cannot read, written down rather than skipped.
+#
+# This is the loud half of the policy above, and it exists because the alternative
+# -- teaching the parser to accept what it does not model -- is the failure the
+# module docstring names. Four of the 132:
+#
+# | icon | construct that stopped it |
+# | --- | --- |
+# | `tags/loaders/geyser.svg` | four paths under `matrix(1.04036 0 0 1.1631 ...)` -- a non-uniform scale, which `stroke_scale` refuses because it has no single stroke width to apply |
+# | `tags/loaders/purpur.svg` | `matrix(1.125 0 0 1.1372 ...)` on five of its six shapes, and `<use xlink:href>` on the other |
+# | `tags/loaders/quilt.svg` | `matrix(.03053 0 0 .03046 ...)`, which differs in the fourth decimal and is still a different width per axis |
+# | `tags/loaders/legacy-fabric.svg` | `<g clip-path="url(#clip0_6351_12952)">`, a clip this tool cannot put on a path |
+#
+# `legacy-fabric`'s clip happens to be a `<rect width="24" height="24">` over a
+# `0 0 24 24` view box, so it clips nothing, and reading that would need a rule
+# this tool does not have and would be wrong for the next icon that clips for real.
+# So the clip is refused, the icon is absent, and `tags_icon` returns `None` for
+# it: a loader pill with no glyph in it is 24 rows rather than 26, which is the
+# height the reference draws a tag with no icon and not a wrong shape.
+REFUSED_TAGS = {
+    "tags/loaders/geyser": "non-uniform transform scale (1.0404 x 1.1631)",
+    "tags/loaders/legacy-fabric": "unknown attribute `clip-path` on <g>",
+    "tags/loaders/purpur": "non-uniform transform scale (1.1250 x 1.1372)",
+    "tags/loaders/quilt": "non-uniform transform scale (0.0305 x 0.0305)",
+}
 
 # Attributes a shape may carry. Anything outside this set on a shape is refused,
 # because an attribute this port does not understand is an attribute it would
@@ -565,13 +638,15 @@ ATTR = re.compile(rf"({NAMESPACED})\s*=\s*\"([^\"]*)\"")
 
 class Element:
     def __init__(self, commands: list[tuple], stroke_width: float, filled: bool,
-                 ink: tuple[str, str | None], element: str, opacity: float = 1.0):
+                 ink: tuple[str, str | None], element: str, opacity: float = 1.0,
+                 even_odd: bool = False):
         self.commands = commands
         self.stroke_width = stroke_width
         self.filled = filled
         self.ink = ink
         self.element = element
         self.opacity = opacity
+        self.even_odd = even_odd
 
 
 def subpath_areas(commands: list[tuple]) -> list[float]:
@@ -646,7 +721,7 @@ def ink_hint(value: str | None) -> tuple[str, str | None]:
     return ("Inherit", None)
 
 
-def read_icon(path: Path, both: list[str],
+def read_icon(path: Path, key: str, both: list[str], even_odds: list[str],
               winding_risks: list[str]) -> tuple[tuple[float, float], list[Element]]:
     text = path.read_text(encoding="utf-8")
     view = re.search(r'viewBox="([^"]+)"', text)
@@ -697,7 +772,7 @@ def read_icon(path: Path, both: list[str],
         has_fill = fill not in ("none", None)
         has_stroke = stroke not in ("none", None)
         if has_fill and has_stroke:
-            both.append(f"{path.name}:{tag}")
+            both.append(f"{key}:{tag}")
         filled = has_fill and not has_stroke
         width = css_length(inherited.get("stroke-width", "2")) * stroke_scale(matrix)
         # `opacity` is a real part of the drawing -- the spinner's ring is 25% of
@@ -724,13 +799,23 @@ def read_icon(path: Path, both: list[str],
         # The one thing this generator cannot carry across. Named and counted
         # rather than glossed: stage 2 then knows which icons need a visual
         # comparison against the reference rather than a claim about them.
-        if has_fill and inherited.get("fill-rule", "nonzero") == "evenodd":
+        # What this was before the toolkit could be told: the risk was computed,
+        # named and refused, because the toolkit filled non-zero and there was
+        # nowhere to put the rule. Both backends tessellate either rule, so the
+        # rule is carried now -- see `even_odd` on `Element` and `Paint::Fill` --
+        # and what is left to compute is *which* of them would actually draw
+        # differently without it. An even-odd path with one subpath is the same
+        # shape either way, so it is carried but not counted.
+        even_odd = has_fill and inherited.get("fill-rule", "nonzero") == "evenodd"
+        if even_odd:  # noqa: SIM102 -- the branch is a measurement, not a conversion
             areas = subpath_areas(commands)
-            if len(areas) > 1 and all(a > 0 for a in areas) or len(areas) > 1 and all(a < 0 for a in areas):
-                winding_risks.append(f"{path.name}:{tag}")
+            even_odds.append(f"{key}#{len(elements)}")
+            same_way = len(areas) > 1 and (all(a > 0 for a in areas) or all(a < 0 for a in areas))
+            if same_way:
+                winding_risks.append(f"{key}#{len(elements)}")
 
         if has_fill:
-            elements.append(Element(commands, width, True, ink_hint(fill), tag, opacity))
+            elements.append(Element(commands, width, True, ink_hint(fill), tag, opacity, even_odd))
         if has_stroke or not has_fill:
             stroke_ink = stroke if has_stroke else None
             elements.append(Element(commands, width, False, ink_hint(stroke_ink), tag, opacity))
@@ -768,6 +853,41 @@ def fnum(value: float) -> str:
     return text if "." in text else text + ".0"
 
 
+def f32_text(value: float) -> str:
+    """`value` as Rust's `Display` for an `f32` spells it.
+
+    The width test below compares formatted strings rather than numbers, so the
+    two sides have to spell a float the same way. Rust prints the shortest
+    decimal that round-trips through the type, which `repr` of the `f64` this
+    tool computes in is not: `2.32536f32` is `2.3254` there and `2.32536` here,
+    and the only way to learn the first is to ask for successively rounder
+    spellings until one lands on the same `f32` again.
+
+    The short spellings the set already had (`8`, `1.6`, `4`, `1.5`) never
+    showed this, because `%g` and Rust agree on every value whose shortest
+    spelling is also its six-significant-digit one.
+    """
+    packed = struct.pack("f", value)
+    for precision in range(1, 10):
+        text = f"{struct.unpack('f', packed)[0]:.{precision}g}"
+        if struct.pack("f", float(text)) == packed:
+            return text
+    return f"{value:g}"
+
+
+def width_text(value: float) -> str:
+    """A stroke width the way the *table* spells it, not the way this computes it.
+
+    Two roundings stand between a width here and the `f32` the test reads back:
+    [`fnum`] rounds to four decimals when it writes the literal, and Rust's
+    `Display` then prints the shortest spelling of that `f32`. Going through
+    `fnum` first is what makes the two sides agree -- `2.32536` is written as
+    `2.3254` and read back as `2.3254`, so comparing against the unrounded value
+    is comparing against a number the file does not hold.
+    """
+    return f32_text(float(fnum(value)))
+
+
 def clean(commands: list[tuple]) -> list[tuple]:
     """Round to four decimals, which is below a device pixel at any sane zoom."""
     out: list[tuple] = []
@@ -790,18 +910,48 @@ def main() -> int:
         print(f"missing reference icons: {ICONS}", file=sys.stderr)
         return 2
 
-    files = sorted(ICONS.glob("*.svg"))
-    icons = []
+    icons: list[tuple] = []
+    sets: dict[str, list[tuple]] = {}
     both: list[str] = []
     winding_risks: list[str] = []
-    for path in files:
-        name = path.stem
-        try:
-            box, elements = read_icon(path, both, winding_risks)
-        except Unsupported as exc:
-            print(f"{path.name}: {exc}", file=sys.stderr)
-            return 1
-        icons.append((name, variant(name), box, elements))
+    refused: list[tuple[str, str]] = []
+    even_odds: list[str] = []
+    for source in SOURCES:
+        directory = ICONS / source["directory"] if source["directory"] else ICONS
+        files = sorted(directory.glob(source["glob"]))
+        if not files:
+            print(f"no icons in {directory}", file=sys.stderr)
+            return 2
+        collected: list[tuple] = []
+        for path in files:
+            # The name in `ALL` and its two tag tables is the file's path below
+            # `assets/icons` without its extension, because a stem is not unique
+            # across the three: `badge-check.svg` is two different pictures, and
+            # `by_name` has to be able to say which one it meant.
+            name = (Path(source["directory"]) / path.stem).as_posix() if source["directory"] \
+                else path.stem
+            try:
+                box, elements = read_icon(path, name, both, even_odds, winding_risks)
+            except Unsupported as exc:
+                if source["complete"]:
+                    print(f"{name}.svg: {exc}", file=sys.stderr)
+                    return 1
+                if name not in REFUSED_TAGS:
+                    print(f"{name}.svg: {exc}", file=sys.stderr)
+                    print(
+                        f"  {name}.svg is a tag icon this tool cannot read and is not "
+                        "in REFUSED_TAGS.\n  Add it there with the construct that stopped "
+                        "it, or teach the parser the construct -- not both.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                refused.append((name, str(exc)))
+                print(f"{name}.svg: {exc} -- refused, and named in REFUSED_TAGS",
+                      file=sys.stderr)
+                continue
+            collected.append((name, source["prefix"] + variant(path.stem), box, elements))
+        sets[source["table"]] = collected
+        icons.extend(collected)
 
     seen: dict[str, str] = {}
     for name, rust, _, _ in icons:
@@ -817,13 +967,41 @@ def main() -> int:
     add("//!")
     add("//! **Generated by `tools/gen_icons.py`. Do not edit.**")
     add("//!")
-    add("//! These are the Modrinth App's own icons, out of the 313 SVGs in")
+    add("//! These are the Modrinth App's own icons, out of the SVGs in")
     add("//! `vendor/modrinth-app/assets/icons`, and they are outlines rather than")
     add("//! pictures: the reference draws them stroked in `currentColor` at width 2")
     add("//! with round caps and joins, which is what lets an icon take the colour of")
     add("//! the control it sits in. This is why they are geometry and not a bitmap --")
     add("//! a rasterised icon cannot be tinted, and the shell's previous icons were")
     add("//! bitmaps carved out of another launcher's binary.")
+    add("//!")
+    add("//! `assets/icons` is three directories, and so is this file:")
+    add("//!")
+    add(f"//! | table | where | variants | count |")
+    add("//! | --- | --- | --- | --- |")
+    for source in SOURCES:
+        where = f"`icons/{source['directory']}`" if source["directory"] else "`icons/`"
+        add(f"//! | `{source['table']}` | {where} | "
+            f"`{source['prefix'] or 'none'}` | {len(sets[source['table']])} |")
+    add("//!")
+    add("//! The prefixes are the reference's own. `assets/build/generate-exports.ts`")
+    add("//! walks the same two tag directories and writes `TagCategory${stem}` and")
+    add("//! `TagLoader${stem}` because `tags/categories/badge-check.svg` and")
+    add("//! `badge-check.svg` are two different pictures; the `Icon` suffix it also")
+    add("//! appends is dropped here because these variants read `BadgeCheck`. Nothing")
+    add("//! outside a tag set is prefixed, which is what keeps the other names as they")
+    add("//! were.")
+    add("//!")
+    add("//! Four of the 132 tag icons are **not here**, because the generator refuses")
+    add("//! the construct rather than approximating it. They are named below and in")
+    add("//! `the_tag_icons_this_tool_could_not_read_are_the_four_it_names`:")
+    add("//!")
+    for name in sorted(REFUSED_TAGS):
+        add(f"//! * `{name}.svg` -- {REFUSED_TAGS[name]}")
+    add("//!")
+    add("//! A tag pill for one of those four draws no icon, which makes it the")
+    add("//! 24-row pill rather than the 26-row one -- the height a tag with no icon")
+    add("//! has anyway, and not a wrong shape.")
     add("//!")
     add("//! Arcs, quadratics and the smooth-curve commands are all already converted")
     add("//! to cubics by the generator, and `<g transform>` is applied to every point")
@@ -838,7 +1016,7 @@ def main() -> int:
     add("// the last icon is drawn from here.")
     add("#![allow(dead_code)]")
     add("")
-    add("use iced::widget::canvas::{LineCap, LineDash, LineJoin, Path, Stroke, Style};")
+    add("use iced::widget::canvas::{fill::Rule, Fill, LineCap, LineDash, LineJoin, Path, Stroke, Style};")
     add("use iced::{Color, Point};")
     add("")
     add("/// One drawing step. Absolute coordinates, in the icon's own view box.")
@@ -891,6 +1069,16 @@ def main() -> int:
     add("    pub filled: bool,")
     add("    /// Where its colour comes from.")
     add("    pub ink: Ink,")
+    add("    /// Whether the reference fills this element with `fill-rule=\"evenodd\"`.")
+    add("    ///")
+    add("    /// It is carried rather than assumed because the two rules differ, and five")
+    add("    /// of the tag icons depend on it: the gear behind *Data Pack*, *Resource")
+    add("    /// Pack* and *Vanilla Shader*, and the two faces behind *Mobs* and")
+    add("    /// *Entities*, all cut their holes with it and are solid blobs filled")
+    add("    /// non-zero. Both backends tessellate a `Fill` with either rule, so there")
+    add("    /// is nothing to refuse -- what there was until this was a generator that")
+    add("    /// knew about the risk and had nowhere to put the answer.")
+    add("    pub even_odd: bool,")
     add("    /// The element's own `opacity`, which multiplies whatever ink it gets.")
     add("    ///")
     add("    /// The spinner's ring is a quarter opaque, so this is not decoration:")
@@ -898,7 +1086,14 @@ def main() -> int:
     add("    pub opacity: f32,")
     add("}")
     add("")
-    add("/// Every icon in the reference's set.")
+    add("/// Every icon in the reference's three sets.")
+    add("///")
+    add("/// One enum and three tables, because that is the shape the reference itself")
+    add("/// has: `icons/*.svg` are the icons a control draws, and the two tag")
+    add("/// directories are the glyphs a tag pill draws, which `getTagIcon` looks up")
+    add("/// in the loader table and then the category table. Splitting the tables")
+    add("/// rather than the enum keeps `ALL` at the 313 top-level icons its own gate")
+    add("/// walks, so a tag icon appearing does not move the top-level element count.")
     add("#[derive(Clone, Copy, Debug, PartialEq, Eq)]")
     add("pub enum Glyph {")
     for name, rust, _, _ in icons:
@@ -906,21 +1101,59 @@ def main() -> int:
         add(f"    {rust},")
     add("}")
     add("")
-    add("/// The reference's set, in name order, with the file name beside each.")
+    add("/// The top-level set, in name order, with the file name beside each.")
     add("pub const ALL: &[(&str, Glyph)] = &[")
-    for name, rust, _, _ in icons:
+    for name, rust, _, _ in sets["ALL"]:
         add(f"    (\"{name}\", Glyph::{rust}),")
     add("];")
     add("")
+    add("/// `icons/tags/categories/*.svg`, in name order: a category tag's own icon.")
+    add("///")
+    add("/// The reference's `categoryIconMap`, keyed by the same file stem. A project")
+    add("/// card does not draw these -- `ProjectCardTags` passes `hide-non-loader-icon`")
+    add("/// -- so what asks this table for an icon is a tag *list* outside a card.")
+    add("pub const TAG_CATEGORIES: &[(&str, Glyph)] = &[")
+    for name, rust, _, _ in sets["TAG_CATEGORIES"]:
+        add(f"    (\"{name}\", Glyph::{rust}),")
+    add("];")
+    add("")
+    add("/// `icons/tags/loaders/*.svg`, in name order: a loader tag's own icon.")
+    add("///")
+    add("/// The reference's `loaderIconMap`, keyed by the same file stem. These are")
+    add("/// the glyphs a project card's tag pills draw, and there are 30 of them")
+    add("/// against `TAG_CATEGORIES`'s 102.")
+    add("pub const TAG_LOADERS: &[(&str, Glyph)] = &[")
+    for name, rust, _, _ in sets["TAG_LOADERS"]:
+        add(f"    (\"{name}\", Glyph::{rust}),")
+    add("];")
+    add("")
+    add("/// The three tables, in the order they are declared above.")
+    add("fn tables() -> [&'static [(&'static str, Glyph)]; 3] {")
+    add(f"    [{', '.join(source['table'] for source in SOURCES)}]")
+    add("}")
+    add("")
     add("impl Glyph {")
-    add("    /// The reference's own file name, without the extension.")
+    add("    /// The icon's own file name below `assets/icons`, without the extension.")
+    add("    ///")
+    add("    /// A tag icon's name carries its directory -- `tags/loaders/forge` rather")
+    add("    /// than `forge` -- because the stem is not unique across the three sets,")
+    add("    /// and a name that could be two pictures is not a name.")
     add("    pub fn name(self) -> &'static str {")
-    add("        ALL.iter().find(|(_, g)| *g == self).map(|(n, _)| *n).unwrap_or(\"\")")
+    add("        tables()")
+    add("            .iter()")
+    add("            .flat_map(|table| table.iter())")
+    add("            .find(|(_, g)| *g == self)")
+    add("            .map(|(n, _)| *n)")
+    add("            .unwrap_or(\"\")")
     add("    }")
     add("")
     add("    /// The icon a name refers to, for a gate that walks the reference.")
     add("    pub fn by_name(name: &str) -> Option<Glyph> {")
-    add("        ALL.iter().find(|(n, _)| *n == name).map(|(_, g)| *g)")
+    add("        tables()")
+    add("            .iter()")
+    add("            .flat_map(|table| table.iter())")
+    add("            .find(|(n, _)| *n == name)")
+    add("            .map(|(_, g)| *g)")
     add("    }")
     add("")
     add("    /// The view box the commands are expressed in, as `(width, height)`.")
@@ -964,8 +1197,14 @@ def main() -> int:
     add("")
     add("/// How one element is painted: stroked in the ink, or filled with it.")
     add("///")
-    add("/// The reference fills a handful of its 313 icons and strokes the rest, so")
-    add("/// this is a property of the element rather than of the icon.")
+    add("/// The reference fills a handful of its icons and strokes the rest, so this")
+    add("/// is a property of the element rather than of the icon.")
+    add("///")
+    add("/// `Fill` is the toolkit's own fill rather than a bare `Color` because it")
+    add("/// carries the rule beside the style, and the five even-odd tag icons are")
+    add("/// wrong without it. It is the type `Frame::fill` already takes, so a caller")
+    add("/// that hands it straight over -- which is what both of this crate's")
+    add("/// callers do -- keeps compiling.")
     add("///")
     add("/// No `PartialEq`: the toolkit's `Stroke` does not carry one, and nothing")
     add("/// needs to compare two painted elements.")
@@ -980,8 +1219,8 @@ def main() -> int:
     add("pub enum Paint {")
     add("    /// Stroke the path, at the width the reference declares for it.")
     add("    Stroke(Stroke<'static>),")
-    add("    /// Fill the path.")
-    add("    Fill(Color),")
+    add("    /// Fill the path, with the rule the reference declared for it.")
+    add("    Fill(Fill),")
     add("}")
     add("")
     add("/// One icon, ready to draw: geometry in its own view box, and how to paint it.")
@@ -1004,7 +1243,10 @@ def main() -> int:
     add("        };")
     add("        let path = build(element.commands);")
     add("        let paint = if element.filled {")
-    add("            Paint::Fill(ink)")
+    add("            Paint::Fill(Fill {")
+    add("                style: Style::Solid(ink),")
+    add("                rule: if element.even_odd { Rule::EvenOdd } else { Rule::NonZero },")
+    add("            })")
     add("        } else {")
     add("            Paint::Stroke(Stroke {")
     add("                style: Style::Solid(ink),")
@@ -1028,6 +1270,7 @@ def main() -> int:
             add(f"        commands: &{command_table(rust, index)},")
             add(f"        stroke_width: {fnum(element.stroke_width)},")
             add(f"        filled: {'true' if element.filled else 'false'},")
+            add(f"        even_odd: {'true' if element.even_odd else 'false'},")
             add(f"        opacity: {fnum(element.opacity)},")
             tint = element.ink
             if tint[0] == "Fixed":
@@ -1056,7 +1299,7 @@ def main() -> int:
     # transform's scale factor (23 x 0.08671), so an exact comparison would list
     # an icon that is stroked correctly as an exception.
     width_exceptions = sorted(
-        f"{name}:{element.stroke_width:g}"
+        f"{name}:{width_text(element.stroke_width)}"
         for name, _, _, elements in icons
         for element in elements
         if abs(element.stroke_width - 2.0) > 0.01
@@ -1065,27 +1308,116 @@ def main() -> int:
     with_tokens = sorted({(name, e.ink[1]) for name, _, _, els in icons for e in els if e.ink[0] == "Token"})
     filled_icons = sorted({name for name, _, _, els in icons if any(e.filled for e in els)})
     widths = sorted({e.stroke_width for _, _, _, els in icons for e in els})
+    # The tag stems that a top-level icon already answers to, which is what the
+    # prefixes exist for: fifteen of them, all categories. Written down because
+    # "the prefixes keep the top-level names as they are" is a claim about a list
+    # and this is the list.
+    top_stems = {name.rsplit("/", 1)[-1] for name, _, _, _ in sets["ALL"]}
+    collisions = sorted(
+        name for name, _, _, _ in icons
+        if "/" in name and name.rsplit("/", 1)[-1] in top_stems
+    )
 
     add("#[cfg(test)]")
     add("mod tests {")
     add("    use super::*;")
     add("")
+    add("    /// Every icon in the three tables, as `(name, glyph)` pairs.")
+    add("    fn every() -> Vec<(&'static str, Glyph)> {")
+    add("        tables()")
+    add("            .iter()")
+    add("            .flat_map(|table| table.iter().copied())")
+    add("            .collect()")
+    add("    }")
+    add("")
     add("    #[test]")
     add("    fn the_whole_reference_is_here() {")
-    add(f"        // The vendored tree holds {len(icons)} SVGs; a generator that quietly")
-    add("        // skipped one that it could not parse would leave a hole nothing else")
-    add("        // notices, so the count is asserted rather than the absence of errors.")
-    add(f"        assert_eq!(ALL.len(), {len(icons)});")
-    add("        let mut names: Vec<&str> = ALL.iter().map(|(n, _)| *n).collect();")
+    add("        // The vendored tree holds 313 top-level SVGs, 102 in")
+    add("        // `tags/categories` and 30 in `tags/loaders`; a generator that")
+    add("        // quietly skipped one that it could not parse would leave a hole")
+    add("        // nothing else notices, so every count is asserted rather than the")
+    add("        // absence of errors. The two tag counts are 132 less the four named")
+    add("        // in `the_tag_icons_this_tool_could_not_read_are_the_four_it_names`,")
+    add("        // which is why that test exists and why it fails when one of them is")
+    add("        // taught to the parser.")
+    add(f"        assert_eq!(ALL.len(), {len(sets['ALL'])});")
+    add(f"        assert_eq!(TAG_CATEGORIES.len(), {len(sets['TAG_CATEGORIES'])});")
+    add(f"        assert_eq!(TAG_LOADERS.len(), {len(sets['TAG_LOADERS'])});")
+    add(f"        assert_eq!(every().len(), {len(icons)}, \"the variant count moved\");")
+    add("        let mut names: Vec<&str> = every().iter().map(|(n, _)| *n).collect();")
     add("        names.sort_unstable();")
     add("        let mut unique = names.clone();")
     add("        unique.dedup();")
     add("        assert_eq!(names, unique, \"two icons share a name\");")
+    add("        // And every variant is reachable from a table, which is what makes")
+    add("        // `name()` and `by_name()` total over the enum rather than over a")
+    add("        // subset of it.")
+    add("        for (_, glyph) in every() {")
+    add("            assert!(!glyph.name().is_empty(), \"{glyph:?} is in no table\");")
+    add("            assert_eq!(Glyph::by_name(glyph.name()), Some(glyph));")
+    add("        }")
+    add("    }")
+    add("")
+    add("    #[test]")
+    add("    fn the_two_tag_sets_carry_the_reference_prefixes() {")
+    add("        // `assets/build/generate-exports.ts` walks these same two")
+    add("        // directories and prefixes each stem, because")
+    add("        // `tags/categories/badge-check.svg` and `badge-check.svg` are two")
+    add("        // different pictures. The prefix is what keeps the 313 top-level")
+    add("        // names exactly as they were -- they are referenced by name across")
+    add("        // the whole tree, and a collision guard that renamed one would be a")
+    add("        // silent break in every one of them.")
+    add("        for (name, glyph) in TAG_CATEGORIES {")
+    add("            assert!(name.starts_with(\"tags/categories/\"), \"{name}\");")
+    add("            assert!(")
+    add("                format!(\"{glyph:?}\").starts_with(\"TagCategory\"),")
+    add("                \"{name} lost its prefix\"")
+    add("            );")
+    add("        }")
+    add("        for (name, glyph) in TAG_LOADERS {")
+    add("            assert!(name.starts_with(\"tags/loaders/\"), \"{name}\");")
+    add("            assert!(")
+    add("                format!(\"{glyph:?}\").starts_with(\"TagLoader\"),")
+    add("                \"{name} lost its prefix\"")
+    add("            );")
+    add("        }")
+    add("        // No tag glyph shares a variant with a top-level one, which is the")
+    add("        // whole reason for the prefix. `badge-check` is the case that")
+    add("        // proves the guard was reached rather than passed by luck: the")
+    add("        // reference ships both.")
+    add("        let top: Vec<String> = ALL.iter().map(|(_, g)| format!(\"{g:?}\")).collect();")
+    add("        for (_, glyph) in TAG_CATEGORIES.iter().chain(TAG_LOADERS) {")
+    add("            assert!(")
+    add("                !top.contains(&format!(\"{glyph:?}\")),")
+    add("                \"{glyph:?} is also a top-level variant\"")
+    add("            );")
+    add("        }")
+    add(f"        let mut clashing: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in collisions)}];")
+    add("        clashing.sort_unstable();")
+    add("        let mut actual: Vec<&str> = TAG_CATEGORIES")
+    add("            .iter()")
+    add("            .chain(TAG_LOADERS)")
+    add("            .filter(|(_, glyph)| {")
+    add("                let stem = glyph.name().rsplit('/').next().unwrap_or_default();")
+    add("                ALL.iter().any(|(name, _)| {")
+    add("                    let other = name.rsplit('/').next().unwrap_or(name);")
+    add("                    other == stem")
+    add("                })")
+    add("            })")
+    add("            .map(|(name, _)| *name)")
+    add("            .collect();")
+    add("        actual.sort_unstable();")
+    add("        assert_eq!(")
+    add("            actual, clashing,")
+    add("            \"the set of tag icons whose stem is also a top-level icon moved\"")
+    add("        );")
+    add("        assert!(!actual.is_empty(), \"the collision list is empty, so this proves nothing\");")
+    add("        assert_ne!(Glyph::TagCategoryBadgeCheck, Glyph::BadgeCheck);")
     add("    }")
     add("")
     add("    #[test]")
     add("    fn every_icon_draws_something_finite() {")
-    add("        for (name, glyph) in ALL {")
+    add("        for (name, glyph) in every() {")
     add("            let elements = glyph.elements();")
     add("            assert!(!elements.is_empty(), \"{name} has no elements\");")
     add("            for element in elements {")
@@ -1155,22 +1487,57 @@ def main() -> int:
     add("    }")
     add("")
     add("    #[test]")
-    add("    fn no_filled_path_needs_a_winding_rule_the_toolkit_cannot_give_it() {")
-    add("        // The reference fills with even-odd; the toolkit fills with non-zero.")
-    add("        // They differ only when a filled path has more than one subpath and its")
-    add("        // subpaths wind the same way -- then a hole the reference cuts comes out")
-    add("        // solid here. Of the filled paths in this set, six have more than one")
-    add("        // subpath and four of those wind their subpaths oppositely, so they cannot")
-    add("        // differ; the remaining two do not declare even-odd at all, so non-zero is")
-    add("        // the rule they are drawn with upstream. This asserts that reading, so an")
-    add("        // icon added upstream that *does* need it fails here instead of rendering")
-    add("        // as a solid blob nobody compares. The list below is what the generator")
-    add("        // found by winding every subpath; the assertion is that it found nothing.")
-    add(f"        let mut risky: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in winding_risks)}];")
-    add("        risky.sort_unstable();")
-    add("        assert!(")
-    add("            risky.is_empty(),")
-    add("            \"a filled path now needs even-odd winding: {risky:?}\"")
+    add("    fn the_filled_paths_that_change_without_even_odd_are_the_ones_it_names() {")
+    add("        // The two fill rules differ only where a filled path has more than one")
+    add("        // subpath and its subpaths wind the same way: then even-odd cuts a hole")
+    add("        // that non-zero fills. `Element::even_odd` now carries the rule, so")
+    add("        // nothing is drawn wrongly -- but the rule is only worth carrying where")
+    add("        // it changes the picture, and this says which those are, so a sixth")
+    add("        // icon that needs it upstream fails here instead of quietly becoming")
+    add("        // one more `Fill` nobody looks at.")
+    add("        //")
+    add("        // Five of them, and every one is a tag icon: the gear behind *Data")
+    add("        // Pack*, *Resource Pack* and *Vanilla Shader* (three files with the same")
+    add("        // path), and the two faces behind *Mobs* and *Entities*. None of the 313")
+    add("        // top-level icons is on this list, which is why the top-level fills")
+    add("        // looked right before this and these five would not have.")
+    add("        // Every element that declares the rule carries it, which is the half")
+    add("        // that is checkable from here: the file's own `even_odd` flags against")
+    add("        // the list the generator wrote down. The key is the icon and the")
+    add("        // element's index in it -- `Element` does not carry which tag it came")
+    add("        // from, and adding a field for a test would put a pointer in every one")
+    add("        // of them.")
+    add(f"        let mut expected: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in sorted(even_odds))}];")
+    add("        expected.sort_unstable();")
+    add("        let mut actual: Vec<String> = Vec::new();")
+    add("        for (name, glyph) in every() {")
+    add("            for (index, element) in glyph.elements().iter().enumerate() {")
+    add("                if element.filled && element.even_odd {")
+    add("                    actual.push(format!(\"{name}#{index}\"));")
+    add("                }")
+    add("            }")
+    add("        }")
+    add("        actual.sort_unstable();")
+    add("        let expected: Vec<&str> = expected;")
+    add("        let actual: Vec<&str> = actual.iter().map(|s| s.as_str()).collect();")
+    add("        assert_eq!(actual, expected);")
+    add("        assert!(!actual.is_empty(), \"the list is empty, so this proves nothing\");")
+    add("")
+    add("        // And the five of those eight are the five where the rule changes the")
+    add("        // picture rather than being a no-op on a single-subpath or a pair wound")
+    add("        // the other way round. `cog` and `x` carry it and do not need it, which is")
+    add("        // harmless: the rule is the reference's own and the toolkit honours it,")
+    add("        // and carrying what a file declares is not an approximation of it.")
+    add(f"        let matters: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in winding_risks)}];")
+    add("        for name in &matters {")
+    add("            assert!(")
+    add("                expected.contains(name),")
+    add("                \"{name} is not one of the even-odd elements\"")
+    add("            );")
+    add("        }")
+    add("        assert_eq!(")
+    add("            matters.len(), 5,")
+    add("            \"the number of elements the rule actually changes has moved\"")
     add("        );")
     add("    }")
     add("")
@@ -1182,10 +1549,10 @@ def main() -> int:
     add("        // declares it -- strokes their *outlines*, which renders, and looks")
     add("        // like a slightly wrong icon rather than like a bug.")
     add(f"        let expected: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in filled_icons)}];")
-    add("        let mut actual: Vec<&str> = ALL")
-    add("            .iter()")
+    add("        let mut actual: Vec<&str> = every()")
+    add("            .into_iter()")
     add("            .filter(|(_, g)| g.elements().iter().any(|e| e.filled))")
-    add("            .map(|(n, _)| *n)")
+    add("            .map(|(n, _)| n)")
     add("            .collect();")
     add("        actual.sort_unstable();")
     add("        assert_eq!(actual, expected);")
@@ -1209,8 +1576,8 @@ def main() -> int:
     add("        // finer. The exceptions are written down, so a sixth one appearing")
     add("        // upstream fails here rather than silently changing an icon that")
     add("        // nothing else compares.")
-    add("        let mut widths: Vec<String> = ALL")
-    add("            .iter()")
+    add("        let mut widths: Vec<String> = every()")
+    add("            .into_iter()")
     add("            .flat_map(|(n, g)| {")
     add("                g.elements()")
     add("                    .iter()")
@@ -1235,6 +1602,44 @@ def main() -> int:
     add("        assert!(!widths.is_empty(), \"the exceptions list is empty, so this proves nothing\");")
     add("    }")
     add("")
+    add("    #[test]")
+    add("    fn the_tag_icons_this_tool_could_not_read_are_the_four_it_names() {")
+    add("        // The generator refuses what it cannot model rather than")
+    add("        // approximating it, and it prints every refusal while it runs -- but a")
+    add("        // message on a build machine is not a gate. These four are the ones it")
+    add("        // cannot read, and the reason is written next to each, so that:")
+    add("        //")
+    add("        // * a fifth icon appearing in either tag directory fails the build")
+    add("        //   rather than being skipped into a hole;")
+    add("        // * teaching the parser the construct fails the build too, which is the")
+    add("        //   point: the day one of these is drawn it should be because somebody")
+    add("        //   decided it should be, in a commit that says so.")
+    add("        //")
+    add("        // Three are non-uniform transform scales -- `geyser`, `purpur` and")
+    add("        // `quilt` -- where a round-capped stroke has no single width to apply;")
+    add("        // one is a `clip-path` the tool cannot put on a path.")
+    refused_list = ", ".join(chr(34) + n + chr(34) for n in sorted(REFUSED_TAGS))
+    add(f"        let mut refused: Vec<&str> = vec![{refused_list}];")
+    add("        refused.sort_unstable();")
+    add("        assert_eq!(refused.len(), 4, \"the number of refusals moved\");")
+    add("        let here: Vec<&str> = every()")
+    add("            .into_iter()")
+    add("            .map(|(name, _)| name)")
+    add("            .filter(|name| name.starts_with(\"tags/\"))")
+    add("            .collect();")
+    add("        for name in &here {")
+    add("            assert!(*name != \"tags/loaders/geyser\", \"{name} was drawn after all\");")
+    add("            assert!(*name != \"tags/loaders/purpur\", \"{name} was drawn after all\");")
+    add("            assert!(*name != \"tags/loaders/quilt\", \"{name} was drawn after all\");")
+    add("            assert!(")
+    add("                *name != \"tags/loaders/legacy-fabric\",")
+    add("                \"{name} was drawn after all\"")
+    add("            );")
+    add("        }")
+    add("        // 132 tag icons minus four.")
+    add("        assert_eq!(here.len(), 128);")
+    add("    }")
+    add("")
     add("    fn numbers(command: Cmd) -> Vec<f32> {")
     add("        match command {")
     add("            Cmd::Move(x, y) | Cmd::Line(x, y) => vec![x, y],")
@@ -1248,6 +1653,16 @@ def main() -> int:
     text = "\n".join(lines)
     report = [
         f"icons        {len(icons)}",
+    ]
+    for source in SOURCES:
+        table = source["table"]
+        its = sets[table]
+        report.append(
+            f"  {table:<14} {len(its):>4}  "
+            f"{sum(len(elements) for _, _, _, elements in its):>5} elements"
+        )
+    report += [
+        f"refused      {len(refused)}: {', '.join(name for name, _ in sorted(refused))}",
         f"elements     {sum(len(elements) for _, _, _, elements in icons)}",
         f"commands     {total_commands}",
         f"stroke width {widths}",
