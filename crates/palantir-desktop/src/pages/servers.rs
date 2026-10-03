@@ -1178,11 +1178,14 @@ fn preview<'a>(theme: Gen) -> Element<'a, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .align_y(iced::alignment::Vertical::Top)
-    // The panel's 1-pixel border on either side, so that what is in the flow is
+    // The panel's 1-pixel border on every side, so that what is in the flow is
     // laid in the *padding* box the reference lays it in: its two rules are 398
     // wide rather than 400, a friend row's `px-4` starts at x=538 rather than
-    // 537, and the title row's X sits 2 pixels further left.
-    .padding(Padding { top: 0.0, right: 1.0, bottom: 0.0, left: 1.0 });
+    // 537, the title row's X sits 2 pixels further left, and the title row's rule
+    // is 61 rows down the panel rather than 60 -- the reference's own capture has
+    // it at y=133 on a panel whose top border is at y=72, and `p-4` with a
+    // 28-pixel line and the row's own `border-b` is 61 of those.
+    .padding(Padding { top: 1.0, right: 1.0, bottom: 1.0, left: 1.0 });
     let layers = Stack::at(Vector::ZERO, content)
         .over(
             Vector::new(0.0, PREVIEW_HEIGHT - INVITE_LINK_HEIGHT),
