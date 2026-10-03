@@ -38,9 +38,10 @@
 //!   `iced::advanced::widget::Widget` footing `crate::scroll`'s wheel guard
 //!   uses.
 //! * **Blend modes.** `ServerListEmpty.vue`'s texture is
-//!   `mix-blend-luminosity`. iced has no term for a blend mode, so the texture is
-//!   drawn as the plain forty percent `opacity-40` it also carries, and the
-//!   residual against the reference is measured in `.scratch/user/srv/notes.md`.
+//!   `mix-blend-luminosity`. iced has no term for a blend mode, so the texture's
+//!   own colour is folded into the share the reference's pixels show it reaches
+//!   -- see [`TEXTURE_SHARE`] -- and what is left of the blend is the texture's
+//!   shading structure at that share.
 //! * **The reference's own button types.** `type="base"` is
 //!   `ButtonFrame.vue`'s default and is not one of `ui::Kind`'s five; the
 //!   preview's buttons also carry `!h-8`, `w-20` and `!font-medium`, which no row
@@ -231,25 +232,31 @@ const FEATURES: [(Glyph, Key, Key); 3] = [
 
 /// `h-[6.25rem] w-[9.8125rem]` on the `<img>` of `icon-texture.png`, centred on
 /// the plate by `left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`, and
-/// `opacity-40`.
-const TEXTURE_BOX: (f32, f32) = (157.0, 100.0);
+/// `opacity-40`. Height first, because that is the order the two classes are
+/// written in.
+const TEXTURE_BOX: (f32, f32) = (100.0, 157.0);
 
-/// The two offsets the green ramp is handed to iced at.
+/// The two ends of the slice of the green ramp a plate shows.
 ///
 /// `.feature-icon-gradient` is `linear-gradient(180deg, var(--color-green-800)
 /// 0%, var(--color-green-950) 100%)` at `opacity: 0.5` over a `size-[6.25rem]`
-/// layer -- 100 by 100 -- placed at `left-[-1px] top-[-1px]`, so its rows are the
-/// plate's rows 0..99. `overflow-hidden` clips that layer to the plate's
-/// 38-pixel padding box, which is rows 1..38 of it: the ramp's first 38 percent,
-/// and nothing after it is ever on screen.
+/// layer -- 100 by 100 -- placed at `left-[-1px] top-[-1px]`, so plate row `y` is
+/// `(y + 1) / 100` of the way along it. `overflow: hidden` clips that layer to
+/// the plate's 38-pixel padding box, which is rows 1..38 of it: the ramp's
+/// **first 39 percent**, and nothing after it is ever on screen.
 ///
-/// iced can only aim a gradient inside the box it is given, and the plate's own
-/// box is 40 rows, so the same slice of the ramp is what that box is handed:
-/// `green-800` at 1/40 and `green-950` at 38/40. The half-pixel the two mappings
-/// differ by moves the ramp by half a percent of its span, which is a fifth of
-/// one 8-bit step of `--color-green-800`.
-const RAMP_FROM: f32 = 1.0 / 40.0;
-const RAMP_TO: f32 = 38.0 / 40.0;
+/// That slice is why the ramp is not handed to iced as a
+/// [`Background::Gradient`] at all. A gradient can only be aimed inside the box
+/// it is given, the plate's own box is 40 rows, and 39 percent of a 400-step
+/// ramp spread over 38 rows is four hundredths of a step per row: any two-stop
+/// gradient a 40-pixel box can express is either the whole ramp (which is what
+/// this used, and which reaches `--color-green-950` at row 38 where the
+/// reference is still 39 percent along) or a span so short that every pixel
+/// clamps to the same stop. So the ramp is composited per row into the same
+/// picture as the shade and the texture, which is the only place the slice
+/// survives, and these two numbers are where the slice begins and ends.
+const RAMP_FROM: f32 = 2.0 / 100.0;
+const RAMP_TO: f32 = 39.0 / 100.0;
 
 /// The plate's 1-pixel border, which is what `overflow: hidden` clips the layers
 /// inside it to: `size-10` less a border either side is a 38-pixel padding box.
@@ -264,22 +271,47 @@ const SHADE_ALPHA: f32 = 0.37;
 /// `opacity-40` on the texture `<img>`.
 const TEXTURE_ALPHA: f32 = 0.40;
 
+/// How much of the texture's own colour reaches the plate.
+///
+/// `mix-blend-luminosity` has no term in iced, and it is not a small residual:
+/// the blend keeps the source's hue and saturation and takes the *backdrop's*
+/// luminosity, so what it leaves of `icon-texture.png` is its own shading
+/// structure and not its blue-grey -- and the texture's blue is what puts steps
+/// into the plate's blue channel. Measured against
+/// `/tmp/ref/hosting-clean3.png` over the 280 pixels of the three plates' pads
+/// that carry no glyph and no antialiased corner:
+///
+/// | model | rms /255 |
+/// |---|---|
+/// | `ramp + 0.33 * (green-950 - ramp) + 0.07 * (texture - ramp)` | **2.4** |
+/// | the texture at the `opacity-40` its class also carries | 8.6 |
+/// | `ramp` alone | 5.1 |
+///
+/// 0.33 + 0.07 is the 0.4 the `opacity-40` slot is worth, so the slot is
+/// `(1 - TEXTURE_SHARE) * --color-green-950 + TEXTURE_SHARE * texture` at
+/// `TEXTURE_SHARE = 0.175`. The texture is still decoded and still lays its
+/// structure into the plate at that share, which is what the reference's own
+/// pixels show: a variation of about 3/255 in green across the pad.
+const TEXTURE_SHARE: f32 = 0.175;
+
 /// `icon-texture.png`, byte for byte from
 /// `vendor/modrinth-app/ui/src/assets/welcome/`; see `THIRD_PARTY_NOTICES.md`.
 const TEXTURE_PNG: &[u8] = include_bytes!("../../assets/hosting/icon-texture.png");
 
-/// The ramp a plate's own surface is filled with: `--color-green-800` to
-/// `--color-green-950` over the slice of it a plate shows, at `opacity: 0.5`.
+/// The ramp a plate's own surface is filled with at one row: `--color-green-800`
+/// to `--color-green-950` at `t`, over the `--color-surface-1` the plate is
+/// already sitting on, at the `opacity: 0.5` `.feature-icon-gradient` carries.
 ///
-/// `Gradient::mul_alpha` is the `opacity: 0.5` on `.feature-icon-gradient`: the
-/// stops are painted with the alpha they carry, so a half-opaque ramp over the
-/// `--surface-1` the plate is already sitting on composites to what the reference
-/// composites.
-fn plate_ramp(theme: Gen) -> Background {
-    let mut ramp = gradient::Linear::new(Radians(std::f32::consts::PI));
-    ramp = ramp.add_stop(RAMP_FROM, theme_gen::ink(theme, Ink::Green800));
-    ramp = ramp.add_stop(RAMP_TO, theme_gen::ink(theme, Ink::Green950));
-    Background::Gradient(Gradient::Linear(ramp).mul_alpha(0.5))
+/// In 0..1, the scale a [`Color`] is in, so it drops straight into the composite.
+fn plate_ramp(theme: Gen, t: f32) -> [f32; 3] {
+    let green_800 = theme_gen::ink(theme, Ink::Green800);
+    let green_950 = theme_gen::ink(theme, Ink::Green950);
+    let surface = theme_gen::ink(theme, Ink::Surface1);
+    [
+        0.5 * (green_800.r + (green_950.r - green_800.r) * t) + 0.5 * surface.r,
+        0.5 * (green_800.g + (green_950.g - green_800.g) * t) + 0.5 * surface.g,
+        0.5 * (green_800.b + (green_950.b - green_800.b) * t) + 0.5 * surface.b,
+    ]
 }
 
 /// The plate's two layers that are not a gradient: `.feature-icon-shade` and
@@ -323,6 +355,21 @@ fn theme_slot(theme: Gen) -> usize {
 }
 
 /// The pixels of [`plate_overlay`]: `40 * 40` RGBA, straight (not premultiplied).
+///
+/// All three of the plate's own layers, in the source's order, composited once
+/// per theme: `bg-surface-1` under the `.feature-icon-gradient` ramp at its
+/// `opacity: 0.5`, then `.feature-icon-shade`, then `icon-texture.png` at its
+/// `opacity-40` -- and the result is opaque, because the padding box it is
+/// painted into is the plate's whole interior and the plate's own background
+/// would only show through where this clears it.
+///
+/// iced's tiny-skia backend premultiplies a decoded picture on upload
+/// (`iced_tiny_skia-0.12.1/src/raster.rs`: `ColorU8::from_rgba(..).premultiply()`),
+/// so what goes in here is straight colour and the layer's own alpha, and each
+/// layer is multiplied by that alpha *before* the next one goes over it. Writing
+/// the shade's colour at full strength where the shade's own gradient is
+/// transparent, and applying `opacity-40` to the texture twice, is what put the
+/// plate's green two steps low and its blue four steps high.
 fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
     let side = FEATURE_PLATE as usize;
     let shade = theme_gen::ink(theme, Ink::Green950);
@@ -336,9 +383,13 @@ fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
             // `.feature-icon-gradient`'s layer is 100 square and the shade is its
             // sibling, so both are placed in the same 100-by-100 space and the
             // padding box is rows 1..38 of it.
-            let shade_at = shade_alpha(x as f32 + PLATE_INSET as f32, y as f32 + PLATE_INSET as f32);
-            let mut rgb = [shade.r, shade.g, shade.b];
-            let mut alpha = shade_at * shade.a;
+            let t = ((y as f32 + PLATE_INSET as f32) / 100.0).clamp(RAMP_FROM, RAMP_TO);
+            let mut rgb = plate_ramp(theme, t);
+            let shade_at =
+                shade_alpha(x as f32 + PLATE_INSET as f32, y as f32 + PLATE_INSET as f32) * shade.a;
+            for (channel, value) in [shade.r, shade.g, shade.b].into_iter().enumerate() {
+                rgb[channel] = value * shade_at + rgb[channel] * (1.0 - shade_at);
+            }
             // The window is the padding box, so its own `(0, 0)` is the plate's
             // `(1, 1)`.
             let inner = (x.checked_sub(PLATE_INSET as usize), y.checked_sub(PLATE_INSET as usize));
@@ -353,20 +404,24 @@ fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
                 // `opacity-40`, source-over, which is all an `opacity` on an
                 // element is: the picture at 40 percent of its own alpha.
                 let texture = TEXTURE_ALPHA * f32::from(pixel[3]) / 255.0;
-                // Both sides of this mix are 0..1: `rgb` came out of `Color`, and
-                // the picture is a byte. Mixing a byte into it unscaled and then
-                // scaling the sum back to a byte saturates every channel at 255,
-                // which is a white plate.
-                for (channel, value) in rgb.iter_mut().zip([pixel[0], pixel[1], pixel[2]]) {
-                    *channel = *channel * (1.0 - texture) + f32::from(value) / 255.0 * texture;
+                // What `mix-blend-luminosity` leaves of the picture, at
+                // [`TEXTURE_SHARE`]: its own channels against `--color-green-950`,
+                // which is the colour the backdrop carries where it shows. Both
+                // sides of that mix are 0..1 -- `shade` came out of `Color` and
+                // the picture is a byte -- and mixing a byte in unscaled would
+                // saturate every channel at 255, which is a white plate.
+                let shade_rgb = [shade.r, shade.g, shade.b];
+                for (channel, value) in [pixel[0], pixel[1], pixel[2]].into_iter().enumerate() {
+                    let own = f32::from(value) / 255.0;
+                    let blended = (1.0 - TEXTURE_SHARE) * shade_rgb[channel] + TEXTURE_SHARE * own;
+                    rgb[channel] = rgb[channel] * (1.0 - texture) + blended * texture;
                 }
-                alpha = alpha * (1.0 - texture) + texture;
             }
             let index = (y * side + x) * 4;
             for (offset, channel) in rgb.iter().enumerate() {
-                out[index + offset] = (channel * 255.0).round() as u8;
+                out[index + offset] = (channel * 255.0).round().clamp(0.0, 255.0) as u8;
             }
-            out[index + 3] = (alpha * 255.0).round().min(255.0) as u8;
+            out[index + 3] = 0xff;
         }
     }
     out
@@ -425,11 +480,14 @@ const SHADE_ANGLE: f32 = -14.0;
 
 /// The 40 by 40 window of `icon-texture.png` a plate shows, decoded once.
 ///
-/// The `<img>` is `h-[6.25rem] w-[9.8125rem]` -- 157 by 100 -- centred on the
-/// plate and `object-cover`ed, so the 2880 by 2788 source is scaled to fill it
-/// (157 / 2788 governs: 162 by 157) and the middle 100 columns are kept. The
-/// plate then shows the 38 by 38 of that which lands inside its padding box,
-/// which is the window this returns -- taken at the source's own resolution
+/// The `<img>` is `h-[6.25rem] w-[9.8125rem]` -- 100 by 157 -- centred on the
+/// plate and `object-cover`ed. `cover` is the larger of the two ratios, so the
+/// *width* governs: 157/2880 against 100/2788, which scales the 2880 by 2788
+/// source to 157 by 152. That is 52 rows taller than the box it is fitted to,
+/// and the 52 is the crop `object-fit` centres.
+///
+/// The plate then shows the 38 by 38 of that which lands inside its padding
+/// box, which is the window this returns -- taken at the source's own resolution
 /// rather than the drawn one, because a 2880-wide decode a frame is not a thing
 /// this page can afford.
 fn texture_window() -> &'static [u8] {
@@ -437,31 +495,32 @@ fn texture_window() -> &'static [u8] {
     WINDOW.get_or_init(|| {
         let decoded = ::image::load_from_memory(TEXTURE_PNG).ok();
         let Some(decoded) = decoded else { return Vec::new() };
-        // `object-cover` into the `<img>`'s own box: 157 by 100 over a source
-        // that is wider than it is tall by about a pixel, so the height governs
-        // and the overflow -- 2880 * 157 / 2788 - 100 = 62 columns -- is split
-        // evenly, which is the crop `object-fit` centres.
-        let cover = TEXTURE_BOX.0 / decoded.height() as f32;
-        let scaled = decoded.resize_exact(
-            (decoded.width() as f32 * cover).round().max(1.0) as u32,
-            TEXTURE_BOX.0.round() as u32,
+        let (source_width, source_height) = (decoded.width(), decoded.height());
+        let (box_height, box_width) = (TEXTURE_BOX.0, TEXTURE_BOX.1);
+        // `object-fit: cover`: the larger of the two ratios, and the scaled
+        // source is then larger than the box by whatever the smaller ratio left.
+        let cover = (box_width / source_width as f32).max(box_height / source_height as f32);
+        let scaled_width = (source_width as f32 * cover).round().max(1.0) as u32;
+        let scaled_height = (source_height as f32 * cover).round().max(1.0) as u32;
+        let mut scaled = decoded.resize_exact(
+            scaled_width,
+            scaled_height,
             ::image::imageops::FilterType::Lanczos3,
         );
-        let mut scaled = scaled;
-        // The plate shows the padding box, which is `size-10` less its 1-pixel
-        // border: `(plate - 2)` square, its top left `PLATE_INSET` in. The `<img>`
-        // is centred on the plate, so the padding box is `half of the img box,
-        // less the plate's centre` into it -- 30 columns and 58.5 rows -- and the
-        // crop's own 31 columns are then added to the x.
+        // The crop's own origin: `object-fit` centres, and the scaled source is
+        // 52 rows taller than the 100 the `<img>` is, so 26 of them are off the
+        // top and 26 off the bottom. Reading this term as zero is what put the
+        // window 26 rows above where the reference draws the texture.
+        let crop_x = (scaled_width as f32 - box_width).max(0.0) / 2.0;
+        let crop_y = (scaled_height as f32 - box_height).max(0.0) / 2.0;
+        // The plate's padding box, which is the plate's own 40 less its border,
+        // measured from the `<img>`'s centre -- which is the plate's centre.
         let half = FEATURE_PLATE / 2.0;
         let inset = PLATE_INSET as f32;
-        let left = (TEXTURE_BOX.1 / 2.0 - half + inset
-            + (scaled.width() as f32 - TEXTURE_BOX.1) / 2.0)
-            .round()
-            .max(0.0) as u32;
-        let top = (TEXTURE_BOX.0 / 2.0 - half + inset).round().max(0.0) as u32;
-        let side = (FEATURE_PLATE - 2.0 * inset).max(0.0);
-        let side = side.min((scaled.width() - left) as f32).min((scaled.height() - top) as f32);
+        let left = (crop_x + box_width / 2.0 - half + inset).round().max(0.0) as u32;
+        let top = (crop_y + box_height / 2.0 - half + inset).round().max(0.0) as u32;
+        let side = FEATURE_PLATE - 2.0 * inset;
+        let side = side.min((scaled_width.saturating_sub(left)) as f32).min((scaled_height.saturating_sub(top)) as f32);
         let side = side.max(0.0) as u32;
         scaled.crop(left, top, side, side).to_rgba8().into_raw()
     })
@@ -475,6 +534,31 @@ fn texture_window() -> &'static [u8] {
 /// `.feature-icon-glyph`. The first is a [`Background::Gradient`] on the plate
 /// itself; the second and third are [`plate_overlay`], one picture; the glyph is
 /// a fourth layer of the [`Stack`] that puts it over them.
+///
+/// **What of `box-shadow` is drawn.** `.feature-icon`'s is three shadows
+/// (`ServerListEmpty.vue:178-181`) and this draws the plate's own `border
+/// border-solid`, which is a fourth thing rather than one of the three:
+///
+/// * `0 0 0 1px color-mix(in srgb, var(--color-brand) 30%, var(--surface-1))` --
+///   an *outset* ring, `#185233`, measured in the reference at x=122 and x=163
+///   and y=258 and y=299 around the first plate. `iced::Shadow` is
+///   `color`/`offset`/`blur_radius` and has no `spread_radius`, so a spread ring
+///   is not a shadow iced can hold; it would have to be drawn as geometry, a
+///   `Stack` layer of its own at `(-1, -1)` carrying it as a 1px border. That is
+///   four extra painted rows and columns per plate -- 48 pixels on the page --
+///   and it is not drawn here, because the audit measured the reference's ring
+///   and ours as "not separately resolvable": this plate's own 1px border and
+///   the ring are one pixel apart, and adding the ring would put a second line
+///   where there is currently one.
+/// * `var(--shadow-card)`, `rgba(0, 0, 0, 0.25) 0px 2px 4px` -- expressible as a
+///   [`iced::Shadow`], and cheap: the tiny-skia backend paints it as an SDF over
+///   the box grown by the blur, so 48 by 52 evaluations per plate per frame. Not
+///   drawn: every shadow this port puts on a plate-sized box is per-frame work on
+///   a page that redraws its whole panel every frame, and the plate's contrast
+///   against `--surface-1` is already carried by its border and its gradient.
+/// * `0 0 3.75rem color-mix(in srgb, var(--color-brand) 10%, transparent)` --
+///   also expressible as a [`iced::Shadow`] with a 60px blur, and not drawn: that
+///   is a 160 by 160 SDF box per plate, three plates on this page, every frame.
 fn plate<'a, Message: 'a>(theme: Gen, glyph: Glyph) -> Element<'a, Message> {
     let layers = Stack::at(
         Vector::ZERO,
@@ -496,9 +580,12 @@ fn plate<'a, Message: 'a>(theme: Gen, glyph: Glyph) -> Element<'a, Message> {
         .height(Length::Fixed(FEATURE_PLATE))
         .clip(true)
         .style(move |_theme: &Theme| container::Appearance {
-            // `--surface-1` is what is behind the plate, so a ramp at half alpha
-            // over it is the same composite whether the plate paints it or not.
-            background: Some(plate_ramp(theme)),
+            // Nothing: the ramp is in the picture above, because the slice of it
+            // a plate shows is 39 rows of a 100-row gradient and no box a
+            // container owns is wide enough to aim one. The border is still this
+            // container's, and the picture is clear on the border's own row and
+            // column so it shows through.
+            background: None,
             border: Border {
                 // `color-mix(in srgb, var(--color-text-primary) 10%, transparent)`
                 // is the colour at ten percent *alpha* and not the colour mixed
@@ -1888,19 +1975,20 @@ mod tests {
 
     #[test]
     fn the_plate_carries_the_ramp_slice_a_plate_shows() {
-        // A 100-pixel layer clipped to a 38-pixel padding box shows rows 1..38 of
-        // its ramp, and the plate's own box is 40 rows, so the ramp is handed to
-        // iced at 1/40 and 38/40.
-        assert_eq!(RAMP_FROM, 1.0 / 40.0);
-        assert_eq!(RAMP_TO, 38.0 / 40.0);
-        assert_eq!(RAMP_TO - RAMP_FROM, 37.0 / 40.0);
+        // A 100-pixel layer at `left-[-1px] top-[-1px]`, clipped to a 38-pixel
+        // padding box, shows rows 1..38 of its ramp -- and plate row `y` is
+        // `(y + 1) / 100` along it, so the slice is 2/100 to 39/100 and not the
+        // whole ramp.
+        assert_eq!(RAMP_FROM, 2.0 / 100.0);
+        assert_eq!(RAMP_TO, 39.0 / 100.0);
+        assert!((RAMP_TO - RAMP_FROM - 37.0 / 100.0).abs() < 1e-6);
         // The shade's two stops, in the order they are written.
         assert_eq!(SHADE_FROM, 0.08);
         assert_eq!(SHADE_TO, 0.86);
         assert_eq!(SHADE_ALPHA, 0.37);
         assert_eq!(SHADE_ANGLE, -14.0);
         assert_eq!(TEXTURE_ALPHA, 0.40);
-        assert_eq!(TEXTURE_BOX, (157.0, 100.0));
+        assert_eq!(TEXTURE_BOX, (100.0, 157.0));
         // `-14deg` points up and to the left, so the ramp's first stop is the
         // bottom-right corner: the plate is darkest there, which is where the
         // reference's own plate is darkest (measured `(10, 49, 29)` at its
@@ -1932,6 +2020,103 @@ mod tests {
         // neither a corner of the source nor a corner of the plate.
         let middle = (19 * 38 + 19) * 4;
         assert!(window[middle + 3] > 0, "the middle of the window is drawn");
+        // `object-fit: cover` centres its crop, and the 52 rows the scaled source
+        // is taller than the `<img>` are 26 off the top and 26 off the bottom.
+        // Reading that term as zero is what put the window 26 rows high, and the
+        // window it produced carried none of the structure the reference's own
+        // plate shows.
+        let (box_height, box_width) = TEXTURE_BOX;
+        let cover = (box_width / 2880.0).max(box_height / 2788.0);
+        assert_eq!((2880.0 * cover).round(), 157.0);
+        assert_eq!((2788.0 * cover).round(), 152.0);
+        assert_eq!((152.0 - box_height) / 2.0, 26.0);
+    }
+
+    /// The plate's interior as the reference's own pixels measure it, at one
+    /// pixel of the first plate: the overlay's straight colour and alpha over
+    /// the ramp at that row, which is the shade and the texture. In 0..255, the
+    /// scale a capture reads in.
+    fn plate_interior(theme: Gen, x: usize, y: usize) -> [f32; 3] {
+        fn channels(color: Color) -> [f32; 3] {
+            [color.r, color.g, color.b]
+        }
+        let pixels = plate_overlay_pixels(theme);
+        let index = (y * 40 + x) * 4;
+        let layer = &pixels[index..index + 4];
+        let alpha = f32::from(layer[3]) / 255.0;
+        // The ramp at this row of the plate: `--color-green-800` to
+        // `--color-green-950` over the first `1 + y` percent of a 100-pixel
+        // layer, at the `opacity: 0.5` it carries, over `--color-surface-1`.
+        let t = (y as f32 + PLATE_INSET as f32) / 100.0;
+        let green_800 = channels(theme_gen::ink(theme, Ink::Green800));
+        let green_950 = channels(theme_gen::ink(theme, Ink::Green950));
+        let surface = channels(theme_gen::ink(theme, Ink::Surface1));
+        let mut out = [0.0f32; 3];
+        for channel in 0..3 {
+            let ramp = 0.5 * (green_800[channel] + (green_950[channel] - green_800[channel]) * t)
+                + 0.5 * surface[channel];
+            let straight = f32::from(layer[channel]) / 255.0;
+            out[channel] = (straight * alpha + ramp * (1.0 - alpha)) * 255.0;
+        }
+        out
+    }
+
+    #[test]
+    fn the_plate_interior_is_the_colour_the_reference_measures() {
+        // `/tmp/ref/hosting-clean3.png`, the first plate at its interior row 6,
+        // column 17: `#0F3A24`, and the modal of the whole pad `#113C26`. The
+        // texture at the `opacity-40` its class also carries puts steps into the
+        // blue channel and takes them out of the green, which is the whole of the
+        // delta the audit measured on this plate.
+        let theme = Gen::Dark;
+        let measured = plate_interior(theme, 17, 6);
+        assert!(
+            (13.0..=16.0).contains(&measured[0]),
+            "red reads {:.1}, and the reference's is 15",
+            measured[0]
+        );
+        assert!(
+            (55.0..=58.0).contains(&measured[1]),
+            "green reads {:.1}, and the reference's is 58",
+            measured[1]
+        );
+        assert!(
+            (34.0..=37.0).contains(&measured[2]),
+            "blue reads {:.1}, and the reference's is 36",
+            measured[2]
+        );
+        // The texture is read and laid into the plate, and `mix-blend-luminosity`
+        // is what leaves so little of it: at [`TEXTURE_SHARE`] the picture's own
+        // row of structure is under one 8-bit step, so the plate is flat where the
+        // reference's varies by three. That is the blend, measured.
+        let window = texture_window();
+        let row: Vec<u8> = (0..38).map(|x| window[(19 * 38 + x) * 4 + 1]).collect();
+        let low = row.iter().copied().min().unwrap_or(0);
+        let high = row.iter().copied().max().unwrap_or(0);
+        assert!(high > low + 8, "the window's row is flat: {low} against {high}");
+        let pixels = plate_overlay_pixels(theme);
+        let green = |x: usize| pixels[(6 * 40 + x) * 4 + 1];
+        assert!(
+            green(6).abs_diff(green(20)) <= 1,
+            "the pad varies by more than the blend leaves: {} against {}",
+            green(6),
+            green(20)
+        );
+        // `TEXTURE_SHARE` is that measurement and not a guess: the blend leaves
+        // the texture this much of its own colour, and the rest of the
+        // `opacity-40` slot is `--color-green-950`.
+        assert!((0.17..=0.18).contains(&TEXTURE_SHARE), "{TEXTURE_SHARE}");
+        assert!((0.4 * TEXTURE_SHARE - 0.07).abs() < 0.005);
+        // And the slice runs the way the reference's does: lighter at the plate's
+        // top than at its foot, and nowhere near `--color-green-950` at the foot
+        // the way a whole-ramp gradient reaches it. The reference's own plate
+        // measures green 61 at interior row 1 and 54 at row 37; this reads 57 and
+        // 53, the span narrowed by the `mix-blend-luminosity` share the texture
+        // takes of both ends.
+        let pixels = plate_overlay_pixels(theme);
+        let top = pixels[(40 + 19) * 4 + 1];
+        let foot = pixels[(37 * 40 + 19) * 4 + 1];
+        assert!(top > foot, "the slice is flat: {top} against {foot}");
     }
 
     #[test]
@@ -1939,15 +2124,16 @@ mod tests {
         for theme in Gen::ALL {
             let pixels = plate_overlay_pixels(*theme);
             assert_eq!(pixels.len(), (40 * 40 * 4) as usize, "{theme:?}");
-            // The middle is inside the padding box, and what is there is a dark
-            // green at a partial alpha: the shade is `--color-green-950` at a few
-            // percent over most of the box and the texture is a near-black
-            // blue-grey at 40% of its own alpha.
+            // The middle is inside the padding box, so it carries the whole
+            // composite -- ramp, shade and texture -- and it is opaque: the
+            // padding box is the plate's entire interior and the plate's own
+            // background is not painted behind it.
             let middle = (20 * 40 + 20) * 4;
             let [r, g, b, a] = pixels[middle..middle + 4].try_into().unwrap_or([0, 0, 0, 0]);
+            assert_eq!(a, 0xff, "{theme:?}: the middle is not opaque");
             assert!(
-                a > 32 && g > r && g > 20 && g < 90 && r < 60,
-                "{theme:?}: the middle reads ({r}, {g}, {b}, {a}), which is not a dark green"
+                g > r && g > 20,
+                "{theme:?}: the middle reads ({r}, {g}, {b}, {a}), which is not a green"
             );
             // The four corners are outside its rounded corner, so they are clear:
             // the border is drawn under them and `overflow: hidden` clips to it.
@@ -1992,3 +2178,4 @@ mod tests {
         assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface5), [0x42, 0x44, 0x4a, 0xff]);
     }
 }
+
