@@ -44,6 +44,8 @@ use std::time::Duration;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
 use iced::widget::{column, container, image, mouse_area, row, text_input, Space};
 use iced::window;
+use iced::advanced::widget::{tree, Tree};
+use iced::advanced::{layout, mouse, renderer, Layout, Widget};
 use iced::{
     gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
     Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
@@ -5247,13 +5249,40 @@ fn tags(&self) -> iced::Command<Message> {
         // The pane's reserved scrollbar gutter goes over the page in the same
         // way, and for the same reason. See [`Shell::pane_gutter_at`] and
         // [`pane_gutter`].
+        //
+        // One layer is not the page's to draw: the page's own, which is the
+        // hosting toast, and which goes *over* the gutter and *under* the shadow
+        // and the rule. See [`Shell::page_overlay`].
+        let mut layers =
+            crate::pages::overlay::Stack::at(Vector::ZERO, page)
+                .over(self.pane_gutter_at(), pane_gutter(theme));
+        if let Some((at, overlay)) = self.page_overlay(theme, page_width) {
+            // Clipped to the page column, which is `.app-viewport` and the reason
+            // the toast can be drawn out here at all. The box is stated in this
+            // layer's own coordinates rather than the pane's: the stack has already
+            // moved it by `at`, and `Clipped` measures its box from wherever the
+            // element laid itself out, so the page column -- `page_width` from the
+            // pane's own top-left corner -- starts `at` back out of the toast's
+            // corner. See [`Clipped`].
+            let column = Rectangle {
+                x: -at.x,
+                y: -at.y,
+                width: page_width,
+                height: self.viewport.height - BAR,
+            };
+            layers = layers.over(at, Clipped::new(column, overlay));
+        }
         container(
             // The reference's own order, which is the order one box paints its
             // own three things in: the reserved column is under the page's
             // shadow and under the rule, and the rule is over the shadow (CSS
-            // draws an inset shadow over a background and under a border).
-            crate::pages::overlay::Stack::at(Vector::ZERO, page)
-                .over(self.pane_gutter_at(), pane_gutter(theme))
+            // draws an inset shadow over a background and under a border). The
+            // page's own layer goes between the reserved column and the shadow,
+            // which is the order the reference's `z-index`es give: the pane's
+            // `::before` is `z-index: 30` and outranks a `z-10` toast, while the
+            // reserved column stands in for what is under the page in the flow
+            // and is outranked by it.
+            layers
                 .over(Vector::ZERO, pane_shadow(page_width, theme))
                 .over(Vector::ZERO, pane_rule(theme)),
         )
@@ -5268,6 +5297,41 @@ fn tags(&self) -> iced::Command<Message> {
             ..container::Appearance::default()
         })
         .into()
+    }
+
+    /// The layer the page draws over the pane's own furniture, if it has one.
+    ///
+    /// One page has one, and it is the hosting page's invite toast. The reference
+    /// draws that toast as a *sibling* of the `overflow-hidden` preview panel
+    /// inside `ServerListEmptyPreview`'s own 400-wide `relative` root, so it
+    /// escapes the panel; and it is a `position: absolute; z-index: 10` box inside
+    /// `.app-viewport`, which is what clips it at the pane's edge (the box's last
+    /// column is `x=984`, its fill's is `x=979`, and the pane ends at 980).
+    /// Nothing inside a page can be over the pane's own layers, because
+    /// they are siblings of the page rather than layers of it: the reserved gutter
+    /// that hides iced's scrollbar, the rule and the inset shadow all are.
+    ///
+    /// So the page hands the layer back and the pane's stack puts it where the
+    /// reference's `z-index`es put it, between the gutter and the shadow. What
+    /// this is *not* allowed to be is a second reason to touch the gutter: the
+    /// strip's five bands are the reference's own, measured at `x=970..979` on six
+    /// routes, and the two answers that were tried and are wrong are recorded at
+    /// [`pane_gutter`] -- deleting the strip, and painting it under the page.
+    ///
+    /// `page` is the page column's width, and it is passed because the toast's
+    /// place in the page depends on it: the page's spacers are `FillPortion`s of
+    /// what the column leaves over, so the toast's offset is a function of the
+    /// width and cannot be a constant. The knowledge stays on the page side --
+    /// `servers::page_overlay` is what turns the width into an offset, out of the
+    /// same `MARGIN_SHARE` ratio the row itself is laid out by.
+    fn page_overlay(&self, theme: Gen, page: f32) -> Option<(Vector, Element<'_, Message>)> {
+        match &self.screen {
+            pages::Screen::Servers(_) => {
+                let (at, overlay) = servers::page_overlay(theme, page)?;
+                Some((at, overlay.map(pages::Message::Servers).map(Message::Screen)))
+            }
+            _ => None,
+        }
     }
 
     /// Where the pane's reserved scrollbar gutter begins, measured from the pane's
@@ -8231,12 +8295,36 @@ fn pane_rule(theme: Gen) -> Element<'static, Message> {
 /// is also why the strip can be this narrow: [`GUTTER_BAR`] columns of it are the page's
 /// own ink and change nothing.
 ///
-/// What the strip cannot do is give back the ten pixels it covers. On
+/// What the strip cannot do is give back the ten pixels it covers to a layer
+/// drawn *under* it -- which is why the hosting toast is not one. On
 /// `/hosting/manage/` the reference's invite toast runs out to `x=979` -- the
 /// page's content box ends at 974 and the toast overflows it, clipped by the
-/// viewport's own padding box at 980 -- and this still stops at `x=969`, because
-/// the bar is painted over the toast and only `page.rs` can stop it being drawn.
-/// The pixels either side of that are now the reference's.
+/// viewport's own padding box at 980 -- and a toast drawn inside the page stops at
+/// `x=969`, because the strip is over the page. The toast is therefore a layer of
+/// the *pane*, above this strip and below the pane's shadow and rule
+/// ([`Shell::page_overlay`]), which is where the reference's `z-index`es put it.
+///
+/// # The two answers that do not work
+///
+/// Both were tried, and both leave the ten columns this strip owns covered by the
+/// wrong pixels, so they are here rather than in the next reader's experiments.
+///
+/// **Delete the strip.** Its first job is hiding *iced's* bar, and the bands are
+/// opaque rather than translucent for that reason alone (see [`shadow_band`]). It
+/// is also the only thing standing between that bar and the page's own right-hand
+/// pixels, on every route, and iced draws the bar over the content
+/// (`scrollable.rs:960-975`), so without the strip a scrolling page shows a
+/// `#757C84` bar down `x=970..979` that the reference does not have at all. The
+/// five bands here are not decoration: they are what the reference measures in
+/// those columns, byte for byte, on every route this shell draws.
+///
+/// **Paint the strip under the page.** Same failure, from the other side, and it is
+/// worth writing down because it looks like the same fix: the bar it has to hide is
+/// drawn by the scrollable *inside* the page, so a strip under the page is a strip
+/// under the bar as well, and the bar comes back. The strip has to be over the
+/// page; the toast has to be over the strip; and nothing inside a page can be over
+/// a sibling of the page. That is the whole of the argument for [`Clipped`] and a
+/// page layer the shell inserts itself.
 fn pane_gutter(theme: Gen) -> Element<'static, Message> {
     row![
         // The four columns where the reference measures the page's own
@@ -8296,6 +8384,179 @@ fn shadow_ink(theme: Gen, depth: f32) -> Color {
         g: base.g * (1.0 - depth),
         b: base.b * (1.0 - depth),
         a: base.a,
+    }
+}
+
+/// One element, drawn inside a box inside the box it laid out in: the
+/// `overflow: hidden` that iced 0.12 has no element for.
+///
+/// `.app-viewport` (`App.vue:2747-2752`) is `overflow: auto; overflow-x: hidden`,
+/// so nothing drawn inside the pane reaches past the pane's own edges -- and the
+/// hosting page's toast is the case that needs it, because the toast's box runs to
+/// `x=984` while the pane ends at 980 ([`Shell::page_overlay`]). Every other layer
+/// in the pane is already inside the pane's box, so this changes the toast's last
+/// four columns and nothing else.
+///
+/// `box_` is measured from the element's own top-left corner rather than being the
+/// element's bounds, and that is the whole trap. The pane's stack takes its size
+/// from its base layer, and that layer is the row holding the page *and* the
+/// panel, so a box read off the stack's own bounds is the window's width and
+/// clips nothing. Worse, this widget wraps one *layer* of that stack rather than
+/// the stack, so what it lays out is the layer: an element already moved to
+/// `x=649` reports `649` as its own origin, not the pane's `64`. Clipping to
+/// either is a no-op, and each looked right for as long as it was not measured.
+///
+/// The caller therefore states the box in the layer's own coordinates, which it
+/// can because it is the one that moved the layer. See [`Shell::pane`].
+///
+/// Not a `Container::clip`, which reads like the same thing and is not:
+/// `container.rs:262-268` only hands its content a *narrower `viewport`*, and a
+/// `container`'s own background is `draw_background(renderer, &style,
+/// layout.bounds())` (`container.rs:361-363`) -- it never looks at the viewport it
+/// was given, so a clipped container still paints its fill past its own edge. Nor
+/// is there a `clip` element to reach for: iced 0.12.3 has no `stack` either, and
+/// the three widgets that do put a scissor round their own drawing --
+/// `Scrollable`, `Svg` and `Image` -- each clip to their own bounds while drawing
+/// something else.
+///
+/// So the scissor is `Renderer::with_layer`, which is the same call
+/// `scrollable.rs:909-918` makes, and everything else about the element inside it
+/// is untouched: the same tag, the same tree, the same layout node, the same events
+/// and the same cursor. It is here rather than in `crate::pages::overlay` because
+/// this is the only place in the port that needs it, and `overlay`'s `Stack` is a
+/// layout thing rather than a compositing one.
+struct Clipped<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: 'a,
+{
+    box_: Rectangle,
+    content: Element<'a, Message, Theme, Renderer>,
+}
+
+impl<'a, Message, Theme, Renderer> Clipped<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    /// Draw `content` inside `box_`, stated from where it laid itself out.
+    fn new(
+        box_: Rectangle,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    ) -> Element<'a, Message, Theme, Renderer> {
+        Element::new(Clipped {
+            box_,
+            content: content.into(),
+        })
+    }
+}
+
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Clipped<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    // Everything but the drawing is the content's, and the layout node is the
+    // content's own node rather than a new parent around it: the clip is a
+    // compositing decision, and nothing that lays out, diffs or takes a pointer
+    // can tell the difference.
+    fn tag(&self) -> tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn size(&self) -> iced::Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content.as_widget().layout(tree, renderer, limits)
+    }
+
+    fn operate(
+        &self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation<Message>,
+    ) {
+        self.content.as_widget().operate(tree, layout, renderer, operation);
+    }
+
+    fn on_event(
+        &mut self,
+        tree: &mut Tree,
+        event: iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) -> iced::event::Status {
+        self.content.as_widget_mut().on_event(
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        )
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        // The box the content laid out in, from which the caller's box is measured.
+        // `with_layer` intersects with whatever clip it is already inside
+        // (`iced_wgpu`'s `layer.rs:251-268`), so a scissor here is never wider than
+        // the window.
+        let laid_out = layout.bounds();
+        let box_ = Rectangle {
+            x: laid_out.x + self.box_.x,
+            y: laid_out.y + self.box_.y,
+            width: self.box_.width,
+            height: self.box_.height,
+        };
+        let Some(bounds) = box_.intersection(viewport) else { return };
+        renderer.with_layer(bounds, |renderer| {
+            self.content.as_widget().draw(
+                tree, renderer, theme, style, layout, cursor, viewport,
+            );
+        });
     }
 }
 
@@ -12706,6 +12967,44 @@ mod tests {
                 let pane = width - RAIL - if panel { PANEL } else { 0.0 };
                 assert_eq!(shell.pane_gutter_at().x + ICED_BAR, pane, "{width}x{height} panel={panel}");
                 assert!(pane > ICED_BAR, "the pane is wider than the strip it draws");
+                drop(shell.render());
+            }
+        }
+    }
+
+    #[test]
+    fn only_the_hosting_page_lends_the_pane_a_layer_of_its_own() {
+        // The one thing [`Shell::page_overlay`] can get wrong by existing at all:
+        // a layer on a page the reference draws none on would sit over the gutter
+        // on every route, and the gutter is what hides iced's bar. So it is the
+        // hosting route and nothing else, and the pane it is clipped to is the
+        // page column -- which is narrower than the stack the layer is in, because
+        // that stack's base layer is the row holding the page *and* the panel.
+        for (address, lends) in [
+            ("/hosting/manage", true),
+            ("/user/FlameFire", false),
+            ("/browse/modpack", false),
+            ("/skins", false),
+            ("/instance/atm10", false),
+        ] {
+            for panel in [true, false] {
+                let mut shell = Shell::new(
+                    Address::parse(address).expect("a sample address"),
+                    Gen::Dark,
+                    &settings(!panel, true, true),
+                );
+                press(&mut shell, Message::Viewport(iced::Size::new(1280.0, 720.0)));
+                let page = 1280.0 - RAIL - if panel { PANEL } else { 0.0 };
+                assert_eq!(
+                    shell.page_overlay(shell.theme, page).is_some(),
+                    lends,
+                    "{address} panel={panel}"
+                );
+                // And the clip that keeps the toast inside it: the page column is
+                // the pane's own width from the pane's own top, so the pane's
+                // height is what is left under the bar.
+                assert_eq!(720.0 - BAR, 672.0, "the page column's height at 720");
+                assert!(page < 1280.0, "the page column is not the whole window");
                 drop(shell.render());
             }
         }

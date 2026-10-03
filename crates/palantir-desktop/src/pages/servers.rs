@@ -907,9 +907,11 @@ fn frame_button<'a, Message: 'a>(
 
 // ---- The toast -----------------------------------------------------------
 
-/// `left-[32%]` of the preview's own 400: 128.
+/// `left-[32%]` of the preview's own 400: 128, measured from the preview's left
+/// edge and not from the pane's -- the offset the toast is drawn at is
+/// `preview_left`'s plus this, which is why the number alone is not a place.
 const TOAST_LEFT: f32 = 0.32 * PREVIEW;
-/// `top-[23rem]`.
+/// `top-[23rem]`, measured from the preview's top edge for the same reason.
 const TOAST_TOP: f32 = 23.0 * 16.0;
 /// `w-[21rem]`, which is also as wide as this toast is ever drawn.
 ///
@@ -922,23 +924,31 @@ const TOAST_TOP: f32 = 23.0 * 16.0;
 /// that 400-wide root rather than against anything inside the panel.
 ///
 /// What is left bounding it is `.app-viewport` (`App.vue:2747-2752`), which is
-/// `overflow: auto` with `scrollbar-gutter: stable`. The gutter is carved out of
-/// the *content* box, so the content is laid out 10 pixels narrower than the pane
-/// and a child that overflows it still paints into the gutter -- an `overflow`
-/// clip is at the padding box, which is the pane's full width. So on the
-/// reference's own capture the toast's box runs x=649..985 and its fill is visible
-/// to x=979, where the pane ends at 980.
+/// `overflow: auto; overflow-x: hidden` with `scrollbar-gutter: stable`. The
+/// gutter is carved out of the *content* box, so the content is laid out 10 pixels
+/// narrower than the pane and a child that overflows it still paints into the
+/// gutter -- an `overflow` clip is at the padding box, which is the pane's full
+/// width. So on the reference's own capture the toast's box runs x=649..984 and its
+/// fill is visible to x=979, where the pane ends at 980.
 ///
-/// Here the box is the same x=649..985 and it is clipped at the same 980, and then
-/// the last ten of those columns are painted over: `Shell::pane_gutter` lays a ten-
-/// pixel strip at x=970..979 over the page to hide iced's own scrollbar, which is
-/// what `shell.rs:5284-5296` says it is for. That is why the fill measures
-/// x=649..969 and not x=649..979, and it is why `page.rs::no_bar()` was the wrong
-/// place to look: the scrollable never reserved the gutter in the first place --
-/// the page column measures 868 wide on both sides, which is `916 - 2 * 24` with
-/// nothing taken off it, and 868 is what puts the four auto margins at 35 and the
-/// button's own left edge on x=123.0 in both. `shell.rs` is reserved, so the ten
-/// columns stay.
+/// Here the box is the same x=649..984 and it is clipped at the same 980, by the
+/// same means the page itself is clipped there: iced's `Scrollable` wraps its
+/// content in a layer at its own bounds (`scrollable.rs:909-918`), which is why the
+/// toast could be a child of the page at all. What it could not be is a child of
+/// the page *and* over the pane's furniture, and that is what cost the fill its
+/// last ten columns: `shell.rs`'s `pane_gutter` lays a ten-pixel strip at
+/// x=970..979 over the whole page to hide iced's own scrollbar, so a toast drawn
+/// below it ended at x=969. So the toast is drawn by the pane's own stack now,
+/// above the gutter and below the pane's shadow and rule -- see [`page_overlay`]
+/// for the order, and `pane_gutter` in `shell.rs` for the two answers that were
+/// tried and are wrong.
+///
+/// Note what is *not* the fix, because it looks like one: the page column still
+/// measures 868 wide on both sides, which is `916 - 2 * 24` with nothing taken off
+/// it, and 868 is what puts the four auto margins at 35 and the button's own left
+/// edge on x=123.0 in both. Carving the ten columns out of the page instead --
+/// `page.rs::no_bar()`, or a narrower page body -- would move the margins and put
+/// the gutter at x=960..969 instead of the reference's 970..979.
 const TOAST_WIDTH: f32 = 21.0 * 16.0;
 /// `px-4 py-3`.
 const TOAST_PAD_X: f32 = 16.0;
@@ -1055,6 +1065,68 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     }
     blocks.push(empty_state(theme));
     page::body(blocks, GAP, Message::Wheel)
+}
+
+/// The one layer this page draws over the pane rather than inside it: the invite
+/// toast, at the place in the page the reference puts it.
+///
+/// `ServerListEmptyPreview.vue` holds three siblings in one `relative mx-auto
+/// h-[38rem] w-full max-w-[25rem] select-none -mb-10` root: the `overflow-hidden`
+/// panel, the fade, and the toast. Because the toast is a *sibling* of the panel
+/// and not a child of it, the panel's `!overflow-hidden` does not clip it -- which
+/// is what `toast` used to be drawn through, and the reason the reference's toast
+/// escapes the preview altogether rather than sitting inside the picture.
+///
+/// Nothing inside a page can draw over its pane's own furniture, though: the
+/// reserved scrollbar gutter is a *sibling* of the whole page rather than a layer
+/// of it (`shell.rs`'s `pane_gutter`, which is where the two answers that were
+/// tried and are wrong are written down), and so are the pane's rule and its inset
+/// shadow. So the toast is handed back here and `shell.rs` puts it in the pane's
+/// own [`crate::pages::overlay::Stack`] between the gutter and the shadow, which
+/// is the reference's own order -- `.app-contents::before` is `z-index: 30`
+/// (`App.vue:2725`) and outranks the toast's `z-10`, while the page's own in-flow
+/// content and the sidebar's `::before` are outranked by it.
+///
+/// `page` is the page column's own width, because the toast's containing block is
+/// the 400-wide root and its place *in the root* is not enough to place it in the
+/// pane: see [`preview_left`].
+pub(crate) fn page_overlay<'a>(theme: Gen, page: f32) -> Option<(Vector, Element<'a, Message>)> {
+    // The offset below is the row's place on the page as the reference draws it,
+    // which is the page with no notice above it: `ServerListEmpty` is that page's
+    // whole body, and the four buttons that raise a notice here are the ones the
+    // reference's own `logged-in="false"` branch says cannot work. A notice pushes
+    // this row down by the notice's own height, and iced reports no height before
+    // the frame that draws it.
+    Some((
+        Vector::new(
+            preview_left(page) + TOAST_LEFT,
+            crate::page::INSET + TOAST_TOP,
+        ),
+        toast(theme),
+    ))
+}
+
+/// The preview's own left edge inside the page column, which is the left edge of
+/// the toast's containing block.
+///
+/// Derived rather than measured, because every term of it is the reference's and
+/// the row's three spacers are already this port's statement of the four `mx-auto`
+/// margins: the page's inset, then the margin before the column, the column
+/// itself, and the margin-and-gap-and-margin that [`MARGIN_SHARE`] stands for. The
+/// spacers are `FillPortion`s of the row's free space, so the same sum the row
+/// itself is laid out by is the sum here -- at the reference's own 1280x720 that is
+/// `24 + 35 + 320 + 78 = 457`, which puts the preview on x=521 and the toast's box
+/// on `x=649..985`, both of which are where the reference's capture measures them.
+///
+/// Reading it off `MARGIN_SHARE` rather than off `MARGIN` is what keeps this true
+/// at another window width: the shares are a ratio, the free space is what is left
+/// after the column and the preview, and iced hands each `FillPortion` its share of
+/// *that*.
+fn preview_left(page: f32) -> f32 {
+    let free = page - 2.0 * crate::page::INSET - COLUMN - PREVIEW;
+    let total: f32 = MARGIN_SHARE.iter().map(|share| f32::from(*share)).sum();
+    let share = |index: usize| free * f32::from(MARGIN_SHARE[index]) / total;
+    crate::page::INSET + share(0) + COLUMN + share(1)
 }
 
 /// `ServerListEmpty` with `logged-in="false"`: the column, the preview, and the
@@ -1379,8 +1451,11 @@ fn preview<'a>(theme: Gen) -> Element<'a, Message> {
         .over(
             Vector::new(0.0, PREVIEW_HEIGHT - PREVIEW_FADE),
             preview_fade(theme),
-        )
-        .over(Vector::new(TOAST_LEFT, TOAST_TOP), toast(theme));
+        );
+    // The toast is *not* a fourth layer here, though the reference's template puts
+    // it in this root beside the panel. It is a sibling of the panel and not a
+    // child of it, so it has to be drawn by something that is a sibling of the
+    // pane -- see [`page_overlay`].
     container(layers)
         .width(Length::Fixed(PREVIEW))
         .height(Length::Fixed(PREVIEW_HEIGHT))
@@ -2023,6 +2098,32 @@ mod tests {
         assert_eq!(TOAST_LEFT + TOAST_WIDTH, 464.0);
         // Which is 64 pixels past the panel, and the page viewport is what cuts it.
         assert_eq!(TOAST_LEFT + TOAST_WIDTH - PREVIEW, 64.0);
+        // And where the pane's own stack draws it: the preview's left edge inside
+        // the page column, which is the page's inset, the margin before the
+        // column, the column and the margin-and-gap-and-margin between them.
+        assert_eq!(
+            preview_left(916.0),
+            457.0,
+            "`24 + 35 + 320 + 78` at 1280x720"
+        );
+        assert_eq!(
+            preview_left(916.0) + TOAST_LEFT,
+            585.0,
+            "the toast's box starts at x=649"
+        );
+        assert_eq!(
+            preview_left(916.0) + TOAST_LEFT + TOAST_WIDTH,
+            921.0,
+            "and ends five past the pane's own 916, which the clip is for"
+        );
+        assert_eq!(crate::page::INSET + TOAST_TOP, 392.0, "the box's top is window y=440");
+        // A width the row's own spacers do not divide evenly at the reference's
+        // window, because the offset follows the row rather than being written
+        // down: iced hands each `FillPortion` its share of what is left over.
+        assert!(
+            preview_left(1216.0) > preview_left(916.0),
+            "and it follows the width"
+        );
         assert_eq!(TOAST_PAD_X, 4.0 * 4.0);
         assert_eq!(TOAST_PAD_Y, 3.0 * 4.0);
         assert_eq!(TOAST_GAP, 4.0 * 4.0);
