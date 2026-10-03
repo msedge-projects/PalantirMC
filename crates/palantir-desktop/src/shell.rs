@@ -227,6 +227,176 @@ pub const CONTROLS_GAP: f32 = 8.0;
 /// arithmetic is the same either way: two paddings, three buttons, two gaps.
 pub const CONTROLS_WIDTH: f32 = 2.0 * CONTROLS_PAD + 3.0 * CONTROLS_BUTTON + 2.0 * CONTROLS_GAP;
 
+// ---- The scrollbar ------------------------------------------------------
+
+/// How wide the reference's scrollbar is: six pixels.
+///
+/// Not iced's number, which is **ten**. That is the whole of the defect this
+/// section exists for, and it has three parts that have to agree:
+///
+/// * `iced_widget-0.12.3/src/scrollable.rs:157-167` — `Properties::default()` is
+///   `{ width: 10.0, margin: 0.0, scroller_width: 10.0 }`.
+/// * `iced_widget-0.12.3/src/scrollable.rs:1383-1401` — the bar goes at
+///   `bounds.right - total/2 - width/2`, so it is drawn *over* the region's last
+///   pixels rather than beside them. A ten-pixel band over a page's own padding
+///   is a band in the middle of the page.
+/// * `iced_style-0.12.1/src/theme.rs:1188-1214` — a region with no `.style()` gets
+///   `Scrollable::Default`, whose track is `palette.background.weak.color` and
+///   whose thumb is `palette.background.strong.color`. With this shell's palette
+///   (`widget_theme`) in dark those two mixes come out as `#4C5156` and `#757C84`
+///   exactly — which is why the colours this port drew are in no token table and
+///   where they came from.
+///
+/// Six is what the reference's sidebar draws, and it is
+/// `overlayscrollbars`' own default: `App.vue:940-946` configures that instance
+/// with `overflow` and nothing else, so every other knob — `--os-size`,
+/// `--os-padding-inline`, `--os-track-bg`, the handle's radius — is the library's.
+/// `App.vue:2839-2844` then sets `--os-handle-bg: var(--color-scrollbar)`, which
+/// `variables.scss:331` remaps onto `--surface-5` and `variables.scss:239` fixes
+/// at `#42444a`. Measured, on every reference capture, the bar occupies
+/// `x=1272..1277` of a 1280x720 window with two clear columns beside it.
+pub const SCROLLBAR: f32 = 6.0;
+
+/// The clear track either side of [`SCROLLBAR`], which is what the two columns at
+/// `x=1278..1279` in that same capture are: `overlayscrollbars`' default
+/// `--os-padding-inline`.
+///
+/// It is also what puts the bar where it belongs. iced adds
+/// `2 * margin` to `max(width, scroller_width)` for the space a region reserves,
+/// so ten pixels of reserve over a six-pixel bar is two either side — and the
+/// reservation is what a dialog's body is broken for
+/// ([`DIALOG_SCROLLBAR`]), so that arithmetic stays true there too.
+pub const SCROLLBAR_PAD: f32 = 2.0;
+
+/// The scrollbar the reference paints, in iced's own terms.
+///
+/// The track is `None` and not a colour because the reference's is transparent —
+/// `*::-webkit-scrollbar-track { background: transparent }`
+/// (`app-frontend/src/assets/stylesheets/global.scss:137-139`) for a native bar,
+/// `overlayscrollbars`' default `--os-track-bg` for the sidebar's — so what shows
+/// through is whatever the region is drawn on. The handle is `--color-scrollbar`,
+/// which is [`Ink::Scrollbar`]: `theme_gen.rs:632` already carries it, and its
+/// dark value is `#42444a`.
+///
+/// The radius is a third of the width rather than `--radius-lg` (1rem) because a
+/// radius wider than half a six-pixel box *is* half a six-pixel box, and the
+/// reference's capture shows the handle with fully rounded ends.
+///
+/// `hovered` and `dragging` answer the same as `active` on purpose. The
+/// reference's only hover rule is `*::-webkit-scrollbar:hover { opacity: 1 }`
+/// (`global.scss:133-135`) off a base of `opacity: 0.5`, and the capture measures
+/// the bar at full `--color-scrollbar` with the pointer nowhere near it — so there
+/// is no measured hover colour, and a brighter one would be a guess about a
+/// reference this port is matching pixel for pixel.
+pub struct Bar {
+    /// The generated theme, carried rather than taken from iced's `Theme`: a
+    /// stylesheet is handed `&iced::Theme` and this port's tokens are not in it,
+    /// which is why every other themed closure in this file captures a [`Gen`]
+    /// and ignores the argument it is given.
+    theme: Gen,
+}
+
+impl Bar {
+    /// The one appearance, which is what the bar is at rest, over it and
+    /// dragged.
+    fn appearance(&self) -> iced::widget::scrollable::Appearance {
+        iced::widget::scrollable::Appearance {
+            container: iced::widget::container::Appearance::default(),
+            scrollbar: iced::widget::scrollable::Scrollbar {
+                background: None,
+                border: Border::default(),
+                scroller: iced::widget::scrollable::Scroller {
+                    color: theme_gen::ink(self.theme, Ink::Scrollbar),
+                    border: Border {
+                        radius: (SCROLLBAR / 3.0).into(),
+                        ..Border::default()
+                    },
+                },
+            },
+            gap: None,
+        }
+    }
+}
+
+impl iced::widget::scrollable::StyleSheet for Bar {
+    type Style = Theme;
+
+    fn active(&self, _theme: &Theme) -> iced::widget::scrollable::Appearance {
+        self.appearance()
+    }
+
+    fn hovered(
+        &self,
+        _theme: &Theme,
+        _is_mouse_over_scrollbar: bool,
+    ) -> iced::widget::scrollable::Appearance {
+        self.appearance()
+    }
+}
+
+/// The style a region that shows the reference's bar hands to `Scrollable::style`.
+///
+/// [`Bar`] is a stylesheet while `Scrollable::style` takes the theme's style
+/// enum, so the conversion lives here rather than at each of the five call sites:
+/// a region writes `.style(crate::shell::bar(theme))`.
+///
+/// [`DIALOG_SCROLLBAR`] is what the ten-pixel reserve is *for*, and it is that
+/// constant rather than a coincidence: the dialog bodies this file builds are
+/// broken for ten pixels so that nothing sits under a bar, and a six pixel bar
+/// with two pixels either side is exactly what now goes there.
+fn bar(theme: Gen) -> iced::theme::Scrollable {
+    iced::theme::Scrollable::custom(Bar { theme })
+}
+
+/// [`SCROLLBAR`] wide with [`SCROLLBAR_PAD`] of clear track either side, as
+/// `iced::widget::scrollable::Properties` describes it.
+///
+/// Width and margin are both needed and they are not the same knob: `width` is
+/// what is drawn and `margin` is what is reserved, and the reserve is what iced
+/// centres the bar inside — `x = bounds.right - (max(width, scroller_width) +
+/// 2 * margin) / 2 - width / 2` — which is how a six-pixel bar lands on
+/// `x=1272..1277` rather than flush against the window's edge.
+fn bar_direction() -> iced::widget::scrollable::Direction {
+    iced::widget::scrollable::Direction::Vertical(
+        iced::widget::scrollable::Properties::new()
+            .width(SCROLLBAR)
+            .scroller_width(SCROLLBAR)
+            .margin(SCROLLBAR_PAD),
+    )
+}
+
+/// The room iced's own bar reserves at a region's right edge, which is the width
+/// it draws and its default: [`Properties::default`]'s `width` and `margin` are
+/// both 10.0 and 0.0, so `max(10, 10) + 0` is ten.
+///
+/// Only the page column needs this number, and only because its region is built
+/// in another file: see [`pane_gutter`].
+const ICED_BAR: f32 = 10.0;
+
+/// The column a region's bar starts at, counted from the region's own right edge
+/// back into it.
+///
+/// iced's own arithmetic, written out rather than reached into:
+/// `scrollable.rs:1383-1401` reserves `max(width, scroller_width) + 2 * margin`
+/// and then centres `width` inside that reserve, so
+/// `x = right - total / 2 - width / 2`. It is spelled here because the number it
+/// has to produce is a measured one — `x=1272` in a window 1280 wide, which is
+/// what every reference capture shows — and the margin is the only thing standing
+/// between that and a bar flush against the window's edge.
+///
+/// [`SCROLLBAR_PAD`] is what makes the reserve and the bar different numbers, and
+/// iced needs both: `margin` is the reserved space and `width` is the painted
+/// space, and a region reserves the first while showing the second.
+///
+/// `#[cfg(test)]` because iced does the arithmetic at run time and this only says
+/// what it comes to; [`Shell::panel`] is where the answer has to be right.
+#[cfg(test)]
+fn bar_at(right: f32) -> f32 {
+    // `scroller_width` is set to the same six, so the wider of the two is six.
+    let reserve = SCROLLBAR + 2.0 * SCROLLBAR_PAD;
+    right - reserve / 2.0 - SCROLLBAR / 2.0
+}
+
 // ---- The panel's first section -----------------------------------------
 
 /// `p-4` on each of the sidebar's sections, and `text-base` on the heading
@@ -4977,9 +5147,14 @@ fn tags(&self) -> iced::Command<Message> {
         // this container is still the pane in the rule's colour and the page is
         // still laid over all of it, so the only thing that moved is which
         // pixel each of them starts on.
+        //
+        // The pane's reserved scrollbar gutter goes over the page in the same
+        // way, and for the same reason: it is painted over content rather than
+        // beside it. See [`Shell::pane_gutter_at`] and [`pane_gutter`].
         container(
             crate::pages::overlay::Stack::at(Vector::ZERO, page)
-                .over(Vector::ZERO, pane_rule(theme)),
+                .over(Vector::ZERO, pane_rule(theme))
+                .over(self.pane_gutter_at(), pane_gutter(theme)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -4992,6 +5167,25 @@ fn tags(&self) -> iced::Command<Message> {
             ..container::Appearance::default()
         })
         .into()
+    }
+
+    /// Where the pane's reserved scrollbar gutter begins, measured from the pane's
+    /// own left edge.
+    ///
+    /// Arithmetic rather than a measurement, and it cannot be anything else: the
+    /// gutter is drawn over the page rather than laid out beside it, so nothing
+    /// about it is ever reported. The pane is the window less the rail and, when
+    /// it is up, the panel — the same two constants [`Shell::rail`] and
+    /// [`Shell::panel`] are drawn at — so at the reference's own 1280x720 with the
+    /// panel up this is `1280 - 64 - 300 - 10 = 906`, which is window `x=970`, and
+    /// 970 is exactly where iced put the bar it hides.
+    ///
+    /// The panel's own case is the other half of the same arithmetic and needs
+    /// none of it: a bar inside the panel is drawn by the panel's region, which
+    /// knows where the panel ends.
+    fn pane_gutter_at(&self) -> Vector {
+        let panel = if self.panel_shown() { PANEL } else { 0.0 };
+        Vector::new(self.viewport.width - RAIL - panel - ICED_BAR, 0.0)
     }
 
     /// The right panel: the reference's own column, with its sections in it.
@@ -5075,7 +5269,17 @@ fn tags(&self) -> iced::Command<Message> {
         }
         // `border-l` over the wash: iced paints a `Border` on all four sides, so
         // the panel's own edge is a one-pixel column rather than a border width.
+        //
+        // The bar is the reference's own. `.app-sidebar-scrollable` is an
+        // `overlayscrollbars` instance (`App.vue:2490-2494`, given nothing but
+        // `overflow` to configure at `App.vue:940-946`), so what it draws is the
+        // library's defaults: six pixels of `--color-scrollbar` on a transparent
+        // track, inset two from the container's edge, ends fully rounded. The
+        // panel ends at the window's edge, so this bar is the window's — which is
+        // where the reference's capture puts it, at `x=1272..1277`.
         let scroll = crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
+            .direction(bar_direction())
+            .style(bar(theme))
             .width(Length::Fill)
             .height(Length::Fill);
         let body: Element<'_, Message> = if self.promo_shown() {
@@ -6471,14 +6675,21 @@ fn tags(&self) -> iced::Command<Message> {
                 .push(
                     // [`DIALOG_INNER`] rather than `Fill`: the width the body's
                     // content is broken for has to be the width the body is
-                    // *given*, or the bar iced draws over a scrollable's right
-                    // edge sits on the last chip of a row. See
+                    // *given*, or the bar a scrollable draws over its right edge
+                    // sits on the last chip of a row. See
                     // [`DIALOG_SCROLLBAR`].
+                    //
+                    // And the bar is six wide with two clear pixels either side,
+                    // which is exactly the ten the body is broken for — so the
+                    // reservation [`DIALOG_SCROLLBAR`] documents is now the
+                    // reservation rather than an allowance for the wrong number.
                     container(crate::scroll::region(
                         crate::scroll::DIALOG,
                         body,
                         Message::Wheel,
-                    ))
+                    )
+                    .direction(bar_direction())
+                    .style(bar(theme)))
                     .width(Length::Fixed(DIALOG_INNER))
                     .max_height(self.dialog_body_room()),
                 ),
@@ -6891,11 +7102,18 @@ fn tags(&self) -> iced::Command<Message> {
                     // The list scrolls past 300px, which is the reference's own
                     // bound on its options -- and it is the options rather than
                     // the dropdown, so the footer stays outside it.
+                    //
+                    // The bar is the dialog's, at the reference's six pixels: a
+                    // `MultiSelect`/`Combobox` list is an `overlayscrollbars`
+                    // instance like every other list in the reference
+                    // (`MultiSelect.vue:1487-1489`, `Combobox.vue:1121-1123`).
                     container(crate::scroll::region(
                         crate::scroll::VERSIONS,
                         column(rows).width(Length::Fill),
                         Message::Wheel,
-                    ))
+                    )
+                    .direction(bar_direction())
+                    .style(bar(theme)))
                         .width(Length::Fill)
                         .max_height(VERSION_LIST_HEIGHT)
                         .into()
@@ -7059,7 +7277,9 @@ fn tags(&self) -> iced::Command<Message> {
                         crate::scroll::BUILDS,
                         column(rows).width(Length::Fill),
                         Message::Wheel,
-                    ))
+                    )
+                    .direction(bar_direction())
+                    .style(bar(theme)))
                         .width(Length::Fill)
                         .max_height(VERSION_LIST_HEIGHT)
                         .into()
@@ -7816,6 +8036,47 @@ fn pane_rule(theme: Gen) -> Element<'static, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+/// The reference's `scrollbar-gutter: stable`, drawn as the pane draws its rule.
+///
+/// `.app-viewport` (`App.vue:2747-2752`) is `overflow: auto` with
+/// `scrollbar-gutter: stable`, so it reserves six pixels at its right edge
+/// whether or not anything has been scrolled. Nothing is painted in them — the
+/// track is transparent (`global.scss:137-139`) and the thumb paints nothing
+/// (`global.scss:141-146`: `--color-scrollbar` behind a five-pixel transparent
+/// border with `background-clip: content-box`) — so the column reads as the
+/// viewport's own background, which is `--color-bg` = `--surface-1`. Every
+/// reference capture measures the same thing, on every route and on a scrolled
+/// page alike: six flat columns at `x=975..979`, `#15171B` against a `#16181C`
+/// viewport.
+///
+/// **Ten pixels and not six**, and not `--color-scrollbar`, for two reasons that
+/// are both about what is being hidden rather than about the reference:
+///
+/// * What is being hidden is *iced's* bar, and iced's bar is ten pixels wide
+///   ([`ICED_BAR`]). Six would leave four of it showing, which is worse than the
+///   band it replaces.
+/// * The colour is the pane's own. The reference's reserved column is one unit per
+///   channel darker than `--surface-1` and that value is not declared anywhere in
+///   the vendored reference — it is the engine's own compositing of the gutter —
+///   so there is no token to reproduce it with, and inventing one would be a
+///   colour no capture could confirm.
+///
+/// A page's content cannot reach this strip, which is what makes covering a
+/// layout rather than a patch: every page goes through [`crate::page::body`], and
+/// its inset (`p-6`, sixteen on Skins) keeps content at least sixteen pixels
+/// clear of the pane's edge. The strip is painted in the same colour as the
+/// padding beside it, so the only pixel it changes is the bar's.
+fn pane_gutter(theme: Gen) -> Element<'static, Message> {
+    container(Space::with_height(Length::Fill))
+        .width(Length::Fixed(ICED_BAR))
+        .height(Length::Fill)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// The account the card's header names: the one in force, or the reference's own
@@ -11973,5 +12234,149 @@ mod tests {
         );
         drop(shell.render());
     }
-}
 
+    // ---- The scrollbar ---------------------------------------------------
+
+    #[test]
+    fn the_reference_scrollbar_is_six_wide_and_stands_two_clear_of_the_edge() {
+        // The audit's two bands, as numbers. `x=1272..1277` is what every
+        // reference capture measures for the bar at the window's right edge, and
+        // `x=1278..1279` is the clear wash beside it -- which is the only reason
+        // `SCROLLBAR_PAD` exists, because iced reserves `width + 2 * margin` and
+        // centres the bar in it: a margin of zero would put a six-pixel bar
+        // flush against the window and land at 1274.
+        assert_eq!(bar_at(1280.0), 1272.0);
+        assert_eq!(bar_at(1280.0) + SCROLLBAR, 1278.0, "six columns, 1272..1277");
+        // The reserve is ten, which is the same ten the dialog bodies are broken
+        // for: two, six, two. `DIALOG_SCROLLBAR` is the number that has to keep
+        // meaning "the room this bar takes", and it is asserted as the identity
+        // rather than as a literal so that moving either half fails here.
+        assert_eq!(SCROLLBAR + 2.0 * SCROLLBAR_PAD, DIALOG_SCROLLBAR);
+        // And ten is iced's own bar, which is what the page column's gutter has
+        // to cover rather than the six the reference reserves.
+        assert_eq!(ICED_BAR, 10.0);
+        assert!(ICED_BAR > SCROLLBAR, "a gutter narrower than the bar would show part of it");
+    }
+
+    #[test]
+    fn the_bar_is_transparent_behind_and_the_reference_scrollbar_coloured_in_front() {
+        // The two halves of `Bar`, read back off the stylesheet rather than off
+        // the source: the track is `None` because both of the reference's bars
+        // are transparent behind the handle (`global.scss:137-139` for a native
+        // one, overlayscrollbars' default `--os-track-bg` for the sidebar's), and
+        // the handle is `--color-scrollbar`, which is `--surface-5` = `#42444a`
+        // in dark. `theme_gen.rs:632` carries it, so this is the reference's own
+        // token rather than a colour typed in.
+        use iced::widget::scrollable::StyleSheet as _;
+        let bar = Bar { theme: Gen::Dark };
+        let appearance = bar.active(&widget_theme(Gen::Dark));
+        assert!(appearance.scrollbar.background.is_none(), "the track is transparent");
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Scrollbar),
+            [0x42, 0x44, 0x4a, 0xff],
+            "the handle is the reference's own --color-scrollbar"
+        );
+        assert_eq!(appearance.scrollbar.scroller.color, theme_gen::ink(Gen::Dark, Ink::Scrollbar));
+        // Fully rounded ends: a radius wider than half the bar is half the bar,
+        // which is what `--radius-lg` (1rem) comes to on a six-pixel box.
+        assert!(SCROLLBAR / 3.0 <= SCROLLBAR / 2.0);
+        // Hover and drag are the same appearance, because the reference's only
+        // hover rule raises an opacity this port's captures already measure as 1.
+        // `scrollable::Appearance` is not `PartialEq`, so the handle is what is
+        // compared -- the rest of the appearance is the transparent track read
+        // back a line above.
+        for other in [
+            bar.hovered(&widget_theme(Gen::Dark), true),
+            bar.hovered(&widget_theme(Gen::Dark), false),
+            bar.dragging(&widget_theme(Gen::Dark)),
+        ] {
+            assert_eq!(
+                other.scrollbar.scroller.color,
+                appearance.scrollbar.scroller.color,
+                "there is no measured hover colour to draw"
+            );
+            assert!(other.scrollbar.background.is_none());
+        }
+        // Every generated theme answers, which is the point of carrying a `Gen`
+        // rather than reaching into iced's `Theme`.
+        for theme in Gen::ALL {
+            let appearance = Bar { theme: *theme }.active(&widget_theme(*theme));
+            assert_eq!(
+                appearance.scrollbar.scroller.color,
+                theme_gen::ink(*theme, Ink::Scrollbar),
+                "{theme:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_pages_reserved_gutter_covers_the_bar_and_not_the_page() {
+        // The strip the pane draws over its page, and the reason it is drawn at
+        // all: a page's own region is built in `page.rs`, so its bar cannot be
+        // restyled from here and is covered instead. What has to be true is that
+        // the strip and the bar occupy the same ten columns -- otherwise the
+        // gutter covers nothing and the band survives it.
+        // Two routes that force the panel whatever the setting says, and one that
+        // does not -- so the strip is proved against both ways the pane's own
+        // right edge is arrived at.
+        for (address, panel) in [
+            ("/user/FlameFire", true),
+            ("/browse/modpack", true),
+            ("/skins", false),
+        ] {
+            let mut shell = Shell::new(
+                Address::parse(address).expect("a sample address"),
+                Gen::Dark,
+                &settings(!panel, true, true),
+            );
+            press(&mut shell, Message::Viewport(iced::Size::new(1280.0, 720.0)));
+            assert_eq!(shell.panel_shown(), panel, "{address}");
+            let pane = 1280.0 - RAIL - if panel { PANEL } else { 0.0 };
+            // The page's region ends at the pane's right edge, so iced's bar is
+            // the last ten columns of it, and the gutter starts where the bar
+            // starts.
+            assert_eq!(
+                shell.pane_gutter_at().x,
+                pane - ICED_BAR,
+                "{address}: the strip covers the bar"
+            );
+            // And it stops at the pane's edge rather than over the panel, which
+            // at 1280x720 with the panel up is `x=980`: the strip owns
+            // `970..980`, which is exactly the ten columns iced's default bar
+            // occupied at `x=970..979` in the audit's capture.
+            assert_eq!(RAIL + shell.pane_gutter_at().x + ICED_BAR, RAIL + pane, "{address}");
+            // The strip can only ever cover padding, because a page's own inset
+            // keeps content clear of the pane's edge by more than the bar's
+            // width. `p-6` is the library pages' and sixteen is Skins', so the
+            // narrowest of them is the one that matters.
+            assert!(
+                crate::page::INSET > ICED_BAR,
+                "a page's content would reach under the strip at p-{}",
+                crate::page::INSET
+            );
+            drop(shell.render());
+        }
+    }
+
+    #[test]
+    fn the_gutter_follows_the_window_rather_than_being_pinned() {
+        // Resizing is the whole risk in a strip whose position is arithmetic: a
+        // strip pinned to the first window's width would eat the page's content
+        // on every other one. Every one of these has to end flush with the pane,
+        // including the window's own floor (`MINIMUM_SIZE` in `main.rs`).
+        for (width, height) in [(980.0, 640.0), (1280.0, 720.0), (1920.0, 1080.0)] {
+            for panel in [true, false] {
+                let mut shell = Shell::new(
+                    Address::parse("/").expect("a sample address"),
+                    Gen::Dark,
+                    &settings(!panel, true, true),
+                );
+                press(&mut shell, Message::Viewport(iced::Size::new(width, height)));
+                let pane = width - RAIL - if panel { PANEL } else { 0.0 };
+                assert_eq!(shell.pane_gutter_at().x + ICED_BAR, pane, "{width}x{height} panel={panel}");
+                assert!(pane > ICED_BAR, "the pane is wider than the strip it draws");
+                drop(shell.render());
+            }
+        }
+    }
+}
