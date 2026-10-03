@@ -886,7 +886,7 @@ impl State {
         let mut none: Vec<&str> = self
             .excluded
             .iter()
-            .filter(|(filter, _)| filter.as_str() != LICENSE)
+            .filter(|(filter, _)| filter.as_str() != LICENSE && filter.as_str() != ADVANCED)
             .map(|(_, option)| option.as_str())
             .collect();
         none.sort_unstable();
@@ -895,6 +895,22 @@ impl State {
         }
         if self.excluded.contains(&(LICENSE.to_string(), OPEN_SOURCE.to_string())) {
             parts.push("open_source NOT IN [true]".to_string());
+        }
+        // A disclosure's option is `method: 'or'` over `disclosure_types`, and
+        // negative, so `newFilters` files it under `negativeByType` rather than
+        // `orGroups` -- which is why an excluded disclosure is a `NOT IN` part of
+        // its own field instead of joining the `categories` list above. Being the
+        // one negative filter whose field nothing else uses, it cannot disturb
+        // that list either way.
+        let mut disclosures: Vec<&str> = self
+            .excluded
+            .iter()
+            .filter(|(filter, _)| filter.as_str() == ADVANCED)
+            .map(|(_, option)| option.as_str())
+            .collect();
+        disclosures.sort_unstable();
+        if let Some(part) = none_of("disclosure_types", &disclosures) {
+            parts.push(part);
         }
         parts.extend(self.environment_parts());
         (!parts.is_empty()).then(|| parts.join(" AND "))
@@ -1673,6 +1689,16 @@ const SIDEBAR_FILTERS: &[Filter] = &[
         defaults: DEFAULT_SHADER_LOADERS,
     },
     Filter {
+        id: ADVANCED,
+        label: Key::SearchFilterTypeAdvanced,
+        // `supported_project_types: ALL_PROJECT_TYPES` -- the whole tab list, so
+        // this section is on every tab and is never narrowed the way a category
+        // section is.
+        kinds: ALL_TABS,
+        display: Display::All,
+        defaults: &[],
+    },
+    Filter {
         id: LICENSE,
         label: Key::SearchFilterTypeLicense,
         kinds: &[
@@ -1690,6 +1716,9 @@ const SIDEBAR_FILTERS: &[Filter] = &[
 
 /// `search.ts`'s `environment` filter id.
 const ENVIRONMENT: &str = "environment";
+/// `search.ts`'s `advanced` filter id -- *Advanced exclusions*, and the only
+/// filter in the table whose rows are exclude-only.
+const ADVANCED: &str = "advanced";
 /// `search.ts`'s `game_version` filter id -- the *Game version* section, and the
 /// one filter in this table that is neither a list of rows nor an expandable
 /// one: `display: 'scrollable'`, `searchable: true`, every game version Modrinth
@@ -1709,6 +1738,55 @@ const SHADER_LOADER: &str = "shader_loader";
 const LICENSE: &str = "license";
 /// The one option of the `license` filter, as `search.ts` spells it.
 const OPEN_SOURCE: &str = "open_source";
+
+/// The disclosures `advanced` offers, in `PROJECT_DISCLOSURE_TYPES`' own order:
+/// each one's id, its label, and the project types it applies to
+/// (`DISCLOSURE_SUPPORTED_PROJECT_TYPES`).
+///
+/// **`derivative_work` is not here** because
+/// `createDisclosureFilterOptions` drops it before the list is built, and the
+/// project-type rows beside them (`all_project_types:...`) are here but not drawn:
+/// `newFilters` skips every `advanced` option that `isProjectTypeExclusionOption`
+/// recognises, so the reference draws rows that change nothing.
+///
+/// Two of the disclosures carry `sub_options` in the reference -- *AI-generated
+/// content* splits by AI usage and *Telemetry* by consent -- behind a third press
+/// on the row. Those are not drawn: the sub-options are another `or` group under
+/// the same `disclosure_types` field, and the row's third press is a disclosure
+/// chevron that has no place in a row this port draws with two presses at most.
+const DISCLOSURES: &[(&str, Key, &[ProjectType])] = &[
+    ("ai_content", Key::SearchFilterTypeAdvancedDisclosureAiContent, ALL_TABS),
+    ("ai_functionality", Key::SearchFilterTypeAdvancedDisclosureAiFunctionality, ALL_TABS),
+    ("advertisements", Key::SearchFilterTypeAdvancedDisclosureAdvertisements, ALL_TABS),
+    ("epilepsy_triggers", Key::SearchFilterTypeAdvancedDisclosureEpilepsyTriggers, ALL_TABS),
+    // `['mod', 'plugin', 'modpack']`.
+    ("system_interactions", Key::SearchFilterTypeAdvancedDisclosureSystemInteractions, &[
+        ProjectType::Mod,
+        ProjectType::Plugin,
+        ProjectType::Modpack,
+    ]),
+    // `['mod', 'plugin', 'modpack', 'server']`.
+    ("telemetry", Key::SearchFilterTypeAdvancedDisclosureTelemetry, &[
+        ProjectType::Mod,
+        ProjectType::Plugin,
+        ProjectType::Modpack,
+        ProjectType::Server,
+    ]),
+    ("paid_features", Key::SearchFilterTypeAdvancedDisclosurePaidFeatures, ALL_TABS),
+    ("archived", Key::SearchFilterTypeAdvancedDisclosureArchived, ALL_TABS),
+];
+
+/// `ALL_CONTENT_PROJECT_TYPES`, which is what seven of the nine disclosures
+/// support.
+const ALL_TABS: &[ProjectType] = &[
+    ProjectType::Mod,
+    ProjectType::ResourcePack,
+    ProjectType::Datapack,
+    ProjectType::Shader,
+    ProjectType::Modpack,
+    ProjectType::Plugin,
+    ProjectType::Server,
+];
 
 /// `DEFAULT_MOD_LOADERS` (`tag-messages.ts:575`): what the mod tab's *Loader*
 /// shows before *Show more*.
@@ -1744,6 +1822,10 @@ impl Filter {
             GAME_VERSION if kind == ProjectType::Mod => 2,
             GAME_VERSION if kind == ProjectType::Shader => -1,
             MOD_LOADER if kind == ProjectType::Mod => 1,
+            // `ordering: -1000`, the only negative number big enough to be about
+            // the position rather than the tab: *Advanced exclusions* is always
+            // the last section, on every tab.
+            ADVANCED => -1000,
             _ => 0,
         }
     }
@@ -1819,6 +1901,34 @@ fn filter_rows(
         // draws them itself because it is the only section with a search field,
         // a toggle group and a window of its own on top of them.
         GAME_VERSION => Vec::new(),
+        // The disclosures, in `PROJECT_DISCLOSURE_TYPES`' own order, minus the
+        // one `createDisclosureFilterOptions` drops and minus the ones this tab
+        // cannot have: `isDisclosureCompatibleWithProjectTypes` asks whether the
+        // disclosure's supported project types and the tab's overlap, and only
+        // *Telemetry* and *External system interactions* are narrower than "all".
+        ADVANCED => DISCLOSURES
+            .iter()
+            .filter(|(_, _, kinds)| kinds.contains(&kind))
+            .map(|(id, label, _)| Row {
+                id: (*id).to_string(),
+                label: message(*label),
+                chosen: false,
+                excluded: state.is_excluded(ADVANCED, id),
+                // `supports: ['exclude']` and nothing else, so
+                // `primaryAction === 'exclude'` from the first frame: there is no
+                // second button on these rows at all, and the row's own press is
+                // the exclusion.
+                excludes: false,
+                press: Message::Exclude {
+                    filter: ADVANCED.to_string(),
+                    option: (*id).to_string(),
+                },
+                exclude: Message::Exclude {
+                    filter: ADVANCED.to_string(),
+                    option: (*id).to_string(),
+                },
+            })
+            .collect(),
         // Every loader filter is `tags.value.loaders` narrowed to the project
         // types the filter declares, which is what `Tags::loaders_for` answers,
         // with `formatLoader` for the label. The one narrowing it cannot answer
@@ -3896,17 +4006,86 @@ mod tests {
     }
 
     #[test]
+    fn an_advanced_row_is_exclude_only_and_asks_a_disclosure_types_not_in() {
+        // `advanced` is the one filter whose `supports` is `['exclude']` and not
+        // `['include', 'exclude']`, so `primaryAction` is `'exclude'` from the
+        // first frame: the row has no second button, and pressing it once asks.
+        let mut state = state_of(ProjectType::Mod);
+        state.update(Message::Tags { result: Ok(tags_with(&[])) });
+
+        let rows = filter_rows(&state, filters_for(ProjectType::Mod).iter().find(|f| f.id == ADVANCED).expect("the advanced section"), ProjectType::Mod, &tags_with(&[]));
+        assert!(
+            rows.iter().all(|row| !row.chosen && !row.excludes),
+            "no row can be chosen, and none of them offers a second press"
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<&str>>(),
+            vec![
+                "ai_content",
+                "ai_functionality",
+                "advertisements",
+                "epilepsy_triggers",
+                "system_interactions",
+                "telemetry",
+                "paid_features",
+                "archived",
+            ],
+            "`PROJECT_DISCLOSURE_TYPES` less `derivative_work`, which \
+             `createDisclosureFilterOptions` drops"
+        );
+
+        let Some(Ask::Search(first)) =
+            state.update(Message::Exclude { filter: ADVANCED.to_string(), option: "telemetry".to_string() })
+        else {
+            panic!("excluding a disclosure asks");
+        };
+        assert_eq!(
+            first.query.facets,
+            vec![r#"disclosure_types NOT IN ["telemetry"]"#.to_string()],
+            "the option's own field, and a list even for one value"
+        );
+
+        // A category excluded beside it stays its own `categories` part: the two
+        // are different fields, so `negativeByType` holds two entries.
+        let category = category_filter_id(ProjectType::Mod, "technology");
+        let Some(Ask::Search(second)) =
+            state.update(Message::Exclude { filter: category, option: "technology".to_string() })
+        else {
+            panic!("excluding a category asks");
+        };
+        assert_eq!(
+            second.query.facets,
+            vec![concat!(
+                r#"categories NOT IN ["technology"]"#,
+                " AND ",
+                r#"disclosure_types NOT IN ["telemetry"]"#,
+            )
+            .to_string()],
+            "the two fields are one request, and the category is not asked as a disclosure"
+        );
+    }
+
+    #[test]
     fn the_game_version_section_sorts_where_search_ts_says_it_does() {
         // `ordering: projectTypes.includes('mod') ? 2 : includes('shader') ? -1`,
         // so the mod tab's *Game version* is its first section and the shader
         // tab's is its last -- the only filter in the table whose number is
         // negative.
+        // `advanced`'s `ordering: -1000` puts it last on every tab that has one,
+        // which is why it trails the license rather than leading the table it is
+        // written in.
         let order = |kind| filters_for(kind).iter().map(|f| f.id).collect::<Vec<&str>>();
-        assert_eq!(order(ProjectType::Mod), vec![GAME_VERSION, MOD_LOADER, ENVIRONMENT, LICENSE]);
-        assert_eq!(order(ProjectType::Shader), vec![SHADER_LOADER, LICENSE, GAME_VERSION]);
+        assert_eq!(
+            order(ProjectType::Mod),
+            vec![GAME_VERSION, MOD_LOADER, ENVIRONMENT, LICENSE, ADVANCED]
+        );
+        assert_eq!(
+            order(ProjectType::Shader),
+            vec![SHADER_LOADER, LICENSE, GAME_VERSION, ADVANCED]
+        );
         assert_eq!(
             order(ProjectType::Modpack),
-            vec![GAME_VERSION, ENVIRONMENT, MODPACK_LOADER, LICENSE],
+            vec![GAME_VERSION, ENVIRONMENT, MODPACK_LOADER, LICENSE, ADVANCED],
             "and no ordering at all on the tab that sets none"
         );
     }
