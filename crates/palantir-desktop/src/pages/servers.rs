@@ -816,6 +816,24 @@ const TOAST_WIDTH: f32 = 21.0 * 16.0;
 /// `px-4 py-3`.
 const TOAST_PAD_X: f32 = 16.0;
 const TOAST_PAD_Y: f32 = 12.0;
+/// `border border-solid`: the one pixel the reference's own box carries on every
+/// side.
+///
+/// This is the fifth term the toast's height is made of, and it is the one a
+/// port drops without noticing, because CSS counts a border in the box it draws
+/// (`box-sizing: border-box` is Tailwind's preflight, and an auto-height flex
+/// container's height is its content plus its padding plus its border) while
+/// iced's `container` paints the border *inside* the box its padding already
+/// produced. The reference's own pixels give the whole sum:
+/// 440..551 is 112 rows, its content is 453..538 -- 40 for the two `leading-5`
+/// lines, `mt-2.5`'s 10, and the buttons' `h-9` 36 -- and 112 - 86 = 26 is
+/// `py-3` twice with the border once at each end: 12 + 1 + 13.
+/// `TOAST_PAD_Y` on its own is 24, which is the 110 this drew.
+const TOAST_BORDER: f32 = 1.0;
+/// The content's inset from the toast's border box: `py-3` and `px-4` measured
+/// from *inside* the border, which is where CSS measures a padding from.
+const TOAST_INSET_X: f32 = TOAST_PAD_X + TOAST_BORDER;
+const TOAST_INSET_Y: f32 = TOAST_PAD_Y + TOAST_BORDER;
 /// `gap-4`, between the avatar and the text beside it.
 const TOAST_GAP: f32 = 16.0;
 /// `mt-2.5`, between the toast's two lines and its buttons.
@@ -1322,11 +1340,12 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     );
     container(
         row![]
-            // The box's own width less its `px-4`, stated rather than `Fill`:
-            // iced resolves a `container`'s `width` against the limits its padding
-            // leaves, so a `Fill` row is handed 304 only if it happens to ask for
-            // no more, and the row is what puts the X 16 pixels from the edge.
-            .width(Length::Fixed(TOAST_WIDTH - 2.0 * TOAST_PAD_X))
+            // The box's own width less its `px-4` and its border, stated rather
+            // than `Fill`: iced resolves a `container`'s `width` against the
+            // limits its padding leaves, so a `Fill` row is handed 302 only if
+            // it happens to ask for no more, and the row is what puts the X 17
+            // pixels from the edge.
+            .width(Length::Fixed(TOAST_WIDTH - 2.0 * TOAST_INSET_X))
             .spacing(TOAST_GAP)
             .align_items(Alignment::Start)
             .push(
@@ -1365,22 +1384,22 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
             ),
     )
     .width(Length::Fixed(TOAST_WIDTH))
-    .padding(Padding {
-        top: TOAST_PAD_Y,
-        right: TOAST_PAD_X,
-        bottom: TOAST_PAD_Y,
-        left: TOAST_PAD_X,
-    })
-    .style(move |_theme: &Theme| container::Appearance {
-        background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface2))),
-        border: Border {
-            color: theme_gen::ink(theme, Ink::Surface4),
-            width: 1.0,
-            radius: TOAST_RADIUS.into(),
-        },
-        ..container::Appearance::default()
-    })
-    .into()
+        .padding(Padding {
+            top: TOAST_INSET_Y,
+            right: TOAST_INSET_X,
+            bottom: TOAST_INSET_Y,
+            left: TOAST_INSET_X,
+        })
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface2))),
+            border: Border {
+                color: theme_gen::ink(theme, Ink::Surface4),
+                width: 1.0,
+                radius: TOAST_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// The two names the toast spells out rather than asking for.
@@ -1812,6 +1831,27 @@ mod tests {
         // pixels down a 608 box.
         assert_eq!(PREVIEW_FADE, 28.0 * 16.0);
         assert_eq!(PREVIEW_HEIGHT - PREVIEW_FADE, 160.0);
+    }
+
+    #[test]
+    fn the_toast_is_the_height_the_reference_measures() {
+        // `/tmp/ref/hosting-clean3.png`: the box is y 440..551, 112 rows, and its
+        // content is 453..538, 86 of them. The height is those four terms and
+        // nothing else -- two `leading-5` lines, `mt-2.5`, the buttons' `h-9`,
+        // and `py-3` measured from inside the `border border-solid` that CSS
+        // counts in the box and iced paints inside the padding's own.
+        const LINES: f32 = 2.0 * BUTTON_LINE;
+        let content = LINES + TOAST_BUTTON_GAP + MD_HEIGHT;
+        assert_eq!(LINES, 40.0, "two `text-base leading-5` lines");
+        assert_eq!(content, 86.0, "440 + 13 = 453 and 538 = 551 - 13");
+        assert_eq!(content + 2.0 * TOAST_INSET_Y, 112.0);
+        assert_eq!(TOAST_BORDER, 1.0, "`border border-solid`");
+        assert_eq!(TOAST_INSET_Y, 3.0 * 4.0 + TOAST_BORDER);
+        assert_eq!(TOAST_INSET_X, 4.0 * 4.0 + TOAST_BORDER);
+        // The content's own measure: 336 less a border and `px-4` either side,
+        // which is the reference's 302 rather than the 304 a border-blind
+        // padding leaves.
+        assert_eq!(TOAST_WIDTH - 2.0 * TOAST_INSET_X, 302.0);
     }
 
     #[test]
