@@ -207,11 +207,18 @@ const CARD_PAD_TOP: f32 = ui::CARD_PAD + 1.0;
 /// *Install* button's ring ended at x=939 against the reference's 938 and its own
 /// content box's 938, which is the whole of what this constant is.
 const CARD_PAD_RIGHT: f32 = ui::CARD_PAD + 1.0;
-/// Where the tags row starts inside the content box: `360 - 276 = 84`, measured as
-/// the *bottom* of the row, which is where `mt-auto` puts it -- the row ends flush
-/// with the content box and [`ui::tag`] is 24 pixels tall inside the reference's
-/// 26-pixel row (the reference's carries an `h-4` icon; see the notes).
-const CARD_TAGS_TOP: f32 = 83.0;
+/// Where the tags row starts inside the content box: `358 - 277 = 81`.
+///
+/// Measured as the row's own first row, not as the bottom of its tallest pill.
+/// The row is `mt-auto` into the content box and it is 26 pixels tall whatever it
+/// holds, so the row's *top* is the number and the pills inside it are placed by
+/// `items-center`: the reference's own `<div class="flex items-center gap-1">`
+/// around `ProjectCardEnvironment` and `ProjectCardTags`, which is what puts a
+/// 24-row pill one pixel lower than a 26-row one on the same row. Both readings
+/// were measured on `/tmp/ref/user-ref.png` at the first card: the three pills
+/// that carry an `h-4` glyph are y=358..383 and the three that do not are
+/// y=359..382.
+const CARD_TAGS_TOP: f32 = 81.0;
 
 /// The gap between the header and the strip, which is [`GAP`] plus four.
 ///
@@ -1716,6 +1723,10 @@ fn project_row<'a>(
     let tail = row![]
         .width(Length::Fill)
         .height(Length::Fixed(CARD_TAG_ROW))
+        // `items-center`, off the row's own `flex items-center gap-1`: a 24-row
+        // pill in a 26-row row sits one pixel lower, which is what the reference
+        // measures for every pill of its tags rows that carries no icon.
+        .align_items(Alignment::Center)
         .spacing(CARD_GAP_X)
         // The icon column, with the grid's own `gap-x-3` after it: `100 + 12 = 112`
         // from the content box's left edge, which is `1 + 16 + 100 + 12 = 129` from
@@ -1785,12 +1796,86 @@ pub struct Tags {
     /// which is the reference's `empty:hidden` on the same `TagItem`.
     pub environment: Option<(Glyph, String)>,
     /// The tags that fit, in the order `ProjectCardTags` draws them.
-    pub tags: Vec<String>,
+    pub tags: Vec<Tag>,
     /// How many tags the `+N` pill is standing in for.
     pub overflow: usize,
 }
 
+/// One visible tag, with the glyph `TagTagItem` puts in front of its label.
+///
+/// The three fields are the three things `ProjectCardTags` reads off a tag, and
+/// the icon is one of them because `TagTagItem`'s own rule is a *per-tag* one:
+///
+/// ```ts
+/// const icon = computed(() =>
+///     props.hideNonLoaderIcon && !isLoader.value ? undefined : getTagIcon(props.tag))
+/// ```
+///
+/// `ProjectCardTags.vue:56` passes `hide-non-loader-icon`, so on a card the icon
+/// is [`crate::ui::tag_icon`] for a **loader** and `None` for a category -- which
+/// is the whole reason the row is not one height. *Client and server*, *Forge*
+/// and *Modpack* are twenty-six rows on the reference's own capture and
+/// *Challenging* and *Combat* are twenty-four, and the difference is exactly
+/// whether this field is `Some`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tag {
+    /// The tag as the document publishes it, which is the key both of the
+    /// reference's tables are asked with.
+    pub id: String,
+    /// `formatTag(tag)` (`tag-messages.ts:663`): the loader's message, then the
+    /// category's, then the capitalised tag for one neither table has.
+    pub label: String,
+    /// `getTagIcon(tag)`, and `None` for a category because of
+    /// `hide-non-loader-icon`. Also `None` for the four loader icons this port
+    /// does not draw -- see [`crate::ui::tag_icon`], which names them.
+    pub icon: Option<Glyph>,
+}
+
+/// One pill of a card's tags row, as the reference's `<template>` order draws it.
+///
+/// The row is a [`crate::ui::tag_height`] question rather than a
+/// [`crate::ui::tag`] one, and this is the answer the row is built from: three
+/// kinds of pill in one list, of which two carry a glyph and one does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pill {
+    /// The label the pill shows.
+    pub label: String,
+    /// The `h-4` glyph in front of it, if the reference draws one there.
+    pub icon: Option<Glyph>,
+}
+
 impl Tags {
+    /// Every pill of the row, in the order the reference's own `<template>` draws
+    /// them: the environment's message, then each visible tag's own, then `+N`.
+    ///
+    /// The three are built by three different components and they disagree about
+    /// the icon, which is why this returns pills rather than labels:
+    /// `ProjectCardEnvironment` always puts one there (`GlobeIcon`,
+    /// `ClientIcon`, `ServerIcon` or `UserIcon`, per
+    /// `ProjectCardEnvironment.vue:115-138`); `ProjectCardTags` passes
+    /// `hide-non-loader-icon`, so only a loader's is drawn; and `TagsOverflow`
+    /// writes `+{{ tags.length }}` into a plain `TagItem` with no slot in it, so
+    /// the count never has one.
+    pub fn pills(&self) -> Vec<Pill> {
+        let mut pills: Vec<Pill> = Vec::with_capacity(self.tags.len() + 2);
+        if let Some((glyph, label)) = &self.environment {
+            pills.push(Pill { label: label.clone(), icon: Some(*glyph) });
+        }
+        pills.extend(self.tags.iter().map(|tag| Pill {
+            label: tag.label.clone(),
+            icon: tag.icon,
+        }));
+        if self.overflow > 0 {
+            pills.push(Pill { label: format!("+{}", self.overflow), icon: None });
+        }
+        pills
+    }
+
+    /// The visible tags' own ids, which is what the row is sorted and sliced on.
+    pub fn ids(&self) -> Vec<&str> {
+        self.tags.iter().map(|tag| tag.id.as_str()).collect()
+    }
+
     /// The pills' labels, in the order the reference's own `<template>` draws them:
     /// the environment's message, then each visible tag's own, then `+N`.
     ///
@@ -1801,21 +1886,7 @@ impl Tags {
     /// choosing which of the two tables is meant (`minecraft` is a loader for
     /// resource packs and a category for mods).
     pub fn labels(&self) -> Vec<String> {
-        let mut labels: Vec<String> = Vec::with_capacity(self.tags.len() + 2);
-        if let Some((_, label)) = &self.environment {
-            labels.push(label.clone());
-        }
-        labels.extend(self.tags.iter().map(|tag| {
-            if is_loader(tag) {
-                crate::locale::loader_label(tag)
-            } else {
-                crate::locale::category_label(tag)
-            }
-        }));
-        if self.overflow > 0 {
-            labels.push(format!("+{}", self.overflow));
-        }
-        labels
+        self.pills().into_iter().map(|pill| pill.label).collect()
     }
 }
 
@@ -1868,7 +1939,27 @@ pub fn card_tags(project: &ModrinthUserProject) -> Tags {
         .collect();
     Tags {
         environment,
-        tags: tags[..shown].to_vec(),
+        // The glyph is asked for here, where the tag is built rather than where
+        // the row is drawn, because `hide-non-loader-icon` is a property of the
+        // tag and not of the surface the row happens to be on: the same *Forge*
+        // carries an icon on this card and on a tag list, and carries none on a
+        // card that hides non-loader icons. `formatTag` and `getTagIcon` are both
+        // keyed off the id.
+        tags: tags[..shown]
+            .iter()
+            .map(|id| Tag {
+                label: if is_loader(id) {
+                    crate::locale::loader_label(id)
+                } else {
+                    crate::locale::category_label(id)
+                },
+                // `TagTagItem.vue:28`: the loader table first, and nothing at all
+                // for a category, because `ProjectCardTags` passes
+                // `hide-non-loader-icon`.
+                icon: if is_loader(id) { ui::tag_icon(id) } else { None },
+                id: id.clone(),
+            })
+            .collect(),
         // `[...new Set([...tags - visible, ...extra - visible])]`, and the two
         // lists cannot share a tag by the filter above.
         overflow: tags.len() - shown + extra.len(),
@@ -1938,7 +2029,13 @@ fn environment_tag(project: &ModrinthUserProject) -> Option<(Glyph, String)> {
         }
         "client_and_server" => (Glyph::Globe, Key::ProjectCardEnvironmentClientAndServer),
         "client_only" | "client_only_server_optional" => {
-            (Glyph::MonitorSmartphone, Key::ProjectCardEnvironmentClient)
+            // `ClientIcon`, which is `assets/icons/client.svg` -- the monitor on
+            // its stand, not `monitor-smartphone.svg`. They are different
+            // pictures and only one of them is the one this `<template>` names;
+            // the import is `import { ClientIcon, GlobeIcon, ServerIcon,
+            // UserIcon } from '@modrinth/assets'` on line 3 and
+            // `generated-icons.ts` resolves it to `./icons/client.svg`.
+            (Glyph::Client, Key::ProjectCardEnvironmentClient)
         }
         "server_only" | "server_only_client_optional" => {
             (Glyph::Server, Key::ProjectCardEnvironmentServer)
@@ -2002,12 +2099,17 @@ fn unique(tags: &[String]) -> Vec<String> {
 /// 26-row row sits one pixel lower, which is what the reference measures for every
 /// pill that carries no icon.
 ///
-/// The pills themselves are [`ui::tag`]'s and their labels are [`Tags::labels`],
-/// so what this adds is the row and nothing else.
+/// The pills themselves are [`ui::tag`]'s and [`ui::tag_with_icon`]'s, and which
+/// one a pill gets is [`Pill::icon`] rather than a guess here -- three of the six
+/// pills on the reference's first card are twenty-six rows and three are
+/// twenty-four, and the difference is exactly whether the tag is a loader.
 fn tags_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, Message> {
     let mut row = row![].spacing(CARD_TAG_GAP).align_items(Alignment::Center);
-    for label in card_tags(project).labels() {
-        row = row.push(ui::tag(theme, &label));
+    for pill in card_tags(project).pills() {
+        row = row.push(match pill.icon {
+            Some(glyph) => ui::tag_with_icon(theme, &pill.label, glyph),
+            None => ui::tag(theme, &pill.label),
+        });
     }
     row.into()
 }
@@ -2492,7 +2594,7 @@ mod tests {
         // The categories alphabetically, then the loaders -- `forge` is one of
         // the six `DEFAULT_LOADER_NAMES` and `mrpack` is not, so *Forge* comes
         // first even though the modpack's own `loaders` lists it after.
-        assert_eq!(tags.tags, ["challenging", "combat", "forge", "mrpack"]);
+        assert_eq!(tags.ids(), ["challenging", "combat", "forge", "mrpack"]);
         assert_eq!(tags.overflow, 1);
         assert_eq!(environment_label(&tags), Some("Client and server".to_string()));
         assert_eq!(
@@ -2512,7 +2614,7 @@ mod tests {
             r#""server_only""#,
         );
         let tags = card_tags(&island);
-        assert_eq!(tags.tags, ["minigame", "worldgen", "fabric", "forge"]);
+        assert_eq!(tags.ids(), ["minigame", "worldgen", "fabric", "forge"]);
         assert_eq!(tags.overflow, 3);
         assert_eq!(tags.labels(), ["Server", "Minigame", "World Generation", "Fabric", "Forge", "+3"]);
 
@@ -2523,7 +2625,7 @@ mod tests {
         let end = flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, "");
         let tags = card_tags(&end);
         assert!(tags.environment.is_none());
-        assert_eq!(tags.tags, ["mobs", "datapack"]);
+        assert_eq!(tags.ids(), ["mobs", "datapack"]);
         assert_eq!(tags.overflow, 1);
         assert_eq!(tags.labels(), ["Mobs", "Data Pack", "+1"]);
 
@@ -2535,6 +2637,97 @@ mod tests {
         let tags = card_tags(&bare);
         assert!(tags.labels().is_empty());
         assert_eq!(tags.overflow, 0);
+    }
+
+    #[test]
+    fn only_a_loader_carries_a_glyph_and_a_count_never_does() {
+        // The whole point of this row, and the reason [`ui::tag_height`] takes a
+        // boolean: three of the six pills on the reference's first card are
+        // twenty-six rows and three are twenty-four, and every one of the
+        // twenty-six drew an icon.
+        //
+        // `TagTagItem.vue:28` is the rule and `ProjectCardTags.vue:56` passes
+        // `hide-non-loader-icon`, so on a card a category's `getTagIcon` answer
+        // is thrown away. *Client and server* is the third icon and it comes from
+        // `ProjectCardEnvironment`, which has no such prop -- and *+1*, which is
+        // `TagsOverflow`'s plain `TagItem` with no slot in it, is the fifth pill
+        // that stays short.
+        let icons = |project: &ModrinthUserProject| -> Vec<(String, Option<Glyph>)> {
+            card_tags(project)
+                .pills()
+                .into_iter()
+                .map(|pill| (pill.label, pill.icon))
+                .collect()
+        };
+
+        // Card 1, *Zombie Invade 100 Days*: y=358..383 for the three that carry a
+        // glyph and y=359..382 for the three that do not.
+        let pack = flamefire(
+            "modpack",
+            r#""challenging", "combat""#,
+            r#""forge""#,
+            r#""multiplayer""#,
+            r#""client_and_server""#,
+        );
+        assert_eq!(
+            icons(&pack),
+            vec![
+                ("Client and server".to_string(), Some(Glyph::Globe)),
+                ("Challenging".to_string(), None),
+                ("Combat".to_string(), None),
+                ("Forge".to_string(), Some(Glyph::TagLoaderForge)),
+                ("Modpack".to_string(), Some(Glyph::TagLoaderMrpack)),
+                ("+1".to_string(), None),
+            ]
+        );
+
+        // Card 3, *Zombie Invade Nether End*: no environment pill, so its loader
+        // row has five slots rather than four and *Mobs* and *+1* are all that is
+        // left beside *Data Pack*.
+        let end = flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, "");
+        assert_eq!(
+            icons(&end),
+            vec![
+                ("Mobs".to_string(), None),
+                ("Data Pack".to_string(), Some(Glyph::TagLoaderDatapack)),
+                ("+1".to_string(), None),
+            ]
+        );
+
+        // And the property, over all three of the reference's cards rather than
+        // for one: a pill is twenty-six rows exactly when it has a glyph in it.
+        for project in [
+            flamefire(
+                "modpack",
+                r#""challenging", "combat""#,
+                r#""forge""#,
+                r#""multiplayer""#,
+                r#""client_and_server""#,
+            ),
+            flamefire(
+                "mod",
+                r#""minigame", "worldgen""#,
+                r#""datapack", "fabric", "forge", "neoforge", "quilt""#,
+                "",
+                r#""server_only""#,
+            ),
+            flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, ""),
+        ] {
+            for tag in card_tags(&project).tags {
+                assert_eq!(
+                    tag.icon.is_some(),
+                    ui::is_loader_tag(&tag.id) && ui::tag_icon(&tag.id).is_some(),
+                    "{}: a card's glyph is a loader's, and only if this port draws one",
+                    tag.id
+                );
+                assert_eq!(
+                    tag.icon,
+                    if ui::is_loader_tag(&tag.id) { ui::tag_icon(&tag.id) } else { None },
+                    "{}",
+                    tag.id
+                );
+            }
+        }
     }
 
     #[test]
@@ -3232,9 +3425,21 @@ mod tests {
             ui::Size::Md.height() + CARD_STATS_LEAD + CARD_STAT_ICON + CARD_STATS_GAP + CARD_STAT_ICON,
             CARD_CONTENT - 1.0
         );
-        // The tags row is the reference's own 26, `mt-auto` to the content box's
-        // bottom, so it starts one pixel above our 24-pixel pill's own bottom.
-        assert_eq!(CARD_TAGS_TOP + 26.0, CARD_CONTENT);
+        // The tags row is the reference's own 26 and it ends one row above the
+        // content box's bottom, which is where `mt-auto` leaves it once the grid's
+        // own bottom row is counted. Measured against the reference's first card:
+        // its three 26-row pills are y=358..383 and its three 24-row pills are
+        // y=359..382, so the row's first row is 358 = the box's top (276) + this.
+        assert_eq!(277.0 + CARD_TAGS_TOP, 358.0, "the tags row starts at y=358");
+        assert_eq!(ui::tag_height(true), 26.0, "the row is as tall as its tallest pill");
+        // And `items-center` is what puts the shorter pills one row lower inside
+        // it: a row laid out from the top would draw *Challenging* at y=358
+        // against the reference's y=359.
+        assert_eq!(
+            ui::tag_height(false) + (ui::TAG_HEIGHT_ICON - ui::TAG_HEIGHT) / 2.0,
+            25.0,
+            "a 24-row pill centred in a 26-row row ends one row before its bottom"
+        );
         // And the kit's own 24-pixel pill still sits inside that 26-pixel row.
         assert!(CARD_TAGS_TOP + ui::TAG_HEIGHT <= CARD_CONTENT, "the tags row is inside the box");
         // And the icon column is the indent the tags row starts at, with the

@@ -678,8 +678,8 @@ pub fn framed<'a, Message: 'a>(
 /// one: a tag only becomes twenty-six rows when it carries the `h-4` glyph, and
 /// which tags carry it is the caller's answer, not this file's. The heights are
 /// both named -- [`TAG_HEIGHT`] and [`TAG_HEIGHT_ICON`], with [`tag_height`] to
-/// ask -- and every caller that wants the icon needs one more argument at the call
-/// site than it has today.
+/// ask -- and [`tag_with_icon`] is the other half of that answer, for a caller
+/// that has one.
 pub fn tag<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
     container(
         text(label.to_string())
@@ -705,6 +705,255 @@ pub fn tag<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
         ..container::Appearance::default()
     })
     .into()
+}
+
+/// A tag pill with the reference's `h-4` glyph in front of its label.
+///
+/// The other [`tag`], and the one that is [`TAG_HEIGHT_ICON`] tall rather than
+/// [`TAG_HEIGHT`]. The three differences between the two, all off
+/// `TagItem.vue`'s own `baseClass`:
+///
+/// * the content is a [`row`] of the glyph and the label rather than the label,
+///   with [`TAG_GAP`] between them -- `inline-flex ... gap-1`, which is what puts
+///   the four pixels between the icon and the word;
+/// * the box is [`TAG_ICON`] tall rather than [`TAG_LABEL_SIZE`], because
+///   `items-center` puts the icon and the label on one line and the line is as
+///   tall as the taller of them;
+/// * the corner radius is [`TAG_HEIGHT_ICON`] / 2 rather than [`TAG_HEIGHT`] / 2.
+///   `rounded-full` is a rule and not a number: CSS resolves it against the border
+///   box, so it is thirteen on this pill and twelve on the other, which is what the
+///   reference's own straight top-edge runs measure.
+///
+/// The glyph is drawn in the label's ink, which is the one thing
+/// `text-[--_color,var(--color-secondary)]` covers: `TagItem.vue` gives `[&>svg]`
+/// a size and nothing else, so the icon inherits the same `--color-secondary` the
+/// label does and is `#96A2B0` on the dark look.
+///
+/// The label is the same widget [`tag`] builds, deliberately, so that a pill which
+/// carries an icon and one which does not cannot drift apart in any of the four
+/// things a label is made of.
+pub fn tag_with_icon<'a, Message: 'a>(
+    theme: Gen,
+    label: &str,
+    glyph: Glyph,
+) -> Element<'a, Message> {
+    let ink = theme_gen::ink(theme, Ink::Secondary);
+    container(
+        row![icon::icon(glyph, TAG_ICON, ink)]
+            .spacing(TAG_GAP)
+            .align_items(Alignment::Center)
+            .push(
+                text(label.to_string())
+                    .size(TAG_LABEL_SIZE)
+                    .font(regular())
+                    .style(iced::theme::Text::Color(ink)),
+            ),
+    )
+    .height(Length::Fixed(TAG_HEIGHT_ICON))
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: TAG_PAD,
+        right: TAG_PAD,
+    })
+    .center_y()
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: (TAG_HEIGHT_ICON / 2.0).into(),
+        },
+        ..container::Appearance::default()
+    })
+    .into()
+}
+
+/// The glyph a tag draws in front of its label, if the reference has one.
+///
+/// `getTagIcon` (`assets/index.ts:176`), which is `getLoaderIcon(tag)` and then
+/// `getCategoryIcon(tag)` -- the loader table first, because a Modrinth tag is a
+/// loader or a category and `minecraft` is both depending on the project type.
+///
+/// Each of those is a lookup in a table the reference generates from a directory:
+/// [`crate::icons_gen::TAG_LOADERS`] for `icons/tags/loaders/*.svg` and
+/// [`crate::icons_gen::TAG_CATEGORIES`] for `icons/tags/categories/*.svg` -- 26
+/// and 102, against the reference's 30 and 102. The keys are the file stems, and
+/// the keys Modrinth publishes agree on every one of them that is a tag, which is
+/// what makes the lookup a lookup rather than a table this file keeps beside the
+/// reference's.
+///
+/// Four loaders have no glyph here: `geyser`, `legacy-fabric`, `purpur` and
+/// `quilt`, because the icon generator refuses the construct each of them uses
+/// rather than approximating it -- a non-uniform transform scale in three cases
+/// and a `clip-path` in the fourth. They are named in `icons_gen.rs` and in its
+/// test, and a pill for one of them is the [`TAG_HEIGHT`] pill rather than a
+/// twenty-six-row one: the height a tag with no icon has, and not a wrong shape.
+///
+/// This is `TagTagItem`'s rule *without* `hide-non-loader-icon`. A project card
+/// passes that prop, so a caller drawing a card's tag row asks
+/// [`is_loader_tag`] first and gets nothing for a category; a caller drawing a
+/// tag list elsewhere in the reference gets the category icon.
+pub fn tag_icon(tag: &str) -> Option<Glyph> {
+    // `getLoaderIcon(tag) ?? getCategoryIcon(tag)`, in that order and with no
+    // question asked in between: the reference's `??` is on the two lookups, not
+    // on whether the tag is a loader, so a loader whose glyph this port does not
+    // draw falls through to the category table and a tag that is both answers
+    // with the loader's.
+    loader_tag_icon(tag).or_else(|| category_tag_icon(tag))
+}
+
+/// Whether a tag is a loader, which is what `hide-non-loader-icon` turns on.
+///
+/// `getTagMessage(tag, 'loader') !== undefined` (`TagTagItem.vue:30`), which is
+/// the reference's `tag.loader.<tag>` being a key rather than a list of loaders
+/// kept here -- so this is the generated message table asked the same question,
+/// and a loader that table has not caught up with is one no caller will draw an
+/// icon for.
+pub fn is_loader_tag(tag: &str) -> bool {
+    crate::text_gen::from_name(&format!("tag.loader.{tag}")).is_some()
+}
+
+/// `getLoaderIcon`: `loaderIconMap[tag.toLowerCase()]`.
+fn loader_tag_icon(tag: &str) -> Option<Glyph> {
+    match tag {
+        "fabric" => Some(Glyph::TagLoaderFabric),
+        "bta-babric" => Some(Glyph::TagLoaderBtaBabric),
+        "forge" => Some(Glyph::TagLoaderForge),
+        "neoforge" => Some(Glyph::TagLoaderNeoforge),
+        "minecraft" => Some(Glyph::TagLoaderMinecraft),
+        "mrpack" => Some(Glyph::TagLoaderMrpack),
+        "bukkit" => Some(Glyph::TagLoaderBukkit),
+        "spigot" => Some(Glyph::TagLoaderSpigot),
+        "paper" => Some(Glyph::TagLoaderPaper),
+        "sponge" => Some(Glyph::TagLoaderSponge),
+        "canvas" => Some(Glyph::TagLoaderCanvas),
+        "datapack" => Some(Glyph::TagLoaderDatapack),
+        "folia" => Some(Glyph::TagLoaderFolia),
+        "bungeecord" => Some(Glyph::TagLoaderBungeecord),
+        "waterfall" => Some(Glyph::TagLoaderWaterfall),
+        "velocity" => Some(Glyph::TagLoaderVelocity),
+        "iris" => Some(Glyph::TagLoaderIris),
+        "optifine" => Some(Glyph::TagLoaderOptifine),
+        "vanilla" => Some(Glyph::TagLoaderVanilla),
+        "java-agent" => Some(Glyph::TagLoaderJavaAgent),
+        "liteloader" => Some(Glyph::TagLoaderLiteloader),
+        "modloader" => Some(Glyph::TagLoaderModloader),
+        "nilloader" => Some(Glyph::TagLoaderNilloader),
+        "ornithe" => Some(Glyph::TagLoaderOrnithe),
+        "babric" => Some(Glyph::TagLoaderBabric),
+        "rift" => Some(Glyph::TagLoaderRift),
+        _ => None,
+    }
+}
+
+/// `getCategoryIcon`: `categoryIconMap[tag.toLowerCase()]`.
+fn category_tag_icon(tag: &str) -> Option<Glyph> {
+    match tag {
+        "adventure" => Some(Glyph::TagCategoryAdventure),
+        "atmosphere" => Some(Glyph::TagCategoryAtmosphere),
+        "audio" => Some(Glyph::TagCategoryAudio),
+        "backpack" => Some(Glyph::TagCategoryBackpack),
+        "badge" => Some(Glyph::TagCategoryBadge),
+        "badge-check" => Some(Glyph::TagCategoryBadgeCheck),
+        "bed-double" => Some(Glyph::TagCategoryBedDouble),
+        "blocks" => Some(Glyph::TagCategoryBlocks),
+        "bloom" => Some(Glyph::TagCategoryBloom),
+        "building-2" => Some(Glyph::TagCategoryBuilding2),
+        "camera" => Some(Glyph::TagCategoryCamera),
+        "cartoon" => Some(Glyph::TagCategoryCartoon),
+        "castle" => Some(Glyph::TagCategoryCastle),
+        "challenging" => Some(Glyph::TagCategoryChallenging),
+        "clapperboard" => Some(Glyph::TagCategoryClapperboard),
+        "cloud" => Some(Glyph::TagCategoryCloud),
+        "colored-lighting" => Some(Glyph::TagCategoryColoredLighting),
+        "combat" => Some(Glyph::TagCategoryCombat),
+        "compass" => Some(Glyph::TagCategoryCompass),
+        "core-shaders" => Some(Glyph::TagCategoryCoreShaders),
+        "crown" => Some(Glyph::TagCategoryCrown),
+        "cursed" => Some(Glyph::TagCategoryCursed),
+        "decoration" => Some(Glyph::TagCategoryDecoration),
+        "dices" => Some(Glyph::TagCategoryDices),
+        "economy" => Some(Glyph::TagCategoryEconomy),
+        "entities" => Some(Glyph::TagCategoryEntities),
+        "environment" => Some(Glyph::TagCategoryEnvironment),
+        "equipment" => Some(Glyph::TagCategoryEquipment),
+        "fantasy" => Some(Glyph::TagCategoryFantasy),
+        "film" => Some(Glyph::TagCategoryFilm),
+        "flag" => Some(Glyph::TagCategoryFlag),
+        "foliage" => Some(Glyph::TagCategoryFoliage),
+        "fonts" => Some(Glyph::TagCategoryFonts),
+        "food" => Some(Glyph::TagCategoryFood),
+        "footprints" => Some(Glyph::TagCategoryFootprints),
+        "game-mechanics" => Some(Glyph::TagCategoryGameMechanics),
+        "gamepad-2" => Some(Glyph::TagCategoryGamepad2),
+        "gauge" => Some(Glyph::TagCategoryGauge),
+        "globe" => Some(Glyph::TagCategoryGlobe),
+        "grid-3x3" => Some(Glyph::TagCategoryGrid3x3),
+        "gui" => Some(Glyph::TagCategoryGui),
+        "handshake" => Some(Glyph::TagCategoryHandshake),
+        "heart-crack" => Some(Glyph::TagCategoryHeartCrack),
+        "heart-pulse" => Some(Glyph::TagCategoryHeartPulse),
+        "high" => Some(Glyph::TagCategoryHigh),
+        "house" => Some(Glyph::TagCategoryHouse),
+        "items" => Some(Glyph::TagCategoryItems),
+        "kitchen-sink" => Some(Glyph::TagCategoryKitchenSink),
+        "library" => Some(Glyph::TagCategoryLibrary),
+        "lightweight" => Some(Glyph::TagCategoryLightweight),
+        "locale" => Some(Glyph::TagCategoryLocale),
+        "lock" => Some(Glyph::TagCategoryLock),
+        "low" => Some(Glyph::TagCategoryLow),
+        "magic" => Some(Glyph::TagCategoryMagic),
+        "management" => Some(Glyph::TagCategoryManagement),
+        "map-pinned" => Some(Glyph::TagCategoryMapPinned),
+        "medium" => Some(Glyph::TagCategoryMedium),
+        "minigame" => Some(Glyph::TagCategoryMinigame),
+        "mobs" => Some(Glyph::TagCategoryMobs),
+        "modded" => Some(Glyph::TagCategoryModded),
+        "models" => Some(Glyph::TagCategoryModels),
+        "multiplayer" => Some(Glyph::TagCategoryMultiplayer),
+        "network" => Some(Glyph::TagCategoryNetwork),
+        "optimization" => Some(Glyph::TagCategoryOptimization),
+        "palette" => Some(Glyph::TagCategoryPalette),
+        "path-tracing" => Some(Glyph::TagCategoryPathTracing),
+        "paw-print" => Some(Glyph::TagCategoryPawPrint),
+        "pbr" => Some(Glyph::TagCategoryPbr),
+        "pickaxe" => Some(Glyph::TagCategoryPickaxe),
+        "potato" => Some(Glyph::TagCategoryPotato),
+        "quests" => Some(Glyph::TagCategoryQuests),
+        "realistic" => Some(Glyph::TagCategoryRealistic),
+        "reflections" => Some(Glyph::TagCategoryReflections),
+        "refresh-ccw" => Some(Glyph::TagCategoryRefreshCcw),
+        "screenshot" => Some(Glyph::TagCategoryScreenshot),
+        "scroll-text" => Some(Glyph::TagCategoryScrollText),
+        "semi-realistic" => Some(Glyph::TagCategorySemiRealistic),
+        "shadows" => Some(Glyph::TagCategoryShadows),
+        "shield" => Some(Glyph::TagCategoryShield),
+        "simplistic" => Some(Glyph::TagCategorySimplistic),
+        "skull" => Some(Glyph::TagCategorySkull),
+        "social" => Some(Glyph::TagCategorySocial),
+        "square" => Some(Glyph::TagCategorySquare),
+        "storage" => Some(Glyph::TagCategoryStorage),
+        "sword" => Some(Glyph::TagCategorySword),
+        "swords" => Some(Glyph::TagCategorySwords),
+        "target" => Some(Glyph::TagCategoryTarget),
+        "technology" => Some(Glyph::TagCategoryTechnology),
+        "terminal" => Some(Glyph::TagCategoryTerminal),
+        "theater" => Some(Glyph::TagCategoryTheater),
+        "themed" => Some(Glyph::TagCategoryThemed),
+        "transportation" => Some(Glyph::TagCategoryTransportation),
+        "tree-pine" => Some(Glyph::TagCategoryTreePine),
+        "trophy" => Some(Glyph::TagCategoryTrophy),
+        "tweaks" => Some(Glyph::TagCategoryTweaks),
+        "users" => Some(Glyph::TagCategoryUsers),
+        "utility" => Some(Glyph::TagCategoryUtility),
+        "vanilla-like" => Some(Glyph::TagCategoryVanillaLike),
+        "wand-sparkles" => Some(Glyph::TagCategoryWandSparkles),
+        "wifi-off" => Some(Glyph::TagCategoryWifiOff),
+        "worldgen" => Some(Glyph::TagCategoryWorldgen),
+        "zap" => Some(Glyph::TagCategoryZap),
+        _ => None,
+    }
 }
 
 // ---- Controls ------------------------------------------------------------
@@ -3009,7 +3258,120 @@ mod tests {
         for theme in Gen::ALL {
             let face: Element<'_, ()> = tag(*theme, "Challenging");
             drop(face);
+            let with_icon: Element<'_, ()> = tag_with_icon(*theme, "Forge", Glyph::TagLoaderForge);
+            drop(with_icon);
         }
+    }
+
+    #[test]
+    fn a_tag_with_an_icon_is_the_pill_the_reference_measures_at_twenty_six() {
+        // The three numbers `tag_with_icon` changes, all off `TagItem.vue`'s one
+        // class string, and the reason the pill has two heights rather than one:
+        //
+        // * `inline-flex items-center` puts the `[&>svg]:h-4` glyph and the
+        //   `leading-none` label on one line, so the line is the taller of them;
+        // * `gap-1` puts four pixels between them;
+        // * `rounded-full` is a rule CSS resolves against the border box, so the
+        //   radius is half the height and not a fixed twelve.
+        //
+        // Measured on the reference's own /user/FlameFire capture: *Client and
+        // server*, *Forge* and *Modpack* are 26 rows and *Challenging*, *Combat*
+        // and *+1* are 24, and every 26 drew an icon. The port drew all six at 24
+        // with none.
+        assert_eq!(tag_height(true), 1.0 + 4.0 + TAG_ICON + 4.0 + 1.0);
+        assert_eq!(tag_height(false), 1.0 + 4.0 + TAG_LABEL_SIZE + 4.0 + 1.0);
+        assert_eq!(TAG_GAP, 4.0, "`gap-1` between the icon and the label");
+        // And the icon takes its colour from the label, because `baseClass` gives
+        // `[&>svg]` a size and no ink of its own.
+        assert_eq!(theme_gen::ink(Gen::Dark, Ink::Secondary), theme_gen::ink(Gen::Dark, INK_SECONDARY));
+    }
+
+    #[test]
+    fn a_tag_icon_is_the_reference_get_tag_icon() {
+        // `getTagIcon` (`assets/index.ts:176`) is `getLoaderIcon(tag)` and then
+        // `getCategoryIcon(tag)`, each a lookup in a table the reference generates
+        // from a directory of SVGs. The three loaders on the reference's own first
+        // card and the two categories beside them are the cases that matter: the
+        // loaders answer, the categories answer under `getTagIcon`, and a card
+        // does not ask for a category because it passes `hide-non-loader-icon`.
+        assert_eq!(tag_icon("forge"), Some(Glyph::TagLoaderForge));
+        assert_eq!(tag_icon("mrpack"), Some(Glyph::TagLoaderMrpack));
+        assert_eq!(tag_icon("datapack"), Some(Glyph::TagLoaderDatapack));
+        assert_eq!(tag_icon("challenging"), Some(Glyph::TagCategoryChallenging));
+        assert_eq!(tag_icon("combat"), Some(Glyph::TagCategoryCombat));
+        assert_eq!(tag_icon("mobs"), Some(Glyph::TagCategoryMobs));
+        assert_eq!(tag_icon("worldgen"), Some(Glyph::TagCategoryWorldgen));
+        // A tag neither table has is no icon, which is the `+N` pill: `TagsOverflow`
+        // writes `+{{ tags.length }}` into a plain `TagItem` with no slot in it.
+        assert_eq!(tag_icon("+1"), None);
+        assert_eq!(tag_icon("1.20.1"), None);
+        assert_eq!(tag_icon(""), None);
+    }
+
+    #[test]
+    fn is_loader_is_the_reference_tag_loader_table() {
+        // `getTagMessage(tag, 'loader') !== undefined` (`TagTagItem.vue:30`). The
+        // three loaders on the reference's first card answer true and the two
+        // categories beside them answer false, which is what makes *Client and
+        // server*, *Forge* and *Modpack* the three pills that grow an icon and
+        // *Challenging* and *Combat* the two that do not.
+        for loader in ["forge", "mrpack", "fabric", "neoforge", "datapack", "quilt"] {
+            assert!(is_loader_tag(loader), "{loader} is a loader");
+        }
+        for category in ["challenging", "combat", "mobs", "worldgen", "minigame"] {
+            assert!(!is_loader_tag(category), "{category} is not a loader");
+        }
+        // `minecraft` is the case the reference's own comment is about: it is a
+        // loader for a resource pack and a category for a mod, and `getTagIcon`
+        // looks the loader table first for exactly that reason.
+        assert!(is_loader_tag("minecraft"));
+        assert_eq!(tag_icon("minecraft"), Some(Glyph::TagLoaderMinecraft));
+    }
+
+    #[test]
+    fn every_tag_glyph_in_the_two_tables_is_reachable_by_its_tag() {
+        // The two functions above are a hand-written table over the generator's two
+        // generated ones, so the gate is that they agree: every key in
+        // `TAG_LOADERS` answers through `tag_icon`, and no key is claimed that the
+        // generator did not emit. A tag the reference adds upstream without this
+        // port hearing fails here rather than drawing a pill with no icon in it.
+        for (name, _) in crate::icons_gen::TAG_LOADERS {
+            let tag = name.rsplit('/').next().unwrap_or(name);
+            assert_eq!(
+                tag_icon(tag),
+                crate::icons_gen::Glyph::by_name(name),
+                "{tag} is in the generator's loader table and not in tag_icon"
+            );
+        }
+        for (name, _) in crate::icons_gen::TAG_CATEGORIES {
+            let tag = name.rsplit('/').next().unwrap_or(name);
+            // `getTagIcon` asks the loader table first, so a category whose stem
+            // is also a loader key answers with the loader's glyph. `minecraft` is
+            // the only such pair, and `getTagIcon` gives it the loader, so this is
+            // asserted rather than assumed.
+            let expected =
+                if crate::icons_gen::TAG_LOADERS.iter().any(|(loader, _)| *loader == tag) {
+                    crate::icons_gen::Glyph::by_name(&format!("tags/loaders/{tag}"))
+                } else {
+                    crate::icons_gen::Glyph::by_name(name)
+                };
+            assert_eq!(tag_icon(tag), expected, "{tag}");
+        }
+    }
+
+    #[test]
+    fn the_four_loaders_with_no_glyph_are_the_ones_the_generator_refuses() {
+        // `icons_gen.rs` refuses four of the thirty loader icons rather than
+        // approximating what they use: a non-uniform transform scale in three
+        // cases and a `clip-path` in the fourth. A pill for one of them draws no
+        // icon, which makes it the 24-row pill -- the height a tag with no icon
+        // has, and not a wrong shape.
+        for tag in ["geyser", "legacy-fabric", "purpur", "quilt"] {
+            assert!(is_loader_tag(tag), "{tag} is a loader the reference has");
+            assert_eq!(tag_icon(tag), None, "{tag} has a glyph this port does not draw");
+        }
+        assert_eq!(crate::icons_gen::TAG_LOADERS.len(), 26, "30 less the four refused");
+        assert_eq!(crate::icons_gen::TAG_CATEGORIES.len(), 102);
     }
 
     #[test]
