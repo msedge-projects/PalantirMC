@@ -112,15 +112,54 @@ const HEADER_GROUP_GAP: f32 = 8.0;
 /// The summary and the metadata are both 16: measured, the `J` of *Just* and the
 /// `J` of *Joined* are each twelve rows tall.
 const HEADER_TEXT: f32 = 16.0;
-/// The line the header's own summary is set on.
+/// The line the header's own summary is set on -- the CSS line, not the painted one.
 ///
 /// `page-header/index.vue:20` gives the summary no size class, so it inherits the
-/// body size (16) and the stylesheet's `line-height: 1.15`, which is 18.4 pixels
-/// of CSS and 18 painted -- the same reading [`crate::ui::NAV_LABEL_LINE`] records
-/// for a tab label. Measured against the reference: its summary's ink occupies
-/// y=115..129 and the metadata row begins 18 pixels below the title's own block,
-/// which only works on an 18-pixel line.
-const HEADER_SUMMARY_LINE: f32 = 18.0;
+/// body size (16) and the stylesheet's `line-height: 1.15`, which is 18.4 pixels of
+/// CSS. The same reading [`crate::ui::NAV_LABEL_LINE`] records for a tab label.
+///
+/// 18.4 rather than the 18 those fifteen paint to, and the reason is that this line
+/// height is load-bearing for the column around it:
+/// `page-header/index.vue:9`'s text column is stretched to the avatar's 96 rows
+/// and its children are centred by `justify-center`, so the column starts at
+/// `(96 - H) / 2` with `H = 24 + 6 + this + 8 + 20` -- and half a pixel of `H` is
+/// half a pixel of where the title and the metadata are drawn.
+///
+/// Measured at 1280x720 against `/tmp/ref/user-ref.png`, ink rows at half coverage,
+/// across the three values this column can take:
+///
+/// | this line, and the metadata row's | title | summary | metadata | pixels off the reference, nine bands |
+/// | --- | --- | --- | --- | --- |
+/// | 18.0, row 20.8 (before [`METADATA_LINE`]) | 84..101 | 114..128 | 139..156 | 29522 |
+/// | 18.0, row 20 | 85..102 | 115..129 | 139..156 | 29213 |
+/// | **18.4, row 20** | **84..101** | 114..128 | 139..156 | **29204** |
+/// | the reference | 84..101 | 115..129 | 139..156 | -- |
+///
+/// The title and the summary trade a single row between them, because a centred
+/// first child puts the title's baseline at `31 - H_summary / 2` and the summary's
+/// at `title + 12 + 6 + H_summary / 2` -- both the same number for either 18, and
+/// the capture differs only in which side of a whole-pixel boundary each falls on.
+/// 18.4 is the one that leaves the *title* on the reference's rows, and the title
+/// is the landmark the profile page is known for, so the summary's row is what
+/// pays.
+const HEADER_SUMMARY_LINE: f32 = 18.4;
+/// The line the metadata row's words are set on, which is *not* the summary's.
+///
+/// `page-header-metadata-item.vue:79`'s `baseClass` ends in `leading-none`, and
+/// `leading-none` is `line-height: 1` -- neither the `text-*` scale's line nor
+/// the inherited `1.15` the header's own summary keeps. It beats `text-sm`'s own
+/// `1.25rem` because both are utilities of one class and the line-height ones are
+/// written after the font-size ones: the same order that gives
+/// `page-header/index.vue:13`'s `text-2xl leading-none` `h1` a 24-pixel line
+/// rather than 32, and that makes a `TagItem`'s icon-less pill
+/// `1 + py-1(4) + 14 + py-1(4) + 1 = 24` rows rather than the 30 a `text-sm`
+/// line would ask for.
+///
+/// So the number is the label's own size, and setting it is not tidiness: left at
+/// iced's default `Relative(1.3)` the words measured 20.8 rows against the 20 of
+/// the `size-5` icon beside them, and the row -- the header's last block -- grew
+/// by four fifths of a pixel.
+const METADATA_LINE: f32 = 16.0;
 /// `gap-x-[1.625rem]` on the metadata row, which is also the width of the span
 /// each `BulletDivider` sits in -- so the gap and the divider are one number.
 const METADATA_GAP: f32 = 26.0;
@@ -132,6 +171,21 @@ const METADATA_TEXT_GAP: f32 = 8.0;
 /// `pb-4` under the header's own rule, which is the 16 pixels between the rule at
 /// y=184 and the strip at y=201.
 const HEADER_PAD_BOTTOM: f32 = 16.0;
+
+/// The size and the line of the sentence an empty list draws.
+///
+/// `EmptyState.vue:9` is `<span class="text-2xl font-semibold text-contrast">`, and
+/// both empty sentences on this page are that component's *heading*
+/// (`layout.vue:243`'s `profile.label.no-projects` and `layout.vue:328`'s
+/// `profile.label.no-collections`) rather than its description -- the descriptions
+/// are the `isSelf`-only arm this launcher never reaches. `text-2xl` is
+/// `1.5rem`/`2rem`, so the sentence is twenty-four pixels of text on a
+/// thirty-two-pixel line; it is a `span` and not a heading, so there is no user
+/// agent's line-height in it to read instead, whatever `preflight: false` does
+/// elsewhere on this page.
+const EMPTY_HEADING: f32 = 24.0;
+/// [`EMPTY_HEADING`]'s own line, which is `text-2xl`'s `2rem` and not its size.
+const EMPTY_HEADING_LINE: f32 = 32.0;
 
 /// `gap-x-3` and `gap-y-2` on a project card's own grid.
 const CARD_GAP_X: f32 = 12.0;
@@ -161,14 +215,44 @@ const CARD_STATS_GAP: f32 = 12.0;
 const CARD_STATS_LEAD: f32 = CARD_GAP_Y + 12.0;
 /// `gap-2` inside `__info`, between a card's title and its summary.
 const CARD_INFO_GAP: f32 = 8.0;
-/// `text-base` on a card's summary.
+/// The body size, which is what a card's summary is: [`HEADER_TEXT`], sixteen.
 ///
 /// `ProjectCard.vue:120`'s list layout gives `.project-card-summary` no size class
-/// at all, so it inherits the body size; the `@container (width < 550px)` block is
-/// the only thing that would make it `text-sm`, and an 868-pixel card is nowhere
-/// near it. Measured on the reference's own first card: the summary's ink is 16
-/// pixels tall on an 18-pixel line.
-const CARD_SUMMARY: f32 = 16.0;
+/// at all, and `ProjectCard.vue:402-404`'s `@apply text-sm` is inside the
+/// `@container (width < 550px)` block beside it -- an 868-pixel card, measured on
+/// the reference's own capture, is nowhere near it. So the summary inherits the
+/// body size.
+///
+/// Three readings off `/tmp/ref/user-ref.png` at 1280x720 fix the size at sixteen
+/// and leave no room for fourteen, and the first is a ruler rather than a
+/// comparison: Inter's em dash has an advance of exactly `1.0000 em` and an ink of
+/// exactly `1.0000 em` (`Inter-400.ttf`, upem 2816, `U+2014` advance 2816), and
+/// card two's summary ends in a pair of them -- thirty-two solid pixels from x=620
+/// to x=651 with nothing antialiased at either end, which is two ems and so two
+/// sixteens. The second is that the summary's `6` and the `6` of
+/// `ProjectCardStats`' downloads count -- which carries no size class either, and so
+/// is known to be sixteen -- are both twelve rows of ink, `461..472` and `490..501`
+/// on card two. The third is that the same two digits sit exactly eighteen rows
+/// apart with identical profiles, which is [`CARD_SUMMARY_LINE`] and not the twenty
+/// a `text-sm` line would put between them.
+///
+/// A fourteen-pixel reading is also refuted by the wrap, which is the one thing
+/// about this site that is *not* right yet: the reference's card-two first line
+/// carries one word more than ours (it ends *A skyblock*, ours ends *A*), and the
+/// two sides' word boundaries are identical to the pixel over the whole shared
+/// prefix -- `——` at x=620..651 and `A` at x=657..666 on both -- so the two are set
+/// at the same size and the difference is where the column stops, not how big the
+/// text is.
+const CARD_SUMMARY: f32 = HEADER_TEXT;
+/// The line the summary is set on: the painted eighteen, not the CSS eighteen-and-
+/// four-fifths [`HEADER_SUMMARY_LINE`] keeps.
+///
+/// The same `1.15` at sixteen, one rounding apart from the header's own summary,
+/// and the rounding is the point: `line-clamp-2` is a *height*, and this line is
+/// what the box below the title is two of (see the `line-clamp-2` note at the call
+/// site and the `36.0` the gate test asserts), so it is stored as the eighteen the
+/// reference's own two lines are measured apart rather than as the eighteen-and-
+/// four-fifths CSS calls for. `text-sm` would make it 20.
 const CARD_SUMMARY_LINE: f32 = 18.0;
 /// `size-5` on `ProjectCardStats`' and `ProjectCardDate`'s icons.
 const CARD_STAT_ICON: f32 = 20.0;
@@ -277,12 +361,24 @@ const COLLECTION_NAME: f32 = 18.0;
 const COLLECTION_NAME_LINE: f32 = 28.0;
 /// `gap-2` between the name and the `LibraryIcon` line under it.
 const COLLECTION_NAME_GAP: f32 = 8.0;
-/// The foot's own `text-sm`: the *Collection* line, the description and the project
-/// count are all inherited, and none of the three carries a size class.
-const COLLECTION_LABEL: f32 = 14.0;
-/// `text-sm`'s own line -- the reference's is twenty pixels of fourteen-pixel text,
-/// which is what `ui::tabs`' label uses for the same class.
-const COLLECTION_LABEL_LINE: f32 = 20.0;
+/// The body size, which is what every other line of a collection card is.
+///
+/// `layout.vue:276-316` is the whole of it: the name's `h2` carries `text-lg` on
+/// `:277`, and *nothing else on the card names a size at all* -- the
+/// `LibraryIcon` line is `<div class="flex items-center gap-1">` (`:281`), the
+/// description is `<div class="grow text-primary">` (`:287`) and the foot is
+/// `<div class="mt-auto flex flex-wrap items-center gap-4">` (`:290`), and
+/// `text-primary` is this preset's alias for `--color-text-primary`
+/// (`tailwind-preset.ts:23`), a colour rather than a scale.
+/// `ProjectCardList.vue` and the card's own wrapper div (`:268-273`) name none
+/// either, so all four inherit the body size, which is [`HEADER_TEXT`] and the
+/// same sixteen the reference's own header words measure.
+const COLLECTION_LABEL: f32 = HEADER_TEXT;
+/// The line those four lines are set on: the stylesheet's own `1.15` at sixteen --
+/// [`HEADER_SUMMARY_LINE`]'s reading, for the same rule and the same number. The
+/// card's rows are set by its own `h-full` track rather than by centring against
+/// the avatar, so nothing here needs the CSS line and nothing here is measured.
+const COLLECTION_LABEL_LINE: f32 = HEADER_SUMMARY_LINE;
 /// The glyphs in the card's head and foot, which the reference asks for at its
 /// default `size-4`.
 const COLLECTION_ICON: f32 = ui::CONTROL_ICON;
@@ -1018,8 +1114,8 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
                 blocks.push(ui::card(
                     theme,
                     text(State::empty_sentence(false))
-                        .size(16.0)
-                        .line_height(iced::Pixels(16.0))
+                        .size(EMPTY_HEADING)
+                        .line_height(iced::Pixels(EMPTY_HEADING_LINE))
                         .font(heading())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
                 ));
@@ -1040,8 +1136,8 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
         blocks.push(ui::card(
             theme,
             text(State::no_collections_sentence(false))
-                .size(16.0)
-                .line_height(iced::Pixels(16.0))
+                .size(EMPTY_HEADING)
+                .line_height(iced::Pixels(EMPTY_HEADING_LINE))
                 .font(heading())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         ));
@@ -1226,6 +1322,7 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
                 .push(
                     text(label)
                         .size(HEADER_TEXT)
+                        .line_height(iced::Pixels(METADATA_LINE))
                         .font(medium())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
                 ),
@@ -2263,8 +2360,20 @@ fn platform_tag<'a, Message: 'a>(
         None => ui::TAG_HEIGHT,
     };
     let painted = theme_gen::ink(theme, ink);
+    // `TagItem.vue:19`'s `baseClass` is `py-1 leading-none ... font-normal text-sm`,
+    // and `leading-none` is `line-height: 1`, so the line is the label's own size and
+    // not `text-sm`'s `1.25rem`: the pill is `1 + 4 + 14 + 4 + 1 = 24` rows, which
+    // is [`ui::TAG_HEIGHT`], and a twenty-pixel line would ask for thirty. Pinned
+    // anyway, because iced's `Relative(1.3)` is 18.2 here and this is the second
+    // site on this page that left the line to it.
+    //
+    // Which is a change no capture will show: the pill centres its content, and a
+    // centred box puts the baseline at `top + H/2 + (A - D) * fs / 2` whatever the
+    // line is, so the words and the `h-4` glyph land on the rows they were already
+    // on. It is right rather than visible.
     let label_text = text(label.to_string())
         .size(ui::TAG_LABEL_SIZE)
+        .line_height(iced::Pixels(ui::TAG_LABEL_SIZE))
         .font(regular())
         .style(iced::theme::Text::Color(painted));
     let content: Element<'a, Message> = match glyph {
@@ -3831,11 +3940,28 @@ mod tests {
         assert_eq!(HEADER_STRIP_GAP, 16.0);
         assert_eq!(CARD_TAG_GAP, 4.0);
         assert_eq!(CARD_TAG_ROW, 26.0);
-        // The summary inherits `text-base` on the stylesheet's own 18.4-pixel line,
-        // which paints as 18 -- measured, the reference's two summary lines are 18
-        // pixels apart.
+        // The summary carries no size class, so it inherits the body size on the
+        // stylesheet's own 18.4-pixel line, which paints as 18 -- measured, the
+        // reference's two `6` digits in card two's summary are 461..472 and
+        // 479..490, eighteen rows apart with identical profiles. Sixteen and not
+        // fourteen: Inter's em dash is `1.0000 em` of ink, and card two's summary
+        // ends in a pair of them across thirty-two solid pixels.
         assert_eq!(CARD_SUMMARY, 16.0);
         assert_eq!(CARD_SUMMARY_LINE, 18.0);
+        // The metadata row's words are `leading-none`, which is `line-height: 1`, so
+        // its line is its own size -- the one site on this page where that is not
+        // the inherited `1.15` of [`HEADER_SUMMARY_LINE`], and the reason the
+        // metadata band moved 320 pixels closer to the reference when it was set.
+        assert_eq!(METADATA_LINE, HEADER_TEXT);
+        // Both empty sentences are `EmptyState`'s *heading*, a `text-2xl` span.
+        assert_eq!(EMPTY_HEADING, 24.0);
+        assert_eq!(EMPTY_HEADING_LINE, 32.0);
+        // A collection card's name is the only line on it that names a size, so the
+        // other four are the body size on the inherited line rather than a
+        // `text-sm` nobody wrote.
+        assert_eq!(COLLECTION_LABEL, HEADER_TEXT);
+        assert_eq!(COLLECTION_LABEL_LINE, HEADER_SUMMARY_LINE);
+        assert_ne!(COLLECTION_NAME, COLLECTION_LABEL, "the name names a size and the rest do not");
     }
 
     #[test]
