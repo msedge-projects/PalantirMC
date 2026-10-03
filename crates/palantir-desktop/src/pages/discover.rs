@@ -50,7 +50,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use iced::mouse::Interaction;
 use iced::widget::{column, container, mouse_area, row, Space};
-use iced::{Alignment, Background, Border, Element, Font, Length, Padding};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 use palantir_net::engine::Search as ApiSearch;
 use palantir_net::ModrinthSearchHit;
 
@@ -1929,6 +1929,30 @@ fn message(key: Key) -> String {
 /// label) add up to a slightly different number than the pixels do.
 const OPTION_ICON: f32 = 20.0;
 
+/// The fill behind an option row, as the reference's three arms name them.
+///
+/// `SearchFilterOption.vue`'s button class is one expression with three arms:
+/// `included ? 'bg-brand-highlight text-contrast' : excluded ?
+/// 'bg-highlight-red text-contrast' : 'bg-transparent … hover:bg-button-bg'`. The
+/// third arm is the one that was missing -- the row drew nothing under the
+/// pointer, so a reader could not tell which row the press would land on except
+/// by its label lifting to `text-contrast`.
+///
+/// The unchosen fill fades in with the hover rather than arriving with it, which
+/// is what `crate::ui::switch` does with the same token: the tween's travel is
+/// the clock, and the pointer's own fraction is how far through it the frame is.
+fn row_fill(chosen: bool, excluded: bool, hover: f32) -> Option<(Ink, f32)> {
+    if chosen {
+        Some((Ink::ColorBrandHighlight, 1.0))
+    } else if excluded {
+        Some((Ink::RedHighlight, 1.0))
+    } else if hover > 0.0 {
+        Some((Ink::ButtonBg, hover.min(1.0)))
+    } else {
+        None
+    }
+}
+
 fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     let key = crate::ui::scoped("discover:option", &row.id);
     let (_, hover) = crate::ui::interaction(key);
@@ -1986,14 +2010,9 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
         );
         line = line.push(exclude_button(theme, row));
     }
-    let background = if row.chosen {
-        Some(Background::Color(theme_gen::ink(theme, Ink::ColorBrandHighlight)))
-    } else if row.excluded {
-        // `excluded ? 'bg-highlight-red text-contrast'`.
-        Some(Background::Color(theme_gen::ink(theme, Ink::RedHighlight)))
-    } else {
-        None
-    };
+    let background = row_fill(row.chosen, row.excluded, hover).map(|(ink, alpha)| {
+        Background::Color(Color { a: alpha, ..theme_gen::ink(theme, ink) })
+    });
     mouse_area(
         container(line)
             .width(Length::Fill)
@@ -3882,6 +3901,25 @@ mod tests {
 
     /// The version rows the panel would draw for `state`, in the order it draws
     /// them, which is the tag document's own order.
+    #[test]
+    fn an_option_row_is_tinted_only_while_the_pointer_is_on_it() {
+        // The reference's third arm: an unchosen row is `bg-transparent` with
+        // `hover:bg-button-bg`, so the fill is the pointer's own fraction of
+        // `--color-button-bg` -- the same arithmetic `ui::switch` uses on the same
+        // token.
+        assert_eq!(row_fill(false, false, 0.0), None, "an unchosen row with no pointer on it");
+        assert_eq!(
+            row_fill(false, false, 0.4),
+            Some((Ink::ButtonBg, 0.4)),
+            "and half a hover is half the fill"
+        );
+        // The chosen and excluded arms are opaque and are not the pointer's to
+        // fade: one is `bg-brand-highlight`, the other `bg-highlight-red`.
+        assert_eq!(row_fill(true, false, 0.3), Some((Ink::ColorBrandHighlight, 1.0)));
+        assert_eq!(row_fill(true, true, 0.0), Some((Ink::ColorBrandHighlight, 1.0)), "and never both at once");
+        assert_eq!(row_fill(false, true, 0.0), Some((Ink::RedHighlight, 1.0)));
+    }
+
     fn version_ids(state: &State, tags: &palantir_net::Tags) -> Vec<String> {
         let query = state.version_query.to_lowercase();
         tags.game_versions
