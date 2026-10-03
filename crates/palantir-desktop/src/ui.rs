@@ -4,7 +4,7 @@
 //! | Widget | Reference |
 //! | --- | --- |
 //! | [`card`] | `.base-card` in `assets/styles/classes.scss`: `padding: 1rem`, `background-color: var(--surface-3)`, `border-radius: var(--radius-lg)`, `border: 1px solid var(--surface-4)` |
-//! | [`tabs`] | `base/NavTabs.vue`: `rounded-full bg-bg-raised p-1` inside `card-shadow border border-solid border-surface-4`, each tab `px-4 py-2 font-bold` |
+//! | [`tabs`] | `base/NavTabs.vue`: `rounded-full bg-bg-raised p-1` inside `border border-solid border-surface-4`, each tab `px-4 py-2 font-bold`; the `card-shadow` on the same element is **not** drawn, for [`card_shadow`] |
 //! | [`tag`] | `base/TagItem.vue`: `bg-button-bg border-surface-5 border-[1px] px-2 py-1 leading-none rounded-full text-sm font-normal`, the label in `text-secondary` |
 //! | [`admonition`] | `base/Admonition.vue`: a 24px severity icon in its own colour, then a header and a body |
 //! | [`search`] | `base/inputs/Input.vue`: a 20px `text-secondary opacity-60` icon, value `text-primary`, placeholder `text-secondary`, focus `text-contrast` |
@@ -2128,17 +2128,53 @@ pub const TAB_STRIP: f32 = TAB_HEIGHT + 8.0 + 2.0;
 /// The `border-[1px]` `NavTabs.vue:11` puts on the strip, in `--surface-4`.
 pub const TAB_STRIP_BORDER: f32 = 1.0;
 
-/// `card-shadow`, the class `NavTabs.vue:11` puts on the strip.
+/// `--shadow-card`, the class `NavTabs.vue:11` puts on the strip as `card-shadow`.
 ///
-/// It resolves to `--shadow-card` (`app-frontend/src/assets/stylesheets/global.scss:164`),
-/// which is `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` in the dark theme
+/// It resolves to `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` in the dark theme
 /// (`assets/styles/variables.scss:368`) and `rgba(50, 50, 100, 0.1) 0px 2px 4px 0px`
 /// in the light one (`:140`); `.oled-mode` and `.retro-mode` extend `.dark-mode`
-/// and so take dark's. All three numbers survive the crossing into iced's
-/// `Shadow` because the value's spread is `0px` and `Shadow` has no spread to
-/// lose it in; the *shape* does not, and is the residual the notes record: the
-/// backend ramps a blur with a smoothstep across the radius where Chromium runs a
-/// Gaussian, so the row under the pill is softer here than there.
+/// and so take dark's. **None of it is drawn**, and that is the documented limit
+/// rather than a residual shape: iced 0.12.3 cannot draw it here at all. The
+/// numbers are kept because they are what the measurement is compared against and
+/// because a backend that grows a separate shadow pass can draw them without a
+/// second decision.
+///
+/// **Why.** `iced_widget::container::draw_background` has no shadow of its own: it
+/// hands the fill, the ring and the `Shadow` to a single `renderer::fill_quad`,
+/// and `iced_wgpu`'s solid pipeline expands that one quad by the blur and the
+/// offset and composites the shadow in the same fragment
+/// (`shader/quad/solid.wgsl`):
+///
+/// ```wgsl
+/// return mix(base_color, shadow_color, (1.0 - radius_alpha) * shadow_alpha);
+/// ```
+///
+/// `radius_alpha` is meant to be that quad's own rounded-box coverage, so the
+/// shadow only reaches the pixels the box does not cover, and on paper nothing
+/// lands in the fill. Measured on this port's own build at 1280x720, it lands
+/// there anyway: `#27292E` reads `#1D1F22` from x=243 to x=356, `#161719` from
+/// x=140 to x=236 and `#101113` from x=237 to x=242, with hard vertical steps at
+/// x=357, x=243 and x=237 -- which are the strip's own tab boundaries -- and the
+/// selected tab's plate is darkened with them. The steps are one, two and three
+/// layers of `rgba(0,0,0,0.25)` stacked on the pill's own fill.
+///
+/// Three placements were built and measured, each a full release build:
+///
+/// | where the shadow goes | x>=357 | x=243..356 | x=140..236 | x=237..242 |
+/// | --- | --- | --- | --- | --- |
+/// | on the pill's own quad | `#27292E` | 0.75x | 0.75^2 | 0.75^3 |
+/// | on a parent quad drawn *before* the pill | `#27292E` | 0.875x | 0.77x | 0.667x |
+/// | not drawn at all | `#27292E` | `#27292E` | `#27292E` | `#27292E` |
+///
+/// A parent quad is drawn first -- `Container::draw` calls `draw_background`
+/// before it draws its child -- so the second row is a case where the pill's own
+/// opaque fill is painted last and still does not win, which is the whole of the
+/// limit: there is no placement of an `iced::Shadow` that leaves this pill's fill
+/// alone. Two other probes rule out the alternatives: the steps do not move when
+/// the blur is changed from 4 to 40, so they are not the shadow's own edge, and
+/// they reproduce at the same x on a freshly created surface at a different window
+/// size, so they are not a stale framebuffer.
+#[cfg(test)]
 fn card_shadow(theme: Gen) -> iced::Shadow {
     let color = match theme {
         Gen::Light => Color::from_rgba(50.0 / 255.0, 50.0 / 255.0, 100.0 / 255.0, 0.1),
@@ -2152,8 +2188,10 @@ fn card_shadow(theme: Gen) -> iced::Shadow {
 }
 
 /// `0px 2px` in `--shadow-card`: how far the shadow sits below the pill.
+#[cfg(test)]
 const TAB_SHADOW_OFFSET: f32 = 2.0;
 /// `4px` in `--shadow-card`, which is the blur radius and not a diameter.
+#[cfg(test)]
 const TAB_SHADOW_BLUR: f32 = 4.0;
 
 /// The selected tab's plate, as the reference composites it.
@@ -2208,8 +2246,9 @@ fn plate(theme: Gen) -> Color {
 /// border-solid border-surface-4': mode === 'navigation'` (`NavTabs.vue:11`), and
 /// nothing in the vendored tree passes `mode="local"` -- the three call sites are
 /// the profile's `page-nav` strip, the browse tab's, and the hosting manager's. So
-/// the border and the shadow belong on all five of this port's strips
-/// ([`TAB_STRIP`], [`card_shadow`]).
+/// the border belongs on all five of this port's strips ([`TAB_STRIP`],
+/// [`TAB_STRIP_BORDER`]). The `card-shadow` on the same element does not:
+/// [`card_shadow`] is why.
 pub fn tabs<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     keys: &[&'static str],
@@ -2320,7 +2359,11 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
     // outside the padding and so does iced -- so the height is set rather than
     // left to the padding, and it is the reference's own arithmetic:
     // 1 + 4 + 36 + 4 + 1.
-    let shadow = card_shadow(theme);
+    //
+    // There is no `shadow` in this appearance and there is not one anywhere else
+    // in this file: iced 0.12.3 paints a container's shadow as part of that
+    // container's own quad, and on this pill the shadow reaches inside the fill.
+    // [`card_shadow`] has the measurements.
     container(track)
         .height(Length::Fixed(TAB_STRIP))
         .padding(4.0)
@@ -2331,7 +2374,6 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
                 width: TAB_STRIP_BORDER,
                 color: theme_gen::ink(theme, Ink::Surface4),
             },
-            shadow,
             ..container::Appearance::default()
         })
         .into()
@@ -3137,9 +3179,10 @@ mod tests {
         // `#34363c` (`assets/styles/variables.scss:238`) -- the byte at y=201 and
         // at y=246 of that capture.
         assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface4), [0x34, 0x36, 0x3c, 0xff]);
-        // And the shadow carries all three of `--shadow-card`'s numbers: iced's
-        // `Shadow` has no `spread_radius`, and this value's spread is 0px, so
-        // there is nothing of it to lose on the way across.
+        // `--shadow-card` still names all three of its numbers here, so that a
+        // backend which can draw the shadow has them: iced's `Shadow` has no
+        // `spread_radius` and this value's spread is 0px, so nothing of it is
+        // lost on the way across.
         for theme in Gen::ALL {
             let shadow = card_shadow(*theme);
             assert_eq!(shadow.offset, iced::Vector::new(0.0, 2.0));
@@ -3148,6 +3191,40 @@ mod tests {
         }
         // Dark's own colour, from `variables.scss:368`.
         assert_eq!(card_shadow(Gen::Dark).color, Color::from_rgba(0.0, 0.0, 0.0, 0.25));
+    }
+
+    #[test]
+    fn the_tab_strip_carries_no_shadow_at_all() {
+        // The claim this replaces was that only the shadow's *shape* is a
+        // residual. It is not: iced 0.12.3 cannot draw the shadow here without
+        // reaching inside the pill's own fill, and the pill's fill is the one
+        // thing on this widget the reference is exact about.
+        //
+        // Measured on this port's own build at 1280x720, y=212 across the pill,
+        // as multiples of the pill's own `#27292E`:
+        //
+        // | the shadow goes | x>=357 | x=243..356 | x=140..236 | x=237..242 |
+        // | --- | --- | --- | --- | --- |
+        // | on the pill | 1.0 | 0.750 | 0.5625 | 0.4219 |
+        // | on a parent quad drawn first | 1.0 | 0.875 | 0.769 | 0.667 |
+        // | nowhere | 1.0 | 1.0 | 1.0 | 1.0 |
+        //
+        // so the appearance `tabs_with_glyphs` builds must not carry a shadow,
+        // and `draw_background`'s guard proves it will not draw one from
+        // anywhere else: with `background` set it draws, but the shadow branch of
+        // the solid pipeline is taken on `shadow.color.a > 0.0` alone, and
+        // `container::Appearance::default()`'s is `Color::default()`, which is
+        // `Color::TRANSPARENT`.
+        assert_eq!(container::Appearance::default().shadow.color.a, 0.0);
+        assert_eq!(iced::Shadow::default().color, Color::TRANSPARENT);
+        // The pill is `#27292E` and the plate composites over exactly that, so the
+        // fill a shadow lands on is not a colour this port chooses.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg), [0x27, 0x29, 0x2e, 0xff]);
+        // And the ring, the height and the padding are unchanged by this, because
+        // the shadow was never part of any of them.
+        assert_eq!(TAB_STRIP, 46.0);
+        assert_eq!(TAB_STRIP_BORDER, 1.0);
+        assert_eq!(TAB_PAD, 16.0);
     }
 
     #[test]
