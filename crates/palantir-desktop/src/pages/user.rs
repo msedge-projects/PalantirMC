@@ -81,7 +81,7 @@ use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP};
 use crate::route::ProjectType;
 use crate::store::Store;
-use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Ink, Theme as Gen};
 use crate::ui::{self, text, Hovered};
@@ -174,7 +174,7 @@ const HEADER_PAD_BOTTOM: f32 = 16.0;
 
 /// The size and the line of the sentence an empty list draws.
 ///
-/// `EmptyState.vue:9` is `<span class="text-2xl font-semibold text-contrast">`, and
+/// `EmptyState.vue:7` is `<span class="text-2xl font-semibold text-contrast">`, and
 /// both empty sentences on this page are that component's *heading*
 /// (`layout.vue:243`'s `profile.label.no-projects` and `layout.vue:328`'s
 /// `profile.label.no-collections`) rather than its description -- the descriptions
@@ -183,21 +183,24 @@ const HEADER_PAD_BOTTOM: f32 = 16.0;
 /// thirty-two-pixel line; it is a `span` and not a heading, so there is no user
 /// agent's line-height in it to read instead, whatever `preflight: false` does
 /// elsewhere on this page.
+///
+/// The weight is the third half of the same class, and it is 600 and not the 800
+/// [`crate::style::heading`] draws a real heading at: `font-semibold` in the one
+/// span, `--font-weight-heading` in the other. Measured, the reference's own
+/// sentence is set no heavier than the `text-base font-medium` words under it.
 const EMPTY_HEADING: f32 = 24.0;
 /// [`EMPTY_HEADING`]'s own line, which is `text-2xl`'s `2rem` and not its size.
 const EMPTY_HEADING_LINE: f32 = 32.0;
 
 /// `gap-x-3` and `gap-y-2` on a project card's own grid.
+///
+/// The horizontal one is also a *track* of its own, which is what the width a
+/// card's summary has to stop in is made of: see [`CARD_ICON`], [`project_row`]
+/// and css-grid-1 §11.2's note that "gutters are treated as fixed-size tracks --
+/// tracks with their min and max sizing functions both set to the gutter's used
+/// size -- for the purpose of the grid sizing algorithm".
 const CARD_GAP_X: f32 = 12.0;
 const CARD_GAP_Y: f32 = 8.0;
-/// The room between a card's `1fr` info column and its right-hand columns.
-///
-/// `grid-template-columns: auto 1fr auto auto` with `gap-x-3` puts *three* gaps
-/// across a card: icon | info | (empty `actions`/`dummy`) | stats. The third
-/// column is `auto` and holds nothing, because `__actions` spans columns three
-/// and four and pushes its button to the right with `ml-auto` -- so the space a
-/// card's summary actually has to stop in is two `gap-x-3`, not one.
-const CARD_COL_GAP: f32 = 24.0;
 /// `gap-3` on `ProjectCardList`, between the cards of the list.
 const LIST_GAP: f32 = 12.0;
 /// `text-xl` on `ProjectCardTitle`, which is the list layout's own size.
@@ -236,13 +239,16 @@ const CARD_INFO_GAP: f32 = 8.0;
 /// apart with identical profiles, which is [`CARD_SUMMARY_LINE`] and not the twenty
 /// a `text-sm` line would put between them.
 ///
-/// A fourteen-pixel reading is also refuted by the wrap, which is the one thing
-/// about this site that is *not* right yet: the reference's card-two first line
-/// carries one word more than ours (it ends *A skyblock*, ours ends *A*), and the
-/// two sides' word boundaries are identical to the pixel over the whole shared
+/// A fourteen-pixel reading is also refuted by the wrap, which is what fixed this
+/// size before the column's width was known: the reference's card-two first line
+/// carries one word more than ours did (it ends *A skyblock*, ours ended *A*), and
+/// the two sides' word boundaries were identical to the pixel over the whole shared
 /// prefix -- `——` at x=620..651 and `A` at x=657..666 on both -- so the two are set
 /// at the same size and the difference is where the column stops, not how big the
-/// text is.
+/// text is. That column is [`project_row`]'s `right` away now; the residual on the
+/// second and third cards is our *Install to instance* button measuring 183 where
+/// the reference's measures 189, which is the advance question the summary above
+/// the `1fr` column and not a number in this file.
 const CARD_SUMMARY: f32 = HEADER_TEXT;
 /// The line the summary is set on: the painted eighteen, not the CSS eighteen-and-
 /// four-fifths [`HEADER_SUMMARY_LINE`] keeps.
@@ -1116,7 +1122,10 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
                     text(State::empty_sentence(false))
                         .size(EMPTY_HEADING)
                         .line_height(iced::Pixels(EMPTY_HEADING_LINE))
-                        .font(heading())
+                        // `font-semibold`, and not the 800 [`heading`] is for a
+                        // real heading: `EmptyState.vue:7` is
+                        // `<span class="text-2xl font-semibold text-contrast">`.
+                        .font(semibold())
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
                 ));
             }
@@ -1138,7 +1147,9 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
             text(State::no_collections_sentence(false))
                 .size(EMPTY_HEADING)
                 .line_height(iced::Pixels(EMPTY_HEADING_LINE))
-                .font(heading())
+                // The same `font-semibold` as the sentence above, for the same
+                // `EmptyState.vue:7`.
+                .font(semibold())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         ));
     } else if let Some(grid) = collections {
@@ -1699,11 +1710,16 @@ fn collection_status(
 /// independent rows the audit measured the downloads at rel y 95 against the
 /// reference's 75, the date at 101 against 106, and the two overlapping by ten.
 ///
+/// Horizontally the same template is what decides where the `1fr` info column
+/// stops, which is load-bearing rather than tidiness -- the column is what wraps
+/// the summary. It is derived in full at [`project_row`]'s `right`, from
+/// `ProjectCard.vue:319-325` and css-grid-1 §11.5.
+///
 /// Every landmark below is measured off `/tmp/ref/user-ref.png` at the
 /// reference's own 1280x720: the card is x=88..955 and y=259..400 (868 x 142), its
-/// content box is y=276..384, the icon is y=276..375, the *Install* button is
-/// y=276..311, the stats are y=334..349, the tags are y=358..383 and the date is
-/// y=365..382.
+/// content box is x=105..938 and y=276..384, the icon is x=105..204 and
+/// y=276..375, the *Install* button is x=845..938 and y=276..311, the stats are
+/// x=786..937 and y=334..349, the tags are y=358..383 and the date is y=365..382.
 fn project_row<'a>(
     theme: Gen,
     profile: &'a Profile,
@@ -1756,9 +1772,9 @@ fn project_row<'a>(
             .width(Length::Fill)
             .height(Length::Fixed(CARD_SUMMARY_LINE * 2.0)),
         );
-    // `__stats`: downloads and then followers on one line, the date under it, the
-    // pair right-aligned against the card's own right edge.
-    let stats = column![]
+    // `__stats`, the grid's *fourth* column: the downloads-and-followers line and
+    // then the date under it, both flush right against the card's own edge.
+    let mut lines = column![]
         .spacing(CARD_STATS_GAP)
         .align_items(Alignment::End)
         .push(
@@ -1776,16 +1792,65 @@ fn project_row<'a>(
         (Glyph::History, project.updated.as_str())
     };
     let when = how_ago(date_key.1, now);
-    let stats = if when.is_empty() {
-        stats
-    } else {
-        stats.push(stat(theme, date_key.0, &when))
-    };
-    // `__actions` and `__stats` are the grid's third and fourth columns, both
-    // flush right, so they share one column here and one column's width: the
-    // wider of the two, which is what an `auto` track takes. Measured on the
-    // reference's first card: the button's ring is 94 pixels and the stats' ink
-    // 152, so the track is 152 and the button sits at x=845..938.
+    if !when.is_empty() {
+        lines = lines.push(stat(theme, date_key.0, &when));
+    }
+    // The `gap-x-3` between the third and fourth columns is a fixed-size track of
+    // its own (css-grid-1 §11.2), so the span those two columns make is a row of
+    // [the third track, which nothing in this layout sizes, then the stats] --
+    // twelve pixels wider than the stats alone whenever the stats are what
+    // governs that span.
+    let stats = row![]
+        .spacing(CARD_GAP_X)
+        .push(Space::with_width(Length::Shrink))
+        .push(lines);
+    // `__actions` and `__stats` are one span of the grid -- columns three and
+    // four, the gutter between them included -- so this is the width of that
+    // whole span, and it is what the `1fr` column is measured against.
+    //
+    // It is the *wider of two things*, and which one wins is the reference's
+    // whole answer to a card that wraps a word early. `ProjectCard.vue:319-325`:
+    //
+    // ```css
+    // .grid-project-card-list.has-actions {
+    //     grid-template:
+    //         'icon info actions actions'
+    //         'icon info dummy stats'
+    //         'icon tags tags stats';
+    //     grid-template-columns: auto 1fr auto auto;
+    // }
+    // ```
+    //
+    // `__actions` spans the third column, the gutter and the fourth, and css-grid
+    // hands a spanning item's width to the tracks it spans (§11.5: "evenly
+    // distributing the extra space across those tracks insofar as possible"), so
+    // tracks three and four together owe it the button's own 189 pixels *less the
+    // 12 the gutter already owes*. Nothing else is in the third column -- the
+    // `dummy` area of row two is named and never filled -- so it takes the whole
+    // shortfall, and the span comes to exactly the button's width. `__stats` is
+    // the one item of the fourth column alone and `auto` is `minmax(auto,
+    // max-content)`, so that track is as wide as the wider of the stats line and
+    // the date under it. How the 189 splits between the two `auto` tracks is not
+    // observable and does not matter: `__actions` is `ml-auto` and `__stats` is
+    // `items-end`, so both are flush against the card's own right edge whatever
+    // the split is, and only the sum reaches the summary.
+    //
+    // Measured on the reference's own three cards at 1280x720: the first card's
+    // button is 94 (`x=845..938`) against a 153-pixel stats line, so the stats
+    // govern, the third track is nothing, the span is 165, and the button sits
+    // flush right in it. The second and third cards carry *Install to instance*
+    // at 189 (`x=750..938`), wider than their 139- and 119-pixel stats, so there
+    // the button governs, the span is 189, and the summary's `1fr` column is
+    // `834 - 100 - 3 * 12 - (189 - 12) = 521` -- the 521 that card two's first
+    // line needs to carry *A skyblock* (`x=217..737`, its em dashes at
+    // `620..651`) and not one word more.
+    //
+    // What is left of that on the second and third cards is not in this file: our
+    // *Install to instance* measures 183 where the reference's measures 189 -- the
+    // label's own advance, 136.76 by `Inter-600`'s `hmtx` against the ~143 the
+    // reference paints, which is the letter-spacing question and not a number here.
+    // So those two cards get `521 + 6 - 1`, the last pixel being this card's own
+    // content box being one wider than the reference's.
     let right = column![]
         .spacing(CARD_STATS_LEAD)
         .align_items(Alignment::End)
@@ -1795,9 +1860,10 @@ fn project_row<'a>(
         .push(stats);
     let head = row![]
         .width(Length::Fill)
-        // Two `gap-x-3`: the grid's third column is `auto` and empty, because
-        // `__actions` spans columns three and four and pushes itself right.
-        .spacing(CARD_COL_GAP)
+        // One `gap-x-3`: the room between the `1fr` column and the span the two
+        // right-hand columns make. The other two gaps are inside the icon row and
+        // inside `right`, which is the span itself.
+        .spacing(CARD_GAP_X)
         .push(
             row![]
                 .width(Length::Fill)
@@ -3931,9 +3997,27 @@ mod tests {
         assert_eq!(CARD_ICON + CARD_GAP_X + 17.0, 129.0);
         // And `line-clamp-2` is two of the summary's own lines.
         assert_eq!(CARD_SUMMARY_LINE * 2.0, 36.0);
-        // Two `gap-x-3` between the `1fr` column and the right-hand ones, because
-        // the grid's third `auto` column is empty.
-        assert_eq!(CARD_COL_GAP, CARD_GAP_X * 2.0);
+        // The room a card's summary has to stop in, read off the reference's own
+        // second card: an 868-pixel card less its `border-1px` and its `p-4` is an
+        // 834-pixel content box, the icon column takes 100 of it, three `gap-x-3`
+        // take 36, and the span the two right-hand `auto` columns make owes the
+        // 189-pixel *Install to instance* button all but the one `gap-x-3` that
+        // spans it. What is left is the `1fr` column, and 521 is the width that
+        // carries *A skyblock* to x=737 and stops before *with*.
+        assert_eq!(
+            868.0 - 2.0 - 2.0 * ui::CARD_PAD - CARD_ICON - 3.0 * CARD_GAP_X - (189.0 - CARD_GAP_X),
+            521.0
+        );
+        // And on the first card, where the 94-pixel button is narrower than the
+        // 153-pixel stats line, the stats govern instead: the third track is
+        // nothing, the span is a `gap-x-3` more than the stats, and the `1fr`
+        // column comes out twenty-four wider than it is on the second -- which is
+        // what puts the button flush right at the reference's x=845 with room for
+        // a word the reference's own line does not take.
+        assert_eq!(
+            868.0 - 2.0 - 2.0 * ui::CARD_PAD - CARD_ICON - 3.0 * CARD_GAP_X - 153.0,
+            545.0
+        );
         // The rule-to-strip gap is `NormalPage`'s `gap-y-4` rather than the
         // `gap-y-3` the rest of the page is spaced with: measured, the
         // reference's rule is y=184 and the strip's border y=201, and ours drew
