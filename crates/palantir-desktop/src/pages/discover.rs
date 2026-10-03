@@ -246,6 +246,29 @@ pub enum Message {
     /// reference's own `category_<project_type>_<header>` where the row is a
     /// category, because that is what `search.ts` keys its filters by.
     Exclude { filter: String, option: String },
+    /// A game version was chosen, or unchosen.
+    ///
+    /// `game_version`'s options are `method: 'or'` over the field
+    /// `game_versions`, so two of them are one `IN` -- the same shape as a
+    /// `resolutions` section's alternatives and for the same reason, and kept in
+    /// a set of its own because a version is not a category.
+    Version(String),
+    /// The panel's own search field was typed in.
+    ///
+    /// Not a request: it filters the section's rows, exactly as `query` does in
+    /// `SearchSidebarFilter.vue`, and the version list behind it does not move.
+    VersionQuery(String),
+    /// The section's *Show all versions* box was pressed.
+    ///
+    /// Also not a request: the box is a `toggle_group`, and what it controls is
+    /// whether a non-release version is a row at all.
+    AllVersions(bool),
+    /// The panel's own scroll region reported where it is.
+    ///
+    /// A geometry of its own rather than the page's: the version list is a second
+    /// scroll region inside the sidebar panel, with its own 256-pixel window, and
+    /// one geometry cannot be two offsets at once.
+    VersionsScrolled(Geometry),
     /// A sidebar section was opened or closed.
     ///
     /// Not a request: opening a section changes what is on screen and not what
@@ -411,6 +434,25 @@ pub struct State {
     /// press the exclusion once it is excluded). One option is in one set or the
     /// other, never both.
     pub excluded: BTreeSet<(String, String)>,
+    /// The game versions chosen in the sidebar, by version string.
+    ///
+    /// Its own set because a version is not a category: the request carries it
+    /// under `game_versions`, and it is an `'or'` option, so two of them are one
+    /// list rather than two parts.
+    pub versions: BTreeSet<String>,
+    /// What has been typed into the game-version section's own search field.
+    ///
+    /// The panel's own `query`, not the page's: it filters the rows of one
+    /// section and nothing else, which is what `isVisible`'s `matchesQuery` does.
+    pub version_query: String,
+    /// Whether the section's *Show all versions* box is ticked, which is what
+    /// `toggledGroups` holds for the one toggle group the filter declares.
+    ///
+    /// False on arrival, because the box is unticked in the reference and a
+    /// snapshot row is a row the reader has to ask for.
+    pub all_versions: bool,
+    /// Where the version panel's own scroll region is, as it last reported.
+    versions_at: Geometry,
     /// The sidebar sections whose open state the reader has changed.
     ///
     /// One set for both kinds of default, because a default is a fact about the
@@ -471,6 +513,10 @@ impl State {
             categories: BTreeSet::new(),
             filters: BTreeSet::new(),
             excluded: BTreeSet::new(),
+            versions: BTreeSet::new(),
+            version_query: String::new(),
+            all_versions: false,
+            versions_at: Geometry::default(),
             touched: BTreeSet::new(),
             expanded: BTreeSet::new(),
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
@@ -498,6 +544,7 @@ impl State {
             // Nothing to do with it here: where the region is *is* the page's
             // state, and the next frame ([`view`]) is the one that uses it.
             Message::Scrolled(at) => self.geometry = at,
+            Message::VersionsScrolled(at) => self.versions_at = at,
 
             Message::ProjectType(project_type) => {
                 if self.project_type != project_type {
@@ -602,6 +649,23 @@ impl State {
                     self.touched.insert(section);
                 }
             }
+            // The same question for a game version, and the same answer. An exclusion
+            // cannot happen here -- `game_version` is `supports: ['include']` --
+            // so the choice only ever lands in `versions`.
+            Message::Version(version) => {
+                if !self.versions.remove(&version) {
+                    self.versions.insert(version);
+                }
+                self.page = 1;
+                return Some(Ask::Search(self.ask()));
+            }
+            // The panel's own two controls are the ones `SearchSidebarFilter`
+            // keeps in refs: the box decides whether a snapshot is a row, and the
+            // field decides which rows are on screen. Neither moves the request,
+            // so neither asks -- which is also why the versions chosen stay
+            // chosen while the reader narrows the list they are chosen from.
+            Message::VersionQuery(query) => self.version_query = query,
+            Message::AllVersions(on) => self.all_versions = on,
             // *Show more* is `showMore`, a `ref(false)` the reference keeps per
             // section, and the one piece of a section's own state that is not its
             // open state: the content is already open when the press is reachable
@@ -804,6 +868,14 @@ impl State {
             .chain(self.options_of(SHADER_LOADER))
             .collect();
         if let Some(part) = any_of("categories", &group.into_iter().collect::<Vec<&str>>()) {
+            parts.push(part);
+        }
+        // `game_version`'s options are `method: 'or'` over the field
+        // `game_versions`, so they are a second group of their own -- a different
+        // field from `categories`, so `newFilters` starts a second entry in
+        // `orGroups` rather than joining the versions into the categories list.
+        let chosen_versions: Vec<&str> = self.versions.iter().map(|version| version.as_str()).collect();
+        if let Some(part) = any_of("game_versions", &chosen_versions) {
             parts.push(part);
         }
         // Then the exclusions, which `newFilters` appends after the groups and
@@ -1132,7 +1204,15 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             }
             let rows = category_rows(state, header, &options);
             let open = state.is_open(header, true);
-            blocks.push(section(theme, header, locale::category_header_label(header), &rows, open, None));
+            blocks.push(section(
+                theme,
+                header,
+                locale::category_header_label(header),
+                &rows,
+                open,
+                None,
+                None,
+            ));
         }
         // And then the filters that are not categories, in `search.ts`'s order.
         for filter in filters_for(state.project_type) {
@@ -1146,7 +1226,11 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             // 'expandable'"` in `SearchSidebarFilter.vue`.
             let more = (filter.display == Display::Expandable)
                 .then_some((filter.id, state.expanded.contains(filter.id)));
-            blocks.push(section(theme, filter.id, message(filter.label), &rows, open, more));
+            // And a `scrollable` section brings its own content: the search
+            // field, the toggle group's box and the panel that scrolls.
+            let panel = (filter.display == Display::Scrollable)
+                .then(|| versions(theme, state, tags));
+            blocks.push(section(theme, filter.id, message(filter.label), &rows, open, more, panel));
         }
     }
     let count = blocks.len();
@@ -1216,6 +1300,7 @@ fn section<'a>(
     rows: &[Row],
     open: bool,
     more: Option<(&'a str, bool)>,
+    panel: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let button = row![]
         .align_items(Alignment::Center)
@@ -1240,11 +1325,19 @@ fn section<'a>(
         ));
     let mut inner = column![].spacing(4.0).width(Length::Fill);
     if open {
-        for row in rows {
-            inner = inner.push(option_row(theme, row));
-        }
-        if let Some((filter, expanded)) = more {
-            inner = inner.push(show_more(theme, filter, expanded));
+        // A `scrollable` section's content is its panel rather than a column of
+        // rows, which is the one thing that distinguishes the third of the
+        // reference's three shapes.
+        match panel {
+            Some(panel) => inner = inner.push(panel),
+            None => {
+                for row in rows {
+                    inner = inner.push(option_row(theme, row));
+                }
+                if let Some((filter, expanded)) = more {
+                    inner = inner.push(show_more(theme, filter, expanded));
+                }
+            }
         }
     }
     let mut body = column![].spacing(8.0).width(Length::Fill).push(button);
@@ -1301,6 +1394,104 @@ fn show_more<'a>(theme: Gen, filter: &str, expanded: bool) -> Element<'a, Messag
     .on_exit(Message::hover_with(key, false, 1.0))
     .into()
 }
+
+/// The game-version section's inside: the box, the search field, and the panel.
+///
+/// `SearchSidebarFilter`'s `scrollable` branch, which is the only one of the
+/// three that draws this: a `Checkbox` per `toggle_groups` entry above a
+/// `ScrollablePanel` of `h-[16rem]`, with a search `Input` between them
+/// (`mx-2 my-1 w-[calc(100%-1rem)]`, `size="small"`, a search icon and a clear
+/// button). Each option in a scrollable section also carries `mr-3`, which is the
+/// room the panel's own scrollbar takes.
+fn versions<'a>(
+    theme: Gen,
+    state: &'a State,
+    tags: &'a palantir_net::Tags,
+) -> Element<'a, Message> {
+    // `isVisible`, in the reference's own order: the box first, the query second.
+    // `toggle_group` is `version_type !== 'release' ? 'all_versions' : undefined`,
+    // so without the box ticked the panel lists the releases and nothing else.
+    let query = state.version_query.to_lowercase();
+    let rows: Vec<Row> = tags
+        .game_versions
+        .iter()
+        .filter(|version| state.all_versions || version.version_type == "release")
+        .filter(|version| query.is_empty() || version.version.to_lowercase().contains(&query))
+        .map(|version| Row {
+            id: version.version.clone(),
+            label: version.version.clone(),
+            chosen: state.versions.contains(&version.version),
+            excluded: false,
+            // `supports: ['include']`, so there is no second press on a version.
+            excludes: false,
+            press: Message::Version(version.version.clone()),
+            exclude: Message::Version(version.version.clone()),
+        })
+        .collect();
+
+    let drawn = crate::scroll::window(rows.len(), VERSION_ROW, list_at(state.versions_at));
+    let mut list = column![].spacing(4.0).width(Length::Fill);
+    if drawn.start > 0 {
+        list = list.push(space(drawn.start, VERSION_ROW));
+    }
+    for row in rows.iter().skip(drawn.start).take(drawn.len()) {
+        list = list.push(option_row(theme, row));
+    }
+    if drawn.end < rows.len() {
+        list = list.push(space(rows.len() - drawn.end, VERSION_ROW));
+    }
+
+    let box_row = row![]
+        .align_items(Alignment::Center)
+        .spacing(8.0)
+        .width(Length::Fill)
+        .push(ui::checkbox(
+            theme,
+            crate::ui::scoped("discover:all-versions", GAME_VERSION),
+            state.all_versions,
+            false,
+            Message::AllVersions(!state.all_versions),
+        ))
+        .push(
+            text(message(Key::SearchFilterTypeGameVersionAllVersions))
+                .size(14.0)
+                .line_height(iced::Pixels(20.0))
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        );
+    crate::scroll::region(
+        "discover:versions",
+        column![]
+            .spacing(8.0)
+            .width(Length::Fill)
+            .push(container(box_row).padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 }))
+            .push(ui::input_sized(
+                theme,
+                ui::InputSize::Small,
+                &message(Key::SearchFilterOptionSearchPlaceholder),
+                &state.version_query,
+                Message::VersionQuery,
+            ))
+            .push(
+                container(list)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(VERSIONS_PANEL))
+                    // `mr-3` on every option in a scrollable section: the room
+                    // the panel's own scrollbar takes.
+                    .padding(Padding { top: 0.0, right: 12.0, bottom: 0.0, left: 0.0 }),
+            ),
+        Message::Wheel,
+    )
+    .on_scroll(|at| Message::VersionsScrolled(Geometry::of(at)))
+    .into()
+}
+
+/// The height of the version panel: `h-[16rem]`, which is the only number in
+/// this section that is not a class on a row.
+const VERSIONS_PANEL: f32 = 256.0;
+/// One option row's pitch inside the panel: the row's own height -- `px-2 py-1`
+/// around a twenty-pixel line -- plus the `gap-1` the panel's column sets.
+const VERSION_ROW: f32 = 32.0;
 
 /// One row of a section, whichever section it is in.
 ///
@@ -1405,6 +1596,9 @@ enum Display {
     /// `'expandable'`: the filter's `default_values` and whatever is already
     /// chosen, with a *Show more* press that swaps in the whole list.
     Expandable,
+    /// `'scrollable'`: the whole option list, inside a panel of its own that
+    /// scrolls, with a search field on top.
+    Scrollable,
 }
 
 /// The filters the sidebar offers besides its categories, in `search.ts`'s own
@@ -1421,6 +1615,20 @@ enum Display {
 /// named here so that the next reader does not have to go back to `search.ts` to
 /// learn they were considered.
 const SIDEBAR_FILTERS: &[Filter] = &[
+    Filter {
+        id: GAME_VERSION,
+        label: Key::SearchFilterTypeGameVersion,
+        kinds: &[
+            ProjectType::Mod,
+            ProjectType::Modpack,
+            ProjectType::ResourcePack,
+            ProjectType::Shader,
+            ProjectType::Plugin,
+            ProjectType::Datapack,
+        ],
+        display: Display::Scrollable,
+        defaults: &[],
+    },
     Filter {
         id: ENVIRONMENT,
         label: Key::SearchFilterTypeEnvironment,
@@ -1470,6 +1678,11 @@ const SIDEBAR_FILTERS: &[Filter] = &[
 
 /// `search.ts`'s `environment` filter id.
 const ENVIRONMENT: &str = "environment";
+/// `search.ts`'s `game_version` filter id -- the *Game version* section, and the
+/// one filter in this table that is neither a list of rows nor an expandable
+/// one: `display: 'scrollable'`, `searchable: true`, every game version Modrinth
+/// publishes in a 256-pixel panel with a search field above it.
+const GAME_VERSION: &str = "game_version";
 /// `search.ts`'s `mod_loader` filter id -- the *Loader* section of the mod tab.
 const MOD_LOADER: &str = "mod_loader";
 /// `search.ts`'s `modpack_loader` filter id -- the *Loader* section of the tab
@@ -1513,6 +1726,11 @@ impl Filter {
     /// below *License* instead of above it.
     fn ordering(&self, kind: ProjectType) -> i32 {
         match self.id {
+            // `game_version` is `2` on the mod tab and `-1` on the shader one, so
+            // the shader tab's *Game version* sits below *License* while the mod
+            // tab's sits above its *Loader*.
+            GAME_VERSION if kind == ProjectType::Mod => 2,
+            GAME_VERSION if kind == ProjectType::Shader => -1,
             MOD_LOADER if kind == ProjectType::Mod => 1,
             _ => 0,
         }
@@ -1585,6 +1803,10 @@ fn filter_rows(
             press: press(OPEN_SOURCE),
             exclude: Message::Exclude { filter: LICENSE.to_string(), option: OPEN_SOURCE.to_string() },
         }],
+        // `game_version` has no rows here: its options go in the panel, which
+        // draws them itself because it is the only section with a search field,
+        // a toggle group and a window of its own on top of them.
+        GAME_VERSION => Vec::new(),
         // Every loader filter is `tags.value.loaders` narrowed to the project
         // types the filter declares, which is what `Tags::loaders_for` answers,
         // with `formatLoader` for the label. The one narrowing it cannot answer
@@ -2784,7 +3006,7 @@ mod tests {
             assert_eq!(
                 ids.first().copied(),
                 match kind {
-                    ProjectType::Mod => Some(MOD_LOADER),
+                    ProjectType::Mod | ProjectType::Modpack => Some(GAME_VERSION),
                     ProjectType::Shader => Some(SHADER_LOADER),
                     _ => Some(ENVIRONMENT),
                 },
@@ -3479,12 +3701,9 @@ mod tests {
             "one and-part, then the one categories group, which is the order newFilters appends them in"
         );
 
-        // And the mod tab's *Loader* sorts above *License*, which is the one
-        // non-zero ordering in the table; the modpack tab's is the table's order.
-        let order = |kind| filters_for(kind).iter().map(|f| f.id).collect::<Vec<&str>>();
-        assert_eq!(order(ProjectType::Mod), vec![MOD_LOADER, ENVIRONMENT, LICENSE]);
-        assert_eq!(order(ProjectType::Modpack), vec![ENVIRONMENT, MODPACK_LOADER, LICENSE]);
-        assert_eq!(order(ProjectType::Shader), vec![SHADER_LOADER, LICENSE]);
+        // And the mod tab's *Loader* sorts above *License*; the order of the sections
+        // themselves is held by
+        // `the_game_version_section_sorts_where_search_ts_says_it_does`.
     }
 
     #[test]
@@ -3588,6 +3807,89 @@ mod tests {
         for row in filter_rows(&state, license, ProjectType::Modpack, state.tags.ready().expect("tags")) {
             assert!(row.excludes, "{} has one", row.id);
         }
+    }
+
+    #[test]
+    fn the_game_version_section_lists_releases_until_the_box_is_ticked() {
+        // `display: 'scrollable'`, `searchable: true`, and one `toggle_group`:
+        // `toggle_group: gameVersion.version_type !== 'release' ? 'all_versions'
+        // : undefined`, so a snapshot or a beta is a row only while the *Show all
+        // versions* box is ticked. Both controls are refs in the reference and
+        // neither moves the request.
+        let mut state = state_of(ProjectType::Mod);
+        state.update(Message::Tags {
+            result: Ok(palantir_net::Tags {
+                game_versions: vec![
+                    palantir_net::GameVersionTag { version: "1.21.4".to_string(), version_type: "release".to_string() },
+                    palantir_net::GameVersionTag { version: "24w14a".to_string(), version_type: "snapshot".to_string() },
+                    palantir_net::GameVersionTag { version: "1.5.2".to_string(), version_type: "release".to_string() },
+                ],
+                ..tags_with(&[])
+            }),
+        });
+        let tags = state.tags.ready().expect("tags").clone();
+        let listed = |state: &State| version_ids(state, &tags);
+
+        assert_eq!(listed(&state), vec!["1.21.4".to_string(), "1.5.2".to_string()], "the releases, in the document's own order");
+        assert_eq!(state.update(Message::AllVersions(true)), None, "ticking the box asks for nothing");
+        assert_eq!(listed(&state), vec!["1.21.4".to_string(), "24w14a".to_string(), "1.5.2".to_string()], "and the snapshot joins them, in place");
+
+        // The field filters the rows and nothing else: the chosen versions stay
+        // chosen, because they are not on screen to be unchosen from.
+        state.update(Message::Version("1.21.4".to_string()));
+        state.update(Message::VersionQuery("24".to_string()));
+        assert_eq!(listed(&state), vec!["24w14a".to_string()], "one row matches the query");
+        assert!(state.versions.contains("1.21.4"), "and the choice is still there");
+        assert_eq!(state.update(Message::VersionQuery(String::new())), None, "clearing the field asks for nothing");
+
+        // A chosen version asks, as one `or` group over its own field -- not
+        // joined into `categories`, which is the field a category and a loader
+        // share.
+        let Some(Ask::Search(asked)) = state.update(Message::Version("24w14a".to_string())) else {
+            panic!("choosing a version asks");
+        };
+        assert_eq!(
+            asked.query.facets,
+            vec![r#"game_versions IN ["1.21.4", "24w14a"]"#.to_string()],
+            "two versions are one IN, and it is not mixed in with the categories group"
+        );
+
+        // The panel is a window of its own: 256 pixels at a 32-pixel pitch is
+        // eight rows, and the window is drawn from the panel's own geometry, not
+        // the page's.
+        assert_eq!(VERSIONS_PANEL, 256.0);
+        let at = Geometry { offset: 0.0, view_height: VERSIONS_PANEL };
+        assert!(crate::scroll::window(40, VERSION_ROW, at).len() >= 8, "eight rows fit in the panel");
+        assert!(crate::scroll::window(40, VERSION_ROW, list_at(at)).start <= 40);
+        drop(versions(Gen::Dark, &state, &tags));
+    }
+
+    #[test]
+    fn the_game_version_section_sorts_where_search_ts_says_it_does() {
+        // `ordering: projectTypes.includes('mod') ? 2 : includes('shader') ? -1`,
+        // so the mod tab's *Game version* is its first section and the shader
+        // tab's is its last -- the only filter in the table whose number is
+        // negative.
+        let order = |kind| filters_for(kind).iter().map(|f| f.id).collect::<Vec<&str>>();
+        assert_eq!(order(ProjectType::Mod), vec![GAME_VERSION, MOD_LOADER, ENVIRONMENT, LICENSE]);
+        assert_eq!(order(ProjectType::Shader), vec![SHADER_LOADER, LICENSE, GAME_VERSION]);
+        assert_eq!(
+            order(ProjectType::Modpack),
+            vec![GAME_VERSION, ENVIRONMENT, MODPACK_LOADER, LICENSE],
+            "and no ordering at all on the tab that sets none"
+        );
+    }
+
+    /// The version rows the panel would draw for `state`, in the order it draws
+    /// them, which is the tag document's own order.
+    fn version_ids(state: &State, tags: &palantir_net::Tags) -> Vec<String> {
+        let query = state.version_query.to_lowercase();
+        tags.game_versions
+            .iter()
+            .filter(|version| state.all_versions || version.version_type == "release")
+            .filter(|version| query.is_empty() || version.version.to_lowercase().contains(&query))
+            .map(|version| version.version.clone())
+            .collect()
     }
 
     fn tags_with(loaders: &[(&str, &[&str])]) -> palantir_net::Tags {
