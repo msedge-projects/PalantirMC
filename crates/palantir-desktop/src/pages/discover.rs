@@ -247,6 +247,13 @@ pub enum Message {
     Section(String),
     /// The search was asked for again.
     Search,
+    /// A section's *Show more* was pressed, or its *Show fewer*.
+    ///
+    /// Also not a request, and for a different reason than [`Message::Section`]:
+    /// the options a press reveals are options the reader can then choose, and
+    /// choosing one of those is what asks. The id is the section's own, as it is
+    /// for every other press in the panel.
+    Expand(String),
     /// One result was opened. Reported rather than applied: which page is in the
     /// pane is the shell's business, so this comes back out of
     /// [`crate::pages::Screen::update`] as an [`crate::pages::Open`].
@@ -394,6 +401,16 @@ pub struct State {
     /// else, so what a press changes is that default rather than the other way
     /// round. [`State::is_open`] is the whole rule.
     pub touched: BTreeSet<String>,
+    /// The sections whose *Show more* has been pressed.
+    ///
+    /// Only the sections with `display: 'expandable'` have one, and what it holds
+    /// is the reference's `showMore`: before the press such a section shows the
+    /// filter's own `default_values` and nothing else, and after it the section
+    /// shows every option it has. A separate set from [`touched`](Self::touched)
+    /// because the two are different questions -- a section can be open and shut
+    /// again over three options, and a section can be shut with every option in
+    /// it chosen.
+    pub expanded: BTreeSet<String>,
     /// The results, which arrive from the search API.
     pub results: Load<Vec<Hit>>,
     /// The tag lists, which is what the sidebar's filter options are made of.
@@ -436,6 +453,7 @@ impl State {
             categories: BTreeSet::new(),
             filters: BTreeSet::new(),
             touched: BTreeSet::new(),
+            expanded: BTreeSet::new(),
             // Not `Empty`: nothing has been asked for yet, and an empty *answer*
             // and an unmade *request* are different sentences on the screen. The
             // shell asks for this page as soon as it draws it (`Screen::opening`),
@@ -541,6 +559,19 @@ impl State {
             Message::Section(section) => {
                 if !self.touched.remove(&section) {
                     self.touched.insert(section);
+                }
+            }
+            // *Show more* is `showMore`, a `ref(false)` the reference keeps per
+            // section, and the one piece of a section's own state that is not its
+            // open state: the content is already open when the press is reachable
+            // (it is inside the content, which is `inert` while the section is
+            // shut), and every option it reveals is an option that could have been
+            // chosen from the start. So it is a set of the sections that have been
+            // opened the long way, keyed by the section's own id like
+            // [`State::touched`] is.
+            Message::Expand(section) => {
+                if !self.expanded.remove(&section) {
+                    self.expanded.insert(section);
                 }
             }
             // The switch is a request-shaped control, like the sort and the view
@@ -708,10 +739,7 @@ impl State {
     /// whether the same set of choices is the same *string*, which is what keeps
     /// one cache entry per question rather than one per order of pressing.
     fn facet_filter(&self) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(categories) = self.category_filter() {
-            parts.push(categories);
-        }
+        let mut parts: Vec<String> = self.category_parts();
         // `license`'s only option is an `'and'` option (`method: 'and'`, value
         // `open_source:true`), so it is a part of its own and two of them cannot
         // happen: `open_source = true`, unquoted, because
@@ -719,11 +747,22 @@ impl State {
         if self.chosen(LICENSE, OPEN_SOURCE) {
             parts.push("open_source = true".to_string());
         }
-        // The loaders are `'or'` options, so one chosen loader is `categories =
-        // ...` and two are one `IN` -- the same shape as the alternatives inside
-        // a `resolutions` section, and for the same reason.
-        let loaders = self.options_of(MODPACK_LOADER);
-        if let Some(part) = any_of("categories", &loaders) {
+        // The loaders are `'or'` options and they are asked under `categories`,
+        // the field their `value` names -- so a loader joins the alternatives of
+        // a `resolutions` section in **one** group rather than becoming a second
+        // part. `newFilters` keys `orGroups` by the field, not by the filter, so
+        // 16x and fabric are one `categories IN ["16x", "fabric"]`: asking for a
+        // mod that is both would find fewer than the reference does.
+        let group: BTreeSet<&str> = self
+            .categories
+            .iter()
+            .filter(|name| alternatives(self.header_of(name)))
+            .map(|name| name.as_str())
+            .chain(self.options_of(MOD_LOADER))
+            .chain(self.options_of(MODPACK_LOADER))
+            .chain(self.options_of(SHADER_LOADER))
+            .collect();
+        if let Some(part) = any_of("categories", &group.into_iter().collect::<Vec<&str>>()) {
             parts.push(part);
         }
         parts.extend(self.environment_parts());
@@ -787,30 +826,12 @@ impl State {
     /// pushed as a part: one resolution or another is one answer to one question,
     /// so two of them are `categories IN ["1080p", "1440p"]` -- one part, not two
     /// joined with `AND`, which would ask for a pack that is both.
-    fn category_filter(&self) -> Option<String> {
-        if self.categories.is_empty() {
-            return None;
-        }
-        let mut parts: Vec<String> = Vec::new();
-        let mut either: Vec<&String> = Vec::new();
-        for name in &self.categories {
-            if alternatives(self.header_of(name)) {
-                either.push(name);
-            } else {
-                parts.push(format!("categories = \"{name}\""));
-            }
-        }
-        // After the parts, as `newFilters` appends its groups: the two kinds are
-        // in a fixed order whichever rows were pressed. One alternative is still
-        // one value and not a list of one -- `newFilters` writes `field = value`
-        // for a group of one and `field IN [...]` only for more.
-        if let Some(part) = any_of(
-            "categories",
-            &either.iter().map(|name| name.as_str()).collect::<Vec<&str>>(),
-        ) {
-            parts.push(part);
-        }
-        Some(parts.join(" AND "))
+    fn category_parts(&self) -> Vec<String> {
+        self.categories
+            .iter()
+            .filter(|name| !alternatives(self.header_of(name)))
+            .map(|name| format!("categories = \"{name}\""))
+            .collect()
     }
 
     /// The header a chosen category is filed under, for this tab.
@@ -1046,7 +1067,7 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             }
             let rows = category_rows(state, &options);
             let open = state.is_open(header, true);
-            blocks.push(section(theme, header, locale::category_header_label(header), &rows, open));
+            blocks.push(section(theme, header, locale::category_header_label(header), &rows, open, None));
         }
         // And then the filters that are not categories, in `search.ts`'s order.
         for filter in filters_for(state.project_type) {
@@ -1055,7 +1076,12 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
                 continue;
             }
             let open = state.is_open(filter.id, filter.opens());
-            blocks.push(section(theme, filter.id, message(filter.label), &rows, open));
+            // The *Show more* press belongs to the section that declares it, and
+            // only an `expandable` one does: `v-if="filterType.display ===
+            // 'expandable'"` in `SearchSidebarFilter.vue`.
+            let more = (filter.display == Display::Expandable)
+                .then_some((filter.id, state.expanded.contains(filter.id)));
+            blocks.push(section(theme, filter.id, message(filter.label), &rows, open, more));
         }
     }
     let count = blocks.len();
@@ -1124,6 +1150,7 @@ fn section<'a>(
     label: String,
     rows: &[Row],
     open: bool,
+    more: Option<(&'a str, bool)>,
 ) -> Element<'a, Message> {
     let button = row![]
         .align_items(Alignment::Center)
@@ -1151,6 +1178,9 @@ fn section<'a>(
         for row in rows {
             inner = inner.push(option_row(theme, row));
         }
+        if let Some((filter, expanded)) = more {
+            inner = inner.push(show_more(theme, filter, expanded));
+        }
     }
     let mut body = column![].spacing(8.0).width(Length::Fill).push(button);
     if open {
@@ -1172,6 +1202,41 @@ fn section<'a>(
     .into()
 }
 
+/// The *Show more* press under an `expandable` section's options.
+///
+/// The same button as an option row -- `rounded-xl px-2 py-1 text-sm
+/// font-semibold` in `text-secondary`, lifting to `text-contrast` under the
+/// pointer -- with a `h-4 w-4` `DropdownIcon` in front of the label instead of a
+/// check, turned over while the list is out (`rotate-180` on `showMore`), and no
+/// mark at the end.
+fn show_more<'a>(theme: Gen, filter: &str, expanded: bool) -> Element<'a, Message> {
+    let key = crate::ui::scoped("discover:show-more", filter);
+    let (_, hover) = crate::ui::interaction(key);
+    let label = if expanded {
+        Key::SearchFilterOptionShowFewer
+    } else {
+        Key::SearchFilterOptionShowMore
+    };
+    let ink = if hover > 0.0 { INK_CONTRAST } else { INK_SECONDARY };
+    let line = row![]
+        .align_items(Alignment::Center)
+        .width(Length::Fill)
+        .push(icon::icon(chevron(expanded), OPTION_CHECK, theme_gen::ink(theme, ink)))
+        .push(text(message(label)).size(14.0).line_height(iced::Pixels(20.0)).font(semibold()).style(
+            iced::theme::Text::Color(theme_gen::ink(theme, ink)),
+        ));
+    mouse_area(container(line).width(Length::Fill).padding(Padding {
+        top: 4.0,
+        right: 8.0,
+        bottom: 4.0,
+        left: 8.0,
+    }))
+    .on_press(Message::Expand(filter.to_string()))
+    .on_enter(Message::hover_with(key, true, 1.0))
+    .on_exit(Message::hover_with(key, false, 1.0))
+    .into()
+}
+
 /// One row of a section, whichever section it is in.
 ///
 /// The reference draws every option with the same component
@@ -1180,6 +1245,7 @@ fn section<'a>(
 /// a loader row another `categories` value. Carrying the message in the row is
 /// what lets one drawing serve both kinds without either of them knowing about
 /// the other.
+#[derive(Clone)]
 struct Row {
     /// The option's own id, as the reference's `FilterOption.id`.
     ///
@@ -1211,11 +1277,11 @@ fn category_rows(state: &State, options: &[&palantir_net::CategoryTag]) -> Vec<R
 
 /// One of the sidebar's filters that is not a category.
 ///
-/// `search.ts` builds these in one array, and the three fields carried here are
-/// the ones that decide what the panel draws: which tabs the section is on
-/// (`supported_project_types`), where it sits among the others (`ordering`), and
-/// whether it is open when the page arrives (the app variant's
-/// `getFilterOpenByDefault`).
+/// `search.ts` builds these in one array, and the fields carried here are the
+/// ones that decide what the panel draws: which tabs the section is on
+/// (`supported_project_types`), how much of it there is (`display`), where it
+/// sits among the others (`ordering`), and whether it is open when the page
+/// arrives (the app variant's `getFilterOpenByDefault`).
 struct Filter {
     /// `search.ts`'s `FilterType.id`, which is also what the request is keyed by.
     id: &'static str,
@@ -1223,6 +1289,27 @@ struct Filter {
     label: Key,
     /// `supported_project_types`: the kinds of project it is offered for.
     kinds: &'static [ProjectType],
+    /// `display`: how many of the options the section shows, and whether it
+    /// carries the *Show more* press that shows the rest.
+    display: Display,
+    /// `default_values`: the options an `expandable` section shows before that
+    /// press, and the ones it sorts to the top of the list afterwards.
+    ///
+    /// Empty for an `All` filter, where the reference never reads them: the sort
+    /// that puts them first is guarded on `display === 'expandable'`, so a
+    /// `default_values` on an `all` filter is not drawn.
+    defaults: &'static [&'static str],
+}
+
+/// `search.ts`'s `display`, which is the whole of what decides how many rows a
+/// section draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Display {
+    /// `'all'`: every option, always, and no press under the list.
+    All,
+    /// `'expandable'`: the filter's `default_values` and whatever is already
+    /// chosen, with a *Show more* press that swaps in the whole list.
+    Expandable,
 }
 
 /// The filters the sidebar offers besides its categories, in `search.ts`'s own
@@ -1233,19 +1320,42 @@ struct Filter {
 /// `searchable` -- a 16rem scroll panel with a search field on top, and this
 /// page has no second scroll region to put the panel in ([`Message::Scrolled`]
 /// carries one geometry and the results list has it); `included_content`, which
-/// is a project picker rather than a list; and the `advanced` exclusions, whose
-/// options are disclosure toggles. Each is named here so that the next reader
-/// does not have to go back to `search.ts` to learn they were considered.
+/// is a project picker rather than a list; `plugin_loader`, which is
+/// `supported_project_types: ['plugin']` and this port has no plugin tab; and
+/// the `advanced` exclusions, whose options are disclosure toggles. Each is
+/// named here so that the next reader does not have to go back to `search.ts` to
+/// learn they were considered.
 const SIDEBAR_FILTERS: &[Filter] = &[
     Filter {
         id: ENVIRONMENT,
         label: Key::SearchFilterTypeEnvironment,
         kinds: &[ProjectType::Mod, ProjectType::Modpack],
+        display: Display::All,
+        defaults: &[],
+    },
+    Filter {
+        id: MOD_LOADER,
+        label: Key::SearchFilterTypeModLoader,
+        kinds: &[ProjectType::Mod],
+        display: Display::Expandable,
+        defaults: DEFAULT_MOD_LOADERS,
     },
     Filter {
         id: MODPACK_LOADER,
         label: Key::SearchFilterTypeModpackLoader,
         kinds: &[ProjectType::Modpack],
+        // `display: 'all'`, and the only loader filter that is: a modpack's
+        // loaders are three or four rows, so the reference draws all of them and
+        // the section carries no press under the list.
+        display: Display::All,
+        defaults: &[],
+    },
+    Filter {
+        id: SHADER_LOADER,
+        label: Key::SearchFilterTypeShaderLoader,
+        kinds: &[ProjectType::Shader],
+        display: Display::Expandable,
+        defaults: DEFAULT_SHADER_LOADERS,
     },
     Filter {
         id: LICENSE,
@@ -1258,21 +1368,38 @@ const SIDEBAR_FILTERS: &[Filter] = &[
             ProjectType::Plugin,
             ProjectType::Datapack,
         ],
+        display: Display::All,
+        defaults: &[],
     },
 ];
 
 /// `search.ts`'s `environment` filter id.
 const ENVIRONMENT: &str = "environment";
+/// `search.ts`'s `mod_loader` filter id -- the *Loader* section of the mod tab.
+const MOD_LOADER: &str = "mod_loader";
 /// `search.ts`'s `modpack_loader` filter id -- the *Loader* section of the tab
-/// whose loaders are offered for modpacks. The mod and shader tabs have their
-/// own (`mod_loader`, `shader_loader`) and are not drawn here: both are
-/// `display: 'expandable'`, which shows three rows and a *Show more* press, and
-/// that press is a second control in a row that carries one.
+/// whose loaders are offered for modpacks. It is the one loader filter the
+/// reference declares `display: 'all'` for, so it is the only one of the three
+/// that draws its whole list and carries no *Show more*.
 const MODPACK_LOADER: &str = "modpack_loader";
+/// `search.ts`'s `shader_loader` filter id -- the *Loader* section of the
+/// shader tab.
+const SHADER_LOADER: &str = "shader_loader";
 /// `search.ts`'s `license` filter id.
 const LICENSE: &str = "license";
 /// The one option of the `license` filter, as `search.ts` spells it.
 const OPEN_SOURCE: &str = "open_source";
+
+/// `DEFAULT_MOD_LOADERS` (`tag-messages.ts:575`): what the mod tab's *Loader*
+/// shows before *Show more*.
+///
+/// Three names, and the set is what makes the section worth expanding at all:
+/// Modrinth lists a dozen mod loaders, and `fabric`, `forge` and `neoforge` are
+/// the ones the reference offers without being asked.
+const DEFAULT_MOD_LOADERS: &[&str] = &["fabric", "forge", "neoforge"];
+/// `DEFAULT_SHADER_LOADERS` (`tag-messages.ts:577`), the same for the shader
+/// tab.
+const DEFAULT_SHADER_LOADERS: &[&str] = &["iris", "optifine", "vanilla"];
 
 impl Filter {
     /// `search.ts`'s `ordering` for this filter on `kind`.
@@ -1283,9 +1410,15 @@ impl Filter {
     /// tab. Everything else is `undefined`, which the sort reads as zero, and
     /// which is the whole of the modpack tab's order -- its three sections keep
     /// the declaration order below.
+    ///
+    /// The `1` belongs to `mod_loader` and to nothing else. The first draft gave
+    /// it to `modpack_loader`, which reads the same expression but sits on the
+    /// modpack tab, where no ordering is set at all -- so it was a number on a
+    /// filter the mod tab does not have, and the mod tab's own *Loader* sorted
+    /// below *License* instead of above it.
     fn ordering(&self, kind: ProjectType) -> i32 {
         match self.id {
-            MODPACK_LOADER if kind == ProjectType::Mod => 1,
+            MOD_LOADER if kind == ProjectType::Mod => 1,
             _ => 0,
         }
     }
@@ -1346,23 +1479,84 @@ fn filter_rows(
             chosen: state.chosen(LICENSE, OPEN_SOURCE),
             press: press(OPEN_SOURCE),
         }],
-        // `tags.value.loaders.filter(loader => loader.supported_project_types
-        // .includes('modpack'))`, which is what `Tags::loaders_for` answers, with
-        // `formatLoader` for the label.
-        MODPACK_LOADER => tags
-            .loaders_for(kind.token())
-            .into_iter()
-            .map(|loader| Row {
-                id: loader.name.clone(),
-                label: locale::loader_label(&loader.name),
-                chosen: state.chosen(MODPACK_LOADER, &loader.name),
-                press: press(&loader.name),
-            })
-            .collect(),
+        // Every loader filter is `tags.value.loaders` narrowed to the project
+        // types the filter declares, which is what `Tags::loaders_for` answers,
+        // with `formatLoader` for the label. The one narrowing it cannot answer
+        // is `mod_loader`'s, which drops the loaders that are also plugins or
+        // datapacks -- see [`loaders_of`].
+        id @ (MOD_LOADER | MODPACK_LOADER | SHADER_LOADER) => {
+            let chosen: Vec<Row> = loaders_of(id, kind, tags)
+                .into_iter()
+                .map(|loader| Row {
+                    id: loader.clone(),
+                    label: locale::loader_label(&loader),
+                    chosen: state.chosen(filter.id, &loader),
+                    press: press(&loader),
+                })
+                .collect();
+            visible_rows(filter, state, chosen)
+        }
         // Every id in [`SIDEBAR_FILTERS`] has an arm above; this keeps a filter
         // added to the table without its rows from drawing an empty section.
         _ => Vec::new(),
     }
+}
+
+/// The loaders `filter` lists, in the order the tag document has them.
+///
+/// `Tags::loaders_for` answers the whole of each filter's narrowing except one:
+/// `mod_loader`'s options are the loaders that support `mod` **and neither**
+/// `plugin` **nor** `datapack`, and a loader can be in both lists -- `paper` is
+/// a plugin and a datapack loader, and a loader that also served mods would be
+/// offered on the mod tab by the plain narrowing and not by the reference's.
+/// The extra two clauses are here rather than in `palantir-net` because they are
+/// this filter's arithmetic and not the tag document's.
+fn loaders_of(
+    filter: &str,
+    kind: ProjectType,
+    tags: &palantir_net::Tags,
+) -> Vec<String> {
+    tags.loaders_for(kind.token())
+        .into_iter()
+        .filter(|loader| {
+            filter != MOD_LOADER
+                || !loader
+                    .supported_project_types
+                    .iter()
+                    .any(|project| project == "plugin" || project == "datapack")
+        })
+        .map(|loader| loader.name.clone())
+        .collect()
+}
+
+/// The rows of a section that are `expandable`, as `visibleOptions` hands them
+/// over.
+///
+/// The reference filters the options by `isVisible(option) || isIncluded(option)
+/// || isExcluded(option) || hasSelectedSubOption(option)`, which for an
+/// `expandable` filter reads: the option is shown when the section is opened the
+/// long way, or when the filter lists it in `default_values`. The two `is*`
+/// tests then keep a chosen option on screen even when nothing else would -- so
+/// a loader the reader chose stays a row they can unchoose, which is the whole
+/// point of a filter that hides its options. Then the list is sorted so the
+/// `default_values` come first, which is a stable sort and so leaves the tag
+/// document's own order inside each half of it.
+fn visible_rows(filter: &Filter, state: &State, rows: Vec<Row>) -> Vec<Row> {
+    if filter.display == Display::All {
+        return rows;
+    }
+    let shown: Vec<Row> = if state.expanded.contains(filter.id) {
+        rows
+    } else {
+        rows.iter()
+            .filter(|row| filter.defaults.contains(&row.id.as_str()) || row.chosen)
+            .cloned()
+            .collect()
+    };
+    let (mut defaults, mut rest): (Vec<Row>, Vec<Row>) =
+        shown.into_iter().partition(|row| filter.defaults.contains(&row.id.as_str()));
+    defaults.append(&mut rest);
+    defaults
 }
 
 /// The reference's own message for `key`, as the panel shows it.
@@ -2159,7 +2353,7 @@ mod tests {
     #[test]
     fn a_chosen_category_is_one_and_ed_part_of_the_request() {
         let mut state = State::new(ProjectType::Modpack);
-        assert!(state.category_filter().is_none(), "nothing chosen is no facet");
+        assert!(state.category_parts().is_empty(), "nothing chosen is no facet");
 
         let Some(Ask::Search(first)) = state.update(Message::Category("technology".to_string()))
         else {
@@ -2396,10 +2590,17 @@ mod tests {
                 vec![ENVIRONMENT, LICENSE]
             };
             assert_eq!(opens, expected, "environment and license open, and only those ({kind:?})");
+            // The first section is `search.ts`'s first for the tab, except on the
+            // mod tab, where `mod_loader`'s `ordering: 1` puts it above the rest --
+            // which is what the one non-zero ordering in the table is for.
             assert_eq!(
                 ids.first().copied(),
-                if kind == ProjectType::Shader { Some(LICENSE) } else { Some(ENVIRONMENT) },
-                "and the first section is the one `search.ts` declares first"
+                match kind {
+                    ProjectType::Mod => Some(MOD_LOADER),
+                    ProjectType::Shader => Some(SHADER_LOADER),
+                    _ => Some(ENVIRONMENT),
+                },
+                "and the first section is the one that sorts first"
             );
             assert!(
                 !ids.contains(&MODPACK_LOADER) || kind == ProjectType::Modpack,
@@ -2984,5 +3185,137 @@ mod tests {
             "opening a section is not a change to the request"
         );
         assert_ne!(state.is_open("technical", true), open, "and the press turned it over");
+    }
+
+    #[test]
+    fn the_mod_tabs_loader_lists_its_defaults_until_show_more_is_pressed() {
+        // `display: 'expandable'` with `default_values: DEFAULT_MOD_LOADERS`: the
+        // three loaders the reference offers without being asked, and a press
+        // that shows the rest of the tag document's list.
+        let mut state = state_of(ProjectType::Mod);
+        let tags = tags_with(&[("fabric", &["mod"]), ("forge", &["mod"]), ("quilt", &["mod"]), (
+            "neoforge",
+            &["mod"],
+        )]);
+        state.update(Message::Tags { result: Ok(tags) });
+
+        let loader = SIDEBAR_FILTERS.iter().find(|f| f.id == MOD_LOADER).expect("the mod tab has a loader filter");
+        assert_eq!(loader.display, Display::Expandable);
+        assert_eq!(loader.defaults, DEFAULT_MOD_LOADERS);
+        assert_eq!(
+            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<String>>(),
+            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string()],
+            "three rows, the defaults, in the tag document's own order"
+        );
+
+        // A chosen loader that is not a default stays a row: `isVisible(option) ||
+        // isIncluded(option)` keeps it on screen so it can be unchosen.
+        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
+        assert_eq!(
+            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<String>>(),
+            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string(), "quilt".to_string()],
+            "and the chosen one after them"
+        );
+
+        // *Show more* asks for nothing: the loaders it shows were options the
+        // reader could have chosen from the start.
+        assert_eq!(state.update(Message::Expand(MOD_LOADER.to_string())), None);
+        assert_eq!(
+            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<String>>(),
+            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string(), "quilt".to_string()],
+            "which for this list is every row the tag document has"
+        );
+
+        // The shader tab has its own filter with its own defaults, and a loader
+        // that serves mods and plugins is not on the mod tab's list.
+        let shader = SIDEBAR_FILTERS.iter().find(|f| f.id == SHADER_LOADER).expect("the shader tab has a loader filter");
+        assert_eq!(shader.defaults, DEFAULT_SHADER_LOADERS);
+        let mut plugin = state_of(ProjectType::Mod);
+        plugin.update(Message::Tags {
+            result: Ok(tags_with(&[("fabric", &["mod"]), ("paper", &["mod", "plugin"])])),
+        });
+        assert_eq!(
+            filter_rows(&plugin, loader, ProjectType::Mod, plugin.tags.ready().expect("tags"))
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<String>>(),
+            vec!["fabric".to_string()],
+            "`mod_loader` drops a loader that is also a plugin"
+        );
+        drop(show_more(Gen::Dark, MOD_LOADER, true));
+    }
+
+    #[test]
+    fn a_resolution_and_a_loader_are_one_categories_group() {
+        // `newFilters` keys `orGroups` by the *field* an option's value names, and
+        // a loader's value is `categories:<name>` -- the same field a resolution
+        // uses. So the two are one `IN`, not two parts joined with `AND`: the
+        // reference returns a mod that is 16x *or* fabric, and asking for one
+        // that is both would find fewer.
+        let mut state = state_of(ProjectType::Mod);
+        state.update(Message::Tags {
+            result: Ok(palantir_net::Tags {
+                categories: vec![
+                    palantir_net::CategoryTag {
+                        name: "16x".to_string(),
+                        project_type: "mod".to_string(),
+                        header: RESOLUTIONS_HEADER.to_string(),
+                    },
+                    palantir_net::CategoryTag {
+                        name: "technology".to_string(),
+                        project_type: "mod".to_string(),
+                        header: "technical".to_string(),
+                    },
+                ],
+                ..palantir_net::Tags::default()
+            }),
+        });
+        state.update(Message::Category("16x".to_string()));
+        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "fabric".to_string() });
+        state.update(Message::Category("technology".to_string()));
+        let Some(Ask::Search(asked)) = state.update(Message::Search) else {
+            panic!("the ask");
+        };
+        assert_eq!(
+            asked.query.facets,
+            vec![r#"categories = "technology" AND categories IN ["16x", "fabric"]"#.to_string()],
+            "one and-part, then the one categories group, which is the order newFilters appends them in"
+        );
+
+        // And the mod tab's *Loader* sorts above *License*, which is the one
+        // non-zero ordering in the table; the modpack tab's is the table's order.
+        let order = |kind| filters_for(kind).iter().map(|f| f.id).collect::<Vec<&str>>();
+        assert_eq!(order(ProjectType::Mod), vec![MOD_LOADER, ENVIRONMENT, LICENSE]);
+        assert_eq!(order(ProjectType::Modpack), vec![ENVIRONMENT, MODPACK_LOADER, LICENSE]);
+        assert_eq!(order(ProjectType::Shader), vec![SHADER_LOADER, LICENSE]);
+    }
+
+    fn tags_with(loaders: &[(&str, &[&str])]) -> palantir_net::Tags {
+        palantir_net::Tags {
+            // One category, so the tag list is `Ready`: a tag document with no
+            // category in it is the answer that says there are none.
+            categories: vec![palantir_net::CategoryTag {
+                name: "technology".to_string(),
+                project_type: "mod".to_string(),
+                header: "technical".to_string(),
+            }],
+            loaders: loaders
+                .iter()
+                .map(|(name, kinds)| palantir_net::LoaderTag {
+                    name: (*name).to_string(),
+                    supported_project_types: kinds.iter().map(|k| (*k).to_string()).collect(),
+                })
+                .collect(),
+            ..palantir_net::Tags::default()
+        }
     }
 }
