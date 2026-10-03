@@ -10,3 +10,9 @@
 # the index are the bytes upstream shipped. It also stops diff from trying to show
 # a line-ending change on 1857 files.
 vendor/modrinth-app/** -text
+
+# The bundled font faces are binary for the same reason. Inter's own files are
+# ~300 KB of `glyf` and `cmap`, and a CRLF normalisation applied to them on a
+# checkout would produce a file that still parses as a directory and renders
+# nothing. `-text` keeps the bytes in the working tree the bytes in the index.
+crates/palantir-desktop/assets/fonts/** -text

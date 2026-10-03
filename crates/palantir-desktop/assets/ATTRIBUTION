@@ -28,3 +28,14 @@ and stroked by `icon.rs` -- see `THIRD_PARTY_NOTICES.md`, which carries that
 notice for the source and the binary -- plus the brand art in `assets/brand/`.
 No Prism-derived art is shipped. Instance art, when an instance page draws it,
 comes from the reference's own set on the same terms.
+
+## fonts/
+
+Five weights of Inter, 400/500/600/700/800, which is the ladder the reference's
+`inter.scss` asks for. They are the reference's own files, fetched from the CDN
+that stylesheet pins by `tools/make_fonts.py` and unwrapped from the WOFF
+container into the plain sfnt cosmic-text can read. SIL Open Font License 1.1,
+(C) 2016-2020 The Inter Project Authors; the licence text ships beside the faces
+in `fonts/OFL.txt`, and each face carries the same notice in its `name` table.
+`THIRD_PARTY_NOTICES.md` carries the full entry -- what was taken, from where,
+and why "Inter 3.19" is the version string these faces actually report.

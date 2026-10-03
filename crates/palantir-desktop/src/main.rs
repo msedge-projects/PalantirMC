@@ -262,8 +262,17 @@ fn opening_size() -> (f32, f32) {
 /// or two of fallback text plus five messages -- and here a message rebuilds the
 /// entire interface, so that would be five extra rebuilds during startup.
 ///
-/// Subset by `tools/make_fonts.py` from Inter 3.19, the release Modrinth's own
-/// stylesheet pins. All five together are ~292 KB.
+/// The reference's own files, fetched by `tools/make_fonts.py` from the CDN its
+/// `inter.scss` pins, unwrapped from the WOFF container into the plain sfnt
+/// cosmic-text can read. All five together are ~1.5 MB.
+///
+/// Note the version string in each face's `name` table reads `Version
+/// 3.019;git-0a5106e0b`, which *is* Inter 3.19: Inter zero-pads the minor
+/// component, and the upstream v3.19 release's own desktop OTFs carry that
+/// exact string. Reading it as "3.019, not 3.19" once had a pixel audit blame
+/// these faces for every label measuring a few pixels narrow, which they do not
+/// -- their `hmtx` advances are identical to the reference's for every codepoint
+/// they cover.
 ///
 /// Crate-visible rather than private because `ui.rs`'s shaping test builds
 /// the same system out of the same five faces.
@@ -276,11 +285,11 @@ fn opening_size() -> (f32, f32) {
 /// the identical code was fine on a slightly older one. The coercion is what
 /// const evaluation actually allows.
 pub(crate) static FONTS: [&[u8]; 5] = [
-    include_bytes!("../assets/fonts/Inter-400.otf"),
-    include_bytes!("../assets/fonts/Inter-500.otf"),
-    include_bytes!("../assets/fonts/Inter-600.otf"),
-    include_bytes!("../assets/fonts/Inter-700.otf"),
-    include_bytes!("../assets/fonts/Inter-800.otf"),
+    include_bytes!("../assets/fonts/Inter-400.ttf"),
+    include_bytes!("../assets/fonts/Inter-500.ttf"),
+    include_bytes!("../assets/fonts/Inter-600.ttf"),
+    include_bytes!("../assets/fonts/Inter-700.ttf"),
+    include_bytes!("../assets/fonts/Inter-800.ttf"),
 ];
 
 fn main() -> iced::Result {

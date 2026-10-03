@@ -66,6 +66,57 @@ in binary distributions alike. Adding an entry is part of taking the code.
   would be recorded here and in `UPSTREAM.md` before it was made, and the tree is
   merged with upstream rather than re-derived.
 
+## Inter
+
+* **What**: the five weights the whole interface is drawn in --
+  `crates/palantir-desktop/assets/fonts/Inter-{400,500,600,700,800}.ttf`,
+  embedded with `include_bytes!` from `crates/palantir-desktop/src/main.rs`'s
+  `FONTS` and handed to iced through `Settings::fonts`. Modrinth sets its
+  entire interface in Inter at weight 500 (`--font-weight-text`), so 400/500/
+  600/700/800 is the ladder the reference's stylesheet asks for and 500 is the
+  default this shell boots with.
+* **From**: the reference's own files, not a re-derivation of them --
+  `https://cdn.modrinth.com/fonts/inter/Inter-{Regular,Medium,SemiBold,Bold,
+  ExtraBold}.woff?v=3.19`, the second `src` of each weight in
+  `vendor/modrinth-app/packages/assets/styles/inter.scss`, fetched by
+  `tools/make_fonts.py`. Modrinth's CDN serves each of them (HTTP 200,
+  `font/woff`), and a WOFF is a container rather than a compression, so the
+  script unwraps it into the plain sfnt cosmic-text 0.10 can read without a
+  decompressor -- which matters, because the machine that builds this tree has
+  no pip and the previous pipeline's `pyftsubset` could not run on it.
+  * **These are Inter 3.19.** The `name` table's version string reads `Version
+    3.019;git-0a5106e0b`, which looks like a different release and is not:
+    Inter zero-pads the minor component to three digits, and the upstream
+    `v3.19` release's own `Inter Desktop/*.otf` files carry that exact string
+    and that exact git hash. The CDN's build is not a subset either -- 2505
+    codepoints and 2548 glyphs, the same counts as `Inter Desktop/*.otf` in the
+    upstream archive.
+  * A pixel audit once attributed every label on the profile and hosting pages
+    measuring one to five pixels narrower than the reference's to these faces
+    being "3.019" rather than "3.19". It is not the typeface: `hmtx` is
+    identical to the reference's for all 2505 codepoints in all five weights,
+    and the residual delta has opposite signs at two different sizes, which one
+    typeface cannot produce. `make_fonts.py` asserts the version string, the
+    family, the PostScript name, `unitsPerEm` and the presence of the five
+    tables a renderer needs before it writes a face, so a bad unwrap fails the
+    tool rather than shipping a file that renders nothing.
+* **Licence**: SIL Open Font License 1.1, the licence Inter is published under
+  and one this repository's GPL-3.0-only is compatible with for a
+  redistributed font. The text travels with the faces in
+  `crates/palantir-desktop/assets/fonts/OFL.txt`, which is upstream's own
+  `LICENSE.txt` from the `v3.19` release verbatim -- OFL 1.1 asks for the
+  copyright and licence records to accompany the font, and each face also
+  carries them in its own `name` table (IDs 13 and 14), which
+  `pyftsubset`'s `--name-IDs=*` had preserved and this pipeline gets for free
+  by shipping whole faces.
+* **Trademarks**: "Inter" is a trademark of Rasmus Andersson, which the OFL
+  grant does not cover and which nothing here claims. The typeface is used
+  because it is the typeface the interface being reproduced is drawn in.
+* **Changes**: none to the font data. The WOFF unwrap reassembles the tables
+  the container holds -- same bytes, recomputed table checksums and
+  `head.checkSumAdjustment` -- and writes a plain sfnt. Nothing is subset,
+  hinted, renamed or otherwise edited.
+
 ## cosmic-text
 
 * **What**: the text engine the interface is shaped by -- vendored **and patched**
