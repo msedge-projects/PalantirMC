@@ -1324,7 +1324,10 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
                         .size(HEADER_TEXT)
                         .line_height(iced::Pixels(METADATA_LINE))
                         .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_SECONDARY,
+                        ))),
                 ),
         );
     }
@@ -3961,7 +3964,10 @@ mod tests {
         // `text-sm` nobody wrote.
         assert_eq!(COLLECTION_LABEL, HEADER_TEXT);
         assert_eq!(COLLECTION_LABEL_LINE, HEADER_SUMMARY_LINE);
-        assert_ne!(COLLECTION_NAME, COLLECTION_LABEL, "the name names a size and the rest do not");
+        assert_ne!(
+            COLLECTION_NAME, COLLECTION_LABEL,
+            "only the name names a size"
+        );
     }
 
     #[test]
