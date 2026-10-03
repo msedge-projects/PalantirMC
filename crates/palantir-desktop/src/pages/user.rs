@@ -81,9 +81,9 @@ use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP};
 use crate::route::ProjectType;
 use crate::store::Store;
-use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
-use crate::theme_gen::{self, Theme as Gen};
+use crate::theme_gen::{self, Ink, Theme as Gen};
 use crate::ui::{self, text, Hovered};
 
 // ---- The page's geometry, quoted ------------------------------------------
@@ -1842,6 +1842,16 @@ pub struct Pill {
     pub label: String,
     /// The `h-4` glyph in front of it, if the reference draws one there.
     pub icon: Option<Glyph>,
+    /// The tag's own id, and `None` for the two pills that are not a tag.
+    ///
+    /// It is here because `TagTagItem` is the one place in the reference that
+    /// paints a tag in something other than `--color-secondary`, and what it
+    /// paints it in is named after this string:
+    /// `--_color: var(--color-platform-${tag})`. The environment's pill is a
+    /// plain `TagItem` with no `TagTagItem` around it, and `+N` is
+    /// `TagsOverflow`'s plain `TagItem` with no slot in it at all, so neither
+    /// has a tag to be coloured by.
+    pub id: Option<String>,
 }
 
 impl Tags {
@@ -1859,14 +1869,15 @@ impl Tags {
     pub fn pills(&self) -> Vec<Pill> {
         let mut pills: Vec<Pill> = Vec::with_capacity(self.tags.len() + 2);
         if let Some((glyph, label)) = &self.environment {
-            pills.push(Pill { label: label.clone(), icon: Some(*glyph) });
+            pills.push(Pill { label: label.clone(), icon: Some(*glyph), id: None });
         }
         pills.extend(self.tags.iter().map(|tag| Pill {
             label: tag.label.clone(),
             icon: tag.icon,
+            id: Some(tag.id.clone()),
         }));
         if self.overflow > 0 {
-            pills.push(Pill { label: format!("+{}", self.overflow), icon: None });
+            pills.push(Pill { label: format!("+{}", self.overflow), icon: None, id: None });
         }
         pills
     }
@@ -2103,15 +2114,192 @@ fn unique(tags: &[String]) -> Vec<String> {
 /// one a pill gets is [`Pill::icon`] rather than a guess here -- three of the six
 /// pills on the reference's first card are twenty-six rows and three are
 /// twenty-four, and the difference is exactly whether the tag is a loader.
+///
+/// The one exception is a loader the reference paints in its own platform
+/// colour, which is [`platform_tag`] rather than either of them: see
+/// [`pill_ink`].
 fn tags_row<'a>(theme: Gen, project: &'a ModrinthUserProject) -> Element<'a, Message> {
     let mut row = row![].spacing(CARD_TAG_GAP).align_items(Alignment::Center);
     for pill in card_tags(project).pills() {
-        row = row.push(match pill.icon {
-            Some(glyph) => ui::tag_with_icon(theme, &pill.label, glyph),
-            None => ui::tag(theme, &pill.label),
+        row = row.push(match (pill.icon, platform_colour(&pill)) {
+            (icon, Some(ink)) => platform_tag(theme, &pill.label, icon, ink),
+            (Some(glyph), None) => ui::tag_with_icon(theme, &pill.label, glyph),
+            (None, None) => ui::tag(theme, &pill.label),
         });
     }
     row.into()
+}
+
+/// The `--color-platform-*` a loader tag's pill is painted in, if the reference
+/// has one for that tag.
+///
+/// `TagTagItem.vue:2` is the whole rule:
+///
+/// ```text
+/// <TagItem :style="isLoader ? `--_color: var(--color-platform-${tag})` : ''">
+/// ```
+///
+/// so a loader gets its platform's colour and everything else keeps
+/// `--color-secondary`. `TagItem`'s own class is
+/// `text-[--_color,var(--color-secondary)]`, which is why the fallback is the
+/// ink every other pill on this page is already drawn in -- and why the glyph
+/// follows the label: `[&>svg]` is given a size and no colour, so the icon
+/// inherits the `color` the label is set in.
+///
+/// Seventeen of the thirty loader tags have a token. Both columns below are the
+/// reference's own table, `assets/styles/variables.scss:169` and `:389`, in the
+/// order that file declares them:
+///
+/// | tag | token | light | dark |
+/// | --- | --- | --- | --- |
+/// | `bta-fabric` | `--color-platform-bta-fabric` | `#5BA938` | `#72CC4A` |
+/// | `bukkit` | `--color-platform-bukkit` | `#E78362` | `#F6AF7B` |
+/// | `bungeecord` | `--color-platform-bungeecord` | `#C69E39` | `#D2C080` |
+/// | `fabric` | `--color-platform-fabric` | `#8A7B71` | `#DBB69B` |
+/// | `folia` | `--color-platform-folia` | `#6AA54F` | `#A5E388` |
+/// | `forge` | `--color-platform-forge` | `#5B6197` | `#959EEF` |
+/// | `liteloader` | `--color-platform-liteloader` | `#4C90DE` | `#7AB0EE` |
+/// | `neoforge` | `--color-platform-neoforge` | `#DC895C` | `#F99E6B` |
+/// | `nilloader` | `--color-platform-nilloader` | `#DD5088` | `#F45E9A` |
+/// | `ornithe` | `--color-platform-ornithe` | `#6097CA` | `#87C7FF` |
+/// | `paper` | `--color-platform-paper` | `#E67E7E` | `#EEAAAA` |
+/// | `purpur` | `--color-platform-purpur` | `#7763A3` | `#C3ABF7` |
+/// | `quilt` | `--color-platform-quilt` | `#8B61B4` | `#C796F9` |
+/// | `spigot` | `--color-platform-spigot` | `#CD7A21` | `#F1CC84` |
+/// | `sponge` | `--color-platform-sponge` | `#C49528` | `#F9E580` |
+/// | `velocity` | `--color-platform-velocity` | `#4B98B0` | `#83D5EF` |
+/// | `waterfall` | `--color-platform-waterfall` | `#5F83CB` | `#78A4FB` |
+///
+/// The tokens themselves are already in [`crate::theme_gen`]: `gen_theme.py`
+/// reads every custom property it classifies as a colour and
+/// `--color-platform-*` are seventeen of its 144. So this table is only *which
+/// token belongs to which tag*, which no stylesheet states -- `TagTagItem`
+/// builds the name by interpolation -- and which of the thirty loader tags has
+/// one at all.
+///
+/// The other thirteen (`babric`, `canvas`, `datapack`, `geyser`, `iris`,
+/// `java-agent`, `legacy-fabric`, `minecraft`, `modloader`, `mrpack`,
+/// `optifine`, `rift`, `vanilla`) have no token, and a `var()` naming a property
+/// that does not exist makes `--_color` invalid at computed-value time, which
+/// sends `text-[--_color,var(--color-secondary)]` to its own fallback: those
+/// pills are `#96A2B0`, the ink they were already drawn in. So `None` here means
+/// "leave it alone", not "guess a colour for it".
+///
+/// One of the seventeen is unreachable as things stand: [`ui::is_loader_tag`]
+/// answers false for `bta-fabric`, because it asks the message id
+/// `tag.loader.bta-fabric` where the reference asks its own table by key, and the
+/// reference's id for that one is `tag.loader.bta-babric` upstream
+/// (`tag-messages.ts:11`). The arm is here because the token is, and because that
+/// one answer is what also costs that tag its glyph and its `BTA (Babric)`
+/// label.
+fn platform_ink(tag: &str) -> Option<Ink> {
+    Some(match tag {
+        "bta-fabric" => Ink::PlatformBtaBabric,
+        "bukkit" => Ink::PlatformBukkit,
+        "bungeecord" => Ink::PlatformBungeecord,
+        "fabric" => Ink::PlatformFabric,
+        "folia" => Ink::PlatformFolia,
+        "forge" => Ink::PlatformForge,
+        "liteloader" => Ink::PlatformLiteloader,
+        "neoforge" => Ink::PlatformNeoforge,
+        "nilloader" => Ink::PlatformNilloader,
+        "ornithe" => Ink::PlatformOrnithe,
+        "paper" => Ink::PlatformPaper,
+        "purpur" => Ink::PlatformPurpur,
+        "quilt" => Ink::PlatformQuilt,
+        "spigot" => Ink::PlatformSpigot,
+        "sponge" => Ink::PlatformSponge,
+        "velocity" => Ink::PlatformVelocity,
+        "waterfall" => Ink::PlatformWaterfall,
+        _ => return None,
+    })
+}
+
+/// The `--color-platform-*` one of this page's pills is painted in, if it is
+/// painted in one at all: `TagTagItem`'s `isLoader` ternary over one pill.
+///
+/// The two halves are kept apart on purpose: [`platform_ink`] is what the
+/// stylesheet declares, and [`ui::is_loader_tag`] is what
+/// `getTagMessage(tag, 'loader') !== undefined` answers. A category that shared
+/// a loader's name would take the category's answer, which is the reference's
+/// rule rather than this table's -- and the two pills that are not tags at all
+/// are `None` because there is nothing to name a token after.
+fn platform_colour(pill: &Pill) -> Option<Ink> {
+    pill.id
+        .as_deref()
+        .filter(|id| ui::is_loader_tag(id))
+        .and_then(platform_ink)
+}
+
+/// The ink a pill ends up in, which is [`INK_SECONDARY`] unless
+/// [`platform_colour`] has one: `text-[--_color,var(--color-secondary)]` and its
+/// fallback, spelled the way a gate can ask about a pill rather than about a
+/// widget.
+fn pill_ink(pill: &Pill) -> Ink {
+    platform_colour(pill).unwrap_or(INK_SECONDARY)
+}
+
+/// One of this page's tag pills, in an ink of the caller's choosing.
+///
+/// A platform-coloured loader is drawn here rather than through [`ui::tag`] or
+/// [`ui::tag_with_icon`] because both of those paint `--color-secondary` and
+/// nothing else, and `ui.rs` is not this slice's to edit: what the kit wants is
+/// an ink parameter, and this is the caller-side equivalent of one.
+///
+/// Every number in the frame is the kit's own constant, so this cannot drift
+/// from the two it stands in for in any of the seven things a pill is made of:
+/// [`ui::TAG_HEIGHT_ICON`] or [`ui::TAG_HEIGHT`] for the height -- which is the
+/// glyph's business and not the colour's -- half of that for the radius, because
+/// `rounded-full` is a rule rather than a number, [`ui::TAG_PAD`] either side,
+/// and [`ui::TAG_GAP`], [`ui::TAG_ICON`] and [`ui::TAG_LABEL_SIZE`] for the row
+/// and the label in it.
+///
+/// A platform-coloured loader with no glyph in it is real rather than
+/// hypothetical: *Purpur* and *Quilt* have tokens and are two of the four loader
+/// icons the generator refuses, so their pills are the 24-row ones and are still
+/// painted in the platform colour.
+fn platform_tag<'a, Message: 'a>(
+    theme: Gen,
+    label: &str,
+    glyph: Option<Glyph>,
+    ink: Ink,
+) -> Element<'a, Message> {
+    let height = match glyph {
+        Some(_) => ui::TAG_HEIGHT_ICON,
+        None => ui::TAG_HEIGHT,
+    };
+    let painted = theme_gen::ink(theme, ink);
+    let label_text = text(label.to_string())
+        .size(ui::TAG_LABEL_SIZE)
+        .font(regular())
+        .style(iced::theme::Text::Color(painted));
+    let content: Element<'a, Message> = match glyph {
+        Some(glyph) => row![icon::icon(glyph, ui::TAG_ICON, painted)]
+            .spacing(ui::TAG_GAP)
+            .align_items(Alignment::Center)
+            .push(label_text)
+            .into(),
+        None => label_text.into(),
+    };
+    container(content)
+        .height(Length::Fixed(height))
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: ui::TAG_PAD,
+            right: ui::TAG_PAD,
+        })
+        .center_y()
+        .style(move |_theme: &iced::Theme| container::Appearance {
+            background: Some(iced::Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+            border: Border {
+                color: theme_gen::ink(theme, Ink::Surface5),
+                width: 1.0,
+                radius: (height / 2.0).into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into()
 }
 
 /// One statistic: an icon at `size-5` and the count beside it, in `font-medium`.
@@ -2803,6 +2991,198 @@ mod tests {
         );
         // `uniqueSorted` is a `Set`, so a tag listed twice is one pill.
         assert_eq!(unique(&["a".to_string(), "b".to_string(), "a".to_string()]), ["a", "b"]);
+    }
+
+    #[test]
+    fn a_loader_pill_is_painted_in_its_own_platform_colour() {
+        // The measured defect, on the reference's own profile page at 1280x720:
+        // *Fabric* is `#DBB69B` there and *Forge* is `#959EEF`, and both were
+        // drawn `#96A2B0`. Those two are the dark column of
+        // `--color-platform-fabric` and `--color-platform-forge`
+        // (`variables.scss:389` and `:391`), which is what the reference's
+        // `var(--color-platform-${tag})` resolves to in the look it opens in.
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::PlatformFabric),
+            [0xdb, 0xb6, 0x9b, 0xff]
+        );
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::PlatformForge), [0x95, 0x9e, 0xef, 0xff]);
+        // The light look carries its own pair, from the same file's `:169` and
+        // `:171`, so what is read is a token and not two transcribed hexes.
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Light, Ink::PlatformFabric),
+            [0x8a, 0x7b, 0x71, 0xff]
+        );
+        assert_eq!(theme_gen::ink_rgba(Gen::Light, Ink::PlatformForge), [0x5b, 0x61, 0x97, 0xff]);
+        // And the ink the other pills keep, which the audit measured as correct
+        // on both sides: the categories, *Modpack* and `+1`.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, INK_SECONDARY), [0x96, 0xa2, 0xb0, 0xff]);
+    }
+
+    #[test]
+    fn seventeen_platform_colours_sixteen_of_them_reachable_through_is_loader_tag() {
+        // The reference's own loader table, `tag-messages.ts:5`, has thirty tags.
+        let loaders = [
+            "babric", "bta-fabric", "bukkit", "bungeecord", "canvas", "datapack", "fabric",
+            "folia", "forge", "geyser", "iris", "java-agent", "legacy-fabric", "liteloader",
+            "minecraft", "modloader", "mrpack", "neoforge", "nilloader", "optifine", "ornithe",
+            "paper", "purpur", "quilt", "rift", "spigot", "sponge", "vanilla", "velocity",
+            "waterfall",
+        ];
+        assert_eq!(loaders.len(), 30);
+        let coloured: Vec<&str> = loaders
+            .iter()
+            .copied()
+            .filter(|tag| platform_ink(tag).is_some())
+            .collect();
+        assert_eq!(coloured.len(), 17, "the platform tokens moved: {coloured:?}");
+        // `ui::is_loader_tag` is `TagTagItem`'s `isLoader`, and it answers true
+        // for twenty-nine of the thirty. It is false for `bta-fabric`, because
+        // this port asks the *message id* `tag.loader.bta-fabric` where the
+        // reference asks its own table by key -- and the reference's id for that
+        // one is misspelled upstream (`tag-messages.ts:11` writes
+        // `tag.loader.bta-babric` for a key spelled `bta-fabric`). So its pill is
+        // left on `--color-secondary` here even though the reference would paint
+        // it `--color-platform-bta-fabric`: the same answer that also costs that
+        // tag its glyph and its `BTA (Babric)` label, and one fix in `ui.rs`
+        // rather than one here.
+        assert!(!ui::is_loader_tag("bta-fabric"), "the id is still the misspelled one");
+        assert_eq!(platform_ink("bta-fabric"), Some(Ink::PlatformBtaBabric));
+        let reachable: Vec<&str> = coloured
+            .iter()
+            .copied()
+            .filter(|tag| ui::is_loader_tag(tag))
+            .collect();
+        assert_eq!(reachable.len(), 16, "the reachable platform colours moved: {reachable:?}");
+        for tag in loaders {
+            if tag != "bta-fabric" {
+                assert!(ui::is_loader_tag(tag), "{tag} stopped being a loader tag");
+            }
+        }
+        // The thirteen tags with no token keep `--color-secondary`, and *Modpack*
+        // and *Data Pack* are two of them -- both measured as `#96A2B0` on both
+        // sides of the audit, so they stay that way.
+        for tag in ["mrpack", "datapack", "minecraft", "geyser", "legacy-fabric"] {
+            assert!(ui::is_loader_tag(tag), "{tag} is a loader tag");
+            assert_eq!(platform_ink(tag), None, "{tag} gained a token");
+        }
+        // A loader can be coloured and glyphless: *Purpur* and *Quilt* have
+        // tokens and are two of the four loader icons the generator refuses, so
+        // their pills are 24 rows and are still painted in the platform colour.
+        assert_eq!(platform_ink("purpur"), Some(Ink::PlatformPurpur));
+        assert_eq!(platform_ink("quilt"), Some(Ink::PlatformQuilt));
+        assert_eq!(ui::tag_icon("purpur"), None, "purpur's glyph is still refused");
+        assert_eq!(ui::tag_icon("quilt"), None, "quilt's glyph is still refused");
+    }
+
+    #[test]
+    fn only_a_loader_pill_is_painted_in_a_platform_colour() {
+        // `TagTagItem.vue:2` gates the override on `isLoader`, so a category is
+        // `--color-secondary` whatever a loader of a similar name has, and the
+        // two pills that are not tags at all take the fallback because there is
+        // nothing to name a token after.
+        let ink_of = |id: Option<&str>, label: &str| {
+            let pill = Pill { label: label.to_string(), icon: None, id: id.map(str::to_string) };
+            (platform_colour(&pill), pill_ink(&pill))
+        };
+        assert_eq!(ink_of(Some("forge"), "Forge"), (Some(Ink::PlatformForge), Ink::PlatformForge));
+        assert_eq!(ink_of(Some("fabric"), "Fabric"), (Some(Ink::PlatformFabric), Ink::PlatformFabric));
+        // A loader with a token but no glyph in it still gets the colour, and
+        // still a 24-row pill: *Purpur* and *Quilt* are the two that are both.
+        let quilt = Pill {
+            label: "Quilt".to_string(),
+            icon: ui::tag_icon("quilt"),
+            id: Some("quilt".to_string()),
+        };
+        assert_eq!(pill_ink(&quilt), Ink::PlatformQuilt);
+        assert_eq!(ui::tag_height(quilt.icon.is_some()), ui::TAG_HEIGHT);
+        // A category, a loader with no token, and the two pills that are not
+        // tags: all four are the fallback, which is `#96A2B0`.
+        assert_eq!(ink_of(Some("mobs"), "Mobs"), (None, INK_SECONDARY));
+        assert_eq!(ink_of(Some("multiplayer"), "Multiplayer"), (None, INK_SECONDARY));
+        assert_eq!(ink_of(Some("mrpack"), "Modpack"), (None, INK_SECONDARY));
+        assert_eq!(ink_of(Some("datapack"), "Data Pack"), (None, INK_SECONDARY));
+        assert_eq!(ink_of(None, "Client and server"), (None, INK_SECONDARY));
+        assert_eq!(ink_of(None, "+1"), (None, INK_SECONDARY));
+    }
+
+    #[test]
+    fn a_card_s_tag_row_paints_its_loaders_and_nothing_else() {
+        // The three cards on the reference's own capture, through the row that
+        // draws them: *Zombie Invade 100 Days*, *Random Island* and *Zombie
+        // Invade Nether End*.
+        let inks = |project: &ModrinthUserProject| -> Vec<(String, Ink)> {
+            card_tags(project)
+                .pills()
+                .iter()
+                .map(|pill| (pill.label.clone(), pill_ink(pill)))
+                .collect()
+        };
+        assert_eq!(
+            inks(&flamefire(
+                "modpack",
+                r#""challenging", "combat""#,
+                r#""forge""#,
+                r#""multiplayer""#,
+                r#""client_and_server""#,
+            )),
+            vec![
+                ("Client and server".to_string(), INK_SECONDARY),
+                ("Challenging".to_string(), INK_SECONDARY),
+                ("Combat".to_string(), INK_SECONDARY),
+                ("Forge".to_string(), Ink::PlatformForge),
+                ("Modpack".to_string(), INK_SECONDARY),
+                ("+1".to_string(), INK_SECONDARY),
+            ]
+        );
+        // Card 2 is where both audited pills are: *Fabric* and *Forge*, with
+        // *Server*, *Minigame*, *World Generation* and `+3` beside them.
+        assert_eq!(
+            inks(&flamefire(
+                "mod",
+                r#""minigame", "worldgen""#,
+                r#""datapack", "fabric", "forge", "neoforge", "quilt""#,
+                "",
+                r#""server_only""#,
+            )),
+            vec![
+                ("Server".to_string(), INK_SECONDARY),
+                ("Minigame".to_string(), INK_SECONDARY),
+                ("World Generation".to_string(), INK_SECONDARY),
+                ("Fabric".to_string(), Ink::PlatformFabric),
+                ("Forge".to_string(), Ink::PlatformForge),
+                ("+3".to_string(), INK_SECONDARY),
+            ]
+        );
+        // Card 3: *Data Pack* is a loader with no token, so the two pills beside
+        // *Mobs* are the fallback and the row's only coloured one is absent.
+        assert_eq!(
+            inks(&flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, "")),
+            vec![
+                ("Mobs".to_string(), INK_SECONDARY),
+                ("Data Pack".to_string(), INK_SECONDARY),
+                ("+1".to_string(), INK_SECONDARY),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_platform_pill_is_the_kit_s_pill_with_another_ink() {
+        // Every number in `platform_tag`'s frame is the kit's own, so the three
+        // it stands in for cannot drift apart: the height follows the glyph
+        // exactly as [`ui::tag_height`] does, the radius is half of it because
+        // `rounded-full` is a rule rather than a number, and the padding, gap,
+        // icon and label are the four the reference's own `baseClass` names.
+        assert_eq!(ui::tag_height(true), ui::TAG_HEIGHT_ICON);
+        assert_eq!(ui::tag_height(false), ui::TAG_HEIGHT);
+        assert_eq!(ui::TAG_HEIGHT_ICON / 2.0, 13.0);
+        assert_eq!(ui::TAG_HEIGHT / 2.0, 12.0);
+        assert_eq!(ui::TAG_PAD, 8.0);
+        assert_eq!(ui::TAG_GAP, 4.0);
+        assert_eq!(ui::TAG_ICON, 16.0);
+        assert_eq!(ui::TAG_LABEL_SIZE, 14.0);
+        // And the row it sits in is still `CARD_TAG_ROW` tall whatever the pills
+        // in it are, which is the measurement the card's geometry was read from.
+        assert_eq!(CARD_TAG_ROW, 26.0);
     }
 
     #[test]
@@ -3511,3 +3891,4 @@ mod tests {
         }
     }
 }
+
