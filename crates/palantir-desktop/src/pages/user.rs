@@ -29,21 +29,32 @@
 //! row out of a **v3** project: `getProjectCardTags` is its `categories`, its
 //! `loaders` and its `mrpack_loaders`, and `catalogProjectTypes` is its
 //! `project_types` *array* -- which is where the strip's *Data Packs* comes from,
-//! against the v2 `project_type` string that says *Mods*. Both of those are fields
-//! `/v2/user/{id}/projects` does not publish, and the one request that would carry
-//! both is `GET /v3/user/{id}/projects` (public, and answering 200 for an
-//! unauthenticated read of a public account -- measured). Issuing it is the
-//! store's, not this page's: `Store::user` is what asks for the profile
-//! (`store.rs`), and a page in this tree has never held a connection. So
-//! [`card_tags`] puts back the one tag it can derive from what v2 *does* publish
-//! (a modpack's `mrpack` loader, measured across a hundred modpacks) and the strip
-//! still counts v2's single type -- both recorded where they are rather than
-//! papered over.
+//! against the v2 `project_type` string that says *Mods*.
+//!
+//! Both of those are fields `/v2/user/{id}/projects` does not publish, and the one
+//! request that would carry both is `GET /v3/user/{id}/projects` -- public, and
+//! answering 200 for an unauthenticated read of a public account, which is how
+//! G105's "the v3 user service needs a session" was narrowed to the routes that
+//! actually do. `ModrinthApi::user_projects_v3` asks for it and
+//! [`Profile::projects_v3`] carries it, so the strip is counted off v3's array
+//! through [`Profile::type_of`].
+//!
+//! What that read still cannot fix is a card's row. `ProjectCard.vue` is composed
+//! out of the v3 project document as a whole -- `name` where v2 says `title`,
+//! `summary` where it says `description` -- and moving the page onto that document
+//! is a change to every card rather than to one field, so [`card_tags`] still puts
+//! back the one tag it can derive from what v2 *does* publish (a modpack's `mrpack`
+//! loader, measured across a hundred modpacks). The array is read; the rest of the
+//! document is not.
 
 use iced::mouse::Interaction;
 use iced::widget::container;
 use iced::widget::{column, mouse_area, row, Space};
 use iced::{Alignment, Border, Element, Length, Padding, Vector};
+// The deep path rather than a `palantir_net` re-export: this is the one type the
+// page names that `palantir_net`'s convenience list does not carry, and `lib.rs` is
+// not this slice's to edit.
+use palantir_net::engine::modrinth::ModrinthV3Project;
 use palantir_net::modrinth::{ModrinthUser, ModrinthUserProject};
 
 use super::overlay::Stack;
@@ -282,6 +293,16 @@ pub struct Profile {
     pub user: ModrinthUser,
     /// The projects they own, in the order the service lists them.
     pub projects: Vec<ModrinthUserProject>,
+    /// The same projects from the **v3** document, read for one field.
+    ///
+    /// The type array and the id it belongs to, which is why it joins the v2 list by
+    /// id rather than by position: v3 orders its answer differently, and a type
+    /// counted against the wrong project would put a tab on the strip that filters
+    /// to nothing. See [`Profile::type_of`].
+    ///
+    /// Empty when the v3 read failed, which is a degradation rather than a hole:
+    /// every project then falls back to the v2 string.
+    pub projects_v3: Vec<ModrinthV3Project>,
     /// Their avatar, when it could be fetched and decoded -- already rounded into
     /// the circle `UserPageHeader.vue` asks for, by [`crate::avatar`].
     pub avatar: Option<crate::avatar::Icon>,
@@ -306,9 +327,13 @@ impl Profile {
     /// would not come back would be showing less than it knows. The reference's own
     /// avatar does the same thing quietly, falling back to its placeholder, and the
     /// sentence this keeps is drawn where the picture would be.
+    ///
+    /// `projects_v3` is the half that can be missing without anything being drawn
+    /// wrong about it -- see [`Profile::type_of`].
     pub fn of(
         user: ModrinthUser,
         projects: Vec<ModrinthUserProject>,
+        projects_v3: Vec<ModrinthV3Project>,
         avatar: Result<Vec<u8>, String>,
         icons: Vec<crate::avatar::Fetched>,
     ) -> Profile {
@@ -322,7 +347,7 @@ impl Profile {
             },
             Err(reason) => (None, Some(reason)),
         };
-        Profile { user, projects, avatar, note, icons }
+        Profile { user, projects, projects_v3, avatar, note, icons }
     }
 
     /// Everything this user's projects have been downloaded.
@@ -355,24 +380,48 @@ impl Profile {
     ///
     /// A type with no projects is not a filter: the reference builds its strip from
     /// the catalogue of the projects it has (`catalogProjectTypes(projects)`), so an
-    /// unused tab is never offered. The order is not [`ProjectType::TABS`]':
+    /// unused tab is never offered. The order is not [`ProjectType::TABS`]:
     /// `PROJECT_TYPE_ORDER` in `ui/src/utils/project-types.ts` puts mods first and
     /// modpacks fifth, where Discover's tabs put modpacks first.
     ///
-    /// A project whose `project_type` this tree cannot name is counted by the
-    /// header and drawn under *All*, and no filter claims it -- which is what the
-    /// reference does with a type its own order does not list.
+    /// A project whose type this tree cannot name is counted by the header and drawn
+    /// under *All*, and no filter claims it -- which is what the reference does with a
+    /// type its own order does not list (`getProjectSortIndex` returns
+    /// `PROJECT_TYPE_ORDER.length` for one it does not know, and `catalogProjectTypes`
+    /// deletes `'project'` outright).
     pub fn types(&self) -> Vec<ProjectType> {
         ProjectType::PROFILE_ORDER
             .iter()
             .copied()
-            .filter(|kind| {
-                self.projects.iter().any(|project| {
-                    ProjectType::from_token(&project.project_type) == Some(*kind)
-                })
-            })
+            .filter(|kind| self.projects.iter().any(|project| self.type_of(project) == Some(*kind)))
             .collect()
     }
+
+    /// The one type the reference calls this project's own.
+    ///
+    /// `getPrimaryProjectType` reads the head of v3's `project_types`, so that is what
+    /// this reads first, and the v2 string is the fallback rather than a second
+    /// opinion. The order matters because the two disagree on real accounts: v2 calls
+    /// four of FlameFire's six projects `mod` where v3 calls them
+    /// `["datapack", "mod"]`, and v2 calls apace's *Origins-Paper* a `mod` where v3
+    /// calls it a `["plugin"]`. A strip counted from the v2 string is missing *Data
+    /// Packs* and *Plugins* where the reference draws them.
+    ///
+    /// The fallback is what a profile whose v3 read failed is left with, and it is
+    /// chosen over failing: a machine that could not reach one more document still
+    /// has the strip it had, which is wrong for a project of two types rather than
+    /// absent. `None` when neither document names a type this tree knows, which is
+    /// the reference's own `'project'` answer: counted by the header, claimed by no
+    /// tab.
+    pub fn type_of(&self, project: &ModrinthUserProject) -> Option<ProjectType> {
+        self.projects_v3
+            .iter()
+            .find(|entry| entry.id == project.id)
+            .and_then(ModrinthV3Project::primary_type)
+            .and_then(ProjectType::from_token)
+            .or_else(|| ProjectType::from_token(&project.project_type))
+    }
+
 
     /// One project's icon, when it arrived.
     ///
@@ -397,7 +446,9 @@ impl Profile {
     ///
     /// `None` is the strip's *All* tab, which is the reference's own reading of an
     /// address with no type in it. The filter is compared against the project's own
-    /// type string, as the reference's `filterProjectsByType` does.
+    /// type, as the reference's `filterProjectsByType` does -- against
+    /// [`Self::type_of`], which is the same `getPrimaryProjectType` that function
+    /// calls, so a tab and the list under it cannot disagree about what a project is.
     ///
     /// The order is the reference's too, and it is not the service's:
     /// `layout.vue:746` is `filterProjectsByType(...).slice().sort(projectUserSorting)`,
@@ -417,7 +468,7 @@ impl Profile {
             .projects
             .iter()
             .filter(|project| match filter {
-                Some(kind) => ProjectType::from_token(&project.project_type) == Some(kind),
+                Some(kind) => self.type_of(project) == Some(kind),
                 None => true,
             })
             .collect();
@@ -914,6 +965,10 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
 /// (`NavTabs v-if="navLinks.length > 2"`). The *Collections* link the reference adds
 /// when a user has collections is not here: collections are read through the v3
 /// user service, which this tree cannot reach (G105).
+///
+/// Each label is `getProjectTypeTitleMessage(projectType)` formatted with
+/// `{ count: 2 }` -- the *capital* messages, plural -- which are the same seven words
+/// as the category messages [`ProjectType::label`] carries.
 fn filter_strip<'a>(
     theme: Gen,
     state: &State,
@@ -1272,9 +1327,11 @@ pub fn card_tags(project: &ModrinthUserProject) -> Tags {
 /// What it cannot be is a read, and the case it would get wrong is a project v2
 /// calls a mod that v3 also calls one: there the reference draws *Modpack* and
 /// this draws nothing, because v2's single `project_type` string has already lost
-/// the second type. That needs the v3 `project_types` array, which is the same
-/// second request as the strip's own *Data Packs* tab and neither can be asked
-/// for from this file -- see the module docs.
+/// the second type. The v3 `project_types` array now *is* read, for the strip's own
+/// filters (see [`Profile::type_of`]), and it does not reach here: `mrpack` is one
+/// of the two types a modpack leads with rather than a loader it publishes, and
+/// deciding that from an array this row does not receive would be a second reading
+/// of the same document in two places.
 fn card_tag_ids(project: &ModrinthUserProject) -> Vec<String> {
     let mut tags: Vec<String> = Vec::new();
     tags.extend(project.categories.iter().cloned());
@@ -1705,7 +1762,35 @@ mod tests {
                  "description":"A pack","published":"2022-02-02T00:00:00Z","downloads":1234}]"#,
         )
         .expect("the project list");
-        Profile::of(user, projects, Err("no avatar on this machine".to_string()), Vec::new())
+        Profile::of(
+            user,
+            projects,
+            v3_types(),
+            Err("no avatar on this machine".to_string()),
+            Vec::new(),
+        )
+    }
+
+    /// The v3 type list a fixture is read against, keyed by the ids the v2 fixture
+    /// above uses.
+    ///
+    /// Deliberately *not* the same types the v2 list spells: these are the arrays
+    /// `GET /v3/user/{id}/projects` answers for those projects, and the point of the
+    /// pairing is that they disagree.
+    fn v3_types() -> Vec<ModrinthV3Project> {
+        vec![
+            v3("AANobbMI", &["mod"]),
+            v3("hEOCdOgW", &["mod"]),
+            v3("P7dR8mSH", &["modpack"]),
+        ]
+    }
+
+    /// One v3 document for one project id, trimmed to the two fields read.
+    fn v3(id: &str, project_types: &[&str]) -> ModrinthV3Project {
+        ModrinthV3Project {
+            id: id.to_string(),
+            project_types: project_types.iter().map(|kind| kind.to_string()).collect(),
+        }
     }
 
     /// A PNG of one colour, in memory, the way `skin.rs`'s tests make one.
@@ -1763,7 +1848,7 @@ mod tests {
         // match, so one of them cannot be stale beside the other.
         let user: ModrinthUser =
             serde_json::from_str(r#"{"username":"jelly"}"#).expect("the user document");
-        let arrived = Profile::of(user, Vec::new(), Ok(picture(32)), Vec::new());
+        let arrived = Profile::of(user, Vec::new(), Vec::new(), Ok(picture(32)), Vec::new());
         assert!(arrived.avatar.is_some());
         assert!(arrived.note.is_none());
     }
@@ -1938,6 +2023,131 @@ mod tests {
         assert_eq!(profile.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
         // And a user with nothing has no filters at all.
         assert!(Profile::default().types().is_empty());
+    }
+
+    /// FlameFire's own six projects, as the two documents disagree about them.
+    ///
+    /// The v2 half is `GET /v2/user/FlameFire/projects` trimmed to the fields this
+    /// reads, and the v3 half is `GET /v3/user/P3U9o13d/projects` trimmed to
+    /// `project_types`. Both are the live answers, which is the point: v2 calls four
+    /// of the six `mod` where v3 calls them `["datapack", "mod"]`.
+    fn flamefire_profile(with_v3: bool) -> Profile {
+        let user: ModrinthUser = serde_json::from_str(
+            r#"{"id":"P3U9o13d","username":"FlameFire","name":null,"avatar_url":"",
+                "bio":"Just some things I like.","created":"2023-07-10T00:00:00Z"}"#,
+        )
+        .expect("the user document");
+        let projects: Vec<ModrinthUserProject> = serde_json::from_str(
+            r#"[
+                {"id":"Lb4GuFOj","title":"LuckyBlock Island","project_type":"mod","downloads":209072},
+                {"id":"y02ASFMI","title":"NineBlock","project_type":"mod","downloads":66531},
+                {"id":"zXGThYpi","title":"Random Island","project_type":"mod","downloads":14848763},
+                {"id":"O6MnUSQJ","title":"Zombie Invade Nether End","project_type":"mod","downloads":99813},
+                {"id":"l9m9tuPN","title":"Zombie Invade 100 Days","project_type":"modpack","downloads":14848763},
+                {"id":"mO4OAdvy","title":"FlameVPack","project_type":"modpack","downloads":4882}
+            ]"#,
+        )
+        .expect("the v2 project list");
+        let projects_v3: Vec<ModrinthV3Project> = serde_json::from_str(
+            r#"[
+                {"id":"Lb4GuFOj","project_types":["datapack","mod"]},
+                {"id":"y02ASFMI","project_types":["datapack","mod"]},
+                {"id":"zXGThYpi","project_types":["datapack","mod"]},
+                {"id":"O6MnUSQJ","project_types":["datapack"]},
+                {"id":"l9m9tuPN","project_types":["modpack"]},
+                {"id":"mO4OAdvy","project_types":["modpack"]}
+            ]"#,
+        )
+        .expect("the v3 project list");
+        Profile::of(
+            user,
+            projects,
+            if with_v3 { projects_v3 } else { Vec::new() },
+            Err("no avatar".to_string()),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn the_strip_is_counted_off_the_v3_array_and_says_data_packs_where_v2_says_mods() {
+        // The defect this fixes, measured: v2 calls four of these six projects `mod`,
+        // so a strip counted from v2 offers *Mods* and no *Data Packs* -- and the
+        // reference's own strip for this account reads *All · Data Packs · Modpacks ·
+        // Collections*. The reference's *Collections* is out of reach (G105), so what
+        // is left has to be the other three.
+        let profile = flamefire_profile(true);
+        assert_eq!(
+            profile.types(),
+            vec![ProjectType::Datapack, ProjectType::Modpack],
+            "PROJECT_TYPE_ORDER's own order: datapack third, modpack fifth"
+        );
+        // And *not* the v2 answer, which is the pair this replaced.
+        let v2_only = flamefire_profile(false);
+        assert_eq!(v2_only.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
+
+        // A project contributes the type it *leads* with and not every type it is:
+        // *Random Island* is `["datapack", "mod"]` and is counted once, under
+        // `datapack`. That is the reading their reference strip proves -- a set would
+        // have put *Mods* on it.
+        let random = profile.projects.iter().find(|p| p.id == "zXGThYpi").expect("the project");
+        assert_eq!(profile.type_of(random), Some(ProjectType::Datapack));
+        assert_eq!(random.project_type, "mod", "and v2 still calls it a mod");
+    }
+
+    #[test]
+    fn a_tab_and_the_list_under_it_read_the_same_type_and_a_missing_v3_falls_back_to_v2() {
+        // The strip offers what `types` counted and `shown` filters by `type_of`, so
+        // no tab can be offered that filters to nothing. Every tab is either empty or
+        // holds at least one project.
+        let profile = flamefire_profile(true);
+        for kind in profile.types() {
+            assert!(!profile.shown(Some(kind)).is_empty(), "{kind:?} is a tab with nothing under it");
+        }
+        assert_eq!(profile.shown(Some(ProjectType::Datapack)).len(), 4);
+        assert_eq!(profile.shown(Some(ProjectType::Modpack)).len(), 2);
+        assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 0, "nothing leads with `mod` here");
+        assert_eq!(profile.shown(None).len(), 6, "*All* is still every project");
+
+        // And the fallback is the degradation rather than a hole: a profile whose v3
+        // read failed is left with the strip it had, which is wrong for a project of
+        // two types rather than absent.
+        let v2_only = flamefire_profile(false);
+        assert_eq!(v2_only.shown(Some(ProjectType::Mod)).len(), 4);
+        assert_eq!(v2_only.shown(Some(ProjectType::Datapack)).len(), 0);
+        assert_eq!(v2_only.shown(None).len(), 6);
+
+        // A v3 list that named a project the v2 list does not have joins by id and
+        // claims nothing: the ids are the only key either document carries.
+        let mut extra = flamefire_profile(true);
+        extra.projects_v3.push(v3("not-in-v2", &["shader"]));
+        assert_eq!(extra.types(), vec![ProjectType::Datapack, ProjectType::Modpack]);
+    }
+
+    #[test]
+    fn every_tab_label_is_the_reference_s_plural_capital_message() {
+        // `layout.vue:778` formats `getProjectTypeTitleMessage(projectType)` with
+        // `{ count: 2 }`, so the label is the plural arm of
+        // `project-type.<kind>.capital` -- and those are the same seven words as the
+        // category messages `ProjectType::label` carries. Held here so the two tables
+        // cannot drift apart silently: a *Data Packs* that became *Datapacks* would
+        // still be a plausible-looking strip.
+        let expected = [
+            (ProjectType::Mod, "Mods"),
+            (ProjectType::ResourcePack, "Resource Packs"),
+            (ProjectType::Datapack, "Data Packs"),
+            (ProjectType::Shader, "Shaders"),
+            (ProjectType::Modpack, "Modpacks"),
+            (ProjectType::Plugin, "Plugins"),
+            (ProjectType::Server, "Servers"),
+        ];
+        assert_eq!(expected.len(), ProjectType::PROFILE_ORDER.len(), "one row per ordered type");
+        for (kind, label) in expected {
+            assert_eq!(kind.label(), label, "{kind:?}");
+        }
+        // The reference's *Collections* is the one link with no project type behind
+        // it, and it is out of reach here -- so the strip is one shorter than theirs
+        // for an account that has collections, by decision rather than by oversight.
+        assert_eq!(Key::ProjectTypeAll.message(), "All");
     }
 
     #[test]

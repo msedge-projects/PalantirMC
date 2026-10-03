@@ -1276,7 +1276,7 @@ impl Store {
     /// One user's profile: their own document, the projects they own, and their
     /// avatar.
     ///
-    /// **Blocking**, for [`Store::project`]'s reason, and three requests for the one
+    /// **Blocking**, for [`Store::project`]'s reason, and four requests for the one
     /// answer for the same reason Modrinth splits a project three ways: the profile
     /// document is asked for by the *name* an address spells, and the projects are a
     /// second endpoint keyed by the id only that document carries -- which is why
@@ -1285,7 +1285,25 @@ impl Store {
     /// the reference draws its own empty sentence for that, and a launcher that
     /// called it an error would show a broken page for every new account.
     ///
-    /// The avatar's failure is deliberately *not* this call's failure, and the
+    /// The third document is the same account's projects again, read from **v3**,
+    /// and it is the one request here a v2-only store could not make: v2 publishes a
+    /// project's type as a single `project_type` string where v3 publishes the array
+    /// `project_types`, and the reference's profile filter strip is built from the
+    /// array. Measured, not theoretical -- v2 calls four of FlameFire's six projects
+    /// `mod` where v3 calls them `["datapack", "mod"]`, and v2 calls apace's
+    /// *Origins-Paper* a `mod` where v3 calls it a `plugin`, so the strip built from
+    /// v2 alone is missing *Data Packs* and *Plugins* where the reference draws them.
+    /// It is cached under its own URL beside the v2 list, so a profile revisited costs
+    /// nothing more than it did.
+    ///
+    /// That read's failure is deliberately *not* this call's failure, and it is the
+    /// second place this store lets a reason go (the first is
+    /// [`Self::project_icons`]): the page falls back to the v2 string, which is wrong
+    /// for a project of two types rather than absent, and a profile whose header,
+    /// download total and project list all arrived should not be replaced by an error
+    /// sentence because a strip of tabs was one document short.
+    ///
+    /// The avatar's failure is deliberately not this call's failure either, and the
     /// profile carries the reason instead: an account on a machine with no
     /// connection still has a name, a bio and a list of projects, and a picture is
     /// the one thing here that is decoration (see [`Profile::of`]). An account with
@@ -1304,6 +1322,7 @@ impl Store {
         let projects = api
             .user_projects(&user.id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
+        let projects_v3 = api.user_projects_v3(&user.id, &cancel, &backoff).unwrap_or_default();
         let avatar = if user.avatar_url.is_empty() {
             Err("This account has no avatar.".to_string())
         } else {
@@ -1321,7 +1340,7 @@ impl Store {
             .map(|project| project.icon_url.clone())
             .collect();
         let icons = self.project_icons(&urls);
-        Ok(Profile::of(user, projects, avatar, icons))
+        Ok(Profile::of(user, projects, projects_v3, avatar, icons))
     }
 
     /// Install one project into one instance.
@@ -2068,7 +2087,10 @@ pub fn bytes_label(bytes: u64) -> String {
 mod tests {
     use super::*;
     use palantir_net::engine::request::{MapFetch, Route};
-    use palantir_net::modrinth::{project_members_url, project_url, version_url, NEWS_URL};
+    use palantir_net::engine::modrinth::user_projects_v3_url;
+    use palantir_net::modrinth::{
+        project_members_url, project_url, user_projects_url, user_url, version_url, NEWS_URL,
+    };
     use palantir_net::PISTON_MANIFEST_URL;
 
     fn scratch(name: &str) -> PathBuf {
@@ -2192,6 +2214,90 @@ mod tests {
         let again = store.project("AANobbMI").expect("the project, again");
         assert_eq!(again, project);
         assert_eq!(fetch.count(), 3);
+    }
+
+    /// One `GET /v2/user/{id}` body, one `GET /v2/user/{id}/projects` body and one
+    /// `GET /v3/user/{id}/projects` body for the same account, with the disagreement
+    /// between the last two intact: v2 calls the first project a `mod` where v3 calls
+    /// it `["datapack", "mod"]`. An empty `avatar_url` so the store does not ask for a
+    /// picture, which keeps the request count about the documents.
+    const PROFILE_USER_BODY: &str = r#"{
+        "id": "P3U9o13d", "username": "FlameFire", "name": null, "avatar_url": "",
+        "bio": "Just some things I like.", "created": "2023-07-10T00:00:00Z"
+    }"#;
+
+    const PROFILE_USER_PROJECTS_BODY: &str = r#"[
+        {"id":"Lb4GuFOj","slug":"luckyblock-island","project_type":"mod",
+         "title":"LuckyBlock Island","description":"Skyblock","downloads":209072,"icon_url":""},
+        {"id":"l9m9tuPN","slug":"zombie-invade-100-days","project_type":"modpack",
+         "title":"Zombie Invade 100 Days","description":"A pack","downloads":14848763,"icon_url":""}
+    ]"#;
+
+    const PROFILE_USER_PROJECTS_V3_BODY: &str = r#"[
+        {"id":"Lb4GuFOj","slug":"luckyblock-island","project_types":["datapack","mod"],
+         "games":["minecraft-java"],"name":"LuckyBlock Island"},
+        {"id":"l9m9tuPN","slug":"zombie-invade-100-days","project_types":["modpack"],
+         "games":["minecraft-java"],"name":"Zombie Invade 100 Days"}
+    ]"#;
+
+    #[test]
+    fn a_profile_reads_four_documents_and_the_v3_one_is_what_the_strip_counts() {
+        // Three JSON documents and no picture, because `avatar_url` is empty: the
+        // header, the v2 project list every card is drawn from, and the v3 list for
+        // the one field v2 will not say. The strip is the reason -- a filter strip
+        // counted off the v2 string offers *Mods* for this account where the
+        // reference offers *Data Packs*.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
+        fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
+        fetch.set_route(
+            &user_projects_v3_url("P3U9o13d"),
+            Route::text(PROFILE_USER_PROJECTS_V3_BODY),
+        );
+        let store = store_over("profile-v3", fetch.clone());
+
+        let profile = store.user("FlameFire").expect("the profile");
+        assert_eq!(profile.user.username, "FlameFire");
+        assert_eq!(profile.projects.len(), 2);
+        assert_eq!(profile.downloads(), 209_072 + 14_848_763);
+        assert_eq!(fetch.count(), 3, "one request per document, and no picture");
+
+        // Joined by id, not by position: the v3 answer lists the two projects the
+        // other order round, and the type has to land on the right one.
+        assert_eq!(profile.projects_v3.len(), 2);
+        assert_eq!(
+            profile.types(),
+            vec![ProjectType::Datapack, ProjectType::Modpack],
+            "v3's heads, not v2's single strings"
+        );
+        assert_eq!(profile.shown(Some(ProjectType::Datapack)).len(), 1);
+        assert_eq!(profile.shown(Some(ProjectType::Modpack)).len(), 1);
+        assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 0);
+
+        // Asked again, all three are answered from the cache: a profile revisited
+        // costs the same four requests as the first visit, which is three.
+        let again = store.user("FlameFire").expect("the profile, again");
+        assert_eq!(again, profile);
+        assert_eq!(fetch.count(), 3);
+    }
+
+    #[test]
+    fn a_v3_projects_list_that_cannot_be_read_leaves_the_profile_and_its_v2_strip() {
+        // The one reason this store lets go without drawing a sentence over the page:
+        // the strip falls back to the v2 string, so what is left is a strip that is
+        // wrong for a project of two types rather than a profile that is gone.
+        let fetch = Arc::new(MapFetch::new());
+        fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
+        fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
+        // No route for the v3 list: `MapFetch` fails a URL nobody scripted.
+        let store = store_over("profile-no-v3", fetch.clone());
+
+        let profile = store.user("FlameFire").expect("the profile");
+        assert_eq!(profile.projects.len(), 2);
+        assert!(profile.projects_v3.is_empty());
+        assert_eq!(profile.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
+        assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 1);
+        assert_eq!(fetch.count(), 3, "the v3 list was asked for and failed");
     }
 
     #[test]

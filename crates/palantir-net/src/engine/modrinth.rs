@@ -29,6 +29,13 @@
 //! they are checked where the file is: by the content store, at the point the
 //! bytes are adopted. A cache entry here is a document that parsed, which is the
 //! most a JSON API can promise.
+//!
+//! ## One v3 route, for the one field v2 cannot answer
+//!
+//! [`ModrinthApi::user_projects_v3`] is the only request here that leaves v2, and
+//! it is on the file because v2 publishes a project's type as one string and the
+//! reference builds a profile's filter strip from v3's array of them. Everything
+//! else the reference reads here is on the published API and is asked for on it.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -43,8 +50,81 @@ use crate::modrinth::{
     tag_game_versions_url, tag_loaders_url, user_projects_url, user_url, version_url,
     CategoryTag, GameVersionTag, LoaderTag, ModrinthMember, ModrinthProject, ModrinthProjectVersion,
     ModrinthSearchResponse, ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, NEWS_URL,
+    MODRINTH_BASE_URL,
 };
 use crate::Error;
+
+/// Labrinth's v3 base, which is [`MODRINTH_BASE_URL`] one version on.
+///
+/// One version, not a second vocabulary: `/v3/user/{id}/projects` and
+/// `/v2/user/{id}/projects` are the same list of the same account under two
+/// spellings, and the difference between them is the field this file goes to v3
+/// for ([`ModrinthV3Project::project_types`]).
+pub const MODRINTH_V3_BASE_URL: &str = "https://api.modrinth.com/v3";
+
+/// Every project one user owns, as the **v3** document writes it.
+///
+/// Built from the v2 URL rather than from a second encoder: `percent_encode` is
+/// private to [`crate::modrinth`] and one account spelled two ways would be two
+/// cache entries for one profile.
+pub fn user_projects_v3_url(user: &str) -> String {
+    user_projects_url(user).replacen(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL, 1)
+}
+
+/// Read an absent-or-`null` list as an empty one.
+///
+/// The same helper [`crate::modrinth`] applies to its own `environment` lists, and
+/// for the same reason: `#[serde(default)]` covers a field that is *absent* and not
+/// one that is present and `null`, and a `null` read as a parse failure takes a
+/// whole page's list with it. It is written out rather than imported because the
+/// one in [`crate::modrinth`] is private to that module.
+fn null_as_empty_vec<'de, D>(reader: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(<Option<Vec<String>> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
+}
+
+/// One project of a v3 `/user/{id}/projects` answer, read for its `project_types`
+/// and nothing else.
+///
+/// A subset, like every other document this crate models (unknown fields ignored).
+/// The v3 document renames v2's `title` to `name` and its `description` to
+/// `summary`, and the reference draws its cards out of *that* document -- but moving
+/// a page onto it is a change to every card rather than to one field, and the only
+/// thing v2 cannot answer is the type array. So this reads the array and the id it
+/// belongs to, and the page keeps drawing the v2 documents it already has.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthV3Project {
+    /// The project's id, which is what joins this document to the v2 one.
+    #[serde(default)]
+    pub id: String,
+    /// Every type the project belongs to, in the service's own order.
+    ///
+    /// A `["datapack", "mod"]` project is both, and that array is the whole of what
+    /// v2's single `project_type` string cannot say -- see [`Self::primary_type`].
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub project_types: Vec<String>,
+}
+
+impl ModrinthV3Project {
+    /// The one type the reference calls this project's own.
+    ///
+    /// `getPrimaryProjectType` from `@modrinth/utils` is the **head** of the array
+    /// rather than the set of it, and that is a measurement rather than a reading of
+    /// the name: of FlameFire's six projects four answer `["datapack", "mod"]` in v3
+    /// where v2 answers `project_type: "mod"`, and the strip the reference draws for
+    /// that account is *All · Data Packs · Modpacks · Collections* -- *Mods* is not on
+    /// it. A set would have put *Mods* there, so a project contributes one type here
+    /// rather than the two its array names.
+    ///
+    /// `None` for a project whose array is empty or `null`, which is the reference's
+    /// own `'project'` answer spelled as nothing: it has a type this tree does not
+    /// name, so no tab claims it.
+    pub fn primary_type(&self) -> Option<&str> {
+        self.project_types.first().map(String::as_str)
+    }
+}
 
 /// Read one of the tag lists: the same cache, the same error reporting, and a
 /// `Vec` of whatever the route publishes.
@@ -296,7 +376,41 @@ impl ModrinthApi {
         let url = user_projects_url(user);
         let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
-    }/// Every category Modrinth knows, as `GET /v2/tag/category` lists them.
+    }
+
+    /// Every project one user owns, as the **v3** document writes it.
+    ///
+    /// A second request beside [`Self::user_projects`], under its own URL and believed
+    /// for the same TTL, and it is here for one field: v2 spells a project's type as
+    /// the single string `project_type` and v3 spells it as the array `project_types`,
+    /// which is the one the reference builds a profile's filter strip from
+    /// (`catalogProjectTypes` over `projects.value`).
+    ///
+    /// Worth the request, because the two spellings disagree on real accounts and not
+    /// only on rare ones. Measured on FlameFire's six projects: v3 answers
+    /// `["datapack", "mod"]` for four of them where v2 answers `mod`, which is why
+    /// their reference strip reads *Data Packs* and not *Mods*. Measured on apace's
+    /// ten: v3 calls *Origins-Paper* a `["plugin"]` where v2 calls it a `mod`, so a
+    /// strip built from v2 is missing *Plugins* as well. Nothing else in the v2
+    /// document carries the type -- *Origins-Paper*'s v2 `loaders` are
+    /// `["paper", "purpur", "velocity"]`, which name no project type at all -- so this
+    /// is the only route that can answer it.
+    ///
+    /// Believed for the project TTL, beside the v2 answer it sits next to: the same
+    /// account on the same clock, so a profile revisited costs no more than the v2 list
+    /// already did.
+    pub fn user_projects_v3(
+        &self,
+        user: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<Vec<ModrinthV3Project>, Error> {
+        let url = user_projects_v3_url(user);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
+    /// Every category Modrinth knows, as `GET /v2/tag/category` lists them.
     ///
     /// One of three tag routes -- the other two are [`Self::tag_game_versions`]
     /// and [`Self::tag_loaders`] -- and what a browse page's filter sections are
@@ -522,6 +636,85 @@ mod tests {
         let urls: Vec<String> = fetch.requests().iter().map(|r| r.url.clone()).collect();
         assert!(urls.contains(&user_url("2REoufqX")));
         assert!(urls.contains(&user_projects_url("2REoufqX")));
+    }
+
+    /// FlameFire's own three projects as `GET /v3/user/P3U9o13d/projects` answers
+    /// them, trimmed to the two fields read here -- and the arrays are the live
+    /// ones, because their disagreement with v2 is the whole reason the route is
+    /// asked: v2 answers `project_type: "mod"` for the first two.
+    const USER_PROJECTS_V3_BODY: &str = r#"[
+        {"id":"y02ASFMI","slug":"nineblock","project_types":["datapack","mod"],
+         "games":["minecraft-java"],"team_id":"t1","name":"NineBlock"},
+        {"id":"O6MnUSQJ","slug":"zombie-invade-nether-end","project_types":["datapack"],
+         "games":["minecraft-java"],"team_id":"t1","name":"Zombie Invade Nether End"},
+        {"id":"l9m9tuPN","slug":"zombie-invade-100-days","project_types":["modpack"],
+         "games":["minecraft-java"],"team_id":"t1","name":"Zombie Invade 100 Days"}
+    ]"#;
+
+    #[test]
+    fn the_v3_projects_route_is_a_third_document_and_reads_the_head_of_the_type_array() {
+        let (api, fetch) = api("user-v3", DEFAULT_TTL);
+        fetch.set_route(&user_projects_v3_url("P3U9o13d"), Route::text(USER_PROJECTS_V3_BODY));
+
+        let projects = api
+            .user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the v3 list");
+        assert_eq!(projects.len(), 3);
+        assert_eq!(projects[0].id, "y02ASFMI");
+
+        // The head of the array and not the set of it, which is the difference
+        // between a strip reading *Data Packs · Modpacks* and one reading
+        // *Mods · Data Packs · Modpacks*: measured, the reference draws the former for
+        // this account. So a project that is both is counted once.
+        assert_eq!(projects[0].project_types, vec!["datapack", "mod"]);
+        assert_eq!(projects[0].primary_type(), Some("datapack"));
+        assert_eq!(projects[1].primary_type(), Some("datapack"));
+        assert_eq!(projects[2].primary_type(), Some("modpack"));
+
+        // The URL is v3's, so the two lists are two cache entries and a profile that
+        // paid for the v2 answer has not paid for this one.
+        let url = user_projects_v3_url("P3U9o13d");
+        assert_eq!(url, "https://api.modrinth.com/v3/user/P3U9o13d/projects");
+        assert_ne!(url, user_projects_url("P3U9o13d"));
+        assert_eq!(fetch.requests()[0].url, url);
+
+        api.user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        assert_eq!(fetch.count(), 1, "a fresh list is not asked for again");
+    }
+
+    #[test]
+    fn a_type_array_that_answers_null_is_an_empty_one_and_not_a_broken_profile() {
+        // Measured across twenty-nine of the service's own projects, `project_types`
+        // is never null and never empty -- but a null here would fail the parse of the
+        // *whole* list and take the profile's type strip with it, so the read covers
+        // it rather than betting the page on the sample.
+        let (api, fetch) = api("user-v3-null", DEFAULT_TTL);
+        fetch.set_route(
+            &user_projects_v3_url("P3U9o13d"),
+            Route::text(r#"[{"id":"a","project_types":null},{"id":"b"},{"id":"c","project_types":["mod"]}]"#),
+        );
+
+        let projects = api
+            .user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the list");
+        assert_eq!(projects[0].primary_type(), None, "a null array names no type");
+        assert_eq!(projects[1].primary_type(), None, "and an absent one does not either");
+        assert_eq!(projects[2].primary_type(), Some("mod"));
+    }
+
+    #[test]
+    fn the_v3_url_encodes_its_account_exactly_as_the_v2_one_does() {
+        // One account has to be one cache entry across both versions, so the v3 URL
+        // cannot bring an encoder of its own -- it is the v2 URL with the version
+        // segment swapped.
+        assert_eq!(
+            user_projects_v3_url("a b"),
+            "https://api.modrinth.com/v3/user/a%20b/projects"
+        );
+        assert_eq!(
+            user_projects_v3_url("a b"),
+            user_projects_url("a b").replace(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL)
+        );
     }
 
     #[test]
