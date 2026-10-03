@@ -2483,3 +2483,64 @@ against a capture before the first.
 The rule and the shadow are two elements rather than one gradient with a stop
 placed at 1/9: a hand-placed stop is a fraction of the box's *diagonal*, not of
 its height, so it came out as a flat band at the first colour.
+## The tab strip is the pill, and nothing else
+
+The section above is wrong, and this is the correction. Every number in its table
+is right; what it says those numbers *are* is not.
+
+`browse-tab/layout.vue:141` passes `<NavTabs>` **no `pageNav`**. That prop is the
+only thing `NavTabs.vue:3` branches its outer element on:
+
+```html
+<div :class="pageNav ? '-mx-6 -mt-2 mb-1 overflow-x-auto px-6 py-2' : 'contents'" ...>
+```
+
+With `pageNav` false the outer element is `contents`, so the page shows the
+`<nav>` itself and nothing around it — `relative flex w-fit rounded-full
+bg-bg-raised p-1`, as wide as its tabs. There is no header element, no band, no
+`border-b` hairline and no shadow of its own to draw. The hairline and the
+`card-shadow` that do appear on screen are the **pill's own**, from
+`card-shadow border border-solid border-surface-4` on the same `<nav>`
+(`NavTabs.vue:11`), and `ui::tabs` has drawn both since it was written.
+
+A clean capture settles it. At 1280x720 on `/browse/modpack`:
+
+| | Reference |
+| --- | --- |
+| Pill (`--bg-raised`) | x 88..723 |
+| Pill border (`--surface-4`) | x 88 and x 723 |
+| Page background at x 730, x 900 | `(22, 24, 28)` — already the page's own |
+| Pill rows | y 72..117 (46: `1 + 4 + 36 + 4 + 1`) |
+| Head bar's own hairline | y 48 |
+| Search field's top hairline | y 126 |
+
+So the pill is **left-aligned at the page's `INSET` from x=64**, and the raised
+surface stops at 723. What this port drew instead was a `Length::Fill` container
+painted `--bg-raised` with a one-pixel rule and an eight-row gradient under it:
+a 914-pixel band where the reference has a 636-pixel pill, and a pill whose own
+height was wrong twice over, because the band and the rule beneath it were
+standing in for the pill's border and had both been counted as extra.
+
+The corrected strip is `INSET` to the left, `INSET - 1` above and eight rows
+under — the last two measured, not quoted: the head bar's hairline at y=48 is
+this page's first row, so `48 + 24 = 72` is where the pill's top border lands and
+there are 23 rows of page background above it. The eight rows below are the
+pill's own `card-shadow` fading into page background and nothing else; the capture
+has the shadow on y 118..120 and plain background from 121, so this draws no ink
+there at all.
+
+The lesson is the one about captures, and it is worth stating plainly because it
+cost a commit: **the first measurement of this region was taken against a
+capture with a transient panel over it.** `/tmp/ref-disc6.png` has an unrelated
+raised box at x 65..213, y 106..140 — the filter panel mid-animation, or a hover
+card — sitting exactly on top of the band's left end. Every x-extent read off
+that plate was taken against a background that was not the page's. The row
+numbers survived because a row of the band is the same colour wherever you sample
+it; the widths did not, and the widths were the thing that was wrong.
+
+Two things this port still does not draw, recorded rather than faked: the
+`-mx-6 -mt-6` full-bleed (the page insets its content by 24 and this insets the
+pill by the same 24, so the two agree on the left edge and disagree about the
+header reaching the pane's edge), and the reference's `mb-4` under the header,
+which this accounts for inside `STRIP_UNDER` because the capture leaves no room
+between the shadow and the field.
