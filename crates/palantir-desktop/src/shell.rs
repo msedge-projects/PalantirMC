@@ -4959,36 +4959,39 @@ fn tags(&self) -> iced::Command<Message> {
                 },
                 ..container::Appearance::default()
             });
-        // `.app-contents` carries a 1px `--surface-5` edge over its top and left
-        // inside the `--radius-xl` corner, and the page's own background starts
-        // one pixel in: in the reference's capture the rule is at x=64 and y=48,
-        // and the page's `--bg` begins at x=65 and y=49. Two straight rules
-        // would leave the corner's arc unlined, and iced 0.12's border width is
-        // one width on all four sides, so the edge is drawn the way the
-        // reference paints it: this container covers the whole pane in the
-        // rule's colour, the page is laid over all of it but that 1px, and the
-        // arc is the sliver the two rounded corners' own radii show between
-        // them. The page is a pixel narrower and shorter than the pane for the
-        // same reason the reference's content is: it starts after its border,
-        // not under it.
-        container(page)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: 1.0,
-                right: 0.0,
-                bottom: 0.0,
-                left: 1.0,
-            })
-            .style(move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
-                border: Border {
-                    radius: iced::border::Radius::from([PAGE_RADIUS, 0.0, 0.0, 0.0]),
-                    ..Border::default()
-                },
-                ..container::Appearance::default()
-            })
-            .into()
+        // The pane's edge is `.app-contents::before` (`App.vue:2755-2769`): a
+        // `position: fixed` pseudo-element at `z-index: 30` carrying
+        // `border-width: 1px; border-color: var(--surface-5)` and
+        // `border-radius: var(--radius-xl)`. `.app-contents` itself declares no
+        // border, so its content box -- and every page's -- starts at
+        // `left: var(--left-bar-width); top: var(--top-bar-height)`, which is
+        // (64, 48) at the reference's own 1280x720, and the rule is painted
+        // *over* that content rather than beside it. Laying the page one pixel
+        // in, which is what this used to do, therefore moved every page's own
+        // padding down and right by one: `48 + 24 = 72` is where the
+        // reference's first page ink is on both pages and `49 + 24 = 73` is
+        // where this one put it.
+        //
+        // The rule therefore goes over the page as its own layer, and the corner
+        // keeps the sliver the two rounded corners' radii show between them:
+        // this container is still the pane in the rule's colour and the page is
+        // still laid over all of it, so the only thing that moved is which
+        // pixel each of them starts on.
+        container(
+            crate::pages::overlay::Stack::at(Vector::ZERO, page)
+                .over(Vector::ZERO, pane_rule(theme)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+            border: Border {
+                radius: iced::border::Radius::from([PAGE_RADIUS, 0.0, 0.0, 0.0]),
+                ..Border::default()
+            },
+            ..container::Appearance::default()
+        })
+        .into()
     }
 
     /// The right panel: the reference's own column, with its sections in it.
@@ -7773,6 +7776,46 @@ fn hairline(theme: Gen, vertical: bool) -> Element<'static, Message> {
             ..container::Appearance::default()
         })
         .into()
+}
+
+/// The page pane's own edge, drawn *over* the page: `.app-contents::before`'s
+/// one-pixel `--surface-5` rule along its top and left.
+///
+/// Two strips rather than a `Border`, because iced 0.12 paints a border on all
+/// four sides and the reference's pseudo-element's other two edges are off the
+/// window -- `right: calc(-1 * var(--left-bar-width))` and `bottom: calc(-1 *
+/// var(--left-bar-width))` put them 64 pixels past the bottom right corner --
+/// and because the corner's arc belongs to the page's own radius, which the
+/// container behind it already shows.
+fn pane_rule(theme: Gen) -> Element<'static, Message> {
+    // One style for both strips: iced 0.12's `Column` carries no style of its
+    // own, and a background on the column around them would paint the whole pane
+    // in the rule's colour over the page.
+    let rule = move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+        ..container::Appearance::default()
+    };
+    column![
+        // `top`: the pseudo-element's one pixel of border across the pane, which
+        // is also the corner.
+        container(Space::with_width(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(rule),
+        // `left`: the same pixel down the pane's page edge.
+        row![
+            container(Space::with_height(Length::Fill))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(rule),
+            Space::with_width(Length::Fill),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// The account the card's header names: the one in force, or the reference's own
