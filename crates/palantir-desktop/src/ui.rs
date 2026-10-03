@@ -316,7 +316,46 @@ pub const CONTROL: f32 = 40.0;
 /// `rounded-xl` on a combobox and an input wrapper.
 pub const CONTROL_RADIUS: f32 = 12.0;
 /// `size-5` on the icons inside a control.
+///
+/// The value is `size-5` and it is *not* the size of every icon a control holds.
+/// The reference's own stylesheet carries a bare element rule, `svg{width:1em;
+/// height:1em}`, so an icon element that has no class of its own is one *em*
+/// instead -- [`BARE_ICON`] is that number and the two things in this crate that
+/// were reading this one for it. Every use site of this constant wants `size-5`,
+/// and the table is here so that a reader does not have to go looking:
+///
+/// | use site | reference |
+/// | --- | --- |
+/// | [`search`]'s leading glyph, `ui.rs` | `Input.vue:12`, `flex size-5 shrink-0 ... [&>svg]:size-5` -- twenty on the wrapper *and* on the icon |
+/// | the install checklist's undone mark, `shell.rs` | `app-frontend/.../onboarding-checklist/index.vue:120`, `<RadioButtonIcon v-else class="size-5 shrink-0" />` |
+/// | the profile page's collection-card icons, `pages/user.rs` | `layout.vue:282` and `:292`, **unclassed** -- these want [`BARE_ICON`] |
+///
+/// The third row is the only one that does not want this number, and it cannot be
+/// given this number's name without moving the other two, which is why the answer
+/// is a second constant rather than a change here.
 pub const CONTROL_ICON: f32 = 20.0;
+/// The size of an icon element the reference gives no class of its own.
+///
+/// `svg{width:1em;height:1em}` is a bare element rule in the reference's shipped
+/// stylesheet -- it sits between `.iconified-input svg` and `.chart svg` in the
+/// bundle inside `/usr/bin/ModrinthApp`, with nothing wrapping it in a `:where()`
+/// to shed specificity -- so an unclassed `<svg>` is exactly one em of whatever
+/// size it inherits, and `assets/styles/defaults.scss:17`'s `body{font-size:16px}`
+/// is that em on every page this port draws.
+///
+/// `layout.vue`'s collection cards are the case it settles. `<LibraryIcon
+/// aria-hidden="true" />` and `<BoxIcon />` (`:282`, `:292`) carry no class, and
+/// the `flex items-center gap-1` they sit in (`:280`, `:290`) sets no font size
+/// either -- the card above them sizes only its `<h2>` at `text-lg` -- so both are
+/// sixteen pixels, against the twenty [`CONTROL_ICON`] carries for `size-5`.
+///
+/// Not verified against a capture, and the reason is worth having: the reference
+/// client on the capture display is signed out in the session that measured this,
+/// so its profile rail slot opens a sign-in modal instead of a profile, and
+/// `/user/FlameFire` is not reachable from that window without restarting it. The
+/// number is read from the stylesheet the reference itself ships and from the two
+/// lines that consume it, which is the same pair the rest of this file quotes.
+pub const BARE_ICON: f32 = 16.0;
 /// A tag's label size, which is `TagItem.vue`'s `text-sm` at the reference's
 /// sixteen-pixel root.
 pub const TAG_LABEL_SIZE: f32 = 14.0;
@@ -2152,6 +2191,7 @@ pub const TAB_LINE: f32 = 20.0;
 /// (see [`TAB_STRIP`]).
 pub const TAB_LABEL_WEIGHT: iced::font::Weight = iced::font::Weight::Bold;
 
+
 /// The tab's own height: `py-2` around [`TAB_LINE`].
 pub const TAB_HEIGHT: f32 = TAB_LINE + 16.0;
 
@@ -2309,6 +2349,72 @@ pub fn tabs<'a, Message: Clone + Hovered + 'a>(
 /// `text-secondary` where the label is `text-contrast`. The label itself is
 /// `text-nowrap` at the track's `text-sm`, and the pair sit in the link's own
 /// `gap-2`.
+///
+/// The label's advance is short by about 0.7 of a pixel a character, and it is
+/// **not drawn on purpose**.
+///
+/// This is the largest measured disagreement left on this strip and it is recorded
+/// rather than approximated, for four reasons that were each checked against the
+/// reference's own files rather than inferred.
+///
+/// **It is not letter-spacing.** `NavTabs.vue:9` puts `text-xs sm:text-sm font-bold`
+/// on the `<nav>` and the label `<span>` (`:35`, `:57`) carries `tab-color
+/// text-nowrap` and a colour; there is no `tracking-*` on either, and the
+/// stylesheet inside `/usr/bin/ModrinthApp` agrees -- `tracking-` does not occur in
+/// it once, and its only two `letter-spacing` declarations are `pre code` and
+/// `.code-text`. `word-spacing`, `font-feature-settings`, `font-kerning`,
+/// `text-rendering`, `font-variant-ligatures` and `text-spacing` do not occur in
+/// it at all.
+///
+/// **It is not a size.** The strip is forty-six pixels tall on the reference's own
+/// capture (`y=201..246`, borders included), which is `1 + 4 + (8 + 20 + 8) + 4 +
+/// 1`, and that twenty is `text-sm`'s own `line-height: 1.25rem` -- so the label is
+/// on [`TAB_LABEL`]'s fourteen pixels, and a larger size would make the strip
+/// taller. The glyphs agree: *Data Packs*' `D`, `a`, `t` and `a` measure 9, 7, 5 and
+/// 7 pixels of ink on the reference and 8, 7, 4 and 7 here, so the shapes are the
+/// size this port already draws them at.
+///
+/// **It is not the weight.** The table below is a monotone drift, and a drift is
+/// what more or less space per character looks like; a heavier or a lighter face is
+/// wider *per glyph*, and the glyphs already match.
+///
+/// **iced 0.12.3 cannot say it.** `iced_core::widget::Text`'s setters are `size`,
+/// `line_height`, `font`, `style`, `width`, `height`, `horizontal_alignment`,
+/// `vertical_alignment` and `shaping`, and nothing else -- no letter spacing, and
+/// neither `shaping` nor `iced::advanced::graphics::text`'s `Paragraph` carries one
+/// to reach.
+///
+/// The measurement, on *Data Packs* at `coverage > 0.5`, ink-run starts in capture
+/// x, the reference read off `/tmp/ref/user-ref.png` and this port off a build at
+/// the same 1280x720:
+///
+/// | glyph | `D` | `a` | `t` | `a` | `P` | `a` | `c` | `k` | `s` |
+/// | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+/// | reference | 160 | 171 | 180 | 187 | 199 | 209 | 218 | 227 | 235 |
+/// | this port | 159 | 169 | 177 | 182 | 194 | 203 | 211 | 219 | 227 |
+/// | drift | 0 | +1 | +2 | +4 | +4 | +5 | +6 | +7 | +7 |
+///
+/// Seven pixels over eight gaps. The strip's own plate agrees and is the least noisy
+/// of the two numbers: it is 399 wide there and 380 here, and `w-fit` makes it
+/// `8 + 4 * (32 + advance)`, so the four labels want 263.0 of advance against the
+/// 243.7 that Inter 700 at [`TAB_LABEL`] sums to -- 19.3 over 27 character gaps,
+/// which is 0.72 a character.
+///
+/// **Why a per-glyph renderer is not written either.** Composing the label from one
+/// `Text` per character with a spacer between them does fit: a best-fit extra of
+/// 0.75 a character lands all nine of *Data Packs*' origins within one pixel. But
+/// the number that fits is not a constant. Fitted label by label it is 0.75 on
+/// *Data Packs*, 0.35 on *Modpacks*, 0.50 on *Collections*, 0.50 on *Shaders* and
+/// 0.50 on *Resource Packs*, and the best single value still leaves 0.9 pixels of
+/// rms error a glyph. The same measurement on the *Modrinth Hosting* heading runs
+/// the other way -- this port's fifteen glyph origins sit one to three pixels to
+/// the *right* of the reference's by the last one, about -0.15 a character. One
+/// number cannot be +0.7 on one label and -0.15 on another, so anything written
+/// here would be fitting these two renderers' sub-pixel rounding rather than a
+/// property of the label, and would be fitting it with some ninety extra
+/// `Paragraph`s on a strip that five pages draw. What the numbers support is the
+/// narrower claim: the reference's text engine advances glyphs further than
+/// `cosmic-text` does on these labels and further *less* on that heading.
 pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     keys: &[&'static str],
@@ -3572,5 +3678,114 @@ mod tests {
             let on_accent = theme_gen::ink(*theme, Ink::AccentContrast);
             assert_ne!(accent, on_accent, "{theme:?}: the label must be legible");
         }
+    }
+
+    /// Read a file from the vendored reference, or skip the test when the tree is
+    /// absent.
+    ///
+    /// `UPSTREAM.md` promises that removing `vendor/modrinth-app` changes no test,
+    /// so a missing tree returns early rather than failing -- the same bargain
+    /// `reference_tokens` strikes.
+    fn reference_file(relative: &str) -> Option<String> {
+        let path = crate::reference_tokens::vendored_tree().join(relative);
+        std::fs::read_to_string(path).ok()
+    }
+
+    #[test]
+    fn the_two_icon_sizes_are_read_from_the_reference_and_stay_apart() {
+        // `CONTROL_ICON` is `size-5` and `BARE_ICON` is the bare `svg{width:1em;
+        // height:1em}` element rule at the sixteen-pixel root. They are one class
+        // apart in the reference and four pixels apart here, and the reason the
+        // first is not simply lowered to the second is that two of its three use
+        // sites really are `size-5`. Both facts are in the tree, so both are read
+        // out of it here: a rename or a re-tailwind upstream moves the number and
+        // this is what says so.
+        assert_eq!(CONTROL_ICON, 20.0);
+        assert_eq!(BARE_ICON, 16.0);
+        assert_ne!(
+            CONTROL_ICON, BARE_ICON,
+            "the profile page's collection-card icons are unclassed and must not \
+             borrow the twenty that `size-5` means"
+        );
+
+        let Some(input) = reference_file("ui/src/components/base/inputs/Input.vue") else {
+            return;
+        };
+        assert!(
+            input.contains("[&>svg]:size-5"),
+            "Input.vue:12 sizes a leading icon at `size-5`; CONTROL_ICON is that number"
+        );
+        let Some(list) = reference_file(
+            "app-frontend/src/components/ui/onboarding-checklist/index.vue",
+        ) else {
+            return;
+        };
+        assert!(
+            list.contains(r#"<RadioButtonIcon v-else class="size-5 shrink-0" />"#),
+            "the checklist's undone mark is `size-5` too, so CONTROL_ICON cannot move"
+        );
+        // And the other side: the collection card's icons carry no class at all,
+        // which is what leaves them on the bare element rule.
+        let Some(layout) = reference_file("ui/src/layouts/shared/user-profile/layout.vue") else {
+            return;
+        };
+        for icon in [r#"<LibraryIcon aria-hidden="true" />"#, "<BoxIcon />"] {
+            assert!(
+                layout.contains(icon),
+                "layout.vue's collection card draws `{icon}` unclassed; BARE_ICON is \
+                 the only size that follows from that"
+            );
+        }
+        // The em that rule resolves against.
+        let Some(defaults) = reference_file("assets/styles/defaults.scss") else {
+            return;
+        };
+        assert!(
+            defaults.contains("font-size: 16px"),
+            "defaults.scss's `body` is the root BARE_ICON's `1em` is measured against"
+        );
+    }
+
+    #[test]
+    fn a_tab_label_carries_no_letter_spacing_in_the_reference() {
+        // The strip's labels are the largest measured disagreement left on this
+        // file, and the recorded limit on `tabs_with_glyphs` rests on there being
+        // nothing in the reference that asks for the space. That is a claim about
+        // two files, so it is checked against them rather than left in a comment.
+        let (Some(nav), Some(layout)) = (
+            reference_file("ui/src/components/base/NavTabs.vue"),
+            reference_file("ui/src/layouts/shared/user-profile/layout.vue"),
+        ) else {
+            return;
+        };
+        // `NavTabs.vue:9` on the `<nav>`, and the label `<span>` at `:35` and `:57`.
+        let nav_line = nav
+            .lines()
+            .find(|line| line.contains("w-fit rounded-full bg-bg-raised"))
+            .expect("NavTabs.vue still sizes its track on one class line");
+        for forbidden in ["tracking-", "tracking-wide", "tracking-wider"] {
+            assert!(
+                !nav_line.contains(forbidden),
+                "NavTabs.vue's track line now carries `{forbidden}`; the recorded limit on \
+                 `tabs_with_glyphs` has to be re-measured, not re-read"
+            );
+        }
+        for line in nav.lines() {
+            if line.contains("tab-color text-nowrap") {
+                assert!(
+                    !line.contains("tracking-"),
+                    "NavTabs.vue's label span now carries a tracking class"
+                );
+            }
+        }
+        assert!(
+            !layout.contains("tracking-"),
+            "a `tracking-` utility has appeared in the profile layout; where it is, and \
+             what it is worth, is the whole question the recorded limit answers"
+        );
+        assert!(
+            !nav.contains("letter-spacing"),
+            "NavTabs.vue now sets letter-spacing directly"
+        );
     }
 }
