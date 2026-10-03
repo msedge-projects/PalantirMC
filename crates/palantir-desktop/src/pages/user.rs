@@ -385,9 +385,25 @@ const COLLECTION_LABEL: f32 = HEADER_TEXT;
 /// card's rows are set by its own `h-full` track rather than by centring against
 /// the avatar, so nothing here needs the CSS line and nothing here is measured.
 const COLLECTION_LABEL_LINE: f32 = HEADER_SUMMARY_LINE;
-/// The glyphs in the card's head and foot, which the reference asks for at its
-/// default `size-4`.
-const COLLECTION_ICON: f32 = ui::CONTROL_ICON;
+/// The glyphs in the card's head and in its foot, including the four its status
+/// row would draw.
+///
+/// Not one of the six carries a class. `<LibraryIcon aria-hidden="true" />` is
+/// `layout.vue:282`, `<BoxIcon />` is `:292`, and the status line's `GlobeIcon`,
+/// `LinkIcon`, `LockIcon` and `XIcon` are `:301`, `:305`, `:309` and `:313`; the
+/// `flex items-center gap-1` they each sit in (`:281`, `:291`, `:299`) is a flex
+/// box and a gap and no size. So they are not `size-4` by intent and they are not
+/// `size-5` either: with no class of their own they fall to the stylesheet's own
+/// bare element rule `svg{width:1em;height:1em}`, which the bundle inside
+/// `/usr/bin/ModrinthApp` carries unshed of specificity between
+/// `.iconified-input svg` and `.chart svg`, and one em there is the sixteen pixels
+/// `assets/styles/defaults.scss:17`'s `body` asks for -- the same sixteen
+/// [`COLLECTION_LABEL`] reads off the same four lines.
+///
+/// That is [`ui::BARE_ICON`], and not [`ui::CONTROL_ICON`]: the twenty is
+/// `size-5`, which `Input.vue:12` and `onboarding-checklist/index.vue:120` really
+/// do want, and which no line of `layout.vue`'s card ever names.
+const COLLECTION_ICON: f32 = ui::BARE_ICON;
 
 /// The loaders `sortTagsForDisplay` puts ahead of every other loader.
 ///
