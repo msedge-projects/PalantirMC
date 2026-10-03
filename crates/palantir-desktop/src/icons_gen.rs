@@ -44,6 +44,24 @@
 //! before it is written: an affine map commutes with Bezier evaluation, so
 //! transforming the control points transforms the curve exactly.
 //!
+//! 10 elements are **`Cmd::NoPaint`**: a shape the reference
+//! declares with neither a fill nor a stroke, which SVG paints not at all.
+//! It is the clamp path every exported icon carries, and it used to be
+//! emitted as a stroked outline -- reading `fill="none"` as *unfilled but
+//! stroked* -- which drew a 1px frame around ten glyphs. They are named in
+//! `the_shapes_the_reference_does_not_paint_are_the_ten_it_names`:
+//!
+//! * `key.svg` element 1
+//! * `loader.svg` element 1
+//! * `palette.svg` element 1
+//! * `tags/categories/entities.svg` element 1
+//! * `tags/categories/mobs.svg` element 1
+//! * `tags/loaders/bungeecord.svg` element 1
+//! * `tags/loaders/fabric.svg` element 1
+//! * `tags/loaders/forge.svg` element 1
+//! * `tags/loaders/liteloader.svg` element 1
+//! * `tags/loaders/paper.svg` element 1
+//!
 //! Gate: `python tools/gen_icons.py --check` regenerates and compares bytes.
 
 // Nothing draws these yet: the shell that will is stage 2 of
@@ -66,6 +84,15 @@ pub enum Cmd {
     Cubic(f32, f32, f32, f32, f32, f32),
     /// Close the current subpath.
     Close,
+    /// A shape that declares neither a fill nor a stroke, which SVG paints
+    /// not at all. The builder skips it, so the element it belongs to
+    /// builds an empty path.
+    ///
+    /// This is the clamp path every exported icon carries -- `M0 0h24v24H0Z`
+    /// with `fill="none"` and no `stroke` -- written out because reading
+    /// `fill="none"` as *unfilled but stroked* drew a 24-unit box around
+    /// the glyph: a 1px frame the reference does not draw.
+    NoPaint,
 }
 
 /// Where an element's colour comes from.
@@ -2418,6 +2445,9 @@ fn build(commands: &[Cmd]) -> Path {
                     );
                 }
                 Cmd::Close => builder.close(),
+                // A shape with no fill and no stroke has no segments to walk,
+                // so there is nothing to hand the builder.
+                Cmd::NoPaint => {}
             }
         }
     })
@@ -11726,13 +11756,9 @@ const CMD_KEY: [Element; 3] = [
     },
 ];
 
-/// `key.svg` element 1 of 3 (`<path>`), 5 command(s).
-const CMD_KEY_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `key.svg` element 1 of 3 (`<path>`), 1 command(s).
+const CMD_KEY_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `key.svg` element 2 of 3 (`<path>`), 30 command(s).
@@ -13186,13 +13212,9 @@ const CMD_LOADER: [Element; 2] = [
     },
 ];
 
-/// `loader.svg` element 1 of 2 (`<path>`), 5 command(s).
-const CMD_LOADER_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `loader.svg` element 1 of 2 (`<path>`), 1 command(s).
+const CMD_LOADER_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `loader.svg` element 2 of 2 (`<path>`), 13 command(s).
@@ -15892,13 +15914,9 @@ const CMD_PALETTE: [Element; 5] = [
     },
 ];
 
-/// `palette.svg` element 1 of 5 (`<path>`), 5 command(s).
-const CMD_PALETTE_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `palette.svg` element 1 of 5 (`<path>`), 1 command(s).
+const CMD_PALETTE_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `palette.svg` element 2 of 5 (`<path>`), 11 command(s).
@@ -23974,13 +23992,9 @@ const CMD_TAG_CATEGORY_ENTITIES: [Element; 4] = [
     },
 ];
 
-/// `tags/categories/entities.svg` element 1 of 4 (`<path>`), 5 command(s).
-const CMD_TAG_CATEGORY_ENTITIES_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/categories/entities.svg` element 1 of 4 (`<path>`), 1 command(s).
+const CMD_TAG_CATEGORY_ENTITIES_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/categories/entities.svg` element 2 of 4 (`<path>`), 5 command(s).
@@ -26231,13 +26245,9 @@ const CMD_TAG_CATEGORY_MOBS: [Element; 4] = [
     },
 ];
 
-/// `tags/categories/mobs.svg` element 1 of 4 (`<path>`), 5 command(s).
-const CMD_TAG_CATEGORY_MOBS_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/categories/mobs.svg` element 1 of 4 (`<path>`), 1 command(s).
+const CMD_TAG_CATEGORY_MOBS_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/categories/mobs.svg` element 2 of 4 (`<path>`), 5 command(s).
@@ -29888,13 +29898,9 @@ const CMD_TAG_LOADER_BUNGEECORD: [Element; 5] = [
     },
 ];
 
-/// `tags/loaders/bungeecord.svg` element 1 of 5 (`<rect>`), 5 command(s).
-const CMD_TAG_LOADER_BUNGEECORD_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/loaders/bungeecord.svg` element 1 of 5 (`<rect>`), 1 command(s).
+const CMD_TAG_LOADER_BUNGEECORD_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/loaders/bungeecord.svg` element 2 of 5 (`<path>`), 9 command(s).
@@ -30133,13 +30139,9 @@ const CMD_TAG_LOADER_FABRIC: [Element; 2] = [
     },
 ];
 
-/// `tags/loaders/fabric.svg` element 1 of 2 (`<path>`), 5 command(s).
-const CMD_TAG_LOADER_FABRIC_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/loaders/fabric.svg` element 1 of 2 (`<path>`), 1 command(s).
+const CMD_TAG_LOADER_FABRIC_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/loaders/fabric.svg` element 2 of 2 (`<path>`), 13 command(s).
@@ -30217,13 +30219,9 @@ const CMD_TAG_LOADER_FORGE: [Element; 2] = [
     },
 ];
 
-/// `tags/loaders/forge.svg` element 1 of 2 (`<path>`), 5 command(s).
-const CMD_TAG_LOADER_FORGE_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/loaders/forge.svg` element 1 of 2 (`<path>`), 1 command(s).
+const CMD_TAG_LOADER_FORGE_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/loaders/forge.svg` element 2 of 2 (`<path>`), 13 command(s).
@@ -30425,13 +30423,9 @@ const CMD_TAG_LOADER_LITELOADER: [Element; 3] = [
     },
 ];
 
-/// `tags/loaders/liteloader.svg` element 1 of 3 (`<rect>`), 5 command(s).
-const CMD_TAG_LOADER_LITELOADER_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/loaders/liteloader.svg` element 1 of 3 (`<rect>`), 1 command(s).
+const CMD_TAG_LOADER_LITELOADER_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/loaders/liteloader.svg` element 2 of 3 (`<path>`), 3 command(s).
@@ -30912,13 +30906,9 @@ const CMD_TAG_LOADER_PAPER: [Element; 4] = [
     },
 ];
 
-/// `tags/loaders/paper.svg` element 1 of 4 (`<path>`), 5 command(s).
-const CMD_TAG_LOADER_PAPER_1: [Cmd; 5] = [
-    Cmd::Move(0.0, 0.0),
-    Cmd::Line(24.0, 0.0),
-    Cmd::Line(24.0, 24.0),
-    Cmd::Line(0.0, 24.0),
-    Cmd::Close,
+/// `tags/loaders/paper.svg` element 1 of 4 (`<path>`), 1 command(s).
+const CMD_TAG_LOADER_PAPER_1: [Cmd; 1] = [
+    Cmd::NoPaint,
 ];
 
 /// `tags/loaders/paper.svg` element 2 of 4 (`<path>`), 5 command(s).
@@ -31437,7 +31427,7 @@ mod tests {
             for element in elements {
                 assert!(!element.commands.is_empty(), "{name} has an empty element");
                 assert!(
-                    matches!(element.commands[0], Cmd::Move(..)),
+                    matches!(element.commands[0], Cmd::Move(..) | Cmd::NoPaint),
                     "{name} does not start by moving"
                 );
                 for command in element.commands {
@@ -31459,8 +31449,9 @@ mod tests {
         let variants = [
             Cmd::Move(0.0, 0.0), Cmd::Line(1.0, 1.0),
             Cmd::Cubic(0.0, 0.0, 1.0, 1.0, 2.0, 2.0), Cmd::Close,
+            Cmd::NoPaint,
         ];
-        assert_eq!(variants.len(), 4);
+        assert_eq!(variants.len(), 5);
         for command in variants {
             let _ = build(&[command]);
         }
@@ -31573,6 +31564,52 @@ mod tests {
     }
 
     #[test]
+    fn the_shapes_the_reference_does_not_paint_are_the_ten_it_names() {
+        // Ten of the icons carry a shape SVG paints *nothing* for: the clamp
+        // path an exported icon has so that its drawing area has a name,
+        // `M0 0h24v24H0Z`. Seven declare it `fill="none"` with no `stroke`
+        // at all, `key.svg` and `palette.svg` write `stroke="none"` beside
+        // their `fill="none"`, and `bungeecord.svg` spells it as a
+        // `<rect style="fill:none">`.
+        //
+        // This used to be emitted as a stroked outline -- reading `fill="none"`
+        // as *unfilled but stroked* -- which drew a full 24-unit box around
+        // each of these glyphs. Measured on the reference's own profile page:
+        // *Fabric* and *Forge* carry no frame there, and ours had a 16x16px
+        // one around each glyph.
+        //
+        // The list is the assertion and it is the whole list, so an icon that
+        // gains a clamp fails here rather than quietly growing a box. The
+        // key is the icon and the element's index in it, as it is for
+        // `even_odd`.
+        let mut expected: Vec<&str> = vec!["key#0", "loader#0", "palette#0", "tags/categories/entities#0", "tags/categories/mobs#0", "tags/loaders/bungeecord#0", "tags/loaders/fabric#0", "tags/loaders/forge#0", "tags/loaders/liteloader#0", "tags/loaders/paper#0"];
+        expected.sort_unstable();
+        let mut actual: Vec<String> = Vec::new();
+        for (name, glyph) in every() {
+            for (index, element) in glyph.elements().iter().enumerate() {
+                if matches!(element.commands, [Cmd::NoPaint]) {
+                    actual.push(format!("{name}#{index}"));
+                }
+            }
+        }
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "the shapes that paint nothing moved");
+        assert_eq!(expected.len(), 10, "the number of unpainted shapes moved");
+
+        // And none of the ten is the whole of its icon: a glyph that paints
+        // nothing at all would be a different picture, and the four tag icons
+        // this tool refuses are already absent rather than half-drawn.
+        for (name, glyph) in every() {
+            let painted = glyph
+                .elements()
+                .iter()
+                .filter(|element| !matches!(element.commands, [Cmd::NoPaint]))
+                .count();
+            assert!(painted > 0, "{name} paints nothing at all");
+        }
+    }
+
+    #[test]
     fn the_spinner_ring_keeps_its_opacity() {
         // The one icon in the set that draws at less than full opacity: a
         // 25% track under a 75% head. A generator that dropped the attribute
@@ -31657,7 +31694,7 @@ mod tests {
         match command {
             Cmd::Move(x, y) | Cmd::Line(x, y) => vec![x, y],
             Cmd::Cubic(a, b, c, d, e, f) => vec![a, b, c, d, e, f],
-            Cmd::Close => Vec::new(),
+            Cmd::Close | Cmd::NoPaint => Vec::new(),
         }
     }
 }

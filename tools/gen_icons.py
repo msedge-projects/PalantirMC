@@ -30,6 +30,28 @@ transform this cannot parse -- raises and names the file. Silently drawing an ic
 almost right is worse than not drawing it, because nobody goes looking for a
 corner that is off by two units.
 
+## The shape that paints nothing
+
+Ten of the icons carry a shape the reference declares with **neither a fill nor a
+stroke**, and SVG paints nothing at all for it: the clamp path an exported icon
+has so that its drawing area has a name, `M0 0h24v24H0Z`. Seven declare it
+`fill="none"` and no `stroke`; `key.svg` and `palette.svg` write `stroke="none"`
+beside their `fill="none"`; `bungeecord.svg` spells it as a `<rect
+style="fill:none">`.
+
+Reading `fill="none"` as *unfilled but stroked* is what this tool used to do, and
+it drew a full 24-unit box around each of those ten glyphs -- a 1px frame the
+reference does not draw, measured on *Fabric* and *Forge* on the reference's own
+profile page. So such a shape is emitted as `Cmd::NoPaint` and the interpreter
+skips it, which is the doctrine above applied to a shape rather than to an icon:
+the reference paints nothing, so neither does this.
+
+The element is still written, still counted and still named in the generated
+gate, because a generator that dropped the shape would leave no trace of having
+read it -- the next export that clamps differently would be invisible. Skipping
+the *drawing* is the reference's own behaviour; skipping the *record* would be
+this tool's.
+
 ## The three sets, and the two directories this reads besides the top level
 
 `assets/icons` is not one directory. It is three:
@@ -722,7 +744,7 @@ def ink_hint(value: str | None) -> tuple[str, str | None]:
 
 
 def read_icon(path: Path, key: str, both: list[str], even_odds: list[str],
-              winding_risks: list[str]) -> tuple[tuple[float, float], list[Element]]:
+              winding_risks: list[str], no_paint: list[str]) -> tuple[tuple[float, float], list[Element]]:
     text = path.read_text(encoding="utf-8")
     view = re.search(r'viewBox="([^"]+)"', text)
     if not view:
@@ -817,8 +839,22 @@ def read_icon(path: Path, key: str, both: list[str], even_odds: list[str],
         if has_fill:
             elements.append(Element(commands, width, True, ink_hint(fill), tag, opacity, even_odd))
         if has_stroke or not has_fill:
-            stroke_ink = stroke if has_stroke else None
-            elements.append(Element(commands, width, False, ink_hint(stroke_ink), tag, opacity))
+            if has_stroke:
+                elements.append(Element(commands, width, False, ink_hint(stroke), tag, opacity))
+            else:
+                # `fill="none"` and no stroke, or `stroke="none"` beside a `fill` of
+                # `none`: SVG paints nothing at all, and the shape is the clamp path
+                # every exported icon carries (`M0 0h24v24H0Z`) or that clamp
+                # spelled as a `<rect>`/a `stroke="none"` path. It used to be
+                # emitted as a stroked outline here -- reading `fill="none"` as
+                # *unfilled but stroked* -- which drew a full 24x24 box around ten
+                # glyphs: a 1px frame the reference does not draw, on *Fabric*,
+                # *Forge* and eight others. So it is emitted as the one command
+                # that paints nothing and the interpreter skips it. The element is
+                # still written, still counted and still named in the generated
+                # gate, because dropping it would leave no trace of having read it.
+                elements.append(Element([("NoPaint",)], width, False, ("Inherit", None), tag, opacity))
+                no_paint.append(f"{key}#{len(elements) - 1}")
     if not elements:
         raise Unsupported("no geometry")
     return view_box, elements
@@ -916,6 +952,7 @@ def main() -> int:
     winding_risks: list[str] = []
     refused: list[tuple[str, str]] = []
     even_odds: list[str] = []
+    no_paint: list[str] = []
     for source in SOURCES:
         directory = ICONS / source["directory"] if source["directory"] else ICONS
         files = sorted(directory.glob(source["glob"]))
@@ -930,8 +967,20 @@ def main() -> int:
             # `by_name` has to be able to say which one it meant.
             name = (Path(source["directory"]) / path.stem).as_posix() if source["directory"] \
                 else path.stem
+            # The four lists this reader fills are per-icon and only merged once
+            # the icon has been read whole: `read_icon` appends as it walks the
+            # shapes, so an icon it stops half way through would otherwise leave
+            # its findings in a list the gates compare against the generated file
+            # -- `purpur` and `quilt` each named themselves as painting nothing
+            # before the non-uniform transform that refuses them was reached.
+            found_both: list[str] = []
+            found_even_odds: list[str] = []
+            found_winding: list[str] = []
+            found_no_paint: list[str] = []
             try:
-                box, elements = read_icon(path, name, both, even_odds, winding_risks)
+                box, elements = read_icon(
+                    path, name, found_both, found_even_odds, found_winding, found_no_paint,
+                )
             except Unsupported as exc:
                 if source["complete"]:
                     print(f"{name}.svg: {exc}", file=sys.stderr)
@@ -949,6 +998,10 @@ def main() -> int:
                 print(f"{name}.svg: {exc} -- refused, and named in REFUSED_TAGS",
                       file=sys.stderr)
                 continue
+            both.extend(found_both)
+            even_odds.extend(found_even_odds)
+            winding_risks.extend(found_winding)
+            no_paint.extend(found_no_paint)
             collected.append((name, source["prefix"] + variant(path.stem), box, elements))
         sets[source["table"]] = collected
         icons.extend(collected)
@@ -1008,6 +1061,16 @@ def main() -> int:
     add("//! before it is written: an affine map commutes with Bezier evaluation, so")
     add("//! transforming the control points transforms the curve exactly.")
     add("//!")
+    add(f"//! {len(no_paint)} elements are **`Cmd::NoPaint`**: a shape the reference")
+    add("//! declares with neither a fill nor a stroke, which SVG paints not at all.")
+    add("//! It is the clamp path every exported icon carries, and it used to be")
+    add("//! emitted as a stroked outline -- reading `fill=\"none\"` as *unfilled but")
+    add("//! stroked* -- which drew a 1px frame around ten glyphs. They are named in")
+    add("//! `the_shapes_the_reference_does_not_paint_are_the_ten_it_names`:")
+    add("//!")
+    for name in sorted(no_paint):
+        add(f"//! * `{name.split('#')[0]}.svg` element {int(name.split('#')[1]) + 1}")
+    add("//!")
     add("//! Gate: `python tools/gen_icons.py --check` regenerates and compares bytes.")
     add("")
     add("// Nothing draws these yet: the shell that will is stage 2 of")
@@ -1030,6 +1093,15 @@ def main() -> int:
     add("    Cubic(f32, f32, f32, f32, f32, f32),")
     add("    /// Close the current subpath.")
     add("    Close,")
+    add("    /// A shape that declares neither a fill nor a stroke, which SVG paints")
+    add("    /// not at all. The builder skips it, so the element it belongs to")
+    add("    /// builds an empty path.")
+    add("    ///")
+    add("    /// This is the clamp path every exported icon carries -- `M0 0h24v24H0Z`")
+    add("    /// with `fill=\"none\"` and no `stroke` -- written out because reading")
+    add("    /// `fill=\"none\"` as *unfilled but stroked* drew a 24-unit box around")
+    add("    /// the glyph: a 1px frame the reference does not draw.")
+    add("    NoPaint,")
     add("}")
     add("")
     add("/// Where an element's colour comes from.")
@@ -1190,6 +1262,9 @@ def main() -> int:
     add("                    );")
     add("                }")
     add("                Cmd::Close => builder.close(),")
+    add("                // A shape with no fill and no stroke has no segments to walk,")
+    add("                // so there is nothing to hand the builder.")
+    add("                Cmd::NoPaint => {}")
     add("            }")
     add("        }")
     add("    })")
@@ -1423,7 +1498,7 @@ def main() -> int:
     add("            for element in elements {")
     add("                assert!(!element.commands.is_empty(), \"{name} has an empty element\");")
     add("                assert!(")
-    add("                    matches!(element.commands[0], Cmd::Move(..)),")
+    add("                    matches!(element.commands[0], Cmd::Move(..) | Cmd::NoPaint),")
     add("                    \"{name} does not start by moving\"")
     add("                );")
     add("                for command in element.commands {")
@@ -1445,8 +1520,9 @@ def main() -> int:
     add("        let variants = [")
     add("            Cmd::Move(0.0, 0.0), Cmd::Line(1.0, 1.0),")
     add("            Cmd::Cubic(0.0, 0.0, 1.0, 1.0, 2.0, 2.0), Cmd::Close,")
+    add("            Cmd::NoPaint,")
     add("        ];")
-    add("        assert_eq!(variants.len(), 4);")
+    add("        assert_eq!(variants.len(), 5);")
     add("        for command in variants {")
     add("            let _ = build(&[command]);")
     add("        }")
@@ -1559,6 +1635,52 @@ def main() -> int:
     add("    }")
     add("")
     add("    #[test]")
+    add("    fn the_shapes_the_reference_does_not_paint_are_the_ten_it_names() {")
+    add("        // Ten of the icons carry a shape SVG paints *nothing* for: the clamp")
+    add("        // path an exported icon has so that its drawing area has a name,")
+    add("        // `M0 0h24v24H0Z`. Seven declare it `fill=\"none\"` with no `stroke`")
+    add("        // at all, `key.svg` and `palette.svg` write `stroke=\"none\"` beside")
+    add("        // their `fill=\"none\"`, and `bungeecord.svg` spells it as a")
+    add("        // `<rect style=\"fill:none\">`.")
+    add("        //")
+    add("        // This used to be emitted as a stroked outline -- reading `fill=\"none\"`")
+    add("        // as *unfilled but stroked* -- which drew a full 24-unit box around")
+    add("        // each of these glyphs. Measured on the reference's own profile page:")
+    add("        // *Fabric* and *Forge* carry no frame there, and ours had a 16x16px")
+    add("        // one around each glyph.")
+    add("        //")
+    add("        // The list is the assertion and it is the whole list, so an icon that")
+    add("        // gains a clamp fails here rather than quietly growing a box. The")
+    add("        // key is the icon and the element's index in it, as it is for")
+    add("        // `even_odd`.")
+    add(f"        let mut expected: Vec<&str> = vec![{', '.join(chr(34) + n + chr(34) for n in sorted(no_paint))}];")
+    add("        expected.sort_unstable();")
+    add("        let mut actual: Vec<String> = Vec::new();")
+    add("        for (name, glyph) in every() {")
+    add("            for (index, element) in glyph.elements().iter().enumerate() {")
+    add("                if matches!(element.commands, [Cmd::NoPaint]) {")
+    add("                    actual.push(format!(\"{name}#{index}\"));")
+    add("                }")
+    add("            }")
+    add("        }")
+    add("        actual.sort_unstable();")
+    add("        assert_eq!(actual, expected, \"the shapes that paint nothing moved\");")
+    add("        assert_eq!(expected.len(), 10, \"the number of unpainted shapes moved\");")
+    add("")
+    add("        // And none of the ten is the whole of its icon: a glyph that paints")
+    add("        // nothing at all would be a different picture, and the four tag icons")
+    add("        // this tool refuses are already absent rather than half-drawn.")
+    add("        for (name, glyph) in every() {")
+    add("            let painted = glyph")
+    add("                .elements()")
+    add("                .iter()")
+    add("                .filter(|element| !matches!(element.commands, [Cmd::NoPaint]))")
+    add("                .count();")
+    add("            assert!(painted > 0, \"{name} paints nothing at all\");")
+    add("        }")
+    add("    }")
+    add("")
+    add("    #[test]")
     add("    fn the_spinner_ring_keeps_its_opacity() {")
     add("        // The one icon in the set that draws at less than full opacity: a")
     add("        // 25% track under a 75% head. A generator that dropped the attribute")
@@ -1644,7 +1766,7 @@ def main() -> int:
     add("        match command {")
     add("            Cmd::Move(x, y) | Cmd::Line(x, y) => vec![x, y],")
     add("            Cmd::Cubic(a, b, c, d, e, f) => vec![a, b, c, d, e, f],")
-    add("            Cmd::Close => Vec::new(),")
+    add("            Cmd::Close | Cmd::NoPaint => Vec::new(),")
     add("        }")
     add("    }")
     add("}")
@@ -1665,6 +1787,7 @@ def main() -> int:
         f"refused      {len(refused)}: {', '.join(name for name, _ in sorted(refused))}",
         f"elements     {sum(len(elements) for _, _, _, elements in icons)}",
         f"commands     {total_commands}",
+        f"no paint     {len(no_paint)}: {', '.join(sorted(no_paint)) if no_paint else '-'}",
         f"stroke width {widths}",
         f"filled       {len(filled_icons)}: {', '.join(filled_icons) if filled_icons else '-'}",
         f"off-width    {len(width_exceptions)}: {', '.join(width_exceptions) if width_exceptions else '-'}",
@@ -1706,6 +1829,8 @@ def command_table(rust: str, index: int) -> str:
 def command_source(command: tuple) -> str:
     if command[0] == "Close":
         return "Cmd::Close"
+    if command[0] == "NoPaint":
+        return "Cmd::NoPaint"
     if command[0] == "Move":
         return f"Cmd::Move({fnum(command[1])}, {fnum(command[2])})"
     if command[0] == "Line":
