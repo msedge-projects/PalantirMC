@@ -1273,10 +1273,10 @@ impl Store {
         Ok(Project::from_api(&project, author_of(&members), &versions))
     }
 
-    /// One user's profile: their own document, the projects they own, and their
-    /// avatar.
+    /// One user's profile: their own document, the projects they own, their
+    /// collections, and their avatar.
     ///
-    /// **Blocking**, for [`Store::project`]'s reason, and four requests for the one
+    /// **Blocking**, for [`Store::project`]'s reason, and five requests for the one
     /// answer for the same reason Modrinth splits a project three ways: the profile
     /// document is asked for by the *name* an address spells, and the projects are a
     /// second endpoint keyed by the id only that document carries -- which is why
@@ -1285,23 +1285,37 @@ impl Store {
     /// the reference draws its own empty sentence for that, and a launcher that
     /// called it an error would show a broken page for every new account.
     ///
-    /// The third document is the same account's projects again, read from **v3**,
-    /// and it is the one request here a v2-only store could not make: v2 publishes a
-    /// project's type as a single `project_type` string where v3 publishes the array
-    /// `project_types`, and the reference's profile filter strip is built from the
-    /// array. Measured, not theoretical -- v2 calls four of FlameFire's six projects
-    /// `mod` where v3 calls them `["datapack", "mod"]`, and v2 calls apace's
-    /// *Origins-Paper* a `mod` where v3 calls it a `plugin`, so the strip built from
-    /// v2 alone is missing *Data Packs* and *Plugins* where the reference draws them.
-    /// It is cached under its own URL beside the v2 list, so a profile revisited costs
-    /// nothing more than it did.
+    /// Two of the five documents are **v3**, and both are public and anonymous.
+    /// Measured against the live service with no credential:
     ///
-    /// That read's failure is deliberately *not* this call's failure, and it is the
-    /// second place this store lets a reason go (the first is
-    /// [`Self::project_icons`]): the page falls back to the v2 string, which is wrong
-    /// for a project of two types rather than absent, and a profile whose header,
-    /// download total and project list all arrived should not be replaced by an error
-    /// sentence because a strip of tabs was one document short.
+    /// ```text
+    /// GET /v3/user/P3U9o13d/projects     -> 200
+    /// GET /v3/user/FlameFire/collections -> 200, 1176 bytes
+    /// GET /v2/user/FlameFire/collections -> 404
+    /// ```
+    ///
+    /// so "the v3 user service needs a session" was never true of either of these.
+    /// The projects list is read from v3 because v2 publishes a project's type as a
+    /// single `project_type` string where v3 publishes the array `project_types`, and
+    /// the reference's profile filter strip is built from the array. Measured, not
+    /// theoretical -- v2 calls four of FlameFire's six projects `mod` where v3 calls
+    /// them `["datapack", "mod"]`, and v2 calls apace's *Origins-Paper* a `mod` where
+    /// v3 calls it a `plugin`, so the strip built from v2 alone is missing *Data
+    /// Packs* and *Plugins* where the reference draws them. The collections list is
+    /// read from v3 because v2 has no such route at all (the 404 above), and it is
+    /// what puts the strip's *Collections* tab there: `layout.vue:765` appends
+    /// `'collection'` exactly when `collections.value.length > 0`. Each is cached
+    /// under its own URL beside the v2 list, so a profile revisited costs nothing
+    /// more than it did.
+    ///
+    /// Neither of those two reads' failures is this call's failure, and they are the
+    /// second and third places this store lets a reason go (the first is
+    /// [`Self::project_icons`]): the page falls back to the v2 type string, which is
+    /// wrong for a project of two types rather than absent, and a profile whose
+    /// header, download total and project list all arrived should not be replaced by
+    /// an error sentence because a strip of tabs was one document short. A failed
+    /// collections read drops the *Collections* tab rather than showing a list that
+    /// is empty rather than wrong.
     ///
     /// The avatar's failure is deliberately not this call's failure either, and the
     /// profile carries the reason instead: an account on a machine with no
@@ -1323,6 +1337,12 @@ impl Store {
             .user_projects(&user.id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
         let projects_v3 = api.user_projects_v3(&user.id, &cancel, &backoff).unwrap_or_default();
+        // The fourth document, and the second v3 read: a profile's filter strip ends
+        // in a *Collections* tab whenever this answers with at least one, which is
+        // why a read that fails leaves the strip as it was rather than breaking it.
+        // Public and anonymous -- measured, and it is the curl output in this
+        // function's docs.
+        let collections = api.user_collections_v3(&user.id, &cancel, &backoff).unwrap_or_default();
         let avatar = if user.avatar_url.is_empty() {
             Err("This account has no avatar.".to_string())
         } else {
@@ -1333,14 +1353,22 @@ impl Store {
         };
         // Each project's own icon, decoded off the frame thread for
         // `project_icons`'s reason and for `crate::avatar`'s: a card's picture is a
-        // PNG decode, and a page redraws every frame.
-        let urls: Vec<String> = projects
+        // PNG decode, and a page redraws every frame. A collection's icon is fetched
+        // through the same call and carried in the same list, because both are keyed
+        // by the URL the document publishes and neither is a position.
+        let mut urls: Vec<String> = projects
             .iter()
             .filter(|project| !project.icon_url.is_empty())
             .map(|project| project.icon_url.clone())
             .collect();
+        urls.extend(
+            collections
+                .iter()
+                .filter(|collection| !collection.icon_url.is_empty())
+                .map(|collection| collection.icon_url.clone()),
+        );
         let icons = self.project_icons(&urls);
-        Ok(Profile::of(user, projects, projects_v3, avatar, icons))
+        Ok(Profile::of(user, projects, projects_v3, collections, avatar, icons))
     }
 
     /// Install one project into one instance.
@@ -2087,7 +2115,7 @@ pub fn bytes_label(bytes: u64) -> String {
 mod tests {
     use super::*;
     use palantir_net::engine::request::{MapFetch, Route};
-    use palantir_net::engine::modrinth::user_projects_v3_url;
+    use palantir_net::engine::modrinth::{user_collections_v3_url, user_projects_v3_url};
     use palantir_net::modrinth::{
         project_members_url, project_url, user_projects_url, user_url, version_url, NEWS_URL,
     };
@@ -2240,13 +2268,27 @@ mod tests {
          "games":["minecraft-java"],"name":"Zombie Invade 100 Days"}
     ]"#;
 
+    /// Two of FlameFire's four real collections, trimmed to nothing: `description`
+    /// and `icon_url` are `null` on every collection the live service was measured
+    /// on, which is the shape that has to survive a parse.
+    const PROFILE_COLLECTIONS_V3_BODY: &str = r#"[
+        {"id":"gvaNtekl","user":"P3U9o13d","name":"Plugin","description":null,
+         "icon_url":null,"color":null,"status":"listed",
+         "created":"2026-06-16T17:07:15.101156Z","updated":"2026-06-16T17:07:15.101149Z",
+         "projects":["gBIw3Gvy"]},
+        {"id":"3xabYvo8","user":"P3U9o13d","name":"Carpet","description":null,
+         "icon_url":null,"color":null,"status":"listed",
+         "created":"2025-03-29T16:15:46.075350Z","updated":"2025-03-29T16:20:26.673541Z",
+         "projects":["G26sLP13","TQTTVgYE","UHjbX5mk"]}
+    ]"#;
+
     #[test]
-    fn a_profile_reads_four_documents_and_the_v3_one_is_what_the_strip_counts() {
-        // Three JSON documents and no picture, because `avatar_url` is empty: the
-        // header, the v2 project list every card is drawn from, and the v3 list for
-        // the one field v2 will not say. The strip is the reason -- a filter strip
-        // counted off the v2 string offers *Mods* for this account where the
-        // reference offers *Data Packs*.
+    fn a_profile_reads_five_documents_and_the_two_v3_ones_are_what_the_strip_reads() {
+        // Four JSON documents and no picture, because `avatar_url` is empty: the
+        // header, the v2 project list every card is drawn from, and the two v3 lists
+        // for the two things v2 will not say. Both are the strip's: the type array is
+        // why this account offers *Data Packs* where v2's string would offer *Mods*,
+        // and the collections are why the strip ends in *Collections* at all.
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
         fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
@@ -2254,13 +2296,17 @@ mod tests {
             &user_projects_v3_url("P3U9o13d"),
             Route::text(PROFILE_USER_PROJECTS_V3_BODY),
         );
+        fetch.set_route(
+            &user_collections_v3_url("P3U9o13d"),
+            Route::text(PROFILE_COLLECTIONS_V3_BODY),
+        );
         let store = store_over("profile-v3", fetch.clone());
 
         let profile = store.user("FlameFire").expect("the profile");
         assert_eq!(profile.user.username, "FlameFire");
         assert_eq!(profile.projects.len(), 2);
         assert_eq!(profile.downloads(), 209_072 + 14_848_763);
-        assert_eq!(fetch.count(), 3, "one request per document, and no picture");
+        assert_eq!(fetch.count(), 4, "one request per document, and no picture");
 
         // Joined by id, not by position: the v3 answer lists the two projects the
         // other order round, and the type has to land on the right one.
@@ -2274,11 +2320,20 @@ mod tests {
         assert_eq!(profile.shown(Some(ProjectType::Modpack)).len(), 1);
         assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 0);
 
-        // Asked again, all three are answered from the cache: a profile revisited
-        // costs the same four requests as the first visit, which is three.
+        // The fourth document, and the tab it is for: `layout.vue:765` appends
+        // `'collection'` exactly when this list is not empty.
+        assert_eq!(profile.collections.len(), 2);
+        assert_eq!(profile.collections[0].name, "Plugin");
+        assert_eq!(profile.collections[0].project_count(), 1);
+        assert!(profile.has_collections());
+        // The reference's own order: most recently changed first.
+        assert_eq!(profile.sorted_collections()[0].id, "gvaNtekl");
+
+        // Asked again, all four are answered from the cache: a profile revisited
+        // costs the same requests as the first visit.
         let again = store.user("FlameFire").expect("the profile, again");
         assert_eq!(again, profile);
-        assert_eq!(fetch.count(), 3);
+        assert_eq!(fetch.count(), 4);
     }
 
     #[test]
@@ -2289,15 +2344,18 @@ mod tests {
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
         fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
-        // No route for the v3 list: `MapFetch` fails a URL nobody scripted.
+        // No route for either v3 list: `MapFetch` fails a URL nobody scripted.
         let store = store_over("profile-no-v3", fetch.clone());
 
         let profile = store.user("FlameFire").expect("the profile");
         assert_eq!(profile.projects.len(), 2);
         assert!(profile.projects_v3.is_empty());
+        assert!(profile.collections.is_empty());
         assert_eq!(profile.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
         assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 1);
-        assert_eq!(fetch.count(), 3, "the v3 list was asked for and failed");
+        // A collections list that could not be read costs the tab and nothing else.
+        assert!(!profile.has_collections());
+        assert_eq!(fetch.count(), 4, "both v3 lists were asked for and failed");
     }
 
     #[test]

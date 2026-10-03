@@ -669,12 +669,30 @@ pub fn date_label(iso: &str) -> String {
 /// One user's profile, as Modrinth's own document writes it.
 ///
 /// The reference's page draws this header through `plugin:users|get_user_profile`,
-/// which wraps Labrinth's *v3* user service -- a route outside Modrinth's published
-/// API. What is here is the **published** `/v2/user/{username}` document instead: the
-/// same account, the same fields, and the same URL the reference's own web client
-/// uses, which is why this launcher can draw a real profile without a Modrinth
-/// session. The v3-only halves of that page -- collections, organizations, anything
-/// that needs the reader to be signed in -- are the parts that stay named as absent.
+/// which wraps Labrinth's *v3* user service. What is here is the **published**
+/// `/v2/user/{username}` document instead: the same account, the same fields, and
+/// the same URL the reference's own web client uses, which is why this launcher can
+/// draw a real profile without a Modrinth session.
+///
+/// The v3 user service is not somewhere outside the published API, and a comment
+/// here once said the halves of that page it reads -- collections, organizations --
+/// were unreachable for want of a credential. They are not. Measured, anonymously,
+/// against the live service:
+///
+/// ```text
+/// $ curl -sS -w 'status=%{http_code} bytes=%{size_download}\n' \
+///     -H "User-Agent: PalantirMC/0.1.0" \
+///     https://api.modrinth.com/v3/user/FlameFire/collections
+/// status=200 bytes=1176
+/// [{"id":"gvaNtekl","user":"P3U9o13d","name":"Plugin",...}]
+/// ```
+///
+/// So the header stays on v2 because that document is the one every other page here
+/// already reads, and collections are read from v3 for the same reason a profile's
+/// project types are: v3 publishes a field v2 does not. Organizations are named as
+/// absent for a different reason and it is a real one -- this crate models no
+/// organization document and no page asks for one -- and everything the reference
+/// reads that genuinely needs the reader to be signed in stays out.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModrinthUser {
     /// The account's id, which is what the projects list is asked for by.

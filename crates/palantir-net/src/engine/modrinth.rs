@@ -30,12 +30,16 @@
 //! bytes are adopted. A cache entry here is a document that parsed, which is the
 //! most a JSON API can promise.
 //!
-//! ## One v3 route, for the one field v2 cannot answer
+//! ## Two v3 routes, for the two fields v2 cannot answer
 //!
-//! [`ModrinthApi::user_projects_v3`] is the only request here that leaves v2, and
-//! it is on the file because v2 publishes a project's type as one string and the
-//! reference builds a profile's filter strip from v3's array of them. Everything
-//! else the reference reads here is on the published API and is asked for on it.
+//! [`ModrinthApi::user_projects_v3`] and [`ModrinthApi::user_collections_v3`] are
+//! the only requests here that leave v2, and they are on the file because v2 does
+//! not publish what the reference's profile page is built from: a project's type as
+//! an array rather than a string, and a user's collections at all. Both are public
+//! and both answer 200 with no credential -- the second because `/v2/user/{name}/
+//! collections` is a 404 and `/v3/user/{name}/collections` is not, which is a
+//! measurement rather than a reading of the docs. Everything else the reference
+//! reads here is on the published API and is asked for on it.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -71,6 +75,31 @@ pub fn user_projects_v3_url(user: &str) -> String {
     user_projects_url(user).replacen(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL, 1)
 }
 
+/// Every collection one user owns.
+///
+/// **v3 only, and there is no v2 spelling of it**: `/v2/user/{name}/collections`
+/// answers 404, which is a measurement rather than a guess --
+///
+/// ```text
+/// $ curl -sS -o /dev/null -w 'status=%{http_code}\n' \
+///     -H "User-Agent: PalantirMC/0.1.0" \
+///     https://api.modrinth.com/v2/user/FlameFire/collections
+/// status=404
+/// $ curl -sS -w 'status=%{http_code} bytes=%{size_download}\n' \
+///     -H "User-Agent: PalantirMC/0.1.0" \
+///     https://api.modrinth.com/v3/user/FlameFire/collections
+/// status=200 bytes=1176
+/// ```
+///
+/// So this is built from the v2 *profile* URL rather than from a v2 collections URL
+/// that answers nothing, and it still goes through [`crate::modrinth`]'s encoder:
+/// `user_url` is the one function that owns it, and one account spelled two ways
+/// would be two cache entries for one profile.
+pub fn user_collections_v3_url(user: &str) -> String {
+    format!("{}/collections", user_url(user))
+        .replacen(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL, 1)
+}
+
 /// Read an absent-or-`null` list as an empty one.
 ///
 /// The same helper [`crate::modrinth`] applies to its own `environment` lists, and
@@ -83,6 +112,18 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(<Option<Vec<String>> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
+}
+
+/// Read an absent-or-`null` string as an empty one.
+///
+/// The same helper [`crate::modrinth`] applies to `description` and `icon_url`, for
+/// the same reason, and written out for the same reason: the one there is private to
+/// that module. A collection's `description` is `null` unless its author wrote one.
+fn null_as_empty_string<'de, D>(reader: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(<Option<String> as serde::Deserialize>::deserialize(reader)?.unwrap_or_default())
 }
 
 /// One project of a v3 `/user/{id}/projects` answer, read for its `project_types`
@@ -123,6 +164,82 @@ impl ModrinthV3Project {
     /// name, so no tab claims it.
     pub fn primary_type(&self) -> Option<&str> {
         self.project_types.first().map(String::as_str)
+    }
+}
+
+/// One collection of a `GET /v3/user/{id}/collections` answer.
+///
+/// A subset, like every other document this crate models (unknown fields ignored),
+/// and read for exactly what the reference's collection card prints: the name, the
+/// description, the icon, the `projects` array whose length is the card's foot, and
+/// the `status` its own-visitor arm is chosen from. `color` is not read -- it is a
+/// `number` or `null` and nothing in the reference's card is tinted by it.
+///
+/// `description` and `icon_url` are both `null` on the live service far more often
+/// than they are not -- measured across all four of FlameFire's collections, every
+/// one answers `null` for both -- so both read an absent-or-`null` string as an empty
+/// one rather than failing the parse of the whole list over a field the card simply
+/// leaves out.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModrinthCollection {
+    /// The collection's id, which is what its own page is addressed by.
+    #[serde(default)]
+    pub id: String,
+    /// Its name, which is the card's heading.
+    #[serde(default)]
+    pub name: String,
+    /// Its own description, or `null` when the author wrote none.
+    #[serde(default, deserialize_with = "null_as_empty_string")]
+    pub description: String,
+    /// Its icon, or `null` -- which is what every collection measured here answers.
+    #[serde(default, deserialize_with = "null_as_empty_string")]
+    pub icon_url: String,
+    /// `listed` / `unlisted` / `private` / `rejected`.
+    ///
+    /// Read because the card prints it, and only where the viewer may: the
+    /// reference's `canSeeCollectionStatus` is `isSelf || isStaffViewing`, so a
+    /// reader on somebody else's profile gets the string parsed and no line drawn
+    /// from it.
+    #[serde(default)]
+    pub status: String,
+    /// When it was made, ISO-8601.
+    ///
+    /// The *second* key the reference sorts a collection list by, after `updated`
+    /// ([`ModrinthCollection::sort_key`]), so it is read rather than assumed away.
+    #[serde(default)]
+    pub created: String,
+    /// When it was last changed, ISO-8601, which is the *first*.
+    #[serde(default)]
+    pub updated: String,
+    /// The projects in it, which is what the card's `{# project}` count is.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub projects: Vec<String>,
+}
+
+impl ModrinthCollection {
+    /// How many projects the card's foot counts.
+    pub fn project_count(&self) -> usize {
+        self.projects.len()
+    }
+
+    /// The order `sortedCollections` puts two collections in.
+    ///
+    /// `layout.vue:751` is `sort((first, second) => new Date(second.updated) -
+    /// new Date(first.updated) || new Date(second.created) - new Date(first.created))`:
+    /// most recently changed first, and a tie broken by most recently created. Both
+    /// halves matter -- measured across FlameFire's own four, *Plugin* (updated
+    /// 2026-06-16) sorts above *Sodium* (2025-04-27) although *Sodium* has the
+    /// later `created` of the two.
+    ///
+    /// Timestamps are compared as their ISO-8601 text rather than as parsed dates,
+    /// which is safe for one reason and one only: the service writes every one of
+    /// them in the same `YYYY-MM-DDTHH:MM:SS.ffffffZ` shape, fixed-width and
+    /// zero-padded, so byte order *is* time order. A `String` that is not in that
+    /// shape -- absent, or an empty field -- sorts last rather than first, because
+    /// no digits compare greater than the text of a date and an empty string
+    /// compares less than everything.
+    pub fn sort_key(&self) -> (&str, &str) {
+        (self.updated.as_str(), self.created.as_str())
     }
 }
 
@@ -406,6 +523,29 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthV3Project>, Error> {
         let url = user_projects_v3_url(user);
+        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
+    }
+
+    /// Every collection one user owns.
+    ///
+    /// The fourth document a profile is drawn from, and the second one this file
+    /// asks v3 for. It is on v3 because v2 does not publish collections at all --
+    /// `/v2/user/{name}/collections` answers 404 while `/v3/user/{name}/collections`
+    /// answers 200 for the same account with no credential, both measured; see
+    /// [`user_collections_v3_url`] -- and it is asked for anonymously because that
+    /// same measurement is what it is: a collection is a public list of public
+    /// projects, and Modrinth serves it to anyone who asks.
+    ///
+    /// Believed for the project TTL, on the same cache handle as the two lists beside
+    /// it, so a profile that has been looked at costs nothing to look at again.
+    pub fn user_collections_v3(
+        &self,
+        user: &str,
+        cancel: &Cancel,
+        backoff: &Backoff,
+    ) -> Result<Vec<ModrinthCollection>, Error> {
+        let url = user_collections_v3_url(user);
         let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
@@ -714,6 +854,140 @@ mod tests {
         assert_eq!(
             user_projects_v3_url("a b"),
             user_projects_url("a b").replace(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL)
+        );
+    }
+
+    /// FlameFire's own four collections, as `GET /v3/user/P3U9o13d/collections`
+    /// answers them, trimmed to the fields read here and with the real shapes left
+    /// alone -- `description` and `icon_url` are `null` on every one of them, which
+    /// is the shape a `null`-hostile parse would drop the whole list over.
+    const USER_COLLECTIONS_V3_BODY: &str = r#"[
+        {"id":"gvaNtekl","user":"P3U9o13d","name":"Plugin","description":null,
+         "icon_url":null,"raw_icon_url":null,"color":null,"status":"listed",
+         "created":"2026-06-16T17:07:15.101156Z","updated":"2026-06-16T17:07:15.101149Z",
+         "projects":["gBIw3Gvy"]},
+        {"id":"3xabYvo8","user":"P3U9o13d","name":"Carpet","description":null,
+         "icon_url":null,"color":null,"status":"listed",
+         "created":"2025-03-29T16:15:46.075350Z","updated":"2025-03-29T16:20:26.673541Z",
+         "projects":["G26sLP13","TQTTVgYE","UHjbX5mk"]},
+        {"id":"hcGFSYLU","user":"P3U9o13d","name":"Masa","description":null,
+         "icon_url":null,"color":null,"status":"listed",
+         "created":"2025-03-29T16:12:57.302227Z","updated":"2025-03-29T16:22:04.287116Z",
+         "projects":["3llatzyE","5TnrDyNM","GBeCx05I","GcWjdA9I","ITCqumHN","JygyCSA4",
+                     "SFO4Ca80","UMxybHE8","bEpr0Arc","mv1zH6ln","t5wuYk45","zQhsx8KF",
+                     "zfPoD7Tm"]},
+        {"id":"8mvdWhkj","user":"P3U9o13d","name":"Sodium","description":null,
+         "icon_url":null,"color":null,"status":"listed",
+         "created":"2025-03-29T16:16:01.063069Z","updated":"2025-04-27T09:06:15.007363Z",
+         "projects":["2gvRmQXx","JaNmzvA8","aWDwN8NN","kus0jbHN","reCfnRvJ","yD9qW65f"]}
+    ]"#;
+
+    #[test]
+    fn the_collections_route_is_a_fourth_document_and_reads_what_a_card_prints() {
+        let (api, fetch) = api("user-collections", DEFAULT_TTL);
+        fetch.set_route(
+            &user_collections_v3_url("P3U9o13d"),
+            Route::text(USER_COLLECTIONS_V3_BODY),
+        );
+
+        let collections = api
+            .user_collections_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the collection list");
+        assert_eq!(collections.len(), 4);
+        assert_eq!(collections[0].id, "gvaNtekl");
+        assert_eq!(collections[0].name, "Plugin");
+
+        // The foot's count is the length of the `projects` array, and it is the
+        // plural message at that count: one project for the first of these, six for
+        // the third.
+        assert_eq!(collections[0].project_count(), 1);
+        assert_eq!(collections[2].project_count(), 13);
+
+        // A `null` description and a `null` icon are empty ones rather than a parse
+        // failure, because every collection the service was measured on answers
+        // `null` for both -- and a `null` read as a failure takes the whole list.
+        assert_eq!(collections[0].description, "");
+        assert_eq!(collections[0].icon_url, "");
+        assert_eq!(collections[0].status, "listed");
+
+        // v3's own URL, so a profile that has paid for the projects list has not
+        // paid for this one, and one account is one cache entry across both
+        // documents.
+        assert_eq!(
+            user_collections_v3_url("P3U9o13d"),
+            "https://api.modrinth.com/v3/user/P3U9o13d/collections"
+        );
+        assert_ne!(user_collections_v3_url("P3U9o13d"), user_projects_v3_url("P3U9o13d"));
+        assert_eq!(fetch.requests()[0].url, user_collections_v3_url("P3U9o13d"));
+
+        api.user_collections_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
+        assert_eq!(fetch.count(), 1, "a fresh list is not asked for again");
+    }
+
+    #[test]
+    fn a_collection_whose_fields_answer_null_or_absent_still_parses() {
+        // `color` is a number or `null` and is not read; `description` is `null`
+        // when the author wrote none; `projects` is the one field a card counts and
+        // an account with an empty collection must not lose the whole list over.
+        let (api, fetch) = api("user-collections-null", DEFAULT_TTL);
+        fetch.set_route(
+            &user_collections_v3_url("P3U9o13d"),
+            Route::text(
+                r#"[{"id":"a","name":"Empty","description":null,"icon_url":null,
+                     "color":2170391,"status":"private","projects":null},
+                    {"id":"b","name":"Undated"}]"#,
+            ),
+        );
+
+        let collections = api
+            .user_collections_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the list");
+        assert_eq!(collections[0].project_count(), 0, "a null array counts as none");
+        assert_eq!(collections[0].description, "");
+        assert_eq!(collections[1].project_count(), 0);
+        // No dates at all: the sort key is two empty strings, which sort last rather
+        // than first, because an empty string compares less than any date's text.
+        assert_eq!(collections[1].sort_key(), ("", ""));
+    }
+
+    #[test]
+    fn the_collections_sort_key_puts_the_changed_one_first_and_breaks_a_tie_by_creation() {
+        // `layout.vue:751`: `updated` descending, then `created` descending. Fixed-
+        // width ISO-8601 text compares as time order, which is what lets this be a
+        // string comparison rather than a parse.
+        let body = r#"[
+            {"id":"old","name":"Old","created":"2025-01-01T00:00:00.000000Z",
+             "updated":"2023-01-01T00:00:00.000000Z","projects":[]},
+            {"id":"new","name":"New","created":"2024-01-01T00:00:00.000000Z",
+             "updated":"2026-01-01T00:00:00.000000Z","projects":[]},
+            {"id":"tie-late","name":"Tie late","created":"2024-06-01T00:00:00.000000Z",
+             "updated":"2025-01-01T00:00:00.000000Z","projects":[]},
+            {"id":"tie-early","name":"Tie early","created":"2024-01-01T00:00:00.000000Z",
+             "updated":"2025-01-01T00:00:00.000000Z","projects":[]}
+        ]"#;
+        let mut collections: Vec<ModrinthCollection> = serde_json::from_str(body).expect("the list");
+        // `Array::sort_by` is stable, so a tie in both halves would keep the order it
+        // arrived in; the comparator is what decides it, and it is the reverse of the
+        // key. *Old* is the case that shows `created` is only a tie-break: its
+        // `created` is the latest of the four and it still sorts last.
+        collections.sort_by(|first, second| second.sort_key().cmp(&first.sort_key()));
+        let names: Vec<&str> = collections.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["New", "Tie late", "Tie early", "Old"]);
+    }
+
+    #[test]
+    fn the_collections_url_encodes_its_account_as_the_v2_profile_url_does() {
+        // There is no v2 collections route to borrow an encoder from -- it is a 404 --
+        // so this is built from the v2 *profile* URL, which owns the only encoder
+        // `crate::modrinth` has.
+        assert_eq!(
+            user_collections_v3_url("a b"),
+            "https://api.modrinth.com/v3/user/a%20b/collections"
+        );
+        assert_eq!(
+            user_collections_v3_url("a b"),
+            format!("{}/collections", user_url("a b")).replace(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL)
         );
     }
 

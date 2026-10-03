@@ -4,13 +4,24 @@
 //! The reference's page is a header -- the avatar, the name and handle, a summary,
 //! and three facts: how many projects, how many downloads between them, and when
 //! the account joined -- over a strip of that user's project types and the list
-//! under it. The header's facts and the whole list come from Modrinth's
-//! *published* API: `GET /v2/user/{name}` and `GET /v2/user/{id}/projects`. That is
-//! what makes this page real without a Modrinth session, and it is also the limit
-//! of it: the two halves of the reference's page that are read through its internal
-//! v3 user service -- collections and organizations -- stay named as absent
-//! (G105 measured that they are unreachable from this tree) rather than drawn as
-//! empty lists somebody might believe.
+//! under it. The header's facts and the whole list come from Modrinth's *published*
+//! API: `GET /v2/user/{name}` and `GET /v2/user/{id}/projects`. That is what makes
+//! this page real without a Modrinth session.
+//!
+//! Two of the things the page draws are *not* on the published API, and a comment
+//! here once said they were unreachable without a Modrinth credential. They are not.
+//! Measured, anonymously, against the live service:
+//!
+//! ```text
+//! GET /v3/user/P3U9o13d/projects     -> 200   (project_types, the array v2 flattens)
+//! GET /v3/user/FlameFire/collections -> 200, 1176 bytes
+//! GET /v2/user/FlameFire/collections -> 404   (there is no v2 spelling of it)
+//! ```
+//!
+//! So the strip is counted off v3's array through [`Profile::type_of`], and its
+//! *Collections* tab and the cards under it are read from v3's collections route.
+//! A comment that calls a route unreachable when it answers 200 is worse than no
+//! comment: the next reader believes it and stops looking.
 //!
 //! The page *asks* rather than fetches, like Discover and the project page:
 //! [`State::update`] and [`State::opening`] hand the shell an [`Asked`], the shell
@@ -39,6 +50,13 @@
 //! [`Profile::projects_v3`] carries it, so the strip is counted off v3's array
 //! through [`Profile::type_of`].
 //!
+//! Collections are the other v3 read, and the only one with no v2 route behind it at
+//! all: `GET /v3/user/{id}/collections` answers 200 anonymously and
+//! `GET /v2/user/{id}/collections` answers 404.
+//! [`Profile::collections`] carries it, and it is what decides whether the strip ends
+//! in a *Collections* tab (`layout.vue:765`), which selects a different branch of the
+//! page entirely -- the collection cards rather than the project list.
+//!
 //! What that read still cannot fix is a card's row. `ProjectCard.vue` is composed
 //! out of the v3 project document as a whole -- `name` where v2 says `title`,
 //! `summary` where it says `description` -- and moving the page onto that document
@@ -54,7 +72,7 @@ use iced::{Alignment, Border, Element, Length, Padding, Vector};
 // The deep path rather than a `palantir_net` re-export: this is the one type the
 // page names that `palantir_net`'s convenience list does not carry, and `lib.rs` is
 // not this slice's to edit.
-use palantir_net::engine::modrinth::ModrinthV3Project;
+use palantir_net::engine::modrinth::{ModrinthCollection, ModrinthV3Project};
 use palantir_net::modrinth::{ModrinthUser, ModrinthUserProject};
 
 use super::overlay::Stack;
@@ -225,6 +243,43 @@ const CARD_TAG_GAP: f32 = 4.0;
 /// *Combat* and *+1*.
 const CARD_TAG_ROW: f32 = 26.0;
 
+/// The width the reference lays a profile's content column out in.
+///
+/// Measured off `/tmp/ref/user-ref.png` at the reference's own 1280x720, where a
+/// project card is `x=88..955` -- 868 pixels -- and the sidebar's own panel starts
+/// at x=979. The page never learns this number at run time (iced hands `view` a
+/// theme and a state and no width), so it is the measured constant rather than an
+/// `auto-fill`, and [`collection_columns`] is what the reference's grid rule is
+/// resolved against.
+const COLLECTION_CONTENT: f32 = 868.0;
+/// `minmax(350px, 1fr)`: the narrowest a collection card's track may be.
+const COLLECTION_MIN: f32 = 350.0;
+/// `ProjectCardList`'s own `gap-3` -- twelve -- between its tracks and between its
+/// rows, which is [`GAP`] under a different name.
+const COLLECTION_GAP: f32 = GAP;
+/// `Avatar size="64px"`: the collection card's picture.
+const COLLECTION_AVATAR: f32 = 64.0;
+/// The card's `gap-4` between the head, the description and the foot -- sixteen,
+/// which is [`page::GRID_GAP`] rather than this page's [`GAP`].
+const COLLECTION_INNER_GAP: f32 = page::GRID_GAP;
+/// `text-lg font-semibold`: the collection's own name.
+const COLLECTION_NAME: f32 = 18.0;
+/// `text-lg`'s own line, which is [`theme_gen`]'s `(18.0, 28.0)` for that class --
+/// the name is set on twenty-eight rows and not on its own eighteen, which is what
+/// `leading-normal` is.
+const COLLECTION_NAME_LINE: f32 = 28.0;
+/// `gap-2` between the name and the `LibraryIcon` line under it.
+const COLLECTION_NAME_GAP: f32 = 8.0;
+/// The foot's own `text-sm`: the *Collection* line, the description and the project
+/// count are all inherited, and none of the three carries a size class.
+const COLLECTION_LABEL: f32 = 14.0;
+/// `text-sm`'s own line -- the reference's is twenty pixels of fourteen-pixel text,
+/// which is what `ui::tabs`' label uses for the same class.
+const COLLECTION_LABEL_LINE: f32 = 20.0;
+/// The glyphs in the card's head and foot, which the reference asks for at its
+/// default `size-4`.
+const COLLECTION_ICON: f32 = ui::CONTROL_ICON;
+
 /// The loaders `sortTagsForDisplay` puts ahead of every other loader.
 ///
 /// `DEFAULT_MOD_LOADERS`, `DEFAULT_SHADER_LOADERS` and the two more that make
@@ -281,12 +336,22 @@ const TYPE_TAB_KEYS: [&str; 7] = [
     "user:tab:server",
 ];
 
-/// One user's profile: their own document, the projects they own, and their
-/// avatar.
+/// The strip's *Collections* tab, which is not in [`TYPE_TAB_KEYS`] because it is
+/// not a project type: `PROJECT_TYPE_ORDER` puts `collection` last and
+/// `catalogProjectTypes` never returns it, so it is appended after the types rather
+/// than sorted among them.
 ///
-/// Assembled from three answers rather than one, which is why it is a type of its
-/// own: the reference reads the same three (`useQuery` for the user, for their
-/// projects, and an `img` for the avatar) and the page draws the union.
+/// Its own name rather than an index into a shared list, for [`ALL_TAB_KEY`]'s
+/// reason.
+const COLLECTIONS_TAB_KEY: &str = "user:tab:collection";
+
+/// One user's profile: their own document, the projects they own, their
+/// collections, and their avatar.
+///
+/// Assembled from four answers rather than one, which is why it is a type of its
+/// own: the reference reads the same four (`useQuery` for the user, for their
+/// projects, for their collections, and an `img` for the avatar) and the page draws
+/// the union.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Profile {
     /// The account's own document: the name, the handle, the bio, the join date.
@@ -303,6 +368,17 @@ pub struct Profile {
     /// Empty when the v3 read failed, which is a degradation rather than a hole:
     /// every project then falls back to the v2 string.
     pub projects_v3: Vec<ModrinthV3Project>,
+    /// The collections they own, as `GET /v3/user/{id}/collections` writes them.
+    ///
+    /// The fourth document the page is drawn from, and the one that decides whether
+    /// the strip's last tab exists at all: `layout.vue:765` appends `'collection'`
+    /// exactly when this list is not empty. Public and anonymous -- the route answers
+    /// 200 for an account nobody has signed in as -- so this is a read like the
+    /// other three rather than one that needs a session.
+    ///
+    /// Empty when the read failed, and empty is the reference's own answer for an
+    /// account with no collections: in both cases the tab is not drawn.
+    pub collections: Vec<ModrinthCollection>,
     /// Their avatar, when it could be fetched and decoded -- already rounded into
     /// the circle `UserPageHeader.vue` asks for, by [`crate::avatar`].
     pub avatar: Option<crate::avatar::Icon>,
@@ -329,11 +405,13 @@ impl Profile {
     /// sentence this keeps is drawn where the picture would be.
     ///
     /// `projects_v3` is the half that can be missing without anything being drawn
-    /// wrong about it -- see [`Profile::type_of`].
+    /// wrong about it -- see [`Profile::type_of`]. So is `collections`: an account
+    /// with none, and a collections read that failed, draw the same page.
     pub fn of(
         user: ModrinthUser,
         projects: Vec<ModrinthUserProject>,
         projects_v3: Vec<ModrinthV3Project>,
+        collections: Vec<ModrinthCollection>,
         avatar: Result<Vec<u8>, String>,
         icons: Vec<crate::avatar::Fetched>,
     ) -> Profile {
@@ -347,7 +425,47 @@ impl Profile {
             },
             Err(reason) => (None, Some(reason)),
         };
-        Profile { user, projects, projects_v3, avatar, note, icons }
+        Profile { user, projects, projects_v3, collections, avatar, note, icons }
+    }
+
+    /// Whether the strip ends in a *Collections* tab.
+    ///
+    /// `layout.vue:763-766`: `catalogProjectTypes(projects)`, then
+    /// `if (collections.value.length > 0) types.push('collection')`. The condition is
+    /// on the *list*, not on the account: a tab for a list that is empty is a tab
+    /// whose page can only ever be the empty state, and the reference does not offer
+    /// it.
+    pub fn has_collections(&self) -> bool {
+        !self.collections.is_empty()
+    }
+
+    /// The collections, in the order the reference draws them in.
+    ///
+    /// `sortedCollections` (`layout.vue:751`) is `updated` descending with `created`
+    /// descending as the tie-break, which is what [`ModrinthCollection::sort_key`]
+    /// reads. `sort_by` is stable, so a pair that ties in both halves keeps the
+    /// service's own order rather than an invented one.
+    pub fn sorted_collections(&self) -> Vec<&ModrinthCollection> {
+        let mut sorted: Vec<&ModrinthCollection> = self.collections.iter().collect();
+        sorted.sort_by(|first, second| second.sort_key().cmp(&first.sort_key()));
+        sorted
+    }
+
+    /// One collection's icon, when it arrived.
+    ///
+    /// `None` for a collection with no `icon_url`, which is what every collection
+    /// measured on the live service answers -- `null` for all four of FlameFire's --
+    /// and the reference's own `Avatar` draws its placeholder there rather than
+    /// nothing. Fetched by [`crate::store::Store::project_icons`] beside the
+    /// projects' own and keyed by the same URL.
+    pub fn collection_icon(&self, collection: &ModrinthCollection) -> Option<&crate::avatar::Icon> {
+        if collection.icon_url.is_empty() {
+            return None;
+        }
+        self.icons
+            .iter()
+            .find(|fetched| fetched.url == collection.icon_url)
+            .map(|fetched| &fetched.icon)
     }
 
     /// Everything this user's projects have been downloaded.
@@ -494,6 +612,67 @@ pub struct Asked {
     pub round: u64,
 }
 
+/// Which of the strip's tabs is on screen.
+///
+/// Not `Option<ProjectType>`, because the strip has a fourth tab that is not a
+/// project type: `layout.vue:765` pushes the string `'collection'` into the same
+/// list the types go into, and `parseProjectTypeRouteParam` reads it back the same
+/// way. `ProjectType` has no variant for it and cannot grow one from this page --
+/// `route.rs` owns that enum, and `/user/{name}/collections` is deliberately not an
+/// address here ([`ProjectType::from_profile_token`] refuses the token) -- so the
+/// branch is carried by the page instead.
+///
+/// The two project-type arms keep their navigation: [`Message::Filter`] is turned by
+/// [`crate::pages::Screen`] into an address, and the address comes back as
+/// [`State::filter`]. This arm has no address to go out on, so
+/// [`Message::Collections`] is applied here and stays here. That is the one place
+/// this page keeps state the address does not record, and it is a gap in the routing
+/// rather than a choice: leaving the tab and coming back by address lands on *All*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Filter {
+    /// No type in the address: the strip's *All* tab.
+    #[default]
+    All,
+    /// One project type, which is what the address's third segment names.
+    Type(ProjectType),
+    /// The strip's *Collections* tab, and the reference's separate branch.
+    Collections,
+}
+
+impl Filter {
+    /// The tab an address's project type selects.
+    ///
+    /// `None` is *All*, which is `parseProjectTypeRouteParam`'s own reading of an
+    /// address with nothing in its third segment.
+    pub fn of(project_type: Option<ProjectType>) -> Filter {
+        match project_type {
+            Some(kind) => Filter::Type(kind),
+            None => Filter::All,
+        }
+    }
+
+    /// Whether the project list is on screen under this tab.
+    ///
+    /// `layout.vue:220` is `v-if="selectedProjectType !== 'collection'"`, so the
+    /// Collections tab replaces the project list rather than joining it.
+    pub fn shows_projects(self) -> bool {
+        self != Filter::Collections
+    }
+
+    /// The project type the project list is filtered by.
+    ///
+    /// `None` for *All* and for *Collections*, which is what `filterProjectsByType`
+    /// returns for the second: it compares `getPrimaryProjectType(project)` against
+    /// the address's type, and no project of any type answers `'collection'`. The
+    /// list is not drawn at all under that tab, so the empty answer is never used.
+    pub fn project_type(self) -> Option<ProjectType> {
+        match self {
+            Filter::Type(kind) => Some(kind),
+            Filter::All | Filter::Collections => None,
+        }
+    }
+}
+
 /// What the page can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -522,6 +701,25 @@ pub enum Message {
     /// record of what is on screen. [`State::filter`] is where the page then follows
     /// the address.
     Filter(Option<ProjectType>),
+    /// The strip's *Collections* tab was chosen.
+    ///
+    /// Applied here rather than reported, which is the one place this page does not
+    /// do what [`Message::Filter`] does, and it is forced by the routing rather than
+    /// chosen: `Route::User` carries an `Option<ProjectType>`, and a collection is
+    /// not a project type, so there is no address for this tab to be. See
+    /// [`Filter`].
+    Collections,
+    /// A filter chosen while the page is on the collections branch.
+    ///
+    /// [`Message::Filter`] cannot leave that branch by itself, and this is why:
+    /// that message becomes an `Open::User`, the shell turns it into an address, and
+    /// the shell's `go` returns early when that address is the one the page is
+    /// already at. Choosing *All* from the collections branch is exactly that case --
+    /// the collections branch has no address of its own, so the page is still at
+    /// `/user/{name}` -- and the press would have left the reader on the branch they
+    /// were trying to leave. So this arm is applied here, and the address moves only
+    /// when it can.
+    LeaveCollections(Option<ProjectType>),
     /// The header's overflow was pressed.
     More,
     /// A card's *Install* was pressed.
@@ -562,7 +760,26 @@ pub struct State {
     /// page that could not name the user it is about could not ask for it.
     pub user: String,
     /// The project type the address names, which the list is filtered by.
+    ///
+    /// The address's own field and left as it was, because the two project-type arms
+    /// of the strip are navigations and this is what they navigate *by*:
+    /// [`Message::Filter`] becomes an `Open::User`, and the address that comes back
+    /// is written here by [`Self::filter`] and read back by [`Self::selected`]. It
+    /// cannot carry the strip's fourth tab -- see [`Self::collections`] and
+    /// [`Filter`].
     pub project_type: Option<ProjectType>,
+    /// Whether the strip's *Collections* tab is the one on screen.
+    ///
+    /// Page state rather than address state, and the only thing on this page that
+    /// is: `Route::User` carries an `Option<ProjectType>` and a collection is not a
+    /// project type, so there is no `/user/{name}/collections` for this tab to be --
+    /// [`ProjectType::from_profile_token`] refuses the token on purpose. The
+    /// consequence is that leaving the tab and coming back by address lands on
+    /// *All*, which is what the address says.
+    ///
+    /// [`Self::filter`] clears it whenever the address is followed, so the two can
+    /// never disagree about which tab is drawn.
+    pub collections: bool,
     /// The profile, as the service answered it. A `Load`, because the page is drawn
     /// before the answer arrives and its four arms are what says so.
     pub profile: Load<Profile>,
@@ -576,7 +793,26 @@ pub struct State {
 impl State {
     /// A page for one user, filtered by whatever the address asked for.
     pub fn new(user: String, project_type: Option<ProjectType>) -> State {
-        State { user, project_type, profile: Load::Idle, notice: None, round: 0 }
+        State {
+            user,
+            project_type,
+            collections: false,
+            profile: Load::Idle,
+            notice: None,
+            round: 0,
+        }
+    }
+
+    /// Which tab the strip is on, as the one value both arms can be read through.
+    ///
+    /// Named apart from [`Self::filter`], which is the one that *follows an address*:
+    /// this one reads what the page is holding, that one changes it.
+    pub fn selected(&self) -> Filter {
+        if self.collections {
+            Filter::Collections
+        } else {
+            Filter::of(self.project_type)
+        }
     }
 
     /// Apply a message, and answer with what the shell has to do about it.
@@ -600,6 +836,14 @@ impl State {
             // directly means the shell did not route them, and the answer to that is
             // to change nothing rather than to invent a navigation.
             Message::Project(_) | Message::Filter(_) => {}
+            // The Collections tab, applied here: see [`Message::Collections`]. There
+            // is no address for it, so this is the whole of the message.
+            Message::Collections => self.collections = true,
+            // Leaving the branch for one of the two arms the address *can* say. The
+            // address moves by itself when it differs from where the page already is
+            // -- a named type is a different path -- and *All* is the arm that cannot,
+            // which is what [`Message::LeaveCollections`] is for.
+            Message::LeaveCollections(project_type) => self.filter(project_type),
             // A card's own button, reported rather than performed. `pages::mod`
             // turns it into the same `Ask::Install` the project page's button
             // makes, so this launcher installs a mod from a profile exactly as it
@@ -626,8 +870,13 @@ impl State {
     /// the service again for an answer the page is holding would be a round trip
     /// that redraws the same page. A *different* user is not this: that is a new
     /// page, and [`crate::pages::Screen::retarget`] builds one.
+    ///
+    /// An address that names no type is the strip's *All* tab, so it clears the
+    /// collections branch as well: arriving at `/user/x` from `/user/x/collections`
+    /// lands on *All*, which is what the address says.
     pub fn filter(&mut self, project_type: Option<ProjectType>) {
         self.project_type = project_type;
+        self.collections = false;
     }
 
     /// The request the page owes because nothing has been asked for yet.
@@ -656,17 +905,42 @@ impl State {
     /// The reference has one sentence for *somebody else has none* and one for *you
     /// have none*, and the difference is decided by comparing the profile's id
     /// against the signed-in Modrinth account's. This launcher does not hold a
-    /// Modrinth credential -- a decision rather than a gap (G105 measured what one
-    /// would reach, G118 is where the launcher decides not to want it) -- so the
+    /// Modrinth credential -- G118, a decision rather than a gap -- so the
     /// reader's-own arm stays unreachable and the page draws the other one. Both
     /// are the reference's copy, and the comparison it is missing is the whole of
     /// what would select between them; the arm is kept rather than deleted so that
     /// the page is still the reference's page if that decision is ever reversed.
+    ///
+    /// The G105 citation that used to sit here was wrong and has been dropped rather
+    /// than narrowed: it said the credential was needed to *reach* the reference's
+    /// v3 user service, and the two v3 routes this page reads answer 200 with none
+    /// (see the module docs). A credential is still wanted -- for the reader's own
+    /// arm of this sentence -- so the sentence above stands on G118 alone.
     pub fn empty_sentence(own_profile: bool) -> &'static str {
         if own_profile {
             Key::ProfileLabelNoProjectsAuthDescription.message()
         } else {
             Key::ProfileLabelNoProjects.message()
+        }
+    }
+
+    /// The heading to draw for a user with no collections.
+    ///
+    /// The same pair of arms as [`Self::empty_sentence`] and the same reason they
+    /// are one arm here and one there: `showCollectionsEmptyState`'s `isSelf` is
+    /// false, so `profile.label.no-collections-auth-description` is not drawn.
+    ///
+    /// The reference's `EmptyState` for this one also carries a *Create a collection*
+    /// button, and that is the one control in this branch this page does not draw.
+    /// It is behind the same `isSelf` as the description, so it is not reached for
+    /// the same reason -- and were it ever reached it would be a *write* to Modrinth,
+    /// which is what [`crate::store::needs_account`] is for rather than a button that
+    /// silently does nothing.
+    pub fn no_collections_sentence(own_profile: bool) -> &'static str {
+        if own_profile {
+            Key::ProfileLabelNoCollectionsAuthDescription.message()
+        } else {
+            Key::ProfileLabelNoCollections.message()
         }
     }
 }
@@ -716,24 +990,56 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
         head = head.push(strip);
     }
     let mut blocks: Vec<Element<'a, Message>> = vec![head.into()];
-    let shown = profile.shown(state.project_type);
-    if shown.is_empty() {
-        // The reference's own empty state, and the same sentence for a user with no
-        // projects at all and for one with none of the type being looked at -- the
-        // reference draws `profile.label.no-projects` for both.
+    // The project list and the collection grid are two branches of the reference's
+    // one `<div class="flex flex-col gap-3">`, and which of them is on screen is
+    // `selectedProjectType`: `layout.vue:220` draws `ProjectList` only when it is
+    // not `'collection'`, and `layout.vue:257` draws the collection `ProjectCardList`
+    // when it *is* `'collection'` or nothing at all. So the Collections tab replaces
+    // the project list, and the *All* tab carries both with the collections after the
+    // projects -- which is where the reference puts them, and why they sit below the
+    // fold of the 720-pixel window this page is measured at.
+    let filter = state.selected();
+    let shown = profile.shown(filter.project_type());
+    let collections = collection_grid(theme, profile);
+    if filter.shows_projects() {
+        if shown.is_empty() {
+            // The reference's own empty state, and the same sentence for a user with
+            // no projects at all and for one with none of the type being looked at --
+            // the reference draws `profile.label.no-projects` for both. The condition
+            // is `showProjectsEmptyState`, all three of its terms.
+            if shows_projects_empty_state(filter, profile.has_collections(), shown.len()) {
+                blocks.push(ui::card(
+                    theme,
+                    text(State::empty_sentence(false))
+                        .size(16.0)
+                        .line_height(iced::Pixels(16.0))
+                        .font(heading())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                ));
+            }
+        } else {
+            let mut list = column![].spacing(LIST_GAP).width(Length::Fill);
+            for project in shown {
+                list = list.push(project_row(theme, profile, project));
+            }
+            blocks.push(list.into());
+        }
+    }
+    // `showCollectionsEmptyState` (`layout.vue:833`): the collections tab, and
+    // nothing to put under it. The heading alone -- `isSelf` is false without a
+    // Modrinth session, so the reference draws no description and no *Create a
+    // collection* button either. See [`State::no_collections_sentence`].
+    if filter == Filter::Collections && !profile.has_collections() {
         blocks.push(ui::card(
             theme,
-            text(State::empty_sentence(false))
+            text(State::no_collections_sentence(false))
                 .size(16.0)
+                .line_height(iced::Pixels(16.0))
                 .font(heading())
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
         ));
-    } else {
-        let mut list = column![].spacing(LIST_GAP).width(Length::Fill);
-        for project in shown {
-            list = list.push(project_row(theme, profile, project));
-        }
-        blocks.push(list.into());
+    } else if let Some(grid) = collections {
+        blocks.push(grid);
     }
     let mut body = column![].spacing(GAP).width(Length::Fill);
     for block in blocks {
@@ -962,26 +1268,37 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
 ///
 /// The reference draws no strip until it has more than two links -- *All* plus one
 /// type is two -- because a lone filter beside the list it filters says nothing
-/// (`NavTabs v-if="navLinks.length > 2"`). The *Collections* link the reference adds
-/// when a user has collections is not here: collections are read through the v3
-/// user service, which this tree cannot reach (G105).
+/// (`NavTabs v-if="navLinks.length > 2"`). The count is over *links* and not over
+/// project types, so a collection counts toward it: an account with one type and one
+/// collection has three links and does get a strip.
 ///
-/// Each label is `getProjectTypeTitleMessage(projectType)` formatted with
+/// The list is `layout.vue:770`'s `navLinks`: *All*, then one entry per type, then
+/// the collections -- `layout.vue:765` appends `'collection'` to the sorted types
+/// when `collections.value.length > 0`, and `sortProjectTypes` puts it last because
+/// `PROJECT_TYPE_ORDER` ends with it. So the tab is appended rather than sorted in,
+/// and it is absent for an account with none.
+///
+/// Each type's label is `getProjectTypeTitleMessage(projectType)` formatted with
 /// `{ count: 2 }` -- the *capital* messages, plural -- which are the same seven words
-/// as the category messages [`ProjectType::label`] carries.
+/// as the category messages [`ProjectType::label`] carries. The collections label is
+/// the exception and not `getProjectTypeTitleMessage`'s: `layout.vue:777` gives
+/// `'collection'` `messages.collectionsLabel`, which is `project-type.collection.
+/// plural` -- *Collections*, and not *Collection*.
 fn filter_strip<'a>(
     theme: Gen,
     state: &State,
     profile: &Profile,
 ) -> Option<Element<'a, Message>> {
+    let filter = state.selected();
     let types = profile.types();
-    if types.len() < 2 {
+    let collections = profile.has_collections();
+    if 1 + types.len() + usize::from(collections) <= 2 {
         return None;
     }
     let mut keys: Vec<&'static str> = vec![ALL_TAB_KEY];
     let mut labels: Vec<(String, bool)> = vec![(
         Key::ProjectTypeAll.message().to_string(),
-        state.project_type.is_none(),
+        filter == Filter::All,
     )];
     for kind in &types {
         // The keys and the order are one list, so the index of the type in
@@ -990,13 +1307,262 @@ fn filter_strip<'a>(
         // from that same list.
         if let Some(index) = ProjectType::PROFILE_ORDER.iter().position(|known| known == kind) {
             keys.push(TYPE_TAB_KEYS[index]);
-            labels.push((kind.label().to_string(), state.project_type == Some(*kind)));
+            labels.push((kind.label().to_string(), filter == Filter::Type(*kind)));
         }
     }
-    Some(ui::tabs(theme, &keys, &labels, |index| {
-        let chosen = if index == 0 { None } else { types.get(index - 1).copied() };
-        Message::Filter(chosen)
+    if collections {
+        keys.push(COLLECTIONS_TAB_KEY);
+        labels.push((
+            Key::ProjectTypeCollectionPlural.message().to_string(),
+            filter == Filter::Collections,
+        ));
+    }
+    // The two lists are the strip's own index space, so the index that comes back
+    // from a press is read against both: the type tabs are the ones the address can
+    // carry and report through `Message::Filter`, and the collections tab is the one
+    // that cannot, so it reports through `Message::Collections` instead.
+    //
+    // And the arm the address cannot *leave* by is the reason
+    // `Message::LeaveCollections` exists: on the collections branch the page is
+    // still at `/user/{name}`, so `All`'s own address is where it already is and the
+    // shell would treat the press as no navigation at all.
+    let on_collections = filter == Filter::Collections;
+    let typed = types.len();
+    Some(ui::tabs(theme, &keys, &labels, move |index| {
+        let chosen = match index {
+            0 => None,
+            n if n <= typed => types.get(n - 1).copied(),
+            _ => return Message::Collections,
+        };
+        if on_collections {
+            Message::LeaveCollections(chosen)
+        } else {
+            Message::Filter(chosen)
+        }
     }))
+}
+
+/// Whether the *no projects* empty state is drawn, which is `showProjectsEmptyState`
+/// (`layout.vue:827-832`) term for term.
+///
+/// ```text
+/// selectedProjectType !== 'collection'
+///   && filteredProjects.length === 0
+///   && (selectedProjectType !== null || collections.value.length === 0)
+/// ```
+///
+/// The third term is the one a port drops, and it is the reason this is a function
+/// rather than an `if`: an account with collections and no projects of its own would
+/// be told *This user has no projects!* on the *All* tab, immediately above the
+/// collection grid that tab is about to draw. A named type is the other way out --
+/// the address is what the reader asked for there, so an empty list is the answer --
+/// and the collections tab is never it, because `layout.vue:257` draws the grid and
+/// `showCollectionsEmptyState` the heading instead.
+///
+/// `shown` is passed rather than read so the predicate can be gated without a
+/// profile; the caller only asks when it is empty.
+fn shows_projects_empty_state(filter: Filter, has_collections: bool, shown: usize) -> bool {
+    filter.shows_projects()
+        && shown == 0
+        && (filter.project_type().is_some() || !has_collections)
+}
+
+/// The grid of collection cards, or nothing when there is nothing to put in it.
+///
+/// `layout.vue:257-320`'s `ProjectCardList layout="grid"`, whose own rule is
+/// `grid-template-columns: repeat(auto-fill, minmax(350px, 1fr))` over `gap-3`.
+/// `auto-fill` needs a width to fill and iced has no grid, so the column count is
+/// worked out from the content width the reference lays that grid out in -- measured
+/// on `/tmp/ref/user-ref.png` at the reference's own 1280x720 as
+/// `x=88..955` for a project card, so [`COLLECTION_CONTENT`] is 868 pixels -- and
+/// from the 350-pixel floor and the 12-pixel gap the rule states.
+fn collection_grid<'a>(theme: Gen, profile: &'a Profile) -> Option<Element<'a, Message>> {
+    if !profile.has_collections() {
+        return None;
+    }
+    let cards = profile.sorted_collections();
+    let columns = collection_columns(COLLECTION_CONTENT);
+    let mut rows: Vec<Element<'a, Message>> = Vec::new();
+    for chunk in cards.chunks(columns) {
+        let mut row = row![].spacing(COLLECTION_GAP).width(Length::Fill);
+        for collection in chunk {
+            row = row.push(collection_card(theme, profile, collection));
+        }
+        // The last row of a grid whose cards do not divide evenly keeps its columns
+        // rather than stretching the cards it does have, which is what
+        // `grid-template-columns` does with `1fr` and what a `Row` of `Fill` children
+        // does not.
+        for _ in chunk.len()..columns {
+            row = row.push(Space::new(Length::Fill, Length::Shrink));
+        }
+        rows.push(row.into());
+    }
+    let mut grid = column![].spacing(COLLECTION_GAP).width(Length::Fill);
+    for line in rows {
+        grid = grid.push(line);
+    }
+    Some(grid.into())
+}
+
+/// `repeat(auto-fill, minmax(350px, 1fr))` resolved against a content width.
+///
+/// `auto-fill` fits as many tracks as the floor allows and shares the rest between
+/// them, so this is a floor division on `(width + gap)`: two tracks at the
+/// reference's own 868 (2 x 350 + 12 = 712 fits, 3 x 350 + 24 = 1074 does not), and
+/// at least one however narrow the column gets, because a grid with no columns
+/// draws nothing and the reference's always draws one.
+fn collection_columns(width: f32) -> usize {
+    let fits = ((width + COLLECTION_GAP) / (COLLECTION_MIN + COLLECTION_GAP)).floor();
+    (fits as usize).max(1)
+}
+
+/// One collection's card.
+///
+/// The whole of `layout.vue:268-320`: a `grid-cols-[auto_1fr] gap-4` head holding a
+/// 64-pixel `Avatar` beside the name at `text-lg font-semibold` and the
+/// `LibraryIcon` + `profile.label.collection` line, then the description, then the
+/// foot's `BoxIcon` + `profile.collection.projects-count`. There is no status line,
+/// and that is [`collection_status`]'s condition rather than an omission:
+/// `canSeeCollectionStatus` is `isSelf || isStaffViewing`, both false for a reader
+/// on somebody else's profile with no Modrinth session.
+///
+/// `flex-col gap-4` with `grow` on the description and `mt-auto` on the foot, so the
+/// foot is pinned to the card's bottom and the description takes the slack between.
+/// iced has no `grow`, so the slack is a `Fill` spacer instead -- the same
+/// substitution `Stack` makes elsewhere on this page.
+fn collection_card<'a>(
+    theme: Gen,
+    profile: &'a Profile,
+    collection: &'a ModrinthCollection,
+) -> Element<'a, Message> {
+    // `grid-cols-[auto_1fr] gap-4`: the picture is the `auto` column and everything
+    // beside it shares the `1fr`, which is what truncates the name.
+    //
+    // `Avatar size="64px" no-shadow` for the picture, and the placeholder rather than
+    // nothing for a `null` one -- which is the shape every collection the live
+    // service was measured on answers, all four of FlameFire's. A picture that did
+    // arrive is drawn through the kit's own icon box, whose corner radius is the
+    // avatar module's rule and not a measurement of this card: no collection with an
+    // `icon_url` was available to measure against.
+    let picture: Element<'a, Message> = match profile.collection_icon(collection) {
+        Some(icon) => ui::icon_box(theme, COLLECTION_AVATAR, Some(icon)),
+        None => page::glyph(theme, Glyph::CircleUser, COLLECTION_AVATAR),
+    };
+    let head = row![]
+        .width(Length::Fill)
+        .spacing(COLLECTION_INNER_GAP)
+        .align_items(Alignment::Start)
+        .push(picture)
+        .push(
+            column![]
+                .width(Length::Fill)
+                .spacing(COLLECTION_NAME_GAP)
+                .push(
+                    text(collection.name.clone())
+                        .size(COLLECTION_NAME)
+                        .line_height(iced::Pixels(COLLECTION_NAME_LINE))
+                        .font(semibold())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                )
+                .push(
+                    row![]
+                        .spacing(ui::METADATA_GAP / 2.0)
+                        .align_items(Alignment::Center)
+                        .push(icon::icon(
+                            Glyph::Library,
+                            COLLECTION_ICON,
+                            theme_gen::ink(theme, INK_SECONDARY),
+                        ))
+                        .push(
+                            text(Key::ProfileLabelCollection.message())
+                                .size(COLLECTION_LABEL)
+                                .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
+                                .font(crate::style::regular())
+                                .style(iced::theme::Text::Color(theme_gen::ink(
+                                    theme,
+                                    INK_SECONDARY,
+                                ))),
+                        ),
+                ),
+        );
+    // `mt-auto`: the description grows, so the foot is pinned to the card's own
+    // bottom rather than to the end of the text above it.
+    let mut card = column![]
+        .width(Length::Fill)
+        .spacing(COLLECTION_INNER_GAP)
+        .push(head);
+    if !collection.description.is_empty() {
+        card = card.push(
+            text(collection.description.clone())
+                .size(COLLECTION_LABEL)
+                .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
+                .width(Length::Fill)
+                .font(crate::style::regular())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+        );
+    }
+    let mut foot = row![]
+        .spacing(COLLECTION_INNER_GAP)
+        .align_items(Alignment::Center)
+        .push(icon::icon(
+            Glyph::Box,
+            COLLECTION_ICON,
+            theme_gen::ink(theme, INK_SECONDARY),
+        ))
+        .push(
+            text(text_gen::profile_collection_projects_count(
+                collection.project_count() as u64,
+            ))
+            .size(COLLECTION_LABEL)
+            .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
+            .font(crate::style::regular())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+        );
+    if let Some((glyph, key)) = collection_status(false, &collection.status) {
+        foot = foot.push(
+            row![]
+                .spacing(ui::METADATA_GAP / 2.0)
+                .align_items(Alignment::Center)
+                .push(icon::icon(glyph, COLLECTION_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+                .push(
+                    text(key.message())
+                        .size(COLLECTION_LABEL)
+                        .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
+                        .font(crate::style::regular())
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                ),
+        );
+    }
+    card = card.push(Space::new(Length::Fill, Length::Shrink)).push(foot);
+    ui::card(theme, card)
+}
+
+/// The status line's glyph and label, when the viewer may see it at all.
+///
+/// `layout.vue:298-316` is `v-if="canSeeCollectionStatus"`, and
+/// `canSeeCollectionStatus` is `isSelf.value || isStaffViewing.value` -- the
+/// profile's own collections, or a moderator looking at them. Both are false for a
+/// reader looking at somebody else's account in a launcher with no Modrinth
+/// credential, so the line is parsed off the document and never drawn; the arm is
+/// kept because the condition is the reader's, not the document's.
+///
+/// `None` for a status the reference names no line for, which is the reference's own
+/// outcome: its four `v-else-if`s cover `listed` / `unlisted` / `private` /
+/// `rejected` and a fifth value prints nothing.
+fn collection_status(
+    can_see: bool,
+    status: &str,
+) -> Option<(Glyph, Key)> {
+    if !can_see {
+        return None;
+    }
+    match status {
+        "listed" => Some((Glyph::Globe, Key::LabelPublic)),
+        "unlisted" => Some((Glyph::Link, Key::LabelUnlisted)),
+        "private" => Some((Glyph::Lock, Key::CollectionsLabelPrivate)),
+        "rejected" => Some((Glyph::X, Key::LabelRejected)),
+        _ => None,
+    }
 }
 
 /// One project of the list.
@@ -1766,9 +2332,39 @@ mod tests {
             user,
             projects,
             v3_types(),
+            Vec::new(),
             Err("no avatar on this machine".to_string()),
             Vec::new(),
         )
+    }
+
+    /// The same profile with two collections, which is the shape that puts a fourth
+    /// tab on the strip.
+    ///
+    /// Two of FlameFire's own four, with their real ids, names, null descriptions and
+    /// null icons, and their real `projects` lengths: one project in *Plugin* and
+    /// three in *Carpet*, so the plural message has both arms in it.
+    fn with_collections() -> Profile {
+        let mut profile = sample();
+        profile.collections = collections();
+        profile
+    }
+
+    /// Two collections as `GET /v3/user/{id}/collections` answers them, parsed
+    /// rather than built, so the null fields are the service's own and not a
+    /// hand-written `""`.
+    fn collections() -> Vec<ModrinthCollection> {
+        serde_json::from_str(
+            r#"[{"id":"gvaNtekl","user":"P3U9o13d","name":"Plugin","description":null,
+                 "icon_url":null,"color":null,"status":"listed",
+                 "created":"2026-06-16T17:07:15.101156Z","updated":"2026-06-16T17:07:15.101149Z",
+                 "projects":["gBIw3Gvy"]},
+                {"id":"3xabYvo8","user":"P3U9o13d","name":"Carpet","description":null,
+                 "icon_url":null,"color":null,"status":"listed",
+                 "created":"2025-03-29T16:15:46.075350Z","updated":"2025-03-29T16:20:26.673541Z",
+                 "projects":["G26sLP13","TQTTVgYE","UHjbX5mk"]}]"#,
+        )
+        .expect("the collection list")
     }
 
     /// The v3 type list a fixture is read against, keyed by the ids the v2 fixture
@@ -1848,7 +2444,8 @@ mod tests {
         // match, so one of them cannot be stale beside the other.
         let user: ModrinthUser =
             serde_json::from_str(r#"{"username":"jelly"}"#).expect("the user document");
-        let arrived = Profile::of(user, Vec::new(), Vec::new(), Ok(picture(32)), Vec::new());
+        let arrived =
+            Profile::of(user, Vec::new(), Vec::new(), Vec::new(), Ok(picture(32)), Vec::new());
         assert!(arrived.avatar.is_some());
         assert!(arrived.note.is_none());
     }
@@ -2063,6 +2660,7 @@ mod tests {
             user,
             projects,
             if with_v3 { projects_v3 } else { Vec::new() },
+            if with_v3 { collections() } else { Vec::new() },
             Err("no avatar".to_string()),
             Vec::new(),
         )
@@ -2073,8 +2671,9 @@ mod tests {
         // The defect this fixes, measured: v2 calls four of these six projects `mod`,
         // so a strip counted from v2 offers *Mods* and no *Data Packs* -- and the
         // reference's own strip for this account reads *All · Data Packs · Modpacks ·
-        // Collections*. The reference's *Collections* is out of reach (G105), so what
-        // is left has to be the other three.
+        // Collections*. The fourth link is the collections route, which answers 200
+        // anonymously, so all four are drawn and this fixture carries two of
+        // FlameFire's four real collections.
         let profile = flamefire_profile(true);
         assert_eq!(
             profile.types(),
@@ -2145,9 +2744,230 @@ mod tests {
             assert_eq!(kind.label(), label, "{kind:?}");
         }
         // The reference's *Collections* is the one link with no project type behind
-        // it, and it is out of reach here -- so the strip is one shorter than theirs
-        // for an account that has collections, by decision rather than by oversight.
+        // it, and it is the only one whose label is not
+        // `getProjectTypeTitleMessage(...)`: `layout.vue:777` gives it
+        // `messages.collectionsLabel`, which is `project-type.collection.plural`, so
+        // it is *Collections* and not *Collection*. And it is the last of the four,
+        // because `PROJECT_TYPE_ORDER` ends with `collection`.
         assert_eq!(Key::ProjectTypeAll.message(), "All");
+        assert_eq!(Key::ProjectTypeCollectionPlural.message(), "Collections");
+        let order: Vec<&str> = ProjectType::PROFILE_ORDER.iter().map(|kind| kind.token()).collect();
+        assert_eq!(order.last(), Some(&"server"), "seven types, none of them a collection");
+        assert_eq!(
+            PROFILE_TYPE_ORDER_LAST_IN_REFERENCE,
+            "collection",
+            "PROJECT_TYPE_ORDER's eighth entry, after `server`"
+        );
+    }
+
+    /// The token `PROJECT_TYPE_ORDER` sorts by, named here rather than reached for.
+    ///
+    /// `ui/src/utils/project-types.ts:1` is `['mod', 'resourcepack', 'datapack',
+    /// 'shader', 'modpack', 'plugin', 'server', 'collection']`, and this tree's
+    /// [`ProjectType::PROFILE_ORDER`] is its first seven. The eighth is `'collection'`
+    /// and has no variant here, which is exactly why the tab is appended rather than
+    /// sorted among the types.
+    const PROFILE_TYPE_ORDER_LAST_IN_REFERENCE: &str = "collection";
+
+    #[test]
+    fn the_collections_tab_is_the_last_link_and_only_when_there_are_collections() {
+        // `layout.vue:763-766`: `catalogProjectTypes(projects)`, then
+        // `if (collections.value.length > 0) types.push('collection')`, then
+        // `sortProjectTypes`. So the tab's condition is on the list, not the account.
+        let with = with_collections();
+        assert!(with.has_collections());
+        let without = sample();
+        assert!(!without.has_collections());
+
+        // The strip is drawn from `navLinks`, so the four links this account has are
+        // *All*, one per type, and the collections. Asserted through the labels the
+        // strip would carry, in order.
+        let labels = |profile: &Profile| -> Vec<String> {
+            let mut labels = vec![Key::ProjectTypeAll.message().to_string()];
+            labels.extend(profile.types().iter().map(|kind| kind.label().to_string()));
+            if profile.has_collections() {
+                labels.push(Key::ProjectTypeCollectionPlural.message().to_string());
+            }
+            labels
+        };
+        assert_eq!(labels(&with), vec!["All", "Mods", "Modpacks", "Collections"]);
+        assert_eq!(
+            labels(&without),
+            vec!["All", "Mods", "Modpacks"],
+            "the same account without collections is one link shorter"
+        );
+    }
+
+    #[test]
+    fn the_strip_appears_for_three_links_and_not_for_two() {
+        // `NavTabs v-if="navLinks.length > 2"` counts *links*, and the collections
+        // link is one of them: one type plus one collection is *All*, the type and
+        // *Collections* -- three, which the reference draws. This is the case that
+        // used to draw no strip at all, because the count was over types alone.
+        let mut profile = sample();
+        profile.projects.retain(|project| project.project_type == "mod");
+        profile.projects_v3.retain(|entry| entry.id == "AANobbMI");
+        assert_eq!(profile.types(), vec![ProjectType::Mod]);
+        assert_eq!(strip_links(&profile), 2, "no strip: *All* and *Mods*");
+        profile.collections = collections();
+        assert_eq!(strip_links(&profile), 3, "and now there is one");
+    }
+
+    /// How many links the strip would carry: *All*, one per type, and the
+    /// collections when there are any.
+    fn strip_links(profile: &Profile) -> usize {
+        1 + profile.types().len() + usize::from(profile.has_collections())
+    }
+
+    #[test]
+    fn the_collections_tab_selects_the_collection_branch_and_not_the_project_list() {
+        // `layout.vue:220` draws `ProjectList` only when the selected type is not
+        // `'collection'`; `layout.vue:257` draws the collection grid when it is, or
+        // when nothing is selected. So the two branches, not one list plus a
+        // decoration.
+        assert!(Filter::All.shows_projects());
+        assert!(Filter::Type(ProjectType::Mod).shows_projects());
+        assert!(!Filter::Collections.shows_projects());
+        // `filterProjectsByType` compares the project's own type against the
+        // address's, and no project answers `'collection'` -- so even if the list
+        // were drawn it would be empty.
+        assert_eq!(Filter::Collections.project_type(), None);
+        assert_eq!(Filter::All.project_type(), None);
+        assert_eq!(Filter::Type(ProjectType::Datapack).project_type(), Some(ProjectType::Datapack));
+
+        // And the tab's press is applied rather than reported, because there is no
+        // address for it: `Route::User` carries an `Option<ProjectType>`.
+        let mut state = State::new("FlameFire".to_string(), None);
+        assert_eq!(state.selected(), Filter::All);
+        state.update(Message::Collections);
+        assert_eq!(state.selected(), Filter::Collections);
+        assert_eq!(state.collections, true, "page state, because there is no address");
+        // An address that names no type is *All*, so arriving at `/user/x` from the
+        // collections branch lands back on *All* -- and the two fields cannot
+        // disagree, because following the address clears the page state.
+        state.filter(None);
+        assert_eq!(state.selected(), Filter::All);
+        assert_eq!(state.collections, false);
+        state.filter(Some(ProjectType::Modpack));
+        assert_eq!(state.selected(), Filter::Type(ProjectType::Modpack));
+
+        // And the way off the branch, which is a message of its own: `All`'s address
+        // is the one the page is already on, so the shell would not move and the
+        // press has to be applied here.
+        state.update(Message::Collections);
+        assert_eq!(state.selected(), Filter::Collections);
+        state.update(Message::LeaveCollections(None));
+        assert_eq!(state.selected(), Filter::All, "and the reader is not trapped");
+        assert_eq!(state.collections, false);
+        state.update(Message::Collections);
+        state.update(Message::LeaveCollections(Some(ProjectType::Shader)));
+        assert_eq!(state.selected(), Filter::Type(ProjectType::Shader));
+    }
+
+    #[test]
+    fn the_collections_are_drawn_in_the_reference_s_own_order() {
+        // `sortedCollections` is `updated` descending with `created` descending as
+        // the tie-break. The fixture's *Plugin* was changed last (2026) and *Carpet*
+        // before it (2025), which is also the order they arrive in -- so this test
+        // is that the sort is not inverted, and the tie-break is the net crate's.
+        let profile = with_collections();
+        let drawn: Vec<&str> =
+            profile.sorted_collections().iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(drawn, vec!["Plugin", "Carpet"]);
+        assert_eq!(profile.collections[0].project_count(), 1);
+        assert_eq!(profile.collections[1].project_count(), 3);
+    }
+
+    #[test]
+    fn a_collection_card_s_status_line_is_the_reference_s_own_condition() {
+        // `canSeeCollectionStatus` is `isSelf || isStaffViewing`, and both are false
+        // here, so the four labels are parsed off the document and never drawn. The
+        // arm is kept because the condition is the reader's, not the document's, and
+        // each of the four is checked against the reference's own `v-else-if` order.
+        for status in ["listed", "unlisted", "private", "rejected"] {
+            assert!(collection_status(false, status).is_none(), "{status} is not drawn");
+            assert!(collection_status(true, status).is_some(), "{status} when the viewer may");
+        }
+        assert_eq!(
+            collection_status(true, "listed").map(|(_, key)| key.message()),
+            Some("Public")
+        );
+        assert_eq!(
+            collection_status(true, "unlisted").map(|(_, key)| key.message()),
+            Some("Unlisted")
+        );
+        assert_eq!(
+            collection_status(true, "private").map(|(_, key)| key.message()),
+            Some("Private")
+        );
+        assert_eq!(
+            collection_status(true, "rejected").map(|(_, key)| key.message()),
+            Some("Rejected")
+        );
+        // A fifth value prints nothing, which is what four `v-else-if`s do.
+        assert_eq!(collection_status(true, "draft"), None);
+    }
+
+    #[test]
+    fn a_collection_with_no_icon_draws_the_placeholder_and_not_the_first_card_s_picture() {
+        // Every collection the live service was measured on answers `icon_url: null`
+        // -- all four of FlameFire's -- and `Avatar :src="null"` is its placeholder.
+        let profile = with_collections();
+        for collection in &profile.collections {
+            assert!(profile.collection_icon(collection).is_none(), "{}", collection.id);
+        }
+        // A collection that names one is keyed by that URL, the same way a project's
+        // icon is, so two collections never share a picture by position.
+        let mut profile = profile;
+        profile.collections[0].icon_url = "https://cdn.modrinth.com/a.png".to_string();
+        assert!(profile.collection_icon(&profile.collections[0]).is_none(), "nothing fetched");
+    }
+
+    #[test]
+    fn the_collection_grid_counts_its_columns_the_way_auto_fill_does() {
+        // `repeat(auto-fill, minmax(350px, 1fr))` over `gap-3`, at the content
+        // width the reference lays that grid out in.
+        assert_eq!(collection_columns(COLLECTION_CONTENT), 2, "868 fits two tracks of 350");
+        // Three tracks would need 3 x 350 + 2 x 12 = 1074.
+        assert_eq!(collection_columns(1074.0), 3);
+        assert_eq!(collection_columns(1073.0), 2);
+        // And a column too narrow for one still gets one, because a grid with no
+        // columns draws nothing.
+        assert_eq!(collection_columns(0.0), 1);
+        assert_eq!(collection_columns(120.0), 1);
+    }
+
+    #[test]
+    fn the_collections_empty_state_is_only_reachable_from_the_tab_that_wants_it() {
+        // `showCollectionsEmptyState` is `selectedProjectType === 'collection' &&
+        // collections.value.length === 0`. The other way round -- a tab for a list
+        // that is empty -- never happens, because the tab is not on the strip at all
+        // when the list is empty (`layout.vue:765`). So an account with no
+        // collections has no fourth tab to be on, and this branch is only reachable
+        // for a profile whose collections read failed after the tab was drawn.
+        let empty = sample();
+        assert!(!empty.has_collections());
+        assert_eq!(strip_links(&empty), 3, "*All*, *Mods* and *Modpacks*, and nothing else");
+        assert_eq!(State::no_collections_sentence(false), "This user has no collections!");
+        // The reader's-own arm, kept beside it for `empty_sentence`'s reason.
+        assert_eq!(State::no_collections_sentence(true), "You don't have any collections yet.");
+    }
+
+    #[test]
+    fn the_all_tab_says_no_projects_only_when_there_is_no_collection_to_show_instead() {
+        // `showProjectsEmptyState` (`layout.vue:827`) is three terms, and the third
+        // is the one a port drops: `selectedProjectType !== null ||
+        // collections.value.length === 0`. This is the case it exists for.
+        assert!(shows_projects_empty_state(Filter::All, true, 0) == false);
+        assert!(shows_projects_empty_state(Filter::All, false, 0), "no collections: it is shown");
+        assert!(shows_projects_empty_state(Filter::All, false, 1) == false);
+        // A named type is the other way out: with a type selected the address is what
+        // the reader asked for, so an empty list is the answer.
+        assert!(shows_projects_empty_state(Filter::Type(ProjectType::Shader), true, 0));
+        assert!(shows_projects_empty_state(Filter::Type(ProjectType::Shader), false, 0));
+        // And the collections tab is never it: that is `showCollectionsEmptyState`.
+        assert!(!shows_projects_empty_state(Filter::Collections, true, 0));
+        assert!(!shows_projects_empty_state(Filter::Collections, false, 0));
     }
 
     #[test]
