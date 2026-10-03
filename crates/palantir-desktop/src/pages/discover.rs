@@ -1069,6 +1069,27 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     sections.into()
 }
 
+/// The chevron a section header draws, which is one icon in two states.
+///
+/// `Accordion.vue`'s header is a `DropdownIcon` with `:class="{'rotate-180':
+/// isOpen}"`, so the reference draws `dropdown.svg` shut and that same path
+/// turned over open. A rotation is not a thing this port can ask of a glyph: an
+/// icon is a canvas drawing one of the paths in the generated table, and the
+/// table holds the set's own files, which do not include a turned-over copy of
+/// this one. `chevron-up.svg` is the set's own upward chevron and stands in for
+/// it. What that costs, in the reference's own twenty-four-pixel box: turned
+/// over about its centre, `dropdown.svg` runs x 5..19 with its point at y 8,
+/// where `chevron-up.svg` runs x 6..18 with its point at y 9 -- a pixel and a
+/// half of width and one of height, against a chevron that pointed the wrong
+/// way on every open section.
+fn chevron(open: bool) -> Glyph {
+    if open {
+        Glyph::ChevronUp
+    } else {
+        Glyph::Dropdown
+    }
+}
+
 /// Whether the block at `index` of a stack `blocks` long carries the panel's
 /// rule under it.
 ///
@@ -1118,9 +1139,12 @@ fn section<'a>(
         )
         .push(Space::with_width(Length::Fill))
         .push(icon::icon(
-            Glyph::Dropdown,
+            chevron(open),
             SECTION_ICON,
-            theme_gen::ink(theme, INK_DEFAULT),
+            // `ml-auto size-5 transition-transform duration-300 shrink-0
+            // text-contrast`: the header's own ink, not the section's, which is
+            // what the first draft drew.
+            theme_gen::ink(theme, INK_CONTRAST),
         ));
     let mut inner = column![].spacing(4.0).width(Length::Fill);
     if open {
@@ -2925,5 +2949,40 @@ mod tests {
             state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) }),
             None
         );
+    }
+
+    #[test]
+    fn a_section_points_its_chevron_up_only_while_it_is_open() {
+        // `Accordion.vue`'s header carries `:class="{'rotate-180': isOpen}"` on
+        // its `DropdownIcon`, so the shut chevron and the open one are the same
+        // path turned over. A glyph cannot be turned over here, which is what
+        // `chevron` stands in for -- and what would be lost by drawing one
+        // chevron for both states is the reference's own cue for which way the
+        // section opens.
+        assert_eq!(chevron(false), Glyph::Dropdown, "shut, the path as it is in the set");
+        assert_eq!(chevron(true), Glyph::ChevronUp, "open, the set's own upward chevron");
+
+        // The press that turns it over is the section's, and one press is
+        // enough: the state is the sections whose open state the reader has
+        // changed, so a second press is a change back rather than a second
+        // change forward.
+        let mut state = State::new(ProjectType::Mod);
+        state.update(Message::Tags {
+            result: Ok(palantir_net::Tags {
+                categories: vec![palantir_net::CategoryTag {
+                    name: "technology".to_string(),
+                    project_type: "mod".to_string(),
+                    header: "technical".to_string(),
+                }],
+                ..palantir_net::Tags::default()
+            }),
+        });
+        let open = state.is_open("technical", true);
+        assert_eq!(
+            state.update(Message::Section("technical".to_string())),
+            None,
+            "opening a section is not a change to the request"
+        );
+        assert_ne!(state.is_open("technical", true), open, "and the press turned it over");
     }
 }
