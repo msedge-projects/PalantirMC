@@ -373,6 +373,88 @@ fn bar_direction() -> iced::widget::scrollable::Direction {
 /// in another file: see [`pane_gutter`].
 const ICED_BAR: f32 = 10.0;
 
+/// How many of [`ICED_BAR`]'s columns the pane paints in the page's own
+/// background rather than in the reserved gutter's ink.
+///
+/// The strip covers the whole ten, because iced's bar is drawn *over* the
+/// page's content — `iced_widget-0.12.3/src/scrollable.rs:909-918` lays the
+/// content down and `scrollable.rs:960-975` lays the bar on top of it — so the
+/// only way to keep the bar off the page is to paint over it. Its first four
+/// columns (`x=970..973`) are painted in `Ink::Bg`, which is the page's own
+/// background and what the reference measures in them
+/// (`ref/user-ref.png`, `x=964..973 #16181C`), so the page's background runs
+/// unbroken to the gutter; the remaining six are the gutter itself.
+const GUTTER_BAR: f32 = ICED_BAR - GUTTER;
+
+/// The column the reference reserves at the page's right edge, and the ink it
+/// paints there.
+///
+/// `.app-viewport` (`App.vue:2747-2752`) is `overflow: auto` with
+/// `scrollbar-gutter: stable`, so it reserves its scrollbar's width at its right
+/// edge whether or not anything has been scrolled, and nothing is painted in it:
+/// the track is transparent (`global.scss:137-139`) and the thumb paints nothing
+/// (`global.scss:141-146` — `--color-scrollbar` behind a five-pixel transparent
+/// border with `background-clip: content-box`, over a ten-pixel content box).
+///
+/// Every reference capture measures the same six columns, on every route and on a
+/// scrolled page alike (`/tmp/ref/project-scroll.png` has the identical band), and
+/// the band is five columns of one ink with a sixth that is a blend of it and the
+/// page beside it:
+///
+/// ```text
+/// ref, x=964..973         #16181C   (the page's own background, = --surface-1)
+/// ref, x=974              #16181B   (one unit of blue down: the band's own edge)
+/// ref, x=975..979         #15171B   (five columns, flat, the whole rest of the pane)
+/// ref, x=980              the sidebar's own 1px border, --brand-gradient-border
+/// ```
+///
+/// `#15171B` is not a token and is not declared anywhere in the vendored
+/// reference: `variables.scss:233` fixes `--surface-1` at `#16181c` and nothing
+/// darkens it by one unit per channel. It is `--color-bg` under the same
+/// `rgba(0, 0, 0, 0.1)` the pane's own inset shadow is, at the depth that shadow
+/// holds across its middle six pixels — see [`SHADOW_MID`], whose five bands are
+/// the same three values this one is made of. So the band is drawn in the same
+/// ink, and the two measurements stand or fall together.
+const GUTTER: f32 = 6.0;
+
+// ---- The pane's inset shadow --------------------------------------------
+//
+// `.app-contents::before` (`App.vue:2755-2770`) carries
+// `box-shadow: 1px 1px 15px rgba(0, 0, 0, 0.1) inset` beside its one-pixel
+// `--surface-5` rule, and both are painted *over* the page: the pseudo-element is
+// `z-index: 30` and `position: fixed`, and `.app-contents` declares no border of
+// its own, so the rule and the shadow are layers and not layout.
+//
+// The reference measures the shadow as three depths over the pane's own
+// `--surface-1`, and the same three on both of the edges it shows on. Along the
+// left edge (`ref/user-ref.png`, `y=300`) and down the top (`x=300`):
+//
+// ```text
+// x=64 / y=48   #42444A   the rule itself, --surface-5
+// x=65 / y=49   #15171A   SHADOW_HARD   one column, one row
+// x=66..71      #15171B   SHADOW_MID    six columns, six rows
+// x=72 / y=56   #16181B   SHADOW_SOFT   one column, one row
+// x=73 / y=57   #16181C   --surface-1, no shadow left
+// ```
+//
+// Eight pixels on two edges of every page, on every route in every reference
+// capture. The three numbers are not declared in the reference -- `0.1` over
+// `#16181c` is, and which of the three an eight-pixel-wide slice of a fifteen-
+// pixel blur lands on is not -- so they are measured, and they are measured as
+// *depths* rather than as inks because they are the same three the reserved
+// gutter is made of ([`GUTTER`]): `22 * (1 - a)` and the two others land on
+// `(21, 23, 26)`, `(21, 23, 27)` and `(22, 24, 27)` at the three values below,
+// which is what the capture reads.
+
+/// The depth of the reference's inset shadow on its first column and row.
+const SHADOW_HARD: f32 = 0.058;
+/// The depth it holds across the six columns and rows inside that.
+const SHADOW_MID: f32 = 0.038;
+/// The depth of the last one before the shadow is gone.
+const SHADOW_SOFT: f32 = 0.019;
+/// How wide the shadow's own reach is: one hard column, six mid, one soft.
+const SHADOW_REACH: f32 = 8.0;
+
 /// The column a region's bar starts at, counted from the region's own right edge
 /// back into it.
 ///
@@ -5149,8 +5231,8 @@ fn tags(&self) -> iced::Command<Message> {
         // pixel each of them starts on.
         //
         // The pane's reserved scrollbar gutter goes over the page in the same
-        // way, and for the same reason: it is painted over content rather than
-        // beside it. See [`Shell::pane_gutter_at`] and [`pane_gutter`].
+        // way, and for the same reason. See [`Shell::pane_gutter_at`] and
+        // [`pane_gutter`].
         container(
             crate::pages::overlay::Stack::at(Vector::ZERO, page)
                 .over(Vector::ZERO, pane_rule(theme))
@@ -5177,15 +5259,24 @@ fn tags(&self) -> iced::Command<Message> {
     /// about it is ever reported. The pane is the window less the rail and, when
     /// it is up, the panel — the same two constants [`Shell::rail`] and
     /// [`Shell::panel`] are drawn at — so at the reference's own 1280x720 with the
-    /// panel up this is `1280 - 64 - 300 - 10 = 906`, which is window `x=970`, and
-    /// 970 is exactly where iced put the bar it hides.
+    /// panel up this is `1280 - 64 - 300 - 10 = 906`, which is window `x=970`,
+    /// and 970 is exactly where iced put the bar it hides.
+    ///
+    /// Ten and not [`GUTTER`], and the arithmetic says so: the strip starts where
+    /// iced's own bar starts, because the first [`GUTTER_BAR`] columns of it are
+    /// what hide that bar and are painted in the page's own background so the
+    /// reference's page background measures the same on both sides of them. See
+    /// [`pane_gutter`].
     ///
     /// The panel's own case is the other half of the same arithmetic and needs
     /// none of it: a bar inside the panel is drawn by the panel's region, which
     /// knows where the panel ends.
     fn pane_gutter_at(&self) -> Vector {
         let panel = if self.panel_shown() { PANEL } else { 0.0 };
-        Vector::new(self.viewport.width - RAIL - panel - ICED_BAR, 0.0)
+        Vector::new(
+            self.viewport.width - RAIL - panel - GUTTER - GUTTER_BAR,
+            0.0,
+        )
     }
 
     /// The right panel: the reference's own column, with its sections in it.
@@ -8041,39 +8132,91 @@ fn pane_rule(theme: Gen) -> Element<'static, Message> {
 /// The reference's `scrollbar-gutter: stable`, drawn as the pane draws its rule.
 ///
 /// `.app-viewport` (`App.vue:2747-2752`) is `overflow: auto` with
-/// `scrollbar-gutter: stable`, so it reserves six pixels at its right edge
-/// whether or not anything has been scrolled. Nothing is painted in them — the
-/// track is transparent (`global.scss:137-139`) and the thumb paints nothing
+/// `scrollbar-gutter: stable`, so it reserves its scrollbar's width at its right
+/// edge whether or not anything has been scrolled. Nothing is painted in them --
+/// the track is transparent (`global.scss:137-139`) and the thumb paints nothing
 /// (`global.scss:141-146`: `--color-scrollbar` behind a five-pixel transparent
-/// border with `background-clip: content-box`) — so the column reads as the
-/// viewport's own background, which is `--color-bg` = `--surface-1`. Every
-/// reference capture measures the same thing, on every route and on a scrolled
-/// page alike: six flat columns at `x=975..979`, `#15171B` against a `#16181C`
-/// viewport.
+/// border with `background-clip: content-box`, over a ten-pixel content box) --
+/// so what the column reads as is the page's own background under the pane's
+/// shadow, which is what [`GUTTER`] measures.
 ///
-/// **Ten pixels and not six**, and not `--color-scrollbar`, for two reasons that
-/// are both about what is being hidden rather than about the reference:
+/// The strip is [`ICED_BAR`] wide and not [`GUTTER`] because of where it starts,
+/// not of how wide it is. What it hides is *iced's* bar: the page's region is
+/// built in [`crate::page`], which never calls `.style(..)`, so the bar is
+/// `Scrollable::Default` and is drawn at `bounds.right - 10`, ten pixels of
+/// `palette.background.strong` (`iced_style-0.12.1/src/theme.rs:1196-1205`),
+/// which is `#757C84` under this shell's palette. iced draws it *after* the
+/// content (`scrollable.rs:909-918` lays the content down, `scrollable.rs:960-975`
+/// the bar on top), so a bar that reached the page would sit over the page's own
+/// right-hand pixels rather than beside them, and painting over it is the only
+/// thing this file can do about that.
 ///
-/// * What is being hidden is *iced's* bar, and iced's bar is ten pixels wide
-///   ([`ICED_BAR`]). Six would leave four of it showing, which is worse than the
-///   band it replaces.
-/// * The colour is the pane's own. The reference's reserved column is one unit per
-///   channel darker than `--surface-1` and that value is not declared anywhere in
-///   the vendored reference — it is the engine's own compositing of the gutter —
-///   so there is no token to reproduce it with, and inventing one would be a
-///   colour no capture could confirm.
+/// So the ten columns are split where the reference splits them, and the four
+/// that are not the gutter paint nothing at all:
 ///
-/// A page's content cannot reach this strip, which is what makes covering a
-/// layout rather than a patch: every page goes through [`crate::page::body`], and
-/// its inset (`p-6`, sixteen on Skins) keeps content at least sixteen pixels
-/// clear of the pane's edge. The strip is painted in the same colour as the
-/// padding beside it, so the only pixel it changes is the bar's.
+/// ```text
+/// x=970..973   transparent -- the page's own `--surface-1` shows through
+/// x=974        SHADOW_SOFT over that page background   = #16181B
+/// x=975..979   SHADOW_MID  over that page background   = #15171B
+/// ```
+///
+/// which is the reference's band to the byte on every route measured, and which
+/// is also why the strip can be this narrow: [`GUTTER_BAR`] columns of it are the page's
+/// own ink and change nothing.
+///
+/// What the strip cannot do is give back the ten pixels it covers. On
+/// `/hosting/manage/` the reference's invite toast runs out to `x=979` -- the
+/// page's content box ends at 974 and the toast overflows it, clipped by the
+/// viewport's own padding box at 980 -- and this still stops at `x=969`, because
+/// the bar is painted over the toast and only `page.rs` can stop it being drawn.
+/// The pixels either side of that are now the reference's.
 fn pane_gutter(theme: Gen) -> Element<'static, Message> {
+    row![
+        // The four columns where the reference measures the page's own
+        // `--surface-1`, and which are here only to put an opaque page background
+        // under iced's bar.
+        shadow_band(theme, 0.0, GUTTER_BAR),
+        shadow_band(theme, SHADOW_SOFT, 1.0),
+        shadow_band(theme, SHADOW_MID, GUTTER - 1.0),
+    ]
+    .width(Length::Fixed(ICED_BAR))
+    .height(Length::Fill)
+    .into()
+}
+
+/// One band of the reference's `rgba(0, 0, 0, 0.1) inset`, at a measured depth,
+/// `width` of the pane's own `--surface-1` under it.
+///
+/// The depth is the number and not an ink, so the two measurements that share
+/// these three values -- the pane's edge ramp and this reserved column -- cannot
+/// come apart, and so that both themes get their own composite rather than a
+/// colour typed in for the dark one.
+///
+/// Opaque rather than translucent, and the reason is the strip's first job: what
+/// it covers is *iced's* bar, so a translucent band would be a band over the bar
+/// rather than over the page. Nothing is lost by it, because the reference's own
+/// page inset is 24 (`p-6`, sixteen on Skins) and the shadow's reach is eight, so
+/// there is never page ink under a band for a translucent fill to darken.
+///
+/// Not a `Shadow` on a `container`, and deliberately: iced 0.12.3 composites a
+/// `container`'s `Shadow` inside its own rounded-box coverage in one quad
+/// (`solid.wgsl`'s
+/// `mix(base_color, shadow_color, (1.0 - radius_alpha) * shadow_alpha)`), which
+/// bands the fill and made the tab strip unreadable in `7a29753`. A plain
+/// background is one quad with no radius and no shadow in it.
+fn shadow_band(theme: Gen, depth: f32, width: f32) -> Element<'static, Message> {
+    let base = theme_gen::ink(theme, Ink::Bg);
+    let ink = Color {
+        r: base.r * (1.0 - depth),
+        g: base.g * (1.0 - depth),
+        b: base.b * (1.0 - depth),
+        a: base.a,
+    };
     container(Space::with_height(Length::Fill))
-        .width(Length::Fixed(ICED_BAR))
+        .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::Bg))),
+            background: Some(Background::Color(ink)),
             ..container::Appearance::default()
         })
         .into()
@@ -12253,9 +12396,46 @@ mod tests {
         // rather than as a literal so that moving either half fails here.
         assert_eq!(SCROLLBAR + 2.0 * SCROLLBAR_PAD, DIALOG_SCROLLBAR);
         // And ten is iced's own bar, which is what the page column's gutter has
-        // to cover rather than the six the reference reserves.
+        // to cover rather than the six the reference reserves, so the strip is
+        // ten wide with the reference's six at its right-hand end.
         assert_eq!(ICED_BAR, 10.0);
         assert!(ICED_BAR > SCROLLBAR, "a gutter narrower than the bar would show part of it");
+        assert_eq!(GUTTER_BAR + GUTTER, ICED_BAR, "four of the page's own ink, then the gutter");
+        assert_eq!(GUTTER, 6.0, "x=974..979, six columns of the reserved band");
+    }
+
+    /// `--surface-1` under one of the shadow's depths, as the bytes a capture
+    /// reads. The rounding is to nearest, which is what a compositor does to a
+    /// premultiplied quad and what the reference's own engine did.
+    #[cfg(test)]
+    fn under(depth: f32) -> (u8, u8, u8) {
+        let bg = theme_gen::ink(Gen::Dark, Ink::Bg);
+        (
+            (bg.r * (1.0 - depth) * 255.0).round() as u8,
+            (bg.g * (1.0 - depth) * 255.0).round() as u8,
+            (bg.b * (1.0 - depth) * 255.0).round() as u8,
+        )
+    }
+
+    #[test]
+    fn the_reserved_gutter_and_the_panes_edge_are_the_same_three_depths() {
+        // `#15171B` is not a token: nothing in the vendored reference declares
+        // it, and `variables.scss:233` fixes `--surface-1` at `#16181c`. What the
+        // capture says it is, is `--surface-1` under the depth the pane's own
+        // inset shadow holds across its middle six pixels -- which is why the
+        // gutter is painted as a depth and not as an ink, and why the two
+        // measurements have to agree on the three numbers.
+        //
+        // The pairs are the capture's, to the byte: the ramp's own three columns
+        // on the pane's left edge (`ref/user-ref.png`, `y=300`) and the reserved
+        // band's two on the pane's right edge (`x=974`, `x=975`).
+        assert_eq!(under(SHADOW_HARD), (0x15, 0x17, 0x1A), "x=65, y=49");
+        assert_eq!(under(SHADOW_MID), (0x15, 0x17, 0x1B), "x=66..71, y=50..55, x=975..979");
+        assert_eq!(under(SHADOW_SOFT), (0x16, 0x18, 0x1B), "x=72, y=56, x=974");
+        // And under nothing, the page's own `--surface-1`, which is what the
+        // reference measures at x=964..973 and at x=73 / y=57.
+        assert_eq!(under(0.0), (0x16, 0x18, 0x1C));
+        assert_eq!(SHADOW_REACH, 1.0 + GUTTER + 1.0, "one, six, one: eight pixels");
     }
 
     #[test]
