@@ -621,6 +621,19 @@ const FRIEND_PAD: f32 = 16.0;
 const FRIEND_AVATAR_GAP: f32 = 8.0;
 /// `opacity-40` on the rows the reference dims.
 const FRIEND_DIM: f32 = 0.40;
+/// `text-base`'s own line height, which a friend row's name is drawn on.
+///
+/// `ServerListEmptyPreview.vue:54` gives the name `truncate text-base
+/// font-medium text-primary` and nothing else, so the 24 is Tailwind's
+/// `1.5rem` and not a number this page chose. It is a named constant because
+/// iced's own default for the same face is `LineHeight::Relative(1.3)` -- 20.8 --
+/// and the two do not draw the name in the same place: iced puts the baseline
+/// `line_height - descent` below the top of the line box, so a taller box in the
+/// same centred space lands half the difference lower. Over a `size-1.5rem`
+/// avatar that is the one pixel the reference's names sit below ours, and
+/// measured on `Josh` -- ink centroid y=265.467 in `/tmp/ref/hosting-clean3.png`,
+/// y=264.458 at 20.8 and y=265.456 at 24 -- 24 is the one that matches.
+const FRIEND_NAME_LINE: f32 = 24.0;
 
 /// The eight photographs, byte for byte from
 /// `vendor/modrinth-app/ui/src/assets/servers/server-list-empty/`.
@@ -898,7 +911,34 @@ fn frame_button<'a, Message: 'a>(
 const TOAST_LEFT: f32 = 0.32 * PREVIEW;
 /// `top-[23rem]`.
 const TOAST_TOP: f32 = 23.0 * 16.0;
-/// `w-[21rem]`.
+/// `w-[21rem]`, which is also as wide as this toast is ever drawn.
+///
+/// # What actually bounds the toast's width
+///
+/// Not this number, and not `max-w-[calc(100%-1rem)]` either. The reference draws
+/// the toast as a *sibling* of the `overflow-hidden` panel, inside
+/// `ServerListEmptyPreview`'s own `relative mx-auto h-[38rem] w-full max-w-[25rem]`
+/// root, so the panel does not clip it and the 32% and the 336 are measured against
+/// that 400-wide root rather than against anything inside the panel.
+///
+/// What is left bounding it is `.app-viewport` (`App.vue:2747-2752`), which is
+/// `overflow: auto` with `scrollbar-gutter: stable`. The gutter is carved out of
+/// the *content* box, so the content is laid out 10 pixels narrower than the pane
+/// and a child that overflows it still paints into the gutter -- an `overflow`
+/// clip is at the padding box, which is the pane's full width. So on the
+/// reference's own capture the toast's box runs x=649..985 and its fill is visible
+/// to x=979, where the pane ends at 980.
+///
+/// Here the box is the same x=649..985 and it is clipped at the same 980, and then
+/// the last ten of those columns are painted over: `Shell::pane_gutter` lays a ten-
+/// pixel strip at x=970..979 over the page to hide iced's own scrollbar, which is
+/// what `shell.rs:5284-5296` says it is for. That is why the fill measures
+/// x=649..969 and not x=649..979, and it is why `page.rs::no_bar()` was the wrong
+/// place to look: the scrollable never reserved the gutter in the first place --
+/// the page column measures 868 wide on both sides, which is `916 - 2 * 24` with
+/// nothing taken off it, and 868 is what puts the four auto margins at 35 and the
+/// button's own left edge on x=123.0 in both. `shell.rs` is reserved, so the ten
+/// columns stay.
 const TOAST_WIDTH: f32 = 21.0 * 16.0;
 /// `px-4 py-3`.
 const TOAST_PAD_X: f32 = 16.0;
@@ -1117,6 +1157,47 @@ fn column_text<'a>(theme: Gen) -> Element<'a, Message> {
         features = features.push(feature(theme, glyph, title, description));
     }
     column = column.push(features);
+    // Every `lg` number this row hands `ui::button_with_icon_sized` is the
+    // reference's own (`ButtonFrame.vue`'s `lg` row: `h-10 gap-2 rounded-[14px]
+    // px-4 text-base font-semibold leading-5 [&>svg]:size-5`), and four of them
+    // are confirmed against the capture: the fill measures y=537..576, the corner
+    // is 14, and the `+` icon's ink centroid is x=148.496 here and x=148.496 in
+    // `/tmp/ref/hosting-clean3.png` -- a hundredth of a pixel over the whole glyph,
+    // so the padding, the gap and the icon are exact and none of this is a size, a
+    // weight or a radius.
+    //
+    // # The label's advance is 1.75 pixels short, and it is not this file's
+    //
+    // The reference's button is 150.0 wide and this one is 148.25: its fill runs
+    // x=123.0..273.0 there and x=123.0..271.25 here, read off the two things the
+    // reference paints on the button's own edge -- `ButtonFrame.vue`'s
+    // `button-frame--colored::before`, a one-pixel white gradient ring just inside
+    // the box, which is the column at x=123 and at x=272, and the frame's
+    // `box-shadow: 0 0 0 1px color-mix(in srgb, var(--button-color) 30%, transparent)`,
+    // which is the column at x=122 and x=273 and reads `(23,83,52)` there against
+    // the `0.3 * (27,217,106) + 0.7 * (22,24,28)` = `(23,82,51)` it must be. Both
+    // edges land on whole pixels, so 150.0 is the box and not a reading of it.
+    //
+    // `150 - (px-4 + size-5 + gap-2 + px-4)` is 90.0 for the label's advance, and
+    // Inter-600 at 16 pixels measures "New server" at 88.3636. It is not the face.
+    // The label's ink mass over y=551..562, x=160..260 is 376.29 here and 376.93
+    // in the reference -- the same outlines at the same weight and size to a fifth
+    // of a percent, where Inter-700 would be about eleven percent heavier. Fitting
+    // the whole weight table to the reference's column profile (a FreeType model,
+    // sub-pixel pen) scores 0.39/0.33/0.25/0.21/0.22 for 400/500/600/700/800 --
+    // no weight is a clean fit, which is what a spacing difference and not a
+    // weight difference looks like -- against this page's own 0.25/0.15/0.03 at
+    // 400/500/600, where 600 is exact at pen 167.00. Nor is it letter-spacing: a
+    // uniform extra advance fits the reference's glyphs at +0.16 a character here
+    // and at -0.05 on this page's 30-pixel heading, and one letter-spacing cannot
+    // be both. Fitting the reference's glyphs one at a time puts the error on
+    // `r` -> `v` (+1.0) and spreads +/-0.3 over the rest, which is not a constant
+    // either.
+    //
+    // So the difference is in the advance our own text stack reports rather than in
+    // anything this file can state, and `ui.rs` -- which owns `advance` and the
+    // builder -- is reserved. What is here is correct as written; the 1.75 pixels
+    // are a note, not a defect to be papered over with a width.
     column.push(
         row![]
             .spacing(ACTION_GAP)
@@ -1184,6 +1265,21 @@ fn feature<'a>(theme: Gen, glyph: Glyph, title: Key, description: Key) -> Elemen
 /// order is drawn here. Measured against the reference the label and the arrow
 /// together are 110 wide and the label's own ink starts on the first of them,
 /// which is what the reference's own order gives and the other does not.
+///
+/// # The arrow is `size-5` on both sides, and its ink measures the same
+///
+/// `right-arrow.svg` is two stroked paths in a 24-box with a 2-unit stroke, so at
+/// [`GLYPH`] the ink runs from viewBox `x=4` to `x=20` -- `16 / 24 * 20` = 13.33
+/// pixels of it, and a 20-pixel box either way. That is what the reference's own
+/// capture has: the arrow's columns are `387..400` there and `382..395` here, and
+/// their ink masses are 45.15 and 45.06 -- the same picture, 5.33 pixels further
+/// right, which is exactly how much wider the reference's *label* advance is --
+/// see the note on the *New server* button below. A 23-pixel arrow would need an
+/// ink box of 27.6 of the viewBox's 24, so the number cannot be this icon at any
+/// size.
+///
+/// This is the only `Glyph::RightArrow` on the page, so there is no second call
+/// site to check the same measurement against.
 fn link_button<'a, Message: Clone + crate::ui::Hovered + 'a>(
     theme: Gen,
     key: &'static str,
@@ -1658,6 +1754,12 @@ fn friend_row<'a, Message: 'a>(
                 .push(
                     text(friend.name.to_string())
                         .size(16.0)
+                        // `truncate text-base font-medium text-primary` on the name
+                        // (`ServerListEmptyPreview.vue:54`), so 16 on Tailwind's
+                        // 24-pixel line rather than iced's own `Relative(1.3)` --
+                        // see [`FRIEND_NAME_LINE`] for what that one pixel is
+                        // worth.
+                        .line_height(iced::Pixels(FRIEND_NAME_LINE))
                         .font(medium())
                         .style(iced::theme::Text::Color(dim(theme_gen::ink(
                             theme,
@@ -1751,6 +1853,17 @@ fn preview_invite_link<'a>(theme: Gen) -> Element<'a, Message> {
                         .push(
                             text("https://modrinth.com/server/abc123")
                                 .size(14.0)
+                                // Left on iced's own `Relative(1.3)` -- 18.2 --
+                                // rather than on `text-sm`'s 20 (`ServerListEmpty
+                                // Preview.vue:82`), because with the 20 this row's
+                                // own `h-8` centres half a pixel lower and the
+                                // reference's URL sits half a pixel *higher* than
+                                // that: the URL's ink centroid is y=646.10 in the
+                                // reference and y=646.13 here as written, and
+                                // y=647.05 with the line height stated. The friend
+                                // name above the same rule is the other way round,
+                                // which is why one of the two carries a line height
+                                // and the other does not.
                                 .font(medium())
                                 .style(iced::theme::Text::Color(theme_gen::ink(
                                     theme,
@@ -1921,6 +2034,38 @@ mod tests {
         // pixels down a 608 box.
         assert_eq!(PREVIEW_FADE, 28.0 * 16.0);
         assert_eq!(PREVIEW_HEIGHT - PREVIEW_FADE, 160.0);
+    }
+
+    #[test]
+    fn a_friend_name_is_drawn_on_the_line_the_reference_gives_it() {
+        // The one omission on this page that a capture can settle, and the
+        // direction is worth stating because it is not the direction the class
+        // suggests: `text-base` is 16 on 24, iced's default for the same face is
+        // `Relative(1.3)` = 20.8, and 24 is *lower* on the screen -- the name sat a
+        // pixel high against the reference until this said so. `Josh`'s ink
+        // centroid is y=265.467 in `/tmp/ref/hosting-clean3.png`, 264.458 at 20.8
+        // and 265.456 at this.
+        //
+        // The assertion is the arithmetic rather than the pixel: a gate that
+        // re-measured a capture would need the reference running, and the number
+        // it is here to keep is the one a reader would otherwise round back to
+        // iced's default.
+        assert_eq!(FRIEND_NAME_LINE, 24.0);
+        // The row that carries it: `h-11` with a `size-1.5rem` avatar and
+        // `items-center`, which is what turns the two line heights into a pixel
+        // instead of a rounding.
+        assert_eq!(FRIEND_ROW, 2.75 * 16.0);
+        assert_eq!(FRIEND_AVATAR, 1.5 * 16.0);
+        // The 14-pixel URL under the same rule is left on iced's default on
+        // purpose, and this is why the two rows do not agree: its row is `h-8`
+        // with nothing taller in it, so the two line heights do *not* cancel, and
+        // the default is the one the reference's URL is measured against (ink
+        // centroid y=646.10 there, 646.13 here, 647.05 with `text-sm`'s own 20).
+        assert!(
+            (20.0f32 - 1.3 * 14.0).abs() < 2.0,
+            "the two heights the URL could be drawn on are 18.2 and 20, and the \\
+             capture picks the first"
+        );
     }
 
     #[test]
