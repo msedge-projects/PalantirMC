@@ -5324,11 +5324,33 @@ fn tags(&self) -> iced::Command<Message> {
     /// width and cannot be a constant. The knowledge stays on the page side --
     /// `servers::page_overlay` is what turns the width into an offset, out of the
     /// same `MARGIN_SHARE` ratio the row itself is laid out by.
+    ///
+    /// **And the offset is taken back up by however far the page is scrolled**,
+    /// which is the one thing that has to be undone when a layer leaves the page
+    /// it was measured in. In the reference the toast is inside the content
+    /// `.app-viewport` scrolls (`overflow: auto` at `App.vue:2747-2752`), so it
+    /// rides up with the preview panel it is drawn against; here it is a layer of
+    /// the *pane's* stack, which the scroll does not touch, so without this it
+    /// would stay at `y=440` while everything around it moved and would end up 48
+    /// pixels out of place at the bottom of this page's scroll -- `672 + 48 - 720`
+    /// of it, the whole of what `ServerListEmpty`'s `-mb-10` row leaves to scroll.
+    /// Subtracting is the direction that matters: the content moves *up* by the
+    /// offset, and the toast is measured down from the pane's own top-left corner,
+    /// so up is negative. The clip box the caller states is derived from the
+    /// offset it is given (`Clipped`'s box is stated from where the element laid
+    /// itself out), which is why the scroll has to be applied here rather than
+    /// after it.
+    ///
+    /// The offset itself is [`crate::scroll::Glides::offset`] and what it is is
+    /// written down there: the offset this shell last commanded the page's region
+    /// to, which is where the region is to within the frame a command takes to
+    /// land.
     fn page_overlay(&self, theme: Gen, page: f32) -> Option<(Vector, Element<'_, Message>)> {
         match &self.screen {
             pages::Screen::Servers(_) => {
                 let (at, overlay) = servers::page_overlay(theme, page)?;
-                Some((at, overlay.map(pages::Message::Servers).map(Message::Screen)))
+                let scrolled = at - Vector::new(0.0, self.glides.offset(crate::scroll::PAGE));
+                Some((scrolled, overlay.map(pages::Message::Servers).map(Message::Screen)))
             }
             _ => None,
         }
@@ -5490,7 +5512,14 @@ fn tags(&self) -> iced::Command<Message> {
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
-            .over(
+            // `over_control` and not `over`, because this block is the reference's
+            // `z-10` link and not a picture of one: the link is `App.vue:2554`'s
+            // own `<a>`, it sits over the scroll region, and a click on its words
+            // is the link's. The two blank spacers around it answer nothing, so
+            // naming the whole block a control costs one rectangle test per
+            // pointer event and nothing else. The fade inside it stays a picture
+            // -- see [`Self::promo_overlay`].
+            .over_control(
                 Vector::ZERO,
                 // The overlay block is [`PROMO_PLATE`] tall itself, so the
                 // plate's own height is reserved *under* it: the block then ends
@@ -5635,7 +5664,12 @@ fn tags(&self) -> iced::Command<Message> {
                 .height(Length::Fixed(PROMO_PLATE)),
         )
         .over(Vector::new(0.0, PROMO_PLATE - PROMO_FADE), fade)
-        .over(Vector::new(0.0, PROMO_PLATE - PROMO_LINK_H), upgrade)
+        // The link is a control over a picture, so it is the one layer here that
+        // takes the pointer -- and it takes it before the block below it, which
+        // is the reference's `z-10` against an unnumbered `::after`. The fade
+        // above it is a pseudo-element painted over a gradient and answers
+        // nothing, so it stays a picture.
+        .over_control(Vector::new(0.0, PROMO_PLATE - PROMO_LINK_H), upgrade)
         .into()
     }
 
@@ -9394,7 +9428,9 @@ impl iced::Application for Shell {
         // arrived ([`REPAINT_KICKS`]). Each says `none` when it is not needed,
         // which is what keeps an idle window -- and a launcher with nothing running
         // -- from waking anything up.
-        let frames = if self.animating() { self.frames() } else { Subscription::none() };
+        let moving = self.animating();
+        let frames = if moving { self.frames() } else { Subscription::none() };
+
         Subscription::batch([
             frames,
             self.launching(),

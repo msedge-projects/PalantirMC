@@ -425,6 +425,28 @@ impl Glides {
     pub fn anim(&self, name: &'static str) -> ScrollAnim {
         self.regions.get(name).map(|region| region.anim).unwrap_or_default()
     }
+
+    /// The offset this policy last put `name` at, or zero for a name nothing has
+    /// moved.
+    ///
+    /// **The offset that was commanded, not a measurement of the widget**, and
+    /// that is the honest reading: iced publishes no scrollable's position to the
+    /// application except through the wheel report this policy already takes
+    /// ([`Wheel::offset`], which is measured from the region's own layout), and a
+    /// position that only arrived with a wheel would be a frame behind every
+    /// gesture after the first. What this answers is the number the last
+    /// [`scroll_to`] carried, so it is where the region is to within the frame a
+    /// command takes to land -- and a region nobody has moved is at the top,
+    /// which is the resting state the tests read through `anim` as well.
+    ///
+    /// It exists for one caller: the hosting page's invite toast, which is a
+    /// layer of the pane's own [`crate::pages::overlay::Stack`] rather than a
+    /// child of the page it is drawn against, and so has to be told how far the
+    /// page has been scrolled or it stays where it was while everything around it
+    /// moves. See [`crate::shell::Shell::page_overlay`].
+    pub(crate) fn offset(&self, name: &'static str) -> f32 {
+        self.regions.get(name).map_or(0.0, |region| region.anim.offset)
+    }
 }
 
 // ---- How many rows a frame draws -----------------------------------------
@@ -1328,5 +1350,31 @@ mod tests {
         let mut glides = Glides::default();
         let _ = glides.wheel::<()>(PAGE, wheel_at(-1.0, 400.0, 600.0, 0.0), Instant::now());
         assert!(!glides.animating());
+    }
+
+    #[test]
+    fn an_overlay_can_ask_where_the_page_under_it_is() {
+        // The hosting page's toast is a layer of the *pane's* stack, so the one
+        // number it cannot see for itself is how far the page has been scrolled.
+        // What it must read is the offset the policy is at, frame by frame -- a
+        // toast that read the wheel's own report instead would sit still through
+        // the glide and then jump.
+        let began = Instant::now();
+        let mut glides = Glides::default();
+        assert_eq!(glides.offset(PAGE), 0.0, "a region nobody has moved is at the top");
+        glide(&mut glides, PAGE, 0.0, began);
+        assert_eq!(glides.offset(PAGE), 0.0, "and the frame the wheel lands in has not moved it");
+        let mut seen = Vec::new();
+        let mut now = began;
+        while glides.animating() {
+            let _ = glides.tick::<()>(now);
+            now += FRAME;
+            seen.push(glides.offset(PAGE));
+        }
+        assert!(
+            seen.windows(2).all(|pair| pair[1] > pair[0]),
+            "every frame of a glide moves the overlay with it: {seen:?}"
+        );
+        assert_eq!(glides.offset(PAGE), WHEEL_PIXELS_PER_NOTCH, "and it lands on the target");
     }
 }
