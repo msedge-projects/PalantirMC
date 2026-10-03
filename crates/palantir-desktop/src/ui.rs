@@ -48,7 +48,7 @@ use crate::avatar;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::ROW_GAP;
-use crate::style::{heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 
@@ -317,17 +317,45 @@ pub const CONTROL: f32 = 40.0;
 pub const CONTROL_RADIUS: f32 = 12.0;
 /// `size-5` on the icons inside a control.
 pub const CONTROL_ICON: f32 = 20.0;
-/// A tag's height: `border-[1px] border-solid` and `py-1` around a `text-sm`
-/// label on `leading-none`, which is 1 + 4 + 14 + 4 + 1.
-///
-/// It is 26 rather than 24 for a tag that carries an icon, and that is not a
-/// second height this port chooses between: `[&>svg]:shrink-0 [&>svg]:h-4
-/// [&>svg]:w-4` on the same `baseClass` puts a sixteen-pixel icon in front of a
-/// fourteen-pixel line, and the taller of the two is what the pill is. Measured
-/// on the reference's own /user/FlameFire capture: *Client and server*, *Forge*,
-/// *Server*, *Fabric*, *Modpack* and *Data Pack* are 26 rows, and *Challenging*,
-/// *Combat*, *Minigame*, *World Generation*, *Mods* and *+1* are 24.
+/// A tag's label size, which is `TagItem.vue`'s `text-sm` at the reference's
+/// sixteen-pixel root.
+pub const TAG_LABEL_SIZE: f32 = 14.0;
+/// `TagItem.vue`'s `px-2`, a tag's padding either side of its content.
+pub const TAG_PAD: f32 = 8.0;
+/// `TagItem.vue`'s `gap-1`, between a tag's icon and its label.
+pub const TAG_GAP: f32 = 4.0;
+/// The size of the glyph `TagItem.vue`'s `baseClass` sizes: `[&>svg]:shrink-0
+/// [&>svg]:h-4 [&>svg]:w-4`, which is sixteen pixels.
+pub const TAG_ICON: f32 = 16.0;
+/// A tag with no icon in it: `border-[1px] border-solid` and `py-1` around a
+/// `text-sm` label on `leading-none`, which is 1 + 4 + 14 + 4 + 1.
 pub const TAG_HEIGHT: f32 = 24.0;
+/// The same pill with the `h-4` glyph in front of the label, which is the taller
+/// of the two children and so the height: 1 + 4 + 16 + 4 + 1.
+///
+/// This is not a second height this port chooses between. The sixteen-pixel icon
+/// and the fourteen-pixel line sit side by side in one `inline-flex` box with
+/// `items-center`, so the pill is as tall as the taller of them. Measured on the
+/// reference's own /user/FlameFire capture at 1280x720, over the eighteen pills of
+/// the three cards on it: *Client and server*, *Forge*, *Modpack*, *Server*,
+/// *Fabric*, *Forge* and *Data Pack* are 26 rows, and *Challenging*, *Combat*,
+/// *Minigame*, *World Generation*, *Mobs*, *+1* and *+3* are 24. Every one of the
+/// 26 is a tag that draws an icon and every one of the 24 is a tag that does not.
+pub const TAG_HEIGHT_ICON: f32 = 26.0;
+/// The pill's height for a tag that does or does not carry an icon, which is the
+/// one number a caller laying out a row of tags needs.
+///
+/// A caller that has already decided whether its tag draws a glyph asks here
+/// rather than picking a constant, because the two heights are the two children of
+/// the same flex line and a row built from one and not the other is a row with a
+/// one-pixel jog in it.
+pub const fn tag_height(icon: bool) -> f32 {
+    if icon {
+        TAG_HEIGHT_ICON
+    } else {
+        TAG_HEIGHT
+    }
+}
 /// The size a button's label is set at, which is `Button.vue`'s `text-sm`.
 ///
 /// A constant rather than a literal at the builders below because [`button_width`]
@@ -606,7 +634,7 @@ pub fn framed<'a, Message: 'a>(
         .into()
 }
 
-/// A tag: a small pill in the raised surface.
+/// A tag: a small pill in the raised surface, with no icon in it.
 ///
 /// `TagItem.vue`'s own `baseClass`, which is one string every tag in the
 /// reference is built from -- the project card's `TagTagItem`, the project
@@ -618,33 +646,62 @@ pub fn framed<'a, Message: 'a>(
 /// text-sm inline-flex items-center gap-1 text-[--_color,var(--color-secondary)]
 /// ```
 ///
-/// The label's ink is the one number in it that was wrong here: the port drew it
-/// in `--color-text-default` (`#B0BAC5`) and the class says `--color-secondary`,
-/// which the reference's own table resolves to `--color-text-tertiary`
-/// (`variables.scss:337`, `:321`) and measures as `#96A2B0` on every tag pill in
-/// the /user/FlameFire capture. Every caller of this function is a place the
-/// reference draws a plain `TagItem`, and no caller anywhere in the reference
-/// overrides `--_color` except `TagTagItem`, which sets it to the platform's own
-/// colour for a loader -- a token this kit's table does not carry, and recorded
-/// as the residual it is rather than guessed at here.
+/// The label is `text-sm font-normal` -- fourteen pixels at weight 400 -- and was
+/// drawn here at twelve and semibold, which is the pair the pixel audit measured
+/// on the reference's own pills: *Combat* is eleven ink rows there and nine of
+/// ours, and our *Challenging* came out ten pixels narrower than the reference's.
 ///
-/// What is not drawn is the icon: `TagTagItem`'s `h-4` glyph, which is what
-/// makes the pill 26 rows instead of 24 ([`TAG_HEIGHT`]). Drawing it needs a
-/// per-tag icon mapping this file has no source for, and a caller passing the
-/// wrong one would put a 26-row pill where the reference has a 24-row one.
+/// The ring was missing outright. `border-[--_bg-color,var(--surface-5)]` with
+/// `border-[1px] border-solid` is a one-pixel `--surface-5` stroke, which the
+/// reference's own table gives as `#42444a` for the dark look
+/// (`variables.scss:239`, `:7` for the light one), and the capture reads `#42444A`
+/// on the top and bottom edge of every pill on the page. The fill beside it is
+/// `--color-button-bg` (`variables.scss:329`), which resolves to `--surface-4`
+/// (`variables.scss:238`) and is the `#34363C` that was already right.
+///
+/// `rounded-full` is not a radius but a radius *rule*: CSS resolves it against the
+/// border box, so it is half the height -- twelve here, and thirteen on the
+/// twenty-six-row pill [`TAG_HEIGHT_ICON`] describes. Measured on the reference's
+/// own pills, the straight run of the top edge is inset by twelve on the
+/// twenty-four-row ones and thirteen on the twenty-six-row ones.
+///
+/// The label's ink is the one number in it that was wrong before this one:
+/// `text-[--_color,var(--color-secondary)]`, which the reference's own table
+/// resolves to `--color-text-tertiary` (`variables.scss:337`, `:321`) and measures
+/// as `#96A2B0`. Every caller of this function is a place the reference draws a
+/// plain `TagItem`, and no caller anywhere in the reference overrides `--_color`
+/// except `TagTagItem`, which sets it to the platform's own colour for a loader --
+/// a token this kit's table does not carry, and recorded as the residual it is
+/// rather than guessed at here.
+///
+/// What is still not drawn is the icon, because this function is not asked for
+/// one: a tag only becomes twenty-six rows when it carries the `h-4` glyph, and
+/// which tags carry it is the caller's answer, not this file's. The heights are
+/// both named -- [`TAG_HEIGHT`] and [`TAG_HEIGHT_ICON`], with [`tag_height`] to
+/// ask -- and every caller that wants the icon needs one more argument at the call
+/// site than it has today.
 pub fn tag<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
     container(
         text(label.to_string())
-            .size(12.0)
-            .font(semibold())
+            .size(TAG_LABEL_SIZE)
+            .font(regular())
             .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
     )
     .height(Length::Fixed(TAG_HEIGHT))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: TAG_PAD,
+        right: TAG_PAD,
+    })
     .center_y()
     .style(move |_theme: &Theme| container::Appearance {
         background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
-        border: Border { radius: 12.0.into(), ..Border::default() },
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: (TAG_HEIGHT / 2.0).into(),
+        },
         ..container::Appearance::default()
     })
     .into()
@@ -2890,6 +2947,69 @@ mod tests {
         // And the height is the no-icon one, because no caller draws the `h-4`
         // glyph that would make it 26.
         assert_eq!(TAG_HEIGHT, 24.0);
+    }
+
+    #[test]
+    fn a_tags_label_is_text_sm_at_weight_normal() {
+        // `TagItem.vue:19` ends in `... rounded-full font-normal text-sm ...`, so
+        // the label is fourteen pixels at weight 400. The port drew it at twelve and
+        // semibold. Measured against the reference's own /user/FlameFire capture at
+        // 1280x720, on the two pills neither of them puts an icon in: *Combat* is
+        // eleven ink rows there and nine here, and *Challenging* is ten pixels wider
+        // there (96 against 86) because a fourteen-pixel label is a wider label.
+        assert_eq!(TAG_LABEL_SIZE, 14.0);
+        assert_eq!(TAG_LABEL_SIZE, TAG_HEIGHT - 2.0 - 8.0, "1 + 4 + 14 + 4 + 1");
+        assert_eq!(regular().weight, iced::font::Weight::Normal);
+        assert_ne!(regular().weight, semibold().weight);
+        // `px-2` and `gap-1` off the same class string, which are the two other
+        // numbers it fixes and which a caller reading only the height cannot see.
+        assert_eq!(TAG_PAD, 8.0);
+        assert_eq!(TAG_GAP, 4.0);
+    }
+
+    #[test]
+    fn a_tags_height_is_the_taller_of_its_own_two_children() {
+        // `leading-none` puts the label's line box at its own size, so the pill is
+        // 1 + 4 + line + 4 + 1 with no icon and 1 + 4 + icon + 4 + 1 with one.
+        // `[&>svg]:h-4 [&>svg]:w-4` on the same `baseClass` is the sixteen-pixel
+        // icon that takes the second sum.
+        assert_eq!(TAG_ICON, 16.0);
+        // `py-1` is four above and four below, and `border-[1px]` is one each side.
+        let py = 4.0;
+        let border = 1.0;
+        assert_eq!(TAG_HEIGHT, border + py + TAG_LABEL_SIZE + py + border);
+        assert_eq!(TAG_HEIGHT_ICON, border + py + TAG_ICON + py + border);
+        assert_eq!(tag_height(false), TAG_HEIGHT);
+        assert_eq!(tag_height(true), TAG_HEIGHT_ICON);
+        assert_ne!(tag_height(true), tag_height(false));
+        // The icon is the taller child, which is the whole reason there are two
+        // heights at all rather than one height and a guess.
+        assert!(tag_height(true) > tag_height(false));
+    }
+
+    #[test]
+    fn a_tags_ring_is_one_pixel_of_surface_five() {
+        // `border-[--_bg-color,var(--surface-5)] border-[1px] border-solid` off the
+        // same `baseClass`, which the reference's table gives as `#42444a` in the
+        // dark look (`variables.scss:239`) and `#dddddd` in the light one
+        // (`variables.scss:8`). The capture reads `#42444A` on the top edge of
+        // every pill of the /user/FlameFire page, and the port drew no ring at all.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface5), [0x42, 0x44, 0x4a, 0xff]);
+        assert_eq!(theme_gen::ink_rgba(Gen::Light, Ink::Surface5), [0xdd, 0xdd, 0xdd, 0xff]);
+        // The fill beside it is `--color-button-bg`, which is `--surface-4`
+        // (`variables.scss:329` into `:238`) -- the `#34363C` the capture reads and
+        // which was already right, and which is *not* the ring: two different
+        // surfaces, one apart.
+        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBg), [0x34, 0x36, 0x3c, 0xff]);
+        assert_ne!(theme_gen::ink(Gen::Dark, Ink::Surface5), theme_gen::ink(Gen::Dark, Ink::ButtonBg));
+    }
+
+    #[test]
+    fn every_tag_builds_in_every_theme() {
+        for theme in Gen::ALL {
+            let face: Element<'_, ()> = tag(*theme, "Challenging");
+            drop(face);
+        }
     }
 
     #[test]
