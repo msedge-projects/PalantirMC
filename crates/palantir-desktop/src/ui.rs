@@ -48,7 +48,7 @@ use crate::avatar;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::ROW_GAP;
-use crate::style::{heading, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{heading, inter, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 
@@ -2120,6 +2120,38 @@ pub const TAB_PAD: f32 = 16.0;
 pub const TAB_LABEL: f32 = 14.0;
 pub const TAB_LINE: f32 = 20.0;
 
+/// The weight `NavTabs.vue:9` puts on the label, which is seven hundred and not
+/// the eight hundred a heading is. The class is on the `<nav>`, not on the label:
+/// `text-xs sm:text-sm font-bold` wraps the whole strip, and the label `<span>` at
+/// `NavTabs.vue:35` and `:57` carries only `tab-color text-nowrap` and a colour,
+/// so both the size and the weight are inherited.
+///
+/// **Why this is a constant and not [`heading`].** The strip was drawn in
+/// `heading()`, which is `--font-weight-heading` -- eight hundred. Measured on the
+/// reference's own capture of `/user/FlameFire` at 1280x720 against this port's
+/// build at the same size, on the `ll` of *Collections*, which Inter draws as a
+/// bare vertical stem so its width reads the weight directly:
+///
+/// | | `l` stem | ink runs, *Data Packs* / *Modpacks* / *Collections* |
+/// | --- | --- | --- |
+/// | reference | 2.22px | 9 / 8 / 11 |
+/// | this port in `heading()` | 2.52px | 3 / 5 / 8 |
+/// | Inter 700 at [`TAB_LABEL`] | 2.118px | |
+/// | Inter 800 at [`TAB_LABEL`] | 2.431px | |
+///
+/// Both renderers draw the stem about a tenth of a pixel fatter than the outline
+/// says, so the reference's 2.22 is Inter 700 and this port's 2.52 is Inter 800,
+/// and the run counts say the same thing: eight hundred's stems touch their
+/// neighbours and merge *Data Packs* into three blobs where seven hundred keeps
+/// every letter separate. The reference's own shipped stylesheet agrees --
+/// `.font-bold{font-weight:700}` and `--font-weight-bold:700`, in the same rule
+/// block as the `font-extrabold{font-weight:800}` this was borrowing.
+///
+/// The size was already right and this does not move it: both images put the label
+/// on eleven ink rows, and the strip's own height pins the root at sixteen pixels
+/// (see [`TAB_STRIP`]).
+pub const TAB_LABEL_WEIGHT: iced::font::Weight = iced::font::Weight::Bold;
+
 /// The tab's own height: `py-2` around [`TAB_LINE`].
 pub const TAB_HEIGHT: f32 = TAB_LINE + 16.0;
 
@@ -2337,7 +2369,7 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
                     .size(TAB_LABEL)
                     // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
                     .line_height(iced::Pixels(TAB_LINE))
-                    .font(heading())
+                    .font(inter(TAB_LABEL_WEIGHT))
                     .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
             ),
         )
