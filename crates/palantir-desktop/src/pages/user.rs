@@ -3030,23 +3030,21 @@ mod tests {
             .collect();
         assert_eq!(coloured.len(), 17, "the platform tokens moved: {coloured:?}");
         // `ui::is_loader_tag` is `TagTagItem`'s `isLoader`, and it answers true
-        // for twenty-nine of the thirty. It is false for `bta-fabric`, because
-        // this port asks the *message id* `tag.loader.bta-fabric` where the
-        // reference asks its own table by key -- and the reference's id for that
-        // one is misspelled upstream (`tag-messages.ts:11` writes
-        // `tag.loader.bta-babric` for a key spelled `bta-fabric`). So its pill is
-        // left on `--color-secondary` here even though the reference would paint
-        // it `--color-platform-bta-fabric`: the same answer that also costs that
-        // tag its glyph and its `BTA (Babric)` label, and one fix in `ui.rs`
-        // rather than one here.
-        assert!(!ui::is_loader_tag("bta-fabric"), "the id is still the misspelled one");
+        // for all thirty. The one that needed care is `bta-fabric`: this port asks
+        // the *message id* `tag.loader.<tag>`, and upstream spells that one
+        // `tag.loader.bta-babric` for a key spelled `bta-fabric`
+        // (`tag-messages.ts:10-11`), so the plain lookup found nothing and cost
+        // that tag its glyph, its `BTA (Babric)` label and its platform ink all
+        // at once. The exception is named in `ui::is_loader_tag`; this is the test
+        // that says it is still there.
+        assert!(ui::is_loader_tag("bta-fabric"), "the upstream id is spelled bta-babric");
         assert_eq!(platform_ink("bta-fabric"), Some(Ink::PlatformBtaBabric));
         let reachable: Vec<&str> = coloured
             .iter()
             .copied()
             .filter(|tag| ui::is_loader_tag(tag))
             .collect();
-        assert_eq!(reachable.len(), 16, "the reachable platform colours moved: {reachable:?}");
+        assert_eq!(reachable.len(), 17, "the reachable platform colours moved: {reachable:?}");
         for tag in loaders {
             if tag != "bta-fabric" {
                 assert!(ui::is_loader_tag(tag), "{tag} stopped being a loader tag");

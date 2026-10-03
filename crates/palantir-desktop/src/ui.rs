@@ -811,7 +811,14 @@ pub fn tag_icon(tag: &str) -> Option<Glyph> {
 /// and a loader that table has not caught up with is one no caller will draw an
 /// icon for.
 pub fn is_loader_tag(tag: &str) -> bool {
-    crate::text_gen::from_name(&format!("tag.loader.{tag}")).is_some()
+    // One loader's message is not named after it. `bta-fabric` is the tag the API
+    // publishes, and `tag-messages.ts:10-11` gives it the id `tag.loader.bta-babric`
+    // -- so asking for `tag.loader.bta-fabric` finds nothing, and the answer costs
+    // that tag both its glyph and its *BTA (Babric)* label, because both are the
+    // one message. Named here rather than worked around at the call site, because
+    // the exception is upstream's and there is exactly one of it.
+    let message = if tag == "bta-fabric" { "bta-babric" } else { tag };
+    crate::text_gen::from_name(&format!("tag.loader.{message}")).is_some()
 }
 
 /// `getLoaderIcon`: `loaderIconMap[tag.toLowerCase()]`.
