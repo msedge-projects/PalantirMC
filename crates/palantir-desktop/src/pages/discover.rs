@@ -1217,7 +1217,7 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         // And then the filters that are not categories, in `search.ts`'s order.
         for filter in filters_for(state.project_type) {
             let rows = filter_rows(state, filter, state.project_type, tags);
-            if rows.is_empty() {
+            if !draws(filter, &rows) {
                 continue;
             }
             let open = state.is_open(filter.id, filter.opens());
@@ -1263,6 +1263,18 @@ fn chevron(open: bool) -> Glyph {
     } else {
         Glyph::Dropdown
     }
+}
+
+/// Whether a filter's section is drawn at all.
+///
+/// A filter with no options has nothing to draw, which is what an empty row list
+/// used to mean -- and it is why the game-version section was not on screen at
+/// all: its options are not rows but the panel that draws them, so
+/// [`filter_rows`] answers an empty list for it and the section was skipped as
+/// though the tab had no game versions. A `scrollable` filter is drawn on its
+/// panel's account; everything else is drawn on its rows'.
+fn draws(filter: &Filter, rows: &[Row]) -> bool {
+    !rows.is_empty() || filter.display == Display::Scrollable
 }
 
 /// Whether the block at `index` of a stack `blocks` long carries the panel's
@@ -3928,6 +3940,33 @@ mod tests {
             .filter(|version| query.is_empty() || version.version.to_lowercase().contains(&query))
             .map(|version| version.version.clone())
             .collect()
+    }
+
+    #[test]
+    fn a_filter_is_drawn_on_its_panel_when_its_rows_live_there() {
+        // `filter_rows` answers an empty list for `game_version` -- its options
+        // are not rows but the panel that draws them -- and the guard that used to
+        // read "no rows, no section" dropped the section with them, so the tab
+        // had no game version section at all. A capture is what found it: the
+        // panel's own diagnostic said the section was built and never reached
+        // the screen.
+        let version = SIDEBAR_FILTERS.iter().find(|f| f.id == GAME_VERSION).expect("the filter exists");
+        assert_eq!(version.display, Display::Scrollable);
+        assert!(draws(version, &[]), "a scrollable filter is drawn on its panel");
+        let shut = SIDEBAR_FILTERS.iter().find(|f| f.id == MODPACK_LOADER).expect("the filter exists");
+        assert!(!draws(shut, &[]), "and a list filter with no options is not");
+        assert!(draws(shut, &[Row {
+            id: "mrpack".to_string(),
+            label: "MrPack".to_string(),
+            chosen: false,
+            excluded: false,
+            excludes: true,
+            press: Message::Filter { filter: MODPACK_LOADER.to_string(), option: "mrpack".to_string() },
+            exclude: Message::Exclude {
+                filter: MODPACK_LOADER.to_string(),
+                option: "mrpack".to_string(),
+            },
+        }]));
     }
 
     fn tags_with(loaders: &[(&str, &[&str])]) -> palantir_net::Tags {
