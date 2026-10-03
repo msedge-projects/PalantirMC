@@ -452,8 +452,15 @@ const SHADOW_HARD: f32 = 0.058;
 const SHADOW_MID: f32 = 0.038;
 /// The depth of the last one before the shadow is gone.
 const SHADOW_SOFT: f32 = 0.019;
-/// How wide the shadow's own reach is: one hard column, six mid, one soft.
-const SHADOW_REACH: f32 = 8.0;
+/// The three widths, which are measured rather than derived: `x=65`, `x=66..71`
+/// and `x=72` down the pane's left edge, and `y=49`, `y=50..55` and `y=56` across
+/// its top. The two runs are the same run of eight, which is why they are one
+/// number's worth of constants rather than four.
+const SHADOW_HARD_W: f32 = 1.0;
+const SHADOW_MID_W: f32 = 6.0;
+const SHADOW_SOFT_W: f32 = 1.0;
+/// How wide the shadow's own reach is: one hard, six mid, one soft.
+const SHADOW_REACH: f32 = SHADOW_HARD_W + SHADOW_MID_W + SHADOW_SOFT_W;
 
 /// The column a region's bar starts at, counted from the region's own right edge
 /// back into it.
@@ -5197,6 +5204,11 @@ fn tags(&self) -> iced::Command<Message> {
         let body = container(self.screen.view(theme, &self.store).map(Message::Screen))
             .width(Length::Fill)
             .height(Length::Fill);
+        // The page column's own width, which is where the pane ends and the
+        // panel begins. The pane's edge stops there too: `pane_rule` and
+        // `pane_shadow` both stop short of the panel.
+        let panel = if self.panel_shown() { PANEL } else { 0.0 };
+        let page_width = self.viewport.width - RAIL - panel;
         let elements: Vec<Element<Message>> = if self.panel_shown() {
             vec![body.into(), self.panel()]
         } else {
@@ -5236,9 +5248,14 @@ fn tags(&self) -> iced::Command<Message> {
         // way, and for the same reason. See [`Shell::pane_gutter_at`] and
         // [`pane_gutter`].
         container(
+            // The reference's own order, which is the order one box paints its
+            // own three things in: the reserved column is under the page's
+            // shadow and under the rule, and the rule is over the shadow (CSS
+            // draws an inset shadow over a background and under a border).
             crate::pages::overlay::Stack::at(Vector::ZERO, page)
-                .over(Vector::ZERO, pane_rule(theme))
-                .over(self.pane_gutter_at(), pane_gutter(theme)),
+                .over(self.pane_gutter_at(), pane_gutter(theme))
+                .over(Vector::ZERO, pane_shadow(page_width, theme))
+                .over(Vector::ZERO, pane_rule(theme)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -8255,13 +8272,7 @@ fn pane_gutter(theme: Gen) -> Element<'static, Message> {
 /// bands the fill and made the tab strip unreadable in `7a29753`. A plain
 /// background is one quad with no radius and no shadow in it.
 fn shadow_band(theme: Gen, depth: f32, width: f32) -> Element<'static, Message> {
-    let base = theme_gen::ink(theme, Ink::Bg);
-    let ink = Color {
-        r: base.r * (1.0 - depth),
-        g: base.g * (1.0 - depth),
-        b: base.b * (1.0 - depth),
-        a: base.a,
-    };
+    let ink = shadow_ink(theme, depth);
     container(Space::with_height(Length::Fill))
         .width(Length::Fixed(width))
         .height(Length::Fill)
@@ -8270,6 +8281,91 @@ fn shadow_band(theme: Gen, depth: f32, width: f32) -> Element<'static, Message> 
             ..container::Appearance::default()
         })
         .into()
+}
+
+/// The pane's own `--surface-1` under one of [`SHADOW_HARD`],
+/// [`SHADOW_MID`] and [`SHADOW_SOFT`].
+///
+/// `rgba(0, 0, 0, a)` composited over an opaque colour, which is a scale of each
+/// channel and nothing else -- the reference's shadow has no alpha of its own to
+/// blend and no other colour under it to blend with.
+fn shadow_ink(theme: Gen, depth: f32) -> Color {
+    let base = theme_gen::ink(theme, Ink::Bg);
+    Color {
+        r: base.r * (1.0 - depth),
+        g: base.g * (1.0 - depth),
+        b: base.b * (1.0 - depth),
+        a: base.a,
+    }
+}
+
+/// The pane's own inset shadow, `App.vue:2764`'s
+/// `box-shadow: 1px 1px 15px rgba(0, 0, 0, 0.1) inset`, as the three bands every
+/// reference capture measures.
+///
+/// Drawn over the page like [`pane_rule`] and for the same reason -- the
+/// pseudo-element is `z-index: 30` -- and in two runs rather than one `Shadow`
+/// for the reason [`shadow_band`] gives. The top run stops at the panel's own
+/// edge, which is measured rather than assumed: the rule above it crosses the
+/// panel (`#42444A` at `y=48` for `x=1000` in `ref/hosting-clean3.png`) and the
+/// shadow does not (`x=1000` reads `#18211E`, `#18211E`, `#18211F`, `#18221F`...
+/// across `y=49..57`, the wash's own gradient and nothing else).
+///
+/// The left run starts below the corner the two share. The reference's corner is
+/// the sixteen-pixel arc both are clipped to, and a pair of crossing bands would
+/// darken it twice over; the top run already covers those eight rows, so the left
+/// one begins where the top one ends.
+fn pane_shadow(page: f32, theme: Gen) -> Element<'static, Message> {
+    let band = |depth: f32| {
+        let ink = shadow_ink(theme, depth);
+        move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(ink)),
+            ..container::Appearance::default()
+        }
+    };
+    column![
+        // The rule's own pixel, which is `pane_rule`'s and this shadow's is not:
+        // the pseudo-element's `border` and its `box-shadow` are two properties
+        // of one box, and the capture reads `#42444A` at `x=64` and `y=48`
+        // between them.
+        Space::with_height(Length::Fixed(1.0)),
+        // `top`: the three rows under the rule, hard then mid then soft.
+        container(Space::with_width(Length::Fill))
+            .width(Length::Fixed(page))
+            .height(Length::Fixed(SHADOW_HARD_W))
+            .style(band(SHADOW_HARD)),
+        container(Space::with_width(Length::Fill))
+            .width(Length::Fixed(page))
+            .height(Length::Fixed(SHADOW_MID_W))
+            .style(band(SHADOW_MID)),
+        container(Space::with_width(Length::Fill))
+            .width(Length::Fixed(page))
+            .height(Length::Fixed(SHADOW_SOFT_W))
+            .style(band(SHADOW_SOFT)),
+        // `left`: the same three columns down the page edge, below the rows the
+        // top run has already covered.
+        row![
+            Space::with_width(Length::Fixed(1.0)),
+            container(Space::with_height(Length::Fill))
+                .width(Length::Fixed(SHADOW_HARD_W))
+                .height(Length::Fill)
+                .style(band(SHADOW_HARD)),
+            container(Space::with_height(Length::Fill))
+                .width(Length::Fixed(SHADOW_MID_W))
+                .height(Length::Fill)
+                .style(band(SHADOW_MID)),
+            container(Space::with_height(Length::Fill))
+                .width(Length::Fixed(SHADOW_SOFT_W))
+                .height(Length::Fill)
+                .style(band(SHADOW_SOFT)),
+            Space::with_width(page),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// The account the card's header names: the one in force, or the reference's own
@@ -12485,7 +12581,12 @@ mod tests {
         // And under nothing, the page's own `--surface-1`, which is what the
         // reference measures at x=964..973 and at x=73 / y=57.
         assert_eq!(under(0.0), (0x16, 0x18, 0x1C));
-        assert_eq!(SHADOW_REACH, 1.0 + GUTTER + 1.0, "one, six, one: eight pixels");
+        assert_eq!(SHADOW_REACH, 8.0, "one, six, one: eight pixels");
+        assert_eq!(
+            (SHADOW_HARD_W, SHADOW_MID_W, SHADOW_SOFT_W),
+            (1.0, 6.0, 1.0),
+            "x=65, x=66..71, x=72; y=49, y=50..55, y=56"
+        );
     }
 
     #[test]
