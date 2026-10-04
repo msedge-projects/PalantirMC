@@ -810,6 +810,8 @@ pub struct Shell {
     hovered: Option<Rail>,
     /// One selection tween per rail slot, in [`Rail::ALL`] order.
     plates: Vec<Tween>,
+    /// Wall-clock origin for rail motion, not the number of queued ticks.
+    plate_clock: std::time::Instant,
     /// Which modal is open, if any.
     modal: Option<Modal>,
     /// Which tab the settings dialog is showing.
@@ -1708,6 +1710,7 @@ impl Shell {
             screenshots_slot: settings.show_screenshots,
             hovered: None,
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
+            plate_clock: std::time::Instant::now(),
             modal: None,
             settings_tab: SettingsTab::Appearance,
             maximized: false,
@@ -1898,6 +1901,9 @@ impl Shell {
     /// [`Tween::retarget`] is a no-op when the target has not changed -- so
     /// moving between two Discover pages does not restart the plate.
     fn settle(&mut self) {
+        // Sample an interrupted transition before aiming it elsewhere, and
+        // reset the clock so idle reading time never advances a new leg.
+        self.advance_to(std::time::Instant::now());
         for (index, slot) in Rail::ALL.iter().enumerate() {
             let target = if self.mark(*slot) == Some(Mark::Primary) { 1.0 } else { 0.0 };
             if let Some(tween) = self.plates.get_mut(index) {
@@ -1961,6 +1967,14 @@ impl Shell {
         for tween in &mut self.plates {
             tween.advance(delta);
         }
+    }
+
+    /// Advance rail motion by actual elapsed time. Dropped or delayed ticks
+    /// must not stretch a 250 ms transition into a slow-motion animation.
+    fn advance_to(&mut self, now: std::time::Instant) {
+        let delta = now.saturating_duration_since(self.plate_clock);
+        self.plate_clock = now;
+        self.advance(delta);
     }
 
     /// Take a wheel on one scroll region, and answer with the command that moves
@@ -2123,7 +2137,7 @@ impl Shell {
             // of the regions that this frame moved.
             Message::Tick => {
                 let now = std::time::Instant::now();
-                self.advance(FRAME);
+                self.advance_to(now);
                 if let Ok(mut clock) = anim::clock().lock() {
                     clock.tick(now);
                 }
@@ -9454,12 +9468,9 @@ impl Shell {
         // arrangement the old shell's frame clock uses, and for the same reason.
         // The subscription's life is the animation's: while nothing is moving it
         // is not asked for, iced drops the receiver, and the thread's next send
-        // fails and ends it.
-        // The subscription's life is the animation's: while nothing is moving it
-        // is not asked for, iced drops the receiver, and the thread's next send
         // fails and ends it. That is also what keeps an idle window from waking
         // the GPU sixty times a second to redraw the same picture.
-        iced::subscription::channel(FRAME_ID, 4, |mut sender| async move {
+        iced::subscription::channel(FRAME_ID, 1, |mut sender| async move {
             let _ = std::thread::spawn(move || loop {
                 std::thread::sleep(FRAME);
                 match sender.try_send(Message::Tick) {
@@ -9728,6 +9739,20 @@ mod tests {
         assert!(shell.slots().contains(&Rail::Skins));
         assert!(!shell.slots().contains(&Rail::Screenshots));
         assert_eq!(shell.slots().len(), Rail::ALL.len() - 1, "the image is hidden");
+    }
+
+    #[test]
+    fn rail_transitions_finish_on_time_even_when_frames_are_delayed() {
+        let mut shell = shell_at("/browse/modpack");
+        let began = shell.plate_clock;
+        shell.advance_to(began + Duration::from_millis(125));
+        assert!(shell.plate(Rail::Discover).value() > 0.9);
+        shell.advance_to(began + Duration::from_millis(300));
+        assert_eq!(shell.plate(Rail::Discover).value(), 1.0);
+        assert!(!shell.animating());
+        // A queued duplicate frame contributes no invented 16 ms step.
+        shell.advance_to(began + Duration::from_millis(300));
+        assert_eq!(shell.plate(Rail::Discover).value(), 1.0);
     }
 
     #[test]

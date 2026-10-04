@@ -218,6 +218,10 @@ impl ScrollAnim {
         // Where the region is is the caller's business, not this one's: only the
         // caller knows whether the offset the wheel measured is this policy's own
         // number or somebody else's. See [`Wheel::offset`] and [`Glides::wheel`].
+        // Input can arrive between frame ticks. Sample the old glide at the
+        // event's time before retargeting, rather than restarting from a stale
+        // frame and losing motion on a stream of precision-wheel events.
+        self.tick(now);
         self.observe(wheel.content_height, wheel.view_height);
         self.scroll_notches(wheel.notches);
         self.begin(now);
@@ -814,7 +818,9 @@ where
         viewport: &Rectangle,
     ) -> Option<Wheel> {
         match event {
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(bounds) && wheel_notches(delta) != 0.0 =>
+            {
                 // The part of the content that is on screen: iced hands the
                 // clipped rectangle, so the intersection is the view height
                 // even at the very top or bottom of the page.
@@ -1115,6 +1121,22 @@ mod tests {
     }
 
     #[test]
+    fn wheel_retargeting_samples_motion_between_frames() {
+        let began = Instant::now();
+        let mut anim = page(2000.0, 500.0);
+        anim.wheel(wheel_at(-1.0, 2000.0, 500.0, 0.0), began);
+        let mut sampled = anim;
+        sampled.tick(began + DURATION / 2);
+        anim.wheel(wheel_at(-1.0, 2000.0, 500.0, 0.0), began + DURATION / 2);
+        assert_eq!(anim.offset, sampled.offset);
+        assert!(anim.offset > 0.0, "input between ticks must not freeze motion");
+        assert_eq!(anim.target, 2.0 * WHEEL_PIXELS_PER_NOTCH);
+        anim.tick(began + DURATION + DURATION / 2);
+        assert_eq!(anim.offset, anim.target);
+        assert!(!anim.animating());
+    }
+
+    #[test]
     fn the_first_wheel_event_measures_the_page_for_itself() {
         // A page nobody has scrolled has never reported a viewport, so the
         // geometry has to travel with the wheel event or nothing would move.
@@ -1324,6 +1346,20 @@ mod tests {
             WheelGuard::<(), Theme, iced::Renderer>::claimed(&click, inside, bounds, &viewport),
             None
         );
+    }
+
+    #[test]
+    fn horizontal_and_empty_wheel_events_do_not_restart_vertical_glides() {
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 100.0, height: 1200.0 };
+        let viewport = Rectangle { height: 400.0, ..bounds };
+        let cursor = mouse::Cursor::Available(iced::Point::new(50.0, 50.0));
+        for delta in [mouse::ScrollDelta::Pixels { x: 20.0, y: 0.0 },
+                      mouse::ScrollDelta::Lines { x: 0.0, y: 0.0 }] {
+            let event = Event::Mouse(mouse::Event::WheelScrolled { delta });
+            assert!(WheelGuard::<(), Theme, iced::Renderer>::claimed(
+                &event, cursor, bounds, &viewport,
+            ).is_none());
+        }
     }
 
     #[test]

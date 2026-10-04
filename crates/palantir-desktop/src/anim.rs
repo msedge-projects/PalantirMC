@@ -303,7 +303,9 @@ impl Interactions {
         // the factor it implies is the one already drawn: a control the pointer
         // is on and one it has just left both sit at `1.0` in a light theme.
         tween.pointed = Pointed { hovered, pressed, hover: hover_factor };
-        if tween.to == target && tween.began.is_none() {
+        if tween.to == target {
+            // Repeated pointer reports are not new transitions. Restarting an
+            // in-flight tween here makes it lag or never finish during input.
             return;
         }
         // From where the control is drawn: a press inside a hover starts
@@ -470,6 +472,18 @@ mod tests {
         // transition rather than a jump.
         assert!(ease(0.1) < 0.1, "should leave gently");
         assert!(ease(0.9) > 0.9, "should settle gently");
+    }
+
+    #[test]
+    fn repeated_hover_reports_do_not_restart_the_transition() {
+        let mut clock = Interactions::default();
+        let began = Instant::now();
+        clock.set("repeat", true, false, began);
+        clock.tick(began + INTERACTION_DURATION / 2);
+        clock.set("repeat", true, false, began + INTERACTION_DURATION / 2);
+        clock.tick(began + INTERACTION_DURATION);
+        assert!(!clock.animating());
+        assert_eq!(clock.factor("repeat", true, false), crate::theme::hover_brightness());
     }
 
     #[test]
