@@ -96,6 +96,8 @@ the changes that went on top of the landing:
 | 37180936896 | `3eda7d7` | The header avatar's shadow hung where the card's shadow falls: green in 6m14s, 1307 passed / 0 failed and 19 ignored -- the slot stops being the canvas, so the reach is three pixels outside a 96-pixel card without moving it to x=91 (G153's follow-up) |
 | 37183019838 | `5e88914` | The strip's fourth link given an address of its own: green in 7m38s, **1310 passed / 0 failed** and 19 ignored (818, the run before it plus three), `clippy -D clippy::correctness` clean -- `Route::User.project_type` is `Option<ProfileTab>`, and the cold address now works where it fell back to Home (G155) |
 | 37197535912 | `da746ab` | Each label spaced against its own capture rather than against a constant: **red** in 2m29s -- `Lint` green in 1m46s, `Test workspace` red at 821 passed / **1 failed** / 0 ignored, `Build exe` and `Live services` skipped. `ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` fails at `ui.rs:3308`: `Data Packs` measures 77.8054 where the reference's own capture asks for 83.680. The same tree is green on Linux, so the per-label fits are asserted against one renderer's advances and this runner's font database hands the shaper something narrower (G156) |
+| 37199382822 | `1f393ab` | The label fit measured through the five faces this repository ships rather than the host's installed ones: green in 7m28s through all five jobs -- `Test workspace` 2m17s at **1314 passed / 0 failed** and 19 ignored (177 + 8 + 822 + 4 + 33 + 270), `Lint` 1m29s, the live suite 19 passed / 0 failed in 182.49s, and both Windows exes staged. A test binary never runs `run_shell`, so iced's global font system in one holds this machine's installed faces and this machine has Inter and the runner does not; `shape_width_in` shapes through the shipped `crate::FONTS` instead, and *Data Packs* reads **82.9497** against the reference's own **83.15** where it read 77.8054 on the runner before. The four "basis" figures G156 recorded were the ambient face's overhang mistaken for the glyph's (G157) |
+| 37200516975 | `725dfd6` | The card's own *Install to instance* given the six pixels it was measuring short: green in 7m39s through all five jobs -- `Test workspace` 2m34s at the same **1314 passed / 0 failed** and 19 ignored, `Lint` 1m43s, the live suite 19 passed / 0 failed in 145.56s, and both Windows exes staged. 189 less `md`'s 46 of chrome is 143.0 of label where Inter-600's `hmtx` sums to 136.76, so **0.3467** a gap, both buttons read 189 at x=750..938, and the summary column is the grid's own **521** rather than the `521 + 6 - 1` that was covering for it (G158) |
 
 Worth remembering when reading the run list: `99fe67f` shows as *cancelled* rather
 than green, because `ci.yml` sets `concurrency: cancel-in-progress` and the next
@@ -1096,7 +1098,7 @@ uses (G76), and Settings offers the reference's colour themes and keeps the one
 taken (G77).
 
 **The profile and hosting pages were then read pixel by pixel against the
-reference's own captures, and fifteen slices came out of it** (G142-G156). Two of
+reference's own captures, and seventeen slices came out of it** (G142-G158). Two of
 those are not cosmetic and are the reason the pass is worth a section of its own.
 
 The first is that **nothing inside the page pane took pointer input, on any page.**
@@ -1156,18 +1158,43 @@ problem rather than a geometry one (G150); and the one loader tag whose message 
 published under an id spelled without the hyphen it is looked up with, which cost it
 its glyph, its label and its ink in one lookup (G143).
 
-**Two residuals are open and are written down as such.** Card three's summary carries
-one word more than the reference's -- its window is `[520.9, 523.9)` and we sit at
-528, downstream of the six pixels *Install to instance* is short (183 against 189) --
-and the fit residuals on the fitted labels are +-1px of ink (*Data Packs* 83 against
-82, *Modpacks* 74 against 74, *Collections* 82 against 83).
+**One residual is open and is written down as such.** The fit residuals on the fitted
+labels are +-1px of ink: *Data Packs* 83 against 82, *Modpacks* 74 against 74,
+*Collections* 82 against 83. The other one is closed: card three's summary carried one
+word more than the reference's because *Install to instance* measured 183 against the
+reference's 189 and a `Length::Fill` column absorbed the six, so the column came out
+528 where the grid derives 521 and cards two and three compensated with `521 + 6 - 1`.
+The label is drawn through `tracked_text` at the extra its own box implies -- 189 less
+`md`'s 46 of chrome is 143.0, where Inter-600's `hmtx` sums to 136.76, so **0.3467** a
+gap -- both buttons now measure 189 at x=750..938, card three's first line is
+217..709 against the reference's 217..711, card two's is 217..736 against 217..737, and
+the column is the grid's own **521** with nothing named at the call site (G158). That
+extra is the one number in `TRACKED` that is **derived rather than fitted** -- it comes
+from the reference's measured box width and `ButtonFrame.vue`'s own chrome, with no
+glyph origins left to check it against -- and at **0.3467** it is nearly twice
+*New server*'s **0.1806** at the same size and weight, which is the same finding the
+other four record and the reason the table is a table.
 
 **And the whole-image counts behind all of that are the last measurements taken while
 the reference could be started.** `/usr/bin/ModrinthApp` panics at startup with
 `Failed to initialize GTK` and `/tmp/ref/` holds one file, so the differing-pixel
-numbers are receipts rather than claims that can be re-taken here. G156's own
-assertion is also red on the Windows runner while green on Linux, and its gate says
-so rather than waiting for a reader of the red run.
+numbers are receipts rather than claims that can be re-taken here -- and nothing
+measured after `cec5440` is a fresh whole-image diff at all: the two slices that
+followed it are measured against values recorded while the reference was alive
+(*Install to instance* at 189, the card boxes at 217..711 and 217..737) or derived from
+its own source (`ButtonFrame.vue`'s chrome), and G157's four shaped widths are this
+tree's own `shape_width` through the shipped faces, reproducible here today.
+
+**G156's own assertion is green again, and was red for a reason worth keeping.** It
+failed at `da746ab` on the Windows runner while passing on Linux, because the per-label
+fits were measured through iced's *global* font system -- which in a test binary, that
+never having run `run_shell`, holds this machine's installed faces, and this machine
+has Inter where the runner does not. That also corrects a number G156 had wrong: the
+per-label "basis" between a reference advance and `shape_width` was recorded as +0.530,
+-0.618, -0.978 and **+2.136**, the last written off as a trailing `r` overhanging its
+advance, and on the shipped faces the difference is **-0.206, +0.001, -0.004 and
+-0.070** (G157). `1f393ab` fixed it forward, as a red run is fixed, and the gate now
+reads green with the red run's record kept beside it.
 
 ## What stage 4 has landed so far
 

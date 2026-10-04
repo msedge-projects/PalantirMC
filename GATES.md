@@ -8581,22 +8581,26 @@ $ python tools/progress.py --check
   by 0, so the build is deterministic and that band is the network.
 
 - [x] G156: each label is spaced against its own capture rather than against a
-  constant, which is a per-glyph layout with a per-label fit -- **and this gate's own
-  assertion is red on the Windows runner**
+  constant, which is a per-glyph layout with a per-label fit -- **red on the Windows
+  runner at `da746ab`, and fixed forward by `1f393ab`**
   CHECK: cargo test -p palantir-desktop --locked
          python tools/progress.py --check
-  EXPECT: 177 passed / 0 failed, 8 passed / 0 failed, then the desktop crate's
-          **821 passed / 1 failed / 0 ignored** -- which aborts the workspace run, so
-          `Build exe` and `Live services` are skipped. Run 37197535912, **red** in
-          2m29s, with `Lint` green in 1m46s. The same tree is green here on Linux,
-          where the same assertion is met to within 0.06 of 83.680:
+  EXPECT: **822 passed / 0 failed** and 4 native passed in the desktop crate here,
+          which is the runner's own total on the fix. The gate was red before it:
+          run 37197535912 on `da746ab` is **red** in 2m29s at **821 passed / 1 failed
+          / 0 ignored** in the same 822 tests -- which aborts the workspace run, so
+          `Build exe` and `Live services` are skipped -- with `Lint` green in 1m46s:
               ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it
               ... FAILED at ui.rs:3308
               `Data Packs` measures 77.8054 and the reference's own capture asks
               for 83.680
+          The same tree was green here on Linux, where the same assertion is met to
+          within 0.06 of 83.680. That red run is why G157 exists, and this gate is
+          green as of run 37199382822 on `1f393ab`: **1314 passed / 0 failed** and
+          19 ignored in `Test workspace` (177 + 8 + 822 + 4 + 33 + 270)
           progress exits 0, with G156 attributed to stage 3
-  EVIDENCE: the fits below, the three checks that they are the reference's, and the
-      runner's own transcript.
+  EVIDENCE: the fits below, the three checks that they are the reference's, the
+      runner's own transcript for the red run, and G157 for the fix forward.
 
   **What this supersedes.** A per-glyph text layout was tried and measured worse --
   **0.9 px of rms per glyph**, sixteen pixels of error across the strip -- because it
@@ -8610,7 +8614,10 @@ $ python tools/progress.py --check
   Five labels carry a measured extra and everything else keeps the plain `text` path,
   so the mechanism reaches nothing that was not measured. `advance()` includes the
   extra, so the width layout is told and the width the glyphs are drawn at cannot
-  disagree.
+  disagree. **A sixth label joined the table afterwards**, the card's own *Install to
+  instance*, and it is the one row whose extra was derived rather than fitted -- G158,
+  which is also where the "not one constant" finding this table rests on is measured a
+  second time, at 0.3467 against *New server*'s 0.1806.
 
   | label | face | extra/gap | rms | rms at extra 0 | advance | `hmtx` |
   | --- | --- | --- | --- | --- | --- | --- |
@@ -8644,14 +8651,158 @@ $ python tools/progress.py --check
   `letter-spacing` declarations are on `pre code` and `.code-text`. What is recorded
   here is the reference's advances read off its pixels.
 
-  **What this gate cannot say, and it is the reason the run is red.** The three
+  **What this gate could not say, and what the red run turned out to be.** The three
   earlier asserts in that test pass on the runner, so the fit *is* applied there and
   `advance()` and `shape_width()` agree with each other; what differs is the width both
   of them report for the same string, face and size -- **5.87px** on the first label --
-  which puts the difference in what the platform's font database hands the shaper
-  rather than in the tree. So `TRACKED`'s table, and therefore `tracked_text`'s layout
-  on two pages, is asserted against a measurement the Windows runner does not
-  reproduce. Not diagnosed and not fixed; the fix is Rust.
+  which put the difference in what the platform's font database hands the shaper
+  rather than in the tree. That reading was right and it was not the whole of it: a
+  **test binary never runs `run_shell`**, so iced's global font system in one holds this
+  machine's *installed* faces and nothing else. This machine has Inter installed and a
+  Windows runner does not, so the constants in `TRACKED` were pinned to the host rather
+  than to the five faces in `crate::FONTS`, and the table's own reference column had
+  absorbed the same overhang to stay consistent with them. `1f393ab` is the fix and
+  G157 is its gate; the red run above is kept because it is what explains why the
+  shipped-faces change exists.
+
+- [x] G157: the per-label fit is measured through the five faces this repository
+  ships rather than the host's installed ones, so the same tree answers the same on a
+  machine that has Inter and on one that does not
+  CHECK: cargo test -p palantir-desktop --locked
+         python tools/progress.py --check
+  EXPECT: **822 passed / 0 failed** and 4 native passed in the desktop crate on this
+          Linux box, which is the runner's own total to the test. Run 37199382822 on
+          `1f393ab`, **green in 7m28s** through all five jobs: `Test workspace` 2m17s
+          at **1314 passed / 0 failed** and 19 ignored (177 + 8 + 822 + 4 + 33 + 270),
+          `Lint` 1m29s, the live suite 19 passed / 0 failed in 182.49s, and both
+          Windows exes staged
+          progress exits 0, with G157 attributed to stage 3
+  EVIDENCE: `shape_width_in` and the four shaped widths below, the `hmtx` sums they
+      are now held to within 0.25, and G156's own red run, which is what sent the
+      measurement looking for a font.
+
+  **The defect was a font, and the fit was never wrong.** G156's test passed on this
+  Linux box and failed on the Windows runner: *Data Packs* measured **83.6850** here
+  and **77.8054** there, a difference of **5.87**. The fit was applied correctly in
+  both, because the three asserts ahead of it pass on the runner -- `advance()` and
+  `shape_width()` agree with each other there. What differed was the width both of
+  them reported for the same string, face and size.
+
+  **A test binary never runs `run_shell`,** so iced's global font system inside one
+  holds only **this machine's installed faces**. This machine has Inter installed; a
+  Windows runner does not. So the constants in `TRACKED` were pinned to the host
+  rather than to the five faces in `crate::FONTS` -- and the reference column beside
+  them had been given the same overhang, so that the two agreed with each other on
+  this host by construction. A test built on that pair passes on any machine with
+  Inter installed and fails everywhere else, which is the definition of a gate that
+  measures the machine rather than the tree.
+
+  `shape_width` now has a `shape_width_in` variant that takes the system to shape
+  through, and the test builds one out of `crate::FONTS` the way the CJK shaping test
+  already did. Production keeps the window's system, which `run_shell` fills with
+  those same five faces, so nothing about the drawn label changed: **only the
+  measurement of it.**
+
+  **And that turned out to correct a number this file had got wrong.** The per-label
+  "basis" between a reference advance and `shape_width` was recorded as **+0.530,
+  -0.618, -0.978 and +2.136**, with *New server*'s 2.136 explained away as *a trailing
+  `r` overhangs its advance*. None of it was the glyph. On the shipped faces
+  `shape_width` matches the `hmtx` sum to **-0.206, +0.001, -0.004 and -0.070** -- a
+  fifth of a pixel, which is what an ink extent and an advance sum differ by and no
+  more. The old figures were the **ambient** face's overhang mistaken for the glyph's,
+  and the explanation was invented on top of the largest one rather than read off
+  anything.
+
+  | label | shaped, shipped faces | reference's own advance | off by | `hmtx` | shaped - `hmtx` |
+  | --- | --- | --- | --- | --- | --- |
+  | *Data Packs* | 82.9497 | 83.15 | 0.2003 | 76.54 | -0.206 |
+  | *Modpacks* | 74.2664 | 74.27 | 0.0036 | 71.50 | +0.001 |
+  | *Collections* | 83.4218 | 83.42 | 0.0018 | 77.74 | -0.004 |
+  | *New server* | 89.9152 | 90.0 | 0.0848 | 88.36 | -0.070 |
+
+  **The fits are unchanged and the fit is slightly better than G156's table claimed.**
+  The four extras are the same four numbers G156 fitted, and the check that held them
+  to the reference is now held against the reference's own advances read off its glyph
+  origins -- **83.15, 74.27, 83.42 and 90.0** -- rather than against those advances
+  restated on this crate's ambient basis. Within **0.21** everywhere, and *Modpacks*
+  and *Collections* within **0.005**. The test also asserts the shaped width against
+  its own `hmtx` sum to a quarter of a pixel, which is the assertion that would catch
+  a future table measured off a machine rather than off the shipped faces.
+
+  **What this gate cannot say.** It says nothing about how any of this looks: the
+  four widths are `shape_width` through a font system, not pixels off a screen, and
+  the reference's four advances were read off `ref/user-ref.png` and
+  `ref/hosting-clean3.png` while the reference could still be started. Nothing here
+  can be re-taken against it now.
+
+- [x] G158: the card's own *Install to instance* measures the 189 pixels the
+  reference's does, and the summary column is the grid's own 521 rather than a fudge
+  that added six to it
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: **822 passed / 0 failed** and 4 native passed in the desktop crate here,
+          `clippy` exits 0, and `Lint` is green on the runner: run 37200516975 on
+          `725dfd6`, **green in 7m39s** through all five jobs, `Test workspace` 2m34s
+          at **1314 passed / 0 failed** and 19 ignored (177 + 8 + 822 + 4 + 33 + 270),
+          `Lint` 1m43s, the live suite 19 passed / 0 failed in 145.56s, and both
+          Windows exes staged
+          progress exits 0, with G158 attributed to stage 3
+  EVIDENCE: `ButtonFrame.vue:31`'s own `md` row, the box arithmetic below, and the
+      ink boxes recorded while the reference could still be started -- which is the
+      only kind of measurement this page can still be checked by.
+
+  **This was the last open defect on the two pages.** *Install to instance* on project
+  cards two and three measured **183** where the reference's measures **189**, and
+  because a card's summary column is `Length::Fill` the shortfall did not stay in the
+  button: the column absorbed it and came out **528** where the grid's own arithmetic
+  derives **521** (G149). Card three's summary therefore carried **one word more**
+  than the reference's, at x=216..738 against its 217..711, and its window is
+  `[520.9, 523.9)`. Cards two and three compensated with `521 + 6 - 1`, the last
+  pixel being this card's own content box being one wider than the reference's -- a
+  constant naming a bug rather than a measurement.
+
+  **The label now draws through `tracked_text` at the extra its own box implies.**
+  `ButtonFrame.vue:31`'s `md` row is
+  `h-9 gap-1.5 rounded-xl px-2.5 text-base font-semibold leading-5 [&>svg]:size-5`,
+  so the chrome is `px-2.5` twice over (**20**) plus `gap-1.5` (**6**) plus `size-5`
+  (**20**) = **46**. The reference's box is **189**, so the label is left **143.0**
+  where Inter-600's `hmtx` sums to **136.76**: **6.24** over **eighteen** gaps, or
+  **0.3467** a character. The container sizes itself to whatever that returns, so the
+  button is 189 without a width being named anywhere.
+
+  **That extra is derived, not fitted, and it is recorded as such.** The four tab and
+  tag labels were fitted from the reference's measured glyph origins and then
+  cross-validated against arithmetic that shares nothing with the fitter --
+  *New server* fits **+0.1806** where its own 150.0-pixel box asks for **0.1818**.
+  This one could not be: **the reference's measured box width and the stylesheet's
+  own chrome** are all that is left of it, and there are no glyph origins to check
+  the result against. It is the weaker kind of number and it is not dressed up as the
+  other kind.
+
+  | label | how the extra was got | extra/gap | at the box | `hmtx` | check |
+  | --- | --- | --- | --- | --- | --- |
+  | *New server* | fitted from glyph origins | +0.1806 | 89.9152 against 90.0 | 88.36 | box asks 0.1818 |
+  | *Install to instance* | **derived from its box and `md`'s chrome** | **+0.3467** | 143.0 label in a 189 box | 136.76 | **none: no origins** |
+
+  **And it is nearly twice *New server*'s at the same size and weight** -- 0.3467
+  against 0.1806, both Inter-600 at sixteen, both `text-base` -- which is the same
+  finding as everywhere else on these two pages, stated in G156's own note that the
+  reference's extra runs from +0.18 to +0.38 across the button labels alone at one
+  size and one weight. That is why `TRACKED` is a table and not a constant, and why
+  this gate is a row in it rather than a new constant.
+
+  **Measured after the change.** Both buttons measure **189** at x=750..938. Card
+  three's first line is **217..709** against the reference's **217..711**, and card
+  two's is **217..736** against **217..737**. The `521 + 6 - 1` compensation is gone
+  and the column is the grid's own **521**; the call site now says only where the
+  number came from.
+
+  **What this gate cannot say.** Every figure in it is either arithmetic from the
+  reference's own stylesheet or an ink box recorded while the reference could still be
+  started. The 189 and the 217..711 were measured against a capture that no longer
+  exists, and the 189 is an input to the derivation rather than an output of it, so a
+  reader who doubts it has nothing here to re-measure with.
 
 ## What these gates cannot say
 
@@ -8659,20 +8810,42 @@ $ python tools/progress.py --check
   is still on disk and panics at startup -- `Failed to initialize gtk backend!:
   BoolError { message: "Failed to initialize GTK", filename: "gtk-0.18.2/src/rt.rs",
   function: "gtk::rt::init", line: 141 }` -- and `/tmp/ref/` holds one file,
-  `launch.log`. Every whole-image differing-pixel count in G142-G156 is therefore the
+  `launch.log`. Every whole-image differing-pixel count in G142-G158 is therefore the
   last measurement taken while that app was alive, and **none of them is
   re-checkable**. Where a gate quotes a number its own commit recorded -- a difference
   sum, an rms, an ink box, a plate's interior, a band table -- that number is the
   record, and it is the one to argue with; a whole-image count is a receipt, not a
   claim that can be re-taken here.
-- **One gate's own assertion is red on the runner.** G156's
-  `ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` fails on
-  the Windows runner at `ui.rs:3308` -- `Data Packs` measures 77.8054 where the
-  reference's own capture asks for 83.680 -- while the same tree is green on Linux.
-  The per-label fits are a measurement of *this renderer's* advances, and the gate
-  that holds them is asserted against one renderer's number. That is a limit of the
-  measurement rather than of the gate, and it is written into the gate rather than left
-  for the next reader of a red run.
+- **Nothing measured after `cec5440` is a fresh whole-image diff against the
+  reference.** That commit is where the reference's own process on `:99` and
+  `/tmp/ref/` died, and it does not start again -- the `Failed to initialize GTK`
+  panic above is what it does now. So G157's and G158's figures are of two kinds, and
+  a reader has to know which is which: **G157's four shaped widths are this tree's
+  own `shape_width` through the five faces in `crate::FONTS`**, reproducible here
+  today, against **reference advances recorded while the reference was alive**; and
+  **G158's 189 and its card boxes at 217..711 and 217..737 are ink measurements
+  recorded then too**, with 189 itself now serving as an *input* to that gate's
+  derivation rather than an output of it. No number in either gate is a whole-image
+  differing-pixel count, so neither is the receipt that kind of number is -- they are
+  the recorded measurements those receipts rest on, and re-taking them needs the
+  reference back.
+- **One of those numbers is weaker than the four beside it, and says so.** G158's
+  **0.3467** a gap is derived from the reference's measured box width and
+  `ButtonFrame.vue`'s own chrome, with no glyph origins left to check it against,
+  where G156's four extras were fitted from origins and cross-validated against
+  arithmetic. Nothing in this tree can tell those two apart by failing, so the weaker
+  one is marked in the table and in `TRACKED`'s own comment rather than left for a
+  reader to infer from the fit existing at all.
+- **No gate's own assertion is red on the runner.** G156's
+  `ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` was red
+  at `da746ab` -- `Data Packs` measures 77.8054 where the reference's own capture
+  asks for 83.680, while the same tree is green on Linux -- because the per-label
+  fits were a measurement of *this renderer's* advances rather than of the faces this
+  repository ships. `1f393ab` fixed it forward and G157 is its gate; run 37199382822
+  is green on the same tree with the same test, 822 passed / 0 failed in the desktop
+  crate here and on the runner. The red run's record stays in G156's EXPECT, because
+  it is what explains the shipped-faces change; a reader should not take it for the
+  gate's current state.
 - **No gate compares glyph bitmaps between the clients.** Their ClearType colour
   fringing makes the same word two different pictures, so every text assertion
   here is about ink rows, ink colour and position rather than about pixels.

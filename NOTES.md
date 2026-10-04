@@ -2643,7 +2643,9 @@ second is what landed.
 **What landed fits each label against its own capture.** Five labels carry a
 measured extra; everything else keeps the plain `text` path, so the mechanism
 reaches nothing that was not measured. `advance()` includes the extra, so the
-width layout is told and the width the glyphs are drawn at cannot disagree.
+width layout is told and the width the glyphs are drawn at cannot disagree. A
+sixth joined the table later, and it is the one number in it that was **derived**
+rather than fitted -- see the card button's section below.
 
 | label | face | extra/gap | rms | rms at extra 0 | advance | `hmtx` |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -3305,6 +3307,107 @@ loader tags all take the tag's own name as the message's prefix bar one. The tes
 that pinned the misspelling as expected is turned around to pin the fix, so a change
 that breaks it again says so.
 
+## A test binary never runs `run_shell`, so it never had the shipped faces in it
+
+The tracking test passed on this box and failed on the Windows runner: *Data Packs*
+measured **83.6850** here and **77.8054** there, a difference of **5.87**. The fit was
+being applied correctly in both -- the three asserts ahead of it pass on the runner, so
+`advance()` and `shape_width()` agree with each other there -- and the width differed
+underneath them.
+
+**A test binary never runs `run_shell`,** so iced's global font system inside one holds
+only **this machine's installed faces**. This machine has Inter installed. A Windows
+runner does not. So the constants in `TRACKED` were pinned to the host rather than to
+the five faces in `crate::FONTS`, and the reference column beside them had been given
+the same overhang so that the two agreed on this host by construction: **83.15 + 0.530 =
+83.680**, 74.27 - 0.618 = 73.652, 83.42 - 0.978 = 82.442, 90.0 + 2.136 = 92.136. A
+test built on that pair passes on any machine with Inter installed and fails everywhere
+else, which is the whole definition of a gate that measures the machine.
+
+**That also corrects a number this file's own code had got wrong.** The per-label
+"basis" between a reference advance and `shape_width` was recorded as **+0.530, -0.618,
+-0.978 and +2.136**, with *New server*'s 2.136 explained away as *a trailing `r`
+overhangs its advance*. None of it was the glyph. On the shipped faces `shape_width`
+matches the `hmtx` sum to **-0.206, +0.001, -0.004 and -0.070** -- a fifth of a pixel,
+which is all an ink extent and an advance sum ever differ by. The old four were the
+**ambient** face's overhang mistaken for the glyph's, and the explanation was invented
+on top of the largest of them rather than read off anything.
+
+`shape_width` now has a `shape_width_in` variant that takes the system to shape
+through, and the test builds one out of `crate::FONTS` the way the CJK shaping test
+already did. Production keeps the window's system, which `run_shell` fills with those
+same five faces, so nothing about a drawn label changed -- only the measurement of it.
+The test also holds the shaped width against its own `hmtx` sum to a quarter of a pixel,
+which is the assertion that would catch a future table measured off a machine rather
+than off the shipped faces.
+
+| label | shaped, shipped faces | reference's own advance | off by | `hmtx` | shaped - `hmtx` |
+| --- | --- | --- | --- | --- | --- |
+| *Data Packs* | 82.9497 | 83.15 | 0.2003 | 76.54 | -0.206 |
+| *Modpacks* | 74.2664 | 74.27 | 0.0036 | 71.50 | +0.001 |
+| *Collections* | 83.4218 | 83.42 | 0.0018 | 77.74 | -0.004 |
+| *New server* | 89.9152 | 90.0 | 0.0848 | 88.36 | -0.070 |
+
+The four extras are the same four the previous section fitted; the check is now against
+the reference's own advances read off its glyph origins rather than against those
+advances restated on this crate's ambient basis. **Within 0.21 everywhere, and *Modpacks*
+and *Collections* within 0.005.**
+
+**What this does not say.** These four widths are `shape_width` through a font system,
+not pixels off a screen. The four reference advances were read off `ref/user-ref.png`
+and `ref/hosting-clean3.png` while the reference could still be started, so the
+right-hand column is a recorded measurement and the left-hand one is reproducible here
+today. That asymmetry is the only kind of evidence left for this page.
+
+## The card's button was six pixels short, and a fill column had been paying for it
+
+The last open defect on the two pages. *Install to instance* on project cards two and
+three measured **183** where the reference's measures **189**, and because a card's
+summary column is `Length::Fill` the shortfall did not stay in the button: **the column
+absorbed it** and came out **528** where the grid's own arithmetic derives **521** (the
+section above). Card three's summary therefore carried one word more than the
+reference's, at x=216..738 against its 217..711, and its window is `[520.9, 523.9)`.
+Cards two and three compensated with `521 + 6 - 1`, the last pixel being this card's own
+content box being one wider than the reference's -- a constant naming a bug rather than a
+measurement.
+
+**The fix is the reference's own box arithmetic, and nothing is named at the call site.**
+`ButtonFrame.vue:31`'s `md` row is
+`h-9 gap-1.5 rounded-xl px-2.5 text-base font-semibold leading-5 [&>svg]:size-5`, so the
+chrome is `px-2.5` twice over (**20**) plus `gap-1.5` (**6**) plus `size-5` (**20**) =
+**46**. The reference's box is **189**, so the label is left **143.0** where Inter-600's
+`hmtx` sums to **136.76**: **6.24** over **eighteen** gaps, or **0.3467** a character. The
+container sizes itself to whatever `tracked_text` returns, so the button is 189 without a
+width being written down.
+
+**That extra is derived, not fitted, and it is recorded as what it is.** The four tab and
+tag labels were fitted from the reference's measured glyph origins and then
+cross-validated against arithmetic that shares nothing with the fitter -- *New server*
+fits **+0.1806** where its own 150.0-pixel box asks for **0.1818**. This one could not
+be: **the reference's measured box width and the stylesheet's own chrome** are all that
+is left of it, and there are no glyph origins left to check the result against.
+
+| label | how the extra was got | extra/gap | at the box | `hmtx` | check |
+| --- | --- | --- | --- | --- | --- |
+| *New server* | fitted from glyph origins | +0.1806 | 89.9152 against 90.0 | 88.36 | its box asks 0.1818 |
+| *Install to instance* | **derived from its box and `md`'s chrome** | **+0.3467** | 143.0 label in a 189 box | 136.76 | **none: no origins** |
+
+**And it is nearly twice *New server*'s at the same size and weight** -- 0.3467 against
+0.1806, both Inter-600 at sixteen because `md` and `lg` are both `text-base` -- which is
+the same finding as everywhere else on these pages, and the reason `TRACKED` is a table
+rather than a constant: the reference's extra runs from +0.18 to +0.38 across the button
+labels alone at one size and one weight.
+
+Measured after: both buttons **189** at x=750..938; card three's first line **217..709**
+against the reference's **217..711**, card two's **217..736** against **217..737**. The
+`521 + 6 - 1` compensation is gone and the column is the grid's own **521**.
+
+**Every figure here is either arithmetic from the reference's own stylesheet or an ink
+box recorded while the reference could still be started.** The 189 and the 217..711 were
+measured against a capture that no longer exists, and the 189 is now an *input* to the
+derivation rather than an output of it -- so a reader who doubts it has nothing here to
+re-measure with, and that is worth more to say than a sixth entry in `TRACKED` would be.
+
 ## What none of this can be checked against any more
 
 **The reference capture is gone, and so is the reference.** `/tmp/ref/` holds one
@@ -3326,29 +3429,38 @@ as `(|dR|+|dG|+|dB|) > 0`: `/user/FlameFire` against `ref/user-ref.png` **307,72
 report gives a number -- a difference sum, an rms, an ink box, a plate's interior --
 that number is the record, and it is the one to argue with.
 
-**Two geometry residuals are open and are written down as such.** Card three's
-summary carries one word more than the reference's: its window is `[520.9, 523.9)`
-and we sit at 528, downstream of the six-pixel *Install to instance* shortfall (183
-against 189). And the fit residuals on the fitted labels are +-1px of ink --
-*Data Packs* **83** against **82**, *Modpacks* **74** against **74**, *Collections*
-**82** against **83**. Neither is claimed closed.
+**One geometry residual is open and is written down as such.** The fit residuals on the
+fitted labels are +-1px of ink -- *Data Packs* **83** against **82**, *Modpacks* **74**
+against **74**, *Collections* **82** against **83** -- and they are still open. Card
+three's summary is closed: it used to carry one word more than the reference's because
+*Install to instance* measured 183 against 189 and the fill column absorbed the six, and
+both buttons are 189 now with the column the grid derives. Neither is claimed closed
+beyond what its own section says.
 
-**And the one that is not cosmetic: CI is red at `da746ab`.**
-`ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` fails on
-the Windows runner at `ui.rs:3308`:
+**Nothing measured after `cec5440` is a fresh whole-image diff against the reference.**
+That commit is where the reference's own process on `:99` and `/tmp/ref/` died, and it
+does not start again. The two slices that followed it are measured against values
+recorded while it was alive -- the label fits against the reference's own advances off
+`ref/user-ref.png` and `ref/hosting-clean3.png`, and the card button against *Install to
+instance* at 189 and boxes at 217..711 and 217..737 -- or derived from its own source, as
+`ButtonFrame.vue`'s `md` chrome is. The shaped widths are this tree's own
+`shape_width()` through the five faces in `crate::FONTS`, which is reproducible here today;
+**no figure from either slice is a whole-image differing-pixel count at all**, so neither
+is the receipt that kind of number is.
+
+**And CI is not red.** This section used to say it was, at `da746ab`, and that is the
+record of what the red run was rather than of the gate's state now. The failure was
+`ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` at `ui.rs:3308`:
 
 ```text
 `Data Packs` measures 77.8054 and the reference's own capture asks for 83.680
 test result: FAILED. 821 passed; 1 failed; 0 ignored
 ```
 
-The same tree passes here on Linux, where the same assertion is met to within 0.06 of
-83.680. So `TRACKED`'s table -- and therefore `tracked_text`'s layout, which every
-fitted label on two pages is drawn through -- is asserted against a measurement that
-runner does not reproduce, by **5.87px** on the first label. The two earlier asserts
-in that test pass on the runner, so the fit *is* applied there and `advance()` and
-`shape_width()` agree with each other; what differs is the width both of them report
-for the same string, face and size, which puts the difference in what the platform's
-font database hands the shaper rather than in the tree. Not diagnosed and not fixed
-here, because the fix is Rust and this pass is the record.
-
+**The cause was the font, and the fit was never wrong:** a test binary never runs
+`run_shell`, so the global font system the fit was measured through held this machine's
+installed faces, which include Inter and which a Windows runner does not have. `1f393ab`
+measures through `crate::FONTS` instead, the runner is green on the same test since
+(`37199382822`, 1314 passed / 0 failed and 19 ignored), and this machine is too (822
+passed / 0 failed in the desktop crate). Nothing was amended or force-pushed to get
+there, and the red run stays in G156's `EXPECT` because it is what explains the change.
