@@ -623,6 +623,34 @@ pub fn import_instance(paths: &PalantirPaths, source: &Path) -> Result<String, S
 /// Recursively copy a directory tree (files and directories; symlinks and
 /// special files are skipped, which is all Prism ever writes in an instance).
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    let source = std::fs::canonicalize(src)
+        .map_err(|error| format!("reading '{}': {error}", src.display()))?;
+    // Resolve the nearest existing ancestor, including symlinks, before
+    // creating anything. Importing into the source itself would otherwise
+    // recursively copy the newly created destination until disk exhaustion.
+    let mut ancestor = dst.to_path_buf();
+    let mut suffix = Vec::new();
+    while !ancestor.exists() {
+        if let Some(name) = ancestor.file_name() {
+            suffix.push(name.to_owned());
+        }
+        if !ancestor.pop() || ancestor.as_os_str().is_empty() {
+            ancestor = PathBuf::from(".");
+            break;
+        }
+    }
+    let mut destination = std::fs::canonicalize(&ancestor)
+        .map_err(|error| format!("resolving '{}': {error}", dst.display()))?;
+    for part in suffix.iter().rev() {
+        destination.push(part);
+    }
+    if destination.starts_with(&source) {
+        return Err("cannot copy an instance into itself or one of its subfolders".into());
+    }
+    copy_tree(&source, &destination)
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
     let entries = std::fs::read_dir(src).map_err(|e| format!("reading '{}': {e}", src.display()))?;
     std::fs::create_dir_all(dst).map_err(|e| format!("creating '{}': {e}", dst.display()))?;
     for entry in entries {
@@ -633,7 +661,7 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         let from = entry.path();
         let to = dst.join(entry.file_name());
         if kind.is_dir() {
-            copy_dir_recursive(&from, &to)?;
+            copy_tree(&from, &to)?;
         } else if kind.is_file() {
             std::fs::copy(&from, &to).map_err(|e| format!("copying '{}': {e}", from.display()))?;
         }
@@ -940,6 +968,17 @@ mod tests {
         let again = import_instance(&paths, &source).unwrap();
         assert_ne!(again, id);
         assert!(import_instance(&paths, &dir.path().join("nope")).is_err());
+    }
+
+    #[test]
+    fn copying_into_the_source_is_refused_before_creating_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        assert!(copy_dir_recursive(&source, &source).is_err());
+        let nested = source.join("new/deep/copy");
+        assert!(copy_dir_recursive(&source, &nested).is_err());
+        assert!(!source.join("new").exists());
     }
 
     #[test]

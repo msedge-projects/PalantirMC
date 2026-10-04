@@ -82,12 +82,8 @@ pub fn list_mods(mods_dir: &Path) -> Vec<ModEntry> {
             out.push(ModEntry { file_name: name, display_name, enabled });
         }
     }
-    out.sort_by(|a, b| {
-        a.display_name
-            .to_lowercase()
-            .cmp(&b.display_name.to_lowercase())
-            .then_with(|| a.file_name.cmp(&b.file_name))
-    });
+    // Fold each name once, not twice per comparison in an O(n log n) sort.
+    out.sort_by_cached_key(|entry| (entry.display_name.to_lowercase(), entry.file_name.clone()));
     out
 }
 
@@ -107,10 +103,31 @@ pub fn set_mod_enabled(mods_dir: &Path, file_name: &str, enabled: bool) -> Resul
     if target == file_name {
         return Ok(());
     }
-    match std::fs::rename(mods_dir.join(file_name), mods_dir.join(&target)) {
-        Ok(()) => Ok(()),
-        Err(e) => Err(format!("renaming mod '{file_name}': {e}")),
+    let source = mods_dir.join(file_name);
+    let destination = mods_dir.join(&target);
+    // A rename may replace another jar. A hard link reserves the new name
+    // atomically without copying jar bytes or overwriting an existing entry.
+    if std::fs::hard_link(&source, &destination).is_err() {
+        // Portable installs may live on FAT/exFAT, which cannot hard-link.
+        // Reserve the name before a bounded-memory copy on those filesystems.
+        let mut input = std::fs::File::open(&source)
+            .map_err(|error| format!("reading mod '{file_name}': {error}"))?;
+        let mut output = std::fs::OpenOptions::new().write(true).create_new(true)
+            .open(&destination)
+            .map_err(|error| format!("renaming mod '{file_name}' to '{target}': {error}"))?;
+        let copied = std::io::copy(&mut input, &mut output)
+            .and_then(|_| output.sync_all());
+        drop(output);
+        if let Err(error) = copied {
+            let _ = std::fs::remove_file(&destination);
+            return Err(format!("copying mod '{file_name}': {error}"));
+        }
     }
+    if let Err(error) = std::fs::remove_file(&source) {
+        let _ = std::fs::remove_file(&destination);
+        return Err(format!("renaming mod '{file_name}': {error}"));
+    }
+    Ok(())
 }
 
 /// Plain file-name listing for simple content folders (`resourcepacks/`,
@@ -197,6 +214,19 @@ mod tests {
         // Missing dir lists as empty.
         assert!(list_mods(&dir.path().join("nope")).is_empty());
         assert!(list_content_names(&dir.path().join("nope")).is_empty());
+    }
+
+    #[test]
+    fn toggling_never_overwrites_an_existing_mod() {
+        let dir = tempfile::tempdir().unwrap();
+        for enabled in [false, true] {
+            std::fs::write(dir.path().join("a.jar"), b"enabled version").unwrap();
+            std::fs::write(dir.path().join("a.jar.disabled"), b"disabled version").unwrap();
+            let source = if enabled { "a.jar.disabled" } else { "a.jar" };
+            assert!(set_mod_enabled(dir.path(), source, enabled).is_err());
+            assert_eq!(std::fs::read(dir.path().join("a.jar")).unwrap(), b"enabled version");
+            assert_eq!(std::fs::read(dir.path().join("a.jar.disabled")).unwrap(), b"disabled version");
+        }
     }
 
     #[test]
