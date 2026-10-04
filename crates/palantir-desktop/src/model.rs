@@ -104,12 +104,7 @@ impl InstanceListModel {
     /// Sort entries by display name (case-insensitive), breaking ties by id
     /// so the order is deterministic.
     pub fn sort_by_name(&mut self) {
-        self.entries.sort_by(|a, b| {
-            a.name
-                .to_lowercase()
-                .cmp(&b.name.to_lowercase())
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        self.entries.sort_by_cached_key(|entry| (entry.name.to_lowercase(), entry.id.clone()));
     }
 
     /// All entries in display order.

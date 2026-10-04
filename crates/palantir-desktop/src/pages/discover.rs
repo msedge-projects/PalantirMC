@@ -730,8 +730,16 @@ impl State {
             // what the cards on screen look up, so an icon no card names is one
             // that is never drawn and is dropped when the next results land.
             Message::Icons { arrived } => {
-                for fetched in arrived {
-                    self.icons.insert(fetched.url, fetched.icon);
+                if let Load::Ready(hits) = &self.results {
+                    let named: std::collections::HashSet<&str> = hits.iter()
+                        .map(|hit| hit.icon_url.as_str()).collect();
+                    for fetched in arrived {
+                        // Old requests may finish after a newer search. Keep
+                        // only pictures the current result set actually names.
+                        if named.contains(fetched.url.as_str()) {
+                            self.icons.insert(fetched.url, fetched.icon);
+                        }
+                    }
                 }
             }
             // The crossing, recorded where the clock lives: the page draws the
@@ -3531,6 +3539,30 @@ mod tests {
         state.update(Message::Found { round: asked.round, result: Ok(vec![hit("Sodium")]) });
         state.update(Message::ProjectType(ProjectType::Mod));
         assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
+    }
+
+    #[test]
+    fn late_icons_cannot_repopulate_the_cache_for_old_results() {
+        let mut state = State::new(ProjectType::Modpack);
+        let mut current = hit("Current");
+        current.icon_url = "https://icons/current.png".into();
+        state.results = Load::Ready(vec![current]);
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2, 2, image::Rgba([10, 20, 30, 255]),
+        )).write_to(&mut png, image::ImageOutputFormat::Png).unwrap();
+        let icon = Icon::of(png.get_ref(), avatar::ICON_SIDE).unwrap();
+        state.update(Message::Icons { arrived: vec![
+            Fetched { url: "https://icons/old.png".into(), icon: icon.clone() },
+            Fetched { url: "https://icons/current.png".into(), icon: icon.clone() },
+        ] });
+        assert_eq!(state.icons.len(), 1);
+        assert!(state.icons.contains_key("https://icons/current.png"));
+        state.results = Load::Loading;
+        state.update(Message::Icons { arrived: vec![
+            Fetched { url: "https://icons/old.png".into(), icon },
+        ] });
+        assert!(!state.icons.contains_key("https://icons/old.png"));
     }
 
     #[test]
