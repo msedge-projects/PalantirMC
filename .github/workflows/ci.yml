@@ -251,7 +251,15 @@ jobs:
             throw "Unexpected PalantirMC.exe size: $($exe.Length) bytes"
           }
 
-          "PalantirMC.exe  $hash" | Out-File -Encoding ascii dist/PalantirMC.exe.sha256
+          # Checksum tools require the hash before the filename; the previous
+          # filename-first sidecar was rejected by `sha256sum -c`. Write the
+          # standard form with an explicit LF and verify it before uploading.
+          [System.IO.File]::WriteAllText("dist/PalantirMC.exe.sha256", "$hash  PalantirMC.exe`n")
+
+          $sidecar = [System.IO.File]::ReadAllText("dist/PalantirMC.exe.sha256")
+          if ($sidecar -ne "$hash  PalantirMC.exe`n") {
+            throw "sha256 sidecar is not in 'sha256sum -c' form: '$sidecar'"
+          }
 
           "### PalantirMC.exe (${{ matrix.target }})" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
           "" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY

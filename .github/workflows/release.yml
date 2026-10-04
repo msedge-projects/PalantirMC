@@ -169,7 +169,12 @@ jobs:
             # Regenerated after renaming: the sidecar has to name the file it
             # actually sits next to for `sha256sum -c` to work.
             $hash = (Get-FileHash "release/$name" -Algorithm SHA256).Hash.ToLower()
-            "$name  $hash" | Out-File -Encoding ascii "release/$name.sha256"
+            [System.IO.File]::WriteAllText("release/$name.sha256", "$hash  $name`n")
+
+            $sidecar = [System.IO.File]::ReadAllText("release/$name.sha256")
+            if ($sidecar -ne "$hash  $name`n") {
+              throw "sha256 sidecar is not in 'sha256sum -c' form: '$sidecar'"
+            }
 
             "| $name | $((Get-Item "release/$name").Length) bytes | $hash |" |
               Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
