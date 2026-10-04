@@ -237,7 +237,7 @@ pub struct InstallReport {
 impl InstallReport {
     /// Whether every file the plan asked for is on disk.
     pub fn is_complete(&self) -> bool {
-        self.failed.is_empty()
+        self.failed.is_empty() && self.problems.is_empty()
     }
 
     /// A one-line outcome for the console.
@@ -255,6 +255,9 @@ impl InstallReport {
         }
         if !self.failed.is_empty() {
             out.push_str(&format!(", {} failure(s)", self.failed.len()));
+        }
+        if !self.problems.is_empty() {
+            out.push_str(&format!(", {} problem(s)", self.problems.len()));
         }
         out
     }
@@ -848,12 +851,19 @@ fn run_assets(
     };
     let mut jobs: Vec<FileJob> = Vec::new();
     let mut labels: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     // An asset object is addressed *by* its digest, so the check that catches a
     // corrupted or half-written object costs nothing to state: the hash in the
     // URL is the hash the file has to have, and the transfer verifies it before
     // the file is renamed out of its part name.
     for (name, object) in &index.objects {
         if object.hash.len() < 2 {
+            continue;
+        }
+        // Logical names can alias one physical object. Queue it once so
+        // workers never write the same part file concurrently; reconstruction
+        // still visits every logical name below.
+        if !seen.insert(&object.hash) {
             continue;
         }
         // The path on disk, not the path on the CDN: separate helpers, and this
@@ -2352,6 +2362,8 @@ mod tests {
         assert!(plan.jobs.is_empty());
         assert_eq!(plan.problems.len(), 1);
         assert!(plan.problems[0].contains("no download source"), "{:?}", plan.problems);
+        let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
+        assert!(!report.is_complete(), "a missing library source blocks completion");
     }
 
     #[test]
@@ -2506,6 +2518,60 @@ mod tests {
         assert!(plan.jobs.is_empty());
         let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
         assert!(report.problems.iter().any(|p| p.contains("no download URL")));
+        assert!(!report.is_complete(), "a missing asset index blocks completion");
+    }
+
+    #[test]
+    fn an_unreadable_asset_index_blocks_completion() {
+        let (_dir, paths) = test_paths();
+        let mut profile = LaunchProfile::default();
+        profile.minecraft_assets = Some(palantir_core::version::AssetIndexInfo::bare("17"));
+        let index_path = paths.assets_dir().join("indexes/17.json");
+        std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+        std::fs::write(&index_path, b"not JSON").unwrap();
+        let plan = plan(&paths, &paths.root, &profile, &RuntimeContext::current_host(), Existing::Trust);
+        let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
+        assert!(!report.is_complete());
+        assert!(report.problems.iter().any(|p| p.contains("unreadable")));
+    }
+
+    #[test]
+    fn asset_aliases_download_one_object_and_reconstruct_every_name() {
+        let (_dir, paths) = test_paths();
+        let body = b"shared asset";
+        let hash = sha1_hex(body);
+        let index_path = paths.assets_dir().join("indexes/legacy.json");
+        std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+        std::fs::write(&index_path, json!({
+            "objects": {
+                "first.txt": { "hash": hash, "size": body.len() },
+                "second.txt": { "hash": hash, "size": body.len() }
+            }
+        }).to_string()).unwrap();
+        let target = paths.root.join("resources");
+        let plan = InstallPlan {
+            assets: Some(AssetPlan {
+                id: "legacy".into(),
+                index_path,
+                assets_dir: paths.assets_dir(),
+                reconstruct: vec![target.clone()],
+            }),
+            ..InstallPlan::default()
+        };
+        let mut fetcher = Script::new();
+        fetcher.insert(cdn_url(&hash), body.to_vec());
+        // One worker makes the duplicate-job regression deterministic: the
+        // second job finds the first's file but still counts it as downloaded.
+        let (report, _) = run_lines(&plan, &fetcher.wire(), 1);
+        assert!(report.is_complete(), "{report:?}");
+        assert_eq!(report.objects_downloaded, 1);
+        assert_eq!(report.bytes, body.len() as u64);
+        for name in ["first.txt", "second.txt"] {
+            assert_eq!(std::fs::read(target.join(name)).unwrap(), body);
+        }
+        let (again, _) = run_lines(&plan, &Script::new().wire(), 1);
+        assert!(again.is_complete());
+        assert_eq!(again.present, 1, "count physical objects, not aliases");
     }
 
     #[test]

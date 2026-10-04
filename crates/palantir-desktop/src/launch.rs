@@ -1026,6 +1026,12 @@ fn repaired_line(name: &str, report: &install::InstallReport) -> String {
             report.failed.len()
         ));
     }
+    if let Some(first) = report.problems.first() {
+        line.push_str(&format!(
+            "; {} installation problem(s), starting with: {first}",
+            report.problems.len()
+        ));
+    }
     line
 }
 
@@ -2227,6 +2233,18 @@ fn send_done(sender: &mut Sender<LaunchEvent>, run_id: u64, note: String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_repair_summary_explains_an_installation_problem() {
+        let report = crate::install::InstallReport {
+            problems: vec!["asset index 17 is missing".into()],
+            ..crate::install::InstallReport::default()
+        };
+        assert!(!report.is_complete());
+        let line = super::repaired_line("Test", &report);
+        assert!(line.contains("1 installation problem(s)"), "{line}");
+        assert!(line.contains("asset index 17 is missing"), "{line}");
+    }
+
     use super::*;
     use palantir_core::pack::Component;
     use crate::wire::Script;
