@@ -45,6 +45,20 @@
 //! the round avatar and by [`crate::ui::icon_box`]'s container border for a
 //! project icon -- see [`masked_as`]'s own note on why it cannot be one rule.
 //!
+//! The fifth is the shadow, and it is the one rule of the component that is
+//! drawn per *element* rather than per shape. `Avatar.vue:299` gives every
+//! avatar that is not `.no-shadow` a `box-shadow: var(--shadow-card)` -- which in
+//! the dark look is `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` (`variables.scss:368`)
+//! -- and of the four places this crate draws a circle exactly one asks for it:
+//! `UserPageHeader.vue:4`. `ServerListEmptyPreview.vue:47` and `:100` and
+//! `ServerListing.vue:54` all pass `no-shadow`, so their avatars are the plain
+//! card [`Icon::circle`] builds, and `Icon::shadowed_circle` is the header's.
+//! The shadow is painted into the pixels in bands of measured depth rather than
+//! asked of an iced `Shadow`, because those are composited *inside* the element's
+//! own rounded-box coverage by `solid.wgsl` and so band the very fill they are
+//! meant to sit behind -- which is why [`crate::shell`] draws its own in bands and
+//! so does this. See [`with_card_shadow`] and [`SHADOW_DEPTHS`].
+//!
 //! Four deliberate limits, each named rather than approximated:
 //!
 //! * **No placeholder art.** The reference falls back to an inline hexagon in
@@ -61,13 +75,17 @@
 //! * **No cache of its own.** Decoding happens once per icon per page, in the
 //!   store's worker (see [`crate::store::Store::project_icons`]), and what a page
 //!   keeps is the [`Icon`] it was given.
-//! * **No box-shadow.** `Avatar.vue:299` gives every avatar that is not
-//!   `.no-shadow` a `box-shadow: var(--shadow-card)`, and a profile's header
-//!   avatar is one -- but the shadow is *behind* the picture, and iced cannot
-//!   paint one behind an `image` widget. It could be drawn into a canvas grown to
-//!   hold it, and the arithmetic says not to: see [`masked_as`] for the pixels
-//!   that buys (a 96 box becomes a 108x108 canvas, +2,448 pixels and +9.8KB per
-//!   avatar) against what it costs (a 1.6% dip in one channel over five rows).
+//! * **The shadow does not land on a page yet.** [`Icon::shadowed_circle`] draws
+//!   it, at the geometry and the depths [`ref/user-ref.png`] measures, but the
+//!   shadow's reach is *outside* the card's own box and every caller in this
+//!   crate lays its handle out in a box the size of the card -- so `image`'s
+//!   default `ContentFit::Contain` scales the whole 102-pixel canvas into the
+//!   96-pixel slot the header's avatar sits in. Measured on our own capture, that
+//!   draws the disc 90.35 across instead of 96 and lays the shadow's five bands
+//!   down *inside* the card where the reference has the picture's own pixels, and
+//!   it would shrink `/hosting/manage`'s nine avatars from 24 and 36 to 19.2 and
+//!   28.8. Both callers are in files this one does not own; see
+//!   [`Icon::shadowed_circle`] for the two lines that fix it.
 //!
 //! One thing this cannot do at all: an image whose bytes are not an image this
 //! build's `image` crate reads is refused rather than drawn as a grey square, so a
@@ -117,6 +135,258 @@ const OUTLINE_ALPHA: u8 = 38;
 fn button_bg(theme: Gen) -> [u8; 3] {
     let [red, green, blue, _] = theme_gen::ink_rgba(theme, Ink::ButtonBg);
     [red, green, blue]
+}
+
+// ---- The card's own shadow -----------------------------------------------
+//
+// `Avatar.vue:299`'s `box-shadow: var(--shadow-card)`, and the dark look's
+// `--shadow-card` (`variables.scss:368`) is
+// `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px`: no spread, two pixels down, a
+// four-pixel blur. Three of those four numbers this file can use as they are
+// written; the fourth -- the blur -- is what a CSS blur *radius* means, and
+// spreading a solid edge by half of it is a property of the spec rather than
+// something a rasteriser is obliged to agree with, so the reach is measured and
+// the falloff is measured. What follows is those measurements, and nothing in
+// it is a Gaussian.
+//
+// # What was measured, and where
+//
+// Off `ref/user-ref.png`, the profile header's own avatar: a 96 box at
+// `x=88..183`, `y=72..167`, centre `(136.0, 120.0)`, radius 48, on the page's
+// own `--surface-1` `#16181c` `(22, 24, 28)`.
+//
+// ```text
+//                   the card             the shadow's five steps out
+//   x=85,86,87  (21,23,27) (21,23,26) (20,22,25)   |  the disc: x=88..183
+//   y=71        (21,23,27)                          |  one row above y=72
+//   y=168..172 (18,20,23) (19,21,24) (20,22,25) (21,23,26) (21,23,27)
+// ```
+//
+// Two things come out of that. The shadow reaches **five** rows below a disc
+// whose last row is `167` and **three** columns either side of a disc that runs
+// `88..183`, and only **one** row above it: the shape is the card's own circle
+// moved down [`SHADOW_OFFSET_Y`] and blurred, so the reach is the offset circle
+// grown by [`SHADOW_REACH`] rather than the card grown by it -- which is why the
+// bottom has five rows where the top has one. And each step is a *pre-composited
+// ink*, not an alpha: `(18,20,23)` over `(22,24,28)` is `22 * (1 - a)` truncated
+// to a byte at `a = 0.1429..0.1667`, so a depth is only ever pinned to the
+// half-open interval a byte can express. [`SHADOW_DEPTHS`] takes the middle of
+// each interval, which is what makes the five steps reproduce the capture's own
+// bytes exactly rather than nearly.
+
+/// `variables.scss:368`'s `0px 2px 4px 0px`, offset: the shadow is the card's
+/// own shape moved down this far, with no spread.
+///
+/// Which is why the shadow's centre is the card's centre *plus* this, and why
+/// the capture's shadow is one row above the card and five below it.
+const SHADOW_OFFSET_Y: f32 = 2.0;
+
+/// `variables.scss:368`'s `4px`.
+///
+/// A radius, so a solid edge spreads `blur / 2` past it -- but see
+/// [`SHADOW_REACH`], which is one pixel more than that.
+const SHADOW_BLUR: f32 = 4.0;
+
+/// How far past the card's own edge the shadow is drawn, all four sides.
+///
+/// `blur / 2 = 2` is what the token's own arithmetic gives, and the reference
+/// gives three. The capture above is the receipt: down the centre column the
+/// page's own `#16181c` runs five rows past the disc's last row of `167`, and
+/// across the centre row it runs three columns past `88` and `183`, which is the
+/// offset circle (the card, moved down [`SHADOW_OFFSET_Y`]) grown by three. The
+/// third pixel is the blur's own support rather than its nominal spread: a
+/// rasteriser cuts a Gaussian's tail a pixel or so past the radius the spec
+/// quotes, and `ref/user-ref.png` has nothing at all at `x=84` or at `y=173`,
+/// which is where a fourth would land.
+///
+/// Public because a caller that draws a shadowed card has to lay the handle out
+/// at `side + 2 * SHADOW_REACH`: see [`Icon::shadowed_circle`].
+pub const SHADOW_REACH: f32 = SHADOW_BLUR / 2.0 + 1.0;
+
+/// `variables.scss:368`'s own alpha at the shadow's peak, and the depth
+/// [`SHADOW_DEPTHS`] is expressed as a share of.
+const SHADOW_ALPHA: f32 = 0.25;
+
+/// The light look's `--shadow-card` (`variables.scss:140`):
+/// `rgba(50, 50, 100, 0.1) 0px 2px 4px 0px`.
+///
+/// The same offset and the same blur as the dark look's, so [`SHADOW_REACH`] and
+/// [`SHADOW_DEPTHS`] are the geometry for both and only the ink moves. The tint
+/// is a real colour rather than black, so it is named here rather than folded
+/// into [`Shadow::ink`]; nothing in this crate paints the light look (see
+/// [`masked_as`]), so unlike every other number here it is *not* measured off a
+/// capture and this file does not claim it is.
+const SHADOW_TINT: [u8; 3] = [50, 50, 100];
+
+/// The light look's own alpha, against which [`Shadow::ink`] scales the depths.
+const SHADOW_LIGHT_ALPHA: f32 = 0.1;
+
+/// The depth of each of the five rings the shadow's reach is cut into, darkest
+/// first, one pixel of reach per ring.
+///
+/// Read off `ref/user-ref.png` as in the note above, down the disc's own centre
+/// column `x=136` where the card is opaque and cannot hide any of it, and
+/// cross-checked across the disc's centre row `y=120` where the outer three of
+/// the five are all the row has room for:
+///
+/// ```text
+/// depth   0.155   0.116   0.077   0.039   0.018
+/// ink     (18,20,23) (19,21,24) (20,22,25) (21,23,26) (21,23,27)
+/// s at    46.5    47.5    48.5    49.5    50.5   pixels from the shadow's centre
+/// ```
+///
+/// The five numbers are the middles of the intervals a byte can hold -- the
+/// first is 0.1429..0.1667 and the last 0..0.0357 -- so they are not more
+/// precise than the capture and are not claimed to be. The token's own `0.25` is
+/// *not* one of them: it is the peak at the shadow's core, which is under the
+/// card and is never a pixel of a capture.
+const SHADOW_DEPTHS: [f32; 5] = [0.155, 0.116, 0.077, 0.039, 0.018];
+
+/// The `rgba` a `--shadow-card` is, and the colour it is composited over.
+///
+/// Which is all of the shadow except its falloff: the offset, the blur and the
+/// reach come from the token and the measurement, and neither look changes them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Shadow {
+    /// What is behind the card, which is what the shadow darkens.
+    ///
+    /// `--surface-1`, because that is the page a profile's header avatar is drawn
+    /// on and therefore the colour the reference's own capture composites over.
+    /// Not the card's own `--color-button-bg`, which would halve every depth's
+    /// effect: `#34363c` against `#16181c` is a little over twice the value, and
+    /// the darkest ring would read `(13,14,17)` where the capture reads
+    /// `(18,20,23)`.
+    page: [u8; 3],
+    /// The shadow's own colour: black in the dark look, [`SHADOW_TINT`] in the
+    /// light one.
+    tint: [u8; 3],
+    /// The token's alpha, which scales [`SHADOW_DEPTHS`].
+    alpha: f32,
+}
+
+impl Shadow {
+    /// The `--shadow-card` of the look `theme` is, over that look's page.
+    ///
+    /// The theme comes from the caller for the same reason [`button_bg`]'s does:
+    /// a card is handed an [`Icon`] and has a theme of its own, and the
+    /// constructors below pass the look the app opens in rather than reaching for
+    /// one they are not given.
+    fn of(theme: Gen) -> Shadow {
+        let [red, green, blue, _] = theme_gen::ink_rgba(theme, Ink::Bg);
+        let (tint, alpha) = match theme {
+            Gen::Dark => ([0, 0, 0], SHADOW_ALPHA),
+            _ => (SHADOW_TINT, SHADOW_LIGHT_ALPHA),
+        };
+        Shadow {
+            page: [red, green, blue],
+            tint,
+            alpha,
+        }
+    }
+
+    /// Ring `index`'s ink, pre-composited over the page behind the card.
+    ///
+    /// `22 * (1 - a)` and nothing else, because the dark look's shadow is black
+    /// over an opaque colour and a browser's blend of those is a scale of each
+    /// channel. Truncating, because that is what the capture's own compositor
+    /// does and because truncating is what puts all three channels of a ring on
+    /// the same triple: rounding `28 * (1 - 0.018) = 27.496` gives `#1b` like
+    /// truncation does, but rounding `28 * (1 - 0.039) = 26.908` gives `#1b`
+    /// where truncation gives the `#1a` the capture reads.
+    fn ink(&self, index: usize) -> [u8; 4] {
+        let alpha = self.alpha * SHADOW_DEPTHS[index] / SHADOW_ALPHA;
+        let mut ink = [u8::MAX; 4];
+        for channel in 0..3 {
+            let page = f32::from(self.page[channel]);
+            let tint = f32::from(self.tint[channel]);
+            ink[channel] = (page * (1.0 - alpha) + tint * alpha) as u8;
+        }
+        ink
+    }
+}
+
+/// The canvas a `side`-square card and its shadow need: the shadow's own
+/// footprint, which is the card's box moved down [`SHADOW_OFFSET_Y`] and grown
+/// by [`SHADOW_REACH`] on every side.
+///
+/// Returned as `(canvas side, card x, card y)`. The card's own corner is at
+/// `(reach, reach - offset)` and not `(reach, reach)`: the footprint is the
+/// offset shape's, so the card sits a pixel below its top edge -- which is what
+/// leaves the reference's *one* row above the disc rather than five below it
+/// becoming five above. A 96 card is a 102 canvas with the card at `(3, 1)`.
+fn shadow_canvas(side: u32) -> (u32, u32, u32) {
+    let reach = SHADOW_REACH.round() as u32;
+    let down = SHADOW_OFFSET_Y.round() as u32;
+    (side + 2 * reach, reach, reach.saturating_sub(down))
+}
+
+/// The ring `index`'s outer radius, measured from the shadow's centre.
+///
+/// [`SHADOW_REACH`] past the card's own radius, less a ring per ring already
+/// taken off it -- which is the even cut [`SHADOW_DEPTHS`] is, one pixel of
+/// reach each. The *deepest* ring is the inner one, because that is the order a
+/// shadow's own alpha falls in: so the faintest ring ends exactly at the reach
+/// and the deepest stops one pixel short of the card's own edge, where the
+/// card's opaque disc hides it anyway.
+fn ring_radius(side: u32, index: usize) -> f32 {
+    let inner = SHADOW_DEPTHS.len() - 1 - index;
+    side as f32 / 2.0 + SHADOW_REACH - inner as f32
+}
+
+/// `card` with the shadow its `side`-square box casts, painted in behind it.
+///
+/// The card's own pixels are *copied*, not redrawn: what this returns is the
+/// canvas [`masked_as`] built, untouched and at its own offset, with rings of
+/// [`SHADOW_DEPTHS`]'s inks around it. That is the whole of the argument that the
+/// card's fill, its picture, its outline and its radius are unchanged by the
+/// shadow -- the code that draws them does not run here at all.
+///
+/// The rings are drawn by radius about the offset circle's centre and are *not*
+/// clipped to the card, so a pixel inside the card's own box can carry shadow:
+/// the reference does exactly that, at the corners of the disc's bounding box
+/// where the disc has cleared away and the blurred edge has not yet ended. The
+/// clip to the disc is the card paste, which comes after and wins.
+fn with_card_shadow(card: Picture, shadow: Shadow) -> Picture {
+    let Picture { side, pixels } = card;
+    let (canvas, at_x, at_y) = shadow_canvas(side);
+    let centre_x = at_x as f32 + side as f32 / 2.0;
+    let centre_y = at_y as f32 + SHADOW_OFFSET_Y + side as f32 / 2.0;
+    // Squared radii, so the test is one compare and no square root: the same
+    // shape, asked once at setup instead of per pixel.
+    let radii: Vec<f32> = (0..SHADOW_DEPTHS.len())
+        .map(|ring| {
+            let radius = ring_radius(side, ring);
+            radius * radius
+        })
+        .collect();
+    let inks: Vec<[u8; 4]> = (0..SHADOW_DEPTHS.len())
+        .map(|ring| shadow.ink(ring))
+        .collect();
+    let mut out = vec![0u8; (canvas * canvas * 4) as usize];
+    for y in 0..canvas {
+        for x in 0..canvas {
+            let (dx, dy) = (x as f32 + 0.5 - centre_x, y as f32 + 0.5 - centre_y);
+            let squared = dx * dx + dy * dy;
+            // The first ring whose own radius the pixel is inside: the radii
+            // run outwards and each ring owns the band up to the next one out.
+            let ring = radii.iter().position(|r| squared < *r);
+            if let Some(ring) = ring {
+                let offset = ((y * canvas + x) * 4) as usize;
+                out[offset..offset + 4].copy_from_slice(&inks[ring]);
+            }
+        }
+    }
+    for y in 0..side {
+        for x in 0..side {
+            let from = ((y * side + x) * 4) as usize;
+            let to = (((y + at_y) * canvas + x + at_x) * 4) as usize;
+            out[to..to + 4].copy_from_slice(&pixels[from..from + 4]);
+        }
+    }
+    Picture {
+        side: canvas,
+        pixels: out,
+    }
 }
 
 /// One channel moved toward white by `alpha` out of 255, the way a browser
@@ -190,6 +460,7 @@ fn circle_mask(side: u32) -> Vec<bool> {
 ///
 /// Private, and only ever the input to one [`Icon`]: what a card is handed is the
 /// handle, and what a test reads is this.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Picture {
     side: u32,
     pixels: Vec<u8>,
@@ -236,24 +507,28 @@ fn masked(bytes: &[u8], side: u32) -> Option<Picture> {
 /// is the 16/96 rounded rectangle, which a `container` border *can* draw, and
 /// [`crate::ui::icon_box`] already draws it.
 ///
-/// # Why there is no shadow
+/// # Why the shadow is not drawn here
 ///
-/// `Avatar.vue:299`'s `box-shadow: var(--shadow-card)` is the one rule of the
-/// component's left undrawn, and the arithmetic is the reason rather than the
-/// toolkit being asked for too little. The token is
-/// `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` (`variables.scss:368`): a Gaussian of
-/// `blur/2 = 2px` sigma, shifted down 2, so painting it into a bitmap means
-/// growing the canvas by the offset plus three sigma in every direction a blurred
-/// edge can reach -- 96 becomes 108x108, which is 11,664 pixels against 9,216, or
-/// +2,448 pixels and +9.8KB of RGBA for every avatar this crate decodes. What it
-/// buys is measured on the reference: rows y=168..172 under a disc whose last row
-/// is y=167, going from the page's `#16181c` through `#121417`, `#131518`,
-/// `#141619` and `#15171b` back to `#16181c` -- a peak alpha of 0.25 (which is the
-/// token's own) and a largest 8-bit step of 4/255 = 1.6% in red. And it is not
-/// free of layout: the callers draw a bare `image` at a fixed side inside a
-/// `row`, so a 108x108 handle in a 96 slot would stretch the disc to 112.5% and
-/// the row would grow by 12x8 -- a change in `pages/user.rs` and `pages/servers.rs`,
-/// which are not this file. A 1.6% dip over five rows is not worth either.
+/// `Avatar.vue:299`'s `box-shadow: var(--shadow-card)` is painted *behind* the
+/// card, and this function's canvas is the card's own box -- the picture, the
+/// `--color-button-bg` behind it, the circle mask and the outline are all fitted
+/// to `side`, and the four of them are one composite. So the shadow is not drawn
+/// here but one step out, by [`with_card_shadow`], on a canvas this one's output
+/// is copied into whole: the card's pixels are the bytes [`masked_as`] already
+/// wrote, and the code that wrote them does not run again.
+///
+/// Which is also why the reach is the *measured* [`SHADOW_REACH`] and not the
+/// Gaussian this note used to quote. Three sigma of a `blur/2 = 2` blur is six
+/// pixels, so a 96 card wanted a 108 canvas and a row 12 taller; the capture
+/// says the shadow stops three pixels out, which is a 102 canvas and six.
+///
+/// And it is drawn into the bitmap rather than asked of a `container`'s
+/// `Shadow` for the reason [`crate::shell::shadow_band`] gives, which is the
+/// same one: iced 0.12.3 composites a `Shadow` inside its own element's rounded
+/// box coverage (`solid.wgsl`'s
+/// `mix(base_color, shadow_color, (1.0 - radius_alpha) * shadow_alpha)`), so it
+/// bands the very fill it is meant to sit behind. An outer shadow has to be
+/// pixels this file controls, or elements in a tree it does not own.
 fn masked_as(
     bytes: &[u8],
     side: u32,
@@ -358,6 +633,10 @@ impl Icon {
     /// so a letterboxed icon shows the same colour either way -- and it is that
     /// container which draws the outline for this shape, because a 16/96 rounded
     /// rectangle is a shape a `container` border *can* draw.
+    ///
+    /// And this canvas is the box and nothing else, with no shadow round it,
+    /// which is `ProjectCard.vue:31`'s own `no-shadow` rather than a limit of
+    /// this file's: [`Icon::shadowed_circle`] grows its canvas and this does not.
     pub fn of(bytes: &[u8], side: u32) -> Option<Icon> {
         let picture = masked(bytes, side)?;
         Some(Icon {
@@ -377,8 +656,61 @@ impl Icon {
     /// and the disc is the box's full `side`; and the `1px` 15%-white outline,
     /// which CSS clips to the radius, so it is a ring following the circle rather
     /// than the rounded rectangle a `container` border would draw.
+    ///
+    /// **No shadow.** `Avatar.vue:299` casts `--shadow-card` on every avatar that
+    /// is not `.no-shadow`, and every caller of *this* is one: the eight friends
+    /// on `/hosting/manage` are `ServerListEmptyPreview.vue:47` (`no-shadow`),
+    /// the invite toast's photograph is `ServerListEmptyPreview.vue:100` (the
+    /// same), and the owner chip is `ServerListing.vue:54`. So the canvas is the
+    /// box and nothing else, and [`Icon::shadowed_circle`] is the one constructor
+    /// that grows.
     pub fn circle(bytes: &[u8], side: u32) -> Option<Icon> {
         let picture = masked_as(bytes, side, true, true, button_bg(Gen::Dark))?;
+        Some(Icon {
+            handle: Handle::from_pixels(picture.side, picture.side, picture.pixels),
+        })
+    }
+
+    /// `bytes` as `UserPageHeader.vue:4`'s avatar: [`Icon::circle`]'s card *with*
+    /// `Avatar.vue:299`'s `box-shadow: var(--shadow-card)` behind it.
+    ///
+    /// The one avatar the reference does not pass `no-shadow` to, and the reason
+    /// this is a separate constructor rather than a flag on [`Icon::circle`]: the
+    /// shadow reaches [`SHADOW_REACH`] past the card, so the handle this hands
+    /// back is `side + 2 * reach` across and the card sits at
+    /// `(reach, reach - SHADOW_OFFSET_Y)` inside it. See [`with_card_shadow`]
+    /// for the geometry and the five measured depths.
+    ///
+    /// # The caller has to lay the handle out at the canvas's own size
+    ///
+    /// Which is the whole of what is missing, and it is two lines in
+    /// `pages/user.rs`, which is not this file's:
+    ///
+    /// ```text
+    /// user.rs:544   Icon::circle(&picture, AVATAR as u32)
+    ///             -> Icon::shadowed_circle(&picture, AVATAR as u32)
+    /// user.rs:1202  .width(Length::Fixed(AVATAR))     ->  AVATAR + 2 * SHADOW_REACH
+    ///               .height(Length::Fixed(AVATAR))    ->  AVATAR + 2 * SHADOW_REACH
+    /// ```
+    ///
+    /// `iced_widget-0.12.3/src/image.rs:137` fits the texture to the layout box
+    /// (`ContentFit::Contain`, `image.rs:50`) and `image.rs:104` takes the layout
+    /// box from the `width`/`height` given here rather than from the texture, so
+    /// a 102-pixel canvas in a 96-pixel slot is scaled to 94.1% and the disc goes
+    /// with it. Measured on our own capture of `/user/FlameFire`, growing the
+    /// canvas without the box draws the disc 90.35 across where the reference
+    /// draws 96, and lays the shadow's five bands down *inside* the card -- at
+    /// `x=136`, `y=163..167`, where the reference has the avatar's own picture.
+    /// That is why the module docs call this a limit rather than a fix, and why
+    /// the canvas does not grow in [`Icon::circle`] where `pages/servers.rs`
+    /// would squeeze nine avatars that the reference draws no shadow under.
+    ///
+    /// The `side` passed here is still the *card's* side and not the canvas's, so
+    /// the disc is the size the reference draws whatever the caller's box is.
+    #[allow(dead_code, reason = "`pages/user.rs:544` is the only caller that wants this")]
+    pub fn shadowed_circle(bytes: &[u8], side: u32) -> Option<Icon> {
+        let card = masked_as(bytes, side, true, true, button_bg(Gen::Dark))?;
+        let picture = with_card_shadow(card, Shadow::of(Gen::Dark));
         Some(Icon {
             handle: Handle::from_pixels(picture.side, picture.side, picture.pixels),
         })
@@ -646,29 +978,267 @@ mod tests {
         );
     }
 
-    /// The box-shadow is deliberately not drawn, and this is what holds that line:
-    /// the canvas is the box and nothing else, so there is nowhere in it for a
-    /// shadow's blur to reach.
+    /// `Avatar.vue:299`'s `box-shadow: var(--shadow-card)` is drawn, and these
+    /// are its numbers: the canvas it needs, where the card sits inside it, and
+    /// what the shadow reads as at each of the five depths off it.
     ///
-    /// `--shadow-card` is `rgba(0, 0, 0, 0.25) 0px 2px 4px 0px`
-    /// (`variables.scss:368`), so a bitmap of it needs the box plus the 2px offset
-    /// plus three times the 2px sigma in each direction: 108x108, 2,448 pixels and
-    /// 9.8KB more per avatar than the 9,216 it has. What it buys is a 0.25 peak
-    /// alpha spread over five rows, the largest step 4/255 = 1.6% -- and a caller
-    /// change in a file this one does not own, since a 108x108 handle in a 96 slot
-    /// stretches the disc by 12.5%. See [`masked_as`].
+    /// Measured off `ref/user-ref.png`, the profile header's own avatar, which is
+    /// a 96 box at `x=88..183`, `y=72..167` on the page's `#16181c` and casts a
+    /// shadow five rows below its last row and three columns past either edge of
+    /// its centre row. So a 102 canvas, the card at `(3, 5)` and five rings of
+    /// pre-composited ink -- and every one of the fifteen is read back out of the
+    /// canvas rather than recomputed, so this fails if a reach or a depth moves.
     #[test]
-    fn the_canvas_is_the_box_and_never_the_box_plus_a_shadow() {
-        for side in [2u32, 8, 48, 96, 100] {
-            let disc = masked_as(&picture(64, 64), side, true, true, button_bg(Gen::Dark))
-                .expect("a PNG");
-            assert_eq!(disc.side, side, "a {side}px avatar");
+    fn the_card_carries_the_shadow_the_reference_casts() {
+        let side = 96u32;
+        let shadow = Shadow::of(Gen::Dark);
+        let card =
+            masked_as(&picture(64, 64), side, true, true, button_bg(Gen::Dark)).expect("a PNG");
+        let canvas = with_card_shadow(card, shadow);
+
+        // The canvas is the shadow's own footprint -- the card's box moved down
+        // the offset and grown by the reach -- so the card's corner is a pixel
+        // *below* its top edge, and that is what leaves the capture's single row
+        // above the disc above rather than a fifth row below it below.
+        let (grown, at_x, at_y) = shadow_canvas(side);
+        assert_eq!(shadow_canvas(2), (8, 3, 1), "the same padding at 2px");
+        assert_eq!(
+            shadow_canvas(100),
+            (106, 3, 1),
+            "and at `ProjectCard`'s size"
+        );
+        assert_eq!(canvas.side, grown);
+        assert_eq!((at_x, at_y), (3, 1));
+        assert_eq!(canvas.pixels.len(), (grown * grown * 4) as usize);
+        // 96 becomes 102: six more pixels of canvas than the old note's three
+        // sigma of Gaussian wanted, and 4,896 more bytes of RGBA.
+        assert_eq!(SHADOW_REACH, 3.0, "`blur / 2` is 2 and the capture's is 3");
+
+        // The five rings' inks, darkest first, and the reach they cover: the
+        // outermost ends at the reach and each ring is a pixel of it narrower.
+        let inks: Vec<[u8; 4]> = (0..SHADOW_DEPTHS.len())
+            .map(|ring| shadow.ink(ring))
+            .collect();
+        assert_eq!(
+            inks,
+            vec![
+                [18, 20, 23, 255],
+                [19, 21, 24, 255],
+                [20, 22, 25, 255],
+                [21, 23, 26, 255],
+                [21, 23, 27, 255],
+            ],
+            "`ref/user-ref.png`, x=136 y=168..172 over the page's #16181c"
+        );
+        assert_eq!(ring_radius(side, 4), 51.0, "48 + the reach");
+        assert_eq!(
+            ring_radius(side, 0),
+            47.0,
+            "one pixel inside the card's edge"
+        );
+        // The shadow's centre is the card's own centre and the offset below it,
+        // and the rings land one pixel further out per ring: the card's last row
+        // is 45.5 from that centre, so they are at 46.5 .. 50.5.
+        let centre = (at_x + side / 2, at_y + SHADOW_OFFSET_Y as u32 + side / 2);
+        for ring in 0..SHADOW_DEPTHS.len() {
+            let row = centre.1 + 46 + ring as u32;
             assert_eq!(
-                disc.pixels.len(),
-                (side * side * 4) as usize,
-                "a {side}px avatar holds {side}px of picture and no shadow around it"
+                at(&canvas, centre.0, row),
+                inks[ring],
+                "ring {ring} is {row} rows down, {} from the centre",
+                row as f32 + 0.5 - centre.1 as f32
             );
         }
+
+        // And the twelve pixels the reference's own capture reads around that
+        // card, at the capture's coordinates: the card is at `x=88`, `y=72`
+        // there, so the canvas's `(0, 0)` is the capture's `(85, 71)`.
+        let measured: [(u32, u32, [u8; 3]); 12] = [
+            (51, 97, [18, 20, 23]), // x=136 y=168, the first row below the disc
+            (51, 98, [19, 21, 24]),
+            (51, 99, [20, 22, 25]),
+            (51, 100, [21, 23, 26]),
+            (51, 101, [21, 23, 27]),
+            (2, 53, [20, 22, 25]), // y=120 x=87 and x=184, either side
+            (1, 53, [21, 23, 26]),
+            (0, 53, [21, 23, 27]),
+            (99, 53, [20, 22, 25]),
+            (100, 53, [21, 23, 26]),
+            (101, 53, [21, 23, 27]),
+            (51, 0, [21, 23, 27]), // x=136 y=71, the one row above the disc
+        ];
+        for (x, y, ink) in measured {
+            assert_eq!(
+                at(&canvas, x, y),
+                [ink[0], ink[1], ink[2], 255],
+                "the capture reads {ink:?} at canvas ({x}, {y})"
+            );
+        }
+        // The four corners of the footprint carry nothing, which is what says the
+        // reach is three and not the blur's nominal two: the capture has the page's
+        // own `#16181c` at `x=84` and at `y=173`, and at `(89, 67)` beside the one
+        // row above the disc.
+        for (x, y) in [(0u32, 0u32), (0, 4), (4, 0), (101, 101), (97, 101)] {
+            assert_eq!(
+                at(&canvas, x, y),
+                [0, 0, 0, 0],
+                "({x}, {y}) is clear in the capture and here"
+            );
+        }
+    }
+
+    /// The card's own pixels are the bytes [`masked_as`] wrote, copied in whole.
+    ///
+    /// Which is the claim that the shadow changes nothing inside the disc: the
+    /// fill, the picture, the outline and the radius are all still there, at the
+    /// same bytes, and only the canvas round them is new. So the two composites
+    /// are compared over the card's own box rather than over the shadow's.
+    #[test]
+    fn the_shadow_adds_pixels_and_changes_none() {
+        for side in [8u32, 48, 96] {
+            let art = [52, 58, 63, 255];
+            let card = masked_as(
+                &painted(300, 307, art),
+                side,
+                true,
+                true,
+                button_bg(Gen::Dark),
+            )
+            .expect("a PNG");
+            let shadowed = with_card_shadow(card.clone(), Shadow::of(Gen::Dark));
+            let (grown, at_x, at_y) = shadow_canvas(side);
+            for y in 0..side {
+                for x in 0..side {
+                    assert_eq!(
+                        at(&shadowed, x + at_x, y + at_y),
+                        at(&card, x, y),
+                        "the card moved at {x},{y} of a {side}px disc"
+                    );
+                }
+            }
+            // The disc's own corners are still clear, so the canvas has not filled
+            // in behind them, and the shadow has not leaked past the reach.
+            assert_eq!(at(&shadowed, at_x, at_y)[3], 0, "the corner is clear");
+            assert_eq!(at(&shadowed, at_x + side - 1, at_y + side - 1)[3], 0);
+            assert_eq!(at(&shadowed, 0, 0)[3], 0, "and nothing before the reach");
+            assert_eq!(at(&shadowed, grown - 1, grown - 1)[3], 0);
+            // Everything the shadow did land in is one of its own five inks.
+            let inks: std::collections::BTreeSet<[u8; 4]> = (0..SHADOW_DEPTHS.len())
+                .map(|r| Shadow::of(Gen::Dark).ink(r))
+                .collect();
+            let outside: std::collections::BTreeSet<[u8; 4]> = (0..grown)
+                .flat_map(|y| (0..grown).map(move |x| (x, y)))
+                .filter(|(x, y)| {
+                    let inside = *x >= at_x && *x < at_x + side && *y >= at_y && *y < at_y + side;
+                    !inside && at(&shadowed, *x, *y)[3] != 0
+                })
+                .map(|(x, y)| at(&shadowed, x, y))
+                .collect();
+            assert!(!outside.is_empty(), "a {side}px disc casts something");
+            assert!(outside.is_subset(&inks), "and casts only its own rings");
+        }
+    }
+
+    /// The shadow's own reach is outside the card's box, so the two constructors
+    /// hand back handles of different sizes -- and that difference is the whole
+    /// reason they are two constructors and not one flag.
+    #[test]
+    fn only_the_shadowed_circle_grows_its_canvas() {
+        for side in [24u32, 36, 96] {
+            let bytes = picture(64, 64);
+            let plain = masked_as(&bytes, side, true, true, button_bg(Gen::Dark)).expect("a PNG");
+            let shadowed = with_card_shadow(plain.clone(), Shadow::of(Gen::Dark));
+            assert_eq!(plain.side, side, "the friends list's {side}px avatar");
+            assert_eq!(shadowed.side, side + 6, "and the header's {side}px card");
+            // The card is the same bytes either way; only the canvas round it is
+            // new, and the disc lands at (3, 1) rather than at the origin.
+            for y in 0..side {
+                for x in 0..side {
+                    assert_eq!(at(&shadowed, x + 3, y + 1), at(&plain, x, y));
+                }
+            }
+        }
+        // And the reference's own sizes are the two kinds this crate draws: eight
+        // friends at `size="1.5rem"` round (`ServerListEmptyPreview.vue:47`),
+        // Geometrically at `2.25rem` (`:100`) and the profile header at 96
+        // (`UserPageHeader.vue:8`). Only the last one asks for a shadow.
+        assert_eq!(
+            shadow_canvas(24).0,
+            30,
+            "a friend would draw 30 if it had one"
+        );
+        assert_eq!(
+            shadow_canvas(36).0,
+            42,
+            "the toast would draw 42 if it had one"
+        );
+        assert_eq!(shadow_canvas(96).0, 102, "the header's own canvas is 102");
+    }
+
+    /// `ProjectCard.vue:31` asks for `no-shadow` on a project icon, so
+    /// [`Icon::of`]'s canvas is the box and nothing else -- which is what keeps
+    /// the rail, the sidebar and a project's own cards free of a ring around a
+    /// twenty-pixel avatar.
+    #[test]
+    fn a_project_icon_holds_its_box_and_no_shadow() {
+        for side in [2u32, 8, 48, 96, 100] {
+            let icon = masked(&picture(64, 64), side).expect("a PNG");
+            assert_eq!(icon.side, side, "a {side}px icon");
+            assert_eq!(
+                icon.pixels.len(),
+                (side * side * 4) as usize,
+                "a {side}px icon holds {side}px of picture and no shadow around it"
+            );
+            // `ui::icon_box` lays the handle out at `side` too, so a project icon
+            // is never squeezed by a shadow it was never given.
+            assert!(
+                Icon::of(&picture(64, 64), side)
+                    .map(|icon| icon.handle().id())
+                    .is_some(),
+                "a {side}px icon has a handle"
+            );
+        }
+    }
+
+    /// The light look's `--shadow-card` (`variables.scss:140`) is the same shape
+    /// with a tint and a tenth of the alpha, so the same geometry over the light
+    /// page -- and the one shadow in this file that is *not* measured off a
+    /// capture, because nothing in this crate paints the light look. It is
+    /// derived from the token, and it is worth pinning because it says how little
+    /// the reference's own light look would show: the deepest ring lands twelve
+    /// units under the page and the faintest two.
+    #[test]
+    fn the_light_look_shadow_is_the_same_shape_over_a_tint() {
+        let dark = Shadow::of(Gen::Dark);
+        let light = Shadow::of(Gen::Light);
+        assert_eq!(dark.page, [0x16, 0x18, 0x1c], "--surface-1 under a profile");
+        assert_eq!(
+            light.page,
+            [0xeb, 0xeb, 0xeb],
+            "and its own light equivalent"
+        );
+        assert_eq!(dark.alpha, 0.25, "`rgba(0, 0, 0, 0.25)`");
+        assert_eq!(light.alpha, 0.1, "`rgba(50, 50, 100, 0.1)`");
+        // `rgba(50, 50, 100, 0.1)` over `#ebebeb`: `235 * (1 - a) + tint * a`
+        // truncated, which is 12 units down at the deepest ring and 2 at the
+        // faintest, and blue is a unit under the other two throughout because the
+        // tint's own blue is `100` and not `50`.
+        assert_eq!(
+            (0..SHADOW_DEPTHS.len())
+                .map(|ring| light.ink(ring))
+                .collect::<Vec<_>>(),
+            vec![
+                [223, 223, 226, 255],
+                [226, 226, 228, 255],
+                [229, 229, 230, 255],
+                [232, 232, 232, 255],
+                [233, 233, 234, 255],
+            ]
+        );
+        // The geometry does not move with the ink: same canvas, same card corner,
+        // same five radii, because both tokens declare the same `0px 2px 4px`.
+        assert_eq!(shadow_canvas(96), (102, 3, 1));
+        assert_eq!(ring_radius(96, 4), 51.0);
     }
 
     #[test]
