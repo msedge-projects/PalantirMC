@@ -1303,10 +1303,17 @@ impl Store {
     /// v3 calls it a `plugin`, so the strip built from v2 alone is missing *Data
     /// Packs* and *Plugins* where the reference draws them. The collections list is
     /// read from v3 because v2 has no such route at all (the 404 above), and it is
-    /// what puts the strip's *Collections* tab there: `layout.vue:765` appends
+    /// what puts the strip's *Collections* tab there: `layout.vue:762-765` appends
     /// `'collection'` exactly when `collections.value.length > 0`. Each is cached
     /// under its own URL beside the v2 list, so a profile revisited costs nothing
     /// more than it did.
+    ///
+    /// The collections read is therefore load-bearing for an address as well as for
+    /// a tab: `/user/{name}/collections` resolves (`crate::route::ProfileTab`) and
+    /// draws the cards, and a read that failed draws that tab's own empty state --
+    /// `showCollectionsEmptyState`, `layout.vue:833` -- rather than falling back to
+    /// the profile. Which is the reference's answer too, for an account with no
+    /// collections at all.
     ///
     /// Neither of those two reads' failures is this call's failure, and they are the
     /// second and third places this store lets a reason go (the first is

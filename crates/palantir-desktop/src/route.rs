@@ -215,7 +215,9 @@ impl ProjectType {
     ///
     /// `collections` is refused rather than guessed at: it is a fourth link in the
     /// reference's strip, and collections are not a project type here (see
-    /// [`Self::PROFILE_ORDER`]).
+    /// [`Self::PROFILE_ORDER`]). Refusing the *token* is not refusing the *address*:
+    /// `/user/jelly/collections` resolves, through [`ProfileTab::from_profile_token`],
+    /// which is this function's other half for that one link.
     pub fn from_profile_token(token: &str) -> Option<ProjectType> {
         Self::from_token(token)
             .or_else(|| token.strip_suffix('s').and_then(Self::from_token))
@@ -262,6 +264,71 @@ pub enum InstanceTab {
     Share,
 }
 
+/// What a profile address's third segment names.
+///
+/// The fourth of the shape [`ServerTab`], [`ProjectTab`] and [`InstanceTab`] take
+/// -- an enum beside [`Route`] rather than another `ProjectType` variant, and for
+/// the reason `ProjectType::from_profile_token` gives: a collection is not a kind
+/// of project, so a variant would have to be answered by every place that derives
+/// something from a type. `target_folder` would have to say where a collection
+/// installs, `sentence` would have to put "collections" in a sentence about a
+/// downloaded thing, `TABS` and `ALL` would have to decide whether Discover
+/// offers one -- and the reference offers none of those, because it has no such
+/// concept either. The reference keeps `'collection'` as a *string* that only the
+/// profile's own filter reads: `layout.vue:762` pushes it into `projectTypes` after
+/// `catalogProjectTypes` has run, and `parseProjectTypeRouteParam`
+/// (`ui/src/utils/v3-projects.ts:75`) turns it back into the selection.
+///
+/// No `All` variant, and that is the reference's shape rather than an omission:
+/// `routes.js:66` spells the segment `:projectType?`, and *All* is what an address
+/// with no segment is (`layout.vue:771-773` builds its `href` as `profilePath`
+/// alone). So [`Route::User`] carries an `Option` and `None` is *All* -- the
+/// optional parameter, not a tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileTab {
+    /// `mods`, `datapacks` and the rest: one project type.
+    Projects(ProjectType),
+    /// `collections`, which is the strip's fourth link and no kind of project.
+    Collections,
+}
+
+impl ProfileTab {
+    /// The third segment this tab's address spells, as the reference's own links do.
+    ///
+    /// `layout.vue:779` builds every one of them the same way --
+    /// `` `${profilePath}/${projectType}s` `` -- from the *singular* string, which is
+    /// why a type's is [`ProjectType::profile_token`] and why `'collection'` becomes
+    /// `collections`. There is no singular to append here, and the one segment that
+    /// resolves is the plural.
+    pub fn profile_token(self) -> String {
+        match self {
+            ProfileTab::Projects(kind) => kind.profile_token(),
+            ProfileTab::Collections => "collections".to_string(),
+        }
+    }
+
+    /// What a profile address's third segment names, or `None` for one that names
+    /// nothing this tree has a page for.
+    ///
+    /// `parseProjectTypeRouteParam`, term for term: both spellings of the
+    /// collections token are read (`v3-projects.ts:81-83` tests `'collection'` and
+    /// `'collections'` and answers `'collection'` for either), and everything else
+    /// goes through [`ProjectType::from_profile_token`] -- the singular parser with
+    /// the trailing `s` stripped, which is what the reference's line above it does
+    /// before `normalizeProjectType`.
+    ///
+    /// `collection` is deliberately *not* reachable through
+    /// [`ProjectType::from_profile_token`] and this is its other half rather than a
+    /// contradiction: a collection is not a project type, so no type is handed back
+    /// for the token, and the address is still a real one.
+    pub fn from_profile_token(token: &str) -> Option<ProfileTab> {
+        if token == "collections" || token == "collection" {
+            return Some(ProfileTab::Collections);
+        }
+        ProjectType::from_profile_token(token).map(ProfileTab::Projects)
+    }
+}
+
 /// Which tab of a hosted server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerTab {
@@ -299,7 +366,13 @@ pub enum Route {
     /// `/screenshots`
     Screenshots,
     /// `/user/:user/:projectType?`
-    User { user: String, project_type: Option<ProjectType> },
+    User {
+        /// `:user` -- whose profile.
+        user: String,
+        /// `:projectType`, read the way the reference reads it -- as a
+        /// [`ProfileTab`], or `None` for the *All* tab's own empty path.
+        project_type: Option<ProfileTab>,
+    },
     /// `/project/:id`
     Project { id: String, tab: ProjectTab },
     /// `/instance/:id`
@@ -425,7 +498,7 @@ impl Route {
             }
             [user, name, kind] if user == "user" => Some(Route::User {
                 user: name.clone(),
-                project_type: Some(ProjectType::from_profile_token(kind)?),
+                project_type: Some(ProfileTab::from_profile_token(kind)?),
             }),
             [project, id] if project == "project" => Some(Route::Project {
                 id: id.clone(),
@@ -777,7 +850,14 @@ mod tests {
             Route::Skins,
             Route::Screenshots,
             Route::User { user: "jelly".into(), project_type: None },
-            Route::User { user: "jelly".into(), project_type: Some(ProjectType::Mod) },
+            Route::User {
+                user: "jelly".into(),
+                project_type: Some(ProfileTab::Projects(ProjectType::Mod)),
+            },
+            Route::User {
+                user: "jelly".into(),
+                project_type: Some(ProfileTab::Collections),
+            },
             Route::Project { id: "sodium".into(), tab: ProjectTab::Description },
             Route::Project { id: "sodium".into(), tab: ProjectTab::Versions },
             Route::Project { id: "sodium".into(), tab: ProjectTab::Version("mc1.21-0.5".into()) },
@@ -992,9 +1072,13 @@ mod tests {
             assert_eq!(ProjectType::from_profile_token(kind.token()), Some(*kind));
         }
         assert_eq!(ProjectType::from_token("mods"), None, "the API's own spelling is singular");
-        // The reference's fourth link, which this tree has no page for: refused
-        // rather than read as some type called `collection`.
+        // The reference's fourth link is *not* a project type, and this assertion is
+        // the reason it never becomes one: the token resolves to no type at all, so
+        // nothing that derives from a type -- `target_folder`, `sentence`, `TABS` --
+        // has an arm to answer for. What changed is not this line but the address
+        // below: `/user/jelly/collections` is a real one, through `ProfileTab`.
         assert_eq!(ProjectType::from_profile_token("collections"), None);
+        assert_eq!(ProjectType::from_profile_token("collection"), None);
         assert_eq!(ProjectType::from_profile_token(""), None);
         assert_eq!(ProjectType::from_profile_token("s"), None);
         // And the addresses themselves, both ways round.
@@ -1013,7 +1097,119 @@ mod tests {
             Address::parse("/user/jelly/mod").map(|address| address.route),
             "the two spellings are one page"
         );
-        assert!(Address::parse("/user/jelly/collections").is_none());
+        // The collections address, which used to be `is_none()` here and was the
+        // reason the strip's fourth tab was a dead end: `layout.vue:779` builds it
+        // out of the same template that builds `mods`, so it is an address, and it
+        // names a profile tab rather than a project type.
+        assert_eq!(
+            Address::parse("/user/jelly/collections").map(|address| address.route),
+            Some(Route::User {
+                user: "jelly".into(),
+                project_type: Some(ProfileTab::Collections),
+            })
+        );
+        // `parseProjectTypeRouteParam` accepts the singular too
+        // (`v3-projects.ts:81`), so both of the reference's spellings land here --
+        // and on the same tab, which is the point of the pair.
+        assert_eq!(
+            Address::parse("/user/jelly/collection").map(|address| address.route),
+            Address::parse("/user/jelly/collections").map(|address| address.route)
+        );
+    }
+
+    #[test]
+    fn the_collections_address_round_trips_and_a_third_segment_that_is_nothing_is_refused() {
+        // Read, written, read: `ProfileTab::profile_token` is the writer the shell
+        // uses for every one of the strip's four tabs, so the four addresses and
+        // the four tabs are one list and this walks all of it.
+        let strip = [
+            (None, "/user/FlameFire"),
+            (Some(ProfileTab::Projects(ProjectType::Datapack)), "/user/FlameFire/datapacks"),
+            (Some(ProfileTab::Projects(ProjectType::Modpack)), "/user/FlameFire/modpacks"),
+            (Some(ProfileTab::Collections), "/user/FlameFire/collections"),
+        ];
+        for (tab, path) in strip {
+            let written = match tab {
+                Some(tab) => format!("/user/FlameFire/{}", tab.profile_token()),
+                None => "/user/FlameFire".to_string(),
+            };
+            assert_eq!(written, path, "{tab:?} is not spelled the reference's way");
+            let parsed = Address::parse(path).unwrap_or_else(|| panic!("{path} is not a route"));
+            assert_eq!(parsed.route, Route::User { user: "FlameFire".into(), project_type: tab });
+            assert_eq!(parsed.context, Context::default());
+            // And back again.
+            assert_eq!(
+                Address::parse(&written).map(|address| address.route),
+                Some(parsed.route),
+                "{written} did not survive a round trip"
+            );
+        }
+        // The four addresses are four tabs: none of them is another one, and none is
+        // the bare profile.
+        let routes: Vec<Route> = strip
+            .iter()
+            .map(|(_, path)| Address::parse(path).expect("a route").route)
+            .collect();
+        for (index, route) in routes.iter().enumerate() {
+            for (other, earlier) in routes.iter().enumerate() {
+                assert_eq!(index == other, route == earlier, "two of the four are one address");
+            }
+        }
+        // A third segment that names nothing is still refused, and refused as a
+        // whole rather than read as *All*: `Address::parse` answers `None` so the
+        // shell falls back rather than landing the reader on a page that says
+        // something else.
+        for path in ["/user/jelly/nonsense", "/user/jelly/collectionss", "/user/jelly/s"] {
+            assert!(Address::parse(path).is_none(), "{path} should not resolve");
+        }
+        // A user called `collections` is a name, not a tab: the first segment is
+        // read as the user wherever it sits, and `/collections` is the strip's token
+        // rather than a top-level page.
+        assert!(Address::parse("/collections").is_none());
+        assert!(matches!(
+            Address::parse("/user/collections/mods").map(|address| address.route),
+            Some(Route::User {
+                user,
+                project_type: Some(ProfileTab::Projects(ProjectType::Mod)),
+            }) if user == "collections"
+        ));
+    }
+
+    #[test]
+    fn a_collection_is_a_profile_tab_and_not_a_project_type() {
+        // The one assertion that keeps the two apart, and the reason
+        // `ProfileTab` is its own enum: a collection is selected by an address and
+        // filters nothing.
+        assert_eq!(
+            ProfileTab::from_profile_token("collections"),
+            Some(ProfileTab::Collections)
+        );
+        assert_eq!(ProfileTab::from_profile_token("collection"), Some(ProfileTab::Collections));
+        assert_eq!(
+            ProfileTab::from_profile_token("mods"),
+            Some(ProfileTab::Projects(ProjectType::Mod))
+        );
+        assert_eq!(ProfileTab::from_profile_token(""), None);
+        // No type is handed back for the collections token, and the tab is not one
+        // of the types any of the orderings carry.
+        assert_eq!(ProjectType::from_profile_token("collections"), None);
+        assert_eq!(ProjectType::from_profile_token("collection"), None);
+        for kind in ProjectType::ALL {
+            assert_ne!(ProfileTab::Projects(*kind), ProfileTab::Collections);
+        }
+        // It is not in the list the strip sorts, and `PROJECT_TYPE_ORDER`'s own
+        // `collection` entry is not read as one: that order ends with `collection`
+        // (`ui/src/utils/project-types.ts:1-10`) purely to put the tab last, which
+        // `pages::user` does by appending rather than sorting.
+        assert_eq!(ProjectType::PROFILE_ORDER.len(), 7);
+        assert_eq!(ProjectType::ALL.len(), 7, "still seven: no variant was added");
+        assert_eq!(ProjectType::TABS.len(), 6, "and Discover still offers six");
+        // The one address a collection has is its own, and it is the one the
+        // reference's `navLinks` builds for it.
+        assert_eq!(ProfileTab::Collections.profile_token(), "collections");
+        for kind in ProjectType::ALL {
+            assert_ne!(kind.profile_token(), "collections");
+        }
     }
 
     #[test]

@@ -54,8 +54,10 @@
 //! all: `GET /v3/user/{id}/collections` answers 200 anonymously and
 //! `GET /v2/user/{id}/collections` answers 404.
 //! [`Profile::collections`] carries it, and it is what decides whether the strip ends
-//! in a *Collections* tab (`layout.vue:765`), which selects a different branch of the
-//! page entirely -- the collection cards rather than the project list.
+//! in a *Collections* tab (`layout.vue:762-765`), which selects a different branch of
+//! the page entirely -- the collection cards rather than the project list -- and is
+//! addressable as `/user/{name}/collections`, the fourth of the strip's own links
+//! (see [`crate::route::ProfileTab`]).
 //!
 //! What that read still cannot fix is a card's row. `ProjectCard.vue` is composed
 //! out of the v3 project document as a whole -- `name` where v2 says `title`,
@@ -79,6 +81,7 @@ use super::overlay::Stack;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP};
+use crate::route::ProfileTab;
 use crate::route::ProjectType;
 use crate::store::Store;
 use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
@@ -744,20 +747,16 @@ pub struct Asked {
 
 /// Which of the strip's tabs is on screen.
 ///
-/// Not `Option<ProjectType>`, because the strip has a fourth tab that is not a
-/// project type: `layout.vue:765` pushes the string `'collection'` into the same
-/// list the types go into, and `parseProjectTypeRouteParam` reads it back the same
-/// way. `ProjectType` has no variant for it and cannot grow one from this page --
-/// `route.rs` owns that enum, and `/user/{name}/collections` is deliberately not an
-/// address here ([`ProjectType::from_profile_token`] refuses the token) -- so the
-/// branch is carried by the page instead.
+/// Not [`crate::route::ProfileTab`] and not `Option<ProjectType>`, because this is
+/// what the page *draws* rather than what the address says: `All` is a thing drawn
+/// (it is the first tab, and the arm that puts every project and every collection
+/// on screen at once) and it has no address of its own, while [`ProjectType`] has
+/// three facts about a project that the strip does not need. The relationship is
+/// `Filter::of(Option<ProfileTab>)`, which is [`State::selected`]'s other name.
 ///
-/// The two project-type arms keep their navigation: [`Message::Filter`] is turned by
-/// [`crate::pages::Screen`] into an address, and the address comes back as
-/// [`State::filter`]. This arm has no address to go out on, so
-/// [`Message::Collections`] is applied here and stays here. That is the one place
-/// this page keeps state the address does not record, and it is a gap in the routing
-/// rather than a choice: leaving the tab and coming back by address lands on *All*.
+/// The two project-type arms and the collections arm all keep their navigation:
+/// [`Message::Filter`] is turned by [`crate::pages::Screen`] into an
+/// `Open::User`, and the address that comes back is written by [`State::filter`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Filter {
     /// No type in the address: the strip's *All* tab.
@@ -770,13 +769,15 @@ pub enum Filter {
 }
 
 impl Filter {
-    /// The tab an address's project type selects.
+    /// The tab an address's third segment selects.
     ///
     /// `None` is *All*, which is `parseProjectTypeRouteParam`'s own reading of an
-    /// address with nothing in its third segment.
-    pub fn of(project_type: Option<ProjectType>) -> Filter {
+    /// address with nothing in its third segment -- and the same reading
+    /// [`crate::route::ProfileTab`] keeps, so the two agree term for term.
+    pub fn of(project_type: Option<ProfileTab>) -> Filter {
         match project_type {
-            Some(kind) => Filter::Type(kind),
+            Some(ProfileTab::Projects(kind)) => Filter::Type(kind),
+            Some(ProfileTab::Collections) => Filter::Collections,
             None => Filter::All,
         }
     }
@@ -823,33 +824,18 @@ pub enum Message {
     /// Reported rather than applied, like the library's cards: opening a project is
     /// a change of address, and only the shell owns the history.
     Project(String),
-    /// One of the strip's filters was chosen.
+    /// One of the strip's tabs was chosen.
     ///
     /// The same report as [`Message::Project`], because in the reference the strip
     /// *is* links -- `NavTabs` renders one `href` per type -- so choosing one is a
     /// navigation rather than a change of state, and the address stays the single
-    /// record of what is on screen. [`State::filter`] is where the page then follows
-    /// the address.
-    Filter(Option<ProjectType>),
-    /// The strip's *Collections* tab was chosen.
+    /// record of what is on screen. All four tabs come through here, the
+    /// collections one included: `layout.vue:779` builds every `href` the same way,
+    /// so there is no fourth question to ask. `None` is the *All* tab, whose address
+    /// is the bare profile path.
     ///
-    /// Applied here rather than reported, which is the one place this page does not
-    /// do what [`Message::Filter`] does, and it is forced by the routing rather than
-    /// chosen: `Route::User` carries an `Option<ProjectType>`, and a collection is
-    /// not a project type, so there is no address for this tab to be. See
-    /// [`Filter`].
-    Collections,
-    /// A filter chosen while the page is on the collections branch.
-    ///
-    /// [`Message::Filter`] cannot leave that branch by itself, and this is why:
-    /// that message becomes an `Open::User`, the shell turns it into an address, and
-    /// the shell's `go` returns early when that address is the one the page is
-    /// already at. Choosing *All* from the collections branch is exactly that case --
-    /// the collections branch has no address of its own, so the page is still at
-    /// `/user/{name}` -- and the press would have left the reader on the branch they
-    /// were trying to leave. So this arm is applied here, and the address moves only
-    /// when it can.
-    LeaveCollections(Option<ProjectType>),
+    /// [`State::filter`] is where the page then follows the address back in.
+    Filter(Option<ProfileTab>),
     /// The header's overflow was pressed.
     More,
     /// A card's *Install* was pressed.
@@ -891,24 +877,20 @@ pub struct State {
     pub user: String,
     /// The project type the address names, which the list is filtered by.
     ///
-    /// The address's own field and left as it was, because the two project-type arms
-    /// of the strip are navigations and this is what they navigate *by*:
-    /// [`Message::Filter`] becomes an `Open::User`, and the address that comes back
-    /// is written here by [`Self::filter`] and read back by [`Self::selected`]. It
-    /// cannot carry the strip's fourth tab -- see [`Self::collections`] and
-    /// [`Filter`].
+    /// The address's own field, read out of [`ProfileTab`] once, because the strip
+    /// and the empty states ask for a type in nearly every arm and every one of
+    /// those arms has to say what *Collections* answers. [`Self::filter`] writes it,
+    /// [`Self::selected`] reads it beside [`Self::collections`], and the two cannot
+    /// disagree because one function writes both.
     pub project_type: Option<ProjectType>,
     /// Whether the strip's *Collections* tab is the one on screen.
     ///
-    /// Page state rather than address state, and the only thing on this page that
-    /// is: `Route::User` carries an `Option<ProjectType>` and a collection is not a
-    /// project type, so there is no `/user/{name}/collections` for this tab to be --
-    /// [`ProjectType::from_profile_token`] refuses the token on purpose. The
-    /// consequence is that leaving the tab and coming back by address lands on
-    /// *All*, which is what the address says.
-    ///
-    /// [`Self::filter`] clears it whenever the address is followed, so the two can
-    /// never disagree about which tab is drawn.
+    /// Half of the address, kept beside [`Self::project_type`] rather than inside
+    /// it: `ProjectType` has no variant for a collection and must not grow one (see
+    /// [`ProfileTab`]), so this is the page's own reading of
+    /// `Option<ProfileTab>`. It was page state with no address behind it while the
+    /// route could not carry the token; now `/user/{name}/collections` resolves and
+    /// the two agree.
     pub collections: bool,
     /// The profile, as the service answered it. A `Load`, because the page is drawn
     /// before the answer arrives and its four arms are what says so.
@@ -922,15 +904,17 @@ pub struct State {
 
 impl State {
     /// A page for one user, filtered by whatever the address asked for.
-    pub fn new(user: String, project_type: Option<ProjectType>) -> State {
-        State {
+    pub fn new(user: String, project_type: Option<ProfileTab>) -> State {
+        let mut state = State {
             user,
-            project_type,
+            project_type: None,
             collections: false,
             profile: Load::Idle,
             notice: None,
             round: 0,
-        }
+        };
+        state.filter(project_type);
+        state
     }
 
     /// Which tab the strip is on, as the one value both arms can be read through.
@@ -938,11 +922,14 @@ impl State {
     /// Named apart from [`Self::filter`], which is the one that *follows an address*:
     /// this one reads what the page is holding, that one changes it.
     pub fn selected(&self) -> Filter {
-        if self.collections {
-            Filter::Collections
+        // The two fields put back together into the one value the address holds, so
+        // the drawn tab and the parsed tab are read by the same function.
+        let tab = if self.collections {
+            Some(ProfileTab::Collections)
         } else {
-            Filter::of(self.project_type)
-        }
+            self.project_type.map(ProfileTab::Projects)
+        };
+        Filter::of(tab)
     }
 
     /// Apply a message, and answer with what the shell has to do about it.
@@ -966,14 +953,6 @@ impl State {
             // directly means the shell did not route them, and the answer to that is
             // to change nothing rather than to invent a navigation.
             Message::Project(_) | Message::Filter(_) => {}
-            // The Collections tab, applied here: see [`Message::Collections`]. There
-            // is no address for it, so this is the whole of the message.
-            Message::Collections => self.collections = true,
-            // Leaving the branch for one of the two arms the address *can* say. The
-            // address moves by itself when it differs from where the page already is
-            // -- a named type is a different path -- and *All* is the arm that cannot,
-            // which is what [`Message::LeaveCollections`] is for.
-            Message::LeaveCollections(project_type) => self.filter(project_type),
             // A card's own button, reported rather than performed. `pages::mod`
             // turns it into the same `Ask::Install` the project page's button
             // makes, so this launcher installs a mod from a profile exactly as it
@@ -1003,10 +982,15 @@ impl State {
     ///
     /// An address that names no type is the strip's *All* tab, so it clears the
     /// collections branch as well: arriving at `/user/x` from `/user/x/collections`
-    /// lands on *All*, which is what the address says.
-    pub fn filter(&mut self, project_type: Option<ProjectType>) {
-        self.project_type = project_type;
-        self.collections = false;
+    /// lands on *All*, which is what the address says. The two fields are written
+    /// here and nowhere else, which is what makes it impossible for the drawn tab
+    /// and the address to disagree.
+    pub fn filter(&mut self, project_type: Option<ProfileTab>) {
+        self.project_type = match project_type {
+            Some(ProfileTab::Projects(kind)) => Some(kind),
+            Some(ProfileTab::Collections) | None => None,
+        };
+        self.collections = project_type == Some(ProfileTab::Collections);
     }
 
     /// The request the page owes because nothing has been asked for yet.
@@ -1469,28 +1453,39 @@ fn filter_strip<'a>(
         ));
     }
     // The two lists are the strip's own index space, so the index that comes back
-    // from a press is read against both: the type tabs are the ones the address can
-    // carry and report through `Message::Filter`, and the collections tab is the one
-    // that cannot, so it reports through `Message::Collections` instead.
+    // from a press is read against both -- [`tab_at`], which is that reading on its
+    // own so it can be walked for every tab rather than one.
     //
-    // And the arm the address cannot *leave* by is the reason
-    // `Message::LeaveCollections` exists: on the collections branch the page is
-    // still at `/user/{name}`, so `All`'s own address is where it already is and the
-    // shell would treat the press as no navigation at all.
-    let on_collections = filter == Filter::Collections;
-    let typed = types.len();
+    // Every arm is reported rather than applied, and that is the reference's own
+    // `NavTabs`: four `href`s and four navigations. `pages::Screen` turns this into
+    // `Open::User`, the shell writes `/user/{name}/collections` from the same
+    // `profile_token` the other three get, and the address comes back as
+    // [`State::filter`] -- so leaving the branch needs no message of its own, which
+    // is what the *All* arm's own empty path used to prevent.
     Some(ui::tabs(theme, &keys, &labels, move |index| {
-        let chosen = match index {
-            0 => None,
-            n if n <= typed => types.get(n - 1).copied(),
-            _ => return Message::Collections,
-        };
-        if on_collections {
-            Message::LeaveCollections(chosen)
-        } else {
-            Message::Filter(chosen)
-        }
+        Message::Filter(tab_at(&types, index))
     }))
+}
+
+/// Which tab the strip's `index` selects, as the address segment it becomes.
+///
+/// The strip's own index space: index 0 is *All*, the project types follow in
+/// [`ProjectType::PROFILE_ORDER`] -- the order [`filter_strip`] pushed their keys
+/// in -- and the collections tab is last, because `PROJECT_TYPE_ORDER` ends with
+/// `collection` (`ui/src/utils/project-types.ts:1-10`) and `layout.vue:762` pushes
+/// it after `catalogProjectTypes` has run.
+///
+/// `None` is *All*, which is the absence of a third segment rather than a token of
+/// its own: `layout.vue:771-773` builds that link's `href` as `profilePath` alone.
+/// An index past the end is *Collections*, which can only be reached when the
+/// strip carries one -- [`filter_strip`] does not draw the tab without collections,
+/// so no index the widget can report is out of range.
+fn tab_at(types: &[ProjectType], index: usize) -> Option<ProfileTab> {
+    match index {
+        0 => None,
+        n if n <= types.len() => types.get(n - 1).copied().map(ProfileTab::Projects),
+        _ => Some(ProfileTab::Collections),
+    }
 }
 
 /// Whether the *no projects* empty state is drawn, which is `showProjectsEmptyState`
@@ -3572,6 +3567,63 @@ mod tests {
     }
 
     #[test]
+    fn each_of_the_strip_s_four_tabs_names_the_address_the_reference_links_with() {
+        // The whole of the defect this slice fixed, walked end to end: a press index
+        // -> the segment the reference's `navLinks` builds for that link -> an
+        // address this router resolves -> the tab the page then draws. Four tabs,
+        // which is the reference's own shape: `NavTabs v-if="navLinks.length > 2"`
+        // counts *links* and *All* is one of them.
+        let profile = with_collections();
+        let types = profile.types();
+        assert_eq!(strip_links(&profile), 4, "*All*, two types and the collections");
+        // The fixture's own two types. FlameFire's capture reads *Data Packs* in the
+        // second slot because that is the type its v3 array names, and the strip is
+        // counted off that array -- `layout.vue:762` and [`Profile::type_of`].
+        let addresses: Vec<String> = (0..4)
+            .map(|index| match tab_at(&types, index) {
+                Some(tab) => format!("/user/FlameFire/{}", tab.profile_token()),
+                None => "/user/FlameFire".to_string(),
+            })
+            .collect();
+        assert_eq!(
+            addresses,
+            vec![
+                "/user/FlameFire",
+                "/user/FlameFire/mods",
+                "/user/FlameFire/modpacks",
+                "/user/FlameFire/collections",
+            ]
+        );
+        // Every one of them is a route, and each resolves to the tab it was
+        // written for -- the collections one included, which is the one that used to
+        // resolve to nothing at all.
+        for (index, path) in addresses.iter().enumerate() {
+            let address = crate::route::Address::parse(path)
+                .unwrap_or_else(|| panic!("{path} is not a route"));
+            let mut state = State::new("FlameFire".to_string(), None);
+            match &address.route {
+                crate::route::Route::User { user, project_type } => {
+                    assert_eq!(user, "FlameFire");
+                    state.filter(*project_type);
+                }
+                other => panic!("{path} is not a profile page: {other:?}"),
+            }
+            assert_eq!(state.selected(), Filter::of(tab_at(&types, index)), "{path}");
+        }
+        // And the way back: every tab is reachable from every other tab, which is
+        // what the address is for. *All* was the arm that could not be left while
+        // the collections branch had no address of its own.
+        for from in 0..4 {
+            for to in 0..4 {
+                let mut state = State::new("FlameFire".to_string(), None);
+                state.filter(tab_at(&types, from));
+                state.filter(tab_at(&types, to));
+                assert_eq!(state.selected(), Filter::of(tab_at(&types, to)));
+            }
+        }
+    }
+
+    #[test]
     fn the_strip_appears_for_three_links_and_not_for_two() {
         // `NavTabs v-if="navLinks.length > 2"` counts *links*, and the collections
         // link is one of them: one type plus one collection is *All*, the type and
@@ -3608,33 +3660,42 @@ mod tests {
         assert_eq!(Filter::All.project_type(), None);
         assert_eq!(Filter::Type(ProjectType::Datapack).project_type(), Some(ProjectType::Datapack));
 
-        // And the tab's press is applied rather than reported, because there is no
-        // address for it: `Route::User` carries an `Option<ProjectType>`.
+        // And the tab's press is reported like the other three, because
+        // `/user/{name}/collections` is an address now: `Route::User` carries a
+        // `ProfileTab`, which is what the strip's fourth link is.
         let mut state = State::new("FlameFire".to_string(), None);
         assert_eq!(state.selected(), Filter::All);
-        state.update(Message::Collections);
+        assert_eq!(state.update(Message::Filter(Some(ProfileTab::Collections))), None);
+        assert_eq!(
+            state.selected(),
+            Filter::All,
+            "reported, not applied: the address has not moved yet"
+        );
+        // The address comes back and the page follows it, collections and all.
+        state.filter(Some(ProfileTab::Collections));
         assert_eq!(state.selected(), Filter::Collections);
-        assert_eq!(state.collections, true, "page state, because there is no address");
+        assert_eq!(state.project_type, None, "and no project type is invented");
         // An address that names no type is *All*, so arriving at `/user/x` from the
         // collections branch lands back on *All* -- and the two fields cannot
-        // disagree, because following the address clears the page state.
+        // disagree, because following the address writes both.
         state.filter(None);
         assert_eq!(state.selected(), Filter::All);
         assert_eq!(state.collections, false);
-        state.filter(Some(ProjectType::Modpack));
+        state.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
         assert_eq!(state.selected(), Filter::Type(ProjectType::Modpack));
 
-        // And the way off the branch, which is a message of its own: `All`'s address
-        // is the one the page is already on, so the shell would not move and the
-        // press has to be applied here.
-        state.update(Message::Collections);
+        // The way off the branch is a report like any other, and the *All* arm no
+        // longer needs a message of its own: the page is at `/user/x/collections`,
+        // so `/user/x` is a different address and the shell moves.
+        state.filter(Some(ProfileTab::Collections));
         assert_eq!(state.selected(), Filter::Collections);
-        state.update(Message::LeaveCollections(None));
+        state.filter(None);
         assert_eq!(state.selected(), Filter::All, "and the reader is not trapped");
         assert_eq!(state.collections, false);
-        state.update(Message::Collections);
-        state.update(Message::LeaveCollections(Some(ProjectType::Shader)));
+        state.filter(Some(ProfileTab::Collections));
+        state.filter(Some(ProfileTab::Projects(ProjectType::Shader)));
         assert_eq!(state.selected(), Filter::Type(ProjectType::Shader));
+        assert_eq!(state.project_type, Some(ProjectType::Shader));
     }
 
     #[test]
@@ -3917,8 +3978,9 @@ mod tests {
         state.update(Message::Found { round: 1, result: Ok(Box::new(sample())) });
         // The strip's own press is reported to the shell rather than applied here;
         // what the page does is follow the address it comes back on.
-        assert_eq!(state.update(Message::Filter(Some(ProjectType::Modpack))), None);
-        state.filter(Some(ProjectType::Modpack));
+        let pack = Some(ProfileTab::Projects(ProjectType::Modpack));
+        assert_eq!(state.update(Message::Filter(pack)), None);
+        state.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
         assert_eq!(state.project_type, Some(ProjectType::Modpack));
         assert_eq!(state.profile.ready().map(|profile| profile.shown(state.project_type).len()), Some(1));
         assert_eq!(state.opening(), None, "another filter is not another document");
@@ -3937,7 +3999,9 @@ mod tests {
         let _ = loaded.opening();
         loaded.update(Message::Found { round: 1, result: Ok(Box::new(sample())) });
         let mut filtered = loaded.clone();
-        filtered.filter(Some(ProjectType::Modpack));
+        filtered.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
+        let mut collections = loaded.clone();
+        collections.filter(Some(ProfileTab::Collections));
         let mut with_avatar = loaded.clone();
         if let Load::Ready(profile) = &mut with_avatar.profile {
             profile.avatar = crate::avatar::Icon::circle(&picture(32), AVATAR as u32);
@@ -3952,7 +4016,9 @@ mod tests {
         if let Load::Ready(profile) = &mut empty.profile {
             profile.projects.clear();
         }
-        let states = [&idle, &waiting, &loaded, &filtered, &with_avatar, &failed, &noticed, &empty];
+        let states =
+            [&idle, &waiting, &loaded, &filtered, &collections, &with_avatar, &failed, &noticed,
+             &empty];
         for state in states {
             for theme in Gen::ALL {
                 drop(view(*theme, state, &store));

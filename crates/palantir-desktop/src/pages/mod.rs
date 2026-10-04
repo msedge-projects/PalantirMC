@@ -101,8 +101,14 @@ pub enum Open {
     User {
         /// Whose profile.
         user: String,
-        /// The project type the address names, if it names one.
-        project_type: Option<crate::route::ProjectType>,
+        /// The third segment the address names, if it names one.
+        ///
+        /// A [`crate::route::ProfileTab`] rather than a `ProjectType` because the
+        /// strip's fourth link is not a kind of project: the reference's own
+        /// `navLinks` (`layout.vue:766-780`) builds `collections` out of the same
+        /// template that builds `mods`, so all four tabs are one navigation and this
+        /// field is what all four of them carry. `None` is the *All* tab.
+        project_type: Option<crate::route::ProfileTab>,
     },
 }
 
@@ -672,7 +678,7 @@ impl Screen {
 mod tests {
     use super::*;
     use crate::page::Load;
-    use crate::route::{InstanceTab, ProjectTab, ProjectType, ServerTab};
+    use crate::route::{InstanceTab, ProfileTab, ProjectTab, ProjectType, ServerTab};
 
 
     /// Every address the route table has a shape for.
@@ -966,10 +972,27 @@ mod tests {
             Some(Ask::Open(Open::Project("AANobbMI".to_string())))
         );
         assert_eq!(
-            screen.update(Message::User(user::Message::Filter(Some(ProjectType::Mod))), &store),
+            screen.update(
+                Message::User(user::Message::Filter(Some(ProfileTab::Projects(
+                    ProjectType::Mod
+                )))),
+                &store
+            ),
             Some(Ask::Open(Open::User {
                 user: "jelly".to_string(),
-                project_type: Some(ProjectType::Mod),
+                project_type: Some(ProfileTab::Projects(ProjectType::Mod)),
+            }))
+        );
+        // The strip's fourth tab is the same report, and `collections` is the
+        // segment the shell writes for it -- one navigation for all four tabs.
+        assert_eq!(
+            screen.update(
+                Message::User(user::Message::Filter(Some(ProfileTab::Collections))),
+                &store
+            ),
+            Some(Ask::Open(Open::User {
+                user: "jelly".to_string(),
+                project_type: Some(ProfileTab::Collections),
             }))
         );
         // The whole strip, back to everything.
