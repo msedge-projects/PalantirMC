@@ -1836,6 +1836,13 @@ impl Filter {
     /// starts with `category`, plus `environment` and `license`, and nothing
     /// else. The loaders are not among them, which is why a modpack tab's
     /// *Loader* is a header until it is pressed.
+    ///
+    /// `advanced` is absent for a reason that is *not* that arm. It is settled
+    /// by the arm above it, which tests the id before the `isApp` arm is ever
+    /// reached (`browse-tab/sidebar.vue:103`): the answer is
+    /// `!advancedFiltersCollapsed`, and `use-app-settings.ts:18` sets
+    /// `advanced_filters_collapsed: true`. Collapsed is the default, so
+    /// *Advanced exclusions* arrives shut like the loaders.
     fn opens(&self) -> bool {
         matches!(self.id, ENVIRONMENT | LICENSE)
     }
