@@ -8931,6 +8931,29 @@ $ python tools/progress.py --check
   this is the first time it has been checked against a live window rather than
   against notes about one.
 
+  **And the reason the panel could never be paired is now known, and it is not a
+  geometry problem.** With the reference live and its text read one pixel per character
+  (`.scratch/verify/glyphs.py`), the right panel on Discover does **not** carry filter
+  sections at all. Its bands spell project and article titles -- the band at y 413..427
+  reads as a six-letter word with a `g` descender, the one at y 364..375 as an `A`
+  followed by an `em` -- and the two dense blocks below them (y 476..522 and y 526..719,
+  byte-identical on all six tabs) are a document. It is the app panel's own content. At
+  1500x1000 the layout is the same and the results still begin at x=106, so there is no
+  in-page sidebar either: `NormalPage.vue:25-33` falls back to `ui-normal-page__sidebar`
+  when `hierarchicalSidebarAvailable` is false, and nothing like that column exists.
+
+  **The citation that says it should be there is correct, which matters.** The handoff
+  blamed the earlier notes for reading the sidebar's column as the left one, and named
+  `Browse.vue:1357` as the teleport. That is right:
+  `vendor/modrinth-app/app-frontend/src/pages/Browse.vue:1357-1359` is
+  `<Teleport v-if="browseRouteActive" to="#sidebar-teleport-target"><BrowseSidebar /></Teleport>`.
+  **But `Browse.vue` is in `app-frontend/src/pages/`, not in `ui/src/`** -- `ui/` has no
+  `views/` directory at all, so a search of the tree every other citation in this record
+  comes from turns up nothing and the teleport reads as absent. It is there. What is not
+  there is any way to say which of three things is true in this environment: `browseRouteActive`
+  false, the teleport target absent, or `BrowseSidebar` rendering with no filter data
+  because the tag and category endpoints are unreachable.
+
   **What this gate cannot say.** The panel's own rows below its three cards are still
   not like-for-like, and now that the reference runs that is a finding rather than an
   excuse. Paired per tab, the three cards carry **different content** on the two

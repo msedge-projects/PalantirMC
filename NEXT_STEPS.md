@@ -1269,6 +1269,26 @@ inside the gap, which is why the borders agree regardless. The selected tab's pl
 `(36,85,61)` against our `(36,84,61)`: stage 1's recorded stylesheet-versus-running-app
 finding, checked against a live window for the first time.
 
+**The panel's rows turned out not to be a measurement problem at all.** With the
+reference live and its text read one pixel per character, the right panel on Discover
+does **not** carry filter sections: the bands spell project and article titles, and the
+two dense blocks below them are byte-identical on all six tabs, which is a document, not
+a filter list. At 1500x1000 the layout is the same and the results still begin at x=106,
+so there is no in-page sidebar either -- and `NormalPage.vue:25-33` says where one would
+be if `hierarchicalSidebarAvailable` were false.
+
+**The citation that says there should be one is correct, which was worth checking.**
+`Browse.vue:1357-1359` really is `<Teleport v-if="browseRouteActive"
+to="#sidebar-teleport-target"><BrowseSidebar /></Teleport>`. **But `Browse.vue` is in
+`app-frontend/src/pages/`, not in `ui/src/`** -- `ui/` has no `views/` directory, so a
+search of the tree nearly every other citation in this record comes from finds nothing
+and the teleport reads as absent. It is not. What cannot be said from here is which of
+three things is true in this environment: `browseRouteActive` false, the teleport target
+absent, or `BrowseSidebar` rendering with no filter data because the tag and category
+endpoints are unreachable. So the sidebar this port draws is **unverified against the
+reference**, which is a different and weaker statement than wrong, and it is the honest
+one to leave behind.
+
 **And it struck a number this same pass had put in the record.** The "sixteen to
 nineteen rows low" figure came from pairing `ref-mod.png` against ours when the two
 were not the same tab: the reference's recorded mod plate is its *second* strip tab,
