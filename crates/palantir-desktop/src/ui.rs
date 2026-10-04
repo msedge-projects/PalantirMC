@@ -1397,14 +1397,21 @@ const TRIGGER_VALUE_GAP: f32 = 8.0;
 /// [`InputSize::Standard`]'s twelve.
 const TRIGGER_PAD: f32 = 10.0;
 
+/// `text-base`, the same row, and therefore the size of both the prefix and
+/// the value: the prefix is a plain `<span>` (`browse-tab/layout.vue:191`) and
+/// the value is `Combobox.vue:78`'s, and neither names a size, so both inherit
+/// the sixteen the button sets.
+const TRIGGER_TEXT: f32 = 16.0;
+
 /// `size-5`, on `Combobox.vue:91`'s `ChevronLeftIcon` -- the trigger's own, and
 /// not the one at `:43`, which belongs to the search variant's `<Input>`.
 ///
 /// Its ink is inherited rather than named: the class carries no colour, so it
 /// takes `text-contrast` from `ButtonFrame.vue:45` and reads pure white in the
-/// dark theme (`variables.scss:319`, `:338`). The other chevron in the file, at
-/// `:42`, *is* `text-secondary` -- it belongs to the search variant's `<Input>`
-/// and is a different control in a different branch.
+/// dark theme (`variables.scss:319`, `:338`), which the capture measures as
+/// `(255,255,255)`. The `text-secondary` belongs to the *other* chevron in the
+/// file, the one at `:42`, which is the search variant's `<Input>` -- a different
+/// control in a different branch, and the source of a wrong ink here.
 const TRIGGER_CHEVRON: f32 = 20.0;
 
 /// A combobox trigger: a prefix, the value, and the chevron that says it opens.
@@ -1414,6 +1421,15 @@ const TRIGGER_CHEVRON: f32 = 20.0;
 /// `bg-surface-4` over a `border-surface-5` hairline (`ButtonFrame.vue:45` and
 /// `:138`, `InputFrame.vue:57`) -- but they are two frames with two sets of
 /// metrics, so a trigger draws its own.
+///
+/// The two texts are not interchangeable and were drawn the wrong way round.
+/// `browse-tab/layout.vue:191` gives the prefix `font-semibold text-primary`,
+/// so it is the *dimmer* of the two; `Combobox.vue:78` gives the value
+/// `font-semibold text-inherit`, which resolves against the button's own
+/// `text-contrast`, so it is the white one. The capture agrees: the reference's
+/// prefix peaks at `(176,186,197)` and its value at `(255,255,255)`. Here the
+/// value was also `medium` on fourteen, where the button sets sixteen and
+/// `font-semibold` for both.
 ///
 /// A 1280x720 capture of both clients on `/browse/mod` agrees on every number
 /// here. The reference's sort trigger runs y 182..217 and ours ran y 186..225:
@@ -1432,17 +1448,18 @@ pub fn select<'a, Message: 'a>(
         .spacing(TRIGGER_GAP)
         .push(
             // `Combobox.vue:71`'s own row: the prefix and the value together,
-            // `gap-2` apart. The trigger's two inner `div`s are the outer gap,
+            // `gap-2` apart, the prefix in `text-primary` and the value in
+            // `text-inherit`. The trigger's two inner `div`s are the outer gap,
             // `gap-1.5`, so the two are not the same number.
             row![
                 text(prefix.message())
-                    .size(14.0)
+                    .size(TRIGGER_TEXT)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                text(value.to_string())
+                    .size(TRIGGER_TEXT)
                     .font(semibold())
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                text(value.to_string())
-                    .size(14.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             ]
             .align_items(Alignment::Center)
             .spacing(TRIGGER_VALUE_GAP),
@@ -1451,7 +1468,7 @@ pub fn select<'a, Message: 'a>(
         .push(icon::icon(
             Glyph::ChevronDown,
             TRIGGER_CHEVRON,
-            theme_gen::ink(theme, INK_SECONDARY),
+            theme_gen::ink(theme, INK_CONTRAST),
         ));
     let trigger: Element<'a, Message> = container(body)
         .width(Length::Fill)
@@ -4241,6 +4258,7 @@ mod tests {
         assert_eq!(TRIGGER_HEIGHT, 36.0, "`h-9` on ButtonFrame.vue's `md` row");
         assert_eq!(TRIGGER_GAP, 6.0, "`gap-1.5`, the same row");
         assert_eq!(TRIGGER_PAD, 10.0, "`px-2.5`, the same row");
+        assert_eq!(TRIGGER_TEXT, 16.0, "`text-base`, the same row, inherited twice");
         assert_eq!(TRIGGER_VALUE_GAP, 8.0, "`gap-2`, Combobox.vue:71's own row");
         assert_eq!(TRIGGER_CHEVRON, 20.0, "`size-5` on the trigger's chevron");
         assert_ne!(
@@ -4323,6 +4341,12 @@ mod tests {
             chevrons[1].contains("size-5"),
             "the trigger's chevron is `{}`; TRIGGER_CHEVRON is its `size-5`",
             chevrons[1]
+        );
+        assert!(
+            !chevrons[1].contains("text-"),
+            "the trigger's chevron names no ink of its own and so inherits `text-contrast`, \
+             which reads (255,255,255); the `text-secondary` belongs to the search \
+             variant's chevron, and taking it from there drew this one dim"
         );
         assert!(
             chevrons[0].contains("text-secondary"),
