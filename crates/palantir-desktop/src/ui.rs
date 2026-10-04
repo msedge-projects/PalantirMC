@@ -1373,7 +1373,54 @@ pub fn search<'a, Message: Clone + 'a>(
     )
 }
 
+/// `h-9`, from `ButtonFrame.vue:31`'s own `md` row:
+/// `md: 'h-9 gap-1.5 rounded-xl px-2.5 text-base font-semibold leading-5'`.
+///
+/// Not [`CONTROL`], and not [`InputSize::Standard`] either, though all three
+/// land within four pixels of each other. `ButtonFrame`'s `md` and
+/// `InputFrame`'s `standard` (`InputFrame.vue:47`) agree on `h-9` and disagree on
+/// the padding -- `px-2.5` against `px-3` -- so they are two sizes that share a
+/// height, and a combobox trigger is the first one.
+pub const TRIGGER_HEIGHT: f32 = 36.0;
+
+/// `gap-1.5`, the same row of the same table. This is the gap between the
+/// trigger's two inner `div`s; the gap inside the first of them is
+/// [`TRIGGER_VALUE_GAP`].
+const TRIGGER_GAP: f32 = 6.0;
+
+/// `gap-2`, on `Combobox.vue:71`'s `flex min-w-0 items-center gap-2` -- the row
+/// that holds the prefix and the value together, which is a different gap from
+/// [`TRIGGER_GAP`] and was the one measured at nine rows on the capture.
+const TRIGGER_VALUE_GAP: f32 = 8.0;
+
+/// `px-2.5`, the same row. See [`TRIGGER_HEIGHT`] for why this is not
+/// [`InputSize::Standard`]'s twelve.
+const TRIGGER_PAD: f32 = 10.0;
+
+/// `size-5`, on `Combobox.vue:91`'s `ChevronLeftIcon` -- the trigger's own, and
+/// not the one at `:43`, which belongs to the search variant's `<Input>`.
+///
+/// Its ink is inherited rather than named: the class carries no colour, so it
+/// takes `text-contrast` from `ButtonFrame.vue:45` and reads pure white in the
+/// dark theme (`variables.scss:319`, `:338`). The other chevron in the file, at
+/// `:42`, *is* `text-secondary` -- it belongs to the search variant's `<Input>`
+/// and is a different control in a different branch.
+const TRIGGER_CHEVRON: f32 = 20.0;
+
 /// A combobox trigger: a prefix, the value, and the chevron that says it opens.
+///
+/// The frame is `ButtonFrame.vue`'s and not this module's [`framed`], which is
+/// `InputFrame.vue`'s. The two templates name the same pair of surfaces --
+/// `bg-surface-4` over a `border-surface-5` hairline (`ButtonFrame.vue:45` and
+/// `:138`, `InputFrame.vue:57`) -- but they are two frames with two sets of
+/// metrics, so a trigger draws its own.
+///
+/// A 1280x720 capture of both clients on `/browse/mod` agrees on every number
+/// here. The reference's sort trigger runs y 182..217 and ours ran y 186..225:
+/// four pixels of `CONTROL` too tall, sitting four pixels low. Its fill read
+/// `(66,68,74)` against the reference's `(52,54,60)`, which is the pair the two
+/// had swapped. And the chevron measured 12x8 in the reference against 10x6 in
+/// ours -- the 20/16 ratio, which is `size-5` against a `size-4`.
 pub fn select<'a, Message: 'a>(
     theme: Gen,
     prefix: Key,
@@ -1382,23 +1429,46 @@ pub fn select<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     let body = row![]
         .align_items(Alignment::Center)
-        .spacing(ROW_GAP)
+        .spacing(TRIGGER_GAP)
         .push(
-            text(prefix.message())
-                .size(14.0)
-                .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-        )
-        .push(
-            text(value.to_string())
-                .size(14.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            // `Combobox.vue:71`'s own row: the prefix and the value together,
+            // `gap-2` apart. The trigger's two inner `div`s are the outer gap,
+            // `gap-1.5`, so the two are not the same number.
+            row![
+                text(prefix.message())
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                text(value.to_string())
+                    .size(14.0)
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            ]
+            .align_items(Alignment::Center)
+            .spacing(TRIGGER_VALUE_GAP),
         )
         .push(Space::with_width(Length::Fill))
-        .push(icon::icon(Glyph::ChevronDown, 16.0, theme_gen::ink(theme, INK_SECONDARY)));
-    let framed = framed(theme, body);
-    container(framed).width(Length::Fixed(width)).into()
+        .push(icon::icon(
+            Glyph::ChevronDown,
+            TRIGGER_CHEVRON,
+            theme_gen::ink(theme, INK_SECONDARY),
+        ));
+    let trigger: Element<'a, Message> = container(body)
+        .width(Length::Fill)
+        .height(Length::Fixed(TRIGGER_HEIGHT))
+        .padding(Padding { top: 0.0, bottom: 0.0, left: TRIGGER_PAD, right: TRIGGER_PAD })
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+            border: Border {
+                color: theme_gen::ink(theme, Ink::Surface5),
+                width: 1.0,
+                radius: CONTROL_RADIUS.into(),
+            },
+            ..container::Appearance::default()
+        })
+        .into();
+    container(trigger).width(Length::Fixed(width)).into()
 }
 
 /// A switch: the reference's `base/Toggle.vue`, at its own 48x24.
@@ -4157,6 +4227,107 @@ mod tests {
         assert!(
             defaults.contains("font-size: 16px"),
             "defaults.scss's `body` is the root BARE_ICON's `1em` is measured against"
+        );
+    }
+
+    #[test]
+    fn the_combobox_trigger_is_the_frame_its_own_template_asks_for() {
+        // Five numbers, all of which a capture said were wrong at once: the
+        // trigger was forty pixels tall instead of thirty-six, sat four pixels
+        // low, had its fill and hairline the wrong way round, and carried a
+        // `size-4` chevron where the template says `size-5`. Each is read back
+        // out of the vendored tree so that a re-tailwind upstream moves the
+        // number and this is what says so.
+        assert_eq!(TRIGGER_HEIGHT, 36.0, "`h-9` on ButtonFrame.vue's `md` row");
+        assert_eq!(TRIGGER_GAP, 6.0, "`gap-1.5`, the same row");
+        assert_eq!(TRIGGER_PAD, 10.0, "`px-2.5`, the same row");
+        assert_eq!(TRIGGER_VALUE_GAP, 8.0, "`gap-2`, Combobox.vue:71's own row");
+        assert_eq!(TRIGGER_CHEVRON, 20.0, "`size-5` on the trigger's chevron");
+        assert_ne!(
+            TRIGGER_HEIGHT, CONTROL,
+            "CONTROL is forty; the trigger is `h-9`, which is the whole defect"
+        );
+        assert_eq!(
+            TRIGGER_HEIGHT,
+            InputSize::Standard.height(),
+            "the two templates' sizes share a height even though their padding differs"
+        );
+
+        let (Some(frame), Some(combobox)) = (
+            reference_file("ui/src/components/base/buttons/ButtonFrame.vue"),
+            reference_file("ui/src/components/base/Combobox.vue"),
+        ) else {
+            return;
+        };
+        let md = frame
+            .lines()
+            .find(|line| line.trim_start().starts_with("md: 'h-9"))
+            .expect("ButtonFrame.vue still spells its `md` size out on one line");
+        for class in ["h-9", "gap-1.5", "rounded-xl", "px-2.5", "text-base"] {
+            assert!(
+                md.contains(class),
+                "ButtonFrame.vue's `md` is `{md}`; TRIGGER_* is read off its `{class}`"
+            );
+        }
+        // And the trigger's own row, which is where the value gap and the two
+        // texts' classes live. `Combobox.vue:71` is the row holding them.
+        let trigger_row = combobox
+            .lines()
+            .find(|line| line.contains("flex min-w-0 items-center gap-2"))
+            .expect("Combobox.vue:71 still spaces the prefix and the value itself");
+        assert!(
+            trigger_row.contains("gap-2"),
+            "the prefix/value gap is Combobox.vue's, not ButtonFrame's; TRIGGER_VALUE_GAP \
+             is that eight"
+        );
+        // The size the trigger asks for, and the two surfaces it is painted in.
+        assert!(
+            combobox.contains("triggerSize: 'md'"),
+            "Combobox.vue:338 sets `triggerSize: 'md'`; that is the row read above"
+        );
+        assert!(
+            frame.contains("button-frame--base bg-surface-4"),
+            "ButtonFrame.vue:45 fills the frame `bg-surface-4`, which is what the \
+             capture read as (52,54,60)"
+        );
+        assert!(
+            frame.contains("inset 0 0 0 1px var(--surface-5)"),
+            "ButtonFrame.vue:138 draws the hairline in `--surface-5`, which is \
+             (66,68,74) -- and the pair the capture had the wrong way round"
+        );
+        // There are two `ChevronLeftIcon`s in the file and they are not the
+        // same control: the first belongs to the search variant's `<Input>` and
+        // the second to this trigger. Only the second is this one's size.
+        let chevrons: Vec<String> = combobox
+            .lines()
+            .map(str::trim)
+            .enumerate()
+            .filter(|(_, line)| line.starts_with("<ChevronLeftIcon"))
+            .map(|(at, _line)| {
+                // The opening tag is on its own line and its `class` on the next,
+                // so take the whole element rather than the tag alone.
+                combobox
+                    .lines()
+                    .skip(at)
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(
+            chevrons.len(),
+            2,
+            "one chevron for the search input and one for the trigger"
+        );
+        assert!(
+            chevrons[1].contains("size-5"),
+            "the trigger's chevron is `{}`; TRIGGER_CHEVRON is its `size-5`",
+            chevrons[1]
+        );
+        assert!(
+            chevrons[0].contains("text-secondary"),
+            "the search input's chevron is the one that is `text-secondary`, which is \
+             how the two were told apart in the first place"
         );
     }
 
