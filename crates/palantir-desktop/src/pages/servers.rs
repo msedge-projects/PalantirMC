@@ -38,10 +38,9 @@
 //!   `iced::advanced::widget::Widget` footing `crate::scroll`'s wheel guard
 //!   uses.
 //! * **Blend modes.** `ServerListEmpty.vue`'s texture is
-//!   `mix-blend-luminosity`. iced has no term for a blend mode, so the texture's
-//!   own colour is folded into the share the reference's pixels show it reaches
-//!   -- see [`TEXTURE_SHARE`] -- and what is left of the blend is the texture's
-//!   shading structure at that share.
+//!   `mix-blend-luminosity`, which iced has no term for -- but a separable blend
+//!   mode is arithmetic rather than a rasteriser feature, so it is computed here
+//!   and drawn as the plain colour it works out to. See [`luminosity_blend`].
 //! * **The reference's own button types.** `type="base"` is
 //!   `ButtonFrame.vue`'s default and is not one of `ui::Kind`'s five; the
 //!   preview's buttons also carry `!h-8`, `w-20` and `!font-medium`, which no row
@@ -262,6 +261,10 @@ const RAMP_TO: f32 = 39.0 / 100.0;
 /// inside it to: `size-10` less a border either side is a 38-pixel padding box.
 const PLATE_INSET: u32 = 1;
 
+/// That padding box's side, and so the side of the [`texture_window`] the plate
+/// reads: `FEATURE_PLATE` less a border either side.
+const PADDING_BOX: usize = FEATURE_PLATE as usize - 2 * PLATE_INSET as usize;
+
 /// `.feature-icon-shade`: `linear-gradient(-14deg, color-mix(in srgb,
 /// var(--color-green-950) 37%, transparent) 8%, transparent 86%)`.
 const SHADE_FROM: f32 = 0.08;
@@ -271,28 +274,68 @@ const SHADE_ALPHA: f32 = 0.37;
 /// `opacity-40` on the texture `<img>`.
 const TEXTURE_ALPHA: f32 = 0.40;
 
-/// How much of the texture's own colour reaches the plate.
+/// The weights CSS Compositing and Blending Level 1 gives `Lum()`: 0.3 red,
+/// 0.59 green, 0.11 blue.
 ///
-/// `mix-blend-luminosity` has no term in iced, and it is not a small residual:
-/// the blend keeps the source's hue and saturation and takes the *backdrop's*
-/// luminosity, so what it leaves of `icon-texture.png` is its own shading
-/// structure and not its blue-grey -- and the texture's blue is what puts steps
-/// into the plate's blue channel. Measured against
-/// `/tmp/ref/hosting-clean3.png` over the 280 pixels of the three plates' pads
-/// that carry no glyph and no antialiased corner:
+/// Not the 0.2126/0.7152/0.0722 of a linear-light luma. The spec defines
+/// `Lum()` on the colour's own components and a browser composites the blend in
+/// that space rather than in linear light, and the reference's own pixels say
+/// which reading it took. Over the three plates' 840 interior pixels, with the
+/// plate's interior model otherwise exact, the rms against
+/// `/tmp/ref/hosting-clean3.png` is
 ///
-/// | model | rms /255 |
+/// | `Lum()` read as | rms /255 |
 /// |---|---|
-/// | `ramp + 0.33 * (green-950 - ramp) + 0.07 * (texture - ramp)` | **2.4** |
-/// | the texture at the `opacity-40` its class also carries | 8.6 |
-/// | `ramp` alone | 5.1 |
+/// | 0.3/0.59/0.11 on sRGB -- this | **1.20** |
+/// | 0.2126/0.7152/0.0722 on sRGB | 1.72 |
+/// | 0.3/0.59/0.11 on linear light | 3.27 |
+/// | 0.2126/0.7152/0.0722 on linear light | 4.78 |
 ///
-/// 0.33 + 0.07 is the 0.4 the `opacity-40` slot is worth, so the slot is
-/// `(1 - TEXTURE_SHARE) * --color-green-950 + TEXTURE_SHARE * texture` at
-/// `TEXTURE_SHARE = 0.175`. The texture is still decoded and still lays its
-/// structure into the plate at that share, which is what the reference's own
-/// pixels show: a variation of about 3/255 in green across the pad.
-const TEXTURE_SHARE: f32 = 0.175;
+/// so the blend is done on the sRGB values as they are stored, which is also
+/// what Skia's `kLuminosity` implements for CSS. See [`luminosity_blend`].
+const LUMA: [f32; 3] = [0.3, 0.59, 0.11];
+
+/// `Lum(C)`: the weighted luma of `rgb`, in 0..1.
+fn luma(rgb: [f32; 3]) -> f32 {
+    LUMA[0] * rgb[0] + LUMA[1] * rgb[1] + LUMA[2] * rgb[2]
+}
+
+/// `SetLum(C, l)`: `rgb` moved along the grey axis until it reads `l`.
+///
+/// The spec writes this as `ClipColor(C + d)` with `d = l - Lum(C)` -- an equal
+/// offset on all three components, which is what preserves hue and saturation,
+/// followed by a clamp to the gamut. The backdrop here is opaque, so `l` is
+/// inside the cube and the clamp only ever catches the texture's luma when it
+/// falls below the backdrop's.
+fn set_lum(rgb: [f32; 3], l: f32) -> [f32; 3] {
+    let d = l - luma(rgb);
+    [
+        (rgb[0] + d).clamp(0.0, 1.0),
+        (rgb[1] + d).clamp(0.0, 1.0),
+        (rgb[2] + d).clamp(0.0, 1.0),
+    ]
+}
+
+/// `mix-blend-mode: luminosity`, applied to one pixel.
+///
+/// The mode is `SetLum(Cb, Lum(Cs))`: the **source's** luminosity carried onto
+/// the **backdrop's** hue and saturation. That direction is the whole of it, and
+/// it is the opposite of what the mode's name suggests to read -- it is
+/// `mix-blend-mode: color` that keeps the source's hue and saturation and takes
+/// the backdrop's luminosity. Getting the two the wrong way round is not a
+/// subtle error here: it hands the plate the texture's navy, and the reference's
+/// plate is a saturated green. Measured over the same 840 pixels, with the
+/// backdrop model exact, the rms is 1.20 for this and 2.60 for a source-over at
+/// the same alpha; the source's-hue reading (`color`) puts the plate 15 steps
+/// too high in red and 15 too high in blue.
+///
+/// So a plate pixel is `backdrop` with its three components shifted by the
+/// difference of the two lumas -- the texture darkens the plate, because the
+/// texture is darker than the backdrop it is laid on, and it darkens it by a
+/// third of its own contrast, which is what `opacity-40` is worth.
+fn luminosity_blend(source: [f32; 3], backdrop: [f32; 3]) -> [f32; 3] {
+    set_lum(backdrop, luma(source))
+}
 
 /// `icon-texture.png`, byte for byte from
 /// `vendor/modrinth-app/ui/src/assets/welcome/`; see `THIRD_PARTY_NOTICES.md`.
@@ -319,7 +362,7 @@ fn plate_ramp(theme: Gen, t: f32) -> [f32; 3] {
 ///
 /// Both are a function of the plate's own 40 pixels and of nothing else, so they
 /// are composited once per theme rather than per frame, and the result is one
-/// `image`. Two things make that a composite rather than two widgets:
+/// `image`. Three things make that a composite rather than two widgets:
 ///
 /// * **The clip.** `overflow: hidden` clips the layers to the plate's *padding*
 ///   box, whose rounded corner is the border's radius less the border's width --
@@ -331,10 +374,11 @@ fn plate_ramp(theme: Gen, t: f32) -> [f32; 3] {
 ///   associative, so compositing the pair onto a transparent plate and then
 ///   drawing that over the ramp is the same picture as compositing each onto the
 ///   ramp in turn.
-///
-/// `mix-blend-luminosity` is the one thing left out, and it is left out because
-/// nothing in iced has a term for a blend mode. The texture is drawn as the
-/// forty percent `opacity-40` it also carries.
+/// * **The blend.** the texture is `mix-blend-luminosity` over the backdrop those
+///   two layers make, which [`luminosity_blend`] computes and this composites
+///   like any other source: the blend result takes the backdrop's hue and
+///   saturation at the texture's luminosity, and `opacity-40` then scales that
+///   result over the backdrop.
 fn plate_overlay(theme: Gen) -> iced::widget::image::Handle {
     static CACHE: [OnceLock<iced::widget::image::Handle>; 4] =
         [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
@@ -391,11 +435,15 @@ fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
                 rgb[channel] = value * shade_at + rgb[channel] * (1.0 - shade_at);
             }
             // The window is the padding box, so its own `(0, 0)` is the plate's
-            // `(1, 1)`.
+            // `(1, 1)` -- and its rows are 38 long, not the plate's 40. Striding
+            // it by `side` walks two columns to the right for every row down, so
+            // by the foot of the plate it is reading past the end of the window
+            // and the texture stops being drawn at all.
             let inner = (x.checked_sub(PLATE_INSET as usize), y.checked_sub(PLATE_INSET as usize));
+            let window_side = PADDING_BOX;
             let pixel: Option<[u8; 4]> = match inner {
-                (Some(wx), Some(wy)) if wx < side && wy < side => {
-                    let index = (wy * side + wx) * 4;
+                (Some(wx), Some(wy)) if wx < window_side && wy < window_side => {
+                    let index = (wy * window_side + wx) * 4;
                     window.get(index..index + 4).map(|four| [four[0], four[1], four[2], four[3]])
                 }
                 _ => None,
@@ -404,17 +452,19 @@ fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
                 // `opacity-40`, source-over, which is all an `opacity` on an
                 // element is: the picture at 40 percent of its own alpha.
                 let texture = TEXTURE_ALPHA * f32::from(pixel[3]) / 255.0;
-                // What `mix-blend-luminosity` leaves of the picture, at
-                // [`TEXTURE_SHARE`]: its own channels against `--color-green-950`,
-                // which is the colour the backdrop carries where it shows. Both
-                // sides of that mix are 0..1 -- `shade` came out of `Color` and
-                // the picture is a byte -- and mixing a byte in unscaled would
-                // saturate every channel at 255, which is a white plate.
-                let shade_rgb = [shade.r, shade.g, shade.b];
-                for (channel, value) in [pixel[0], pixel[1], pixel[2]].into_iter().enumerate() {
-                    let own = f32::from(value) / 255.0;
-                    let blended = (1.0 - TEXTURE_SHARE) * shade_rgb[channel] + TEXTURE_SHARE * own;
-                    rgb[channel] = rgb[channel] * (1.0 - texture) + blended * texture;
+                // The blend happens against the backdrop as it stands *after* the
+                // ramp and the shade, so `rgb` is what `Lum()` reads. Both sides
+                // of it are 0..1 -- `rgb` came out of [`plate_ramp`] and the
+                // picture is a byte -- and a byte in unscaled would saturate every
+                // channel at 255, which is a white plate.
+                let source = [
+                    f32::from(pixel[0]) / 255.0,
+                    f32::from(pixel[1]) / 255.0,
+                    f32::from(pixel[2]) / 255.0,
+                ];
+                let blended = luminosity_blend(source, rgb);
+                for (channel, value) in blended.into_iter().enumerate() {
+                    rgb[channel] = rgb[channel] * (1.0 - texture) + value * texture;
                 }
             }
             let index = (y * side + x) * 4;
@@ -2310,59 +2360,229 @@ mod tests {
     #[test]
     fn the_plate_interior_is_the_colour_the_reference_measures() {
         // `/tmp/ref/hosting-clean3.png`, the first plate at its interior row 6,
-        // column 17: `#0F3A24`, and the modal of the whole pad `#113C26`. The
-        // texture at the `opacity-40` its class also carries puts steps into the
-        // blue channel and takes them out of the green, which is the whole of the
-        // delta the audit measured on this plate.
+        // column 17 -- capture (140, 265) -- reads `#0F3A24`. This writes that
+        // pixel out longhand, from the theme's own bytes, rather than calling the
+        // compositor: `opacity-40` over the backdrop at the slice's 7 percent,
+        // the texture's own luma dithered onto the backdrop's hue, and nothing
+        // else. In bytes, and with every step the CSS one:
+        //
+        // * the ramp at `t = 7/100` is `0.5 * (green-800 + (green-950 -
+        //   green-800) * t) + 0.5 * surface-1`, so (19.475, 62.505, 40.415);
+        // * `.feature-icon-shade` is transparent at this pixel -- its gradient
+        //   line is at 91 percent, past the stop that ends it at 86;
+        // * the texture's luma is `0.3*34 + 0.59*37 + 0.11*52 = 37.75` and the
+        //   backdrop's is `47.166`, so the blend moves every component by
+        //   `-9.416` and reads (10.059, 53.089, 30.999);
+        // * `opacity-40` then leaves `0.6 * backdrop + 0.4 * blend` =
+        //   (15.71, 58.74, 36.65).
+        let window = texture_window();
+        let pixel = &window[(5 * 38 + 16) * 4..(5 * 38 + 16) * 4 + 3];
+        assert_eq!(&[pixel[0], pixel[1], pixel[2]], &[34, 37, 52], "the texture moved");
+        assert_eq!(shade_alpha(18.0, 7.0), 0.0, "the shade reaches this pixel");
+        let backdrop = [19.475f32, 62.505, 40.415];
+        let texture = [f32::from(pixel[0]), f32::from(pixel[1]), f32::from(pixel[2])];
+        let luma_of = |c: [f32; 3]| LUMA[0] * c[0] + LUMA[1] * c[1] + LUMA[2] * c[2];
+        assert!((luma_of(texture) - 37.75).abs() < 0.01, "the texture's luma moved");
+        assert!((luma_of(backdrop) - 47.166).abs() < 0.01, "the backdrop's luma moved");
+        let d = luma_of(texture) - luma_of(backdrop);
+        let expected = [0, 1, 2].map(|channel| {
+            let blended = backdrop[channel] + d;
+            0.6 * backdrop[channel] + 0.4 * blended
+        });
         let theme = Gen::Dark;
         let measured = plate_interior(theme, 17, 6);
-        assert!(
-            (13.0..=16.0).contains(&measured[0]),
-            "red reads {:.1}, and the reference's is 15",
-            measured[0]
-        );
-        assert!(
-            (55.0..=58.0).contains(&measured[1]),
-            "green reads {:.1}, and the reference's is 58",
-            measured[1]
-        );
-        assert!(
-            (34.0..=37.0).contains(&measured[2]),
-            "blue reads {:.1}, and the reference's is 36",
-            measured[2]
-        );
-        // The texture is read and laid into the plate, and `mix-blend-luminosity`
-        // is what leaves so little of it: at [`TEXTURE_SHARE`] the picture's own
-        // row of structure is under one 8-bit step, so the plate is flat where the
-        // reference's varies by three. That is the blend, measured.
-        let window = texture_window();
-        let row: Vec<u8> = (0..38).map(|x| window[(19 * 38 + x) * 4 + 1]).collect();
+        for channel in 0..3 {
+            assert!(
+                (expected[channel] - measured[channel]).abs() < 0.51,
+                "channel {channel}: the longhand figure says {:.2} and the compositor says {:.2}",
+                expected[channel],
+                measured[channel]
+            );
+            // And the reference's own pixel, to a step.
+            assert!(
+                (measured[channel] - [15.0f32, 58.0, 36.0][channel]).abs() <= 1.0,
+                "channel {channel} reads {:.2}, and the reference's is {}",
+                measured[channel],
+                [15.0f32, 58.0, 36.0][channel]
+            );
+        }
+        // The texture's own structure reaches the plate, which is the blend's
+        // visible effect and the reason it is worth computing: the window's row
+        // 32 varies by more than eight steps of green, and so does the plate's
+        // row 32 -- the reference's spans 45 to 55 across columns 12 to 28. A
+        // flat overlay, or the share this replaced, leaves a span of two.
+        let row: Vec<u8> = (0..38).map(|x| window[(32 * 38 + x) * 4 + 1]).collect();
         let low = row.iter().copied().min().unwrap_or(0);
         let high = row.iter().copied().max().unwrap_or(0);
         assert!(high > low + 8, "the window's row is flat: {low} against {high}");
         let pixels = plate_overlay_pixels(theme);
-        let green = |x: usize| pixels[(6 * 40 + x) * 4 + 1];
+        let green = |x: usize| i32::from(pixels[(32 * 40 + x) * 4 + 1]);
+        let span = (12..29).map(|x| green(x)).max().unwrap_or(0)
+            - (12..29).map(|x| green(x)).min().unwrap_or(0);
         assert!(
-            green(6).abs_diff(green(20)) <= 1,
-            "the pad varies by more than the blend leaves: {} against {}",
-            green(6),
-            green(20)
+            (6..=10).contains(&span),
+            "the plate's row 32 varies by {span}, and the reference's by 10"
         );
-        // `TEXTURE_SHARE` is that measurement and not a guess: the blend leaves
-        // the texture this much of its own colour, and the rest of the
-        // `opacity-40` slot is `--color-green-950`.
-        assert!((0.17..=0.18).contains(&TEXTURE_SHARE), "{TEXTURE_SHARE}");
-        assert!((0.4 * TEXTURE_SHARE - 0.07).abs() < 0.005);
-        // And the slice runs the way the reference's does: lighter at the plate's
-        // top than at its foot, and nowhere near `--color-green-950` at the foot
-        // the way a whole-ramp gradient reaches it. The reference's own plate
-        // measures green 61 at interior row 1 and 54 at row 37; this reads 57 and
-        // 53, the span narrowed by the `mix-blend-luminosity` share the texture
-        // takes of both ends.
-        let pixels = plate_overlay_pixels(theme);
-        let top = pixels[(40 + 19) * 4 + 1];
-        let foot = pixels[(37 * 40 + 19) * 4 + 1];
-        assert!(top > foot, "the slice is flat: {top} against {foot}");
+    }
+
+    #[test]
+    fn the_luma_is_the_three_weights_the_spec_gives_it() {
+        // CSS Compositing and Blending Level 1 writes `Lum(C) = 0.3*r + 0.59*g +
+        // 0.11*b`. Those weights are what the reference's own pixels agree with
+        // (see [`LUMA`]), and they are not the linear-light luma the same document
+        // does not use: 0.2126/0.7152/0.0722 applied to the *linearised*
+        // components is a different function, and reading a colour that way here
+        // costs two and a half times the rms.
+        assert_eq!(LUMA, [0.3, 0.59, 0.11]);
+        assert!((LUMA.iter().sum::<f32>() - 1.0).abs() < 1e-6, "the weights must sum to 1");
+        assert!((luma([0.0, 0.0, 0.0]) - 0.0).abs() < 1e-6);
+        assert!((luma([1.0, 1.0, 1.0]) - 1.0).abs() < 1e-6);
+        assert!((luma([1.0, 0.0, 0.0]) - 0.3).abs() < 1e-6);
+        assert!((luma([0.0, 1.0, 0.0]) - 0.59).abs() < 1e-6);
+        assert!((luma([0.0, 0.0, 1.0]) - 0.11).abs() < 1e-6);
+        // A grey reads its own value whatever the weights are, and pure white
+        // reads 1, which is what makes an equal offset along the grey axis a
+        // move that holds hue and saturation.
+        assert!((luma([0.4, 0.4, 0.4]) - 0.4).abs() < 1e-6);
+        // And the linear-light reading is measurably a different function: on
+        // mid grey it agrees, and on a saturated colour it does not.
+        let linear_luma = |c: f32| {
+            let l = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+            LUMA[0] * l + LUMA[1] * l + LUMA[2] * l
+        };
+        assert!((linear_luma(0.5) - luma([0.5, 0.5, 0.5])).abs() > 0.1, "linear light is not sRGB");
+        assert!((linear_luma(0.2) - luma([0.2, 0.0, 0.0])).abs() > 0.01);
+    }
+
+    #[test]
+    fn set_lum_moves_every_component_by_one_offset() {
+        // `ClipColor(C + d)` with `d = l - Lum(C)`: one offset on all three
+        // components, then a clamp. The offset is what carries the hue and the
+        // saturation across, so it has to be the *same* number three times.
+        let rgb = [0.2f32, 0.4, 0.6];
+        let at_own = set_lum(rgb, luma(rgb));
+        for channel in 0..3 {
+            assert!((at_own[channel] - rgb[channel]).abs() < 1e-6, "channel {channel}");
+        }
+        // 0.3*0.2 + 0.59*0.4 + 0.11*0.6 = 0.362, so 0.5 is 0.138 along the grey
+        // axis and every component moves by exactly that.
+        let lifted = set_lum(rgb, 0.5);
+        for (channel, value) in lifted.iter().enumerate() {
+            assert!((value - (rgb[channel] + 0.138)).abs() < 1e-5, "channel {channel}: {value}");
+        }
+        // And the clamp is the gamut, not a wrap: one offset on three components
+        // cannot reach a luma of zero unless they all have room for it, so the two
+        // that would go negative stop at black and the one that can keeps the
+        // offset -- which is the gamut the spec's `ClipColor` means.
+        let clamped = set_lum([0.9, 0.8, 0.7], 0.0);
+        assert!((clamped[0] - 0.081).abs() < 1e-5, "the channel with room moved: {clamped:?}");
+        assert_eq!(clamped[1], 0.0);
+        assert_eq!(clamped[2], 0.0);
+    }
+
+    #[test]
+    fn the_luminosity_blend_takes_the_sources_luma_and_the_backdrops_hue() {
+        // A source at the backdrop's own luma is a no-op, which is the mode's
+        // one fixed point.
+        let backdrop = [0.1f32, 0.4, 0.25];
+        assert_eq!(luminosity_blend(backdrop, backdrop), backdrop);
+        // Otherwise the result reads the *source's* luma, and reaches it by one
+        // offset -- the source's hue and saturation never appear in it.
+        let source = [0.3f32, 0.31, 0.5];
+        let blended = luminosity_blend(source, backdrop);
+        assert!((luma(blended) - luma(source)).abs() < 1e-5, "the luma is not the source's");
+        let offset = blended[0] - backdrop[0];
+        for channel in 1..3 {
+            assert!((blended[channel] - backdrop[channel] - offset).abs() < 1e-5, "channel {channel}");
+        }
+        // The plate this actually draws, which is the check that matters: the
+        // texture is navy, the backdrop is the green ramp, and the plate the
+        // reference draws is a *green*. A blend that took the source's hue -- the
+        // `color` mode, and the reading this mode's name invites -- would hand
+        // the plate that navy instead.
+        let ramp = plate_ramp(Gen::Dark, 0.07);
+        let texture = [34.0f32 / 255.0, 37.0 / 255.0, 52.0 / 255.0];
+        let plate = luminosity_blend(texture, ramp);
+        assert!(plate[1] > plate[0] && plate[1] > plate[2], "the plate is not green: {plate:?}");
+        let wrong_way = set_lum(texture, luma(ramp));
+        assert!(
+            wrong_way[2] > wrong_way[1],
+            "the other reading is not the blue-grey it is: {wrong_way:?}"
+        );
+    }
+
+    #[test]
+    fn the_blend_is_composited_on_srgb_and_not_on_linear_light() {
+        // The transfer function, both ways, and its round trip: the pair is only
+        // here to say what the *other* reading of `Lum()` costs, so it is worth
+        // pinning that it is a round trip and not an approximation of one.
+        let to_linear = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let to_srgb = |c: f32| {
+            if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+        };
+        for step in 0..=255u8 {
+            let c = f32::from(step) / 255.0;
+            assert!((to_srgb(to_linear(c)) - c).abs() < 1e-5, "byte {step} does not round trip");
+        }
+        // Composited in linear light, this plate's own pixel comes out (30, 55,
+        // 46) where the reference reads (15, 58, 36) -- fifteen steps of red and
+        // blue that the sRGB reading is one step off. Over the three plates'
+        // 840 interior pixels the rms is 3.27 in linear light against 1.20 in
+        // sRGB, which is what [`LUMA`] records.
+        let ramp = plate_ramp(Gen::Dark, 0.07);
+        let texture = [34.0f32 / 255.0, 37.0 / 255.0, 52.0 / 255.0];
+        let source = texture.map(|c| to_linear(c) * 255.0);
+        let backdrop = ramp.map(|c| to_linear(c) * 255.0);
+        let shift = luma(source) - luma(backdrop);
+        let composited = backdrop.map(|c| to_srgb((c + shift).clamp(0.0, 255.0) / 255.0) * 255.0);
+        let blended = luminosity_blend(texture, ramp);
+        for channel in 0..3 {
+            let linear_read = (0.6 * ramp[channel] + 0.4 * composited[channel]) * 255.0;
+            let srgb = (0.6 * ramp[channel] + 0.4 * blended[channel]) * 255.0;
+            assert!(
+                (linear_read - [15.0f32, 58.0, 36.0][channel]).abs()
+                    > (srgb - [15.0f32, 58.0, 36.0][channel]).abs(),
+                "channel {channel}: linear reads {linear_read:.1}, sRGB reads {srgb:.1}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_precomputed_plate_pins_the_reference_at_both_ends_of_its_slice() {
+        // The slice is rows 1..38 of a 100-row gradient, so its two ends are the
+        // plate's first and last interior rows, and the precomputed picture is
+        // what the reference is checked against at both. `/tmp/ref/hosting-clean3.png`
+        // reads (14, 59, 36) at the first plate's row 1 and (14, 53, 34) at its
+        // row 38, column 17 -- capture (140, 260) and (140, 297) -- and every one
+        // of the three plates reads the same pair.
+        let pixels = plate_overlay_pixels(Gen::Dark);
+        let read = |x: usize, y: usize| {
+            let index = (y * 40 + x) * 4;
+            [pixels[index], pixels[index + 1], pixels[index + 2]]
+        };
+        for (y, reference) in [(1usize, [14u8, 59, 36]), (38, [14, 53, 34])] {
+            let got = read(17, y);
+            for channel in 0..3 {
+                assert!(
+                    (i32::from(got[channel]) - i32::from(reference[channel])).abs() <= 2,
+                    "row {y} channel {channel} reads {}, and the reference's is {}",
+                    got[channel],
+                    reference[channel]
+                );
+            }
+        }
+        // And the slice still runs the way the reference's does: lighter at the
+        // plate's top than at its foot, and nowhere near `--color-green-950` at
+        // the foot the way a whole-ramp gradient reaches it. Six steps over the
+        // 38 rows is the reference's own span (59 against 53).
+        let top = i32::from(read(17, 1)[1]);
+        let foot = i32::from(read(17, 38)[1]);
+        assert_eq!(top - foot, 7, "the slice runs {top} to {foot}");
+        let green_950 = theme_gen::ink_rgba(Gen::Dark, Ink::Green950)[1];
+        assert!(
+            foot > i32::from(green_950) + 4,
+            "the foot reads {foot}, and a whole-ramp gradient would reach {green_950}"
+        );
     }
 
     #[test]
