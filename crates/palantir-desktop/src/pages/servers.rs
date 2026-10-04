@@ -325,9 +325,10 @@ fn set_lum(rgb: [f32; 3], l: f32) -> [f32; 3] {
 /// the backdrop's luminosity. Getting the two the wrong way round is not a
 /// subtle error here: it hands the plate the texture's navy, and the reference's
 /// plate is a saturated green. Measured over the same 840 pixels, with the
-/// backdrop model exact, the rms is 1.20 for this and 2.60 for a source-over at
-/// the same alpha; the source's-hue reading (`color`) puts the plate 15 steps
-/// too high in red and 15 too high in blue.
+/// backdrop model exact, the rms is 1.20 for this, 2.60 for the share of the
+/// texture's own colour this replaces, and 7.57 for a plain source-over at the
+/// same alpha; the source's-hue reading (`color`) puts the plate 15 steps too
+/// high in red and 15 too high in blue.
 ///
 /// So a plate pixel is `backdrop` with its three components shifted by the
 /// difference of the two lumas -- the texture darkens the plate, because the
