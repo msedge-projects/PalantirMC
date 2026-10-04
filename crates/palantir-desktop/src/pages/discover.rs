@@ -1061,9 +1061,9 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
             // the one search field in the tree that does: 48 pixels, `px-4`, a
             // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
             // hairline. A capture of both clients at 1280x720 agrees on every
-            // number -- the reference's field runs y 126..173 and this one drew
-            // y 129..167, forty pixels of `h-10` where the template asks for
-            // `h-12`.
+            // number -- the reference's field runs y 126..173 and so does this
+            // one, forty-eight rows of `h-12` where `ui::CONTROL`'s forty would
+            // not have been.
             ui::input_sized(
                 theme,
                 ui::InputSize::Large,
