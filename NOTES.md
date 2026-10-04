@@ -2334,7 +2334,9 @@ something here" in a shape the reference does not use.
 
 Recorded here because it is the one visible difference on the page and it is a
 licence decision rather than a port, which is the kind of thing a later reader
-would otherwise try to fix with a `sed`.### The browse search field is 48 pixels, not 40
+would otherwise try to fix with a `sed`.
+
+### The browse search field is 48 pixels, not 40
 
 `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is the
 one search field in the tree that does. It is `h-12`: forty-eight pixels at
@@ -2408,7 +2410,9 @@ left, and what closed:
   each is the 189 transcribed tokens, not a screenshot.
 * **Animations.** Still open. Hover tweens (§29) and the scroll glide are in;
   the four §31 named are not, and two of them are attached to surfaces that do
-  not exist yet.### The browse header's shadow, and a three-pixel offset under it
+  not exist yet.
+
+### The browse header's shadow, and a three-pixel offset under it
 
 Two things sit between the tab strip and the search field that this launcher
 does not draw. Measured at x 700, both clients at 1280x720:
@@ -2440,7 +2444,9 @@ the header's own box model, not a padding number tuned until the gap is nine,
 and that is a slice rather than a constant.
 
 Not fixed, and written down with the numbers so the next pass starts from a
-measurement rather than from a guess about which padding is wrong.### The browse header is pinned, and the shadow under it is not decoration
+measurement rather than from a guess about which padding is wrong.
+
+### The browse header is pinned, and the shadow under it is not decoration
 
 `browse-tab/layout.vue`'s header is `sticky top-0 z-20 -mx-6 -mt-6 mb-4
 rounded-tl-[--radius-xl] border-0 border-b border-solid bg-surface-1 px-6 py-4
