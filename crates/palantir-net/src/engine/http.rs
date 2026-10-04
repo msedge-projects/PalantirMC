@@ -97,8 +97,17 @@ impl HttpPool {
     fn send_any(
         &self,
         request: &Request,
+        cancel: &Cancel,
     ) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
-        let permit = self.limit.acquire();
+        // A queued request must still be cancellable while other transfers
+        // hold every connection slot, not only after it reaches the network.
+        let permit = loop {
+            cancel.check()?;
+            if let Some(permit) = self.limit.acquire_timeout(Duration::from_millis(50)) {
+                cancel.check()?;
+                break permit;
+            }
+        };
         let mut builder = self.client.get(&request.url).timeout(self.timeout);
         if let Some(range) = request.range() {
             builder = builder.header("Range", range);
@@ -114,8 +123,8 @@ impl HttpPool {
 
     /// Send `request`, having taken a slot in the ceiling, and treat a non-2xx
     /// answer as the failure it is.
-    fn send(&self, request: &Request) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
-        let (response, permit) = self.send_any(request)?;
+    fn send(&self, request: &Request, cancel: &Cancel) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
+        let (response, permit) = self.send_any(request, cancel)?;
         let status = response.status();
         if !status.is_success() {
             // The body is read here for one reason: it is the only place the
@@ -169,7 +178,7 @@ impl Fetch for HttpPool {
             return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
         }
         cancel.check()?;
-        let (response, _permit) = self.send(request)?;
+        let (response, _permit) = self.send(request, cancel)?;
         let mut body = Vec::new();
         self.drain(request, response, &mut body, cancel)?;
         Ok(body)
@@ -182,14 +191,24 @@ impl Fetch for HttpPool {
         cancel: &Cancel,
     ) -> Result<Outcome, Error> {
         cancel.check()?;
-        let (response, _permit) = self.send(request)?;
+        let (response, _permit) = self.send(request, cancel)?;
         // Decided before a byte is written, which is the whole contract: a
         // server that answered 200 to a `Range` request sent the body from
         // zero, and appending that to a half file is a corrupt file that only
         // its hash would catch.
         let resumed = match request.offset {
-            Some(_) => response.status() == reqwest::StatusCode::PARTIAL_CONTENT,
-            None => false,
+            Some(offset) if response.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
+                let range = response.headers().get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|header| header.to_str().ok());
+                if !range_starts_at(range, offset) {
+                    return Err(Error::format(&request.url, "partial response has an invalid Content-Range"));
+                }
+                true
+            }
+            None if response.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
+                return Err(Error::format(&request.url, "unexpected partial response to a whole-file request"));
+            }
+            _ => false,
         };
         if request.offset.is_some() && !resumed {
             return Ok(Outcome::Ignored);
@@ -212,7 +231,7 @@ impl Fetch for HttpPool {
             return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
         }
         cancel.check()?;
-        let (response, _permit) = self.send_any(request)?;
+        let (response, _permit) = self.send_any(request, cancel)?;
         let status = response.status();
         let etag = response
             .headers()
@@ -230,6 +249,19 @@ impl Fetch for HttpPool {
         self.drain(request, response, &mut body, cancel)?;
         Ok(Response { body, etag, not_modified: false })
     }
+}
+
+/// A 206 is safe to append only when the server names the requested start.
+/// Status alone cannot detect a proxy serving a different slice of the file.
+fn range_starts_at(header: Option<&str>, offset: u64) -> bool {
+    let Some(range) = header.and_then(|header| header.strip_prefix("bytes ")) else {
+        return false;
+    };
+    let Some((bounds, total)) = range.split_once('/') else { return false; };
+    let Some((start, end)) = bounds.split_once('-') else { return false; };
+    let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>()) else { return false; };
+    start == offset && end >= start
+        && (total == "*" || total.parse::<u64>().map(|total| end < total).unwrap_or(false))
 }
 
 /// How much of a refusal's body is read to find its sentence.
@@ -317,6 +349,63 @@ fn bounded(text: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::engine::request::MapFetch;
+
+    #[test]
+    fn resumed_responses_must_name_the_requested_range() {
+        assert!(range_starts_at(Some("bytes 10-19/20"), 10));
+        assert!(range_starts_at(Some("bytes 10-19/*"), 10));
+        for range in [None, Some("bytes 0-19/20"), Some("bytes 10-9/20"),
+                      Some("bytes 10-20/20"), Some("bytes */20"), Some("garbage")] {
+            assert!(!range_starts_at(range, 10), "{range:?}");
+        }
+    }
+
+    #[test]
+    fn a_real_partial_response_with_the_wrong_range_writes_nothing() {
+        use std::net::TcpListener;
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", server.local_addr().unwrap());
+        let thread = std::thread::spawn(move || {
+            let (mut socket, _) = server.accept().unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut request = [0u8; 4096];
+            let read = socket.read(&mut request).unwrap();
+            assert!(read > 0, "the client sent a request");
+            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-2/10\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc").unwrap();
+        });
+        let pool = HttpPool {
+            client: reqwest::blocking::Client::builder().no_proxy().build().unwrap(),
+            limit: Limit::new(1),
+            timeout: Duration::from_secs(2),
+        };
+        let mut sink = Vec::new();
+        let result = pool.get_to(&Request::from(url, 5), &mut sink, &Cancel::new());
+        thread.join().unwrap();
+        assert!(matches!(result, Err(Error::Format { .. })), "{result:?}");
+        assert!(sink.is_empty(), "reject before appending any corrupt bytes");
+        assert_eq!(pool.limit().available(), 1);
+    }
+
+    #[test]
+    fn cancelling_a_request_waiting_for_a_slot_does_not_wait_for_the_slot() {
+        let pool = HttpPool::new(1, Duration::from_millis(100));
+        let held = pool.limit().acquire();
+        let cancel = Cancel::new();
+        std::thread::scope(|scope| {
+            let queued = scope.spawn(|| pool.get(
+                &Request::get("http://192.0.2.1/never-sent"), &cancel,
+            ));
+            std::thread::sleep(Duration::from_millis(20));
+            cancel.cancel();
+            let (tx, rx) = std::sync::mpsc::channel();
+            scope.spawn(move || { tx.send(queued.join()).ok(); });
+            let result = rx.recv_timeout(Duration::from_secs(2));
+            // Release before asserting so a broken implementation cannot hang
+            // the scoped threads while the test unwinds.
+            drop(held);
+            assert!(matches!(result.unwrap().unwrap(), Err(Error::Cancelled)));
+        });
+    }
 
     #[test]
     fn the_user_agent_names_this_build() {
