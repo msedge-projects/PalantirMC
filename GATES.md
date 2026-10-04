@@ -8890,18 +8890,82 @@ $ python tools/progress.py --check
   is the shipped Inter's own hinting rather than a layout, and no constant in this
   tree sets it.
 
+- [x] G160: the reference starts again, so the page pane is measured against a live
+  window rather than a recorded plate -- and G159's column re-checks on all six
+  Discover tabs
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: **825 passed / 0 failed** and 4 native passed in the desktop crate,
+          `clippy -D clippy::correctness` exits 0, and `Lint` is green on the runner
+          progress exits 0, with G160 attributed to stage 3
+  EVIDENCE: `tools/xshot.py --process ModrinthApp --title "Modrinth App"`, the six
+          plates `R-146 R-235 R-346 R-478 R-583 R-674`, and ours `o-modpack o-mod
+          o-resourcepack o-datapack o-shader o-server`, all 1280x720 on `:95`.
+
+  **The GTK panic was a missing environment variable and nothing else.** It was
+  `gtk::rt::init`, and `gtk::init` reads `XDG_RUNTIME_DIR`; pointed at a mode-700
+  directory the app starts, warns `libEGL warning: DRI3 error` and draws. The
+  closing section of this file said the app "does not start again" and that every
+  whole-image count in G142-G158 was **not re-checkable**. Both were wrong, and the
+  cost of leaving them was a slice's worth of work declared impossible.
+
+  **G159's column re-checks, on all six tabs and against the live window.** The five
+  frame borders are at **48, 126, 173, 182 and 217 on every one of the six tabs on
+  both sides** -- the head hairline, the search field's top and bottom, and the
+  trigger's top and bottom. The pill is at 72..117 and the results' own rule at
+  y=230 on both. G159 derived those from a recorded plate because it had to; they
+  were right, and this is the check that says so rather than the derivation.
+
+  **The one row G159 left out is real, and is a shadow.** Under the trigger's bottom
+  border the reference carries **y=218 in `(20,21,25)`** against the page background's
+  `(22,24,28)`, on all six tabs. It is the same family as the five shadow rows under
+  the tab pill at y 118..122, which this port records as deliberately un-drawn, and it
+  wants G153's shadow work rather than a one-row paint. It sits inside the gap, so it
+  moves nothing, which is why the borders still agree.
+
+  **And the active tab's plate is one unit of green out.** The strip's selected tab
+  fills `(36,85,61)` on the reference and `(36,84,61)` here, on all six tabs, and the
+  selected tab is the right one on all six on both sides. That is stage 1's recorded
+  finding -- the stylesheet says `green-500`, the running app measures darker -- and
+  this is the first time it has been checked against a live window rather than
+  against notes about one.
+
+  **What this gate cannot say.** The panel's own rows below its three cards are still
+  not like-for-like, and now that the reference runs that is a finding rather than an
+  excuse. Paired per tab, the three cards carry **different content** on the two
+  sides -- the reference's peak at `(176,186,197)` with 1,992 ink pixels against
+  ours at `(255,255,255)` with 1,087 -- so they are not the same elements and their
+  seven-row offset is not a defect. Below the first section heading they diverge
+  further: on the mod tab the reference's bands run to x=1264 where a section chevron
+  lives while ours are short labels at x=1021. Separating that needs the panel's own
+  sections read with their names, which this gate does not do.
+
 ## What these gates cannot say
 
-- **The reference capture is gone, and the reference with it.** `/usr/bin/ModrinthApp`
-  is still on disk and panics at startup -- `Failed to initialize gtk backend!:
-  BoolError { message: "Failed to initialize GTK", filename: "gtk-0.18.2/src/rt.rs",
-  function: "gtk::rt::init", line: 141 }` -- and `/tmp/ref/` holds one file,
-  `launch.log`. Every whole-image differing-pixel count in G142-G158 is therefore the
-  last measurement taken while that app was alive, and **none of them is
-  re-checkable**. Where a gate quotes a number its own commit recorded -- a difference
-  sum, an rms, an ink box, a plate's interior, a band table -- that number is the
-  record, and it is the one to argue with; a whole-image count is a receipt, not a
-  claim that can be re-taken here.
+- **CORRECTED 2026-10-04: the reference starts again, and this bullet was wrong.**
+  It said the app "does not start again" and that every whole-image
+  differing-pixel count in G142-G158 is therefore **not re-checkable**. Both are
+  no longer true. `/usr/bin/ModrinthApp` runs on `:95` and draws its window, and
+  the whole thing is one environment variable: the GTK failure was
+  `gtk::rt::init` and `gtk::init` needs `XDG_RUNTIME_DIR`, which the earlier runs
+  did not set. With `XDG_RUNTIME_DIR` pointing at a mode-700 directory it starts,
+  reports `libEGL warning: DRI3 error` and no more. The whole procedure:
+
+      mkdir -p /tmp/xdgrt && chmod 700 /tmp/xdgrt
+      XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY=:95 /usr/bin/ModrinthApp &
+      XDG_RUNTIME_DIR=/tmp/xdgrt DISPLAY=:95 python3 tools/xshot.py \
+          --process ModrinthApp --title "Modrinth App" \
+          --client 1280x720 --settle 8 --script <script> --out <png>
+
+  `--script` drives it: `click X Y`, `wait N` and `shot <path>` to a window that is
+  pinned to `--client` first, so every coordinate is the window's own. On Discover
+  the rail's Discover entry is at (39, 126) and the six tab-strip entries sit on
+  y=94 at x = 146, 235, 346, 478, 583 and 674. **Every whole-image count in
+  G142-G159 is therefore re-checkable**, and the first re-check is G160 below. What
+  remains true of the older gates is only the weaker half of what this bullet said:
+  where a gate quotes a number its own commit recorded, that number is still the
+  record, and a whole-image count remains a receipt rather than a claim.
 - **Nothing measured after `cec5440` is a fresh whole-image diff against the
   reference.** That commit is where the reference's own process on `:99` and
   `/tmp/ref/` died, and it does not start again -- the `Failed to initialize GTK`
