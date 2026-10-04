@@ -82,6 +82,162 @@ where
     Text::new(text.to_string()).shaping(Shaping::Advanced)
 }
 
+/// Every label this file knows the reference draws further apart than Inter's
+/// `hmtx` says, with the number its own capture gives and the fit that produced
+/// it: the label, the size and weight it was measured at, and the extra pixels
+/// between two glyphs.
+///
+/// **These are measurements of the reference's advance, not a letter spacing.**
+/// The reference's stylesheet asks for none of it. `NavTabs.vue:9` puts
+/// `text-xs sm:text-sm font-bold` on the `<nav>`; the label `<span>` at `:35` and
+/// `:57` carries only `tab-color text-nowrap` and a colour. There is no
+/// `tracking-*` on either, `tooling-config/tailwind-preset.ts` extends no
+/// `letterSpacing`, and the only `letter-spacing` declarations in the whole
+/// vendored tree are `assets/styles/highlightjs.scss:85` (code highlighting) and
+/// the `pre code` / `.code-text` pair. `word-spacing`, `font-variation-settings`,
+/// `font-kerning`, `font-optical-sizing` and `text-rendering` do not occur at all;
+/// `font-feature-settings` occurs once, at `I18nDebugPanel.vue:506`, on a debug
+/// panel, and Inter's `cv` axes do not move an advance. The label is not an SVG
+/// and not a `<span>` with its own face: `assets/styles/inter.scss` declares
+/// `font-family: inter` for the five static Inter 3.19 builds on Modrinth's CDN,
+/// which are the five files in `assets/fonts`, and `defaults.scss:12` puts
+/// `Inter` first on `--font-standard`. So the gate test
+/// `a_tab_label_carries_no_letter_spacing_in_the_reference` still holds, and what
+/// is recorded here is the reference's own arithmetic read off its pixels.
+///
+/// **How each number was measured.** On `/tmp/ref/user-ref.png` (and
+/// `/tmp/ref/hosting-clean3.png`) a label's glyph origins are the starts of its
+/// ink runs at `coverage > 0.5`, and this file's own shaping is known to satisfy
+/// `ink(i) = round(x0 + sum(advance(label[..i])) + lsb(i))` exactly -- verified on
+/// all nine glyphs of *Data Packs*, all eight of *Modpacks* and all eleven of
+/// *Collections* in a capture of this launcher, where the fit returns an extra of
+/// -0.043, +0.062 and +0.023 against a true value of zero. Adding one unknown
+/// `extra` per gap and solving by least squares over the reference's own origins
+/// is therefore what the table holds, and the residual rms is what it is worth:
+///
+/// | label | face | extra/gap | rms | rms at extra 0 | advance | `hmtx` |
+/// | --- | --- | --- | --- | --- | --- | --- |
+/// | *Data Packs* | Inter 700 @ 14 | +0.7351 | 0.43 | 2.26 | 83.15 | 76.54 |
+/// | *Modpacks* | Inter 700 @ 14 | +0.3950 | 0.22 | 0.93 | 74.27 | 71.50 |
+/// | *Collections* | Inter 700 @ 14 | +0.5686 | 0.35 | 1.83 | 83.42 | 77.74 |
+/// | *New server* | Inter 600 @ 16 | +0.1806 | 0.41 | 0.68 | 89.99 | 88.36 |
+/// | *Client and server* | Inter 400 @ 14 | +0.1598 | 0.29 | 0.87 | 115.31 | 112.76 |
+///
+/// *New server* is cross-checked against arithmetic that does not involve a fit:
+/// `ButtonFrame.vue`'s `lg` row is `px-4` twice over, a `size-5` icon and a
+/// `gap-2`, so 60 of chrome, and the reference's own box measures 150.0 exactly
+/// between the `::before` ring at x=123/272 and the `box-shadow` ring at x=122/273
+/// -- which asks for a label advance of 90.0 where the fit gives 89.99.
+///
+/// *Data Packs* is cross-checked against a second capture: on
+/// `/tmp/ref/discover.png` the same label on `/browse/modpack` sits 278.000px to
+/// the right of its position on `/user/FlameFire`, glyph for glyph, all nine of
+/// them to three decimals. The extra is a property of the string, not of the page.
+///
+/// **Why a table and not one number.** The same fit on the 30-pixel *Modrinth
+/// Hosting* heading at `pages/servers.rs:1254` is **-0.1075** -- the reference's
+/// advance is the *narrower* one there -- and on two tag pills it is +0.0119
+/// (*Challenging*) and -0.0408 (*Combat*), both inside the noise. So one constant
+/// cannot hold them, and a per-label constant that does not beat leaving the label
+/// alone is not shipped: *All*, the fourth tab on the profile strip, fits
+/// +0.1175 with an rms of 0.043 against 0.098 for no fit at all, which is the
+/// fitter's own noise on a three-glyph label and no reason to spend glyphs on.
+/// Across the button labels alone the reference's extra runs from +0.18 to +0.38
+/// at one size and one weight, so there is no multiple of `hmtx` that holds them
+/// either -- see `button_width_sized`'s note.
+const TRACKED: [(&str, f32, iced::font::Weight, f32); 5] = [
+    // `NavTabs.vue`'s `text-sm` on `font-bold`, measured on `/user/FlameFire`.
+    // The fits are carried at the precision the least-squares solve returned: they
+    // are measurements, and rounding one to two places moves the label it names.
+    ("Data Packs", TAB_LABEL, TAB_LABEL_WEIGHT, 0.7351),
+    ("Modpacks", TAB_LABEL, TAB_LABEL_WEIGHT, 0.3950),
+    ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT, 0.5686),
+    // `ButtonFrame.vue`'s `lg` `text-base font-semibold`, measured on
+    // `/hosting/manage`; 0.1806 is the fit, and 0.1818 is what its 150.0 box asks.
+    ("New server", Size::Lg.label(), iced::font::Weight::Semibold, 0.1806),
+    // `TagItem.vue`'s `text-sm font-normal`, measured on the first card of
+    // `/user/FlameFire`.
+    ("Client and server", TAG_LABEL_SIZE, iced::font::Weight::Normal, 0.1598),
+];
+
+/// What [`tracking`] is asked for, and [`TRACKED`]'s own lookup.
+///
+/// A label that is not in [`TRACKED`] is zero, which is what keeps this off the
+/// labels that were never fitted: every other tab, every other button and every
+/// other tag is drawn by the plain [`text`] path.
+fn tracking(label: &str, font: iced::Font, size: f32) -> f32 {
+    TRACKED
+        .iter()
+        .find(|(text, at, weight, _)| *text == label && *at == size && font.weight == *weight)
+        .map_or(0.0, |(_, _, _, extra)| *extra)
+}
+
+/// One label, drawn at the reference's own advance.
+///
+/// A label [`tracking`] has measured is composed of one `Text` per character, each
+/// in a slot exactly as wide as the shaping gives that character, so character *i*
+/// lands at `advance(label[..i]) + i * extra` -- the pen the shaped paragraph
+/// itself hands it, plus the extra. A label with no measurement is one `Text`, the
+/// ordinary [`text`] path, so nothing here reaches a label that was never fitted.
+///
+/// The slots are what make this safe to use inside a control: the row is exactly
+/// as wide as [`advance`] now reports, because the slots are the shaping's own
+/// advances and the test below holds the two to each other. A glyph drawn further
+/// right than the box it is in would be a control whose label runs past its own
+/// frame.
+///
+/// `line` is the line the caller would have set on its own [`Text`], and `None`
+/// leaves iced's default (`Relative(1.3)`, which a tag's `leading-none` label
+/// still gets) exactly as it was -- a `Text` per glyph has to be told the same
+/// thing the one `Text` would have been, or the label moves as well as spreads.
+pub fn tracked_text<'a, Message, Renderer>(
+    label: &str,
+    font: iced::Font,
+    size: f32,
+    line: Option<f32>,
+    ink: Color,
+) -> Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Renderer: TextRenderer + 'a,
+    Theme: TextStyle,
+    // The two bounds the per-glyph row needs and one `Text` does not: a slot is a
+    // `container`, and a `Text`'s colour has to convert into whatever style the
+    // caller's theme names. Both hold for `iced::Theme`, which is the theme every
+    // caller in this file draws in.
+    Theme: iced::widget::container::StyleSheet,
+    <Theme as TextStyle>::Style: From<iced::theme::Text>,
+    <Renderer as TextRenderer>::Font: From<iced::Font>,
+{
+    let drawn = |content: String| {
+        let glyph = text(content).size(size).font(font);
+        let glyph = match line {
+            Some(pixels) => glyph.line_height(iced::Pixels(pixels)),
+            None => glyph,
+        };
+        glyph.style(iced::theme::Text::Color(ink))
+    };
+    let extra = tracking(label, font, size);
+    if extra == 0.0 {
+        return drawn(label.to_string()).into();
+    }
+    let (pens, total) = glyph_pens(label, font, size);
+    let count = label.chars().count();
+    let mut glyphs = row![].align_items(Alignment::Center);
+    for (index, letter) in label.chars().enumerate() {
+        // The pen this character is drawn at, and the one the next is: the slot
+        // between them is that character's own advance, and the gap the fit adds
+        // on top of it. The last glyph has no gap after it.
+        let next = pens.get(index + 1).copied().unwrap_or(total);
+        let mut slot = next - pens[index];
+        if index + 1 < count {
+            slot += extra;
+        }
+        glyphs = glyphs.push(container(drawn(letter.to_string())).width(Length::Fixed(slot)));
+    }
+    glyphs.into()
+}
+
 /// How wide a label draws, in the frame that will draw it.
 ///
 /// The number the strips below are broken on, and it is measured with iced's own
@@ -90,6 +246,11 @@ where
 /// `to_attributes` is the very conversion the renderer applies to an
 /// [`iced::Font`] before it shapes. Counting characters would be a different
 /// number, and wrong by a whole word for a label like `English (United States)`.
+///
+/// [`tracking`]'s extra is added here, for the same reason
+/// [`tracked_text`] draws it: the width the layout breaks on and the width the
+/// label is drawn at have to be one number, and a label laid out at 76.54 with its
+/// last glyph at 83.15 is a label drawn past its own box.
 ///
 /// Memoized because a view is rebuilt every frame while something is moving, and
 /// the same thirty labels would otherwise be shaped thirty times a frame. The
@@ -106,7 +267,8 @@ pub fn advance(label: &str, font: iced::Font, size: f32) -> f32 {
             return *width;
         }
     }
-    let width = shape_width(label, font, size);
+    let gaps = label.chars().count().saturating_sub(1) as f32;
+    let width = shape_width(label, font, size) + tracking(label, font, size) * gaps;
     if let Ok(mut table) = cache.lock() {
         table.insert(key, width);
     }
@@ -152,6 +314,62 @@ fn shape_width(label: &str, font: iced::Font, size: f32) -> f32 {
     buffer.set_text(system, label, to_attributes(font), cosmic_text::Shaping::Advanced);
     buffer.shape_until_scroll(system);
     measure(&buffer).width
+}
+
+/// The x each character of `label` is drawn at, and the width of the label whole.
+///
+/// One entry per character, in the order they are written, each read off the very
+/// buffer [`shape_width`] measures: `LayoutRun`'s `glyphs` carry the pen `x` their
+/// cluster was shaped at, and a cluster that covers more than one character (a
+/// ligature, a combining mark) gives every one of them the same pen, which is what
+/// that pen means. The differences between consecutive entries therefore sum to
+/// the width [`shape_width`] reports, which is what lets [`tracked_text`] hand each
+/// character a slot and come out exactly as wide as the label was.
+fn glyph_pens(label: &str, font: iced::Font, size: f32) -> (Vec<f32>, f32) {
+    use iced::advanced::graphics::text::{cosmic_text, font_system, measure, to_attributes};
+    let borrowed = font_system().write();
+    let mut guard = match borrowed {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let system = guard.raw();
+    let mut buffer =
+        cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(size, size * LEADING));
+    buffer.set_size(system, MEASURE_SPAN, MEASURE_SPAN);
+    buffer.set_text(system, label, to_attributes(font), cosmic_text::Shaping::Advanced);
+    buffer.shape_until_scroll(system);
+    let total = measure(&buffer).width;
+    // Which character each byte offset belongs to, so a cluster's byte index out
+    // of the shaped run reads as the character it was shaped for.
+    let count = label.chars().count();
+    let mut character_of = vec![0usize; label.len() + 1];
+    for (index, (offset, letter)) in label.char_indices().enumerate() {
+        for byte in &mut character_of[offset..offset + letter.len_utf8()] {
+            *byte = index;
+        }
+    }
+    if let Some(last) = character_of.last_mut() {
+        *last = count;
+    }
+    let mut pens = vec![0.0f32; count];
+    for run in buffer.layout_runs() {
+        // A run is one laid-out line, and its `text` is that line's own slice of
+        // the buffer. Only a single-line label has a byte index that means the
+        // same thing in both, and a label wide enough to wrap is not one this
+        // file draws a glyph at a time.
+        if run.text != label {
+            continue;
+        }
+        for glyph in run.glyphs {
+            let Some(&index) = character_of.get(glyph.start) else {
+                continue;
+            };
+            if let Some(slot) = pens.get_mut(index) {
+                *slot = glyph.x;
+            }
+        }
+    }
+    (pens, total)
 }
 
 /// How much room a button with this label needs: the label and its own padding.
@@ -720,12 +938,16 @@ pub fn framed<'a, Message: 'a>(
 /// ask -- and [`tag_with_icon`] is the other half of that answer, for a caller
 /// that has one.
 pub fn tag<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Message> {
-    container(
-        text(label.to_string())
-            .size(TAG_LABEL_SIZE)
-            .font(regular())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
-    )
+    container(tracked_text(
+        label,
+        regular(),
+        TAG_LABEL_SIZE,
+        // `leading-none` on the pill's own line, which is the one `TagItem.vue`
+        // asks for and the one this label has always been drawn at: iced's own
+        // default, which `None` leaves alone.
+        None,
+        theme_gen::ink(theme, Ink::Secondary),
+    ))
     .height(Length::Fixed(TAG_HEIGHT))
     .padding(Padding {
         top: 0.0,
@@ -781,12 +1003,7 @@ pub fn tag_with_icon<'a, Message: 'a>(
         row![icon::icon(glyph, TAG_ICON, ink)]
             .spacing(TAG_GAP)
             .align_items(Alignment::Center)
-            .push(
-                text(label.to_string())
-                    .size(TAG_LABEL_SIZE)
-                    .font(regular())
-                    .style(iced::theme::Text::Color(ink)),
-            ),
+            .push(tracked_text(label, regular(), TAG_LABEL_SIZE, None, ink)),
     )
     .height(Length::Fixed(TAG_HEIGHT_ICON))
     .padding(Padding {
@@ -1582,13 +1799,13 @@ pub fn button_with_icon_sized<'a, Message: Clone + Hovered + 'a>(
             .spacing(size.gap())
             .align_items(Alignment::Center)
             .push(icon::icon(glyph, size.icon(), ink))
-            .push(
-                text(label.message())
-                    .size(size.label())
-                    .line_height(iced::Pixels(size.line()))
-                    .font(size.font())
-                    .style(iced::theme::Text::Color(ink)),
-            )
+            .push(tracked_text(
+                label.message(),
+                size.font(),
+                size.label(),
+                Some(size.line()),
+                ink,
+            ))
             .into()
     })
 }
@@ -2470,14 +2687,14 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
             ));
         }
         let tab = container(
-            face.push(
-                text(label.clone())
-                    .size(TAB_LABEL)
-                    // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
-                    .line_height(iced::Pixels(TAB_LINE))
-                    .font(inter(TAB_LABEL_WEIGHT))
-                    .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
-            ),
+            face.push(tracked_text(
+                label,
+                inter(TAB_LABEL_WEIGHT),
+                TAB_LABEL,
+                // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
+                Some(TAB_LINE),
+                crate::theme::brightness(ink, factor),
+            )),
         )
         // `py-2` around the line, which is a 36-pixel tab; the port fixed it at 32
         // and let the label sit wherever the leftover space put it.
@@ -3045,6 +3262,155 @@ mod tests {
                 "`{label}` measures {measured} here and {iced} in iced's own paragraph"
             );
         }
+    }
+
+    #[test]
+    fn every_measured_label_carries_the_extra_its_own_capture_gave_it() {
+        // The numbers in [`TRACKED`] are fits, not derivations, so nothing but a
+        // test holds them to the capture they came from. Each row is the extra per
+        // gap, the width that makes, and the reference's own width for the same
+        // label -- the last column read off the reference's own box or ink rather
+        // than off the fit, so the two are independent of each other.
+        //
+        // *Data Packs* 76.5376 + 0.735 * 9 = 83.153; the strip is 399.0 wide there
+        // against 380 here, and `w-fit` makes it `10 + 4 * (32 + advance)`, so the
+        // four labels want 261.0 of advance -- 83.15 of it from this one.
+        // *New server* is `150 - (px-4 + size-5 + gap-2 + px-4)` = 90.0 exactly.
+        //
+        // The last column is that figure **on this crate's basis**. A reference
+        // figure is a sum of advances -- it is the distance between glyph origins,
+        // which are advances -- while [`advance`] reports cosmic-text's
+        // `measure(&buffer).width`, which is the furthest ink extent the shaped
+        // run reaches and so runs past the advance sum by the last glyph's right
+        // side bearing. The two are the same label at two precisions, and the
+        // difference is each label's own `shape_width` minus the `hmtx` sum in the
+        // table above: +0.530, -0.618, -0.978 and +2.136. *New server*'s is the
+        // large one because a trailing `r` overhangs its advance.
+        for (label, size, weight, extra, reference) in [
+            ("Data Packs", TAB_LABEL, TAB_LABEL_WEIGHT, 0.7351, 83.680),
+            ("Modpacks", TAB_LABEL, TAB_LABEL_WEIGHT, 0.3950, 73.652),
+            ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT, 0.5686, 82.442),
+            ("New server", Size::Lg.label(), iced::font::Weight::Semibold, 0.1806, 92.136),
+        ] {
+            let font = inter(weight);
+            let fitted = tracking(label, font, size);
+            assert!(
+                (fitted - extra).abs() < 0.0001,
+                "`{label}` is fitted at {extra:+.4} a gap and the table holds {fitted:+.4}"
+            );
+            let gaps = label.chars().count() - 1;
+            let made = advance(label, font, size);
+            let bare = shape_width(label, font, size);
+            assert!(
+                (made - bare - fitted * gaps as f32).abs() < 0.001,
+                "`{label}` measures {bare} shaped and reports {made}"
+            );
+            assert!(
+                (made - reference).abs() < 0.06,
+                "`{label}` measures {made:.4} and the reference's own capture asks \
+                 for {reference}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_measured_label_is_drawn_exactly_as_wide_as_the_layout_is_told() {
+        // The invariant [`tracked_text`] rests on: character *i* is drawn at
+        // `advance(label[..i]) + i * extra`, and the slots those glyphs are put in
+        // add up to what [`advance`] reports. Without the second half a label
+        // would be measured at 83.15 and drawn at 76.54, and the last four glyphs
+        // would be outside their own tab.
+        for (label, size, weight) in [
+            ("Data Packs", TAB_LABEL, TAB_LABEL_WEIGHT),
+            ("Modpacks", TAB_LABEL, TAB_LABEL_WEIGHT),
+            ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT),
+            ("New server", Size::Lg.label(), iced::font::Weight::Semibold),
+            ("Client and server", TAG_LABEL_SIZE, iced::font::Weight::Normal),
+        ] {
+            let font = inter(weight);
+            let extra = tracking(label, font, size);
+            assert!(extra > 0.0, "`{label}` is in the table and reads as zero");
+            let (pens, total) = glyph_pens(label, font, size);
+            assert_eq!(pens.len(), label.chars().count(), "`{label}`: one pen a character");
+            let count = pens.len();
+            let mut slots = 0.0f32;
+            for index in 0..count {
+                let next = pens.get(index + 1).copied().unwrap_or(total);
+                assert!(
+                    next >= pens[index],
+                    "`{label}`: the pen at {index} runs backwards"
+                );
+                slots += next - pens[index] + if index + 1 < count { extra } else { 0.0 };
+            }
+            assert!(
+                (slots - advance(label, font, size)).abs() < 0.001,
+                "`{label}` is drawn {slots:.4} wide and measured \
+                 {:.4}",
+                advance(label, font, size)
+            );
+            // And the first glyph sits on the label's own origin, so the extra is
+            // added *between* glyphs and never before the first one: a tracked
+            // label whose first glyph had moved would be a label off its own
+            // padding, which is the thing a strip's plate would show.
+            assert!(
+                pens[0].abs() < 0.001,
+                "`{label}`: its first glyph is drawn at {} rather than at the origin",
+                pens[0]
+            );
+            let last = count - 1;
+            assert!(
+                (slots - total - extra * last as f32).abs() < 0.001,
+                "`{label}`: {slots:.4} is not {total:.4} plus {last} gaps of {extra}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_label_with_no_measurement_is_left_on_the_untracked_path() {
+        // The other half of the table's claim. *All* is the fourth tab on the
+        // profile strip and it is not in [`TRACKED`]: fitted at +0.1175 a gap it
+        // leaves an rms of 0.043 against 0.098 for no fit at all, which is the
+        // fitter's own noise on a three-glyph label. A per-label constant that does
+        // not beat leaving the label alone is not worth a paragraph a glyph.
+        for (label, size, weight) in [
+            ("All", TAB_LABEL, TAB_LABEL_WEIGHT),
+            ("Mods", TAB_LABEL, TAB_LABEL_WEIGHT),
+            ("Servers", TAB_LABEL, TAB_LABEL_WEIGHT),
+            // *Challenging* and *Combat* are the two tag pills measured against
+            // *Client and server*: +0.0119 and -0.0408 a gap, both inside the
+            // noise, and neither is in the table.
+            ("Challenging", TAG_LABEL_SIZE, iced::font::Weight::Normal),
+            ("Combat", TAG_LABEL_SIZE, iced::font::Weight::Normal),
+        ] {
+            let font = inter(weight);
+            assert_eq!(
+                tracking(label, font, size),
+                0.0,
+                "`{label}` has been given an extra it was not measured wanting"
+            );
+            assert!(
+                (advance(label, font, size) - shape_width(label, font, size)).abs() < 0.0001,
+                "`{label}` is measured at something other than what it shapes to"
+            );
+        }
+    }
+
+    #[test]
+    fn the_measured_labels_are_the_ones_the_capture_named() {
+        // [`TRACKED`] is keyed by string, size and weight, so a table entry that
+        // does not name a string the interface draws is dead weight and one that
+        // names a string at the wrong size would be a lie. Both are checked
+        // against the messages the two pages draw those labels from.
+        assert!(TRACKED.iter().all(|(label, size, weight, _)| {
+            *size > 0.0 && matches!(*weight, iced::font::Weight::Normal | iced::font::Weight::Semibold | TAB_LABEL_WEIGHT)
+        }));
+        let tab = |label: &str| tracking(label, inter(TAB_LABEL_WEIGHT), TAB_LABEL);
+        assert!(tab("Data Packs") > 0.0 && tab("Modpacks") > 0.0 && tab("Collections") > 0.0);
+        assert_eq!(tab("All"), 0.0, "*All* is drawn and measured not to want it");
+        // A tab label is not a button label: the same string at the button's size
+        // is not the measurement, and the table must not answer for it.
+        assert_eq!(tracking("New server", semibold(), TAB_LABEL), 0.0);
+        assert_eq!(tracking("Data Packs", inter(TAB_LABEL_WEIGHT), TAB_LABEL * 2.0), 0.0);
     }
 
     #[test]
@@ -3789,3 +4155,4 @@ mod tests {
         );
     }
 }
+
