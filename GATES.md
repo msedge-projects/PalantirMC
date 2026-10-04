@@ -8812,7 +8812,12 @@ $ python tools/progress.py --check
          cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
          python tools/progress.py --check
   EXPECT: **825 passed / 0 failed** and 4 native passed in the desktop crate here,
-          `clippy -D clippy::correctness` exits 0, and `Lint` is green on the runner
+          `clippy -D clippy::correctness` exits 0, and `Lint` is green on the
+          runner: run 37215856770 on `3525d5d`, **green in 6m32s** through all five
+          jobs -- `Test workspace` 2m25s at **1317 passed / 0 failed** and 19
+          ignored (177 + 8 + 825 + 4 + 33 + 270), the desktop crate's 825 being the
+          run before it plus this slice's three, `Lint` 1m26s, the live suite 19
+          passed / 0 failed, and both Windows exes staged
           progress exits 0, with G159 attributed to stage 3
   EVIDENCE: `ButtonFrame.vue:31`'s `md` row, `Combobox.vue:71`/`:78`/`:90-92`/
           `:338`, `browse-tab/layout.vue:147`/`:178`/`:191`/`:258`, and the
