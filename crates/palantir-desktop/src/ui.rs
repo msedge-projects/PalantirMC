@@ -145,7 +145,7 @@ where
 /// Across the button labels alone the reference's extra runs from +0.18 to +0.38
 /// at one size and one weight, so there is no multiple of `hmtx` that holds them
 /// either -- see `button_width_sized`'s note.
-const TRACKED: [(&str, f32, iced::font::Weight, f32); 5] = [
+const TRACKED: [(&str, f32, iced::font::Weight, f32); 6] = [
     // `NavTabs.vue`'s `text-sm` on `font-bold`, measured on `/user/FlameFire`.
     // The fits are carried at the precision the least-squares solve returned: they
     // are measurements, and rounding one to two places moves the label it names.
@@ -158,6 +158,20 @@ const TRACKED: [(&str, f32, iced::font::Weight, f32); 5] = [
     // `TagItem.vue`'s `text-sm font-normal`, measured on the first card of
     // `/user/FlameFire`.
     ("Client and server", TAG_LABEL_SIZE, iced::font::Weight::Normal, 0.1598),
+    // The card's own *Install to instance*, at `ButtonFrame`'s `md`. Its extra is
+    // not fitted from glyph origins the way the four above are -- it is derived,
+    // because the reference's box is 189 wide and `md`'s chrome is `px-2.5` twice
+    // over, a `gap-1.5` and a `size-5` icon, so 46, and the label is left 143.0
+    // where Inter-600's `hmtx` sums to 136.76: 6.24 over eighteen gaps.
+    //
+    // That it is nearly twice *New server*'s 0.1806 at the same size and weight
+    // is the same finding as everywhere else on this page -- the reference's extra
+    // is not one number -- and it is why this is a table and not a constant. It
+    // also fixes a card rather than working around one: the second and third
+    // cards used to add `521 + 6 - 1` to their summary column to cover this
+    // button being six pixels narrow, and with the button right the column is
+    // the 521 the grid derives.
+    ("Install to instance", Size::Md.label(), iced::font::Weight::Semibold, 0.3467),
 ];
 
 /// What [`tracking`] is asked for, and [`TRACKED`]'s own lookup.

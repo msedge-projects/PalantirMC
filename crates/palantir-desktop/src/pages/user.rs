@@ -1873,12 +1873,14 @@ fn project_row<'a>(
     // line needs to carry *A skyblock* (`x=217..737`, its em dashes at
     // `620..651`) and not one word more.
     //
-    // What is left of that on the second and third cards is not in this file: our
-    // *Install to instance* measures 183 where the reference's measures 189 -- the
-    // label's own advance, 136.76 by `Inter-600`'s `hmtx` against the ~143 the
-    // reference paints, which is the letter-spacing question and not a number here.
-    // So those two cards get `521 + 6 - 1`, the last pixel being this card's own
-    // content box being one wider than the reference's.
+    // What is left of that on the second and third cards is in
+    // [`ui::tracked_text`] now, and not here: our *Install to instance* measured
+    // 183 where the reference's measures 189, because the label's advance was
+    // Inter-600's `hmtx` -- 136.76 -- against the ~143 the reference paints. The
+    // column is `Length::Fill`, so it took the difference as width of its own and
+    // came out 528 where the grid derives 521, which is why the third card's
+    // summary carried a word the reference's does not. With the button 189 the
+    // column is the 521 again, and nothing about it is named here.
     let right = column![]
         .spacing(CARD_STATS_LEAD)
         .align_items(Alignment::End)
@@ -2579,11 +2581,19 @@ fn install_button<'a>(
                 ink,
             ))
             .push(
-                text(label.message())
-                    .size(size.label())
-                    .line_height(iced::Pixels(size.line()))
-                    .font(size.font())
-                    .style(iced::theme::Text::Color(ink)),
+                // `tracked_text` and not `text`: the reference's own card button measures
+                // 189, and at `ButtonFrame`'s `md` chrome -- `px-2.5` twice over, a
+                // `gap-1.5` and a `size-5` icon, so 46 -- that leaves 143.0 of
+                // label where Inter-600's `hmtx` sums to 136.76. The container sizes
+                // itself to whatever this returns, so the button is 189 without any
+                // width being named here.
+                ui::tracked_text(
+                    label.message(),
+                    size.font(),
+                    size.label(),
+                    Some(size.line()),
+                    ink,
+                ),
             ),
     )
     .height(Length::Fixed(size.height()))
