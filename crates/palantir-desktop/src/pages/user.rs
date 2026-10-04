@@ -541,7 +541,12 @@ impl Profile {
         icons: Vec<crate::avatar::Fetched>,
     ) -> Profile {
         let (avatar, note) = match avatar {
-            Ok(picture) => match crate::avatar::Icon::circle(&picture, AVATAR as u32) {
+            // `shadowed_circle` and not `circle`: `UserPageHeader.vue:4` asks for
+            // the shadow and is the one circle of the four this crate draws that
+            // does -- the preview, the listing and the card's all pass
+            // `no-shadow`. The canvas comes back at the card plus its reach, so
+            // the draw site below lays it out wider than [`AVATAR`].
+            Ok(picture) => match crate::avatar::Icon::shadowed_circle(&picture, AVATAR as u32) {
                 Some(avatar) => (Some(avatar), None),
                 None => (
                     None,
@@ -1198,11 +1203,23 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
         // The bytes are already the circle: `crate::avatar::Icon::circle` cleared
         // the alpha outside it, which is the one thing a `container`'s border radius
         // cannot do -- it paints the container's own background and leaves what is
-        // drawn over it square.
-        Some(avatar) => iced::widget::image(avatar.handle())
-            .width(Length::Fixed(AVATAR))
-            .height(Length::Fixed(AVATAR))
-            .into(),
+        // drawn over it square. They also carry the card's shadow, whose reach
+        // falls *outside* the 96-pixel box, so the canvas is laid over a
+        // transparent spacer of the card's own size rather than sized to the
+        // canvas: `Stack`'s layout is its base layer's, so a canvas-as-base would
+        // reserve 102 and push the card three pixels right, and a container would
+        // crop the reach. See [`crate::avatar::SHADOW_REACH`].
+        Some(avatar) => crate::pages::overlay::Stack::at(
+            Vector::ZERO,
+            iced::widget::Space::new(Length::Fixed(AVATAR), Length::Fixed(AVATAR)),
+        )
+        .over(
+            Vector::new(-crate::avatar::SHADOW_REACH, -crate::avatar::SHADOW_REACH),
+            iced::widget::image(avatar.handle())
+                .width(Length::Fixed(AVATAR + 2.0 * crate::avatar::SHADOW_REACH))
+                .height(Length::Fixed(AVATAR + 2.0 * crate::avatar::SHADOW_REACH)),
+        )
+        .into(),
         // The reference's own fallback is a circle tinted by the username with the
         // first letter in it; this launcher has no letter-in-a-circle drawing, so
         // the placeholder is the generic account glyph at the same size.
