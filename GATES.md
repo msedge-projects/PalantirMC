@@ -9061,18 +9061,24 @@ $ python tools/progress.py --check
   written on them, and none was -- they appear only in `.scratch/`, which is not
   committed -- but the error is the one this file keeps naming: a number read in a
   region whose identity was assumed rather than established.
-- **The panel's content may sit sixteen to nineteen rows low, and nothing here
-  says so.** Banding `ref-mod.png` and our own `/browse/mod` plate against each
-  other puts every landmark the same distance apart: the first heading at y 60..75
-  against y 79..94, and each of the three cards sixteen rows lower on ours
-  (104/152/200 against 120/168/216). It is a repeated offset rather than a
-  one-off, and **no gate claims it**, because the two plates do not agree on what
-  is below the first heading: the reference's bands run to x=1264, where
-  `NOTES.md` puts a section chevron, while ours are short secondary-ink labels at
-  x=1021, which are option rows. Whether the reference had its lower sections
-  collapsed at capture, or its plate sits at a scroll offset, or this launcher
-  expands what the reference collapses, is not settled -- and the offsets mean
-  nothing until it is. Settling it needs the reference running, which it is not.
+- **SUPERSEDED by G160.** This bullet said the panel's content "may sit sixteen to
+  nineteen rows low". Measured against the **live** reference rather than a recorded
+  plate, that offset is not there: G160 puts the frame borders at 48, 126, 173, 182
+  and 217 on both sides on all six tabs. The sixteen-to-nineteen figure came from
+  pairing `ref-mod.png` against ours, and **the two were not the same tab** -- the
+  reference's recorded mod plate is its *second* strip tab, while `ProjectType::TABS`
+  here is `Modpack, Mod, ResourcePack, Datapack, Shader, Server`. Pairing by filename
+  rather than by tab is the same class of mistake as every other mis-pairing this file
+  names, and it is written down because the wrong number was in the record and a
+  reader would have acted on it.
+- **The panel's own rows are still not paired, and G160 says why.** With the
+  reference running, per tab, its three cards carry **different content** from ours --
+  peak `(176,186,197)` with 1,992 ink pixels against `(255,255,255)` with 1,087 -- so
+  they are not the same elements and their seven-row offset is not a defect. Below the
+  first section heading they diverge further: on the mod tab the reference's bands run
+  to x=1264, where `NOTES.md` puts a section chevron, and ours are short
+  secondary-ink labels at x=1021. What this needs is the panel's sections read **with
+  their names**, so a band can be attributed rather than guessed at.
 - **One page is switched onto the engine.** Discover's search is the only request
   that goes through the seam; the right panel, the settings modal and every
   instance-facing list still answer from disk or from the copy, so this document
