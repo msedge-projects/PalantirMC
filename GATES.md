@@ -8966,19 +8966,18 @@ $ python tools/progress.py --check
   remains true of the older gates is only the weaker half of what this bullet said:
   where a gate quotes a number its own commit recorded, that number is still the
   record, and a whole-image count remains a receipt rather than a claim.
-- **Nothing measured after `cec5440` is a fresh whole-image diff against the
-  reference.** That commit is where the reference's own process on `:99` and
-  `/tmp/ref/` died, and it does not start again -- the `Failed to initialize GTK`
-  panic above is what it does now. So G157's and G158's figures are of two kinds, and
-  a reader has to know which is which: **G157's four shaped widths are this tree's
-  own `shape_width` through the five faces in `crate::FONTS`**, reproducible here
-  today, against **reference advances recorded while the reference was alive**; and
-  **G158's 189 and its card boxes at 217..711 and 217..737 are ink measurements
-  recorded then too**, with 189 itself now serving as an *input* to that gate's
-  derivation rather than an output of it. No number in either gate is a whole-image
-  differing-pixel count, so neither is the receipt that kind of number is -- they are
-  the recorded measurements those receipts rest on, and re-taking them needs the
-  reference back.
+- **CORRECTED 2026-10-04: the reference is back, so this bullet's premise is gone.**
+  It rested on the app "not start[ing] again" after `cec5440`. It does start (see the
+  corrected bullet above), so G157's and G158's two kinds of figure are no longer a
+  distinction a reader has to carry: **both kinds are now re-takable**, the shaped
+  widths through `crate::FONTS` directly, and the recorded ink boxes by
+  re-capturing the reference. The distinction that *does* survive is the one this
+  bullet itself drew at the end, and it is unaffected: **no number in G157 or G158 is
+  a whole-image differing-pixel count.** They are recorded measurements -- an `hmtx`
+  sum, an ink box -- and the receipts that kind of number would give are what is
+  missing, not the measurements themselves. What each gate quotes stays the record its
+  own commit made; it can now also be re-measured, and a reader who doubts it has
+  something to re-measure against.
 - **One of those numbers is weaker than the four beside it, and says so.** G158's
   **0.3467** a gap is derived from the reference's measured box width and
   `ButtonFrame.vue`'s own chrome, with no glyph origins left to check it against,
