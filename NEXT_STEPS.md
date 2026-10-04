@@ -1217,6 +1217,29 @@ agree on both sides -- prefix peak (176,186,197), value (255,255,255), chevron
 (255,255,255) at 12x8 -- and what is left in this region is glyph rasterisation
 rather than layout.
 
+**The pass then reached the right panel, and stopped at two things it could not
+settle.** `.scratch/verify/panelbands.py` finally segments it -- the panel's fill is
+a vertical gradient, so no two rows share a background and every threshold returns
+one band; taking **each row's own median** as that row's fill cancels the gradient.
+It reproduces `NOTES.md`'s hand-measured sidebar rows from the same plate exactly
+(a heading at y 341..355, options at y 385..400 and y 418..432), so the tool is
+sound. What it does not do is make the plates comparable: banding the reference's
+`/browse/mod` plate against ours puts every landmark sixteen to nineteen rows
+apart, which is a repeated offset rather than a one-off -- but below the first
+heading the two show different *content*, the reference's running to x=1264 where
+the section chevron lives and ours being short labels at x=1021. Collapsed
+accordions, a scroll offset, or an expansion difference; all three fit, and the
+offsets mean nothing until one is chosen. It is recorded in `GATES.md`'s closing
+section as an open question and **no code was changed on the strength of it**.
+
+The same pass retracted a number rather than publishing it. Three brand-gradient
+rows at y 269, 322 and 371 look exactly like `filterClass`'s section rule, and an
+earlier pass counted them as one-where-three. Banding shows they sit below the
+panel's cards among long full-width text bands -- a document, not a filter list --
+so they are the app panel's own separators. The colour and thickness are right;
+the attribution was not, and that is the same mistake twice: a number read in a
+region whose identity was assumed instead of established.
+
 **G156's own assertion is green again, and was red for a reason worth keeping.** It
 failed at `da746ab` on the Windows runner while passing on Linux, because the per-label
 fits were measured through iced's *global* font system -- which in a test binary, that

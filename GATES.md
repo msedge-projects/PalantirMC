@@ -8966,6 +8966,32 @@ $ python tools/progress.py --check
   percentage beside it; what this launcher draws is a grid of chips, which is a
   reading of that list rather than a copy of it. The list, the order and the names
   are the reference's; the chrome is not, and G121 said so first.
+- **No gate has measured the right panel's own rows, and one measurement that
+  looked like it had was wrong.** `.scratch/verify/panelbands.py` segments the panel
+  at last -- the fill is a vertical gradient, so thresholding against the page
+  background returns one band, and thresholding against **each row's own median**
+  cancels it. On `ref-disc.png` the tool returns a section heading at y 341..355
+  and options at y 385..400 and y 418..432, which is what `NOTES.md` recorded by
+  hand from the same plate, so two independent readings agree. But the same tool
+  shows the three brand-gradient rows an earlier pass counted at y 269, 322 and
+  371 are **not** the sidebar's section rules: they sit below the panel's cards,
+  among long full-width text bands (y 478..522, and y 526..719 with 17,758 ink
+  pixels) that are a document rather than a filter list. A gate must not be
+  written on them, and none was -- they appear only in `.scratch/`, which is not
+  committed -- but the error is the one this file keeps naming: a number read in a
+  region whose identity was assumed rather than established.
+- **The panel's content may sit sixteen to nineteen rows low, and nothing here
+  says so.** Banding `ref-mod.png` and our own `/browse/mod` plate against each
+  other puts every landmark the same distance apart: the first heading at y 60..75
+  against y 79..94, and each of the three cards sixteen rows lower on ours
+  (104/152/200 against 120/168/216). It is a repeated offset rather than a
+  one-off, and **no gate claims it**, because the two plates do not agree on what
+  is below the first heading: the reference's bands run to x=1264, where
+  `NOTES.md` puts a section chevron, while ours are short secondary-ink labels at
+  x=1021, which are option rows. Whether the reference had its lower sections
+  collapsed at capture, or its plate sits at a scroll offset, or this launcher
+  expands what the reference collapses, is not settled -- and the offsets mean
+  nothing until it is. Settling it needs the reference running, which it is not.
 - **One page is switched onto the engine.** Discover's search is the only request
   that goes through the seam; the right panel, the settings modal and every
   instance-facing list still answer from disk or from the copy, so this document
