@@ -349,24 +349,111 @@ pub struct Glides {
 #[derive(Debug, Default)]
 struct Region {
     anim: ScrollAnim,
-    /// The offset the last `scroll_to` asked for. What a later wheel's measured
-    /// offset is compared against, to tell this policy's own number from somebody
-    /// else's -- see [`Wheel::offset`].
+    /// The offset the last `scroll_to` asked for, and what a later wheel's
+    /// measured offset is compared against through [`Region::swept`] -- see
+    /// [`Wheel::offset`].
     sent: f32,
+    /// Every offset this policy has put the region at since it last measured it.
+    swept: Swept,
 }
 
-impl Region {
-    /// Take the region over at the offset the wheel measured, if that offset is
-    /// not the one this policy last asked for.
+/// The offsets a region's own commands can account for.
+///
+/// **A range rather than a point, because one command is not one measurement.**
+/// `scroll_to` is an `AbsoluteOffset` (iced_widget-0.12.3's
+/// `operation::scrollable::scroll_to`, applied at `State::scroll_to`), so the
+/// command that lands *last* is the only one the widget ever sees — the ones
+/// before it are overwritten, not composed. But a wheel event does not read the
+/// widget: [`Wheel::offset`] is `viewport.y - bounds.y` off the *cached layout*
+/// (scroll.rs's `WheelGuard::claimed`), and iced_winit only rebuilds that at the
+/// end of its `AboutToWait` branch, after the messages in the batch have run.
+/// A `Message::Tick` arrives as a winit `UserEvent` and is pushed straight into
+/// the message queue (`iced_winit-0.12.2/src/application.rs:366-368`) while a
+/// wheel goes through `user_interface.update` first (`application.rs:494-499`),
+/// and the queue is then drained in arrival order (`application.rs:637-650`).
+/// So a batch arriving as `[Tick, Wheel]` runs the tick's `scroll_to` and *then*
+/// hands `Glides::wheel` a measurement taken before it.
+///
+/// Compared as a single number against the newest command, that measurement is a
+/// whole frame of glide behind — tens of pixels, well past [`SETTLED`] — and reads
+/// exactly like a scrollbar drag. [`Region::adopt`] then resyncs onto it, which
+/// resets `ScrollAnim::target` to a position the reader never asked for and throws
+/// away every notch accumulated since the gesture began; the frame answers
+/// `scroll_to` with the stale offset as well, so the region visibly jumps back.
+/// How many ticks get interleaved depends on the clock thread and on X
+/// round-trip timing, which is why the same gesture travelled a different distance
+/// on every run: 285, 272, 162, 165, 540, 416 and 415 pixels were measured from
+/// the same binary for six, ten and twenty notches, where the arithmetic says
+/// 360, 600 and 1200.
+///
+/// Recording the whole range each command swept makes that case
+/// indistinguishable from the region being where it was told, which is what it
+/// is, and it holds however many commands are outstanding rather than guessing a
+/// depth. Widening a range is also what makes a repeated command mean the same
+/// thing twice: `Region::send` only ever grows it, so re-issuing the last
+/// `scroll_to` — or issuing another while it is still in flight — can no longer
+/// read as an outsider's move.
+///
+/// The `Default` is `Swept::at(0.0)` rather than a range of nothing: a region
+/// nobody has commanded *is* at the top, and `Region::default` is what a name
+/// this policy has never seen resolves to.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Swept {
+    lo: f32,
+    hi: f32,
+}
+
+impl Swept {
+    /// A region nobody has commanded is at the top, which is where it starts.
+    fn at(offset: f32) -> Self {
+        Swept { lo: offset, hi: offset }
+    }
+
+    /// Add an offset a command has put the region at.
+    fn include(&mut self, offset: f32) {
+        self.lo = self.lo.min(offset);
+        self.hi = self.hi.max(offset);
+    }
+
+    /// Whether `offset` is one this policy could have put the region at.
     ///
     /// A tolerance rather than an equality, because iced clamps the offset it is
     /// given at the end of the content and because a frame and a wheel event do
     /// not have to fall on the same tick: half a pixel is this policy's own
     /// rounding, and anything past it is a drag, a keyboard scroll or a clamp.
+    fn holds(&self, offset: f32) -> bool {
+        offset >= self.lo - SETTLED && offset <= self.hi + SETTLED
+    }
+}
+
+impl Region {
+    /// Take the region over at the offset the wheel measured, unless this policy
+    /// could have put it there itself -- which is the whole of what is left, once
+    /// [`Region::swept`] has answered for the commands still in flight.
+    ///
+    /// The cost is a drag that lands *inside* the swept range, which is not
+    /// adopted. That range is at most one frame of a glide wide and exists only
+    /// while a gesture is running or has just finished, against the point-wide
+    /// neighbourhood this replaced; a drag into it is left to the next wheel,
+    /// which re-bases off whatever the region is at by then.
     fn adopt(&mut self, offset: f32) {
-        if (offset - self.sent).abs() > SETTLED {
-            self.anim.resync(offset);
+        if self.swept.holds(offset) {
+            return;
         }
+        self.anim.resync(offset);
+        self.swept = Swept::at(offset);
+    }
+
+    /// Record that a `scroll_to` for `offset` has been issued, and answer with the
+    /// offset that command carries.
+    ///
+    /// Both writers of `sent` go through here, so a commanded offset can never be
+    /// recorded without widening [`Region::swept`] to cover it -- which is the
+    /// whole reason a stale measurement is not read as somebody else's move.
+    fn send(&mut self, offset: f32) -> f32 {
+        self.sent = offset;
+        self.swept.include(offset);
+        self.sent
     }
 }
 
@@ -375,6 +462,13 @@ impl Glides {
     ///
     /// One command, not a stream: the wheel starts the tween and answers with the
     /// offset it starts from, and every frame after this one is [`Glides::tick`]'s.
+    ///
+    /// The notches go onto the **target**, not onto the measured offset, and that
+    /// is deliberate rather than incidental: a burst of wheel events is delivered
+    /// in one batch against one cached layout, so every event in the burst reports
+    /// the same position. Accumulating on the target is the only way two events
+    /// travel two notches. [`Region::adopt`] is what has to keep that accumulation
+    /// -- see [`Swept`], and what happened when it did not.
     pub fn wheel<Message: 'static>(
         &mut self,
         name: &'static str,
@@ -384,8 +478,8 @@ impl Glides {
         let region = self.regions.entry(name).or_default();
         region.adopt(wheel.offset);
         region.anim.wheel(wheel, now);
-        region.sent = region.anim.offset;
-        scroll_to(name, region.sent)
+        let offset = region.send(region.anim.offset);
+        scroll_to(name, offset)
     }
 
     /// Advance every region by one frame, and answer with the commands for the
@@ -404,8 +498,8 @@ impl Glides {
             let before = region.anim.offset;
             region.anim.tick(now);
             if region.anim.offset != before {
-                region.sent = region.anim.offset;
-                moved.push(scroll_to(name, region.sent));
+                let offset = region.send(region.anim.offset);
+                moved.push(scroll_to(name, offset));
             }
         }
         iced::Command::batch(moved)
@@ -579,13 +673,14 @@ pub struct Wheel {
     /// there first, and then slides.
     ///
     /// What reads this is [`Glides`], and what it compares the number against is
-    /// the offset it last *asked* for. The two agree during a glide -- iced
-    /// applies what it is told and hands it back in the next event's viewport --
-    /// so a wheel during a gesture adopts nothing and its notches accumulate,
-    /// while a wheel after a drag adopts the drag. Adopting on every wheel is the
-    /// mistake this field exists to avoid: each notch would re-aim at a position
-    /// a frame behind the one just commanded, and a flick would travel far less
-    /// than the hand asked for.
+    /// the offsets it has *asked* for -- through [`Swept`], which is a range and
+    /// not a point, because the measurement can be a frame behind a command that
+    /// has already been issued. The two agree while a glide is in flight, so a
+    /// wheel during a gesture adopts nothing and its notches accumulate, and a
+    /// wheel after a drag adopts the drag. Adopting on every wheel is the mistake
+    /// this field exists to avoid: each notch would re-aim at a position a frame
+    /// behind the one just commanded, and a flick would travel far less than the
+    /// hand asked for.
     pub offset: f32,
 }
 
@@ -1320,6 +1415,158 @@ mod tests {
         assert_eq!(
             glides.anim(PAGE).target,
             900.0 + WHEEL_PIXELS_PER_NOTCH,
+            "and the notch is measured from there"
+        );
+    }
+
+    /// Run `glides` to rest on the shell's own clock, started at `began`.
+    fn settle_at(glides: &mut Glides, began: Instant) {
+        let mut now = began;
+        let mut frames = 0;
+        while glides.animating() {
+            let _ = glides.tick::<()>(now);
+            now += FRAME;
+            frames += 1;
+            assert!(frames < 60, "the gesture must terminate");
+        }
+    }
+
+    /// What one `xdotool click` is worth, for the tests that talk in clicks.
+    ///
+    /// Two wheel events, because winit 0.29.15's
+    /// `platform_impl/linux/x11/event_processor.rs:1108` maps X buttons 4..=7 to
+    /// `MouseWheel` with no `state` check, so a press and a release each produce
+    /// one -- the measured reason a probe of this shell is not a probe of one
+    /// notch. Only worth stating because these tests are the arithmetic's
+    /// counterpart of the probes in the notes.
+    const NOTCHES_PER_CLICK: f32 = 2.0;
+
+    #[test]
+    fn a_command_still_in_flight_is_not_read_as_an_outsiders_move() {
+        // The race, driven in the order the runtime can produce it. iced_winit
+        // drains its message queue in arrival order
+        // (`iced_winit-0.12.2/src/application.rs:637-650`), a `Message::Tick` is a
+        // `UserEvent` that joins that queue without going through the layout
+        // (`application.rs:366-368`), and a wheel is measured off the *cached*
+        // layout, which is not rebuilt until the end of the batch
+        // (`application.rs:543-551`). So a batch can be `[Tick, Wheel]`: the tick
+        // commands X1, and the wheel then arrives carrying the layout from before
+        // it, X0.
+        //
+        // Compared as one number against the newest command, X0 is a whole frame
+        // of glide behind X1, reads like a drag, and `resync` resets `target` to a
+        // position nobody asked for. Six notches then travel 111, 128 or 213
+        // pixels depending on how many ticks were interleaved.
+        let began = Instant::now();
+        let mut glides = Glides::default();
+        // One click's worth of wheel events, all reporting the same layout.
+        glide(&mut glides, PAGE, 0.0, began);
+        glide(&mut glides, PAGE, 0.0, began);
+        assert_eq!(glides.anim(PAGE).target, NOTCHES_PER_CLICK * WHEEL_PIXELS_PER_NOTCH);
+
+        // A frame passes: the tick commands X1 and the region is on its way there.
+        let _ = glides.tick::<()>(began + FRAME);
+        let commanded = glides.offset(PAGE);
+        assert!(commanded > 0.0, "the frame moved the region: {commanded}");
+
+        // The second click's events, still carrying the layout from *before* that
+        // command landed. This is the stale read.
+        glide(&mut glides, PAGE, 0.0, began + FRAME);
+        glide(&mut glides, PAGE, 0.0, began + FRAME);
+        assert_eq!(
+            glides.anim(PAGE).target,
+            2.0 * NOTCHES_PER_CLICK * WHEEL_PIXELS_PER_NOTCH,
+            "a command this policy issued is not an outsider's move, so the second \
+             click's notches must land on top of the first's"
+        );
+
+        settle_at(&mut glides, began + FRAME);
+        assert_eq!(
+            glides.offset(PAGE),
+            2.0 * NOTCHES_PER_CLICK * WHEEL_PIXELS_PER_NOTCH,
+            "four notches travel four notches"
+        );
+    }
+
+    #[test]
+    fn however_the_frames_and_the_wheel_events_interleave_the_notches_all_land() {
+        // The property the first test states for one ordering, checked for every
+        // ordering the runtime can produce: `stale` is where a wheel reports the
+        // region from, and it is held at the offset the last frame before the
+        // batch observed -- so a batch of `s` ticks then a click, for every `s`,
+        // including none at all and more than the frame can ask for.
+        for frames_before in 0..=6usize {
+            let began = Instant::now();
+            let mut glides = Glides::default();
+            let mut now = began;
+            // The region has been read at 0, which is what a wheel before any
+            // command reports.
+            let mut stale = 0.0;
+            for notch in 1..=6 {
+                // Frames the clock ran before this click's events were handled.
+                for _ in 0..frames_before {
+                    let _ = glides.tick::<()>(now);
+                    now += FRAME;
+                }
+                for _ in 0..2 {
+                    glide(&mut glides, PAGE, stale, now);
+                }
+                assert_eq!(
+                    glides.anim(PAGE).target,
+                    (notch * 2) as f32 * WHEEL_PIXELS_PER_NOTCH,
+                    "{notch} clicks after {frames_before} frames"
+                );
+                // The batch ends: the layout is rebuilt and the next batch's wheel
+                // reports wherever the last command put the region.
+                stale = glides.offset(PAGE);
+            }
+            settle_at(&mut glides, now);
+            assert_eq!(
+                glides.offset(PAGE),
+                12.0 * WHEEL_PIXELS_PER_NOTCH,
+                "{frames_before} frames before each click: six clicks, twelve notches"
+            );
+        }
+    }
+
+    #[test]
+    fn the_same_command_issued_twice_means_the_same_thing_twice() {
+        // `scroll_to` is an `AbsoluteOffset`, so issuing it again cannot move the
+        // region -- and the policy's reading of it has to agree, or a repeated
+        // command would look like an outsider. Two ticks for one frame, then a
+        // wheel carrying a layout from before either of them.
+        let began = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, began);
+        glide(&mut glides, PAGE, 0.0, began);
+        let _ = glides.tick::<()>(began + FRAME);
+        let once = glides.offset(PAGE);
+        let _ = glides.tick::<()>(began + FRAME);
+        assert_eq!(glides.offset(PAGE), once, "the same frame commands the same offset");
+        // And the position a wheel reports from before both is still ours.
+        glide(&mut glides, PAGE, 0.0, began + FRAME);
+        assert_eq!(
+            glides.anim(PAGE).target,
+            3.0 * WHEEL_PIXELS_PER_NOTCH,
+            "a repeated command has not cost a notch"
+        );
+    }
+
+    #[test]
+    fn a_drag_past_anything_this_policy_commanded_is_still_taken_over() {
+        // The half of the gate that is not about this policy's own commands. 1200 is
+        // outside the range a two-notch gesture sweeps, so a scrollbar drag there
+        // is an outsider's move and the notch is measured from it.
+        let now = Instant::now();
+        let mut glides = Glides::default();
+        glide(&mut glides, PAGE, 0.0, now);
+        glide(&mut glides, PAGE, 0.0, now);
+        let _ = glides.tick::<()>(now + FRAME);
+        glide(&mut glides, PAGE, 1200.0, now + FRAME);
+        assert_eq!(glides.anim(PAGE).offset, 1200.0, "the drag is where the glide starts");
+        assert_eq!(
+            glides.anim(PAGE).target,
+            1200.0 + WHEEL_PIXELS_PER_NOTCH,
             "and the notch is measured from there"
         );
     }
