@@ -23,20 +23,21 @@ pub fn read_text(path: &Path) -> Result<String> {
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let name = path.file_name().map(std::ffi::OsStr::to_owned).unwrap_or_default();
-    let mut tmp = dir.join(format!(".{}.tmp-{}", name.to_string_lossy(), std::process::id()));
-    // Avoid clashing with a leftover temp from a crashed run.
-    for attempt in 0..64u32 {
-        if !tmp.exists() {
-            break;
+    // Checking existence and then creating is a race: simultaneous saves can
+    // truncate one another's temporary file. Reserve each candidate atomically.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let (tmp, mut file) = loop {
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = dir.join(format!(".{}.tmp-{}-{serial}", name.to_string_lossy(), std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(file) => break (tmp, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(Error::io(path, error)),
         }
-        tmp = dir.join(format!(".{}.tmp-{}-{}", name.to_string_lossy(), std::process::id(), attempt));
-    }
-    let write_result = (|| -> std::io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(data)?;
-        f.sync_all().ok();
-        Ok(())
-    })();
+    };
+    let write_result = file.write_all(data).and_then(|()| file.sync_all());
+    // Windows cannot rename an open file with ordinary Rust sharing flags.
+    drop(file);
     if let Err(e) = write_result {
         let _ = fs::remove_file(&tmp);
         return Err(Error::io(path, e));
@@ -125,6 +126,31 @@ mod tests {
         assert_eq!(unique_dir_name(root, "My Pack").unwrap(), "My Pack");
         std::fs::create_dir_all(root.join("My Pack")).unwrap();
         assert_eq!(unique_dir_name(root, "My Pack").unwrap(), "My Pack_1");
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_never_share_a_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shared.cfg");
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8u8).map(|value| {
+                let path = &path;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let bytes = vec![value; 256 * 1024];
+                    barrier.wait();
+                    atomic_write(path, &bytes)
+                })
+            }).collect();
+            for handle in handles {
+                handle.join().unwrap().unwrap();
+            }
+        });
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 256 * 1024);
+        assert!(bytes.iter().all(|byte| *byte == bytes[0]), "no interleaved payloads");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary files left");
     }
 
     #[test]

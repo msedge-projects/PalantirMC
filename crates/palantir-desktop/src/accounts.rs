@@ -567,10 +567,10 @@ impl AccountsStore {
                 return Err(format!("creating accounts dir: {e}"));
             }
         }
-        match std::fs::write(&self.path, text) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(format!("writing accounts file: {e}")),
-        }
+        // Never truncate the only copy of refresh tokens before the new
+        // document is fully written and synchronized.
+        palantir_core::util::atomic_write(&self.path, text.as_bytes())
+            .map_err(|error| format!("writing accounts file: {error}"))
     }
 
     /// Add an offline account. Names must be non-blank and unique.
