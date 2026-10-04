@@ -1219,7 +1219,13 @@ pub fn fetch_pack_files(
             continue;
         }
         let dest = root.join(relative);
-        if file.satisfied_at(&dest) {
+        // Reapplying a pack is a repair too: size alone cannot distinguish a
+        // corrupt jar or an older version published under the same filename.
+        let correct_size = file.size == 0
+            || std::fs::metadata(&dest).map(|meta| meta.len() == file.size).unwrap_or(false);
+        if file.satisfied_at(&dest) && correct_size
+            && verify_download(&dest, file.sha1.as_deref().unwrap_or_default()).is_ok()
+        {
             fetch.present += 1;
             continue;
         }
@@ -1239,7 +1245,7 @@ pub fn fetch_pack_files(
         progress(Progress::new("pack files", done, total, bytes));
     });
     for ((file, dest), result) in planned.iter().zip(results) {
-        let bytes = match result {
+        let bytes = match result.and_then(|bytes| check_pack_file_size(file, dest, bytes)) {
             Ok(bytes) => bytes,
             // The first URL failed, so the mirrors get their turn before this
             // file is written off. Sequential and rare: a pack lists mirrors for
@@ -1250,7 +1256,7 @@ pub fn fetch_pack_files(
                 for mirror in file.downloads.iter().skip(1) {
                     let jobs = [FileJob::new(mirror, dest, file.sha1.clone().unwrap_or_default())];
                     let mut one = wire.files(&jobs, 1, &mut |_, _| {});
-                    match one.remove(0) {
+                    match one.remove(0).and_then(|bytes| check_pack_file_size(file, dest, bytes)) {
                         Ok(bytes) => {
                             recovered = Some(bytes);
                             break;
@@ -1271,6 +1277,28 @@ pub fn fetch_pack_files(
         fetch.bytes += bytes;
     }
     fetch
+}
+
+/// A successful HTTP response is not enough for a digest-less pack file:
+/// check its published length before accepting it or abandoning its mirrors.
+fn check_pack_file_size(
+    file: &palantir_loader::PackFile,
+    dest: &Path,
+    transferred: u64,
+) -> Result<u64, String> {
+    if file.size == 0 {
+        return Ok(transferred);
+    }
+    let actual = std::fs::metadata(dest)
+        .map_err(|error| format!("reading {}: {error}", dest.display()))?
+        .len();
+    if actual != file.size {
+        // A mirror must not mistake this bad file for a completed download.
+        std::fs::remove_file(dest)
+            .map_err(|error| format!("removing incomplete {}: {error}", dest.display()))?;
+        return Err(format!("size mismatch: expected {} bytes, got {actual}", file.size));
+    }
+    Ok(transferred)
 }
 
 /// A pack installed as an instance of its own.
@@ -1755,6 +1783,54 @@ mod tests {
             "a file that fails its digest is removed, not kept for the next launch to trust"
         );
         assert!(reports > 0, "the bar hears about the phase");
+    }
+
+    #[test]
+    fn pack_repair_replaces_a_same_size_corrupt_mod() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = b"good jar";
+        let dest = dir.path().join("mods/test.jar");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, b"bad! jar").unwrap();
+        let files = [palantir_loader::PackFile {
+            path: "mods/test.jar".into(),
+            downloads: vec!["https://cdn.example.invalid/test.jar".into()],
+            sha1: Some(sha1_hex(good)),
+            size: good.len() as u64,
+        }];
+        let mut script = Script::new();
+        script.insert(&files[0].downloads[0], good.to_vec());
+        let result = fetch_pack_files(&script.wire(), dir.path(), &files, 1, &mut |_| {});
+        assert!(result.failed.is_empty(), "{result:?}");
+        assert_eq!(result.fetched, 1);
+        assert_eq!(std::fs::read(&dest).unwrap(), good);
+    }
+
+    #[test]
+    fn a_pack_file_without_a_digest_still_checks_size_and_tries_mirrors() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = b"complete jar";
+        let files = [palantir_loader::PackFile {
+            path: "mods/test.jar".into(),
+            downloads: vec!["https://cdn.example.invalid/short.jar".into(),
+                            "https://cdn.example.invalid/good.jar".into()],
+            sha1: None,
+            size: good.len() as u64,
+        }];
+        let mut script = Script::new();
+        script.insert(&files[0].downloads[0], b"short".to_vec());
+        script.insert(&files[0].downloads[1], good.to_vec());
+        let result = fetch_pack_files(&script.wire(), dir.path(), &files, 1, &mut |_| {});
+        assert!(result.failed.is_empty(), "{result:?}");
+        assert_eq!(std::fs::read(dir.path().join(&files[0].path)).unwrap(), good);
+
+        let missing = tempfile::tempdir().unwrap();
+        let mut no_mirror = files[0].clone();
+        no_mirror.downloads.truncate(1);
+        let result = fetch_pack_files(&script.wire(), missing.path(), &[no_mirror], 1, &mut |_| {});
+        assert_eq!(result.failed.len(), 1);
+        assert!(result.failed[0].contains("size mismatch"), "{result:?}");
+        assert!(!missing.path().join(&files[0].path).exists());
     }
 
     #[test]
