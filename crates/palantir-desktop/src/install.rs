@@ -984,12 +984,11 @@ pub fn verify_download(path: &Path, expected_sha1: &str) -> Result<(), String> {
     if expected.is_empty() {
         return Ok(());
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("reading back {}: {e}", path.display()))?;
-    let actual = sha1_hex(&bytes);
-    if actual != expected {
-        return Err(format!("sha1 mismatch: expected {expected}, got {actual}"));
-    }
-    Ok(())
+    // Repairs hash installed jars too: reuse the engine's bounded-memory
+    // verifier rather than allocating a buffer as large as each file.
+    palantir_net::engine::Digest::Sha1(expected)
+        .verify_file(path)
+        .map_err(|error| error.to_string())
 }
 
 /// Lowercase hex SHA-1 of `bytes` (Mojang publishes SHA-1, not SHA-256).
@@ -2651,6 +2650,16 @@ mod tests {
         assert!(verify_download(&path, &sha1_hex(b"hello")).is_ok());
         assert!(verify_download(&path, &sha1_hex(b"other")).is_err());
         assert!(verify_download(&dir.path().join("missing.jar"), &sha1_hex(b"x")).is_err());
+    }
+
+    #[test]
+    fn repair_verification_reads_files_larger_than_a_hash_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.jar");
+        let bytes: Vec<u8> = (0..(3 * 64 * 1024 + 17)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(verify_download(&path, &sha1_hex(&bytes)).is_ok());
+        assert!(verify_download(&path, &sha1_hex(&bytes[..bytes.len() - 1])).is_err());
     }
 
     #[test]

@@ -49,13 +49,9 @@ pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), crate::Error
     if expected.len() != 64 || !expected.bytes().all(is_hex_digit) {
         return Err(crate::Error::format(path, format!("invalid sha256 hex '{expected_hex}'")));
     }
-    let bytes =
-        std::fs::read(path).map_err(|e| crate::Error::io(path, e))?;
-    let actual = sha256_hex(&bytes);
-    if actual != expected {
-        return Err(crate::Error::hash_mismatch(path, expected, actual));
-    }
-    Ok(())
+    // The engine verifier streams fixed-size chunks, so checking a cached
+    // runtime archive does not allocate the entire archive again.
+    crate::engine::Digest::Sha256(expected).verify_file(path)
 }
 
 /// Download `url` via `fetcher` into `dest`, returning the byte count.
@@ -400,6 +396,17 @@ mod tests {
         std::fs::write(&path, b"abc").unwrap();
         verify_sha256(&path, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
             .unwrap();
+    }
+
+    #[test]
+    fn verify_sha256_handles_multiple_chunks_and_a_partial_tail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("large.bin");
+        let bytes: Vec<u8> = (0..(3 * WRITE_BUFFER + 17)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &bytes).unwrap();
+        verify_sha256(&path, &sha256_hex(&bytes)).unwrap();
+        let wrong = sha256_hex(&bytes[..bytes.len() - 1]);
+        assert!(matches!(verify_sha256(&path, &wrong), Err(crate::Error::HashMismatch { .. })));
     }
 
     #[test]
