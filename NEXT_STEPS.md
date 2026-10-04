@@ -1232,6 +1232,16 @@ accordions, a scroll offset, or an expansion difference; all three fit, and the
 offsets mean nothing until one is chosen. It is recorded in `GATES.md`'s closing
 section as an open question and **no code was changed on the strength of it**.
 
+The column itself was re-captured on all six Discover tabs while this was going
+on, and the three hairlines land at **173, 182 and 217 on every one of them** --
+the reference's rows, not one tab's -- with the pill at 72..117 and the field at
+126..173 throughout. `/browse/server` draws no results surface below y=218 at
+x=200, which is recorded and not claimed. One row remains out: the reference
+carries a `(20,21,25)` shadow on y=218 under the trigger's bottom border and this
+port draws plain background, which is the same omission as the five shadow rows
+under the tab pill at y 118..122 and wants G153's shadow work rather than a
+one-row paint.
+
 The same pass retracted a number rather than publishing it. Three brand-gradient
 rows at y 269, 322 and 371 look exactly like `filterClass`'s section rule, and an
 earlier pass counted them as one-where-three. Banding shows they sit below the

@@ -8867,7 +8867,24 @@ $ python tools/progress.py --check
   results one row high for as long as it stood. A capture of `HEAD` unmodified
   confirms the y=71 pill predates this slice.
 
-  **What this gate cannot say.** The three remaining differences in this region are
+  **Checked on all six tabs, not only the mod one.** `tools/xshot.py` on each of
+  `/browse/{mod,modpack,plugin,resourcepack,datapack,shader,server}` puts the three
+  hairlines at **173, 182 and 217 on every one of them**, and the reference's mod
+  plate at the same three -- so the column's arithmetic is the tab's own, not one
+  tab's. The pill and the search field likewise land at 72..117 and 126..173
+  throughout. The `/browse/server` tab draws no results surface at x=200 below
+  y=218, which is not settled and is not claimed here.
+
+  **One row is still out, and it is a shadow.** Under the trigger's bottom border
+  the reference carries y=218 in `(20,21,25)` against the page background's
+  `(22,24,28)`, and one row is all of it; ours draws plain background there. It is
+  the same family as the five rows of shadow under the tab pill at y 118..122,
+  which this port records as deliberately un-drawn, and fixing it properly means
+  the shadow work G153 did for the avatar card rather than a one-row paint. So it
+  is measured and left, which is why the boundaries above still agree: the shadow
+  is inside the gap and moves nothing.
+
+  **What this gate cannot say.** The remaining differences in this region are
   glyph rasterisation -- the prefix's ink run is 61 columns against the reference's
   61, the value's 79 against 81, and the two baselines are one row apart -- which
   is the shipped Inter's own hinting rather than a layout, and no constant in this
