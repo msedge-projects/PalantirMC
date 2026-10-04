@@ -326,11 +326,21 @@ from it, uncached, on every frame the page paints -- tens of thousands of `sqrt`
 calls and two heap allocations per frame, on a tile that sits on two scrollable
 pages. The accent hairline carries the same read for one fill.
 
-Inter is now the shell's typeface: 400/500/600/700/800, subset by
-`tools/make_fonts.py` from the release Modrinth's own stylesheet pins, ~292 KB
-for all five, loaded through `Settings::fonts` so the first frame is already
-Inter. `default_font` is weight 500 because that is what Modrinth sets body text
-at.
+Inter is now the shell's typeface: 400/500/600/700/800, loaded through
+`Settings::fonts` so the first frame is already Inter. `default_font` is weight
+500 because that is what Modrinth sets body text at.
+
+**Superseded (4 Oct, `0f78a06`).** Those five faces were our own subset, ~292 KB,
+cut by `tools/make_fonts.py` from the release Modrinth's own stylesheet pins. They
+are now the reference's own published bytes -- the five files on Modrinth's CDN,
+unwrapped from WOFF by that tool -- 1,497 KB for all five and a binary 6.2%
+larger, for 2,505 codepoints and 2,548 glyphs against the subset's 505.
+Cyrillic, Greek and Latin Extended Additional go from nothing to 254, 121 and 256
+codepoints. See "The fonts are the reference's own faces, and the version string
+that accused them" below, which is the finding that sent the subset: the subset was
+never the fault, because `Version 3.019;git-0a5106e0b` **is** Inter 3.19 and its
+`hmtx` advances already matched the reference's for every codepoint both sides
+cover, in all five weights, with zero differences.
 
 ### Still unmeasured / open
 
@@ -2544,3 +2554,795 @@ pill by the same 24, so the two agree on the left edge and disagree about the
 header reaching the pane's edge), and the reference's `mb-4` under the header,
 which this accounts for inside `STRIP_UNDER` because the capture leaves no room
 between the shadow and the field.
+
+## The fonts are the reference's own faces, and the version string that accused them
+
+A pixel audit measured every label on the profile and hosting pages one to five
+pixels narrower than the reference's and put the cause at the typeface, on the
+grounds that the bundled faces report `Version 3.019` in their name table while the
+reference loads Inter 3.19. Both halves of that are wrong, and the first is wrong
+in a way that is worth more than the fault it was blamed for.
+
+**Inter zero-pads the minor component.** The 3.19 release writes `3.019`, so
+`Version 3.019;git-0a5106e0b` **is** Inter 3.19 and that exact string with that
+exact git hash is in the upstream v3.19 archive's own `Inter Desktop/*.otf`, in
+every file the CDN the reference's stylesheet pins serves, and in the faces this
+tree shipped. Reading `3.019` as a different release from `3.19` is a formatting
+convention mistaken for a version difference.
+
+**And the advances agree anyway.** The `hmtx` advances of the shipped faces are
+identical to the reference's for all 505 codepoints they cover, in all five
+weights -- **zero** differences across 2,525 comparisons -- so no width could have
+moved, and one typeface cannot produce opposite signs either. It does: body text
+at 16px measured 5px *wider* here while bold 14px labels measured 3-7px
+*narrower*. Meanwhile the profile title, the stats number and the last date word
+already matched the reference exactly, which is what confirms the advances really
+are the same. The reference's *Data Packs* separates into nine ink runs and ours
+into six, every letter a pixel narrower, which is what drawing the bold labels
+smaller looks like rather than what a different face looks like.
+
+**What the swap buys is coverage, and it costs 1.2 MB.** Modrinth's CDN build is
+not a subset: 2,505 codepoints and 2,548 glyphs, the same counts as upstream's
+desktop faces, and a strict superset of what we shipped -- Cyrillic 0 to 254,
+Greek 0 to 121, Latin Extended Additional 0 to 256. The reference draws Cyrillic
+and Greek mod text out of this very file and we were falling back to a system face
+for it. 292 KB becomes 1,497 KB and the binary grows 6.2%; subsetting it back down
+needs fontTools and guessing which 2,000 codepoints to keep is worse than shipping
+them. Measured after the swap, **all 21 ink boxes on `/user/FlameFire` are
+unchanged to the pixel** and the 1-7px class is exactly where it was -- which is
+the measurement that says the typeface was never the cause.
+
+Nothing here has ever contained CJK, Kana, Hangul or box drawing, because Inter has
+no such coverage to have: the profile page's Chinese renders from a system
+fallback through the cosmic-text patch either way, so there was no CJK coverage to
+regress.
+
+The faces now come from the reference's own published bytes rather than from
+re-running pyftsubset over the upstream release, which is also the only route that
+works on this machine: it has neither pip nor fontTools, and the stylesheet's
+woff2 cannot be read by cosmic-text at all. A WOFF can, because a WOFF is a
+container rather than a compression, so `tools/make_fonts.py` unwraps it with zlib
+alone and asserts the version string, the family, the PostScript name,
+`unitsPerEm` and the tables a renderer needs before it writes a face -- a bad
+unwrap fails the tool instead of shipping a file that renders nothing. Upstream's
+`LICENSE.txt` ships beside the faces, since OFL 1.1 asks for the copyright and
+licence records to travel with the font.
+
+The width delta itself is still there, and it is space between glyphs: see the next
+section, which is where all five of these labels ended up.
+
+## Space between glyphs, fitted per label rather than declared as a letter spacing
+
+**What is not the cause.** There is no `tracking-*` utility anywhere in the
+reference's shipped stylesheet, and its only two `letter-spacing` declarations
+are `pre code` and `.code-text`. `NavTabs.vue:9` puts `text-xs sm:text-sm
+font-bold` on the `<nav>` the label inherits from, and the label `<span>` at `:35`
+and `:57` carries only `tab-color text-nowrap` and a colour.
+`word-spacing`, `font-variation-settings`, `font-kerning`, `font-optical-sizing`
+and `text-rendering` do not occur at all. The gate test
+`a_tab_label_carries_no_letter_spacing_in_the_reference` still passes, and what
+is recorded here is the reference's own arithmetic read off its pixels rather than
+a letter spacing the stylesheet asks for.
+
+**And it is not one constant either.** Fitting a single extra per gap across both
+pages asks **+0.72** a character on the profile tab strip and **-0.15** on the
+30-pixel Modrinth Hosting heading -- the same fit run again on the shipped code
+comes out at **-0.1075** there, which is the same sign and a tighter number. One
+constant cannot be both, so an earlier prototype that fitted a single extra across
+both pages was rightly thrown out: it left **0.9 px of rms per glyph**, and the
+strip came out 16 pixels of error. A per-glyph layout measured against a *global*
+fit is not the same thing as one measured against a *per-label* fit, and the
+second is what landed.
+
+**What landed fits each label against its own capture.** Five labels carry a
+measured extra; everything else keeps the plain `text` path, so the mechanism
+reaches nothing that was not measured. `advance()` includes the extra, so the
+width layout is told and the width the glyphs are drawn at cannot disagree.
+
+| label | face | extra/gap | rms | rms at extra 0 | advance | `hmtx` |
+| --- | --- | --- | --- | --- | --- | --- |
+| *Data Packs* | Inter 700 @ 14 | +0.7351 | 0.43 | 2.26 | 83.15 | 76.54 |
+| *Modpacks* | Inter 700 @ 14 | +0.3950 | 0.22 | 0.93 | 74.27 | 71.50 |
+| *Collections* | Inter 700 @ 14 | +0.5686 | 0.35 | 1.83 | 83.42 | 77.74 |
+| *New server* | Inter 600 @ 16 | +0.1806 | 0.41 | 0.68 | 89.99 | 88.36 |
+| *Client and server* | Inter 400 @ 14 | +0.1598 | 0.29 | 0.87 | 115.31 | 112.76 |
+
+**How a fit is measured.** A label's glyph origins on the reference's own capture
+are the starts of its ink runs at `coverage > 0.5`, and this tree's shaping
+satisfies `ink(i) = round(x0 + sum(advance(label[..i])) + lsb(i))` exactly -- so
+adding one unknown `extra` per gap and solving by least squares over the
+reference's own origins is what the table holds, and the rms beside it is what the
+number is worth.
+
+**Three checks that the fits are the reference's and not ours.** The fitter returns
+an extra of **-0.043, +0.062 and +0.023** against a true value of zero when run on
+this launcher's own captures, so it is not reading our shaping back. On
+`/browse/modpack` the same label sits **278.000** pixels to the right of where it
+sits here, all nine glyphs to three decimals, so the extra belongs to the string and
+not to the page. And *New server* fits **+0.1806** where its own 150.0-pixel box
+asks for **0.1818** -- `ButtonFrame.vue`'s `lg` row is `px-4` twice over, a `size-5`
+icon and a `gap-2`, so 60 of chrome, and the reference's box measures 150.0 exactly
+between its two rings. That is arithmetic which shares nothing with the fitter
+landing on the fitter's number.
+
+**A fit that does not beat leaving the label alone is not fitted.** *All*, the
+fourth tab, fits +0.1175 at an rms of 0.043 against 0.098 for no fit at all --
+three glyphs and the fitter's own noise, so it is not fitted. Across the button
+labels alone the reference's extra runs from +0.18 to +0.38 at one size and one
+weight, so there is no multiple of `hmtx` that holds them either.
+
+Sixteen pixels of error across the strip, down to two. Ink widths, before and
+after, against the reference: *Data Packs* **75 -> 83** against 82, *Modpacks*
+**71 -> 74** against 74, *Collections* **77 -> 82** against 83. Those three are the
+residuals, at +-1px of ink, and they are open.
+
+**iced 0.12.3 still cannot be asked for a letter spacing.** `Text`'s setters are
+`size`, `line_height`, `font`, `style`, `width`, `height`, the two alignments and
+`shaping`, and neither `shaping` nor `Paragraph` carries a spacing. That limit is
+still real; what was wrong was treating it as the reason the labels are narrow.
+
+## A box-shadow is five rings of opaque ink, not a container's Shadow
+
+**The pane's inset shadow was not being drawn at all.** `App.vue:2755-2770` puts
+two things on `.app-contents::before`: the one-pixel `--surface-5` rule
+`pane_rule` already draws, and `box-shadow: 1px 1px 15px rgba(0, 0, 0, 0.1)
+inset`. The second was missing and the capture reads it on every route. Measured
+off `ref/user-ref.png` at y=300 and x=300, identical on `ref/hosting-clean3.png`,
+`ref/project.png`, `ref/discover.png` and the scrolled `ref/project-scroll.png`:
+
+| x | y | value | what |
+| --- | --- | --- | --- |
+| 64 | 48 | `#42444A` | the rule |
+| 65 | 49 | `#15171A` | one |
+| 66..71 | 50..55 | `#15171B` | six |
+| 72 | 56 | `#16181B` | one |
+| 73 | 57 | `#16181C` | `--surface-1` |
+
+So it is three depths of the pane's own background -- **0.058, 0.038 and 0.019** --
+and not three inks, which is what makes the reserved gutter's own `#15171B`
+(`8f33f1a`) the same three numbers wearing a different name. `0.1` over `#16181c`
+is declared; which of the three an eight-pixel slice of a fifteen-pixel blur lands
+on is not, so the three are measured.
+
+**Three runs, not one `Shadow`,** because of what `7a29753` found: iced 0.12.3
+composites a container's `Shadow` inside its element's own rounded-box coverage in
+one quad (`solid.wgsl`: `mix(base_color, shadow_color, (1.0 - radius_alpha) *
+shadow_alpha)`), which bands its own fill. A background is one quad with neither in
+it, so the pane cannot get the banding the tab strip got -- but three explicit
+opaque bands can.
+
+**Two things the capture decides and the class list does not.** The rule crosses
+the panel and the shadow stops at it -- `#42444A` at y=48 for x=1000 in the
+reference, and `#18211E`, `#18211E`, `#18211F`, `#18221F` across y=49..57 with
+nothing else in it -- so the top run is the page column's width and not the pane's.
+And the order is the reference's own: the reserved column under the shadow and
+under the rule, the rule over the shadow, which is how CSS paints one box's border,
+inset shadow and background.
+
+**The avatar card's shadow was recorded as inexpressible, and that was worse than
+leaving it out.** `Avatar.vue:299` gives every avatar that is not `.no-shadow` a
+`box-shadow: var(--shadow-card)`, which the dark look declares
+`rgba(0, 0, 0, 0.25) 0px 2px 4px 0px` (`variables.scss:368`). The recorded reason
+was that iced cannot paint behind an `image` widget and that a canvas grown to hold
+the blur wants 108 pixels across. Both halves are wrong. The precedent above is
+right -- iced does composite a `container`'s `Shadow` inside its own coverage --
+and the reach is measured rather than derived, and it is **three** pixels rather
+than three sigma. Off `ref/user-ref.png` the profile header's card is a 96 box at
+x=88..183, y=72..167, and the shadow reaches five rows below its last row, three
+columns either side of its centre row and one row above its first: the offset circle
+(the card, moved down two) grown by three, so a **102**-pixel canvas, not 108.
+
+So it is drawn, from **five opaque pre-composited rings** one pixel of reach each,
+darkest innermost, at depths **0.155, 0.116, 0.077, 0.039 and 0.018** -- the
+middles of the intervals a byte can hold, which is what makes the five bands
+reproduce the capture's own bytes exactly rather than nearly. Composited over
+`--surface-1` rather than the card's own `--color-button-bg`, because `#34363c`
+against `#16181c` is a little over twice the value and the deepest ring would read
+`(13,14,17)` where the capture reads `(18,20,23)`. The card's pixels are copied
+rather than redrawn, so the fill, the picture, the mask and the outline are not
+touched by the shadow step at all.
+
+Against the reference the bands match byte for byte on **2,574 of the 2,848** shadow
+pixels at least a pixel clear of the card's antialiased rim, and the other **274**
+differ by at most one unit in one channel. Isolated before/after binaries built from
+the same tree and differing only in that file are identical on all five routes.
+
+**Growing `Icon::circle`'s canvas instead is worse than drawing nothing,** which is
+why the shadow is its own constructor. iced takes the layout box from the caller's
+width and height and scales the texture into it, so a 102 canvas in the header's 96
+slot draws the disc 90.35 across and lays the five bands down inside the card where
+the reference has the picture -- **4,994** differing pixels on `/user/FlameFire` --
+and shrinks `/hosting/manage`'s nine avatars from 24 and 36 to 19.2 and 28.8,
+**4,328** more.
+
+**The slot stops being the canvas.** Both halves of that matter: the reach is three
+pixels *outside* the 96-pixel card, so a slot sized to the canvas reserves 102 and
+pushes the card three pixels right -- measurably wrong, with the left-hand rings
+vanishing into the page and the card landing at x=91 instead of 88. A container
+would be worse, because it crops the reach. So the canvas is layered *over* a
+transparent spacer of the card's own size at a negative offset, which is the one
+shape that reserves 96 and draws 102; and `Stack` reports its base layer's size,
+which is why the spacer is the base and the canvas the layer.
+
+What is left is **forty pixels**: in the reserved gutter's own top eight rows this
+reads `#15171A` where the reference reads `#14161A`, because the bands are opaque
+and the reference's are a composite of the shadow over a gutter that is itself a
+composite. One unit of blue on five columns of eight rows.
+
+## A blend mode is arithmetic, and the first reading of it named the other mode
+
+`ServerListEmpty.vue:26` puts `mix-blend-luminosity` on the feature plate's
+texture, and the plate carried a note saying the blend had no expression here and
+that what reached the picture was a measured share of the texture's own colour.
+That was the wrong reason for the right arithmetic. **A separable blend mode is a
+function of two colours**, so it can be computed once per theme and drawn as the
+plain colour it works out to -- which is what the plate's precomputed 40x40 picture
+already is.
+
+**The mode is `SetLum(Cb, Lum(Cs)`** -- the *source's* luminosity carried onto the
+*backdrop's* hue and saturation. The note had it the other way round, which is
+`mix-blend-mode: color`, and the reference's own pixels settle which is which: the
+texture is navy and the plate the reference draws is a saturated green, so the other
+reading puts the plate fifteen steps too high in red and blue. Over the **840**
+interior pixels of the three plates that carry neither the glyph nor the rounded
+corner, the rms against `ref/hosting-clean3.png` is **1.20** for the mode and
+**12.4** for the reading that keeps the source's hue.
+
+**The colour space is sRGB, not linear light,** and that is measured rather than
+assumed. The same 840 pixels read:
+
+| reading | rms |
+| --- | --- |
+| spec weights 0.3/0.59/0.11 on sRGB | **1.20** |
+| Rec. 709 weights on sRGB | 1.72 |
+| spec weights, linearised | 3.27 |
+| Rec. 709 weights, linearised | 4.78 |
+
+A weight sweep puts the optimum on the spec's weights, so `LUMA` carries
+0.3/0.59/0.11 and the arithmetic runs on the bytes.
+
+**The blend is worth up to ten steps of green and blue** on the reference's own
+pixels, which is not a rounding error: the plate cannot be a plain gradient.
+
+Over the three plates, ours against the reference: **4,688 differing pixels become
+4,289**, the mean channel error **3.12 becomes 2.17**, and of the pixels that still
+differ the share within two steps goes from **25.5% to 66.5%**. The plate's pad
+alone -- **1,296** pixels -- goes from mean 2.39 and rms 2.91 to mean **0.86** and
+rms **1.34**, with the pixels differing by more than two falling from 45.5% to
+**4.4%**. Every non-glyph row of all three plates is now within two per channel.
+
+**The same measurement found a second, unrelated bug.**
+`plate_overlay_pixels` was striding the 38-wide texture window by the plate's 40,
+which walks two columns right per row and runs off the end of the window over the
+last two rows -- so the texture was being drawn in the wrong place and then not at
+all. The stride is `PADDING_BOX` now.
+
+One number in that note was mislabelled and is worth naming because a mislabelled
+number reads as a smaller gap than the real one: the "2.60" set beside the rms of
+1.20 is not the rms of a plain source-over at the same alpha. It is the rms of the
+share of the texture's own colour that this replaced, and a plain source-over at
+the same alpha measures **7.57**. Three numbers, correctly named, beat two with one
+of them mislabelled.
+
+## A layer that swallowed the pointer, and a scroll_to that raced the command meant to recognise it
+
+**Nothing inside the page pane took pointer input, on any page.** `Shell::pane`
+wraps every page in `pages::overlay::Stack` for CSS-like absolute layering, and
+`Stack` implemented `layout`, `draw` and `mouse_interaction` but not `on_event`. It
+therefore inherited `iced_core-0.12.3/src/widget.rs:115-127`, which returns
+`Status::Ignored` without descending, and `operate` was an empty stub for the same
+reason. The port rendered correctly and could not be used: on `/user/FlameFire` all
+four profile tabs stayed unpressable -- the plated tab stayed `All` in 4 of 4
+frames -- hover never painted, and the wheel never moved the list, while the rail
+worked because it is outside the stack. Only the rail.
+
+Forwarding is **per layer and declared by the call site**, not "every layer to every
+event": `Stack::over` is a picture and is not asked at all, and `Stack::over_control`
+puts a live overlay back into the walk. The pane's own furniture -- the reserved
+scrollbar gutter, the hosting toast, the inset shadow and the rule -- goes on with
+`over` and takes no input, so an overlay cannot become a click shield over the page.
+The one live overlay is the panel ad's *Upgrade to Modrinth Plus* link, which
+`App.vue:2554-2564` puts at `absolute bottom-[250px] ... z-10` over the sidebar's
+own column and which was unreachable by `mouse_interaction` as well. `on_event` walks
+the layers last to first and stops at the first `Captured`; `mouse_interaction` walks
+the same layers in the same order and takes the first answer that is not `Idle`,
+because a hit test that disagrees with delivery is worse than either alone.
+`operate` now calls `Operation::container` and descends, which is what lets a focus
+or clipboard operation reach anything inside a page.
+
+**The hosting preview stays inert, which is the reference's own reading.**
+`ServerListEmptyPreview.vue` is `inert aria-hidden` -- a picture of the invite
+dialog -- so the panel, its buttons, the friend rows, the invite link and the toast
+beside it are drawn and none of them are hit targets. Clicking the picture of an
+*Invite* button moves **352** pixels, all of them the pointer.
+
+**`diff` was the other half of the same defect**, and it is fixed here because
+delivering input makes it visible: it built a fresh `Tree` per layer and swapped
+them in, so every layer's state was thrown away every frame, and a `mouse_area`
+keeps `is_hovered` there. A control therefore lit up under the pointer and never
+went out again -- the enter was published and the exit never was.
+`tree.diff_children` is iced's own idiom and keeps the state.
+
+Measured on `:95` at 1280x720: four profile tabs switch and switch back, hover
+paints on and off a tab and a card, the wheel scrolls the project list, `+ New
+server` raises its notice, the preview stays inert, the checklist opens the create
+dialog and its chips, rows and version list all respond. Pixels against the
+reference: `/hosting/manage` 434,931 -> **434,928**, `/user/FlameFire` 307,840 ->
+**307,813**, `/browse/modpack` 412,765 -> **412,758**, `/skins` 388,703,
+`/instance` 248,007 -> **248,004**. Against the pre-change captures the same routes
+differ by **1,079 / 2,362 / 1,074 / 697 / 799** pixels, all of it one to three
+levels on 1px borders from the `diff` fix.
+
+**The second defect was a `scroll_to` still in flight reading as somebody else's
+move.** `Region::adopt` told this policy's own number from an outsider's by
+comparing the offset a wheel event measured against the offset the last `scroll_to`
+carried, with half a pixel of tolerance. That comparison races the command it is
+meant to recognise. A `scroll_to` is applied synchronously at the end of the same
+`application.update` (`iced_winit-0.12.2/src/application.rs:851-886`), but a wheel
+does not read the widget: `Wheel::offset` is `viewport.y - bounds.y` off the
+**cached** layout, which iced_winit only rebuilds at the end of its `AboutToWait`
+branch (`application.rs:543-551`). `Message::Tick` arrives as a winit `UserEvent`
+(`application.rs:366-368`) and joins the message queue without going through the
+layout, a wheel goes through `user_interface.update` first
+(`application.rs:494-499`), and the queue is then drained in arrival order
+(`application.rs:637-650`). So a batch arriving as `[Tick, Wheel]` runs the tick's
+`scroll_to` and *then* hands `Glides::wheel` a measurement taken before it -- one
+frame of glide behind, tens of pixels, past `SETTLED`, and indistinguishable from a
+scrollbar drag.
+
+`adopt` therefore resynced onto it, which resets `ScrollAnim::target` from where the
+gesture was going back to a position the reader never asked for, and the frame
+answered `scroll_to` with the stale offset as well, so the region jumped backwards.
+Every notch accumulated since the gesture began was discarded, and how many survived
+depended on how many ticks were interleaved. Three clicks at (500,400) on
+`/user/FlameFire` measured **277, 435 and 177** pixels across three runs of the same
+binary, five measured **180, 304 and 271**, and ten measured **261, 439 and 449** --
+where the arithmetic is 360, 600 and 1,200. This was unreachable until the pointer
+was forwarded through the stack, after which the wheel works and this is the next
+thing showing.
+
+**The command was never the problem.** `scroll_to` is an `AbsoluteOffset`
+(`iced_widget-0.12.3`'s `operation::scrollable::scroll_to`, applied at
+`State::scroll_to`) and the command that lands last is the only one the widget ever
+sees, so there is nothing to make relative. The relative part is deliberate and
+stays: a burst of wheel events is delivered in one batch against one cached layout,
+so every event in the burst reports the same position, and accumulating on the target
+is the only way two events travel two notches.
+
+So `Region` now records **`swept`**, the range of offsets its own commands have put
+the region at since it last measured it, and `adopt` skips a measurement that lies
+inside it. `Region::send` is the only writer of `sent` and only ever *widens* the
+range, which is what makes a repeated command mean the same thing twice -- re-issuing
+the last `scroll_to`, or issuing a second while the first is in flight, can no longer
+read as an outsider's move -- and it holds however many commands are outstanding
+rather than guessing a depth. A debounce was rejected: it buys determinism with
+latency and hides the cause rather than removing it. The cost, recorded on `adopt`,
+is a drag landing inside the swept range, which is at most one frame of a glide wide
+and exists only while a gesture runs.
+
+The four tests are the deliverable, and they are the reason the bug is not in the
+file now: `adopt` reverted to the single-number comparison fails three of them and
+passes the fourth, which is the one that keeps a real drag adopted so the other
+three cannot be satisfied by dropping the gate. With the range, ten clicks at
+(500,400) land on the same pixel in three runs, and one, three, five, seven and ten
+clicks land on 120, 360, 600 and the end of the content where the arithmetic puts
+them.
+
+## The strip's fourth link needed an address of its own
+
+`/user/FlameFire` drew a strip of four links and made the fourth one a dead end. The
+tab was drawn, the collections view under it was drawn, and pressing it changed page
+state rather than the address -- so the tab could not be reached by typing and the
+address could not be copied out of the shell. The cause was that `Route::User` had
+nowhere to put it: its third segment is read through `ProjectType`,
+`from_profile_token` refuses `collections` on purpose, and a `?` on that arm made
+the whole address `None`.
+
+**The reference has no such gap.** Its strip is four `href`s built by one template,
+`layout.vue:779`:
+
+```js
+href: `${profilePath}/${projectType}s`,
+```
+
+and the string it is fed is `'collection'`, pushed into the same list the project
+types go into at `layout.vue:762`:
+
+```js
+const types = catalogProjectTypes(projects.value)
+if (collections.value.length > 0) types.push('collection')
+```
+
+so the tab's href is `/user/FlameFire/collections`, built exactly the way `mods` is.
+The route that receives it is the one route for all four, `routes.js:66`
+(`/user/:user/:projectType?`), with no pattern on the parameter, and
+`parseProjectTypeRouteParam` reads both spellings and hands `'collection'` back
+(`ui/src/utils/v3-projects.ts:81-83`). Two facts came out of that and they are the
+whole shape of the change: **the segment is optional and *All* is its absent case**,
+because `layout.vue:771-773` gives *All* an href with no third segment; and only the
+plural is ever written.
+
+So `route.rs` grows `ProfileTab { Projects(ProjectType), Collections }`, beside
+`ServerTab`, `ProjectTab` and `InstanceTab`, which is what this codebase already
+does with a page's tabs. **It is not a `ProjectType` variant, and that is not a
+compromise:** a variant would have to be answered by `target_folder` (which folder
+does a collection install into), by `sentence`, by `TABS` and by `ALL`, and the
+reference answers none of those because it has no such concept either -- it keeps
+`'collection'` as a string only its own filter reads. Pretending otherwise would
+corrupt the derivation everywhere else. `Route::User.project_type` becomes
+`Option<ProfileTab>` and `None` is *All* in `Route::User`, in `Message::Filter`, in
+`Open::User` and in `pages::user::Filter::of` alike. The field keeps the name
+`project_type` because `routes.js:66` spells the parameter that, and because
+`shell.rs` was not that slice's to edit: giving `ProfileTab` the same
+`profile_token()` method `ProjectType` has means `shell.rs:2634` writes
+`/user/FlameFire/collections` unchanged.
+
+**The page then got simpler rather than bigger.** `Message::Collections` and
+`Message::LeaveCollections` are gone: both existed only because the branch had no
+address, and `LeaveCollections` was the workaround for a specific trap -- the page
+sat at `/user/{name}` while drawing the collections branch, so pressing *All*
+produced the address it was already at and `Shell::go` returned early, leaving the
+reader where they were trying to leave. With `/user/{name}/collections` in the
+address that cannot happen, so all four tabs are one `Message::Filter` and one
+`Open::User`. `State::filter` is the single writer of both `project_type` and
+`collections`, so the drawn tab and the parsed tab cannot disagree.
+
+The two assertions this fixes are updated, not deleted, because each was right about
+project types and wrong only about the address. `route.rs:997` still asserts that no
+`ProjectType` is handed back for `collections` -- that is the reason it never becomes
+one, and nothing derived from a type has an arm to answer for. `route.rs:1016`
+asserted that `Address::parse("/user/jelly/collections").is_none()`, which *was* the
+dead end; it now asserts the route the address resolves to, and that the singular
+`/user/x/collection` resolves to the same page.
+
+Measured on `:117` at 1280x720. Clicking *Collections* at (411, 223) moves the
+strip's plate from x=92..141 to x=354..462 and draws all four of FlameFire's
+collections in the reference's own `updated`-descending order -- *Plugin* (1),
+*Sodium* (6), *Masa* (13), *Carpet* (3) -- with no status line and no *Create a
+collection* button, which is `canSeeCollectionStatus = isSelf || isStaffViewing` and
+`v-if="isSelf"` with no Modrinth session, not omissions. **219,734** pixels change.
+Clicking *All* back gives the project list and the plate back to x=92..141,
+**219,565** pixels, and pressing *Collections* again is byte-identical to the first
+press. **Launching straight at `--page /user/FlameFire/collections` renders the
+collections view rather than falling back to Home**, which it did before because
+`Shell::opening` parses the address and the parse was `None`.
+
+Pixels, counted as `(|dR|+|dG|+|dB|) > 0`: `/user/FlameFire` 307,792 -> **307,727**,
+`/hosting/manage` 434,529 -> **434,529**, `/browse/modpack` 412,823 -> **412,823**,
+`/skins` 388,703 -> **388,703**, `/instance` 248,004 -> **248,004**. Four of the
+five are bit-identical before and after, which is the answer in its strongest form
+because `ui.rs` is shared by all five. The user's 406 are bounded to x=786..853
+y=334..349 -- the first card's download line, 14.87M -> 14.88M, the reference's own
+October capture reading 14.84M -- and outside that box the before and after frames
+are 0 px apart, so the total against the reference went *down* by 65. Five captures
+of the new build read 307,727 to the digit and differ from each other by 0, so the
+build is deterministic and that band is the network.
+
+## A card's summary gets the column the reference's own grid gives it
+
+The second card's summary ended `—— A` where the reference ends `—— A skyblock`, and
+the previous pass was right that the size is not the answer: the shared prefix's word
+boundaries agree to the pixel, so both sides are set at the same size and the
+difference is **where the `1fr` column stops**. It is derivable from the grid rather
+than from the pixels.
+
+`ProjectCard.vue:319-325` gives a card with an actions slot
+
+```text
+'icon info actions actions'
+'icon info dummy   stats'
+'icon tags  tags   stats'
+```
+
+over `auto 1fr auto auto` with `gap-x-3`, and `__actions` spans the third column, the
+gutter and the fourth. Two spec rules finish it. **css-grid-1 §11.2:** gutters are
+fixed-size tracks for the sizing algorithm, so the button spans *three* tracks and 12
+of its width is the gutter's. **§11.5:** a spanning item's width is distributed
+across the tracks it spans, "insofar as possible" -- and nothing else is in the third
+column, the `dummy` area being named and never filled, so it takes the whole
+shortfall. Tracks three and four together therefore owe the button's width less one
+`gap-x-3`, which is **177** of the 834-pixel content box's 698 that is not the icon,
+and the summary's column is **521**.
+
+Two readings off `ref/user-ref.png` agree on that number and neither can be fitted
+any other way. The button's left edge is **750** and it is flush right (`ml-auto`),
+so the span is 939 - 750 = **189**, the button's own measured width, with no free
+space for the margin to eat. And the wrap needs it: card two's first line measures
+**520.9** pixels of advance from the column's left edge, so the column is at least
+521 -- a margin of **0.1** -- and under 557.5 or *with* would have joined the line.
+
+So the third `auto` track is not zero and the old two-`gap-x-3` room was wrong.
+`stats` is now drawn as a row of [the third track, which nothing sizes, then the
+stats] with the grid's own `gap-x-3`, and the head row keeps one gap beside it,
+which makes the room `gap + max(button, gap + stats)` without a constant anywhere.
+Card one is untouched by it -- its 94-pixel button is narrower than its 153-pixel
+stats line, so the stats govern and the third track is nothing -- and its *Install*
+ring stays at x=846..938 and its stats ink at x=787..938, both exactly where they
+were.
+
+**What is left is not in that file.** Our *Install to instance* measures **183** where
+the reference's measures **189** -- the label's advance, 136.76 by Inter-600's
+`hmtx` against the ~143 the reference paints, which is the letter-spacing question
+the next-but-one section takes -- so cards two and three get **528** rather than 521,
+and card three's first line now carries **one word more** than the reference's. Both
+are named at the call site rather than papered over. This is the one open geometry
+residual: card three's summary window is `[520.9, 523.9)` and we sit at 528,
+downstream of the six-pixel shortfall in one button's label.
+
+The empty sentences are the other half, and they are a weight rather than a size.
+`EmptyState.vue:7` is `<span class="text-2xl font-semibold text-contrast">`, so the
+weight is **600** and not the 800 `style::heading()` draws a real heading at; the two
+call sites ask for `semibold()` now and the shared helper is untouched. Measured on
+`--page /user/FlameFire/resourcepacks`, which is the only address that reaches the
+empty state for an account this port can fetch: the ink rows are **282..304** either
+way and the sentence is **297** pixels wide against **305**, with **2,366** ink pixels
+against **2,881** -- the 7.6 pixels Inter's own advances predict for 800 against 600
+at twenty-four.
+
+## The toast was over the gutter, not under it
+
+The hosting page's invite toast measured x=649..969 where the reference measures
+x=649..984 with the fill visible to x=979, and **the cause was paint order rather
+than geometry**. `ServerListEmptyPreview.vue` holds the toast as a *sibling* of the
+`overflow-hidden` panel inside its own 400-wide `relative` root, so the panel never
+clipped it and it composited above everything the pane draws. Here it was a layer of
+the page, and the pane's reserved scrollbar gutter is a *sibling* of the whole page
+-- a ten-pixel strip at x=970..979 laid over it to hide iced's own bar -- so the
+strip covered the toast's last ten columns.
+
+Nothing inside a page can be over a layer of the pane, so the page now hands the
+layer back: `servers::page_overlay` returns the toast and the place in the page the
+reference puts it, and `Shell::page_overlay` puts it into the pane's own stack
+between the gutter and the inset shadow. That order is the reference's own:
+`.app-contents::before` is `z-index: 30` (`App.vue:2725`) and outranks the toast's
+`z-10`, while the page's own in-flow content and the sidebar's `::before` are
+outranked by it.
+
+**Keeping the clip took a widget.** The toast's box runs four columns past the pane,
+and the clip that used to stop it was iced's `Scrollable` wrapping its content in a
+layer at its own bounds (`scrollable.rs:909-918`) -- which the hoist leaves behind.
+`Container::clip` is not the answer: it only narrows the `viewport` it hands its
+content, and a `container`'s background never reads it. So there is a `Clipped`, a
+scissor and nothing else, whose box is stated in the layer's own coordinates because
+the caller is what moved the layer. Both halves of that are written down, because
+each looked right and clipped nothing for a build: the stack's own bounds are the
+window's rather than the page column's, since its base layer is the row holding the
+page *and* the panel; and an element the stack has already moved to x=649 reports
+649 as its own origin, not the pane's 64.
+
+The two answers that do not work are now at `pane_gutter` rather than in the next
+reader's experiments, and a control build settles them: with the strip deleted and
+nothing else changed, iced's `#757C84` bar shows down x=970..979 on **four of five**
+routes -- **5,078** px over 512 rows on `/hosting/manage`, **2,988** over 299 on
+`/user/FlameFire`, **2,518** over 252 on `/skins` and **1,088** over 110 on
+`/browse/modpack` -- and on none of them with the strip in place. `/instance` shows
+none either way because that page does not scroll. Every one of the **1,098** pixels
+the hoist moves is at x=970..979, y=440..551: the toast's own rows and the ten
+columns the strip used to own. The other four routes are byte-identical before and
+after.
+
+Measured at 1280x720 against the captures the tree already measures against: the
+fill now runs 650..979 (contiguous, strict `#1D1F23`), the pane's rule is still
+`#42444A` at (868,48), x=90..954 is still `#16181C` for all 865 columns, and the
+hosting page's whole-image difference falls from **435,982 to 434,931**.
+
+**What it costs is real and is recorded rather than hidden:** the toast no longer
+glides with the page. It is a layer of the pane now, outside the page's scroll
+region, and `Glides::anim` -- the only accessor for a region's offset -- was
+`#[cfg(test)]` in `scroll.rs`, so `pane()` could not translate it. This page scrolls
+48px in all and the toast sits 392px below the pane's top, so it cannot leave the
+pane; it is up to **48px** out of place at the bottom of the scroll. That is fixed
+later and in the right place -- `Glides` is a field on `Shell`, the view runs on
+`&self`, and `ScrollAnim::offset` is already `pub`, so `Glides::offset` answers it
+and `Shell::page_overlay` subtracts it -- after which the toast's border rows read
+392..503 at the bottom of the scroll where they read 440..551 before, which is what
+the reference draws.
+
+## A taller line box lands the baseline lower, not the same
+
+An audit of the profile page found two text widgets whose line height was never set,
+so both fell to iced's default `Relative(1.3)` -- **20.8** pixels at sixteen -- while
+the reference sets an absolute one per class. The metadata row's words are
+`page-header-metadata-item.vue:79`'s `leading-none`, which is `line-height: 1`, so
+the line is the label's own sixteen; the platform tag's label is `TagItem.vue:19`'s
+`leading-none text-sm` at fourteen, which the kit's own 24-pixel pill settles on its
+own -- 1 + py-1(4) + line + py-1(4) + 1 = 24 leaves line **14** -- and the same
+utility order that puts a `text-sm leading-none` on 14 puts
+`page-header/index.vue:13`'s `text-2xl leading-none` h1 on **24** rather than 32.
+
+Sweeping the other thirteen sites against their own sources moved six more numbers,
+all of them unsourced: both empty sentences are `EmptyState.vue:9`'s
+`text-2xl font-semibold` heading and not a sixteen-pixel card line, and the four
+lines of a collection card that are not its name carry no size class at all --
+`layout.vue:281`, `:287`, `:290` and `:299` name none, and the `text-primary` on the
+description is this preset's alias for a colour, not a scale -- so they inherit the
+body size rather than the `text-sm` the old comment claimed.
+
+**The card summary was left alone, and three readings refute `text-sm` there.**
+`ProjectCard.vue:402-404`'s `@apply text-sm` sits inside the `@container (width <
+550px)` block and the card measures **868**; Inter's em dash is **1.0000 em** of
+advance and of ink, and card two's summary ends in a pair of them across thirty-two
+solid pixels; the summary's `6` and `ProjectCardStats`'s `6`, which carries no size
+class and so is known to be sixteen, are both **twelve** rows of ink; and those two
+digits sit exactly **eighteen** rows apart with identical profiles.
+
+**Two of the three changes move no ink at all, and the third is a half-pixel.** Both
+unsited lines were inside a box that centres its content, and a centred box puts
+the baseline at `top + H/2 + (A - D) * fs / 2` whatever the line is. The metadata
+row is not centred on its own, but it is the header column's last block and the
+column is centred against the avatar, so the 0.8 the row gave back moved the column
+-- which is why the header summary's line went from 18 to the stylesheet's **18.4**.
+That is the CSS line rather than the eighteen those pixels paint to, and the table
+in its doc comment is what chose it: of the three values the column can take, 18.4
+is the one that leaves the title on the reference's rows, and the summary's single
+row is what pays.
+
+Whole page against `ref/user-ref.png`: **308,427** differing pixels before,
+**308,222** after. The metadata band is 320 of that; nothing else moved by more than
+antialiasing.
+
+**The same rule is why the friend names were a pixel high.** `ServerListEmptyPreview
+.vue:54` gives a friend's name `truncate text-base font-medium text-primary` and
+nothing else, so it is 16 pixels on Tailwind's 24-pixel line. This drew the 16 and
+left iced's own default for the face, `LineHeight::Relative(1.3)`, which is 20.8. It
+was expected to be invisible: the avatar beside the name is `size="1.5rem"` and the
+group is `items-center`, so a taller line box in the same centred space ought to
+split its extra leading evenly. **It does not, because iced puts the baseline
+`line_height - descent` below the top of the line box rather than centring the
+leading in it**, so the taller box lands the baseline half the difference *lower*.
+All eight names were a pixel above the reference's, and a pixel above it in the same
+direction every time:
+
+| name | reference | before | after |
+| --- | --- | --- | --- |
+| Josh | 265.467 | 264.458 | 265.456 |
+| Prospector | 309.620 | 308.632 | 309.630 |
+| Fetch | 353.010 | 351.997 | 352.995 |
+| IMB11 | 396.406 | 395.381 | 396.381 |
+| Truman | 441.323 | 440.237 | 441.238 |
+| Boris | 485.199 | 484.177 | 485.184 |
+| Saya | 529.795 | 528.594 | 529.606 |
+| Michael | 572.437 | 571.267 | 572.248 |
+
+`Josh`'s own difference sum against `ref/hosting-clean3.png` halves, from **16,490 to
+7,860**, and its max channel delta falls from **159 to 82**. The whole capture moves
+**2,271** pixels, all of them inside the eight friend rows.
+
+**The 14-pixel URL under the same rule keeps iced's default, and says why in the
+comment:** its row is `h-8 items-center` with nothing taller in it, so nothing
+cancels there, and stating `text-sm`'s own 20 moves it to y=647.045 against the
+reference's 646.095 where the default sits at 646.132. That is the finding stated as
+a rule rather than as a fix: the baseline rule is not a bug, it is how iced lays a
+line out, and a line height is a decision that has to be read off the element that
+centres it.
+
+## Two icon sizes, and one bare element rule
+
+`ui::CONTROL_ICON` is `size-5` and has to stay **twenty**: `ui::search`'s leading
+glyph is `size-5` on both the wrapper and the icon (`Input.vue:12`), and the install
+checklist's undone mark is `size-5 shrink-0`
+(`onboarding-checklist/index.vue:120`). The profile page's collection card is
+different. `layout.vue:282` and `:292` draw `LibraryIcon` and `BoxIcon` with **no
+class at all**, so they fall to the bare `svg{width:1em;height:1em}` element rule in
+the reference's shipped stylesheet, which the bundle in `/usr/bin/ModrinthApp`
+carries unshed of specificity between `.iconified-input svg` and `.chart svg`, and
+one em there is the **sixteen** pixels `defaults.scss:17`'s `body` asks for.
+
+The four status-line glyphs are the same case and are the reason the rule is a
+constant rather than a comment. `layout.vue:301`, `:305`, `:309` and `:313` draw
+`GlobeIcon`, `LinkIcon`, `LockIcon` and `XIcon` unclassed, each in a
+`flex items-center gap-1`, and **nothing above them sets a font size either**:
+`ProjectCardList`, `SmartClickable`, the card's own div and its
+`grid-cols-[auto_1fr]` name none, `text-primary` is a colour
+(`tailwind-preset.ts:19-20`), and the only size on the card is the `<h2>`'s
+`text-lg`, which is a **sibling** of the icon line rather than an ancestor. So they
+are neither `size-4` nor `size-5` by intent. `ui::BARE_ICON` is that number, and
+`CONTROL_ICON`'s doc now carries all three use sites, because the shared number is
+right and only the third caller was wrong.
+
+**That change could not be photographed, and the reason is worth having.** In the
+tree it was written against, the Collections view could not be reached at all:
+`pages/overlay.rs`'s `Stack` implemented `Widget` without an `on_event`, so it
+inherited `iced_core`'s default of `Status::Ignored` and never descended, and
+`Shell::pane` wraps every page in one. Hover, press and the wheel all failed over the
+page and all worked in the rail, its sibling in `Shell::render`. So the number was
+read off the reference's stylesheet and off the six lines that consume it.
+
+**The tab labels are a weight, and the weight is 700.** The strip on the profile page
+is `tabs_with_glyphs`, fed by `TAB_LABEL` and `TAB_LINE` -- not by
+`NAV_LABEL_SIZE`, which drives the sidebar. So the sixteen-pixel label an audit was
+comparing against `Tabs.vue`'s `text-sm` was never in this path: the profile page
+renders `NavTabs`, not `Tabs`, and `NavTabs.vue:9` puts `text-xs sm:text-sm
+font-bold` on the `<nav>` that the label inherits from, which at a 1280-wide window is
+**fourteen** pixels at weight **700**.
+
+The size was already right. Both captures put the label on eleven ink rows, and the
+strip's own **forty-six** pixels -- `2 + 2.75 * 16` -- pin the root `rem` at sixteen,
+so `text-sm`'s `.875rem` is fourteen here. The weight was not: the label was drawn in
+`heading()`, which is eight hundred.
+
+**The discriminator is the `ll` of *Collections*,** which Inter draws as a bare
+vertical stem, so its width reads the weight with nothing else in the way: **2.22px**
+in the reference against **2.52px** here, where Inter 700 measures **2.118** and
+Inter 800 measures **2.431** at fourteen pixels, and both renderers draw the stem
+about a tenth of a pixel fatter than the outline. The ink run counts say the same
+thing: eight hundred's stems touch their neighbours and merge *Data Packs* into three
+blobs where seven hundred keeps nine letters apart. So ink runs go **3/5/8 to
+5/6/9** against the reference's **9/8/11**, the stem goes 2.52 to **2.16** against
+2.22, and ink mass on *Data Packs* goes **431 to 393** against the reference's **396**.
+
+**The strip's width gets worse and is left alone on purpose.** The reference's
+advances sum to **261**, where Inter 700 at fourteen gives **243.9** -- seventeen
+pixels of advance that no fourteen-pixel Inter weight can produce, while this port's
+own build tracks the font to within its ink-edge quantisation (246 against Inter
+800's 247.60, and 242 against Inter 700's 243.86). What is left there moves glyph
+origins without touching outlines, which is what space looks like, and it is local to
+the strip: the profile bio measures 174 against 173. That is the finding the next
+section takes up, and this is the slice that ruled out size and weight as the cause.
+
+`pages/user.rs` also draws the empty state in `heading()`, where `EmptyState.vue:9`
+is `text-2xl font-semibold`. Verified, and not fixed there. Worth recording: that
+same empty state is an unframed `flex flex-col items-center` column with a
+`h-[200px]` illustration, where ours is a `ui::card` with no illustration.
+
+## One loader tag's message is spelled without the hyphen it is looked up with
+
+`is_loader_tag` asks whether `tag.loader.<tag>` exists, and it answers false for
+**`bta-fabric`** -- because `tag-messages.ts:10-11` publishes that tag under the id
+`tag.loader.bta-babric`, spelled without the hyphen. So one answer cost that tag its
+glyph, its *BTA (Babric)* label and its `--color-platform-bta-fabric` ink all at
+once, and the reference draws all three.
+
+The exception is named where the lookup is rather than worked around at the call
+site, because the oddity is upstream's and there is exactly one of it: the **thirty**
+loader tags all take the tag's own name as the message's prefix bar one. The test
+that pinned the misspelling as expected is turned around to pin the fix, so a change
+that breaks it again says so.
+
+## What none of this can be checked against any more
+
+**The reference capture is gone, and so is the reference.** `/tmp/ref/` holds one
+file, `launch.log`, and `/usr/bin/ModrinthApp` is still on disk but panics at
+startup:
+
+```text
+thread 'main' panicked at tao-0.36.0/src/platform_impl/linux/event_loop.rs:217:53:
+Failed to initialize gtk backend!: BoolError { message: "Failed to initialize GTK",
+  filename: "gtk-0.18.2/src/rt.rs", function: "gtk::rt::init", line: 141 }
+```
+
+So **every whole-image differing-pixel count in the sections above is the last
+measurement taken while that app was alive.** They are not re-checkable and nothing
+in this tree can make them so. The numbers as each commit last recorded them, counted
+as `(|dR|+|dG|+|dB|) > 0`: `/user/FlameFire` against `ref/user-ref.png` **307,727**,
+`/hosting/manage` against `ref/hosting-clean3.png` **434,929**, `/browse/modpack`
+**412,823**, `/skins` **388,703**, `/instance` **248,004**. Where a commit's own
+report gives a number -- a difference sum, an rms, an ink box, a plate's interior --
+that number is the record, and it is the one to argue with.
+
+**Two geometry residuals are open and are written down as such.** Card three's
+summary carries one word more than the reference's: its window is `[520.9, 523.9)`
+and we sit at 528, downstream of the six-pixel *Install to instance* shortfall (183
+against 189). And the fit residuals on the fitted labels are +-1px of ink --
+*Data Packs* **83** against **82**, *Modpacks* **74** against **74**, *Collections*
+**82** against **83**. Neither is claimed closed.
+
+**And the one that is not cosmetic: CI is red at `da746ab`.**
+`ui::tests::every_measured_label_carries_the_extra_its_own_capture_gave_it` fails on
+the Windows runner at `ui.rs:3308`:
+
+```text
+`Data Packs` measures 77.8054 and the reference's own capture asks for 83.680
+test result: FAILED. 821 passed; 1 failed; 0 ignored
+```
+
+The same tree passes here on Linux, where the same assertion is met to within 0.06 of
+83.680. So `TRACKED`'s table -- and therefore `tracked_text`'s layout, which every
+fitted label on two pages is drawn through -- is asserted against a measurement that
+runner does not reproduce, by **5.87px** on the first label. The two earlier asserts
+in that test pass on the runner, so the fit *is* applied there and `advance()` and
+`shape_width()` agree with each other; what differs is the width both of them report
+for the same string, face and size, which puts the difference in what the platform's
+font database hands the shaper rather than in the tree. Not diagnosed and not fixed
+here, because the fix is Rust and this pass is the record.
+
