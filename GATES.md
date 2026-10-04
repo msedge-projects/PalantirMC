@@ -8804,6 +8804,70 @@ $ python tools/progress.py --check
   exists, and the 189 is an input to the derivation rather than an output of it, so a
   reader who doubts it has nothing here to re-measure with.
 
+- [x] G159: the Discover page's column puts each row where the reference's plate
+  puts it -- the combobox trigger given ButtonFrame's own frame and metrics, its
+  two texts the right way round, and the three gaps below the tab strip made to be
+  three numbers rather than two
+  CHECK: cargo test -p palantir-desktop --locked
+         cargo clippy -p palantir-desktop --all-targets --locked -- -D clippy::correctness
+         python tools/progress.py --check
+  EXPECT: **825 passed / 0 failed** and 4 native passed in the desktop crate here,
+          `clippy -D clippy::correctness` exits 0, and `Lint` is green on the runner
+          progress exits 0, with G159 attributed to stage 3
+  EVIDENCE: `ButtonFrame.vue:31`'s `md` row, `Combobox.vue:71`/`:78`/`:90-92`/
+          `:338`, `browse-tab/layout.vue:147`/`:178`/`:191`/`:258`, and the
+          1280x720 `/browse/mod` pair recorded in `.scratch/verify/` (`ref-mod.png`
+          against `ours-final.png`).
+
+  **Three defects, all in one column, and none of them where the notes said.** A
+  1280x720 capture of both clients on `/browse/mod` puts the reference's tab pill on
+  y 72..117, its search field on y 126..173, its sort trigger on y 182..217 and its
+  results' rule on y 230. Ours drew 71..116, 125..172, 186..225 and 237 -- every
+  boundary wrong, and the first one wrong for a reason no capture had found.
+
+  **The trigger was not a control this module already had.** `ui::select` drew
+  itself inside `InputFrame.vue`'s `framed` at `ui::CONTROL`'s forty pixels. But
+  `Combobox.vue:338` asks for `triggerSize: 'md'`, and `ButtonFrame.vue:31`'s own
+  `md` row is `h-9 gap-1.5 rounded-xl px-2.5 text-base font-semibold` -- so the
+  height is **36**, the padding **10**, and the two frames had their fill and
+  hairline the wrong way round: `ButtonFrame.vue:45` fills `bg-surface-4` (**52,
+  54, 60**) under a `--surface-5` inset shadow (`:138`, **66, 68, 74**), where ours
+  read (66,68,74) against the reference's (52,54,60).
+
+  **Its two texts had their inks swapped.** `browse-tab/layout.vue:191` gives the
+  prefix `font-semibold text-primary`, so the prefix is the dimmer one, and
+  `Combobox.vue:78` gives the value `font-semibold text-inherit`, which resolves
+  against the button's own `text-contrast`, so the value is the white one -- ours
+  had it backwards, and the value at `medium` on fourteen where the button sets
+  sixteen. The chevron was the same kind of mistake: `Combobox.vue` has **two**
+  `<ChevronLeftIcon>`s, and the `text-secondary` at `:42` belongs to the search
+  variant's `<Input>` while this control's at `:90` names no ink at all. The ink
+  runs now agree: prefix peak **(176,186,197)**, value **(255,255,255)**, chevron
+  **(255,255,255)** and 12x8 against the reference's 12x8, the `size-5`/`size-4`
+  ratio.
+
+  **The gaps below the strip were never one gap.** The field's bottom hairline is
+  y=173 and the trigger's top border y=182 -- **eight** rows; the trigger's bottom
+  is y=217 and the results' rule y=230 -- **twelve**. `layout.vue` is a fragment
+  (the `<Input size="large">` at `:147` and the `flex flex-wrap items-center
+  gap-2` div at `:178` are siblings under a wrapper this port does not draw), so
+  the capture is the only place the eight is written down; the twelve is the body
+  column's `GAP` plus the `mt-1` the results block carries at `:258`. One gap for
+  the whole column put the trigger four rows low and the results seven.
+
+  **And `STRIP_ABOVE` was one pixel short of its own inset.** This column begins
+  *on* the head hairline's own row, y=48, so the twenty-three rows between y=48
+  and the pill's y=72 are counted *from* y=48 and the gap is `INSET`. Subtracting
+  the hairline drew the pill at y=71 and held the field, the trigger and the
+  results one row high for as long as it stood. A capture of `HEAD` unmodified
+  confirms the y=71 pill predates this slice.
+
+  **What this gate cannot say.** The three remaining differences in this region are
+  glyph rasterisation -- the prefix's ink run is 61 columns against the reference's
+  61, the value's 79 against 81, and the two baselines are one row apart -- which
+  is the shipped Inter's own hinting rather than a layout, and no constant in this
+  tree sets it.
+
 ## What these gates cannot say
 
 - **The reference capture is gone, and the reference with it.** `/usr/bin/ModrinthApp`

@@ -1044,21 +1044,38 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     // is kept there: a page that scrolled as a whole could not report where its
     // list starts.
     column![pinned_tabs(theme, state), body(vec![
-        // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
-        // the one search field in the tree that does: 48 pixels, `px-4`, a
-        // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
-        // hairline. A capture of both clients at 1280x720 agrees on every
-        // number -- the reference's field runs y 126..173 and this one drew
-        // y 129..167, forty pixels of `h-10` where the template asks for
-        // `h-12`.
-        ui::input_sized(
-            theme,
-            ui::InputSize::Large,
-            &state.placeholder(),
-            &state.query,
-            Message::Query,
-        ),
-        controls(theme, state),
+        // The search field and the controls row are one group, and the gap
+        // between them is the page's own rather than the body column's.
+        //
+        // `browse-tab/layout.vue` is a fragment: the `<Input size="large">` at
+        // `:147` and the `flex flex-wrap items-center gap-2` div at `:178` are
+        // siblings, and whatever spaces them belongs to a wrapper this port does
+        // not draw. The capture settles it. The reference's field ends on y=173
+        // and its sort trigger starts on y=182 -- eight rows -- while the trigger
+        // ends on y=217 and the results surface begins on y=230 -- twelve. So
+        // there are two gaps, not one, and they differ by exactly the `mt-1` on
+        // the results block (`layout.vue:258`, `class="search mt-1
+        // [overflow-anchor:none]"`) sitting on top of the wrapper's eight.
+        column![
+            // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
+            // the one search field in the tree that does: 48 pixels, `px-4`, a
+            // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
+            // hairline. A capture of both clients at 1280x720 agrees on every
+            // number -- the reference's field runs y 126..173 and this one drew
+            // y 129..167, forty pixels of `h-10` where the template asks for
+            // `h-12`.
+            ui::input_sized(
+                theme,
+                ui::InputSize::Large,
+                &state.placeholder(),
+                &state.query,
+                Message::Query,
+            ),
+            controls(theme, state),
+        ]
+        .spacing(SEARCH_TO_CONTROLS)
+        .width(Length::Fill)
+        .into(),
         results(theme, state),
     ])]
     .width(Length::Fill)
@@ -1100,18 +1117,37 @@ fn pinned_tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// The page background above the pill, and the gap under it.
 ///
 /// Measured on a 1280x720 capture of the reference at `/browse/modpack`, where
-/// the head bar's own bottom hairline is at y=48 and the search field's top
-/// hairline at y=126: twenty-three rows of page background, then the pill's
-/// forty-six (`1 + 4 + 36 + 4 + 1`, borders included) at y 72..117, then eight
-/// more rows of page background before the field. Twenty-three and not [`INSET`]
-/// because the head's hairline is the page's first row here, so the pill's top
-/// border lands on `48 + 24`.
+/// the head bar's own bottom hairline is at y=48, the pill's top border at y=72,
+/// its bottom at y=117, and the search field's top hairline at y=126. This port's
+/// pill is the reference's forty-six (`1 + 4 + 36 + 4 + 1`, borders included),
+/// this gap is [`INSET`], and the eight after it are [`STRIP_UNDER`].
+///
+/// [`INSET`] and not one less, and the head's hairline is the whole reason.
+/// This column begins on the hairline's own row rather than the row below it, so
+/// the twenty-three rows that separate y=48 from y=72 are counted *from* y=48 and
+/// the pill's top border lands on `48 + 24`. An earlier revision subtracted the
+/// hairline here, which drew the pill on y=71 and put the field, the controls and
+/// the results one row above the reference for as long as it stood.
 ///
 /// The eight rows under the pill are its own `card-shadow` to fade into and
 /// nothing else: the capture has the pill's shadow on y 118..120 and plain page
 /// background from 121, and this draws no ink there at all.
-const STRIP_ABOVE: f32 = INSET - 1.0;
+const STRIP_ABOVE: f32 = INSET;
 const STRIP_UNDER: f32 = 8.0;
+
+/// The gap between the search field and the controls row, which is the page's own
+/// and not the body column's [`GAP`].
+///
+/// Measured on a 1280x720 capture of the reference at `/browse/mod`, where the
+/// field's bottom hairline is at y=173 and the sort trigger's top border at
+/// y=182: eight rows, against the twelve [`GAP`] puts between everything else in
+/// the column. The trigger's bottom is y=217 and the results surface begins at
+/// y=230 -- twelve -- so the two joins differ, and the difference is exactly the
+/// `mt-1` on the results block (`browse-tab/layout.vue:258`, `class="search mt-1
+/// [overflow-anchor:none]"`) sitting on top of this eight. The template is a
+/// fragment, so the eight belongs to a wrapper this port does not draw and the
+/// capture is the only place it is written down.
+const SEARCH_TO_CONTROLS: f32 = 8.0;
 
 /// The page's body: the inset, the spacing, and the scroll region that reports
 /// where it is.
@@ -3363,7 +3399,7 @@ mod tests {
         // has a 636-pixel pill -- and put the pill's own height wrong twice over,
         // since the band and the rule under it were not the pill's border at all.
         assert_eq!(INSET, 24.0, "the page's own inset, left of the pill");
-        assert_eq!(STRIP_ABOVE, 23.0, "page background above the pill");
+        assert_eq!(STRIP_ABOVE, 24.0, "page background above the pill, hairline row included");
         assert_eq!(STRIP_UNDER, 8.0, "and the gap its shadow fades into");
         // The pill keeps its own frame and its own shadow, which are what the
         // reference draws around the tabs: `card-shadow border border-solid
@@ -3389,6 +3425,42 @@ mod tests {
         // distinction rather than a single number asserted twice.
         assert_eq!(ui::InputSize::Standard.height(), 36.0);
         assert_eq!(ui::CONTROL, 40.0, "what this drew before the size was read off");
+    }
+
+    #[test]
+    fn the_two_gaps_below_the_strip_are_not_the_same_gap() {
+        // The column that stacks the search field, the controls row and the
+        // results puts [`GAP`] between each pair, and the reference does not: its
+        // two joins measure eight and twelve on the same 1280x720 capture, the
+        // difference being the `mt-1` the results block carries. Drawn with one
+        // gap the trigger sat at y=186 instead of y=182 and the results surface
+        // came out at y=238 instead of y=230, so both were low by four and the
+        // eight was invisible until the numbers were written down.
+        assert_eq!(SEARCH_TO_CONTROLS, 8.0, "field to trigger, on the capture");
+        assert_eq!(GAP, 12.0, "trigger to results, which is this plus the `mt-1`");
+        assert_ne!(
+            SEARCH_TO_CONTROLS, GAP,
+            "one gap for the whole column is what put the trigger four rows low"
+        );
+    }
+
+    #[test]
+    fn the_column_lands_where_the_reference_puts_each_row() {
+        // The arithmetic, from the head's hairline on y=48 down to the results'
+        // own rule. Every number on the right was read off a 1280x720 capture of
+        // the reference at `/browse/mod`; this is what says the three gaps and
+        // the three heights compose to them, so a change to any one of the six
+        // that is wrong on its own still fails here.
+        let field_top = 48.0 + STRIP_ABOVE + ui::TAB_STRIP + STRIP_UNDER;
+        let field_bottom = field_top + ui::InputSize::Large.height() - 1.0;
+        let trigger_top = field_bottom + 1.0 + SEARCH_TO_CONTROLS;
+        let trigger_bottom = trigger_top + ui::TRIGGER_HEIGHT - 1.0;
+        let results_top = trigger_bottom + 1.0 + GAP;
+        assert_eq!(field_top, 126.0, "the capture puts the field's border on y=126");
+        assert_eq!(field_bottom, 173.0, "and its last row on y=173");
+        assert_eq!(trigger_top, 182.0, "the capture puts the trigger's border on y=182");
+        assert_eq!(trigger_bottom, 217.0, "and its last row on y=217");
+        assert_eq!(results_top, 230.0, "the capture puts the results' rule on y=230");
     }
 
     #[test]
