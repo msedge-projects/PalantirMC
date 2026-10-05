@@ -226,9 +226,51 @@ fn hover_fraction(factor: f32, pointed: Pointed) -> f32 {
 /// *single* key, and everything else is at rest and costs a map lookup. Keyed
 /// by a stable string the view supplies, for [`SwitchAnim`]'s reason — a key
 /// derived from tree position would animate whatever lands in the slot.
+///
+/// The selection tweens are in here for the same reason and not because a
+/// pointer has anything to do with them: [`Interactions::selection`] is asked
+/// while the view is being *built*, so whatever state a tab change needs to
+/// reach the next frame has to be reachable from a view that is rebuilt every
+/// frame. The shell's own [`crate::motion::Tween`]s live on the shell and are
+/// advanced by the shell's tick, which is the right home for motion the shell
+/// owns; this is motion a *page* owns and cannot.
 #[derive(Debug, Clone, Default)]
 pub struct Interactions {
     tweens: HashMap<&'static str, Tween>,
+    selections: HashMap<&'static str, Selection>,
+}
+
+/// One control's *selection* tween: how far it is between not-chosen and
+/// chosen.
+///
+/// A different question from [`Tween`]'s, which is about the pointer: nothing
+/// here reads a pointer, and a selected tab does not dim when the reader moves
+/// off it. What it is for is the colour a control takes when it is chosen —
+/// [`crate::motion::Timing::TAB_COLOR`]'s `transition: color 100ms
+/// cubic-bezier(0.4, 0, 0.2, 1)` on `NavTabs.vue`'s `.tab-color`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Selection {
+    /// The fraction it started the current leg from.
+    from: f32,
+    /// The fraction it is heading for: 0.0 unselected, 1.0 selected.
+    to: f32,
+    /// Where it is drawn this frame.
+    progress: f32,
+    /// When the leg began, or `None` once it has arrived.
+    began: Option<Instant>,
+    /// The timing this leg runs on.
+    ///
+    /// Held per control and not shared, because the reference's two tab
+    /// surfaces do not agree: `NavTabs.vue`'s `.tab-color` is 100ms and
+    /// `TabbedModal.vue`'s `transition-all` is Tailwind's own 150ms. A clock
+    /// that had one duration for both would have to be wrong for one of them.
+    timing: crate::motion::Timing,
+}
+
+impl Selection {
+    fn settled(fraction: f32, timing: crate::motion::Timing) -> Selection {
+        Selection { from: fraction, to: fraction, progress: fraction, began: None, timing }
+    }
 }
 
 impl Interactions {
@@ -386,9 +428,61 @@ impl Interactions {
         }
     }
 
-    /// Whether any control is mid-tween.
+    /// How chosen the control `id` is drawn, given that it is `selected`.
+    ///
+    /// `0.0` is the unselected ink and `1.0` the selected one, and everything
+    /// between is the two mixed: [`crate::motion::Timing::TAB_COLOR`]'s `color`
+    /// transition, which is the only part of a tab change this shell can draw
+    /// without the geometry the reference reads off a DOM node (see
+    /// [`crate::motion::Timing::TAB_PLATE`], which is the other half and the
+    /// reason that one is not).
+    ///
+    /// **Asked from the view, and that is why it takes `&mut self`.** A page's
+    /// tab is a `mouse_area` whose press is a message the page handles, and the
+    /// page's state is swapped inside that handler, so by the time the *next*
+    /// view is built the tween has to already know the tab moved. Rather than
+    /// add a message to every tab strip's handler, this notices the change on
+    /// the way past: the view says what the state is, and the clock starts a leg
+    /// if that is not what it last drew.
+    ///
+    /// **A control nobody has drawn before is simply at its value.** The first
+    /// paint of a strip must not fade its selected tab in from nothing, which is
+    /// the failure mode of reading an absent entry as `0.0`; that is
+    /// [`Interactions::factor`]'s rule and it is the same rule here.
+    ///
+    /// `now` is asked for rather than read, on [`Interactions::set`]'s
+    /// argument: the leg has to start on the same clock [`Interactions::tick`]
+    /// advances it on, or a caller that cannot supply that clock has no way
+    /// to ask what a half-finished cross-fade looks like.
+    pub fn selection(
+        &mut self,
+        id: &'static str,
+        selected: bool,
+        timing: crate::motion::Timing,
+        now: Instant,
+    ) -> f32 {
+        let target = if selected { 1.0 } else { 0.0 };
+        let selection =
+            self.selections.entry(id).or_insert_with(|| Selection::settled(target, timing));
+        selection.timing = timing;
+        if selection.to == target {
+            // A rebuild every frame asks this every frame, and restarting a leg
+            // on each one would leave it for ever at its origin.
+            return selection.progress;
+        }
+        // From where it is drawn, not from where it was headed: a change
+        // interrupted half way back starts from the half it is showing.
+        selection.from = selection.progress;
+        selection.to = target;
+        selection.progress = selection.from;
+        selection.began = Some(now);
+        selection.progress
+    }
+
+    /// Whether any control is mid-tween, hovered or selected.
     pub fn animating(&self) -> bool {
         self.tweens.values().any(|tween| tween.began.is_some())
+            || self.selections.values().any(|selection| selection.began.is_some())
     }
 
     /// Advance every tween to `now`, returning whether any still moves.
@@ -409,6 +503,29 @@ impl Interactions {
                 moving = true;
             }
         }
+        // The selections are a separate leg on separate numbers, so they are
+        // solved separately as well: a colour cross-fade runs on
+        // `NavTabs.vue`'s own curve over its own duration, where a hover is a
+        // smoothstep over [`INTERACTION_DURATION`]. Sharing the solver would
+        // mean either borrowing the wrong curve or an [`ease`] that is
+        // neither.
+        for selection in self.selections.values_mut() {
+            let Some(began) = selection.began else {
+                continue;
+            };
+            let timing = selection.timing;
+            let span = timing.millis as f32 / 1000.0;
+            let elapsed = now.saturating_duration_since(began).as_secs_f32();
+            let progress = if span > 0.0 { (elapsed / span).clamp(0.0, 1.0) } else { 1.0 };
+            let eased = crate::motion::ease(timing.control(), progress);
+            selection.progress = selection.from + (selection.to - selection.from) * eased;
+            if progress >= 1.0 {
+                selection.progress = selection.to;
+                selection.began = None;
+            } else {
+                moving = true;
+            }
+        }
         moving
     }
 
@@ -425,6 +542,7 @@ impl Interactions {
     /// else's tween here to pull the pixels out from under.
     pub fn clear(&mut self) {
         self.tweens.clear();
+        self.selections.clear();
     }
 }
 
@@ -448,6 +566,82 @@ mod tests {
     fn at(millis: u64) -> Instant {
         // A fixed origin: the tests are about elapsed time, not about now.
         Instant::now() + Duration::from_millis(millis)
+    }
+
+    #[test]
+    fn a_selection_never_animates_the_first_time_it_is_drawn() {
+        // The rule `Interactions::factor` already follows: a control nobody has
+        // reported is drawn at its value, so the first paint of a tab strip shows
+        // its selected tab in the selected ink rather than fading it up from the
+        // unselected one. Reading an absent entry as `0.0` would animate every
+        // strip in the app on every page change.
+        let mut clock = Interactions::default();
+        let now = Instant::now();
+        assert_eq!(clock.selection("a", true, crate::motion::Timing::TAB_COLOR, now), 1.0);
+        assert_eq!(clock.selection("b", false, crate::motion::Timing::TAB_COLOR, now), 0.0);
+        assert!(!clock.animating(), "so nothing is moving");
+    }
+
+    #[test]
+    fn a_selection_cross_fades_on_its_own_rule_and_not_a_frame() {
+        // `NavTabs.vue`: `transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1)`.
+        // Not `INTERACTION_DURATION`, and not the smoothstep `ease` above: a
+        // colour cross-fade is a different length on a different curve, and a
+        // clock that shared one solver with the hovers would have to be wrong
+        // about one of the two.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        let rule = crate::motion::Timing::TAB_COLOR;
+        assert_eq!(clock.selection("tab", true, rule, start), 1.0);
+        clock.tick(start + rule.duration());
+        assert!(!clock.animating());
+
+        // Now the reader presses another tab, and this one gives its ink up.
+        let pressing = start + rule.duration();
+        assert_eq!(clock.selection("tab", false, rule, pressing), 1.0, "a change starts where it is");
+        assert!(clock.animating(), "so the shell is asked for frames");
+        clock.tick(pressing + rule.duration() / 2);
+        let half = clock.selection("tab", false, rule, pressing + rule.duration() / 2);
+        assert!(half > 0.0 && half < 1.0, "half way there: {half}");
+        // Tailwind's curve is front-loaded, so half the time is most of the way.
+        assert!(half < 0.5, "cubic-bezier(0.4, 0, 0.2, 1) leads: {half}");
+        clock.tick(pressing + rule.duration());
+        assert_eq!(clock.selection("tab", false, rule, pressing), 0.0, "and it lands exactly");
+        assert!(!clock.animating());
+    }
+
+    #[test]
+    fn two_strips_do_not_share_a_selection_duration() {
+        // `NavTabs.vue`'s `.tab-color` is 100ms and `TabbedModal.vue`'s
+        // `transition-all` is Tailwind's 150ms. Both are asked for by name, so a
+        // strip cannot borrow the other's length.
+        let mut clock = Interactions::default();
+        let start = Instant::now();
+        let strip = crate::motion::Timing::TAB_COLOR;
+        let column = crate::motion::Timing::TAB_COLUMN;
+        assert_eq!(strip.millis, 100);
+        assert_eq!(column.millis, 150);
+        // Both settle at "selected" first -- an absent entry is drawn at its
+        // value, not animated up to it -- and both then give their ink up. The
+        // two legs start on the same tick and run for different lengths.
+        assert_eq!(clock.selection("strip", true, strip, start), 1.0);
+        assert_eq!(clock.selection("column", true, column, start), 1.0);
+        assert_eq!(clock.selection("strip", false, strip, start), 1.0);
+        assert_eq!(clock.selection("column", false, column, start), 1.0);
+        clock.tick(start + strip.duration());
+        // The strip's 100ms is up and the column's 150ms is not, which is the
+        // whole reason the timing travels with the control rather than being
+        // looked up once: one shared duration would have finished both at 100
+        // or left both running at 150.
+        assert_eq!(clock.selection("strip", false, strip, start), 0.0, "the strip is done");
+        assert!(
+            clock.selection("column", false, column, start) > 0.0,
+            "the column is still on its own 150ms"
+        );
+        assert!(clock.animating(), "so the frame clock stays awake for it");
+        clock.tick(start + column.duration());
+        assert_eq!(clock.selection("column", false, column, start), 0.0);
+        assert!(!clock.animating());
     }
 
     #[test]

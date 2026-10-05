@@ -808,6 +808,17 @@ pub struct Shell {
     screenshots_slot: bool,
     /// Which rail slot the pointer is over.
     hovered: Option<Rail>,
+    /// How far the panel toggle's arrow has turned: 1.0 pointing at the panel
+    /// that is up, 0.0 at the one it would come back from.
+    ///
+    /// `App.vue:2408-2413` carries `transition-transform` and `rotate-180` on
+    /// that `IconButton`, so the arrow is *turned* rather than swapped, and a
+    /// half turn of a `RightArrowIcon` is a `LeftArrowIcon` at some fraction of
+    /// the way. iced 0.12 cannot rotate a glyph, so the half turn is drawn as
+    /// the cross-dissolve of the two glyphs -- which is the same two shapes the
+    /// reference has, and, for a shape that is its own mirror image, the same
+    /// picture a rotation gives at every angle. See [`Timing::PANEL_ARROW`].
+    panel_arrow: Tween,
     /// One selection tween per rail slot, in [`Rail::ALL`] order.
     plates: Vec<Tween>,
     /// How opaque the page is, so a page that has just been swapped fades up
@@ -823,6 +834,49 @@ pub struct Shell {
     plate_clock: std::time::Instant,
     /// Which modal is open, if any.
     modal: Option<Modal>,
+    /// The modal that was dismissed and is still on its way out.
+    ///
+    /// `NewModal.vue`'s `hide()` does not take the element out of the tree when
+    /// the dialog starts to leave -- it sets `visible` false, which starts the
+    /// leave transition, and only clears `open` 300ms later
+    /// ([`Timing::MODAL_UNMOUNT`]). A shell that dropped the `Option` on the
+    /// frame the reader pressed would have nothing to fade, so the dialog moves
+    /// here instead and is drawn from here for that long.
+    ///
+    /// The two are separate because every message in this file that means "close
+    /// it" -- six of them, plus the scrim's own press -- asks [`Shell::dismiss`]
+    /// rather than assigning, and because the *live* slot has to mean "this
+    /// dialog is up and will answer messages". A dialog on its way out draws its
+    /// rows and takes no presses, which is what the reference's own
+    /// `pointer-events: none` on `.modal-container` does the moment `shown`
+    /// comes off.
+    closing: Option<Modal>,
+    /// How much of the reference's 300ms is left on the leaving dialog.
+    ///
+    /// A countdown rather than a deadline, and the reason is the clock it has
+    /// to agree with: the leave *transition* runs on this shell's own
+    /// accumulated frame deltas ([`Shell::advance`]), so a deadline taken from
+    /// the wall clock would retire a dialog a different number of milliseconds
+    /// after its fade began whenever the two clocks drifted apart — which is
+    /// exactly when a machine is busy. A browser's `setTimeout` is a frame
+    /// clock too, so counting down is the faithful shape.
+    ///
+    /// Zero when nothing is leaving. See [`Shell::dismiss`].
+    closing_left: Duration,
+    /// How opaque the dialog itself is: `NewModal.vue`'s `> .modal-body`, from
+    /// `opacity: 0` to `opacity: 1` on `all 0.2s ease-in-out`.
+    ///
+    /// Aimed at 0 by [`Shell::dismiss`] and at 1 by [`Shell::present`], so the
+    /// one tween runs both legs -- which is what the reference's `shown` class
+    /// does, being the same two rules in either direction. See
+    /// [`Timing::MODAL_DIALOG`].
+    modal_fade: Tween,
+    /// The same for the bed behind it, which is the other half and the other
+    /// curve: `opacity: 0` to `opacity: 1` on `all 0.2s ease-out`. Kept apart
+    /// from [`Shell::modal_fade`] because the reference declares the two
+    /// transitions on two different rules with two different curves, and one
+    /// tween cannot be two timings.
+    scrim_fade: Tween,
     /// Which tab the settings dialog is showing.
     ///
     /// Shell state rather than the dialog's own, because the dialog is rebuilt from
@@ -1732,10 +1786,18 @@ impl Shell {
             skins_slot: settings.show_skins,
             screenshots_slot: settings.show_screenshots,
             hovered: None,
+            panel_arrow: Tween::at(1.0, Timing::PANEL_ARROW),
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
             page_fade: Tween::at(1.0, Timing::PAGE_FADE),
             plate_clock: std::time::Instant::now(),
             modal: None,
+            // At rest, both halves of the arrival already at their end: the first
+            // paint of a shell has no modal up, and a tween built at zero would
+            // fade the window's *next* dialog in from nothing twice over.
+            closing: None,
+            closing_left: Duration::ZERO,
+            modal_fade: Tween::at(1.0, Timing::MODAL_DIALOG),
+            scrim_fade: Tween::at(1.0, Timing::MODAL_SCRIM),
             settings_tab: SettingsTab::Appearance,
             maximized: false,
             viewport: DIALOG_VIEWPORT,
@@ -2012,12 +2074,93 @@ impl Shell {
         self.forget_pointer();
     }
 
+    /// Put a dialog up and start its arrival.
+    ///
+    /// The one place [`Shell::modal_fade`] is aimed at 1, for the reason
+    /// [`Shell::retarget_screen`] is the only place [`Shell::page_fade`] is
+    /// restarted: a value that is moved from two dozen call sites is a value that
+    /// will be moved without being restarted, and a dialog that arrives at 60%
+    /// opacity forever is a worse bug than one that arrives at all.
+    ///
+    /// Any dialog still on its way out is dropped rather than faded back in. That
+    /// is the reference's own behaviour: `show()` clears `hideTimeout` and puts
+    /// the *same* element back at `visible = true`, which interrupts the leave
+    /// where it stands -- but only because it is the same element, and this
+    /// shell's two dialogs are built fresh each frame, so there is nothing to
+    /// interrupt. Starting the newcomer at nothing is the honest reading of an
+    /// arrival that begins mid-leave.
+    fn present(&mut self, modal: Modal) {
+        self.closing = None;
+        self.closing_left = Duration::ZERO;
+        self.modal = Some(modal);
+        for (tween, timing) in [
+            (&mut self.modal_fade, Timing::MODAL_DIALOG),
+            (&mut self.scrim_fade, Timing::MODAL_SCRIM),
+        ] {
+            // Built at nothing and aimed at one, rather than handed both ends at
+            // once: `Tween::at` is a tween *at rest*, so aiming it is what starts
+            // the leg. See [`Shell::retarget_screen`] for the same argument on
+            // the page fade.
+            *tween = Tween::at(0.0, timing);
+            tween.retarget(1.0);
+        }
+    }
+
+    /// Take a dialog down and start its departure.
+    ///
+    /// The one place a `Modal` leaves [`Shell::modal`], and the reason the leave
+    /// can be seen at all. The dialog moves to [`Shell::closing`] and stays drawn
+    /// for [`Timing::MODAL_UNMOUNT`], which is the reference's own 300ms: the
+    /// leave transition runs 200ms, and the element it runs on has to still be
+    /// there when it ends.
+    ///
+    /// **A no-op when nothing is up**, deliberately, so that the scrim's press --
+    /// which every press outside a dialog reaches, because the scrim is the layer
+    /// that covers the window -- cannot start a leave leg on a shell that has
+    /// nothing to leave. Starting one anyway would leave [`Shell::scrim_fade`
+    /// running against a tween nobody asked for, and the window would dim itself
+    /// on a click that closed nothing.
+    fn dismiss(&mut self) {
+        // `take()` rather than a test and an assignment, because the two
+        // slots have to move together: a shell that cleared `modal` and left
+        // `closing` empty would take the dialog off screen on the frame of
+        // the press, which is the thing the 300ms exists to prevent.
+        let Some(leaving) = self.modal.take() else {
+            return;
+        };
+        self.closing = Some(leaving);
+        self.modal_fade.retarget(0.0);
+        self.scrim_fade.retarget(0.0);
+        self.closing_left = Timing::MODAL_UNMOUNT;
+    }
+
+    /// The dialog to draw: the live one, or the one on its way out.
+    ///
+    /// Two slots rather than one because "is a modal up" and "is a dialog being
+    /// painted" are different questions, and [`Shell::render`] asks the first
+    /// while [`Shell::modal_layer`] asks this one. A dialog on its way out is
+    /// painted and is not up.
+    fn dialog_drawn(&self) -> Option<&Modal> {
+        self.modal.as_ref().or(self.closing.as_ref())
+    }
+
     /// Advance every moving tween by `delta`.
     fn advance(&mut self, delta: Duration) {
         for tween in &mut self.plates {
             tween.advance(delta);
         }
         self.page_fade.advance(delta);
+        self.modal_fade.advance(delta);
+        self.scrim_fade.advance(delta);
+        self.panel_arrow.advance(delta);
+        // The leaving dialog's own clock, counted down on the same deltas as
+        // its fade so the two cannot disagree.
+        if self.closing.is_some() {
+            self.closing_left = self.closing_left.saturating_sub(delta);
+            if self.closing_left.is_zero() {
+                self.closing = None;
+            }
+        }
     }
 
     /// Advance rail motion by actual elapsed time. Dropped or delayed ticks
@@ -2026,6 +2169,12 @@ impl Shell {
         let delta = now.saturating_duration_since(self.plate_clock);
         self.plate_clock = now;
         self.advance(delta);
+        // The reference takes the dialog out of its tree on a timer rather than
+        // when its transition ends (`hideTimeout`), and the difference is worth
+        // keeping: a shell that cleared the moment its tween landed would have no
+        // 100ms of grace, and a dropped frame in the middle of the leave would
+        // take the dialog off screen half-faded. The countdown is in
+        // [`Shell::advance`], for the reason [`Shell::closing_left`] gives.
     }
 
     /// Take a wheel on one scroll region, and answer with the command that moves
@@ -2057,6 +2206,18 @@ impl Shell {
         // the fade is, or the page would arrive at whatever opacity it happened
         // to be drawn at and then stop.
         if self.page_fade.is_running() {
+            return true;
+        }
+        // Both halves of a dialog's arrival or departure, and the dialog's own
+        // unmount: a shell whose dialog is 30ms from being dropped has to be sent
+        // the frame that drops it, or it stays drawn for ever.
+        if self.modal_fade.is_running() || self.scrim_fade.is_running() || self.closing.is_some()
+        {
+            return true;
+        }
+        // The panel toggle's arrow is mid-turn, which is the only motion the
+        // reference gives the panel itself -- see [`Shell::panel_toggle`].
+        if self.panel_arrow.is_running() {
             return true;
         }
         // A region mid-glide is moving as well, and the frame it is waiting for is
@@ -2368,7 +2529,7 @@ impl Shell {
                         // The dialog has done its job and the sentence belongs
                         // where the button was: a modal over it would be covering
                         // the answer it just produced.
-                        self.modal = None;
+                        self.dismiss();
                         self.install_error = None;
                         // A pack made an instance, and the reference leaves the
                         // reader in what it just made -- so the list the pages are
@@ -2633,7 +2794,7 @@ impl Shell {
                         // instance that was brought in.
                         self.store.reload();
                         self.import_error = None;
-                        self.modal = None;
+                        self.dismiss();
                         self.go(Address::at(route::Route::Instance {
                             id,
                             tab: route::InstanceTab::Content,
@@ -2654,7 +2815,7 @@ impl Shell {
                         self.store.reload();
                         self.create_error = None;
                         self.create_name.clear();
-                        self.modal = None;
+                        self.dismiss();
                         self.go(Address::at(route::Route::Instance {
                             id,
                             tab: route::InstanceTab::Content,
@@ -2683,7 +2844,7 @@ impl Shell {
                 // The two rail buttons that open a flow rather than a page: the
                 // reference's `+` and the gear.
                 match slot {
-                    Rail::Settings => self.modal = Some(Modal::Settings),
+                    Rail::Settings => self.present(Modal::Settings),
                     Rail::CreateInstance => self.open_create(),
                     _ => {}
                 }
@@ -2735,7 +2896,7 @@ impl Shell {
                         // missing half of the request is *which instance*, and only
                         // a reader knows that.
                         self.install_error = None;
-                        self.modal = Some(Modal::Install {
+                        self.present(Modal::Install {
                             project: install.id,
                             title: install.title,
                             pack: install.pack,
@@ -2801,6 +2962,10 @@ impl Shell {
             }
             Message::Sidebar(shown) => {
                 self.sidebar = shown;
+                // The arrow turns with the panel rather than after it: this is the
+                // one place that aims it, for the same reason [`Shell::present`]
+                // is the only place that aims a dialog's fade.
+                self.panel_arrow.retarget(if shown { 1.0 } else { 0.0 });
                 None
             }
             Message::ToggleAccounts => {
@@ -2897,7 +3062,7 @@ impl Shell {
                 None
             }
             Message::CloseModal => {
-                self.modal = None;
+                self.dismiss();
                 // The Skins editor is the page's state rather than this shell's
                 // (`pages::Screen::skins_edit`), so dismissing it is a message to the
                 // page. A close with no editor open is the same nothing: the page
@@ -2967,7 +3132,7 @@ impl Shell {
                 crate::instance_settings::State::failed(id.to_string(), name, problem)
             }
         };
-        self.modal = Some(Modal::InstanceSettings(Box::new(state)));
+        self.present(Modal::InstanceSettings(Box::new(state)));
     }
 
     /// Forget an instance's link to the pack it came from, and re-read the card.
@@ -3128,7 +3293,7 @@ impl Shell {
         self.loader_builds = Load::Idle;
         self.loader_builds_for = None;
         self.loader_builds_requested = false;
-        self.modal = Some(Modal::Create);
+        self.present(Modal::Create);
     }
 
     /// Take the dialog's loader to `loader`.
@@ -3256,7 +3421,7 @@ impl Shell {
         self.import_found = self.store.importable();
         self.import_error = None;
         self.importing = false;
-        self.modal = Some(Modal::Import);
+        self.present(Modal::Import);
     }
 
     /// Bring one instance in, off the frame thread.
@@ -4354,7 +4519,11 @@ fn tags(&self) -> iced::Command<Message> {
         // The Skins page's editor is a modal too, and it is not in `Modal`: it is the
         // page's own state (`pages::Screen::skins_edit`), so the layer is drawn for it
         // as well as for the shell's own modals.
-        if self.modal.is_some() || self.screen.skins_edit().is_some() {
+        // A dialog on its way out is drawn too, which is the point of
+        // [`Shell::closing`]: the reference leaves the element in its tree for
+        // [`Timing::MODAL_UNMOUNT`] after `shown` comes off, and the window would
+        // otherwise blink back to the page the instant the reader pressed.
+        if self.dialog_drawn().is_some() || self.screen.skins_edit().is_some() {
             // A modal covers the window rather than replacing it. The reference's
             // overlay is `position: fixed` over the page it dims, and its own
             // capture shows that: at y=350 the rail's chrome reads `(25, 34, 36)`
@@ -5100,6 +5269,23 @@ fn tags(&self) -> iced::Command<Message> {
     /// the edge the panel would come back from, and a `base` face while it is
     /// shown against a `quiet` one while it is not -- which is the difference
     /// between the raised plate this draws and no plate at all.
+    ///
+    /// **The face changes on the frame of the press, and the arrow does not.**
+    /// That is the reference's own split: `:type` is bound to `sidebarToggled`
+    /// and `rotate-180` is on a `transition-transform`, so the plate appears
+    /// while the glyph is still half-turned, and catches up 150ms later. So the
+    /// ink this picks is the *target* state, and the glyph is drawn at
+    /// [`Shell::panel_arrow`].
+    ///
+    /// **The panel itself does not move, and that is a citation too.**
+    /// `App.vue:2676-2681` is where a reader would look for the panel's own
+    /// transition, and the rule is there commented out:
+    /// `// transition: grid-template-columns 0.4s ease-in-out;`. The reference
+    /// ships the panel snapping between `1fr 0px` and `1fr 300px` -- the 0.4s
+    /// rule was written and then switched off -- so this shell swaps it in a
+    /// frame too. Animating the width here would be inventing a rule the
+    /// reference does not have, and would make a launcher look like a *slower*
+    /// app rather than a slower-looking one.
     fn panel_toggle(&self) -> Element<'_, Message> {
         let showing = self.sidebar;
         let ink = theme_gen::ink(self.theme, if showing { INK_CONTRAST } else { INK_DEFAULT });
@@ -5111,8 +5297,33 @@ fn tags(&self) -> iced::Command<Message> {
         // The reference rotates the one icon it has rather than holding a
         // second, so a launcher with both arrows picks the one that points at
         // where the panel would go rather than drawing a mirror of the shape.
-        let glyph = if showing { Glyph::RightArrow } else { Glyph::LeftArrow };
-        let face = container(icon::icon(glyph, CONTROLS_ICON, ink))
+        //
+        // Both are drawn, each at the other's complement, because iced cannot
+        // rotate a glyph: `1.0` is all right arrow and `0.0` is all left, and
+        // the half turn between them is a dissolve rather than a spin. For a
+        // shape that is its own mirror image the two are the same picture at
+        // every angle a rotation would show, which is the same argument
+        // [`Shell::checklist`]'s two chevrons are drawn on.
+        let turn = self.panel_arrow.value().clamp(0.0, 1.0);
+        let left = Color { a: ink.a * (1.0 - turn), ..ink };
+        let right = Color { a: ink.a * turn, ..ink };
+        let arrows = if turn >= 1.0 {
+            icon::icon(Glyph::RightArrow, CONTROLS_ICON, ink)
+        } else if turn <= 0.0 {
+            icon::icon(Glyph::LeftArrow, CONTROLS_ICON, ink)
+        } else {
+            // `over`, not `over_control`: a glyph is a picture of the arrow and
+            // the press belongs to the `mouse_area` around the whole box, so a
+            // layer that answered for itself would be a second path to the same
+            // press with none of the shell's own plumbing behind it.
+            crate::pages::overlay::Stack::at(
+                iced::Vector::ZERO,
+                icon::icon(Glyph::LeftArrow, CONTROLS_ICON, left),
+            )
+            .over(iced::Vector::ZERO, icon::icon(Glyph::RightArrow, CONTROLS_ICON, right))
+            .into()
+        };
+        let face = container(arrows)
             .width(Length::Fixed(CONTROLS_BUTTON))
             .height(Length::Fixed(CONTROLS_BUTTON))
             .center_x()
@@ -8101,7 +8312,11 @@ fn tags(&self) -> iced::Command<Message> {
             let dialog = self.dialog(Key::AppSkinsModalEditTitle, body);
             return self.scrim(dialog);
         }
-        let dialog = match &self.modal {
+        // From whichever slot holds it -- the live one, or the one on its way out
+        // (see [`Shell::dialog_drawn`]). A `None` arm is unreachable from
+        // [`Shell::render`], which draws the layer only when one of the two is
+        // set, and it falls to Settings for the same reason it always has.
+        let dialog = match self.dialog_drawn() {
             Some(Modal::Create) => self.create_dialog(),
             Some(Modal::Import) => self.import_dialog(),
             Some(Modal::Install { project, title, pack }) => {
@@ -8111,8 +8326,6 @@ fn tags(&self) -> iced::Command<Message> {
                 &format!("{} · {}", state.name, Key::LabelSettings.message()),
                 crate::instance_settings::view(self.theme, state).map(Message::InstanceSettings),
             ),
-            // The layer is only drawn while a modal is up, and Settings is the one
-            // that exists: a `None` here is not reachable from `render`.
             Some(Modal::Settings) | None => self.settings_dialog(),
         };
         self.scrim(dialog)
@@ -8127,7 +8340,35 @@ fn tags(&self) -> iced::Command<Message> {
         // Read outside the closure: the ramp depends on the window's height, and
         // a closure that reached back into `self` for it would borrow the shell
         // for as long as the element lives.
-        let bed = modal_scrim(self.viewport);
+        //
+        // Both halves of the arrival are here, at the two different numbers the
+        // reference declares them at. The bed is `.modal-overlay`'s own
+        // `opacity`, so the ramp itself is drawn at [`Shell::scrim_fade`]. The
+        // dialog is `> .modal-body`'s `opacity`, which is drawn the way the page
+        // fade is (see [`Shell::pane`]): as a wash of the *same* ramp over the
+        // dialog at `1 - fade`. That is not an approximation of the composite --
+        // it is the composite, because the bed is the only thing behind a
+        // dialog, so `dialog * a + bed * (1 - a)` is what a browser would paint
+        // for a dialog at opacity `a`.
+        //
+        // Which is also why the wash is [`Stack::over`] and not [`Stack::at`]:
+        // it covers the dialog's own rows, so it must not be able to swallow a
+        // press. [`crate::pages::overlay::Stack::over_control`] is the one that
+        // puts a layer back into the event walk, and a fade is not that.
+        let bed = modal_scrim(self.viewport, self.scrim_fade.value().clamp(0.0, 1.0));
+        let wash = modal_scrim(self.viewport, 1.0 - self.modal_fade.value().clamp(0.0, 1.0));
+        let veil = container(Space::new(Length::Fill, Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme: &Theme| container::Appearance {
+                background: Some(wash),
+                ..container::Appearance::default()
+            });
+        // The dialog is the stack's own box, so the veil -- a `Fill` layer drawn
+        // at no offset -- covers exactly the dialog and no more. `at` rather
+        // than `over`, because the dialog is live and the veil is not.
+        let dialog =
+            crate::pages::overlay::Stack::at(iced::Vector::ZERO, dialog).over(iced::Vector::ZERO, veil);
         let scrim = container(dialog)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -9069,13 +9310,22 @@ fn settings_fade(theme: Gen) -> Background {
 /// reference's `0.647` at y=200, `0.706` at 350 and `0.824` at 600. The toolkit
 /// blends both of its quad pipelines with `SrcAlpha`/`OneMinusSrcAlpha`; what was
 /// wrong was what it had to blend with.
-fn modal_scrim(viewport: iced::Size) -> Background {
+fn modal_scrim(viewport: iced::Size, opacity: f32) -> Background {
     // The line and the stops are literals in [`MODAL_SCRIM`], so this arm is
     // unreachable in practice; it exists so that a typo in that line shows the
     // page rather than panicking in a paint.
     let Some((angle, stops)) = parse_gradient(MODAL_SCRIM) else {
         return Background::Color(Color::TRANSPARENT);
     };
+    // `.modal-overlay`'s `opacity` is a property of the whole element, so it
+    // scales every stop rather than being mixed into one of them: a ramp drawn at
+    // 0.5 has half of each stop's alpha, and the two stops between them still
+    // interpolate to each other rather than to nothing.
+    let stops: Vec<(f32, Color)> = stops
+        .into_iter()
+        .map(|(offset, colour)| (offset, Color { a: colour.a * opacity, ..colour }))
+        .collect();
+    let stops = &stops;
     let span = viewport.height + 2.0 * MODAL_SCRIM_INSET;
     let mut linear = gradient::Linear::new(Radians(angle));
     linear = linear.add_stop(0.0, ramp_at(&stops, MODAL_SCRIM_INSET / span));
@@ -12005,6 +12255,150 @@ mod tests {
         assert_eq!(left + 1.0 + 24.0 + SETTINGS_NAV - 1.0, 488.0, "the captured divider");
     }
 
+    /// Move the shell's clock to `millis` after the shell was built.
+    ///
+    /// Relative to the last tick, because that is what [`Shell::advance_to`]
+    /// measures: it takes the delta off `plate_clock` and moves `plate_clock`
+    /// forward, so `tick_to(shell, 299)` is 299ms of *this shell's own* time and
+    /// not 299ms of wall clock. Which is the point -- every tween on the shell
+    /// runs on that same delta, and a test that moved the window clock without
+    /// moving this one would be testing something no frame ever does.
+    fn tick_to(shell: &mut Shell, millis: u64) {
+        let start = shell.plate_clock;
+        shell.advance_to(start + Duration::from_millis(millis));
+    }
+
+    #[test]
+    fn a_dialog_arrives_and_leaves_on_the_reference_s_two_curves() {
+        // `NewModal.vue`: the bed is `opacity` on `all 0.2s ease-out` and the body
+        // is `opacity` (and `scale`) on `all 0.2s ease-in-out`. Two tweens, not
+        // one, because a single value cannot carry two curves.
+        let mut shell = shell_at("/");
+        assert_eq!(shell.modal, None);
+        assert_eq!(shell.modal_fade.value(), 1.0, "a shell with no dialog has no fade to run");
+
+        press(&mut shell, Message::Rail(Rail::Settings));
+        assert!(shell.modal_fade.is_running(), "the dialog fades in when it is put up");
+        assert!(shell.scrim_fade.is_running(), "and so does the bed behind it");
+        assert_eq!(shell.modal_fade.value(), 0.0, "from nothing");
+        assert!(shell.animating(), "so the frame clock stays awake");
+
+        // Both halves are 200ms, so both are at their end at 200ms -- and both
+        // are at nothing at the same instant, which is what makes the two
+        // curves the only thing that distinguishes them.
+        tick_to(&mut shell, 100);
+        let mid_dialog = shell.modal_fade.value();
+        let mid_scrim = shell.scrim_fade.value();
+        assert!(mid_dialog > 0.0 && mid_dialog < 1.0, "half way: {mid_dialog}");
+        assert!(mid_scrim > 0.0 && mid_scrim < 1.0, "half way: {mid_scrim}");
+        // `ease-out` is most of the way there by the middle and `ease-in-out` is
+        // barely started, which is the difference between the two curves and the
+        // reason a single tween would have been visibly wrong rather than merely
+        // a little wrong.
+        assert!(
+            mid_scrim > mid_dialog,
+            "the bed leads the dialog: {mid_scrim} against {mid_dialog}"
+        );
+
+        tick_to(&mut shell, 200);
+        assert_eq!(shell.modal_fade.value(), 1.0, "the dialog lands on its target exactly");
+        assert_eq!(shell.scrim_fade.value(), 1.0);
+        assert!(!shell.modal_fade.is_running() && !shell.scrim_fade.is_running());
+    }
+
+    #[test]
+    fn a_dismissed_dialog_stays_drawn_for_the_reference_s_own_300ms() {
+        // `hide()` sets `visible` false, which starts the leave, and only clears
+        // `open` 300ms later. A shell that dropped the dialog on the frame of the
+        // press would have nothing to fade -- and `setTimeout(..., 300)` is what
+        // the reference writes to avoid exactly that.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::Settings));
+        tick_to(&mut shell, 200);
+        press(&mut shell, Message::CloseModal);
+
+        assert_eq!(shell.modal, None, "it stops answering messages at once");
+        assert_eq!(shell.closing, Some(Modal::Settings), "but it is still on screen");
+        assert!(shell.dialog_drawn().is_some(), "so the layer is still drawn");
+        assert!(shell.animating(), "and the shell is still asking for frames");
+
+        // The countdown is the reference's own 300ms from the press, not from
+        // the dialog arriving and not from the leave ending: the element stays
+        // mounted for 100ms after its transition has already finished, which
+        // is what `setTimeout(..., 300)` is for.
+        assert_eq!(shell.closing_left, Timing::MODAL_UNMOUNT);
+
+        // 299ms on it is still mounted, and two more takes it out of the tree.
+        // Both are named rather than "not yet", so a shell that retired the
+        // dialog the moment its tween landed -- at 200ms -- would fail the
+        // first of them rather than pass both.
+        tick_to(&mut shell, 299);
+        assert_eq!(shell.closing, Some(Modal::Settings), "still mounted one millisecond early");
+        assert_eq!(shell.closing_left, Duration::from_millis(1));
+
+        tick_to(&mut shell, 301);
+        assert_eq!(shell.closing, None, "300ms later it is out of the tree");
+        assert_eq!(shell.closing_left, Duration::ZERO);
+        assert!(shell.dialog_drawn().is_none());
+        assert!(!shell.animating(), "and the shell stops asking for frames for it");
+    }
+
+    #[test]
+    fn closing_a_dialog_that_is_not_up_changes_nothing() {
+        // The scrim's press reaches every click outside a dialog, and a shell
+        // with no dialog has no scrim -- but the message does not know that. A
+        // dismissal that ran anyway would leave the bed fading on its own.
+        let mut shell = shell_at("/");
+        // Settled first: a shell is built with its rail's plates still in
+        // flight, so `animating` is true before anything is pressed and the
+        // assertion below would be about the rail rather than about this.
+        tick_to(&mut shell, 250);
+        assert!(!shell.animating(), "nothing is moving yet");
+        let before = shell.scrim_fade.value();
+        press(&mut shell, Message::CloseModal);
+        assert_eq!(shell.scrim_fade.value(), before);
+        assert!(!shell.scrim_fade.is_running(), "no leave leg nobody asked for");
+        assert_eq!(shell.closing, None);
+        assert!(!shell.animating());
+    }
+
+    #[test]
+    fn a_new_dialog_replaces_a_leaving_one_from_nothing() {
+        // `show()` clears `hideTimeout` and re-shows the same element, which
+        // interrupts the leave where it stands. This shell's dialogs are built
+        // fresh each frame, so the honest reading of that is a new arrival that
+        // begins at nothing -- and the leaving one goes rather than lingering.
+        let mut shell = shell_at("/");
+        press(&mut shell, Message::Rail(Rail::Settings));
+        press(&mut shell, Message::CloseModal);
+        assert_eq!(shell.closing, Some(Modal::Settings));
+        press(&mut shell, Message::Rail(Rail::CreateInstance));
+        assert_eq!(shell.closing, None, "the one on its way out is dropped");
+        assert_eq!(shell.modal, Some(Modal::Create));
+        assert_eq!(shell.modal_fade.value(), 0.0, "and the newcomer starts at nothing");
+    }
+
+    #[test]
+    fn the_panel_arrow_turns_over_tailwind_s_own_150ms() {
+        // `App.vue`: `transition-transform` and `rotate-180`, which is
+        // 150ms on `cubic-bezier(0.4, 0, 0.2, 1)`.
+        let mut shell = shell_at("/");
+        assert_eq!(shell.panel_arrow.value(), 1.0, "the panel is up, so the arrow points in");
+        press(&mut shell, Message::Sidebar(false));
+        assert!(shell.panel_arrow.is_running());
+        assert!(shell.animating(), "a half turn keeps the clock awake");
+        tick_to(&mut shell, 100);
+        let half = shell.panel_arrow.value();
+        assert!(half > 0.0 && half < 1.0, "half turned: {half}");
+        tick_to(&mut shell, 100);
+        assert_eq!(shell.panel_arrow.value(), 0.0, "and landed exactly");
+        assert!(!shell.panel_arrow.is_running());
+
+        // And it turns on the way back up rather than snapping.
+        press(&mut shell, Message::Sidebar(true));
+        assert_eq!(shell.panel_arrow.value(), 0.0, "the turn starts where the arrow is");
+    }
+
     #[test]
     fn the_modal_scrim_is_the_reference_s_own_ramp() {
         // `NewModal.vue`'s `.modal-overlay.standard`, read at the window's own
@@ -12014,7 +12408,7 @@ mod tests {
         // scrim -- (32, 43, 43) over the rail's chrome at the top of it, and
         // (18, 25, 29) at the bottom.
         let Background::Gradient(gradient::Gradient::Linear(linear)) =
-            modal_scrim(iced::Size::new(1280.0, 720.0))
+            modal_scrim(iced::Size::new(1280.0, 720.0), 1.0)
         else {
             panic!("the scrim is a gradient");
         };

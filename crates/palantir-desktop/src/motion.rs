@@ -173,6 +173,139 @@ impl Timing {
     /// app rather than a faster-looking one.
     pub const PAGE_FADE: Timing = Timing { millis: 250, control: [0.42, 0.0, 0.58, 1.0] };
 
+    /// A dialog's own arrival: `scale` and `opacity` together.
+    ///
+    /// `ui/src/components/modal/NewModal.vue`'s `> .modal-body` rule: the body
+    /// sits at `scale: 0.97` with `opacity: 0` and `visibility: hidden`, and
+    /// `.modal-container.shown > .modal-body` takes it to `opacity: 1;
+    /// visibility: visible; scale: 1` on `transition: all 0.2s ease-in-out`.
+    /// CSS's `ease-in-out` is `cubic-bezier(0.42, 0, 0.58, 1)`, which is the same
+    /// four numbers [`Timing::PAGE_FADE`] carries -- the reference reaches for
+    /// that curve in both places, so they share the constant's value and not its
+    /// name.
+    ///
+    /// **The scale is not drawn.** iced 0.12 has no transform, so what a shell
+    /// can paint of a `scale` is nothing at all: a dialog at 0.97 that
+    /// interpolates to 1.0 is the same dialog, slightly narrower, for 200ms.
+    /// Faking it with padding would move every row inside the dialog as well,
+    /// which is the *other* half of `scale` and not what the reference does --
+    /// it scales the box and its contents together. What is drawn is the
+    /// opacity half, which is the part a reader notices and the half the
+    /// capture can measure. See [`crate::shell::Shell::modal_opacity`].
+    pub const MODAL_DIALOG: Timing = Timing { millis: 200, control: [0.42, 0.0, 0.58, 1.0] };
+
+    /// The bed behind a dialog, which is the other half of its arrival.
+    ///
+    /// The same file's `.modal-overlay`: `opacity: 0` with
+    /// `transition: all 0.2s ease-out`, taken to `opacity: 1` by `.shown`.
+    ///
+    /// It cannot be a [`Timing::declared`] lookup, because the reference writes
+    /// this one as the shorthand keyword `ease-out` inside a two-property
+    /// `all` transition -- `all 0.2s ease-out` -- and a lookup takes a *property*
+    /// and a duration, not a shorthand. The four control points are what CSS
+    /// defines `ease-out` to be, and they are the same four the generated table
+    /// resolves `Curve::EaseOut` to, which is what makes this a citation rather
+    /// than a guess: [`Timing::declared`] for `("all", 200)` can answer in any of
+    /// three curves, because three files each declare `all 200ms` on a different
+    /// one.
+    pub const MODAL_SCRIM: Timing = Timing { millis: 200, control: [0.0, 0.0, 0.58, 1.0] };
+
+    /// How long the reference waits before it takes the modal out of the tree.
+    ///
+    /// `NewModal.vue`'s `hide()` sets `visible` false and then leaves the
+    /// element mounted for 300ms: `hideTimeout = setTimeout(() => { open.value =
+    /// false }, 300)`. Without that delay the leave transition would have nothing
+    /// left to run on, and the dialog would blink rather than fade. The shell has
+    /// the same problem in the same shape -- a modal dropped from an `Option` is
+    /// gone on the next frame -- so the number is a citation for *when* the
+    /// option may be cleared rather than a duration to animate over.
+    pub const MODAL_UNMOUNT: Duration = Duration::from_millis(300);
+
+    /// The panel toggle's arrow, which turns a half revolution when the panel
+    /// goes or comes.
+    ///
+    /// `App.vue:2408-2413`: the `IconButton` that opens and closes the panel
+    /// carries `class="mr-3 transition-transform"` and
+    /// `:class="{ 'rotate-180': !sidebarToggled }"`. Tailwind's
+    /// `transition-transform` is a three-part utility -- `transition-property:
+    /// transform`, `transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1)`,
+    /// `transition-duration: 150ms` -- and the four control points above are
+    /// Tailwind's own, which is the curve this module's docs already say is not
+    /// one of the five CSS-named easings. The rest of the vendored tree confirms
+    /// the duration rather than merely defaulting it: `Combobox.vue`, `TagItem.vue`
+    /// and `CollapsibleAdmonition.vue` each spell out
+    /// `transition-transform duration-150` where they mean this and
+    /// `duration-300` where they mean something longer.
+    pub const PANEL_ARROW: Timing = Timing { millis: 150, control: [0.4, 0.0, 0.2, 1.0] };
+
+    /// A settings dialog's own tab column, which changes colour and plate
+    /// together.
+    ///
+    /// `ui/src/components/modal/TabbedModal.vue:176` puts `transition-all` on
+    /// each tab button in the column, so when the selected tab changes both its
+    /// `bg-button-bgSelected` plate and its `text-button-textSelected` ink
+    /// cross-fade -- `transition-all` being Tailwind's widest property list on the
+    /// utility's own 150ms and `cubic-bezier(0.4, 0, 0.2, 1)`.
+    ///
+    /// **The same four numbers as [`Timing::PANEL_ARROW`], and that is not a
+    /// coincidence.** Both utilities set only `transition-property`; Tailwind
+    /// takes the duration and the timing function from its own defaults, so every
+    /// `transition-*` in the vendored tree is `150ms cubic-bezier(0.4, 0, 0.2, 1)`
+    /// unless it also carries a `duration-` class. Two named constants rather than
+    /// one shared, because they are two declarations in two files and a future
+    /// regeneration of either should be visible as a test failing on one name
+    /// rather than silently moving both.
+    pub const TAB_COLUMN: Timing = Timing { millis: 150, control: [0.4, 0.0, 0.2, 1.0] };
+
+    /// A tab strip's label and icon, which change colour when the tab changes.
+    ///
+    /// `ui/src/components/base/NavTabs.vue`'s scoped `.tab-color` rule is
+    /// `transition: color 100ms cubic-bezier(0.4, 0, 0.2, 1)`, on the label's
+    /// `<span>` and the icon alike. The curve is Tailwind's, the same one
+    /// [`Timing::PANEL_ARROW`] carries and for the same reason: Tailwind's
+    /// `transition-*` utilities name it rather than a CSS keyword.
+    ///
+    /// **The plate itself is a different transition, and it is not this one.**
+    /// The strip's slider -- the pill that slides under the selected tab -- is
+    /// `.navtabs-transition`, which moves `left`, `right`, `top` and `bottom`
+    /// over `80ms` on the same curve, with a `175ms` *stagger delay* on whichever
+    /// trailing edge is not travelling toward its new position
+    /// (`animateSliderTo`'s `STAGGER_DELAY`). So the reference slides its plate in
+    /// 80ms and cross-fades its labels in 100ms, and they are not the same
+    /// number. See [`Timing::TAB_PLATE`].
+    pub const TAB_COLOR: Timing = Timing { millis: 100, control: [0.4, 0.0, 0.2, 1.0] };
+
+    /// The pill that slides under a tab strip's selected tab.
+    ///
+    /// The same file's `.navtabs-transition`, quoted whole in
+    /// `theme_gen::MOTION_VERBATIM`: `left 80ms cubic-bezier(0.4, 0, 0.2, 1)
+    /// v-bind(leftDelay), right 80ms ... v-bind(rightDelay), top 80ms ...
+    /// v-bind(topDelay), bottom 80ms ... v-bind(bottomDelay)`.
+    ///
+    /// **Not drawn, and the reason is worth the paragraph.** The reference knows
+    /// where the pill is because it reads `el.offsetLeft` off a real DOM node.
+    /// An iced widget tree has no layout to interrogate -- a strip is a `row!` of
+    /// `mouse_area`s whose widths come from measured text this shell only ever
+    /// sees while painting -- so there is no offset to start an 80ms leg *from*.
+    /// Inventing one (a fixed tab width, or a fraction of the strip) would slide
+    /// a plate to a position the reference never puts it at, which is worse than
+    /// the plate being where the reference has it and arriving at once. The
+    /// label cross-fade in [`Timing::TAB_COLOR`] *is* drawn, because it needs no
+    /// geometry: it is a colour, and a colour can be mixed from the two inks the
+    /// strip already knows.
+    pub const TAB_PLATE: Timing = Timing { millis: 80, control: [0.4, 0.0, 0.2, 1.0] };
+
+    /// The stagger the plate waits on its trailing edges: `NavTabs.vue`'s own
+    /// `const STAGGER_DELAY = '175ms'`.
+    ///
+    /// The reference moves the plate's leading edges immediately and delays the
+    /// trailing ones, which is what makes the pill *stretch* across the strip
+    /// rather than jump and grow: the edge already in the right place arrives
+    /// first and the one that has further to come waits. Kept because it is a
+    /// fact about the reference that a port of the plate would need, and not
+    /// because anything reads it today.
+    pub const TAB_PLATE_STAGGER: Duration = Duration::from_millis(175);
+
     /// The row of the reference's motion table this pair is, or `None`.
     ///
     /// Returning `None` is the useful answer: it means the reference does not
@@ -556,6 +689,101 @@ mod tests {
         assert_eq!(
             Timing::declared("opacity", 125).and_then(|timing| timing.curve()),
             Some(Curve::EaseOut)
+        );
+    }
+
+    #[test]
+    fn a_dialog_arrives_on_the_reference_s_own_two_halves() {
+        // `NewModal.vue`: the bed is `opacity` on `all 0.2s ease-out` and the
+        // body is `scale` + `opacity` on `all 0.2s ease-in-out`. Two halves, two
+        // curves, and only one of the two curves is one of the five named ones --
+        // `ease-out` and `ease-in-out` are both cubic-bezier shorthands.
+        assert_eq!(Timing::MODAL_SCRIM.millis, 200);
+        assert_eq!(Timing::MODAL_DIALOG.millis, 200);
+        assert_ne!(Timing::MODAL_SCRIM.control(), Timing::MODAL_DIALOG.control());
+        assert_eq!(
+            Timing::MODAL_DIALOG.control(),
+            theme_gen::curve(Curve::EaseInOut),
+            "the body's half is CSS's ease-in-out"
+        );
+        // Both halves do resolve to named curves -- `ease-out` and `ease-in-out`
+        // are two of the five -- so the difference between them is real and not
+        // an artefact of how the numbers were written down.
+        assert_eq!(Timing::MODAL_SCRIM.curve(), Some(Curve::EaseOut));
+        assert_eq!(Timing::MODAL_DIALOG.curve(), Some(Curve::EaseInOut));
+        // Which is also why `Timing::declared` cannot be used for either: the
+        // reference writes `all 200ms` on three different curves in three files,
+        // so a lookup by property and duration alone is ambiguous *by design* and
+        // answers in whichever of them the table happens to sort first. Both of
+        // these rules are `all 200ms`, so both would be answered by that same
+        // lookup and both would get the same curve -- which is why each is a
+        // constant with the file that wrote it named beside it.
+        let ambiguous = Timing::declared_rows("all")
+            .into_iter()
+            .filter(|(millis, _, _)| *millis == 200)
+            .map(|(_, curve, source)| (curve, source))
+            .collect::<Vec<_>>();
+        assert!(
+            ambiguous.len() >= 2 && ambiguous.iter().any(|(curve, _)| *curve != ambiguous[0].0),
+            "`all 200ms` is declared on more than one curve, so a lookup cannot say which: {ambiguous:?}"
+        );
+        assert!(ambiguous
+            .iter()
+            .any(|(_, source)| source.ends_with("modal/NewModal.vue")));
+        // And the unmount delay the leave transition needs in order to run at all.
+        assert_eq!(Timing::MODAL_UNMOUNT, Duration::from_millis(300));
+    }
+
+    #[test]
+    fn the_panel_arrow_and_the_tab_strip_carry_tailwind_s_own_curve() {
+        // Neither is one of the five CSS-named curves: both come from Tailwind's
+        // `transition-transform` / `transition-*` utilities, which name
+        // `cubic-bezier(0.4, 0, 0.2, 1)` outright. A shell that could only name a
+        // CSS curve could not have quoted either of these.
+        let tailwind = [0.4, 0.0, 0.2, 1.0];
+        assert_eq!(Timing::PANEL_ARROW.control(), tailwind);
+        assert_eq!(Timing::TAB_COLOR.control(), tailwind);
+        assert_eq!(Timing::TAB_PLATE.control(), tailwind);
+        assert_eq!(Timing::PANEL_ARROW.curve(), None, "not one of the five names");
+        assert_eq!(Timing::TAB_COLOR.curve(), None);
+        // The three are separate numbers read off three separate declarations, so
+        // none of them may borrow another's duration.
+        assert_eq!(Timing::PANEL_ARROW.millis, 150, "`transition-transform`'s own");
+        assert_eq!(Timing::TAB_COLOR.millis, 100, "`.tab-color`'s own");
+        assert_eq!(Timing::TAB_PLATE.millis, 80, "`.navtabs-transition`'s own");
+        assert_eq!(Timing::TAB_PLATE_STAGGER, Duration::from_millis(175));
+        // The settings dialog's tab column and the panel arrow: two utilities
+        // that differ only in which properties they list, and therefore the same
+        // 150ms on the same curve. Kept apart so a failure names the rule that
+        // moved rather than "some Tailwind transition".
+        assert_eq!(Timing::TAB_COLUMN.control(), tailwind);
+        assert_eq!(Timing::TAB_COLUMN.millis, 150);
+        assert_ne!(Timing::TAB_COLOR.millis, Timing::TAB_COLUMN.millis);
+    }
+
+    #[test]
+    fn the_two_tab_strip_rules_are_cited_verbatim_and_are_not_the_same_rule() {
+        // The rows have to still be in the generated verbatim table, or a
+        // regeneration has silently changed what this file claims the reference
+        // says.
+        let navtabs = |needle: &str| {
+            theme_gen::MOTION_VERBATIM.iter().any(|(source, value)| {
+                source.ends_with("base/NavTabs.vue") && value.contains(needle)
+            })
+        };
+        assert!(navtabs("color 100ms cubic-bezier(0.4, 0, 0.2, 1)"));
+        assert!(navtabs("left 80ms cubic-bezier(0.4, 0, 0.2, 1)"));
+        // The plate's four edges each carry their own v-bind delay, which is the
+        // stagger -- a single edge with no delay would be a different component.
+        assert!(navtabs("v-bind(rightDelay)"), "the trailing edge is delayed, not the leading one");
+        // `App.vue`'s panel arrow, whose rule is a Tailwind utility rather than a
+        // stylesheet declaration, so it is not in the generated table at all --
+        // which is exactly why it is a named constant here and not a lookup.
+        assert!(
+            !theme_gen::MOTION_VERBATIM.iter().any(|(source, value)| {
+                source.ends_with("App.vue") && value.contains("transition-transform")
+            }),
+            "the arrow's number is Tailwind's, not a declaration the generator reads"
         );
     }
 

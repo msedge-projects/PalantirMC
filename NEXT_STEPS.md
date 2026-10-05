@@ -1613,6 +1613,57 @@ file it produced, rather than to Prism's rewrite of that file:
   G100's own `#[ignore]`d tests, re-run by the `Live services` job, because
   `PublisherMeta` is in the desktop crate and no live test reaches it.
 
+### Motion: what is drawn, and the two that are deliberately not
+
+Every duration below is a quote from the vendored reference rather than a number
+chosen here, and each one names the file and the rule it was read off.
+`motion.rs` is the single place they are held, and its tests assert against the
+generated motion table so a regeneration cannot quietly move one.
+
+* **A new page fading in.** `App.vue`'s own `<Transition name="fade">` around
+  the router view: `0.25s ease-in-out` from `opacity: 0`, and no `fade-leave-*`
+  rules at all, so the outgoing page leaves on the spot and only the incoming one
+  fades up.
+* **A dialog's arrival and its departure, both ways.** `NewModal.vue` declares
+  two halves on two different rules with two different curves -- the bed is
+  `opacity` on `all 0.2s ease-out` and the body is `scale` plus `opacity` on
+  `all 0.2s ease-in-out` -- so this shell keeps two tweens rather than one. The
+  dialog's own `scale: 0.97` is **not** drawn: iced 0.12 has no transform, and a
+  dialog interpolated from 0.97 to 1.0 is the same dialog very slightly narrower
+  for 200ms, which is not a picture a reader can tell from the arrival. The
+  leave needs the element to stay mounted to run on, which is what the same
+  file's `setTimeout(..., 300)` is for: the dismissed dialog moves out of the
+  live slot and is drawn for 300ms more before it is dropped, counted down on
+  the same frame deltas as its own fade rather than on the wall clock, so the
+  two cannot drift apart on a busy machine.
+* **The panel toggle's arrow turning.** `App.vue` puts `transition-transform` and
+  `rotate-180` on that `IconButton`, which is Tailwind's own 150ms on
+  `cubic-bezier(0.4, 0, 0.2, 1)`. iced cannot rotate a glyph, so the half turn
+  is drawn as the cross-dissolve of the two arrows -- the same two shapes, and for
+  a shape that is its own mirror image the same picture at every angle.
+* **A tab's label, icon and plate changing colour.** `NavTabs.vue`'s `.tab-color`
+  is `color 100ms` and `TabbedModal.vue`'s tab buttons carry `transition-all`,
+  which is the same Tailwind 150ms. Both are drawn as a mix of the two inks and
+  the two plates, because a colour needs no geometry to interpolate.
+
+Two are **deliberately** not drawn, and each is a decision rather than a gap:
+
+* **The panel's own width.** `App.vue:2676-2681` is where the reference's rule
+  would be, and it is there commented out:
+  `// transition: grid-template-columns 0.4s ease-in-out;`. The reference ships
+  the panel snapping between `1fr 0px` and `1fr 300px`; the 0.4s rule was written
+  and switched off. Animating the width here would be inventing a rule the
+  reference does not have.
+* **The pill that slides under a tab strip.** `NavTabs.vue`'s `.navtabs-
+  transition` moves `left`, `right`, `top` and `bottom` over 80ms with a 175ms
+  stagger on whichever trailing edge is travelling further, which stretches the
+  pill across the strip rather than moving it. The reference knows where it is
+  because it reads `offsetLeft` off a DOM node; an iced widget tree has no layout
+  to interrogate, so there is no offset to start the leg from, and a plate
+  arriving at a position the reference never puts it at would be worse than one
+  that is where the reference has it and arrives at once. The label cross-fade
+  beside it is drawn, because a colour is two colours and a fraction.
+
 ## What stage 5 does not carry over, and why
 
 The stage's own list is done. What follows is what the reference has in the same

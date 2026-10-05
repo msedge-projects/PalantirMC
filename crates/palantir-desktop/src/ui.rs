@@ -539,6 +539,29 @@ pub fn interaction(key: &str) -> (f32, f32) {
     }
 }
 
+/// How far the control `key` is between its unselected and selected ink, asking
+/// the clock on the way past.
+///
+/// The counterpart of [`interaction`], and it differs in one way that matters:
+/// this one *writes*. A tab's press is a message its own page handles, and the
+/// page's state changes inside that handler, so the frame after the press is the
+/// first one that can know the tab moved " + D + u" and by the time it is drawn
+/// the moment to start the leg has gone. So the view states what the state is,
+/// and the clock starts the leg if that is not what it last drew.
+///
+/// `timing` is the rule the surface declares, and the two tab surfaces disagree:
+/// `NavTabs.vue`'s `.tab-color` is 100ms and `TabbedModal.vue`'s `transition-all`
+/// is Tailwind's own 150ms. See [`crate::motion::Timing::TAB_COLOR`] and
+/// [`crate::motion::Timing::TAB_COLUMN`].
+pub fn selection(key: &'static str, selected: bool, timing: crate::motion::Timing) -> f32 {
+    match anim::clock().lock() {
+        Ok(mut clock) => clock.selection(key, selected, timing, std::time::Instant::now()),
+        // A poisoned clock is a panic that happened while a tween was being
+        // read. Draw the selected state rather than propagating it.
+        Err(_) => if selected { 1.0 } else { 0.0 },
+    }
+}
+
 /// Record that the pointer entered or left the control `key`.
 ///
 /// Called from a page's `update`, never from its view -- [`Hovered`] says why.
@@ -1611,7 +1634,26 @@ pub fn disabled_switch<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
 ///
 /// Straight component interpolation, which is what a browser's own compositing
 /// does between two opaque tones.
+///
+/// **In sRGB, not in linear light, and that is the rule rather than an
+/// oversight.** A CSS `color` transition is a straight interpolation of the
+/// two declared values in the channel space they were declared in, and CSS
+/// declares sRGB: `NavTabs.vue`'s `.tab-color` and `TabbedModal.vue`'s
+/// `transition-all` both cross-fade between two hex literals that no colour
+/// management stands between. Mixing them linearly would produce a different
+/// ramp and, at the midpoint, a different colour — which is the one frame a
+/// reader would notice and the one a capture would fail.
+///
+/// Alpha travels with the rest of it rather than being carried through, so the
+/// same function fades a plate from [`Color::TRANSPARENT`] to a fill as well
+/// as an ink from one tone to another.
+///
+/// `amount` is clamped because it comes from a tween: [`crate::motion::Tween`]
+/// already lands exactly on its target, but the arithmetic above is six ulps
+/// of float away from `to` on the way, and a plate drawn at `-0.0000001`
+/// alpha is not a picture a rasteriser was asked for.
 fn mix(from: Color, to: Color, amount: f32) -> Color {
+    let amount = amount.clamp(0.0, 1.0);
     Color {
         r: from.r + (to.r - from.r) * amount,
         g: from.g + (to.g - from.g) * amount,
@@ -2775,17 +2817,27 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         // round: it plated the selected tab in `--button-bg` (`surface-4`, a
         // grey) and inked its label in contrast, so the one tab the reader is on
         // was the one tab drawn in no colour at all.
-        let ink = if selected {
-            theme_gen::ink(theme, Ink::ButtonTextSelected)
-        } else {
-            theme_gen::ink(theme, INK_CONTRAST)
-        };
+        //
+        // **Mixed, not chosen.** `NavTabs.vue` puts `.tab-color` on the label
+        // and on the icon, and that class is `transition: color 100ms
+        // cubic-bezier(0.4, 0, 0.2, 1)` — so on a tab change both fade from one
+        // ink to the other rather than being repainted at the new one. That is
+        // [`crate::motion::Timing::TAB_COLOR`], and it needs no geometry: a
+        // colour is two colours and a fraction. The plate it sits on is the
+        // other half of a tab change and is the half that cannot be drawn here —
+        // [`crate::motion::Timing::TAB_PLATE`] says why.
+        let chosen = selection(key, selected, crate::motion::Timing::TAB_COLOR);
+        let ink = mix(
+            theme_gen::ink(theme, INK_CONTRAST),
+            theme_gen::ink(theme, Ink::ButtonTextSelected),
+            chosen,
+        );
         // The icon's own rule, which is a different ink from the label's.
-        let icon_ink = if selected {
-            theme_gen::ink(theme, Ink::ButtonTextSelected)
-        } else {
-            theme_gen::ink(theme, INK_SECONDARY)
-        };
+        let icon_ink = mix(
+            theme_gen::ink(theme, INK_SECONDARY),
+            theme_gen::ink(theme, Ink::ButtonTextSelected),
+            chosen,
+        );
         let (factor, _) = interaction(key);
         // A selected tab is plated and an unselected one is not, and the
         // reference does not change that on hover: what a hover moves is the
@@ -2795,7 +2847,15 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         // composite is worked out here rather than left to the rasteriser, which
         // answers `#25553E` on the backend this build selects where the
         // reference measures `#24543D`.
-        let fill = selected.then_some(plate);
+        //
+        // The plate fades too, and on the *same* leg as the ink, because
+        // `NavTabs.vue`'s `.navtabs-transition` moves the plate's four edges
+        // rather than cross-fading it: what arrives as a fade of the two colours
+        // is this shell's rendering of a pill that has already begun sliding.
+        // `Color::TRANSPARENT` rather than `None` is what lets [`mix`] carry
+        // it — an unselected tab has a fill of zero alpha, not an absent
+        // one, which is the same picture over the track.
+        let fill = mix(Color::TRANSPARENT, plate, chosen);
         let mut face = row![].align_items(Alignment::Center).spacing(TAB_GAP);
         if let Some(glyph) = glyph {
             face = face.push(icon::icon(
@@ -2818,7 +2878,7 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
         // and let the label sit wherever the leftover space put it.
         .padding(Padding { top: 8.0, bottom: 8.0, left: TAB_PAD, right: TAB_PAD })
         .style(move |_theme: &Theme| container::Appearance {
-            background: fill.map(Background::Color),
+            background: Some(Background::Color(fill)),
             border: Border { radius: 999.0.into(), ..Border::default() },
             ..container::Appearance::default()
         });
@@ -2882,11 +2942,17 @@ pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let (factor, _) = interaction(key);
-    let ink = if selected {
-        theme_gen::ink(theme, Ink::ButtonTextSelected)
-    } else {
-        crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor)
-    };
+    // `TabbedModal.vue:176` puts `transition-all` on every button in this
+    // column, so a change of tab moves the ink *and* the plate over
+    // [`crate::motion::Timing::TAB_COLUMN`] rather than repainting both at
+    // their new values. Both are mixed from the same fraction for the same
+    // reason — they are one `transition-all` rather than two rules.
+    let chosen = selection(key, selected, crate::motion::Timing::TAB_COLUMN);
+    let ink = mix(
+        crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor),
+        theme_gen::ink(theme, Ink::ButtonTextSelected),
+        chosen,
+    );
     let mut label_row = row![]
         .align_items(Alignment::Center)
         .spacing(NAV_ITEM_GAP)
@@ -2930,13 +2996,18 @@ pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
     // The pointer's crossing, as a plate that fades in: the reference transitions
     // `bg-button-bg` in over a default 150ms, and this kit's clock carries one
     // brightness factor whose travel from 1.0 to its hover end is the same 0..1.
+    //
+    // Two things are mixed into one plate: the hover's own fade, which is
+    // `bg-button-bg` arriving, and the selection's, which is
+    // `bg-button-bgSelected` replacing it. The reference does not compose
+    // them — `transition-all` moves whichever of the two the element's own
+    // classes currently name, and a hovered *selected* row names the
+    // selected one — so a hover does not tint it. That is the order these two are
+    // mixed in: the hover first, and the selection over it.
     let hover = theme_gen::ink(theme, Ink::ButtonBg);
     let amount = ((factor - 1.0) / 0.25).clamp(0.0, 1.0);
-    let plate = if selected {
-        theme_gen::ink(theme, Ink::ButtonBgSelected)
-    } else {
-        Color { a: hover.a * amount, ..hover }
-    };
+    let rested = mix(Color::TRANSPARENT, hover, amount);
+    let plate = mix(rested, theme_gen::ink(theme, Ink::ButtonBgSelected), chosen);
     let row = container(label_row)
         .width(Length::Fill)
         .height(Length::Fixed(if badge.is_some() { NAV_ITEM_BADGE } else { NAV_ITEM }))
