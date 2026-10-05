@@ -810,6 +810,15 @@ pub struct Shell {
     hovered: Option<Rail>,
     /// One selection tween per rail slot, in [`Rail::ALL`] order.
     plates: Vec<Tween>,
+    /// How opaque the page is, so a page that has just been swapped fades up
+    /// instead of appearing.
+    ///
+    /// Held at 1.0 and only moved when the page behind it is actually
+    /// *replaced* -- see [`Shell::retarget_screen`], which is the one thing that
+    /// restarts it. A tab change within a page reuses that page, and fading it
+    /// would put a quarter of a second between a reader and the tab they
+    /// pressed, which is the opposite of what the reference's router view does.
+    page_fade: Tween,
     /// Wall-clock origin for rail motion, not the number of queued ticks.
     plate_clock: std::time::Instant,
     /// Which modal is open, if any.
@@ -1724,6 +1733,7 @@ impl Shell {
             screenshots_slot: settings.show_screenshots,
             hovered: None,
             plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
+            page_fade: Tween::at(1.0, Timing::PAGE_FADE),
             plate_clock: std::time::Instant::now(),
             modal: None,
             settings_tab: SettingsTab::Appearance,
@@ -1926,6 +1936,32 @@ impl Shell {
         }
     }
 
+    /// Point the screen at a new address and fade the page in if it was replaced.
+    ///
+    /// The one place [`Shell::page_fade`] is restarted, and the reason it is not
+    /// simply in `go` is that `retarget` is not always a new page. A tab change
+    /// inside a project or an instance deliberately reuses the page it already
+    /// has -- so the reader's search text survives -- and the reference's own
+    /// router view does not fade for that either, because the component is the
+    /// same one.
+    ///
+    /// So the fade is restarted by the answer to "was the page behind this
+    /// replaced", and that question is asked *before* the retarget rather than
+    /// after: afterwards both pages are the same and the question is always no.
+    fn retarget_screen(&mut self) {
+        let replaced = !self.screen.serves(&self.address.route);
+        self.screen.retarget(&self.address);
+        if replaced {
+            // From nothing to opaque over the reference's own 250ms
+            // `ease-in-out`. Built at 0 and aimed at 1 rather than handed both
+            // ends at once: `Tween::at` is a tween *at rest*, so aiming it is
+            // what starts the leg, and a page change is a new fade every time
+            // rather than a reversal of one already in flight.
+            self.page_fade = Tween::at(0.0, Timing::PAGE_FADE);
+            self.page_fade.retarget(1.0);
+        }
+    }
+
     /// Move to an address, recording it in the history.
     fn go(&mut self, address: Address) {
         if address == self.address {
@@ -1934,7 +1970,7 @@ impl Shell {
         self.forward.clear();
         self.back.push(std::mem::replace(&mut self.address, address));
         self.settle();
-        self.screen.retarget(&self.address);
+        self.retarget_screen();
         self.forget_pointer();
     }
 
@@ -1961,7 +1997,7 @@ impl Shell {
         // that is already built keeps what it can (a tab change is not a new page)
         // and anything else is built fresh, which is what a browser does when it
         // returns to a document it no longer holds.
-        self.screen.retarget(&self.address);
+        self.retarget_screen();
         self.forget_pointer();
     }
 
@@ -1972,7 +2008,7 @@ impl Shell {
         };
         self.back.push(std::mem::replace(&mut self.address, next));
         self.settle();
-        self.screen.retarget(&self.address);
+        self.retarget_screen();
         self.forget_pointer();
     }
 
@@ -1981,6 +2017,7 @@ impl Shell {
         for tween in &mut self.plates {
             tween.advance(delta);
         }
+        self.page_fade.advance(delta);
     }
 
     /// Advance rail motion by actual elapsed time. Dropped or delayed ticks
@@ -2014,6 +2051,12 @@ impl Shell {
     /// waiting for exactly this frame ([`crate::scroll::Glides`]).
     pub fn animating(&self) -> bool {
         if self.plates.iter().any(Tween::is_running) {
+            return true;
+        }
+        // A page fading in is the frame clock's business for exactly as long as
+        // the fade is, or the page would arrive at whatever opacity it happened
+        // to be drawn at and then stop.
+        if self.page_fade.is_running() {
             return true;
         }
         // A region mid-glide is moving as well, and the frame it is waiting for is
@@ -5287,6 +5330,48 @@ fn tags(&self) -> iced::Command<Message> {
         let body = container(self.screen.view(theme, &self.store).map(Message::Screen))
             .width(Length::Fill)
             .height(Length::Fill);
+        // The page fade, which is the reference's own `<Transition name="fade">`
+        // around its router view: `0.25s ease-in-out` from `opacity: 0`. See
+        // [`Timing::PAGE_FADE`] for the numbers and [`Shell::retarget_screen`]
+        // for what starts it.
+        //
+        // Drawn as a wash *over* the page rather than by giving the page an
+        // alpha, and that is not a shortcut. The reference declares no
+        // `fade-leave-*` rules, so the outgoing page is removed on the spot and
+        // the incoming one fades up from whatever is behind it -- and behind the
+        // router view is `.app-viewport`, which is the page's own background. So
+        // "fade in from nothing" and "fade in from the page colour" are the same
+        // picture here, and the wash is the one of the two that needs no widget
+        // this crate does not have: iced 0.12 has no `Opacity`.
+        //
+        // The wash covers the page only. The reference's transition sits inside
+        // `.app-viewport` and covers neither the rail nor the panel, so those
+        // hold still while the page arrives.
+        let fade = self.page_fade.value().clamp(0.0, 1.0);
+        let body: Element<'_, Message> = if fade >= 1.0 {
+            body.into()
+        } else {
+            // `1 - fade` of the page's own colour, so the page reaches full
+            // strength exactly when the tween settles and the wash is dropped
+            // rather than left at an alpha of zero.
+            let wash = Color { a: 1.0 - fade, ..theme_gen::ink(theme, Ink::Bg) };
+            crate::pages::overlay::Stack::at(
+                iced::Vector::ZERO,
+                column![
+                    container(body).width(Length::Fill).height(Length::Fill),
+                    container(Space::new(Length::Fill, Length::Fill))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .style(move |_theme: &Theme| container::Appearance {
+                            background: Some(Background::Color(wash)),
+                            ..container::Appearance::default()
+                        }),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
+            .into()
+        };
         // The page column's own width, which is where the pane ends and the
         // panel begins. The pane's edge stops there too: `pane_rule` and
         // `pane_shadow` both stop short of the panel.
@@ -9630,6 +9715,57 @@ mod tests {
     /// what makes the drop explicit rather than an oversight.
     fn press(shell: &mut Shell, message: Message) {
         let _ = shell.handle(message);
+    }
+
+    #[test]
+    fn a_new_page_fades_in_and_a_tab_change_does_not() {
+        // The reference's `<Transition name="fade">` runs on the router view, so
+        // it runs when the *page* is replaced and not when the reader switches
+        // tab inside one. Getting that backwards is visible either way: fade
+        // every tab and a tab press takes a quarter of a second to land, never
+        // fade a page change and pages appear with a flash.
+        let mut shell = shell_at("/");
+        assert_eq!(shell.page_fade.value(), 1.0, "the first page is already there");
+
+        // A different page: Home -> Discover.
+        press(&mut shell, Message::Go("/browse/modpack".to_string()));
+        assert!(shell.page_fade.value() < 1.0, "a new page starts transparent");
+        assert!(shell.page_fade.is_running(), "and the clock has to stay awake");
+        assert!(shell.animating(), "or the page would never finish arriving");
+
+        // It arrives on the reference's own timing rather than in one frame.
+        let began = shell.plate_clock;
+        shell.advance_to(began + std::time::Duration::from_millis(125));
+        let half = shell.page_fade.value();
+        assert!(half > 0.0 && half < 1.0, "125ms in it is still arriving: {half}");
+        shell.advance_to(began + std::time::Duration::from_millis(300));
+        assert_eq!(shell.page_fade.value(), 1.0, "250ms is the whole of it");
+        assert!(!shell.animating(), "and then the clock stops");
+
+        // A tab change on the page that is up reuses it, and must not restart.
+        let mut shell = shell_at("/browse/modpack");
+        press(&mut shell, Message::Go("/browse/mod".to_string()));
+        assert_eq!(
+            shell.page_fade.value(),
+            1.0,
+            "a Discover tab is the same page, so it must not fade"
+        );
+    }
+
+    #[test]
+    fn the_page_fade_is_the_reference_s_own_transition() {
+        // Read off `App.vue`'s style block rather than chosen: the transition is
+        // `0.25s ease-in-out` from `opacity: 0`, and CSS's `ease-in-out` is
+        // `cubic-bezier(0.42, 0, 0.58, 1)`.
+        assert_eq!(Timing::PAGE_FADE.millis, 250);
+        assert_eq!(Timing::PAGE_FADE.control, [0.42, 0.0, 0.58, 1.0]);
+        // And it is `ease-in-out`, which is symmetric: half the time is half
+        // the fade. A curve that is not symmetric here would be a different
+        // transition wearing this one's numbers.
+        let mut tween = Tween::at(0.0, Timing::PAGE_FADE);
+        tween.retarget(1.0);
+        tween.advance(std::time::Duration::from_millis(125));
+        assert!((tween.value() - 0.5).abs() < 0.01, "ease-in-out is symmetric");
     }
 
     #[test]

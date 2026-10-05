@@ -414,6 +414,35 @@ impl Screen {
         }
     }
 
+    /// Whether the page on screen is the page `route` names, so that pointing it
+    /// somewhere new reuses it rather than building another.
+    ///
+    /// This is the question [`Screen::retarget`] answers by acting, asked
+    /// separately because two callers need to know the answer *before* they act:
+    /// the shell, to decide whether the page it is about to swap should fade in.
+    /// Asked afterwards it is always true, because by then both pages are the
+    /// same one.
+    ///
+    /// The rule is the one `retarget` already follows: a tab or a filter within a
+    /// page is the same page, and a different project, instance, profile or route
+    /// is not. `Route::Server` is deliberately absent from the `Servers` arm: the
+    /// reference's `/hosting/manage/:id` is a different view from its list, and
+    /// `retarget` answers it by building a new page, so this must say no.
+    pub fn serves(&self, route: &crate::route::Route) -> bool {
+        use crate::route::Route;
+        match (self, route) {
+            (Screen::Home(_), Route::Home) => true,
+            (Screen::Discover(_), Route::Discover { .. }) => true,
+            (Screen::Skins(_), Route::Skins) => true,
+            (Screen::Screenshots(_), Route::Screenshots) => true,
+            (Screen::Servers(_), Route::Servers) => true,
+            (Screen::Project(state), Route::Project { id, .. }) => state.id == *id,
+            (Screen::Instance(state), Route::Instance { id, .. }) => state.id == *id,
+            (Screen::User(state), Route::User { user, .. }) => state.user == *user,
+            _ => false,
+        }
+    }
+
     /// Point a page at a new address, keeping what the new address still means.
     ///
     /// A tab change is not a new page: pressing Files on an instance must not

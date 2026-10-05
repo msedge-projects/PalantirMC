@@ -158,6 +158,21 @@ impl Timing {
     /// is why pressing a rail button reads as a pop rather than a fade.
     pub const NAV_PLATE_FROM_SCALE: f32 = 0.4;
 
+    /// The page fade: a new page arriving over the old one.
+    ///
+    /// `App.vue`'s own `<Transition name="fade">` around the router view, read
+    /// off that file's style block (lines 2829-2835): `fade-enter-active` is
+    /// `transition: 0.25s ease-in-out` and `fade-enter-from` is `opacity: 0`.
+    /// CSS's `ease-in-out` is `cubic-bezier(0.42, 0, 0.58, 1)`, so that is what
+    /// the four control points are rather than one of this module's other five.
+    ///
+    /// **One-sided on purpose.** The reference declares no `fade-leave-*` rules
+    /// at all, so the outgoing page leaves instantly and only the incoming one
+    /// fades up. Reproducing a cross-fade here would be inventing a rule the
+    /// reference does not have, and would make a page change look like a slower
+    /// app rather than a faster-looking one.
+    pub const PAGE_FADE: Timing = Timing { millis: 250, control: [0.42, 0.0, 0.58, 1.0] };
+
     /// The row of the reference's motion table this pair is, or `None`.
     ///
     /// Returning `None` is the useful answer: it means the reference does not
