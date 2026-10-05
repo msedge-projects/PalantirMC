@@ -293,10 +293,101 @@ pub(crate) static FONTS: [&[u8]; 5] = [
 ];
 
 fn main() -> iced::Result {
+    // Install the panic hook before anything else can raise one. See
+    // `install_panic_hook` for why a window that closes on a click is otherwise
+    // a crash nobody can diagnose.
+    install_panic_hook();
     // Decide the renderer from what this machine can actually provide, before
     // iced builds its compositor. See `gpu` for why this is a probe.
     let _ = gpu::select_renderer();
     run_shell(std::env::args().skip(1))
+}
+
+/// Make a raised panic say so, on the console and in a file, instead of taking
+/// the window down without a word.
+///
+/// **Why this is here at all.** A release build used to be `panic = "abort"`, so
+/// any panic ended the process on the spot: the window vanished mid-click and
+/// left nothing behind. That is the worst possible failure for a launcher —
+/// there is no message, no backtrace, and no way to tell which control was
+/// pressed. Unwinding instead means the hook below runs first, and it writes
+/// what happened to `logs/panic.log` beside the launcher's own logs, which is
+/// the one file a bug report can point at.
+///
+/// The message and the backtrace both go to the file; only the message goes to
+/// the console, because a launcher launched from a shortcut has no console to
+/// read and a backtrace there is noise.
+///
+/// A failure to write the log is itself reported rather than swallowed, and never
+/// panics: this runs *because* something has already gone wrong, and a second
+/// panic on the way out would replace a real message with an unrelated one.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column()))
+            .unwrap_or_else(|| "an unknown place".to_string());
+        let message = panic_message(info);
+        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+
+        let report = format!(
+            "panicked at {location}\n\n{message}\n\n{backtrace}\n",
+        );
+        // Best effort by design: an unwritable log directory must not replace
+        // the panic with a second one.
+        if let Err(error) = write_panic_log(&report) {
+            eprintln!("(and the panic log could not be written: {error})");
+        }
+        eprintln!("PalantirMC hit an internal error and had to close.\n  {message}\n  at {location}\n  written to {}", panic_log_path().display());
+        // The default hook still runs, so anything else installed by a library
+        // is not silenced by this one.
+        previous(info);
+    }));
+}
+
+/// The panic's own message, without the `panicked at` prefix the default hook
+/// would add — so the line that names the failure is the same in the file as it
+/// is on the console.
+fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = payload.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "a panic with no message".to_string()
+}
+
+/// Where a panic report is written: `logs/panic.log` under the launcher's home.
+///
+/// Beside the launcher's own logs rather than in the system temp directory,
+/// because the point of the file is that a person can find it and attach it.
+fn panic_log_path() -> std::path::PathBuf {
+    palantir_core::paths::PalantirPaths::home()
+        .logs_dir()
+        .join("panic.log")
+}
+
+/// Append one report to the panic log, creating its directory if need be.
+fn write_panic_log(report: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let path = panic_log_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    // `write_all` reports a short write itself; `flush` is what makes the report
+    // survive the abort that follows, since the buffer is not written until
+    // something asks for it.
+    file.write_all(report.as_bytes()).map_err(|error| error.to_string())?;
+    file.flush().map_err(|error| error.to_string())
 }
 
 /// Run the shell: the window, the fonts, and the flags this run was given.

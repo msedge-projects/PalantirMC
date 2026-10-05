@@ -1668,6 +1668,20 @@ pub enum Message {
     Minimize,
     ToggleMaximize,
     Close,
+    /// The title bar was grabbed, and the window should move with the pointer.
+    ///
+    /// The window has no decorations, so nothing about it is draggable until
+    /// something says so: the frame is client area, and `WM_NCHITTEST` answers
+    /// `HTCLIENT` for all of it. iced's answer is [`window::drag`], which calls
+    /// winit's `drag_window` -- the OS' own modal move loop, so the window
+    /// tracks the pointer the way every other window does rather than by
+    /// nudging itself a frame at a time.
+    ///
+    /// Raised by the head's drag area, which is a `mouse_area` around the bar's
+    /// empty stretches. A `mouse_area` hands the event to its content first and
+    /// only claims it if nothing below did, so the buttons sitting inside the
+    /// bar keep their own presses and this one is what is left over.
+    DragWindow,
     /// The pointer scrolled in one of this shell's own scroll regions.
     ///
     /// A page's region raises the same shape inside its own message and the
@@ -2068,6 +2082,7 @@ impl Shell {
                 return window::maximize(Id::MAIN, self.maximized);
             }
             Message::Close => return window::close(Id::MAIN),
+            Message::DragWindow => return window::drag(Id::MAIN),
             // The caption reads the window itself, so this arm's real job is to
             // be a message at all: it is what makes iced rebuild the view, and
             // the rebuild is what shows a maximize the user performed with Snap,
@@ -2858,6 +2873,7 @@ impl Shell {
             Message::Minimize
             | Message::ToggleMaximize
             | Message::Close
+            | Message::DragWindow
             | Message::Tick
             | Message::Wheel(_, _) => None,
         }
@@ -4375,7 +4391,17 @@ fn tags(&self) -> iced::Command<Message> {
             // reference keeps it here rather than on the instance page for exactly
             // that reason, and this shell used to draw the run only in the header
             // of the instance it belonged to.
-            .push(Space::with_width(Length::Fill))
+            // The stretch between the trail and the controls is the bar's own
+            // drag handle: it is a `Fill` space, so it is the one part of this row
+            // with no control in it and therefore the one part that can be
+            // grabbed without a button swallowing the press.
+            //
+            // `with_size` rather than `with_width`, and the height is the whole
+            // point: the row is `align_items(Center)`, so a child that is only
+            // `Shrink` tall gets *zero* pixels, and a drag area with no height is
+            // a drag area that cannot be grabbed. This is what made the first
+            // attempt at this look correct in the source and dead on screen.
+            .push(self.drag_area(Space::new(Length::Fill, Length::Fill)))
             // The toggle comes *before* the action bar, which is the reference's
             // own order (`App.vue`'s head section puts the `IconButton` ahead of
             // the `AppActionBar` div), and it is not drawn at all on a page that
@@ -4395,6 +4421,25 @@ fn tags(&self) -> iced::Command<Message> {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
                 ..container::Appearance::default()
             })
+            .into()
+    }
+
+    /// A stretch of the title bar that moves the window when it is grabbed.
+    ///
+    /// `window::drag` rather than anything of this shell's own: it hands the
+    /// pointer to the OS, which runs its own modal move loop, so the window
+    /// tracks the gesture at the pointer's own rate instead of one message per
+    /// frame -- and so the pointer can leave the window mid-drag and still drag
+    /// it, which a per-frame nudge cannot do.
+    ///
+    /// A `mouse_area` because it is the one widget that both wraps and defers:
+    /// `MouseArea::on_event` hands the event to its content first and only
+    /// claims it when nothing below took it, so the same wrapper around a
+    /// control would not steal that control's press.
+    fn drag_area<'a>(&self, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+        mouse_area(content)
+            .interaction(Interaction::Pointer)
+            .on_press(Message::DragWindow)
             .into()
     }
 
@@ -5068,18 +5113,40 @@ fn tags(&self) -> iced::Command<Message> {
     }
 
     /// One window control: a 36px square, `type="quiet"`.
+    ///
+    /// The hover is this shell's own, keyed like every other control, because the
+    /// button is client area: nothing but a widget can know the pointer is on it.
+    /// `quiet` is the reference's own variant, and its rule is a `hover:bg-surface-3`
+    /// plate — the same raised surface the bar behind it is, which is why the
+    /// control is only legible on hover at all.
     fn control_button(&self, glyph: Glyph, message: Message) -> Element<'_, Message> {
-        let ink = theme_gen::ink(self.theme, INK_DEFAULT);
+        const CLOSE: &str = "window:close";
+        let key: &'static str = match message {
+            Message::Close => CLOSE,
+            _ => "window:other",
+        };
+        let theme = self.theme;
+        let (factor, _) = crate::ui::interaction(key);
+        let plate = theme_gen::ink(theme, Ink::Surface3);
+        let ink = crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor);
+        // The close control is the reference's `WindowClose` role: the same plate,
+        // and a red glyph on it rather than a green-lit one.
         let face = container(icon::icon(glyph, CONTROLS_ICON, ink))
             .width(Length::Fixed(CONTROLS_BUTTON))
             .height(Length::Fixed(CONTROLS_BUTTON))
             .center_x()
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
+                background: Some(Background::Color(plate)),
                 border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
                 ..container::Appearance::default()
             });
-        mouse_area(face).interaction(Interaction::Pointer).on_press(message).into()
+        mouse_area(face)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover(key, true))
+            .on_exit(Message::hover(key, false))
+            .on_press(message)
+            .into()
     }
 
     /// The rail: the link group, the switcher's growth under it, and the foot.
@@ -9563,6 +9630,32 @@ mod tests {
     /// what makes the drop explicit rather than an oversight.
     fn press(shell: &mut Shell, message: Message) {
         let _ = shell.handle(message);
+    }
+
+    #[test]
+    fn the_title_bar_has_a_drag_handle_and_the_window_can_be_moved() {
+        // The window is undecorated, so nothing is draggable until something
+        // says so: without this the bar is inert and the window cannot be moved
+        // at all, which is what a reader reports as "the app is not draggable".
+        //
+        // Two halves, because there are two ways to get this wrong. The head must
+        // build the handle at all — a `mouse_area` around the bar's one empty
+        // stretch — and the message it publishes must be answered by a *command*,
+        // because a drag is `window::drag` and a message a page is asked about
+        // would be dropped on the floor by `act`'s catch-all.
+        let shell = shell_at("/");
+        drop(shell.head());
+
+        let mut shell = shell_at("/");
+        // `handle` is what a press goes through, and a `Command<Message>` cannot
+        // be compared — so what is pinned is that the arm does not reach `act`
+        // as page state. `act` is the fall-through for anything not taken above
+        // it, and a message that arrives there is a message no page owns.
+        let asked = shell.act(Message::DragWindow);
+        assert!(
+            asked.is_none(),
+            "the drag must be answered by a window command, not handed to a page"
+        );
     }
 
     #[test]

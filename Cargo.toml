@@ -34,4 +34,10 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# Deliberately *not* `abort`. A launcher that aborts on a panic dies the instant
+# one is raised, with no message and nothing on disk: a reader whose window
+# closed on a click sees a crash and no explanation, and neither they nor we can
+# say which click it was. `unwind` lets `main`'s hook catch it, write the panic
+# and the backtrace next to the launcher's log, and tell the reader what happened.
+# The cost is a little binary size, which is not worth being unable to debug.
+panic = "unwind"

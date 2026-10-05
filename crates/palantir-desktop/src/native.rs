@@ -29,7 +29,7 @@
 #[cfg(test)]
 use iced::mouse;
 #[cfg(windows)]
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 /// Thickness of the invisible grab band drawn around the window edge.
@@ -344,16 +344,20 @@ pub fn start_resize(_edge: ResizeEdge) {
 // posted `WM_NCLBUTTONDOWN` itself to start each resize, and corners could only
 // borrow an axis cursor because iced has no diagonal ones.
 //
-// Answering `WM_NCHITTEST` ourselves hands that back. Two things come out of
-// it, and they are the whole reason this exists:
+// Answering `WM_NCHITTEST` ourselves hands that back: returning `HTLEFT`,
+// `HTTOPLEFT` and friends makes Windows run its own resize loop from its own hit
+// test, so the pointer gets the real diagonal resize cursors, and resizing stops
+// depending on a six-pixel band drawn inside the client area.
 //
-// * **The frame is the frame again.** Returning `HTLEFT`, `HTTOPLEFT` and
-//   friends makes Windows run its own resize loop from its own hit test, so the
-//   pointer gets the real diagonal resize cursors, and resizing stops depending
-//   on a six-pixel band drawn inside the client area.
-// * **Windows 11's Snap Layouts flyout.** It appears when the pointer rests on
-//   a region answered with `HTMAXBUTTON`. Nothing else triggers it: the button
-//   has to be non-client for Windows to offer the flyout at all.
+// **The frame's edges are the only thing claimed.** This used to answer
+// `HTMAXBUTTON` over the title bar's maximize control as well, to buy Windows
+// 11's Snap Layouts flyout, and that was a mistake: `HTMAXBUTTON` hands the
+// click to Windows' caption-button loop, which is written for a window that has
+// a caption, and this one is created with `decorations: false`. The result was a
+// maximize button that could not be pressed — press it, drag north-east, and the
+// window followed the pointer with a stray white system button drawn where the
+// real one should be. The flyout is available from the keyboard (`Win` + `Z`)
+// and a working button is worth more. See [`hit_code`].
 //
 // Only the hit test is taken over. Every other message is chained straight to
 // the procedure winit installed, so nothing else about the window changes.
@@ -362,23 +366,20 @@ pub fn start_resize(_edge: ResizeEdge) {
 /// handle it.
 pub const HTCLIENT: u32 = 1;
 
-/// `WM_NCHITTEST`: the pointer is over the maximize button.
+/// `WM_NCHITTEST`: the pointer is over a real maximize button.
+///
+/// Never returned any more — see the note above — but kept, spelled out rather
+/// than imported, because the test that holds the restore bug in place has to be
+/// able to say "this is *not* what the control answers" by name.
+#[cfg(test)]
 pub const HTMAXBUTTON: u32 = 9;
 
-/// `WM_MOUSELEAVE`: the pointer has left the window entirely.
-///
-/// Spelled out rather than imported: windows-sys declares this one under
-/// `Win32_UI_Controls` (it lives in `winuser.h`), and adding a whole feature
-/// for one constant whose value is fixed by the ABI is not worth it.
-#[cfg(windows)]
-const WM_MOUSELEAVE: u32 = 675;
-
-/// `WM_NCMOUSELEAVE`: the pointer has left the window's non-client area.
-///
-/// Spelled out for the same reason as [`WM_MOUSELEAVE`], and grouped with it so
-/// the two "the pointer is gone" messages are read in one place.
-#[cfg(windows)]
-const WM_NCMOUSELEAVE: u32 = 674;
+/// `WM_MOUSELEAVE` and `WM_NCMOUSELEAVE` used to be named here, to un-stick the
+/// maximize control's hover when the pointer left the window. That tracking is
+/// gone with the non-client answer that needed it (see [`hit_code`]): the control
+/// is client area, iced gets the pointer's exits itself, and a message the shim
+/// no longer acts on is not worth an ABI constant and a `Win32_UI_Controls`
+/// feature.
 
 /// Where the title bar's maximize button sits, in logical pixels, measured from
 /// the client area's top-right corner.
@@ -424,17 +425,30 @@ static OWN_WINDOW: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static PREVIOUS_PROC: AtomicIsize = AtomicIsize::new(0);
 
-/// Whether the pointer is resting on the maximize button.
-#[cfg(windows)]
-static MAXIMIZE_HOVERED: AtomicBool = AtomicBool::new(false);
-
 /// The far end of the pipe the window procedure reports state changes on.
 ///
 /// The app registers a sender when its subscription starts; the procedure holds
-/// the other end and posts into it when the window's own state changes — the
-/// maximize control's hover, and whether the window is maximized. Both are
-/// things Windows changes without telling iced, and both are things the app has
-/// to draw.
+/// the other end and posts into it when the window's own state changes — which
+/// is now only whether the window is maximized. That is a thing Windows changes
+/// without telling iced, and the app has to draw it (the caption's glyph is
+/// maximize or restore).
+///
+/// **What used to be here, and why it is gone.** The procedure also reported the
+/// maximize control's hover, because the shim answered `HTMAXBUTTON` over that
+/// control and a non-client region never reaches iced — no pointer events, so no
+/// hover the widget could paint. With the control answered as client area (see
+/// [`hit_code`], and the restore bug that forced it) iced sees the pointer
+/// normally and `Shell::control_button` carries its own `on_enter`/`on_exit`, so
+/// this whole channel for hover is unnecessary.
+///
+/// The measurement that decided it, kept because it is the reason a repaint is
+/// never the answer here and the next person who needs a window-driven redraw
+/// will need it: `InvalidateRect` does not work, because iced rebuilds a view
+/// only when a *message* arrives. A repaint redraws the widget tree the window
+/// already holds, so an invalidated window paints the same pixels as before and
+/// `view()` is never called again — instrumenting it showed two calls at startup
+/// and not one more through hovers, a maximize, a restore and a resize. Hence
+/// this channel: it is the one path that reaches `update`.
 static WATCHER: Mutex<Option<futures::channel::mpsc::UnboundedSender<()>>> = Mutex::new(None);
 
 /// Register the sender the window procedure reports state changes to.
@@ -504,6 +518,29 @@ fn caption_target() -> Option<CaptionTarget> {
 ///
 /// `zoomed` suppresses the resize edges: a maximized window has nothing to
 /// resize, and its edges belong to the screen.
+///
+/// **The title bar's controls are deliberately not answered for.** This used to
+/// return `HTMAXBUTTON` over the maximize control, and that is what broke it.
+/// `HTMAXBUTTON` tells Windows the pixel belongs to a *real* caption button, so
+/// Windows takes the click away from iced and runs its own caption-button loop
+/// (`WM_NCLBUTTONDOWN` → `WM_SYSCOMMAND`/`SC_MAXIMIZE`) — a loop that is written
+/// for a window that has a caption. This one does not: it is created with
+/// `decorations: false`, so there is no caption for that loop to act on, and
+/// what a reader got instead was the caption *drag* — press the restore button,
+/// move the pointer north-east, and the window follows it, with a stray white
+/// system button drawn where the real one should be. That is a control that
+/// cannot be pressed, which is worse than one that is merely not native.
+///
+/// So every pixel inside the client area is `HTCLIENT`, and the frame's resize
+/// edges are the only thing claimed. The cost is honest and worth stating:
+/// Windows 11's Snap Layouts flyout needs a non-client maximize button, so it
+/// does not appear. A working maximize/restore is worth more than a flyout, and
+/// the flyout is reachable with the keyboard (`Win` + `Z`) regardless.
+///
+/// The `target` parameter stays because the shape of the problem is still worth
+/// testing — it is what a caller would need to make the claim, and dropping the
+/// capability without dropping the reasoning would make the next reader
+/// rediscover it.
 pub fn hit_code(
     x: f32,
     y: f32,
@@ -523,10 +560,17 @@ pub fn hit_code(
         }
     }
 
-    match target {
-        Some(target) if target.contains(x, y, client_width) => Some(HTMAXBUTTON),
-        _ => Some(HTCLIENT),
+    // `target` is read so that an empty caption cannot be mistaken for a
+    // deliberate one: the parameter is still part of the signature the shim
+    // calls, and a caller that published a button and got `HTCLIENT` back is
+    // told so by this branch rather than by silence.
+    if let Some(target) = target {
+        if target.contains(x, y, client_width) {
+            return Some(HTCLIENT);
+        }
     }
+
+    Some(HTCLIENT)
 }
 
 /// Which frame edge a point within [`RESIZE_BAND`] of the client's edge belongs
@@ -622,30 +666,6 @@ fn dpi_scale(hwnd: isize) -> f32 {
     }
 }
 
-/// Record the maximize button's hover state and report it to the app.
-///
-/// The button is a non-client region once the shim answers for it, so iced
-/// never receives the pointer there and cannot paint its own hover. This is how
-/// the button finds out instead.
-///
-/// **Why the app is told rather than repainted.** The obvious move is
-/// `InvalidateRect` — mark the window dirty and let it redraw — and it does not
-/// work, for a reason worth writing down here rather than rediscovering. iced
-/// rebuilds a view only when a *message* arrives; a repaint redraws the widget
-/// tree it already holds. An invalidated window therefore paints the same
-/// pixels as before, hover and all, and the app's `view()` is never called
-/// again — which is exactly what instrumenting `view()` showed: two calls at
-/// startup and not one more, through hovers, a maximize, a restore and a
-/// resize. So the shim reports through the one channel that reaches the app's
-/// `update`, and the redraw follows from that.
-#[cfg(windows)]
-fn report_maximize_hover(hovered: bool) {
-    if MAXIMIZE_HOVERED.swap(hovered, Ordering::Relaxed) == hovered {
-        return;
-    }
-    window_state_changed();
-}
-
 /// The window procedure shim.
 ///
 /// It answers `WM_NCHITTEST` and chains everything else — including all the
@@ -664,21 +684,13 @@ unsafe extern "system" fn hit_test_proc(
     };
 
     if msg == WM_NCHITTEST {
+        // Only the frame is claimed. Everything inside the client area is
+        // `HTCLIENT`, so the answer is the frame's and nothing here has to
+        // interpret it — and, in particular, no caption control can be turned
+        // into a system button by accident.
         if let Some(code) = hit_test_answer(hwnd, lparam) {
-            // Windows asks this for every pointer move over the window, so the
-            // answer doubles as the hover report — no separate tracking, and
-            // nothing to keep in step.
-            report_maximize_hover(code == HTMAXBUTTON);
             return code as isize;
         }
-    }
-
-    // The pointer leaving the window raises no hit test — there is no point to
-    // ask about — so without this the button would stay lit after the pointer
-    // went somewhere else entirely. winit has already registered the tracking
-    // these messages come from; it just has no use for them.
-    if msg == WM_MOUSELEAVE || msg == WM_NCMOUSELEAVE {
-        report_maximize_hover(false);
     }
 
     // Maximizing and restoring both arrive here, and neither reaches the app on
@@ -708,7 +720,6 @@ unsafe extern "system" fn hit_test_proc(
     // next message down a dead chain, and a launcher that opened a second
     // window would find the install looking like a repeat and never shim it.
     if msg == WM_NCDESTROY && hwnd == OWN_WINDOW.load(Ordering::Relaxed) {
-        MAXIMIZE_HOVERED.store(false, Ordering::Relaxed);
         PREVIOUS_PROC.store(0, Ordering::Relaxed);
         OWN_WINDOW.store(0, Ordering::Relaxed);
         INSTALL_ATTEMPTS_MADE.store(0, Ordering::Relaxed);
@@ -795,12 +806,6 @@ pub fn window_maximized() -> Option<bool> {
 #[cfg(not(windows))]
 pub fn window_maximized() -> Option<bool> {
     None
-}
-
-/// Whether the pointer is resting on the title bar's maximize button.
-#[cfg(not(windows))]
-pub fn maximize_button_hovered() -> bool {
-    false
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,31 +1180,68 @@ mod tests {
                 "({x},{y}) must not resize a maximized window"
             );
         }
-        // The maximize button still works while maximized — it is what restores.
+        // The restore control still works while maximized — it is what restores,
+        // and it is iced's to answer because it is client area.
         assert_eq!(
             hit_code(w - 64.0, 23.0, w, h, Some(target), true),
-            Some(HTMAXBUTTON)
+            Some(HTCLIENT)
         );
     }
 
     #[test]
-    fn the_maximize_button_is_the_only_non_client_control() {
+    fn the_restore_control_is_never_answered_as_a_system_caption_button() {
+        // The regression this fixes. Answering `HTMAXBUTTON` here made Windows
+        // believe the window had a real caption, and its caption-button loop on
+        // a `decorations: false` window is a *drag*: pressing restore and moving
+        // the pointer north-east dragged the window and drew a stray white
+        // system button, instead of restoring. Every pixel of the control —
+        // inside, on each edge, maximized or not — must be client area so the
+        // click reaches iced's own button and its `window::maximize`.
         let (w, h, target) = measured_window();
         let (left, right) = target.x_span(w);
-        assert_eq!((left, right), (w - 86.0, w - 54.0));
+        for zoomed in [false, true] {
+            for (x, y) in [
+                (w - 64.0, 23.0),
+                (left + 1.0, 23.0),
+                (right - 1.0, 23.0),
+                ((left + right) / 2.0, target.top + 1.0),
+                ((left + right) / 2.0, target.bottom - 1.0),
+            ] {
+                let code = hit_code(x, y, w, h, Some(target), zoomed);
+                assert_eq!(
+                    code,
+                    Some(HTCLIENT),
+                    "({x},{y}) zoomed={zoomed}: a non-client answer here is the restore bug"
+                );
+                assert_ne!(code, Some(HTMAXBUTTON), "({x},{y}) must not be a system button");
+            }
+        }
+    }
 
-        // Inside it, on both axes.
-        assert_eq!(hit_code(w - 64.0, 23.0, w, h, Some(target), false), Some(HTMAXBUTTON));
-        assert_eq!(hit_code(left + 1.0, 23.0, w, h, Some(target), false), Some(HTMAXBUTTON));
-        assert_eq!(hit_code(right - 1.0, 23.0, w, h, Some(target), false), Some(HTMAXBUTTON));
-
-        // Off it: the close button to its right, the bar's padding above and
-        // below, and the shrink/restore glyph's column — all stay iced's to
-        // handle, so the other caption controls keep their own hover and click.
-        assert_eq!(hit_code(right, 23.0, w, h, Some(target), false), Some(HTCLIENT));
-        assert_eq!(hit_code(w - 32.0, 23.0, w, h, Some(target), false), Some(HTCLIENT));
-        assert_eq!(hit_code(w - 64.0, 10.0, w, h, Some(target), false), Some(HTCLIENT));
-        assert_eq!(hit_code(w - 64.0, target.bottom, w, h, Some(target), false), Some(HTCLIENT));
+    #[test]
+    fn the_frame_is_the_only_thing_the_shim_claims() {
+        // Every pixel inside the client area that is not a resize edge is iced's,
+        // whatever the title bar published and whether the window is maximized.
+        // This is the whole claim of the module in one assertion, and it is what
+        // makes the window draggable and its controls pressable.
+        let (w, h, target) = measured_window();
+        let mut client = 0usize;
+        let mut non_client = 0usize;
+        for y in (0..(h as usize)).step_by(7) {
+            for x in (0..(w as usize)).step_by(7) {
+                let edge = x < RESIZE_BAND as usize
+                    || y < RESIZE_BAND as usize
+                    || x >= w as usize - RESIZE_BAND as usize
+                    || y >= h as usize - RESIZE_BAND as usize;
+                match hit_code(x as f32, y as f32, w, h, Some(target), false) {
+                    Some(HTCLIENT) if !edge => client += 1,
+                    Some(_) if edge => non_client += 1,
+                    other => panic!("({x},{y}) is neither client nor a claimed edge: {other:?}"),
+                }
+            }
+        }
+        assert!(client > 1000, "only {client} pixels were client area");
+        assert!(non_client > 0, "the frame claimed nothing at all");
     }
 
     #[test]
@@ -1289,6 +1331,9 @@ mod tests {
         let (w, _, target) = measured_window();
         set_caption_target(target);
         assert_eq!(caption_target(), Some(target));
-        assert_eq!(hit_code(w - 64.0, 23.0, w, 707.0, caption_target(), false), Some(HTMAXBUTTON));
+        // The slot still round-trips into the hit test, and the answer is client
+        // area: publishing a caption target no longer buys a system button (see
+        // `the_restore_control_is_never_answered_as_a_system_caption_button`).
+        assert_eq!(hit_code(w - 64.0, 23.0, w, 707.0, caption_target(), false), Some(HTCLIENT));
     }
 }
