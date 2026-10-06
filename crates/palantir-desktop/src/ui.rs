@@ -37,6 +37,7 @@
 
 #![allow(dead_code)]
 
+use crate::pages::overlay::Stack;
 use iced::advanced::text::Renderer as TextRenderer;
 use iced::widget::text::{Shaping, StyleSheet as TextStyle};
 use iced::widget::{column, container, image, mouse_area, row, text_input, Space, Text};
@@ -1566,6 +1567,111 @@ pub const MENU_OPTION: f32 = MENU_PAD_V * 2.0 + MENU_LINE;
 /// scopes that one on `.button-animation` and this row does not carry it.
 const MENU_HOVER: f32 = 1.15;
 
+/// The dropdown's shadow: `shadow-2xl`, which Tailwind writes as
+/// `0 25px 50px -12px rgb(0, 0, 0 / 0.25)` (`Combobox.vue:126`).
+///
+/// Four numbers and no more: the depth, the drop, the blur and the spread.
+/// What they are drawn *as* is [`menu_shadow_rings`], and the reason they are
+/// not simply an [`iced::Shadow`] is the same one [`card_shadow`] and
+/// [`crate::shell::shadow_band`] write up: iced 0.12.3 composites that in the
+/// quad's own fragment, so it lands on the fill it is meant to sit behind.
+const MENU_SHADOW_ALPHA: f32 = 0.25;
+const MENU_SHADOW_OFFSET_Y: f32 = 25.0;
+const MENU_SHADOW_BLUR: f32 = 50.0;
+const MENU_SHADOW_SPREAD: f32 = -12.0;
+
+/// The blur's own half, which is the whole width of the fade.
+///
+/// A CSS blur of `B` is a Gaussian of `B / 2`, and the shader an `iced::Shadow`
+/// goes through draws the same fade as a `smoothstep` over exactly this distance
+/// either side of the shadow's own edge (`solid.wgsl`). So the shadow is fully
+/// itself 25 rows inside that edge and gone 25 rows outside it, and that is the
+/// span the rings below step across.
+const MENU_SHADOW_FADE: f32 = MENU_SHADOW_BLUR / 2.0;
+
+/// How many rings the fade is stepped into, beside the core itself.
+///
+/// **Five, and the number is measured rather than chosen.** [`crate::avatar`]
+/// draws a five-ring shadow too, but that one paints *opaque* inks it composited
+/// itself; this one is a stack of *translucent* fills, and a stack like that has
+/// a floor that an opaque ring does not.
+///
+/// What the renderer keeps between rings is an eight-bit pixel. A fill of alpha
+/// `a` over a value `v` moves it by `v * a`, and a move smaller than half a unit
+/// rounds straight back to where it was -- there is no accumulator under the
+/// pixel, so the next ring starts from `v` again and a long tail of small steps
+/// never adds up. Against the page's own ink of 22 that floor is `a >= 0.023`.
+///
+/// Sixteen rings (`0.013` apiece) were the first cut, and they drew the page
+/// under the panel at `(21, 23, 27)` against its own `(22, 24, 28)`: the stack
+/// composited to nothing but the core's own `0.057`, one whole unit and so the
+/// whole of what survived. Five rings step the same fade as
+/// `0.070, 0.039, 0.033, 0.024, 0.013, 0.002`, four of which clear the floor,
+/// and the same read is `(21, 23, 25)` -- the blue `25` being what the
+/// reference's own `0.171` of black over `#16181c` comes to. That is the gradient
+/// the screen shows and what the gate on [`select_menu`] holds it to.
+const MENU_SHADOW_RINGS: usize = 5;
+
+/// How far the halo reaches past the panel's own edge on the sides: the fade's
+/// 25, less the 12 the `-12px` spread pulls it back in.
+pub const MENU_SHADOW_SIDE: f32 = MENU_SHADOW_FADE + MENU_SHADOW_SPREAD;
+
+/// How far it reaches below the panel: the same 13, plus the 25 the shadow
+/// itself sits down by. The shadow's own shape is inset by the spread and
+/// dropped by the offset, so its bottom edge is already 13 rows past the
+/// panel's before the blur is added to it.
+pub const MENU_SHADOW_BELOW: f32 = MENU_SHADOW_SIDE + MENU_SHADOW_OFFSET_Y;
+
+/// `smoothstep`, the same function the shader composites an `iced::Shadow`
+/// with, so the rings step along the curve the reference's own blur draws.
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The rings the panel's shadow is drawn as: `(reach past the shadow's own
+/// edge, the ring's own alpha)`, from the core outwards.
+///
+/// The model is `shadow-2xl`'s own, written out: the shadow's shape is the
+/// panel's box inset by the `-12px` spread and dropped by the `25px`, and the
+/// depth at a distance `d` from that shape's edge is
+/// `0.25 * (1 - smoothstep(-25, 25, d))` -- 0.25 deep inside, half at the edge,
+/// gone 25 past it.
+///
+/// A ring is that shape grown by its reach, drawn translucent under the panel,
+/// so a point is covered by every ring that reaches past it. Stacking
+/// translucent fills is `1 - product(1 - a)` and *not* a sum, so the per-ring
+/// alphas are read out of the depths rather than being them: each one is what
+/// turns the composite of the rings over it into that band's own depth.
+///
+/// The core's band is the shape itself, and the panel covers all of it but the
+/// thirteen rows below its own bottom edge -- thirteen rows *inside* the shape,
+/// where the model runs from `0.125` at the shape's edge to `0.171` at the
+/// panel's. The single value a flat band can carry for that strip is the one
+/// halfway along it, which is the model at `d = SPREAD / 2 = -6` and comes to
+/// `0.169`; every other band's `d` is its own midpoint outwards.
+fn menu_shadow_rings() -> Vec<(f32, f32)> {
+    let step = MENU_SHADOW_FADE / MENU_SHADOW_RINGS as f32;
+    // The depth each band is drawn to: the core first, then one band per step
+    // outwards to the edge of the fade.
+    let mut depths: Vec<f32> = Vec::with_capacity(MENU_SHADOW_RINGS + 1);
+    depths.push(MENU_SHADOW_ALPHA *
+        (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, MENU_SHADOW_SPREAD / 2.0)));
+    for band in 1..=MENU_SHADOW_RINGS {
+        let d = (band as f32 - 0.5) * step;
+        depths.push(MENU_SHADOW_ALPHA * (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, d)));
+    }
+    // And the alphas that composite to them: a band is covered by every ring
+    // from its own outwards, so the ring's own alpha is the step from its
+    // band's depth to the one outside it.
+    let mut rings: Vec<(f32, f32)> = Vec::with_capacity(depths.len());
+    for (band, depth) in depths.iter().enumerate() {
+        let beyond = depths.get(band + 1).copied().unwrap_or(0.0);
+        rings.push((band as f32 * step, 1.0 - (1.0 - depth) / (1.0 - beyond)));
+    }
+    rings
+}
+
 /// The panel a [`select`] opens: the reference's own dropdown, under its trigger.
 ///
 /// `Combobox.vue`'s dropdown is teleported to `<body>` and positioned over the
@@ -1576,26 +1682,24 @@ const MENU_HOVER: f32 = 1.15;
 /// -- `rounded-[14px] bg-surface-4 border border-solid border-surface-5`
 /// (`Combobox.vue:126`), and inside it one option per choice at `px-4 py-3`.
 ///
-/// What it does **not** draw is the `shadow-2xl` on that same line, and that is
-/// the limit [`card_shadow`] writes up rather than an oversight: the reference's
-/// `0 25px 50px -12px rgb(0 0 0 / 0.25)` was built at 1280x820 in this kit's own
-/// release build, and iced 0.12.3's solid pipeline composites it in the quad's
-/// own fragment, so it lands on the panel's fill instead of behind it. Measured
-/// with it: every row reads a veil of 0.175 over the panel's own `#34363c` from
-/// the left border to x=263 -- twenty-four pixels short of the right one, where
-/// the veil stops dead in a vertical step -- ramping in over the top 43 rows the
-/// way the 25-pixel offset asks for, and the page beside the panel reads 0.136
-/// above, left and right and 0.318 immediately below. The chosen row's green is
-/// veiled with the rest, so the panel is not merely dimmer than the reference's:
-/// it is dimmer on the left of a hard edge and clean on the right of it. The
-/// second placement `card_shadow`'s table tried was tried here too -- the shadow
-/// on a parent quad, so the panel's own opaque fill is painted after it -- and
-/// it reads the same veil (0.135 across the whole panel, clean only in the right
-/// twenty-four pixels, and the left border veiled with the rest). So it is the
-/// limit rather than the placement, and without the shadow the rows read exactly
-/// what [`Ink::Surface4`] and [`Ink::Green`] say, across the full width, with the
-/// `border-surface-5` hairline as the elevation the panel is left -- one
-/// `iced::Shadow` fewer, the same choice the tab strip made.
+/// The `shadow-2xl` on the line under it is drawn too, and not as an
+/// [`iced::Shadow`]: 0.12.3 composites that in the quad's own fragment, so it
+/// lands on the fill it is meant to sit behind. Measured at 1280x820 in this
+/// kit's own release build, with the shadow on the panel's own quad and again on
+/// a parent quad painted under it, both readings are a veil of about 0.175 over
+/// the rows with a hard vertical step in it (twenty-four pixels short of the
+/// right edge), and the chosen row's green is veiled with the rest. So the
+/// shadow is *rings*, which is how this crate draws every other one --
+/// [`crate::shell::shadow_band`] is the doctrine, [`card_shadow`] is the reason,
+/// and `avatar`'s card shadow is the same trick in pixels -- and the numbers
+/// they are drawn from are [`menu_shadow_rings`]'.
+///
+/// What the panel does *not* have yet is the reference's teleport: it is drawn
+/// in the layout, so the page below it keeps its place only because the halo's
+/// own room is reserved under it ([`MENU_SHADOW_BELOW`]) rather than because the
+/// panel floats over the content the way `Combobox.vue`'s does. That is iced
+/// 0.12's having no z-order, the same wall `Shell::run_switchers` and
+/// `Shell::download_panel` hit.
 ///
 /// The chosen option is the reference's own: `bg-highlight-green` and
 /// `text-green` (`getOptionClasses`), which is `Ink::GreenHighlight` over the
@@ -1681,22 +1785,67 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
     // The one pixel of padding is the panel's own hairline: a container paints
     // its children over its border, and the reference's border-box keeps the
     // options inside it -- so they are inset here by the same pixel.
-    container(list)
+    let panel = container(list)
         .width(Length::Fixed(width))
         .padding(Padding { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 })
-        .style(move |_theme: &Theme| menu_panel(theme))
-        .into()
+        .style(move |_theme: &Theme| menu_panel(theme));
+    // Two hairlines and one option per choice: the panel's own height, which is
+    // what the box under the shadow has to know to reserve the halo's room.
+    let height = 2.0 + MENU_OPTION * options.len() as f32;
+    // The shadow is rings drawn *under* the panel and over the page, which needs
+    // the one thing this kit has that draws one element over another at a chosen
+    // offset: [`crate::pages::overlay::Stack`]. Its first layer is a bare `Space`
+    // and only there to be the box -- the halo below is inside it so the page
+    // keeps its place, and the halo at the sides runs past it, which the stack's
+    // own rules make the caller's to clip and nothing here does.
+    let mut layers = Stack::at(
+        iced::Vector::ZERO,
+        Space::new(
+            Length::Fixed(width),
+            Length::Fixed(height + MENU_SHADOW_BELOW),
+        ),
+    );
+    // The shadow's own shape is the panel's box inset by the spread and dropped
+    // by the offset; a ring is that shape grown by its reach. So each one is
+    // laid down at the shape's own origin moved out by the reach, and sized up
+    // by twice it, with the shape's own radius grown the same way.
+    let inset = -MENU_SHADOW_SPREAD;
+    for (reach, alpha) in menu_shadow_rings() {
+        let ring: Element<'a, Message> = container(
+            Space::new(
+                Length::Fixed(width - 2.0 * inset + 2.0 * reach),
+                Length::Fixed(height - 2.0 * inset + 2.0 * reach),
+            ),
+        )
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, alpha))),
+            border: Border {
+                radius: (MENU_RADIUS - inset + reach).into(),
+                ..Border::default()
+            },
+            ..container::Appearance::default()
+        })
+        .into();
+        layers = layers.over(
+            iced::Vector::new(inset - reach, inset + MENU_SHADOW_OFFSET_Y - reach),
+            ring,
+        );
+    }
+    // And the panel over all of them: opaque, so every ring's part under it is
+    // covered rather than compositing into its fill, which is the whole of what
+    // an `iced::Shadow` could not do.
+    layers.over_control(iced::Vector::ZERO, panel).into()
 }
 
 /// The panel's own frame: `rounded-[14px] bg-surface-4 border border-solid
 /// border-surface-5`, the three classes `Combobox.vue:126` puts on its
-/// dropdown, and deliberately not the `shadow-2xl` on the line under it.
+/// dropdown. The `shadow-2xl` on the line under it is drawn beside this frame as
+/// rings rather than on it -- see [`select_menu`] and [`menu_shadow_rings`].
 ///
 /// Named rather than written inline so the gate can hold the frame itself to
 /// those classes -- the widget it styles is only reachable through a layout, and
-/// the shadow that is *not* drawn is the kind of decision a test should be able
-/// to read out of the value. [`select_menu`]'s own paragraph is why it is not
-/// drawn.
+/// the `iced::Shadow` this frame deliberately does *not* carry is the kind of
+/// decision a test should be able to read out of the value.
 fn menu_panel(theme: Gen) -> container::Appearance {
     container::Appearance {
         background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
@@ -1705,9 +1854,9 @@ fn menu_panel(theme: Gen) -> container::Appearance {
             width: 1.0,
             radius: MENU_RADIUS.into(),
         },
-        // No `shadow-2xl`: see [`select_menu`], and [`card_shadow`] for the
-        // limit it is. The default `Shadow` is transparent, so this is the fill
-        // and the ring and nothing else.
+        // No `iced::Shadow`: it lands on this fill (see [`select_menu`]). The
+        // default `Shadow` is transparent, so this is the fill and the ring and
+        // nothing else.
         ..container::Appearance::default()
     }
 }
@@ -4645,10 +4794,11 @@ mod tests {
     }
 
     #[test]
-    fn the_dropdown_is_the_reference_s_box_and_is_the_one_shadow_this_kit_declines() {
-        // The panel is `Combobox.vue:126`'s own line, three classes of it and
-        // not the fourth: the fill, the ring and the radius are drawn, and the
-        // `shadow-2xl` is the piece [`select_menu`] measures its way out of.
+    fn the_dropdown_is_the_reference_s_box_and_its_shadow_is_rings() {
+        // The panel is `Combobox.vue:126`'s own line: the fill, the ring and the
+        // radius on the frame itself, and the `shadow-2xl` drawn under it as
+        // rings -- the same two halves the class list asks for, in the two ways
+        // this kit draws them.
         assert_eq!(MENU_GAP, 8.0, "`DROPDOWN_GAP` in Combobox.vue, the gap above the panel");
         assert_eq!(MENU_RADIUS, 14.0, "`rounded-[14px]` on the dropdown");
         assert_eq!(MENU_PAD_H, 16.0, "`px-4` on an option");
@@ -4671,12 +4821,13 @@ mod tests {
             assert_eq!(panel.border.width, 1.0, "`border` is one pixel");
             let radius: [f32; 4] = panel.border.radius.into();
             assert_eq!(radius, [MENU_RADIUS; 4], "`rounded-[14px]`, all four corners");
-            // The whole of the decision: iced's shadow lands on this fill (see
-            // [`select_menu`]'s measurement), so it is not drawn at all.
+            // The one thing this frame does not carry is an `iced::Shadow`,
+            // because that lands on this very fill (see [`select_menu`]'s
+            // measurement); the shadow is drawn as rings under the frame.
             assert_eq!(
                 panel.shadow.color.a, 0.0,
-                "`shadow-2xl` is the one class on Combobox.vue:126 this panel does \
-                 not carry, and the reason is written where the panel is drawn"
+                "`shadow-2xl` is drawn as rings beside this frame -- \
+                 [`menu_shadow_rings`] -- and never as an `iced::Shadow` on it"
             );
         }
 
@@ -4695,8 +4846,8 @@ mod tests {
             );
         }
         // The fourth class is on the line after it, because the shadow depends on
-        // which way the panel opens -- and it is the one this kit records as a
-        // refusal rather than draws (see [`select_menu`]).
+        // which way the panel opens -- and it is the one this kit draws as rings
+        // rather than as the class asks for (see [`select_menu`]).
         assert!(
             combobox.contains("shadow-2xl"),
             "and the downward panel still asks for `shadow-2xl`"
@@ -4713,6 +4864,61 @@ mod tests {
         for class in ["px-4", "py-3", "transition-all", "duration-150"] {
             assert!(option.contains(class), "the option row is `{option}`; `{class}` is read off it");
         }
+
+        // And the shadow's own four numbers with the ring arithmetic they come
+        // to: `0 25px 50px -12px rgb(0 0 0 / 0.25)`.
+        assert_eq!(MENU_SHADOW_ALPHA, 0.25, "`rgb(0 0 0 / 0.25)`");
+        assert_eq!(MENU_SHADOW_OFFSET_Y, 25.0, "the `25px` it sits down by");
+        assert_eq!(MENU_SHADOW_BLUR, 50.0, "`50px`");
+        assert_eq!(MENU_SHADOW_SPREAD, -12.0, "`-12px`");
+        assert_eq!(MENU_SHADOW_FADE, 25.0, "a CSS blur of 50 is a Gaussian of 25");
+        assert_eq!(MENU_SHADOW_SIDE, 13.0, "the fade's 25 less the spread's 12");
+        assert_eq!(MENU_SHADOW_BELOW, 38.0, "and the 25 the shadow sits down by");
+        let rings = menu_shadow_rings();
+        assert_eq!(rings.len(), MENU_SHADOW_RINGS + 1, "the core and one ring per step");
+        assert_eq!(rings[0].0, 0.0, "the innermost ring is the shadow's own shape");
+        assert!(
+            (rings[rings.len() - 1].0 - MENU_SHADOW_FADE).abs() < 1e-4,
+            "and the outermost is the far edge of the fade"
+        );
+        // The alphas are steps rather than depths on purpose: a band is covered
+        // by every ring from its own outwards, and stacked translucent fills
+        // composite as `1 - product(1 - a)`. So the model is written out here a
+        // second time and the two are compared band by band -- code and test can
+        // only agree by both being right.
+        let step = MENU_SHADOW_FADE / MENU_SHADOW_RINGS as f32;
+        let model = |d: f32| MENU_SHADOW_ALPHA * (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, d));
+        let mut previous = MENU_SHADOW_ALPHA;
+        for (band, (reach, alpha)) in rings.iter().enumerate() {
+            assert!(*alpha > 0.0 && *alpha < 1.0, "band {band}: alpha {alpha} is not a fill");
+            let composite = 1.0
+                - rings[band..]
+                    .iter()
+                    .fold(1.0, |kept, (_reach, alpha)| kept * (1.0 - alpha));
+            let d = if band == 0 { MENU_SHADOW_SPREAD / 2.0 } else { reach - step / 2.0 };
+            assert!(
+                (composite - model(d)).abs() < 1e-5,
+                "band {band}: the rings composite to {composite}, the model says {}",
+                model(d)
+            );
+            // And the halo gets no deeper as it walks outwards.
+            assert!(composite <= previous + 1e-6, "band {band} is deeper than the one inside it");
+            previous = composite;
+        }
+        // And enough of those steps are big enough to be drawn at all. This is
+        // the floor the ring count is chosen against (see [`MENU_SHADOW_RINGS`]):
+        // a translucent fill of alpha `a` over the page's own ink moves an
+        // eight-bit channel by `v * a`, and anything under half a unit rounds
+        // away rather than accumulating. Sixteen rings failed this and drew one
+        // unit of the eighteen the model asks for; five pass it.
+        let page = theme_gen::ink(Gen::Dark, Ink::Bg);
+        let darkest = (page.r * 255.0).min(page.g * 255.0).min(page.b * 255.0);
+        let visible = rings.iter().filter(|(_reach, alpha)| alpha * darkest >= 0.5).count();
+        assert!(
+            visible >= 3,
+            "only {visible} of {} rings move a pixel of the page's own ink ({darkest})",
+            rings.len()
+        );
     }
 
     #[test]
