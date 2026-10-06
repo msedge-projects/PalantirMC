@@ -410,13 +410,10 @@ pub fn extract_tar_gz_bytes(data: &[u8], dest: impl AsRef<Path>) -> Result<()> {
             std::io::copy(&mut entry, &mut out).map_err(|e| io_err(&out_path, e))?;
             #[cfg(unix)]
             {
-                match entry.header().mode() {
-                    Ok(mode) => {
-                        let perms = std::fs::Permissions::from_mode(mode);
-                        std::fs::set_permissions(&out_path, perms)
-                            .map_err(|e| io_err(&out_path, e))?;
-                    }
-                    Err(_) => {}
+                if let Ok(mode) = entry.header().mode() {
+                    let perms = std::fs::Permissions::from_mode(mode);
+                    std::fs::set_permissions(&out_path, perms)
+                        .map_err(|e| io_err(&out_path, e))?;
                 }
             }
         } else {

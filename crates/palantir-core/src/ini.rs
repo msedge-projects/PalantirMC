@@ -276,12 +276,11 @@ fn unescape_value(s: &str) -> String {
                             out.push(c);
                         }
                     }
-                    '\n' | '\r' => {
+                    '\n' | '\r'
                         // line continuation: skip a paired \r\n / \n\r
-                        if i < n && (chars[i] == '\n' || chars[i] == '\r') && chars[i] != c {
+                        if i < n && (chars[i] == '\n' || chars[i] == '\r') && chars[i] != c => {
                             i += 1;
                         }
-                    }
                     _ => {} // skipped, like Qt
                 }
                 chop_limit = out.len();
@@ -516,7 +515,7 @@ pub fn parse_qt(text: &str, path: &Path) -> Result<IniMap> {
 /// Exact port of `parseOldFileFormat` in `INIFile.cpp`, quirks included.
 pub fn parse_legacy(text: &str, path: &Path) -> Result<IniMap> {
     let mut map = IniMap::new();
-    for (_idx, line) in text.lines().enumerate() {
+    for line in text.lines() {
         let bytes = line.as_bytes();
         // Qt searches for '#' starting at index 1; a '#' at column 0 alone
         // never triggers truncation (see comment in parseOldFileFormat).

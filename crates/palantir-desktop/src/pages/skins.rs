@@ -1753,11 +1753,7 @@ fn saved_card<'a>(
 /// frame's title, with the reference's two sentences and the reference's two
 /// buttons in the reference's own order: proceed last, at the right-hand end
 /// where `justify-end` puts it.
-fn forget_confirm<'a>(
-    theme: Gen,
-    edit: &Edit,
-    wearing: bool,
-) -> Element<'a, Message> {
+fn forget_confirm<'a>(theme: Gen, wearing: bool) -> Element<'a, Message> {
     column![
         heading(theme, Key::AppSkinsDeleteModalTitle.message()),
         caption(theme, Key::AppSkinsDeleteModalDescription.message()),
@@ -1880,7 +1876,7 @@ pub fn edit_view<'a>(
     let slim = edit.variant.eq_ignore_ascii_case("SLIM");
     let mut body = column![].spacing(EDITOR_SECTION_GAP).width(Length::Fill);
     if edit.confirm {
-        return forget_confirm(theme, edit, wearing);
+        return forget_confirm(theme, wearing);
     }
     // The name the row is stored under. The reference's own title is the sentence
     // "Editing skin"; *which* skin is the row's, and a reader who opened the wrong one
@@ -2020,14 +2016,14 @@ fn arm_choices<'a>(theme: Gen, slim: bool) -> Element<'a, Message> {
             ui::scoped(EDIT_KEY, "arm:wide"),
             &variant_label("CLASSIC"),
             !slim,
-            Message::ArmStyle { variant: "CLASSIC".into() },
+            Message::ArmStyle { variant: "CLASSIC" },
         ))
         .push(arm_choice(
             theme,
             ui::scoped(EDIT_KEY, "arm:slim"),
             &variant_label("SLIM"),
             slim,
-            Message::ArmStyle { variant: "SLIM".into() },
+            Message::ArmStyle { variant: "SLIM" },
         ))
         .into()
 }
@@ -2178,9 +2174,10 @@ fn cape_rows(
     capes: &[palantir_net::MinecraftCape],
 ) -> Vec<Vec<Option<&palantir_net::MinecraftCape>>> {
     let mut sorted: Vec<&palantir_net::MinecraftCape> = capes.iter().collect();
-    // `sort_by` is stable, so two capes the service gave the same name keep the
-    // order it listed them in -- which is what `Array.prototype.sort` does too.
-    sorted.sort_by(|left, right| cape_sort_name(left).cmp(&cape_sort_name(right)));
+    // `sort_by_key` is stable, so two capes the service gave the same name keep
+    // the order it listed them in -- which is what `Array.prototype.sort` does
+    // too.
+    sorted.sort_by_key(|left| cape_sort_name(left));
     let mut cells: Vec<Option<&palantir_net::MinecraftCape>> = Vec::with_capacity(sorted.len() + 1);
     cells.push(None);
     cells.extend(sorted.into_iter().map(Some));

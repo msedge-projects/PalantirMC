@@ -570,7 +570,7 @@ mod tests {
         p.insert(0, Component { uid: String::new(), ..Default::default() });
         assert_eq!(p.components().len(), 1);
         p.insert(99, Component { uid: "b".into(), ..Default::default() }); // clamps to end
-        assert_eq!(p.get("b").is_some(), true);
+        assert!(p.get("b").is_some());
         p.insert(0, Component { uid: "c".into(), ..Default::default() });
         assert_eq!(p.components()[0].uid, "c");
     }

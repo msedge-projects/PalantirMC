@@ -2418,8 +2418,8 @@ mod tests {
         assert!(high > low + 8, "the window's row is flat: {low} against {high}");
         let pixels = plate_overlay_pixels(theme);
         let green = |x: usize| i32::from(pixels[(32 * 40 + x) * 4 + 1]);
-        let span = (12..29).map(|x| green(x)).max().unwrap_or(0)
-            - (12..29).map(|x| green(x)).min().unwrap_or(0);
+        let span = (12..29).map(&green).max().unwrap_or(0)
+            - (12..29).map(green).min().unwrap_or(0);
         assert!(
             (6..=10).contains(&span),
             "the plate's row 32 varies by {span}, and the reference's by 10"

@@ -3690,7 +3690,7 @@ mod tests {
         // disagree, because following the address writes both.
         state.filter(None);
         assert_eq!(state.selected(), Filter::All);
-        assert_eq!(state.collections, false);
+        assert!(!state.collections);
         state.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
         assert_eq!(state.selected(), Filter::Type(ProjectType::Modpack));
 
@@ -3701,7 +3701,7 @@ mod tests {
         assert_eq!(state.selected(), Filter::Collections);
         state.filter(None);
         assert_eq!(state.selected(), Filter::All, "and the reader is not trapped");
-        assert_eq!(state.collections, false);
+        assert!(!state.collections);
         state.filter(Some(ProfileTab::Collections));
         state.filter(Some(ProfileTab::Projects(ProjectType::Shader)));
         assert_eq!(state.selected(), Filter::Type(ProjectType::Shader));
@@ -3802,9 +3802,9 @@ mod tests {
         // `showProjectsEmptyState` (`layout.vue:827`) is three terms, and the third
         // is the one a port drops: `selectedProjectType !== null ||
         // collections.value.length === 0`. This is the case it exists for.
-        assert!(shows_projects_empty_state(Filter::All, true, 0) == false);
+        assert!(!shows_projects_empty_state(Filter::All, true, 0));
         assert!(shows_projects_empty_state(Filter::All, false, 0), "no collections: it is shown");
-        assert!(shows_projects_empty_state(Filter::All, false, 1) == false);
+        assert!(!shows_projects_empty_state(Filter::All, false, 1));
         // A named type is the other way out: with a type selected the address is what
         // the reader asked for, so an empty list is the answer.
         assert!(shows_projects_empty_state(Filter::Type(ProjectType::Shader), true, 0));

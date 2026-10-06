@@ -2492,8 +2492,8 @@ mod tests {
 
         let mut fetcher = Script::new();
         fetcher.insert(&plan.jobs[0].url, index_body.clone().into_bytes());
-        fetcher.insert(&cdn_url(&click_hash), click.to_vec());
-        fetcher.insert(&cdn_url(&meta_hash), meta.to_vec());
+        fetcher.insert(cdn_url(&click_hash), click.to_vec());
+        fetcher.insert(cdn_url(&meta_hash), meta.to_vec());
         let (report, lines) = run_lines(&plan, &fetcher.wire(), 2);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
@@ -2536,7 +2536,7 @@ mod tests {
         let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
         // Same length, different bytes: the case a size check cannot see.
-        fetcher.insert(&cdn_url(&hash), b"wxyz".to_vec());
+        fetcher.insert(cdn_url(&hash), b"wxyz".to_vec());
         let (report, _) = run_lines(&plan, &fetcher.wire(), 1);
 
         assert!(!report.is_complete());
@@ -2569,7 +2569,7 @@ mod tests {
         });
         let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
-        fetcher.insert(&cdn_url(&hash), body.to_vec());
+        fetcher.insert(cdn_url(&hash), body.to_vec());
 
         let first = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         run_lines(&first, &fetcher.wire(), 1);
@@ -2675,7 +2675,7 @@ mod tests {
         let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         let mut fetcher = Script::new();
         fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
-        fetcher.insert(&cdn_url(&hash), body.to_vec());
+        fetcher.insert(cdn_url(&hash), body.to_vec());
         let (report, lines) = run_lines(&plan, &fetcher.wire(), 1);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
@@ -2900,7 +2900,7 @@ mod tests {
             index_body.into_bytes(),
         );
         for (hash, body) in bodies {
-            fetcher.insert(&cdn_url(&hash), body.into_bytes());
+            fetcher.insert(cdn_url(&hash), body.into_bytes());
         }
 
         let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);

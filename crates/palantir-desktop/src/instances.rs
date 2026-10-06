@@ -143,7 +143,7 @@ pub fn last_played_label(millis: i64, now_millis: i64) -> String {
     if millis <= 0 {
         return "Never played".to_string();
     }
-    let seconds = ((now_millis - millis).max(0) / 1000) as i64;
+    let seconds = (now_millis - millis).max(0) / 1000;
     let ago = |count: i64, unit: &str| {
         if count == 1 {
             format!("1 {unit} ago")

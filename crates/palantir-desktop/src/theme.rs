@@ -1124,7 +1124,7 @@ impl Btn {
     /// same rule is how this got a light theme that brightened while the
     /// reference's darkened.
     fn role(&self, hovered: bool) -> button::Appearance {
-        let base = match self.role {
+        match self.role {
             Role::Primary => button::Appearance {
                 background: Some(accent().into()),
                 text_color: on_accent(),
@@ -1334,8 +1334,7 @@ impl Btn {
                 border: Border { radius: R_PANE.into(), ..Default::default() },
                 ..Default::default()
             },
-        };
-        base
+        }
     }
 }
 

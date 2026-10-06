@@ -1087,9 +1087,9 @@ pub fn install(
         let wrap = |error: Error| {
             Error::format(PathBuf::from(&label), format!("{label}: {error}"))
         };
-        resolve(&processor.jar).map_err(&wrap)?;
+        resolve(&processor.jar).map_err(wrap)?;
         for coord in &processor.classpath {
-            resolve(coord).map_err(&wrap)?;
+            resolve(coord).map_err(wrap)?;
         }
     }
     // The inputs: data artifacts and inline coordinates the processors that

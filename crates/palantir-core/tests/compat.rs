@@ -104,7 +104,7 @@ fn full_instance_fixture_round_trip() {
     instance.add_play_time_secs(42);
     instance.save().unwrap();
 
-    let reopened = Instance::open(&instance.root()).unwrap();
+    let reopened = Instance::open(instance.root()).unwrap();
     assert_eq!(reopened.name(), "Golden");
     assert_eq!(reopened.notes(), "created by palantir-core");
     assert_eq!(reopened.total_time_played_secs(), 42);

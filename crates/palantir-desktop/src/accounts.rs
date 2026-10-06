@@ -1013,7 +1013,7 @@ mod tests {
         let (_dir, path) = tmp_file();
         let mut store = AccountsStore::load(&path);
         store.add("Steve").unwrap();
-        assert!(store.selected_account().unwrap().is_microsoft() == false);
+        assert!(!store.selected_account().unwrap().is_microsoft());
         store.upsert_microsoft(msa_entry()).unwrap();
         assert_eq!(store.list().len(), 1, "the offline placeholder is gone");
         assert!(store.list()[0].is_microsoft());

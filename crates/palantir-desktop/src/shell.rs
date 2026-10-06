@@ -5589,9 +5589,9 @@ fn tags(&self) -> iced::Command<Message> {
         let panel = if self.panel_shown() { PANEL } else { 0.0 };
         let page_width = self.viewport.width - RAIL - panel;
         let elements: Vec<Element<Message>> = if self.panel_shown() {
-            vec![body.into(), self.panel()]
+            vec![body, self.panel()]
         } else {
-            vec![body.into()]
+            vec![body]
         };
         let page = container(row(elements).height(Length::Fill))
             .width(Length::Fill)
@@ -7151,7 +7151,7 @@ fn tags(&self) -> iced::Command<Message> {
             .push(crate::ui::input_sized(
                 theme,
                 crate::ui::InputSize::Standard,
-                &Key::SettingsLanguageLanguagesSearchFieldPlaceholder.message(),
+                Key::SettingsLanguageLanguagesSearchFieldPlaceholder.message(),
                 &self.locale_query,
                 Message::LocaleSearch,
             ));
@@ -7412,7 +7412,7 @@ fn tags(&self) -> iced::Command<Message> {
         )
         .style(crate::scroll::no_bar());
         let pane_height = pane;
-        let pane_scrolled = self.settings_tab_height().map_or(false, |height| height > pane_height);
+        let pane_scrolled = self.settings_tab_height().is_some_and(|height| height > pane_height);
         let pane_content: Element<'_, Message> = if pane_scrolled {
             // Two children in a cell: the scroll region, then the fade drawn 64
             // above the region's bottom edge. The negative spacing is how this kit
@@ -9200,7 +9200,7 @@ fn theme_columns(width: f32) -> usize {
 /// its own content in the 468 pixels a 720-pixel window gives it.
 fn appearance_settings_height(options: usize, columns: usize) -> f32 {
     let columns = columns.max(1);
-    let rows = ((options + columns - 1) / columns) as f32;
+    let rows = options.div_ceil(columns) as f32;
     let section = THEME_TITLE_LINE + THEME_HEADING_LEAD + THEME_BODY_LINE;
     let grid = rows * THEME_CARD_HEIGHT + (rows - 1.0) * THEME_GAP;
     section + THEME_HEADING_GAP + grid + THEME_SECTION_GAP + section
@@ -9328,10 +9328,10 @@ fn modal_scrim(viewport: iced::Size, opacity: f32) -> Background {
     let stops = &stops;
     let span = viewport.height + 2.0 * MODAL_SCRIM_INSET;
     let mut linear = gradient::Linear::new(Radians(angle));
-    linear = linear.add_stop(0.0, ramp_at(&stops, MODAL_SCRIM_INSET / span));
+    linear = linear.add_stop(0.0, ramp_at(stops, MODAL_SCRIM_INSET / span));
     linear = linear.add_stop(
         1.0,
-        ramp_at(&stops, (MODAL_SCRIM_INSET + viewport.height) / span),
+        ramp_at(stops, (MODAL_SCRIM_INSET + viewport.height) / span),
     );
     Background::Gradient(gradient::Gradient::Linear(linear))
 }

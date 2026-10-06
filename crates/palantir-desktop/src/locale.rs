@@ -345,9 +345,7 @@ pub fn coverage(tag: &str) -> Option<u32> {
     let mut table = table.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     // The table is keyed by the tag *it* carries rather than by the one that was
     // asked about, so the key is the reference's own `&'static str`.
-    let Some(locale) = locale_gen::ALL.iter().find(|locale| locale.tag == tag) else {
-        return None;
-    };
+    let locale = locale_gen::ALL.iter().find(|locale| locale.tag == tag)?;
     if let Some(found) = table.get(locale.tag) {
         return Some(*found);
     }

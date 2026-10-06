@@ -3512,9 +3512,7 @@ mod tests {
         });
         assert_eq!(
             mixed.request().facets,
-            vec![concat!(
-                r#"categories = "technology" AND open_source = true AND categories = "quilt""#
-            )
+            vec!["categories = \"technology\" AND open_source = true AND categories = \"quilt\""
             .to_string()],
             "and the parts are in `newFilters`' own order"
         );
@@ -3527,9 +3525,7 @@ mod tests {
         });
         assert_eq!(
             mixed.request().facets,
-            vec![concat!(
-                r#"categories = "technology" AND open_source = true AND categories IN ["fabric", "quilt"]"#
-            )
+            vec!["categories = \"technology\" AND open_source = true AND categories IN [\"fabric\", \"quilt\"]"
             .to_string()]
         );
 

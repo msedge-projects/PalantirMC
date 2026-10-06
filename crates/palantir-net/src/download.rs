@@ -235,7 +235,7 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
 
 /// Return `true` for ASCII hex digits (`0-9`, `a-f`, `A-F`).
 fn is_hex_digit(b: u8) -> bool {
-    matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+    b.is_ascii_hexdigit()
 }
 
 #[cfg(test)]

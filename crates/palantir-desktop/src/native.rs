@@ -979,15 +979,12 @@ mod tests {
     fn the_running_version_looks_like_a_version() {
         // Platform-dependent by nature, so it only asserts the shape: a real
         // version on this machine, or an honest `None` where there is none.
-        match windows_version() {
-            Some(label) => {
-                assert!(label.starts_with("Windows "), "unexpected label: {label}");
-                assert!(
-                    label.trim_start_matches("Windows ").split('.').count() >= 3,
-                    "a version needs major.minor.build: {label}"
-                );
-            }
-            None => {}
+        if let Some(label) = windows_version() {
+            assert!(label.starts_with("Windows "), "unexpected label: {label}");
+            assert!(
+                label.trim_start_matches("Windows ").split('.').count() >= 3,
+                "a version needs major.minor.build: {label}"
+            );
         }
     }
 

@@ -210,7 +210,7 @@ pub fn instance_var_map(
         profile,
         &instance.name(),
         &instance.id(),
-        &instance.root(),
+        instance.root(),
         &instance.game_root(),
         &crate::assets::game_assets_dir(
             &assets_root,

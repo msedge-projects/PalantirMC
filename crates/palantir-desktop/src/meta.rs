@@ -255,14 +255,13 @@ mod tests {
     /// about routing: what is asked of whom, without a document anywhere.
     fn routing(game: Option<&str>) -> PublisherMeta {
         let dir = std::env::temp_dir().join("palantirmc-meta-routing");
-        let store = PublisherMeta::over(
+        PublisherMeta::over(
             &Script::new().wire(),
             "https://mirror.invalid/v1",
             &dir,
             dir.join("content"),
             game.map(str::to_string),
-        );
-        store
+        )
     }
 
     #[test]
@@ -542,7 +541,7 @@ mod tests {
         let mut store = PublisherMeta::over(
             &wire,
             "https://mirror.invalid/v1",
-            &dir.path().join("meta"),
+            dir.path().join("meta"),
             dir.path().join("content"),
             Some("1.21.4".to_string()),
         );
