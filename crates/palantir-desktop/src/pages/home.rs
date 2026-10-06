@@ -548,17 +548,18 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // profile the reference's row reads *Last played* then *Custom group*, and
     // ours now says the same two things.
     //
-    // Two halves of the reference's own second combobox are named here rather
-    // than faked: the `#prefix` slot is `<LayoutGridIcon class="size-5
-    // text-primary" />`, a 20-pixel mark drawn *inside* the control's own frame,
-    // and `ui::select` -- `ui.rs`, another file -- has nowhere to put one, so both
-    // comboboxes here are missing their mark (the sort one wants `ArrowUpDownIcon`).
-    // What the grouping *does* is [`Group`]'s own paragraph: the choice is stored
-    // and shown, and the grid under it is still one group's worth of tiles.
+    // Both comboboxes wear a mark, not the words "Sort by" and "Group by":
+    // `sort-menu.vue`'s two `#prefix` slots are `ArrowUpDownIcon` and
+    // `LayoutGridIcon`, each `class="size-5 text-primary"`, and the two labels
+    // are `aria-label`s on those icons rather than text in the row -- unlike
+    // `browse-tab/layout.vue`, which puts a span there and is why [`ui::Prefix`]
+    // has two arms. What the grouping *does* is [`Group`]'s own paragraph: the
+    // choice is stored and shown, and the grid under it is still one group's
+    // worth of tiles.
     let second = row![
         ui::select(
             theme,
-            Key::AppLibrarySortLabel,
+            ui::Prefix::Glyph(SORT_MARK),
             state.sort.label(),
             COMBOBOX_WIDTH,
             state.menu == Some(Menu::Sort),
@@ -566,7 +567,7 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         ),
         ui::select(
             theme,
-            Key::AppLibraryGroupByLabel,
+            ui::Prefix::Glyph(GROUP_MARK),
             state.group.label(),
             COMBOBOX_WIDTH,
             state.menu == Some(Menu::Group),
@@ -580,7 +581,8 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     let mut bar = column![first, second].spacing(ROW_GAP).width(Length::Fill);
     // The panel, when one of the two has it open, as this column's next child:
     // `library-toolbar/index.vue` is `flex flex-col gap-2`, so the row's own
-    // spacing puts [`MENU_GAP`]'s eight between the trigger and it, and the tiles
+    // spacing puts its eight -- the `DROPDOWN_GAP` `Combobox.vue` would place the
+    // panel by, which is the same `gap-2` -- between the trigger and it, and the tiles
     // below keep the gap they were drawn with. Pushed only when one is open --
     // an empty child would still cost its spacing and move the grid down.
     if let Some(panel) = menu(theme, state) {
@@ -651,6 +653,16 @@ const TOOLBAR_RULE_HEIGHT: f32 = 24.0;
 /// mark, the label and the chevron -- and this port's [`ui::select`] is a fixed
 /// box, so one number stands for both.
 const COMBOBOX_WIDTH: f32 = 200.0;
+
+/// The mark the sort combobox wears in the slot `sort-menu.vue` opens with
+/// `<template #prefix><ArrowUpDownIcon class="size-5 text-primary"
+/// :aria-label="...app.library.sort.label" /></template>`, and the sort's own
+/// name for it.
+const SORT_MARK: Glyph = Glyph::ArrowUpDown;
+
+/// And the grouping combobox's: `<LayoutGridIcon class="size-5 text-primary"
+/// :aria-label="...app.library.group-by.label" />` in the second `#prefix` slot.
+const GROUP_MARK: Glyph = Glyph::LayoutGrid;
 
 /// `DropdownFilterBar.vue`'s mark with `use-filter-icon` set and nothing applied:
 /// `<FilterIcon class="size-5 text-primary" />`, and `size-5` is 1.25rem.
@@ -1271,6 +1283,11 @@ mod tests {
             "`Group` is the stored default, and this is the label it carries"
         );
         assert_eq!(Key::AppLibraryGroupByLabel.message(), "Group by");
+        // The two *labels of the two controls* are not drawn on the row -- the
+        // marks are -- but they are still carried, as the two marks' names:
+        // `sort-menu.vue` writes each as the `aria-label` of the icon in the
+        // `#prefix` slot. Held here so the pair stays in the string table.
+        assert_eq!(Key::AppLibrarySortLabel.message(), "Sort by");
         let state = State::default();
         assert_eq!(
             state.sort.label(),
@@ -1284,6 +1301,85 @@ mod tests {
         for theme in Gen::ALL {
             drop(library_view(*theme, &state, &cards));
         }
+    }
+
+    #[test]
+    fn the_toolbar_s_two_triggers_wear_the_marks_their_template_names() {
+        // `Combobox.vue:71` leaves the slot before a trigger's value to its
+        // caller, and the library toolbar is the one caller in the tree that
+        // fills it with a glyph. Both halves are read out of that file here, so
+        // an upstream rename or a re-tailwind moves the check with it: the two
+        // icons the two comboboxes ask for, the class they carry, and the fact
+        // that "Sort by"/"Group by" are `aria-label`s on those icons rather
+        // than text in the row -- which is what the two comboboxes on the browse
+        // page do, and the reason [`ui::Prefix`] has two arms.
+        let Some(source) = reference_file(
+            "app-frontend/src/components/ui/library/library-toolbar/sort-menu.vue",
+        ) else {
+            return;
+        };
+        // The two `#prefix` slots, in the order the two comboboxes appear.
+        let slots: Vec<String> = source
+            .split("<template #prefix>")
+            .skip(1)
+            .map(|rest| {
+                rest.split("</template>")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(slots.len(), 2, "one `#prefix` slot per combobox in the toolbar");
+        for (at, icon) in ["ArrowUpDownIcon", "LayoutGridIcon"].iter().enumerate() {
+            assert!(
+                slots[at].contains(icon),
+                "the toolbar's {at} combobox asks for `{icon}` in its prefix slot, and \
+                 the slot reads `{}`",
+                slots[at].trim()
+            );
+            assert!(
+                slots[at].contains("size-5"),
+                "`{icon}` is `size-5`, which is the twenty [`crate::ui::TRIGGER_ICON`] \
+                 draws it at"
+            );
+            assert!(
+                slots[at].contains("text-primary"),
+                "and `text-primary`, the ink both the mark and the browse page's text \
+                 prefix are drawn in"
+            );
+            // A glyph, not a word: the browse page's slots are `<span>`s and this
+            // pair must not be read off them.
+            assert!(
+                !slots[at].contains("<span"),
+                "the prefix slot is a mark rather than a span, which is what tells the \
+                 library's comboboxes apart from `browse-tab/layout.vue`'s"
+            );
+            assert!(
+                slots[at].contains("aria-label"),
+                "the label the mark stands for is its `aria-label`, so a string drawn \
+                 here instead would be neither the mark nor its name"
+            );
+        }
+        assert_eq!(SORT_MARK, Glyph::ArrowUpDown, "the first slot's `ArrowUpDownIcon`");
+        assert_eq!(GROUP_MARK, Glyph::LayoutGrid, "the second slot's `LayoutGridIcon`");
+        // And the two labels the marks answer to are the two the slots name,
+        // read off the ids rather than spelled out: `app.library.sort.label` and
+        // `app.library.group-by.label`, which are the keys this port holds as
+        // [`Key::AppLibrarySortLabel`] and [`Key::AppLibraryGroupByLabel`].
+        assert!(source.contains("'app.library.sort.label'"));
+        assert!(source.contains("'app.library.group-by.label'"));
+        // The sort's cap, which is the one combobox in the tree that raises it.
+        assert!(
+            source.contains(":max-height=\"320\""),
+            "the sort combobox passes `:max-height=\"320\"`; the grouping one passes \
+             none and keeps the default"
+        );
+    }
+
+    /// A file out of the vendored reference, or `None` when the tree is not
+    /// there -- `UPSTREAM.md` promises its absence changes no test.
+    fn reference_file(relative: &str) -> Option<String> {
+        std::fs::read_to_string(crate::reference_tokens::vendored_tree().join(relative)).ok()
     }
 
     #[test]

@@ -145,7 +145,7 @@ where
 /// fitter's own noise on a three-glyph label and no reason to spend glyphs on.
 /// Across the button labels alone the reference's extra runs from +0.18 to +0.38
 /// at one size and one weight, so there is no multiple of `hmtx` that holds them
-/// either -- see `button_width_sized`'s note.
+/// either -- see `button_width`'s note.
 const TRACKED: [(&str, f32, iced::font::Weight, f32); 6] = [
     // `NavTabs.vue`'s `text-sm` on `font-bold`, measured on `/user/FlameFire`.
     // The fits are carried at the precision the least-squares solve returned: they
@@ -406,9 +406,10 @@ fn glyph_pens(label: &str, font: iced::Font, size: f32) -> (Vec<f32>, f32) {
 
 /// How much room a button with this label needs: the label and its own padding.
 ///
-/// [`BUTTON_LABEL_SIZE`], [`BUTTON_PAD`] and [`heading`] are what [`button_text`]
-/// draws a label with, so this is the width that button will occupy rather than an
-/// approximation of it.
+/// [`BUTTON_LABEL_SIZE`], [`BUTTON_PAD`] and [`heading`] are what the builders
+/// below draw a label with -- [`button_or`] through [`button_face`], and
+/// [`button_text_sized`] for the one label that is a string -- so this is the
+/// width one of them will occupy rather than an approximation of it.
 pub fn button_width(label: &str) -> f32 {
     BUTTON_PAD * 2.0 + advance(label, heading(), BUTTON_LABEL_SIZE)
 }
@@ -671,7 +672,7 @@ pub const fn tag_height(icon: bool) -> f32 {
 /// The size a button's label is set at, which is `Button.vue`'s `text-sm`.
 ///
 /// A constant rather than a literal at the builders below because [`button_width`]
-/// has to measure exactly what [`button_text`] draws: a strip of buttons is broken
+/// has to measure exactly what they draw: a strip of buttons is broken
 /// on the measured widths, and a size written in two places is a size that can be
 /// changed in one of them.
 pub const BUTTON_LABEL_SIZE: f32 = 14.0;
@@ -1438,6 +1439,41 @@ const TRIGGER_TEXT: f32 = 16.0;
 /// control in a different branch, and the source of a wrong ink here.
 const TRIGGER_CHEVRON: f32 = 20.0;
 
+/// `size-5` on the mark a *library* combobox wears inside its trigger, which is
+/// the same class as [`TRIGGER_CHEVRON`] and read off other lines.
+///
+/// `sort-menu.vue`'s two `#prefix` slots are
+/// `<ArrowUpDownIcon class="size-5 text-primary" />` and
+/// `<LayoutGridIcon class="size-5 text-primary" />`, so the mark inside the
+/// trigger is the chevron's own twenty and not the sixteen an unclassed icon
+/// would fall back to. Equal to [`TRIGGER_CHEVRON`] and a constant of its own
+/// anyway: they are two elements on two files' lines, and one moving must not
+/// silently move the other.
+const TRIGGER_ICON: f32 = 20.0;
+
+/// What a combobox trigger draws before its value, which the reference varies
+/// per call site and this kit therefore has to be told.
+///
+/// `Combobox.vue:71` puts no content in the slot it opens -- it is the caller's
+/// `#prefix` -- and the two callers in the vendored tree fill it two ways.
+/// `browse-tab/layout.vue:190` and `:209` put a
+/// `<span class="font-semibold text-primary">` there, the sort reading *Sort
+/// by* and the view *View:*. `library/library-toolbar/sort-menu.vue`'s two
+/// comboboxes put a `size-5` glyph there instead -- `ArrowUpDownIcon` for the
+/// sort and `LayoutGridIcon` for the grouping -- and name *Sort by* and *Group
+/// by* only as an `aria-label`, which is a string with no surface in this kit.
+/// So one page's comboboxes wear text and another's wear a mark, and drawing the
+/// library's with the text is the mistake this enum exists to prevent: the
+/// capture this toolbar is measured against reads a 20-pixel mark there, not the
+/// words.
+#[derive(Debug, Clone, Copy)]
+pub enum Prefix {
+    /// A string from the locale table, in `text-primary`.
+    Text(Key),
+    /// A glyph at [`TRIGGER_ICON`], in `text-primary`.
+    Glyph(Glyph),
+}
+
 /// A combobox trigger: a prefix, the value, and the chevron that says it opens.
 ///
 /// The frame is `ButtonFrame.vue`'s and not this module's [`framed`], which is
@@ -1479,12 +1515,24 @@ const TRIGGER_CHEVRON: f32 = 20.0;
 /// control that has nowhere to go here.
 pub fn select<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
-    prefix: Key,
+    prefix: Prefix,
     value: &str,
     width: f32,
     open: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
+    // The slot's own content, either way in `text-primary`: the template's
+    // `<span class="font-semibold text-primary">` and its
+    // `<...Icon class="size-5 text-primary" />` name the same ink, so the two
+    // arms of [`Prefix`] differ in shape and not in colour.
+    let mark: Element<'a, Message> = match prefix {
+        Prefix::Text(key) => text(key.message())
+            .size(TRIGGER_TEXT)
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)))
+            .into(),
+        Prefix::Glyph(glyph) => icon::icon(glyph, TRIGGER_ICON, theme_gen::ink(theme, INK_DEFAULT)),
+    };
     let body = row![]
         .align_items(Alignment::Center)
         .spacing(TRIGGER_GAP)
@@ -1494,10 +1542,7 @@ pub fn select<'a, Message: Clone + Hovered + 'a>(
             // `text-inherit`. The trigger's two inner `div`s are the outer gap,
             // `gap-1.5`, so the two are not the same number.
             row![
-                text(prefix.message())
-                    .size(TRIGGER_TEXT)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                mark,
                 text(value.to_string())
                     .size(TRIGGER_TEXT)
                     .font(semibold())
@@ -1533,12 +1578,6 @@ pub fn select<'a, Message: Clone + Hovered + 'a>(
         .into()
 }
 
-/// How far the panel sits below the trigger that opened it.
-///
-/// `Combobox.vue`'s own `DROPDOWN_GAP`, in pixels, and the gap the caller puts
-/// between [`select`] and [`select_menu`] when it stacks the two.
-pub const MENU_GAP: f32 = 8.0;
-
 /// The panel's corner: `rounded-[14px]` on the dropdown in `Combobox.vue:126`.
 const MENU_RADIUS: f32 = 14.0;
 
@@ -1563,28 +1602,46 @@ pub const MENU_OPTION: f32 = MENU_PAD_V * 2.0 + MENU_LINE;
 /// The tallest the list of options is drawn before the reference stops growing
 /// it and scrolls instead: `DEFAULT_MAX_HEIGHT`, `Combobox.vue:250`.
 ///
-/// **Named, and not yet applied, and the difference is reachable.** The
-/// reference puts it on the `overflow-y-auto` viewport inside the dropdown
+/// **Named, and no menu this kit draws reaches it.** The reference puts it on
+/// the `overflow-y-auto` viewport inside the dropdown
 /// (`:style="{ maxHeight: ... }"`, `Combobox.vue:124`), over the same 44 it
-/// counts a row at, so its list is `min(44 x n, 300)` and its own panel is two
-/// hairlines more. Home's sort menu is the one menu this kit draws that reaches
-/// the cap: `Sort::ALL` is seven, which is 308 of options and a 310 panel, where
-/// the reference stops at 300 and a 302 panel and scrolls the eighth pixel of
-/// its last row. Measured here: the panel's top edge is y=207 and its bottom
-/// border y=516, 310 apart.
+/// counts a row at, so its list is `min(44 x n, cap)` and its own panel is two
+/// hairlines more -- `estimateDropdownHeight`, `Combobox.vue:517`. The cap is
+/// the default and not the rule, though: `sort-menu.vue` passes the *sort*
+/// combobox `:max-height="320"` and leaves the grouping one on the default, so
+/// the two comboboxes on the library toolbar are capped at 320 and 300 rather
+/// than both at 300. Home's sort is seven rows, 308 of options and a 310 panel,
+/// which is under its own 320 and therefore not clamped at all; its grouping is
+/// five, 220; and the browse page's two (five sorts, six view sizes) are under
+/// the default. Measured here: the panel's top edge is y=207 and its bottom
+/// border y=516, 310 apart, which is the 308 plus the frame's two hairlines and
+/// the same 310 the reference lays out.
 ///
-/// What stops it being this constant and a `.height()` is that the scroll is not
-/// this widget's to take. `Combobox.vue` scrolls the viewport itself, and here
-/// the wheel is routed once for the whole shell -- `shell.rs`'s
-/// `event::listen_with` turns every `MouseWheel` into a `Message::Wheel(name,
-/// wheel)` for the *page's* region and `Shell::glide` moves that region. A
-/// `scrollable` inside this panel would therefore have the page scrolling under
-/// it at the same time, which is one region's worth of movement applied twice.
-/// So the cap needs the shell to know a dropdown is open and to hand the wheel
-/// to it instead of the page: a second concern, and the one this constant is
-/// waiting on. Drawing the cap without it would hide the seventh sort behind a
-/// list that cannot be scrolled, which is worse than being 8 pixels tall.
+/// A first reading of this took the 300 for the whole app and concluded the sort
+/// menu was eight pixels too tall and scrolling its last row; the vendored
+/// `sort-menu.vue` is what says otherwise, and [`MENU_MAX_OPTIONS_SORT`] is the
+/// 320 it is read off. What would still stop this being a `.height()` if a menu
+/// did reach it is that the scroll is not this widget's to take.
+/// `Combobox.vue` scrolls the viewport itself, and here the wheel is routed once
+/// for the whole shell -- `shell.rs`'s `event::listen_with` turns every
+/// `MouseWheel` into a `Message::Wheel(name, wheel)` for the *page's* region and
+/// `Shell::glide` moves that region. A `scrollable` inside this panel would
+/// therefore have the page scrolling under it at the same time, which is one
+/// region's worth of movement applied twice. So a cap that bit would need the
+/// shell to know a dropdown is open and to hand the wheel to it instead of the
+/// page: a second concern, and the one this constant is waiting on. Drawing it
+/// without that would hide the last option behind a list that cannot be
+/// scrolled, which is worse than being eight pixels tall.
 pub const MENU_MAX_OPTIONS: f32 = 300.0;
+
+/// The cap the library sort combobox asks for instead of the default:
+/// `:max-height="320"` on the first `Combobox` in `sort-menu.vue`.
+///
+/// Only that one names a number; its grouping combobox beside it passes none and
+/// takes `DEFAULT_MAX_HEIGHT`. Both are seven-or-fewer rows, so neither is ever
+/// clamped here, and this exists so the gate can say so rather than leaving the
+/// 320 in a comment.
+pub const MENU_MAX_OPTIONS_SORT: f32 = 320.0;
 
 /// What an option that is not the chosen one brightens to under the pointer.
 ///
@@ -1704,7 +1761,10 @@ fn menu_shadow_rings() -> Vec<(f32, f32)> {
 /// page, which this kit cannot do -- iced 0.12 has no z-order, the same wall
 /// `Shell::run_switchers` and `Shell::download_panel` hit and took the same way.
 /// So the panel is drawn in the layout: the caller stacks it under the trigger
-/// with [`MENU_GAP`] between them, and what it draws is the reference's own box
+/// it belongs to with its own row gap between them -- eight, which is the number
+/// `Combobox.vue` calls `DROPDOWN_GAP` and the number Tailwind calls `gap-2`,
+/// and one constant rather than two because the two call sites here are rows
+/// that were already spaced -- and what it draws is the reference's own box
 /// -- `rounded-[14px] bg-surface-4 border border-solid border-surface-5`
 /// (`Combobox.vue:126`), and inside it one option per choice at `px-4 py-3`.
 ///
@@ -2073,33 +2133,6 @@ pub fn button<'a, Message: Clone + Hovered + 'a>(
     button_or(theme, key, label, kind, Some(on_press))
 }
 
-/// A button whose label is a string rather than a generated key.
-///
-/// `Button.vue` labels a control with a message, and every other button in this
-/// launcher has a [`Key`] behind its words. The language row is the one caller
-/// that cannot promise one: [`crate::locale::label`] resolves the reference's own
-/// `locale.<tag>` name for all 32 offered codes today, but the resolver is an
-/// `Option` because the list is the vendored tree's and a code upstream adds
-/// without a name must still draw. A missing name becomes its tag, and a tag is
-/// not a key -- so the label is a string here, which is the whole of why this
-/// constructor exists.
-pub fn button_text<'a, Message: Clone + Hovered + 'a>(
-    theme: Gen,
-    key: &'static str,
-    label: &str,
-    kind: Kind,
-    on_press: Message,
-) -> Element<'a, Message> {
-    let label = label.to_string();
-    button_face(theme, key, kind, Length::Shrink, Some(on_press), move |ink| {
-        text(label.clone())
-            .size(BUTTON_LABEL_SIZE)
-            .font(heading())
-            .style(iced::theme::Text::Color(ink))
-            .into()
-    })
-}
-
 /// A button that can be unusable, which is `on_press: None`.
 ///
 /// The reference has no disabled *button*: `Button.vue` always takes an action,
@@ -2296,8 +2329,11 @@ pub fn button_or_sized<'a, Message: Clone + Hovered + 'a>(
 
 /// The same button with a label that is a string rather than a generated key.
 ///
-/// See [`button_text`]: the language rows are names the vendored tree carries,
-/// and a name upstream adds without a message must still draw.
+/// The language rows are names the vendored tree carries, and a name upstream
+/// adds without a message must still draw: [`crate::locale::label`] resolves the
+/// reference's own `locale.<tag>` for all 32 offered codes today and returns an
+/// `Option` because the list is the vendored tree's, so a missing name becomes
+/// its tag -- and a tag is not a [`Key`].
 pub fn button_text_sized<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     key: &'static str,
@@ -2363,12 +2399,6 @@ pub fn icon_button_sized<'a, Message: Clone + Hovered + 'a>(
     sized_face(theme, key, kind, size, Length::Shrink, true, true, Some(on_press), move |ink| {
         icon::icon(glyph, size.icon(), ink)
     })
-}
-
-/// How much room a button at `size` with this label needs: the label and its own
-/// padding, measured with the same face [`button_text_sized`] draws it in.
-pub fn button_width_sized(label: &str, size: Size) -> f32 {
-    size.pad() * 2.0 + advance(label, size.font(), size.label())
 }
 
 /// The face of a button at one row of [`Size`]: its frame, its fill, and the
@@ -4191,12 +4221,27 @@ mod tests {
         // nothing about the widget would say so. Read as text because that is
         // what the mistake is -- a call site whose second argument is still the
         // label, which is exactly the shape this test refuses.
+        //
+        // The list is every constructor a page actually calls, which is not the
+        // same as every constructor this module exports: `ui::button` -- the
+        // unsized, always-press form -- has no call site outside this file at
+        // all, so a list that named it and stopped there would be checking
+        // nothing. It is named here anyway, because the day a page reaches for it
+        // is the day the check has to already be in place; the six below it are
+        // the ones the pages use today, counted by `grep -c` over `pages/` and
+        // the shell.
         for (page, source) in page_sources() {
             for call in [
                 "ui::button(",
                 "ui::button_with_icon(",
+                "ui::button_with_icon_sized(",
+                "ui::button_sized(",
+                "ui::button_or(",
+                "ui::button_or_sized(",
+                "ui::button_text_sized(",
                 "ui::tabs(",
                 "ui::icon_button(",
+                "ui::icon_button_sized(",
                 "ui::icon_button_kind(",
             ] {
                 for call_site in source.split(call).skip(1) {
@@ -4598,9 +4643,20 @@ mod tests {
             drop(search(*theme, "Search mods", "sodium", |_: String| ()));
             drop(select::<Probe>(
                 *theme,
-                Key::LabelSortBy,
+                Prefix::Text(Key::LabelSortBy),
                 "Relevance",
                 256.0,
+                false,
+                Probe::Crossed { key: "ui:test:select", over: false },
+            ));
+            // Both arms of [`Prefix`] build: the text one above, which is what
+            // the browse page's two comboboxes wear, and the glyph one below,
+            // which is what the library toolbar's two wear.
+            drop(select::<Probe>(
+                *theme,
+                Prefix::Glyph(Glyph::ArrowUpDown),
+                "Last played",
+                200.0,
                 false,
                 Probe::Crossed { key: "ui:test:select", over: false },
             ));
@@ -4838,7 +4894,17 @@ mod tests {
         // radius on the frame itself, and the `shadow-2xl` drawn under it as
         // rings -- the same two halves the class list asks for, in the two ways
         // this kit draws them.
-        assert_eq!(MENU_GAP, 8.0, "`DROPDOWN_GAP` in Combobox.vue, the gap above the panel");
+        // The gap above the panel is the caller's own, so there is no constant
+        // for it here: the pages stack the panel as the next child of the row or
+        // column that holds the trigger, and the eight between comes from that
+        // container's own `gap-2`. Both numbers are the same eight `Combobox.vue`
+        // calls `DROPDOWN_GAP`, and this is what says so rather than a constant
+        // nothing draws with.
+        assert_eq!(
+            crate::page::ROW_GAP,
+            8.0,
+            "`gap-2`, the gap the caller puts between a trigger and its panel"
+        );
         assert_eq!(MENU_RADIUS, 14.0, "`rounded-[14px]` on the dropdown");
         assert_eq!(MENU_PAD_H, 16.0, "`px-4` on an option");
         assert_eq!(MENU_PAD_V, 12.0, "`py-3` on the same");
@@ -4914,14 +4980,27 @@ mod tests {
         assert_eq!(MENU_SHADOW_SIDE, 13.0, "the fade's 25 less the spread's 12");
         assert_eq!(MENU_SHADOW_BELOW, 38.0, "and the 25 the shadow sits down by");
         // And the cap the reference stops its list at, which none of the drawing
-        // reads yet -- see [`MENU_MAX_OPTIONS`] for why, and this for the half of
-        // that reason that is arithmetic: the one menu this kit draws that runs
-        // into it. If a menu is ever added that reaches the cap and a page grows
-        // the wheel to scroll it, this is the assertion that has to move first.
+        // reads because no menu this kit draws reaches it -- see
+        // [`MENU_MAX_OPTIONS`]. The sorting is the close one: seven rows against
+        // the 320 `sort-menu.vue` raises that combobox's cap to, and the 300
+        // every other combobox in the tree keeps. If a menu is ever added that
+        // runs past one of the two, this is the assertion that has to move
+        // first, and the wheel routing it names has to move with it.
         assert_eq!(MENU_MAX_OPTIONS, 300.0, "`DEFAULT_MAX_HEIGHT` (`Combobox.vue:250`)");
+        assert_eq!(MENU_MAX_OPTIONS_SORT, 320.0, "`sort-menu.vue`'s `:max-height`");
         assert!(
-            MENU_OPTION * crate::pages::home::Sort::ALL.len() as f32 > MENU_MAX_OPTIONS,
-            "Home's sort menu is the one this kit draws that reaches the cap"
+            MENU_MAX_OPTIONS_SORT > MENU_MAX_OPTIONS,
+            "the library's sort is the one combobox that raises the default, and \
+             clamping it at the default was the eight pixels this pair disproves"
+        );
+        assert!(
+            MENU_OPTION * crate::pages::home::Sort::ALL.len() as f32 <= MENU_MAX_OPTIONS_SORT,
+            "Home's sort menu fits under its own raised cap, which is why our 310-pixel panel \
+             is the reference's and not a pixel of it hidden"
+        );
+        assert!(
+            MENU_OPTION * crate::pages::discover::Sort::ALL.len() as f32 <= MENU_MAX_OPTIONS,
+            "and the browse page's sort fits under the default it does not override"
         );
         let rings = menu_shadow_rings();
         assert_eq!(rings.len(), MENU_SHADOW_RINGS + 1, "the core and one ring per step");

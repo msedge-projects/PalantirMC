@@ -2443,13 +2443,20 @@ fn tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// is inside the reference's `lg:hidden` div (it is the narrow layout's), and a
 /// "*Modpacks* · relevance" caption, which is nobody's. Both are gone, and what
 /// is left is the reference's own pair.
+///
+/// Both prefixes here are **text**, which is the line that separates this row
+/// from the library toolbar's: `browse-tab/layout.vue:190` and `:209` put
+/// `<span class="font-semibold text-primary">` in the `#prefix` slot, where
+/// `sort-menu.vue` puts a `size-5` glyph. So [`ui::Prefix::Text`] here and
+/// [`ui::Prefix::Glyph`] there, and neither page can be read off the other --
+/// the same slot with two contents is the whole of [`ui::Prefix`].
 fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
         .push(ui::select(
             theme,
-            Key::LabelSortBy,
+            ui::Prefix::Text(Key::LabelSortBy),
             state.sort.label(),
             SORT_WIDTH,
             state.menu == Some(Menu::Sort),
@@ -2457,7 +2464,7 @@ fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         ))
         .push(ui::select(
             theme,
-            Key::BrowseViewPrefix,
+            ui::Prefix::Text(Key::BrowseViewPrefix),
             &state.view_label(),
             VIEW_WIDTH,
             state.menu == Some(Menu::View),
