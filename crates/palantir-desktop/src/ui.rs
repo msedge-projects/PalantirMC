@@ -1560,6 +1560,32 @@ const MENU_LINE: f32 = 20.0;
 /// How tall one option is, as the reference counts it.
 pub const MENU_OPTION: f32 = MENU_PAD_V * 2.0 + MENU_LINE;
 
+/// The tallest the list of options is drawn before the reference stops growing
+/// it and scrolls instead: `DEFAULT_MAX_HEIGHT`, `Combobox.vue:250`.
+///
+/// **Named, and not yet applied, and the difference is reachable.** The
+/// reference puts it on the `overflow-y-auto` viewport inside the dropdown
+/// (`:style="{ maxHeight: ... }"`, `Combobox.vue:124`), over the same 44 it
+/// counts a row at, so its list is `min(44 x n, 300)` and its own panel is two
+/// hairlines more. Home's sort menu is the one menu this kit draws that reaches
+/// the cap: `Sort::ALL` is seven, which is 308 of options and a 310 panel, where
+/// the reference stops at 300 and a 302 panel and scrolls the eighth pixel of
+/// its last row. Measured here: the panel's top edge is y=207 and its bottom
+/// border y=516, 310 apart.
+///
+/// What stops it being this constant and a `.height()` is that the scroll is not
+/// this widget's to take. `Combobox.vue` scrolls the viewport itself, and here
+/// the wheel is routed once for the whole shell -- `shell.rs`'s
+/// `event::listen_with` turns every `MouseWheel` into a `Message::Wheel(name,
+/// wheel)` for the *page's* region and `Shell::glide` moves that region. A
+/// `scrollable` inside this panel would therefore have the page scrolling under
+/// it at the same time, which is one region's worth of movement applied twice.
+/// So the cap needs the shell to know a dropdown is open and to hand the wheel
+/// to it instead of the page: a second concern, and the one this constant is
+/// waiting on. Drawing the cap without it would hide the seventh sort behind a
+/// list that cannot be scrolled, which is worse than being 8 pixels tall.
+pub const MENU_MAX_OPTIONS: f32 = 300.0;
+
 /// What an option that is not the chosen one brightens to under the pointer.
 ///
 /// `getOptionClasses` in `Combobox.vue:601` asks for `hover:brightness-[115%]`,
@@ -1750,8 +1776,7 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
             if index == 0 { MENU_RADIUS } else { 0.0 },
             if index == last { MENU_RADIUS } else { 0.0 },
             if index == last { MENU_RADIUS } else { 0.0 },
-        ]
-        .into();
+        ];
         let option: Element<'a, Message> = container(
             row![text(label.to_string())
                 .size(MENU_TEXT)
@@ -2336,7 +2361,7 @@ pub fn icon_button_sized<'a, Message: Clone + Hovered + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     sized_face(theme, key, kind, size, Length::Shrink, true, true, Some(on_press), move |ink| {
-        icon::icon(glyph, size.icon(), ink).into()
+        icon::icon(glyph, size.icon(), ink)
     })
 }
 
@@ -3955,11 +3980,25 @@ mod tests {
     fn the_measured_labels_are_the_ones_the_capture_named() {
         // [`TRACKED`] is keyed by string, size and weight, so a table entry that
         // does not name a string the interface draws is dead weight and one that
-        // names a string at the wrong size would be a lie. Both are checked
-        // against the messages the two pages draw those labels from.
-        assert!(TRACKED.iter().all(|(label, size, weight, _)| {
-            *size > 0.0 && matches!(*weight, iced::font::Weight::Normal | iced::font::Weight::Semibold | TAB_LABEL_WEIGHT)
-        }));
+        // names a string at the wrong size would be a lie. All three are checked,
+        // and the first of them against [`crate::text_gen::ALL`] -- the three
+        // thousand-odd strings the interface can put on screen. Without that half
+        // the table agrees with itself: a fit for `Collections` at a size no
+        // label carries would pass every assertion here and measure nothing.
+        for (label, size, weight, _) in TRACKED {
+            assert!(size > 0.0, "`{label}` is measured at {size}");
+            assert!(
+                matches!(
+                    weight,
+                    iced::font::Weight::Normal | iced::font::Weight::Semibold | TAB_LABEL_WEIGHT
+                ),
+                "`{label}` is measured at {weight:?}"
+            );
+            assert!(
+                crate::text_gen::ALL.iter().any(|key| key.message() == label),
+                "`{label}` is in the table but is not a string any key draws"
+            );
+        }
         let tab = |label: &str| tracking(label, inter(TAB_LABEL_WEIGHT), TAB_LABEL);
         assert!(tab("Data Packs") > 0.0 && tab("Modpacks") > 0.0 && tab("Collections") > 0.0);
         assert_eq!(tab("All"), 0.0, "*All* is drawn and measured not to want it");
@@ -4874,6 +4913,16 @@ mod tests {
         assert_eq!(MENU_SHADOW_FADE, 25.0, "a CSS blur of 50 is a Gaussian of 25");
         assert_eq!(MENU_SHADOW_SIDE, 13.0, "the fade's 25 less the spread's 12");
         assert_eq!(MENU_SHADOW_BELOW, 38.0, "and the 25 the shadow sits down by");
+        // And the cap the reference stops its list at, which none of the drawing
+        // reads yet -- see [`MENU_MAX_OPTIONS`] for why, and this for the half of
+        // that reason that is arithmetic: the one menu this kit draws that runs
+        // into it. If a menu is ever added that reaches the cap and a page grows
+        // the wheel to scroll it, this is the assertion that has to move first.
+        assert_eq!(MENU_MAX_OPTIONS, 300.0, "`DEFAULT_MAX_HEIGHT` (`Combobox.vue:250`)");
+        assert!(
+            MENU_OPTION * crate::pages::home::Sort::ALL.len() as f32 > MENU_MAX_OPTIONS,
+            "Home's sort menu is the one this kit draws that reaches the cap"
+        );
         let rings = menu_shadow_rings();
         assert_eq!(rings.len(), MENU_SHADOW_RINGS + 1, "the core and one ring per step");
         assert_eq!(rings[0].0, 0.0, "the innermost ring is the shadow's own shape");
