@@ -24,10 +24,11 @@
 //!
 //! The search field filters for real. The sort control shows the chosen order and
 //! the seven orders it offers are declared, labelled from the locale and asserted
-//! by this module's own gate -- the combobox that opens to pick one is the last
-//! piece of the control, and declaring its vocabulary now is what keeps the labels
-//! from being invented later. That forward declaration is what the attribute below
-//! permits.
+//! by this module's own gate -- and the combobox beside it opens, draws the
+//! reference's own panel and answers a press ([`toolbar`], [`menu`]), so the
+//! vocabulary declared here is what the panel offers. Declaring it first is what
+//! keeps the labels from being invented later; that forward declaration is what
+//! the attribute below permits.
 #![allow(dead_code)]
 
 use iced::mouse::Interaction;
@@ -100,6 +101,74 @@ impl Sort {
     }
 }
 
+/// What the library is grouped by.
+///
+/// `use-library.ts:69`'s own list, values and all: the reference stores
+/// `displayState.group` as one of those five strings, and `sort-menu.vue`'s
+/// `groupLabels` turns the stored value into the label the control shows -- so
+/// `Group` is what a fresh profile reads as *Custom group*, which is the default.
+///
+/// The choice is stored and drawn here, and the *grouping* is not. That is not
+/// an omission this control hides: an `InstanceGroup` per custom group needs the
+/// group store (`InstanceCard.group` is read from disk and nothing writes one),
+/// and *Instance type* needs a field no card in this launcher carries. So the
+/// panel answers the press and says which grouping was chosen, over a grid that
+/// is still one group's worth of tiles -- the reason is [`library`]'s, written
+/// out where the grid is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Group {
+    /// The reference's stored `'Group'`, shown as *Custom group*.
+    #[default]
+    Custom,
+    /// The reference's `'Instance type'`.
+    InstanceType,
+    /// The reference's `'Loader'`.
+    Loader,
+    /// The reference's `'Game version'`.
+    GameVersion,
+    /// The reference's `'None'`, shown as *No grouping*.
+    None,
+}
+
+impl Group {
+    /// Every grouping the control offers, in the reference's order.
+    pub const ALL: [Group; 5] = [
+        Group::Custom,
+        Group::InstanceType,
+        Group::Loader,
+        Group::GameVersion,
+        Group::None,
+    ];
+
+    /// The reference's key for this grouping's label.
+    pub const fn key(self) -> Key {
+        match self {
+            Group::Custom => Key::AppLibraryGroupByCustomGroup,
+            Group::InstanceType => Key::AppLibraryGroupByInstanceType,
+            Group::Loader => Key::AppLibraryGroupByLoader,
+            Group::GameVersion => Key::AppLibraryGroupByGameVersion,
+            Group::None => Key::AppLibraryGroupByNone,
+        }
+    }
+
+    /// The label, as the reference writes it.
+    pub fn label(self) -> &'static str {
+        self.key().message()
+    }
+}
+
+/// Which of the toolbar's two comboboxes has its panel open, if either.
+///
+/// The panel itself is [`crate::ui::select_menu`]'s; this is only which trigger
+/// asked for it and therefore which options and which offset it is drawn with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    /// *Sort by*, the first of the row's two.
+    Sort,
+    /// *Group by*, the second.
+    Group,
+}
+
 /// What Home can be told.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -107,6 +176,15 @@ pub enum Message {
     Search(String),
     /// A different sort was chosen.
     Sort(Sort),
+    /// A different grouping was chosen.
+    ///
+    /// Chosen rather than in force: see [`Group`] for what the choice reaches.
+    Group(Group),
+    /// A combobox's trigger was pressed: open its panel, or shut it again.
+    ///
+    /// `Combobox.vue:449`'s `handleTriggerClick`, which does exactly these two
+    /// things and nothing else.
+    Toggle(Menu),
     /// The welcome screen's create button.
     CreateInstance,
     /// The welcome screen's import button.
@@ -153,6 +231,10 @@ pub struct State {
     pub search: String,
     /// The chosen order.
     pub sort: Sort,
+    /// The chosen grouping.
+    pub group: Group,
+    /// Which combobox panel is open, if any.
+    pub menu: Option<Menu>,
     /// The last thing this page was asked to do and could not, shown as an
     /// admonition rather than swallowed.
     pub notice: Option<String>,
@@ -201,12 +283,29 @@ impl State {
 
     /// Apply a message.
     pub fn update(&mut self, message: Message) {
+        // The same rule Discover's panel is under: `Combobox.vue` closes on a
+        // click outside itself (`onClickOutside`), this kit has no such event,
+        // and `update` is the one place every message the page is sent passes
+        // through. So an open panel is shut by every message that is not its own
+        // trigger, a pointer crossing or a wheel -- a browser closes nothing by
+        // scrolling past it -- which leaves every press and every key the reader
+        // makes.
+        if !matches!(message, Message::Toggle(..) | Message::Hover { .. } | Message::Wheel(..)) {
+            self.menu = None;
+        }
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
             Message::Wheel(..) => {},
 
             Message::Search(text) => self.search = text,
             Message::Sort(sort) => self.sort = sort,
+            Message::Group(group) => self.group = group,
+            // The panel's own two answers: open it, or shut the one that is
+            // open. Pressing the same trigger twice is how a reader backs out
+            // of the panel without choosing anything.
+            Message::Toggle(menu) => {
+                self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+            }
             // Reported rather than applied, like `Open`: what makes an instance is
             // the store and where the flow goes is the shell, so this comes back
             // out of `Screen::update` as `Ask::Create`.
@@ -396,9 +495,9 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     ]
     .spacing(ROW_GAP)
     .align_items(Alignment::Center);
-    // The sort control shows the chosen order; the combobox that opens to pick
-    // another is the piece of the control this page still draws as a display
-    // (see the module note above).
+    // The sort control shows the chosen order, and the combobox beside it opens
+    // to pick another: both triggers are pressed and both panels are drawn by
+    // [`menu`], under this row where the reference drops them over it.
     //
     // The row is the reference's three children and not one: `library-toolbar/
     // index.vue` writes `<SortMenu />`, then
@@ -449,33 +548,79 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // profile the reference's row reads *Last played* then *Custom group*, and
     // ours now says the same two things.
     //
-    // Two halves of it are still missing and both are named here rather than
-    // faked: the `#prefix` slot is `<LayoutGridIcon class="size-5 text-primary" />`,
-    // a 20-pixel mark drawn *inside* the control's own frame, and `ui::select` --
-    // `ui.rs`, another file -- has nowhere to put one, so both comboboxes here are
-    // missing their mark (the sort one wants `ArrowUpDownIcon`); and the grouping
-    // itself has no model, so this is a display beside the sort control, which is
-    // one for the same reason.
-    let group_by = ui::select(
-        theme,
-        Key::AppLibraryGroupByLabel,
-        Key::AppLibraryGroupByCustomGroup.message(),
-        COMBOBOX_WIDTH,
-    );
+    // Two halves of the reference's own second combobox are named here rather
+    // than faked: the `#prefix` slot is `<LayoutGridIcon class="size-5
+    // text-primary" />`, a 20-pixel mark drawn *inside* the control's own frame,
+    // and `ui::select` -- `ui.rs`, another file -- has nowhere to put one, so both
+    // comboboxes here are missing their mark (the sort one wants `ArrowUpDownIcon`).
+    // What the grouping *does* is [`Group`]'s own paragraph: the choice is stored
+    // and shown, and the grid under it is still one group's worth of tiles.
     let second = row![
         ui::select(
             theme,
             Key::AppLibrarySortLabel,
             state.sort.label(),
-            COMBOBOX_WIDTH
+            COMBOBOX_WIDTH,
+            state.menu == Some(Menu::Sort),
+            Message::Toggle(Menu::Sort),
         ),
-        group_by,
+        ui::select(
+            theme,
+            Key::AppLibraryGroupByLabel,
+            state.group.label(),
+            COMBOBOX_WIDTH,
+            state.menu == Some(Menu::Group),
+            Message::Toggle(Menu::Group),
+        ),
         rule,
         filter
     ]
     .spacing(ROW_GAP)
     .align_items(Alignment::Center);
-    column![first, second].spacing(ROW_GAP).width(Length::Fill).into()
+    let mut bar = column![first, second].spacing(ROW_GAP).width(Length::Fill);
+    // The panel, when one of the two has it open, as this column's next child:
+    // `library-toolbar/index.vue` is `flex flex-col gap-2`, so the row's own
+    // spacing puts [`MENU_GAP`]'s eight between the trigger and it, and the tiles
+    // below keep the gap they were drawn with. Pushed only when one is open --
+    // an empty child would still cost its spacing and move the grid down.
+    if let Some(panel) = menu(theme, state) {
+        bar = bar.push(panel);
+    }
+    bar.into()
+}
+
+/// The panel one of the toolbar's two comboboxes has open, under its trigger.
+///
+/// Where it sits horizontally is the trigger's own offset in [`toolbar`]'s row,
+/// so it lands under the control that opened it: 0 for the sort, one trigger and
+/// one gap for the grouping.
+fn menu<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
+    let (namespace, offset, options, chosen) = match state.menu? {
+        Menu::Sort => (
+            "home:sort",
+            0.0,
+            Sort::ALL
+                .iter()
+                .map(|order| (order.label(), Message::Sort(*order)))
+                .collect::<Vec<_>>(),
+            state.sort.label(),
+        ),
+        Menu::Group => (
+            "home:group",
+            COMBOBOX_WIDTH + ROW_GAP,
+            Group::ALL
+                .iter()
+                .map(|group| (group.label(), Message::Group(*group)))
+                .collect::<Vec<_>>(),
+            state.group.label(),
+        ),
+    };
+    Some(
+        row![Space::with_width(offset), ui::select_menu(theme, namespace, COMBOBOX_WIDTH, &options, chosen)]
+            .align_items(Alignment::Start)
+            .width(Length::Fill)
+            .into(),
+    )
 }
 
 /// The reference's tile grid, as measured at the shell's own 1280-pixel window.
@@ -1137,6 +1282,95 @@ mod tests {
         assert_eq!(COMBOBOX_WIDTH, 200.0);
         let cards = sample();
         for theme in Gen::ALL {
+            drop(library_view(*theme, &state, &cards));
+        }
+    }
+
+    #[test]
+    fn the_group_by_panel_offers_the_reference_s_five_groupings_in_its_order() {
+        // `use-library.ts:69`'s `libraryGroupOptions` and `sort-menu.vue`'s own
+        // `groupLabels`: five stored values, and the labels the reference writes
+        // for them. The panel is built from [`Group::ALL`], so the list is the
+        // vocabulary the reader sees.
+        assert_eq!(Group::ALL.len(), 5);
+        assert_eq!(Group::default(), Group::Custom, "a fresh profile stores 'Group'");
+        let labels: Vec<&str> = Group::ALL.iter().map(|group| group.label()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Custom group",
+                "Instance type",
+                "Loader",
+                "Game version",
+                "No grouping",
+            ]
+        );
+        for group in Group::ALL {
+            assert_eq!(group.label(), group.key().message());
+            assert!(!group.label().is_empty());
+        }
+        // And the choice a press makes is the choice the trigger then reads.
+        let mut state = State::default();
+        assert_eq!(state.group.label(), labels[0]);
+        state.update(Message::Group(Group::Loader));
+        assert_eq!(state.group.label(), "Loader");
+        assert_eq!(state.menu, None, "choosing is a press outside the panel");
+    }
+
+    #[test]
+    fn each_combobox_trigger_opens_its_own_panel_and_shuts_it_again() {
+        // `Combobox.vue:449`'s `handleTriggerClick`, which does exactly these
+        // two things: open the panel named by the press, or shut the one that is
+        // open. Two triggers, so two panels, never both at once.
+        let mut state = State::default();
+        assert_eq!(state.menu, None, "a fresh page draws no panel");
+        state.update(Message::Toggle(Menu::Sort));
+        assert_eq!(state.menu, Some(Menu::Sort));
+        // The second press on the same trigger is how a reader backs out.
+        state.update(Message::Toggle(Menu::Sort));
+        assert_eq!(state.menu, None);
+        // Pressing the *other* trigger while one is open swaps to it rather than
+        // stacking: the reference's panel is one element.
+        state.update(Message::Toggle(Menu::Sort));
+        state.update(Message::Toggle(Menu::Group));
+        assert_eq!(state.menu, Some(Menu::Group));
+        // Every other press and every key is the click-outside this kit has no
+        // event for ([`State::update`]'s rule), so an open panel is shut by them.
+        for message in [
+            Message::Sort(Sort::Name),
+            Message::Group(Group::Loader),
+            Message::Search("sodium".to_string()),
+            Message::DismissNotice,
+        ] {
+            state.menu = Some(Menu::Group);
+            state.update(message);
+            assert_eq!(state.menu, None);
+        }
+        // A pointer crossing and a wheel are not presses: a browser closes
+        // nothing by scrolling past it, so neither does this.
+        for message in [
+            Message::Hover { key: "home:sort", over: true, hover: None },
+            Message::Wheel(
+                "home:library",
+                crate::scroll::Wheel {
+                    notches: 1.0,
+                    content_height: 1200.0,
+                    view_height: 600.0,
+                    offset: 0.0,
+                },
+            ),
+        ] {
+            state.menu = Some(Menu::Sort);
+            state.update(message);
+            assert_eq!(state.menu, Some(Menu::Sort));
+        }
+        // And the row with the two triggers draws over every theme, with a panel
+        // open under it as well as shut.
+        let cards = sample();
+        for theme in Gen::ALL {
+            state.menu = None;
+            drop(library_view(*theme, &state, &cards));
+            state.menu = Some(Menu::Group);
             drop(library_view(*theme, &state, &cards));
         }
     }

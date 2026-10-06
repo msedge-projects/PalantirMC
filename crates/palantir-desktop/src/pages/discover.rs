@@ -199,6 +199,19 @@ impl Sort {
     }
 }
 
+/// Which of the page's two comboboxes has its panel open.
+///
+/// One or the other, never both: `Combobox.vue` opens on a trigger press and
+/// this page has no way to have two pointers. The panel itself is
+/// [`crate::ui::select_menu`]'s, and where it sits on the page is [`menu`]'s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    /// The order the results are in, the `!w-[16rem]` one.
+    Sort,
+    /// How many results a page holds, the `!w-[9rem]` one.
+    View,
+}
+
 /// How many results a page holds.
 ///
 /// `[5, 10, 15, 20, 50, 100]`, of which the reference opens on 20.
@@ -286,6 +299,12 @@ pub enum Message {
     /// choosing one of those is what asks. The id is the section's own, as it is
     /// for every other press in the panel.
     Expand(String),
+    /// A combobox's trigger was pressed: open its panel, or shut it again.
+    ///
+    /// `Combobox.vue:449`'s `handleTriggerClick`, which does exactly these two
+    /// things and nothing else -- the panel is not the page's state to guess at,
+    /// it is this message and the [`Menu`] it names.
+    Toggle(Menu),
     /// One result was opened. Reported rather than applied: which page is in the
     /// pane is the shell's business, so this comes back out of
     /// [`crate::pages::Screen::update`] as an [`crate::pages::Open`].
@@ -402,6 +421,11 @@ pub struct State {
     pub sort: Sort,
     /// How many results to a page.
     pub view: usize,
+    /// Which combobox panel is open, if any.
+    ///
+    /// The whole of [`Menu`]'s state: the panel's own contents are derived from
+    /// it every frame, so there is nothing else to keep in step.
+    pub menu: Option<Menu>,
     /// The current page, one-based.
     pub page: usize,
     /// Whether the sidebar's *Hide already installed* switch is on.
@@ -508,6 +532,7 @@ impl State {
             query: String::new(),
             sort: Sort::default(),
             view: DEFAULT_VIEW,
+            menu: None,
             page: 1,
             hide_installed: false,
             categories: BTreeSet::new(),
@@ -537,9 +562,38 @@ impl State {
     /// One message in, at most one request out: a page cannot ask twice in a turn,
     /// and the shell cannot be handed a request it has already run.
     pub fn update(&mut self, message: Message) -> Option<Ask> {
+        // `Combobox.vue` closes its panel on a click outside it -- the
+        // `onClickOutside` at the end of that file -- and this kit has no such
+        // event. What it does have is one place every message the page is sent
+        // passes through, which is this function, so the panel is shut by every
+        // message that is not its own trigger, a pointer crossing, a scroll (a
+        // browser closes nothing by scrolling past it) or an answer that merely
+        // landed while it was open. What is left is every press and every key
+        // the reader makes, which is what the click-outside was for.
+        if !matches!(
+            message,
+            Message::Toggle(..)
+                | Message::Hover { .. }
+                | Message::Wheel(..)
+                | Message::Scrolled(..)
+                | Message::VersionsScrolled(..)
+                | Message::Found { .. }
+                | Message::Tags { .. }
+                | Message::Icons { .. }
+        ) {
+            self.menu = None;
+        }
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
             Message::Wheel(..) => {},
+
+            // The panel is shut by the rule above when anything else is pressed,
+            // so this is only the trigger's own two answers: open, or shut the
+            // one that is open. Pressing the same trigger twice is how a reader
+            // changes their mind without choosing anything.
+            Message::Toggle(menu) => {
+                self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+            }
 
             // Nothing to do with it here: where the region is *is* the page's
             // state, and the next frame ([`view`]) is the one that uses it.
@@ -1064,26 +1118,34 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
         // there are two gaps, not one, and they differ by exactly the `mt-1` on
         // the results block (`layout.vue:258`, `class="search mt-1
         // [overflow-anchor:none]"`) sitting on top of the wrapper's eight.
-        column![
-            // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
-            // the one search field in the tree that does: 48 pixels, `px-4`, a
-            // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
-            // hairline. A capture of both clients at 1280x720 agrees on every
-            // number -- the reference's field runs y 126..173 and so does this
-            // one, forty-eight rows of `h-12` where `ui::CONTROL`'s forty would
-            // not have been.
-            ui::input_sized(
-                theme,
-                ui::InputSize::Large,
-                &state.placeholder(),
-                &state.query,
-                Message::Query,
-            ),
-            controls(theme, state),
-        ]
-        .spacing(SEARCH_TO_CONTROLS)
-        .width(Length::Fill)
-        .into(),
+        {
+            let mut group = column![
+                // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
+                // the one search field in the tree that does: 48 pixels, `px-4`, a
+                // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
+                // hairline. A capture of both clients at 1280x720 agrees on every
+                // number -- the reference's field runs y 126..173 and so does this
+                // one, forty-eight rows of `h-12` where `ui::CONTROL`'s forty would
+                // not have been.
+                ui::input_sized(
+                    theme,
+                    ui::InputSize::Large,
+                    &state.placeholder(),
+                    &state.query,
+                    Message::Query,
+                ),
+                controls(theme, state),
+            ]
+            .spacing(SEARCH_TO_CONTROLS)
+            .width(Length::Fill);
+            // The panel, when one of the two comboboxes has it open. Pushed only
+            // then: an empty child would still cost the column's own spacing and
+            // move the results down, and a closed page has no panel to show.
+            if let Some(panel) = menu(theme, state) {
+                group = group.push(panel);
+            }
+            group.into()
+        },
         results(theme, state),
     ])]
     .width(Length::Fill)
@@ -2385,9 +2447,72 @@ fn controls<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
-        .push(ui::select(theme, Key::LabelSortBy, state.sort.label(), 256.0))
-        .push(ui::select(theme, Key::BrowseViewPrefix, &state.view_label(), 144.0))
+        .push(ui::select(
+            theme,
+            Key::LabelSortBy,
+            state.sort.label(),
+            SORT_WIDTH,
+            state.menu == Some(Menu::Sort),
+            Message::Toggle(Menu::Sort),
+        ))
+        .push(ui::select(
+            theme,
+            Key::BrowseViewPrefix,
+            &state.view_label(),
+            VIEW_WIDTH,
+            state.menu == Some(Menu::View),
+            Message::Toggle(Menu::View),
+        ))
         .into()
+}
+
+/// The sort trigger's width: `!w-[16rem]` on the reference's own class.
+const SORT_WIDTH: f32 = 256.0;
+
+/// The view trigger's width: `!w-[9rem]` on the same class.
+const VIEW_WIDTH: f32 = 144.0;
+
+/// The panel one of the two comboboxes has open, under the trigger that opened it.
+///
+/// The panel's vertical place is this column's next child after [`controls`],
+/// which gives it [`SEARCH_TO_CONTROLS`] of air above it -- the same eight
+/// `Combobox.vue` calls `DROPDOWN_GAP` -- and leaves the results below the gap
+/// they were drawn with. It is pushed only when a panel is open: a child with
+/// nothing in it would still cost its spacing, and the capture this page is
+/// measured against has none.
+///
+/// Its horizontal place is the trigger's own offset in [`controls`]'s row, so it
+/// lands under the control that opened it rather than under the page: 0 for the
+/// sort, one trigger and one gap for the view.
+fn menu<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
+    let (namespace, offset, width, options, chosen) = match state.menu? {
+        Menu::Sort => (
+            "discover:sort",
+            0.0,
+            SORT_WIDTH,
+            Sort::ALL
+                .iter()
+                .map(|order| (order.label().to_string(), Message::Sort(*order)))
+                .collect::<Vec<_>>(),
+            state.sort.label().to_string(),
+        ),
+        Menu::View => (
+            "discover:view",
+            SORT_WIDTH + ROW_GAP,
+            VIEW_WIDTH,
+            VIEW_SIZES
+                .iter()
+                .map(|size| (size.to_string(), Message::View(*size)))
+                .collect::<Vec<_>>(),
+            state.view_label(),
+        ),
+    };
+    Some(
+        row![Space::with_width(offset), ui::select_menu(theme, namespace, width, &options, &chosen)]
+            .align_items(Alignment::Start)
+            .width(Length::Fill)
+            .into(),
+    )
 }
 
 /// The results, the blocks for an answer still on the way, or the sentence for
@@ -2831,6 +2956,74 @@ mod tests {
         );
         let tokens: Vec<&str> = Sort::ALL.iter().map(|sort| sort.token()).collect();
         assert_eq!(tokens, vec!["relevance", "downloads", "follows", "newest", "updated"]);
+    }
+
+    #[test]
+    fn each_control_s_panel_opens_on_its_own_trigger_and_shuts_on_any_other_press() {
+        // `Combobox.vue:449`'s `handleTriggerClick`: the press names the panel,
+        // and the second press on the same trigger shuts it. The reference's
+        // panel is one element, so two triggers never have one open each.
+        let mut state = state_of(ProjectType::Mod);
+        assert_eq!(state.menu, None, "a fresh page draws no panel");
+        assert!(state.update(Message::Toggle(Menu::Sort)).is_none(), "opening asks for nothing");
+        assert_eq!(state.menu, Some(Menu::Sort));
+        assert!(state.update(Message::Toggle(Menu::Sort)).is_none());
+        assert_eq!(state.menu, None, "the second press is how a reader backs out");
+        state.update(Message::Toggle(Menu::Sort));
+        state.update(Message::Toggle(Menu::View));
+        assert_eq!(state.menu, Some(Menu::View), "the other trigger swaps rather than stacks");
+        // The panel's chosen row is the control's own current value, so the
+        // label the trigger reads and the row the panel paints green are the
+        // same string.
+        assert_eq!(state.sort.label(), "Relevance");
+        assert_eq!(state.view_label(), "20");
+        // Choosing is a press outside the panel's own two answers, so it shuts
+        // the panel as well as changing the control -- which is what
+        // `onClickOutside` did for a click that landed on an option.
+        assert!(state.update(Message::Sort(Sort::Downloads)).is_some(), "and it re-asks");
+        assert_eq!(state.menu, None);
+        assert_eq!(state.sort.label(), "Downloads");
+        state.update(Message::Toggle(Menu::View));
+        state.update(Message::View(10));
+        assert_eq!(state.menu, None);
+        assert_eq!(state.view_label(), "10");
+        // Every other press is the click-outside this kit has no event for, so
+        // `update` is where an open panel is shut by it.
+        for message in [
+            Message::Query("sodium".to_string()),
+            Message::Category("technology".to_string()),
+            Message::Section("technology".to_string()),
+            Message::Page(2),
+            Message::Search,
+        ] {
+            state.menu = Some(Menu::Sort);
+            state.update(message);
+            assert_eq!(state.menu, None);
+        }
+        // A pointer crossing, a scroll and an answer that lands while the panel
+        // is open are none of them presses: the browser closes nothing by
+        // scrolling past it, and an older search's results arriving is not the
+        // reader doing anything at all. The answer here is a stale one (round 0
+        // is never the page's own), so it is dropped as well as leaving the
+        // panel open.
+        for message in [
+            Message::Hover { key: "discover:sort", over: true, hover: None },
+            Message::Scrolled(crate::scroll::Geometry::default()),
+            Message::VersionsScrolled(crate::scroll::Geometry::default()),
+            Message::Found { round: 0, result: Ok(Vec::new()) },
+        ] {
+            state.menu = Some(Menu::Sort);
+            state.update(message);
+            assert_eq!(state.menu, Some(Menu::Sort));
+        }
+        // And the row with the two triggers, and a panel under it, draw over
+        // every theme.
+        for theme in Gen::ALL {
+            state.menu = None;
+            drop(super::view(*theme, &state, &Store::default()));
+            state.menu = Some(Menu::View);
+            drop(super::view(*theme, &state, &Store::default()));
+        }
     }
 
     #[test]

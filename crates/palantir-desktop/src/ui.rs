@@ -1460,11 +1460,29 @@ const TRIGGER_CHEVRON: f32 = 20.0;
 /// `(66,68,74)` against the reference's `(52,54,60)`, which is the pair the two
 /// had swapped. And the chevron measured 12x8 in the reference against 10x6 in
 /// ours -- the 20/16 ratio, which is `size-5` against a `size-4`.
-pub fn select<'a, Message: 'a>(
+///
+/// The trigger is a [`mouse_area`] on `on_press` because the reference's is a
+/// `<button>` (`Combobox.vue:64`): pressing it opens the panel [`select_menu`]
+/// draws under it. It takes no hover of its own, and that is measured rather
+/// than assumed -- `ButtonFrame.vue:98` applies `interactionClasses` only when
+/// the frame's type is `quiet`, this one is `base`, and `Combobox.vue` adds no
+/// `button-animation` to it -- so a crossing here changes no colour, which is
+/// what a capture of this launcher showed before the control was a button at
+/// all: the frame read the same under the pointer as away from it.
+///
+/// The chevron is `Combobox.vue:71`'s own: a `ChevronLeftIcon` turned `-90deg`
+/// when shut, which reads as down, and `rotate-90` when open, which reads as up,
+/// with `transition-transform duration-150` carrying one to the other. This kit
+/// rotates no glyph, so the two states are the two glyphs and the panel's own
+/// arrival is what marks the change; the 150 ms turn is the one piece of this
+/// control that has nowhere to go here.
+pub fn select<'a, Message: Clone + Hovered + 'a>(
     theme: Gen,
     prefix: Key,
     value: &str,
     width: f32,
+    open: bool,
+    on_press: Message,
 ) -> Element<'a, Message> {
     let body = row![]
         .align_items(Alignment::Center)
@@ -1489,7 +1507,7 @@ pub fn select<'a, Message: 'a>(
         )
         .push(Space::with_width(Length::Fill))
         .push(icon::icon(
-            Glyph::ChevronDown,
+            if open { Glyph::ChevronUp } else { Glyph::ChevronDown },
             TRIGGER_CHEVRON,
             theme_gen::ink(theme, INK_CONTRAST),
         ));
@@ -1508,7 +1526,190 @@ pub fn select<'a, Message: 'a>(
             ..container::Appearance::default()
         })
         .into();
-    container(trigger).width(Length::Fixed(width)).into()
+    mouse_area(container(trigger).width(Length::Fixed(width)))
+        .interaction(Interaction::Pointer)
+        .on_press(on_press)
+        .into()
+}
+
+/// How far the panel sits below the trigger that opened it.
+///
+/// `Combobox.vue`'s own `DROPDOWN_GAP`, in pixels, and the gap the caller puts
+/// between [`select`] and [`select_menu`] when it stacks the two.
+pub const MENU_GAP: f32 = 8.0;
+
+/// The panel's corner: `rounded-[14px]` on the dropdown in `Combobox.vue:126`.
+const MENU_RADIUS: f32 = 14.0;
+
+/// An option's horizontal padding: `px-4` on the same line.
+const MENU_PAD_H: f32 = 16.0;
+
+/// An option's vertical padding: `py-3` on the same line.
+const MENU_PAD_V: f32 = 12.0;
+
+/// An option's label: `font-semibold leading-tight` at the app's own 16.
+const MENU_TEXT: f32 = 16.0;
+
+/// The line that label sits on.
+///
+/// `leading-tight` is 1.25, and 16 x 1.25 is what makes an option 44 tall:
+/// `Combobox.vue:357` counts 44 for one without a sub-label, 68 with one.
+const MENU_LINE: f32 = 20.0;
+
+/// How tall one option is, as the reference counts it.
+pub const MENU_OPTION: f32 = MENU_PAD_V * 2.0 + MENU_LINE;
+
+/// What an option that is not the chosen one brightens to under the pointer.
+///
+/// `getOptionClasses` in `Combobox.vue:601` asks for `hover:brightness-[115%]`,
+/// which is not the 1.25 the rest of the interface hovers at -- the reference
+/// scopes that one on `.button-animation` and this row does not carry it.
+const MENU_HOVER: f32 = 1.15;
+
+/// The panel a [`select`] opens: the reference's own dropdown, under its trigger.
+///
+/// `Combobox.vue`'s dropdown is teleported to `<body>` and positioned over the
+/// page, which this kit cannot do -- iced 0.12 has no z-order, the same wall
+/// `Shell::run_switchers` and `Shell::download_panel` hit and took the same way.
+/// So the panel is drawn in the layout: the caller stacks it under the trigger
+/// with [`MENU_GAP`] between them, and what it draws is the reference's own box
+/// -- `rounded-[14px] bg-surface-4 border border-solid border-surface-5`
+/// (`Combobox.vue:126`), and inside it one option per choice at `px-4 py-3`.
+///
+/// What it does **not** draw is the `shadow-2xl` on that same line, and that is
+/// the limit [`card_shadow`] writes up rather than an oversight: the reference's
+/// `0 25px 50px -12px rgb(0 0 0 / 0.25)` was built at 1280x820 in this kit's own
+/// release build, and iced 0.12.3's solid pipeline composites it in the quad's
+/// own fragment, so it lands on the panel's fill instead of behind it. Measured
+/// with it: every row reads a veil of 0.175 over the panel's own `#34363c` from
+/// the left border to x=263 -- twenty-four pixels short of the right one, where
+/// the veil stops dead in a vertical step -- ramping in over the top 43 rows the
+/// way the 25-pixel offset asks for, and the page beside the panel reads 0.136
+/// above, left and right and 0.318 immediately below. The chosen row's green is
+/// veiled with the rest, so the panel is not merely dimmer than the reference's:
+/// it is dimmer on the left of a hard edge and clean on the right of it. The
+/// second placement `card_shadow`'s table tried was tried here too -- the shadow
+/// on a parent quad, so the panel's own opaque fill is painted after it -- and
+/// it reads the same veil (0.135 across the whole panel, clean only in the right
+/// twenty-four pixels, and the left border veiled with the rest). So it is the
+/// limit rather than the placement, and without the shadow the rows read exactly
+/// what [`Ink::Surface4`] and [`Ink::Green`] say, across the full width, with the
+/// `border-surface-5` hairline as the elevation the panel is left -- one
+/// `iced::Shadow` fewer, the same choice the tab strip made.
+///
+/// The chosen option is the reference's own: `bg-highlight-green` and
+/// `text-green` (`getOptionClasses`), which is `Ink::GreenHighlight` over the
+/// panel's own `Ink::Surface4` and `Ink::Green` for its label -- the brand green
+/// at a quarter alpha composited by the renderer rather than by hand, because
+/// the panel's fill is painted under it in the same frame.
+///
+/// Each option rounds only the corners the panel would clip for it:
+/// `overflow-hidden` on the panel is what gives a first or last option its
+/// rounded end in the reference, and this kit clips nothing, so the two outer
+/// corners are set on the option instead. An option that is not the chosen one
+/// is the panel's own colour, so the rounding is invisible on it and only the
+/// green row needs it.
+///
+/// Nothing here reaches the reference's `maxHeight` (300 by default, 320 for the
+/// library's own pair): the four menus this draws hold five, six, seven and five
+/// options, so the tallest is 308 against the library's 320 and every one of them
+/// fits. The cap is a scroll region this control does not yet need -- see
+/// [`MENU_OPTION`] for the arithmetic a caller can check its own menu against.
+pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
+    theme: Gen,
+    namespace: &'static str,
+    width: f32,
+    options: &[(L, Message)],
+    chosen: &str,
+) -> Element<'a, Message> {
+    let last = options.len().saturating_sub(1);
+    let mut list = column![].width(Length::Fill);
+    for (index, (label, message)) in options.iter().enumerate() {
+        let label = label.as_ref();
+        let selected = label == chosen;
+        let key = scoped(namespace, label);
+        let (factor, _) = interaction(key);
+        // The chosen row takes no hover: `getOptionClasses` gives it
+        // `hover:bg-highlight-green`, which is the colour it is already on.
+        let ink = if selected {
+            theme_gen::ink(theme, Ink::Green)
+        } else {
+            crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor)
+        };
+        let plate = if selected {
+            theme_gen::ink(theme, Ink::GreenHighlight)
+        } else {
+            crate::theme::brightness(theme_gen::ink(theme, Ink::Surface4), factor)
+        };
+        let radius: [f32; 4] = [
+            if index == 0 { MENU_RADIUS } else { 0.0 },
+            if index == 0 { MENU_RADIUS } else { 0.0 },
+            if index == last { MENU_RADIUS } else { 0.0 },
+            if index == last { MENU_RADIUS } else { 0.0 },
+        ]
+        .into();
+        let option: Element<'a, Message> = container(
+            row![text(label.to_string())
+                .size(MENU_TEXT)
+                .line_height(iced::Pixels(MENU_LINE))
+                .font(semibold())
+                .style(iced::theme::Text::Color(ink))]
+                .width(Length::Fill)
+                .align_items(Alignment::Center)
+                .padding(Padding {
+                    top: MENU_PAD_V,
+                    bottom: MENU_PAD_V,
+                    left: MENU_PAD_H,
+                    right: MENU_PAD_H,
+                }),
+        )
+        .width(Length::Fill)
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(plate)),
+            border: Border { radius: radius.into(), ..Border::default() },
+            ..container::Appearance::default()
+        })
+        .into();
+        let row: Element<'a, Message> = mouse_area(option)
+            .interaction(Interaction::Pointer)
+            .on_enter(Message::hover_with(key, true, MENU_HOVER))
+            .on_exit(Message::hover_with(key, false, MENU_HOVER))
+            .on_press(message.clone())
+            .into();
+        list = list.push(row);
+    }
+    // The one pixel of padding is the panel's own hairline: a container paints
+    // its children over its border, and the reference's border-box keeps the
+    // options inside it -- so they are inset here by the same pixel.
+    container(list)
+        .width(Length::Fixed(width))
+        .padding(Padding { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 })
+        .style(move |_theme: &Theme| menu_panel(theme))
+        .into()
+}
+
+/// The panel's own frame: `rounded-[14px] bg-surface-4 border border-solid
+/// border-surface-5`, the three classes `Combobox.vue:126` puts on its
+/// dropdown, and deliberately not the `shadow-2xl` on the line under it.
+///
+/// Named rather than written inline so the gate can hold the frame itself to
+/// those classes -- the widget it styles is only reachable through a layout, and
+/// the shadow that is *not* drawn is the kind of decision a test should be able
+/// to read out of the value. [`select_menu`]'s own paragraph is why it is not
+/// drawn.
+fn menu_panel(theme: Gen) -> container::Appearance {
+    container::Appearance {
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface5),
+            width: 1.0,
+            radius: MENU_RADIUS.into(),
+        },
+        // No `shadow-2xl`: see [`select_menu`], and [`card_shadow`] for the
+        // limit it is. The default `Shadow` is transparent, so this is the fill
+        // and the ring and nothing else.
+        ..container::Appearance::default()
+    }
 }
 
 /// A switch: the reference's `base/Toggle.vue`, at its own 48x24.
@@ -4207,7 +4408,24 @@ mod tests {
             let keys = ["ui:test:tab:home", "ui:test:tab:discover"];
             drop(tabs(*theme, &keys, &labels, |_: usize| Probe::Crossed { key: keys[0], over: true }));
             drop(search(*theme, "Search mods", "sodium", |_: String| ()));
-            drop(select::<()>(*theme, Key::LabelSortBy, "Relevance", 256.0));
+            drop(select::<Probe>(
+                *theme,
+                Key::LabelSortBy,
+                "Relevance",
+                256.0,
+                false,
+                Probe::Crossed { key: "ui:test:select", over: false },
+            ));
+            drop(select_menu(
+                *theme,
+                "ui:test:menu",
+                256.0,
+                &[
+                    ("Relevance".to_string(), Probe::Crossed { key: "ui:test:menu", over: false }),
+                    ("Downloads".to_string(), Probe::Crossed { key: "ui:test:menu", over: false }),
+                ],
+                "Relevance",
+            ));
             for kind in [Kind::Standard, Kind::Colored, Kind::Outlined, Kind::Quiet] {
                 // Written with its path on purpose: the shell this rewrite
                 // replaces has a gate that reads the source text looking for
@@ -4424,6 +4642,77 @@ mod tests {
             "the search input's chevron is the one that is `text-secondary`, which is \
              how the two were told apart in the first place"
         );
+    }
+
+    #[test]
+    fn the_dropdown_is_the_reference_s_box_and_is_the_one_shadow_this_kit_declines() {
+        // The panel is `Combobox.vue:126`'s own line, three classes of it and
+        // not the fourth: the fill, the ring and the radius are drawn, and the
+        // `shadow-2xl` is the piece [`select_menu`] measures its way out of.
+        assert_eq!(MENU_GAP, 8.0, "`DROPDOWN_GAP` in Combobox.vue, the gap above the panel");
+        assert_eq!(MENU_RADIUS, 14.0, "`rounded-[14px]` on the dropdown");
+        assert_eq!(MENU_PAD_H, 16.0, "`px-4` on an option");
+        assert_eq!(MENU_PAD_V, 12.0, "`py-3` on the same");
+        assert_eq!(MENU_LINE, 20.0, "the label's line, `leading-tight` at sixteen");
+        // `estimateDropdownHeight`: 44 for an option with no sub-label, which is
+        // every option these four menus draw.
+        assert_eq!(MENU_OPTION, MENU_PAD_V * 2.0 + MENU_LINE);
+        assert_eq!(MENU_OPTION, 44.0, "Combobox.vue:357's own arithmetic");
+        assert_eq!(MENU_HOVER, 1.15, "`hover:brightness-[115%]`, not the global 1.25");
+
+        for theme in Gen::ALL {
+            let panel = menu_panel(*theme);
+            assert_eq!(
+                panel.background,
+                Some(Background::Color(theme_gen::ink(*theme, Ink::Surface4))),
+                "`bg-surface-4`"
+            );
+            assert_eq!(panel.border.color, theme_gen::ink(*theme, Ink::Surface5), "`border-surface-5`");
+            assert_eq!(panel.border.width, 1.0, "`border` is one pixel");
+            let radius: [f32; 4] = panel.border.radius.into();
+            assert_eq!(radius, [MENU_RADIUS; 4], "`rounded-[14px]`, all four corners");
+            // The whole of the decision: iced's shadow lands on this fill (see
+            // [`select_menu`]'s measurement), so it is not drawn at all.
+            assert_eq!(
+                panel.shadow.color.a, 0.0,
+                "`shadow-2xl` is the one class on Combobox.vue:126 this panel does \
+                 not carry, and the reason is written where the panel is drawn"
+            );
+        }
+
+        let Some(combobox) = reference_file("ui/src/components/base/Combobox.vue") else {
+            return;
+        };
+        let dropdown = combobox
+            .lines()
+            .find(|line| line.contains("rounded-[14px]") && line.contains("bg-surface-4"))
+            .expect("Combobox.vue still spells its dropdown's own classes out on one line");
+        for class in ["rounded-[14px]", "bg-surface-4", "border-surface-5"] {
+            assert!(
+                dropdown.contains(class),
+                "the dropdown's line is `{dropdown}`; `{class}` is one of the three this \
+                 panel carries verbatim"
+            );
+        }
+        // The fourth class is on the line after it, because the shadow depends on
+        // which way the panel opens -- and it is the one this kit records as a
+        // refusal rather than draws (see [`select_menu`]).
+        assert!(
+            combobox.contains("shadow-2xl"),
+            "and the downward panel still asks for `shadow-2xl`"
+        );
+        assert!(
+            combobox.contains("shadow-[0_-25px_50px_-12px_rgb(0,0,0,0.25)]"),
+            "the upward panel spells the same shadow out, spread included"
+        );
+        // And the option's own row, which is where the 44 comes from.
+        let option = combobox
+            .lines()
+            .find(|line| line.contains("px-4 py-3"))
+            .expect("Combobox.vue still gives an option `px-4 py-3`");
+        for class in ["px-4", "py-3", "transition-all", "duration-150"] {
+            assert!(option.contains(class), "the option row is `{option}`; `{class}` is read off it");
+        }
     }
 
     #[test]
