@@ -244,6 +244,25 @@ impl Engine {
     pub fn loaders(&self) -> &LoaderMeta {
         &self.loaders
     }
+
+    /// Empty the metadata cache, answering how many entries went.
+    ///
+    /// One directory is behind all three readers (see [`Engine::over`]), so a
+    /// cache over that same directory is the whole set of entries they read:
+    /// there is no fourth store to keep in step, and nothing here that the
+    /// readers do not already do. An entry counts only when its body was
+    /// actually removed, so the number is what the next request will have to
+    /// fetch again.
+    pub fn clear_cache(&self) -> usize {
+        let cache = MetadataCache::new(self.api.cache_dir(), DEFAULT_TTL);
+        let mut cleared = 0;
+        for (url, _) in cache.entries() {
+            if cache.forget(&url) {
+                cleared += 1;
+            }
+        }
+        cleared
+    }
 }
 
 /// One project installed into one instance: what landed, and what to call it.
@@ -1042,6 +1061,21 @@ impl Store {
     pub fn with_engine(mut self, engine: Engine) -> Store {
         self.engine = Some(engine);
         self
+    }
+
+    /// Empty the metadata cache, answering how many entries went.
+    ///
+    /// The Resource Management pane's *Purge cache* button
+    /// (`ResourceManagementSettings.vue`'s `purgeCache`, over the app's own
+    /// `purge_cache_types`). A store with no engine answers with
+    /// [`not_implemented`]'s sentence rather than doing nothing quietly: a purge
+    /// that reported success while removing nothing would leave a user
+    /// believing the stale answer they clicked for is gone.
+    pub fn clear_cache(&self) -> Result<usize, String> {
+        let Some(engine) = &self.engine else {
+            return Err(not_implemented("purging the cache"));
+        };
+        Ok(engine.clear_cache())
     }
 
     /// Run one search, and answer when the answer is in.

@@ -1810,6 +1810,63 @@ the 3,846 keys the language's own table carries, which is what the reference's
 generated coverage file is a generator writing, and the first port of the pane had
 the data and did not draw it.
 
+### The settings dialog's remaining six panes
+
+The dialog was ported with two panes and now carries the eight of the reference's own
+`AppSettingsModal.vue` list that this launcher can draw: Features, Behavior, Privacy,
+Synced settings, Java installations and Resource management join Appearance and
+Language. The three the list has and this does not are Feature flags
+(`developerOnly: true`) and Profile and Social, which are about a Modrinth account.
+Each pane is drawn from its own component -- `FeaturesSettings.vue`,
+`BehaviorSettings.vue`, `PrivacySettings.vue`, `instances-synced-settings/index.vue`,
+`JavaSettings.vue`, `ResourceManagementSettings.vue` -- at the reference's own
+spacing: `mt-6` (24) and `mt-8` (32) between sections, `mt-4` (16) between rows,
+`gap-2.5` (10) inside one, and `text-lg`/`text-xl` headings on the 28-pixel line
+Tailwind gives both.
+
+Four things are drawn differently, and each is recorded here rather than only in the
+drawing.
+
+**The three sliders are number fields.** The quick-instances limit (`0` to the
+reference's own 20), the maximum concurrent downloads (`1` to `10`) and the maximum
+concurrent writes (`1` to `50`) are `Slider`s in the reference, and this kit has none
+-- the same substitution the instance settings modal's memory section already makes,
+for the same reason. What each sets is a number in the preferences file, so a field
+edits that number and the reference's own range is clamped where the message lands.
+
+The Java rows fill `Java {version, number} location` through the generated
+`text_gen::app_settings_java_installations_location_title`, and each row draws the
+path the file holds: the reference's `JavaSelector` is a picker over the JREs it has
+found, and this launcher goes looking for none. The pane's first draft also drew the
+key rather than the message, which is a placeholder on screen.
+
+**The quick-instances count is a count.** It was a bool, which cannot say "seven".
+The preference is `quick_instance_limit: Option<u32>`, and `None` is both the shipped
+default and the reference's own spelling of the top of its slider: `normalizeLimit`
+in its `use-quick-instance-limit.ts` maps anything at or above the maximum to `null`
+rather than to the number. The rail the number governs draws no recent instances yet
+(`rail_separator`'s own note), so the row stores a number nothing reads -- that is the
+honest half of it, and the rail is the other.
+
+**Synced settings draws the reference's rows unavailable.** The five rows its own
+`isSyncedOptionAvailable` leaves in -- `data_packs` is filtered out -- are drawn in
+its order with the switch it disables while syncing is unavailable, which is this
+launcher's state for good: it shares nothing between instances. The first draft of
+this pane drew a sign-in notice from the *Profile* tab's keys instead, which the
+reference's own pane never shows. The edit buttons, the sync-source picker and
+`<LaunchOptions />` are not drawn: each opens a modal over data this launcher does not
+keep, or is a section of its own.
+
+**Database backups cannot be opened.** The folder the reference's button opens
+belongs to an app with a database, and this launcher keeps none, so that button is
+drawn with its press taken away rather than opening nothing or opening somewhere the
+sentence does not name.
+
+Measured after the slice, on this machine: `cargo test --workspace --all-targets
+--locked` at **1357 passed / 0 failed / 19 ignored** (179 + 8 + 859 + 4 + 33 + 274),
+and `cargo clippy --workspace --all-targets --locked -- -D clippy::correctness` with
+nothing to say.
+
 ### The line height that was read backwards
 
 The first port of this dialog came out with no title, a 204-pixel category heading and

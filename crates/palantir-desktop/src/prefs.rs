@@ -49,6 +49,13 @@ pub const PREFS_FILE: &str = palantir_core::paths::PREFS_FILE;
 pub const DEFAULT_MIN_MEM_MIB: u32 = palantir_core::settings::defaults::MIN_MEM_ALLOC as u32;
 /// Heap ceiling, in MiB, for an instance that does not override memory.
 pub const DEFAULT_MAX_MEM_MIB: u32 = palantir_core::settings::defaults::MAX_MEM_ALLOC as u32;
+/// The most recent instances the left rail's list may show.
+///
+/// Twenty, which is the value of `QUICK_INSTANCE_LIMIT_MAX` in the reference's
+/// own `use-quick-instance-limit.ts:3`. It is the *top of the slider* rather
+/// than a number the reference stores: see [`Prefs::quick_instance_limit`] for
+/// why the two spellings of "everything" are one value here.
+pub const QUICK_INSTANCE_LIMIT_MAX: u32 = 20;
 /// "Not changed from the default", for a bool whose default is false.
 fn is_false(value: &bool) -> bool {
     !*value
@@ -120,9 +127,18 @@ pub struct Prefs {
     /// every file starts carrying a line that says nothing.
     #[serde(skip_serializing_if = "is_true")]
     pub show_skin_selector_in_sidebar: bool,
-    /// Put the recently-played instances at the foot of the left rail.
-    #[serde(skip_serializing_if = "is_true")]
-    pub quick_instances_in_sidebar: bool,
+    /// How many recent instances the left rail may show, when that is fewer
+    /// than the reference's own maximum.
+    ///
+    /// `None` is the reference's "no stored limit", and it is also what it
+    /// stores for the top of the slider: `normalizeLimit` in
+    /// `use-quick-instance-limit.ts` maps any rounded value at or above
+    /// [`QUICK_INSTANCE_LIMIT_MAX`] to `null` rather than to the number, so the
+    /// two spellings of "everything" are one value here as they are there. The
+    /// pane draws `None` as the maximum -- `FeaturesSettings.vue:147`'s
+    /// `limit.value ?? QUICK_INSTANCE_LIMIT_MAX`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_instance_limit: Option<u32>,
     /// Show the Jump back in section on the Play page.
     #[serde(skip_serializing_if = "is_true")]
     pub show_jump_in_section: bool,
@@ -146,6 +162,14 @@ pub struct Prefs {
     /// Show how long each instance has been played.
     #[serde(skip_serializing_if = "is_false")]
     pub show_play_time: bool,
+    /// Keep the player's own name off the Skins page's preview.
+    ///
+    /// Off, which is the reference's own value for it
+    /// (`use-app-settings.ts:51`'s `hideNametagSkinsPage: false`), and it is
+    /// one setting read in two places there: `BehaviorSettings.vue:159` reads
+    /// the field this writes and `:194` writes it back.
+    #[serde(skip_serializing_if = "is_false")]
+    pub hide_nametag_skins_page: bool,
     /// Ask before installing a modpack from outside Modrinth.
     #[serde(skip_serializing_if = "is_true")]
     pub warn_unknown_modpacks: bool,
@@ -255,7 +279,7 @@ impl Default for Prefs {
             // ships `showSkinSelectorInSidebar: true`, and a fresh install's
             // rail draws the shirt slot.
             show_skin_selector_in_sidebar: true,
-            quick_instances_in_sidebar: true,
+            quick_instance_limit: None,
             show_jump_in_section: true,
             // Off, and it was on. Minimizing on launch reads as the launcher
             // stealing itself away at the exact moment the user wants to know
@@ -266,6 +290,7 @@ impl Default for Prefs {
             hide_right_sidebar: false,
             compact_instance_cards: false,
             show_play_time: false,
+            hide_nametag_skins_page: false,
             warn_unknown_modpacks: true,
             skip_non_essential_warnings: false,
             locale: None,
@@ -319,9 +344,22 @@ impl Prefs {
     }
 
     /// The Java binary to run `major` with, if one has been chosen.
-    #[cfg(test)]
+    ///
+    /// The Java Installations pane's own read: `JavaSettings.vue` draws one
+    /// `JavaSelector` per major version, and this is the choice behind it. That
+    /// is why it is not a test's helper any more -- a blank path reads as no
+    /// choice, which is the empty box the pane draws.
     pub fn java_path(&self, major: &str) -> Option<&str> {
         self.java_paths.get(major).map(String::as_str).filter(|path| !path.is_empty())
+    }
+
+    /// How many recent instances the rail may show: what was set here, else the
+    /// reference's own maximum.
+    ///
+    /// Two names for one number, which is the reference's own split: it stores a
+    /// *limit* and draws a *count* (`FeaturesSettings.vue:147`).
+    pub fn quick_instance_count(&self) -> u32 {
+        self.quick_instance_limit.unwrap_or(QUICK_INSTANCE_LIMIT_MAX)
     }
 
     /// The OAuth client id the sign-in flow should use.
@@ -654,12 +692,15 @@ mod tests {
             // Off, which is now the side away from the default: this file has to
             // exercise the value the predicate *keeps*, whichever it is.
             show_skin_selector_in_sidebar: false,
-            quick_instances_in_sidebar: false,
+            // Some, which is the side of the predicate that is kept: `None` is
+            // the shipped default and is skipped.
+            quick_instance_limit: Some(4),
             show_jump_in_section: false,
             minimize_on_launch: false,
             hide_right_sidebar: true,
             compact_instance_cards: true,
             show_play_time: true,
+            hide_nametag_skins_page: true,
             warn_unknown_modpacks: false,
             skip_non_essential_warnings: true,
             locale: Some("de-DE".into()),

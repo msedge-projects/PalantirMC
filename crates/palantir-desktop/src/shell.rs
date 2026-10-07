@@ -749,6 +749,27 @@ const THEME_LABEL_LINE: f32 = 18.0;
 const THEME_MODAL_TITLE_LINE: f32 = 32.0;
 /// `h-16` on the fade the pane shows over content it cannot show at once.
 const SETTINGS_FADE: f32 = 64.0;
+/// `gap-2.5`, between the heading, the control and the description inside one
+/// settings section.
+///
+/// The reference's own spacing there: `ResourceManagementSettings.vue` writes
+/// `flex flex-col gap-2.5` around each of its sections and
+/// `FeaturesSettings.vue` around its quick-instances block, and `gap-2.5` is
+/// `0.625rem` = 10.
+const SECTION_LEAD: f32 = 10.0;
+/// `leading-tight` on those sections' descriptions: Tailwind's `1.25` at the
+/// body's own 16 pixels, which is 20.
+///
+/// A row that carries no `leading-tight` keeps [`THEME_BODY_LINE`]'s 18, which is
+/// what an unclassed paragraph is set on -- see that constant's note for why the
+/// two are different numbers.
+const TIGHT_LINE: f32 = 20.0;
+/// Between two Java version rows: `JavaSettings.vue`'s `gap-6` on the list's own
+/// column plus the `mt-4` every row but the first puts on its heading.
+///
+/// 24 + 16 = 40, and it is the sum rather than one of the two because a flex
+/// column's margins do not collapse into its gaps: the reference draws both.
+const JAVA_ROW_LEAD: f32 = 40.0;
 
 /// The `md` `IconButton`'s corner radius, `rounded-xl`.
 const CONTROL_RADIUS: f32 = 12.0;
@@ -1435,38 +1456,75 @@ pub enum Modal {
 /// `AppSettingsModal.vue`'s tab list has eleven entries in three categories:
 /// `display` carries Appearance, Features, Behavior and Language (Feature flags too,
 /// on a developer build), `account` carries Profile, Social and Privacy, and
-/// `instances` carries Synced settings, Java installations and Resource management. The two listed here are the ones whose content this launcher has
-/// ported; a tab joins [`SettingsTab::ALL`] when its own component is ported, and the
-/// rest are named in `NOTES.md` as the work still owed rather than drawn as empty
-/// shells. The order is the reference's and is never sorted: it is the order a
-/// reader's eye travels down the column.
+/// `instances` carries Synced settings, Java installations and Resource management.
+///
+/// The eight here are the ones whose own component is ported: Feature flags is
+/// `developerOnly: true` and only a developer build shows it, and Profile and
+/// Social are about a Modrinth account -- which this launcher does not sign into,
+/// and which is why the Synced settings pane draws its rows unavailable rather
+/// than a signed-in state it could not have. None of the three has a component
+/// ported, so the dialog lists the eight it can draw rather than eleven it cannot
+/// -- an empty shell is not a tab. The order is the reference's and is never
+/// sorted: it is the order a reader's eye travels down the column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     /// `AppearanceSettings.vue`.
     Appearance,
+    /// `FeaturesSettings.vue`.
+    Features,
+    /// `BehaviorSettings.vue`.
+    Behavior,
     /// `LanguageSettings.vue`.
     Language,
+    /// `PrivacySettings.vue`.
+    Privacy,
+    /// `InstancesSyncedSettings.vue`.
+    SyncedOptions,
+    /// `JavaSettings.vue`.
+    JavaInstallations,
+    /// `ResourceManagementSettings.vue`.
+    ResourceManagement,
 }
 
 impl SettingsTab {
     /// Every tab this dialog offers, in the reference's order.
-    pub const ALL: [SettingsTab; 2] = [SettingsTab::Appearance, SettingsTab::Language];
+    pub const ALL: [SettingsTab; 8] = [
+        SettingsTab::Appearance,
+        SettingsTab::Features,
+        SettingsTab::Behavior,
+        SettingsTab::Language,
+        SettingsTab::Privacy,
+        SettingsTab::SyncedOptions,
+        SettingsTab::JavaInstallations,
+        SettingsTab::ResourceManagement,
+    ];
 
     /// The tab's own label, which is the reference's `app.settings.tabs.<name>`: the
     /// same message the reference's `defineMessage` gives the tab's `name`.
     fn label(self) -> Key {
         match self {
             SettingsTab::Appearance => Key::AppSettingsTabsAppearance,
+            SettingsTab::Features => Key::AppSettingsTabsFeatures,
+            SettingsTab::Behavior => Key::AppSettingsTabsBehavior,
             SettingsTab::Language => Key::AppSettingsTabsLanguage,
+            SettingsTab::Privacy => Key::AppSettingsTabsPrivacy,
+            SettingsTab::SyncedOptions => Key::AppSettingsTabsSyncedOptions,
+            SettingsTab::JavaInstallations => Key::AppSettingsTabsJavaInstallations,
+            SettingsTab::ResourceManagement => Key::AppSettingsTabsResourceManagement,
         }
     }
 
-    /// The icon in front of the label: [`Glyph::Paintbrush`] and [`Glyph::Languages`],
-    /// which are `AppSettingsModal.vue`'s own `PaintbrushIcon` and `LanguagesIcon`.
+    /// The icon in front of the label.
     fn glyph(self) -> Glyph {
         match self {
             SettingsTab::Appearance => Glyph::Paintbrush,
+            SettingsTab::Features => Glyph::LightBulb,
+            SettingsTab::Behavior => Glyph::Settings2,
             SettingsTab::Language => Glyph::Languages,
+            SettingsTab::Privacy => Glyph::Shield,
+            SettingsTab::SyncedOptions => Glyph::RefreshCw,
+            SettingsTab::JavaInstallations => Glyph::Coffee,
+            SettingsTab::ResourceManagement => Glyph::Microchip,
         }
     }
 
@@ -1474,15 +1532,17 @@ impl SettingsTab {
     /// Language and nothing on the others.
     fn badge(self) -> Option<Key> {
         match self {
-            SettingsTab::Appearance => None,
             SettingsTab::Language => Some(Key::BadgeBeta),
+            _ => None,
         }
     }
 
-    /// The heading the tab sits under: `tabCategories.display`, "Display".
+    /// The heading the tab sits under.
     fn category(self) -> Key {
         match self {
-            SettingsTab::Appearance | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
+            SettingsTab::Appearance | SettingsTab::Features | SettingsTab::Behavior | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
+            SettingsTab::Privacy => Key::SettingsSidebarLabelAccount,
+            SettingsTab::SyncedOptions | SettingsTab::JavaInstallations | SettingsTab::ResourceManagement => Key::AppSettingsSidebarLabelInstances,
         }
     }
 
@@ -1491,7 +1551,13 @@ impl SettingsTab {
     fn key(self) -> &'static str {
         match self {
             SettingsTab::Appearance => "settings:tab:appearance",
+            SettingsTab::Features => "settings:tab:features",
+            SettingsTab::Behavior => "settings:tab:behavior",
             SettingsTab::Language => "settings:tab:language",
+            SettingsTab::Privacy => "settings:tab:privacy",
+            SettingsTab::SyncedOptions => "settings:tab:synced-options",
+            SettingsTab::JavaInstallations => "settings:tab:java-installations",
+            SettingsTab::ResourceManagement => "settings:tab:resource-management",
         }
     }
 }
@@ -1678,6 +1744,67 @@ pub enum Message {
     },
     /// A modal asked to close, from its own button or from its scrim.
     CloseModal,
+    // ---- Settings controls -----------------------------------------------
+    /// The Features tab: show Worlds tab in instances.
+    ToggleShowWorldsTab,
+    /// The Features tab: show Files tab in instances.
+    ToggleShowFilesTab,
+    /// The Features tab: show Screenshots tab in instances.
+    ToggleShowScreenshotsTab,
+    /// The Features tab: show all screenshots in sidebar.
+    ToggleShowAllScreenshots,
+    /// The Features tab: show skin selector in sidebar.
+    ToggleShowSkinSelector,
+    /// The Features tab: show jump-in section on Play page.
+    ToggleShowJumpIn,
+    /// The Features tab: how many recent instances the rail may show.
+    ///
+    /// A `String` rather than a number because it arrives from a text field: a
+    /// half-typed number is not a choice yet, and the value that lands is the
+    /// one that parses inside the reference's own range.
+    SetQuickInstanceLimit(String),
+    /// The Behavior tab: minimize app when Minecraft starts.
+    ToggleMinimizeOnLaunch,
+    /// The Behavior tab: hide right sidebar by default.
+    ToggleHideRightSidebar,
+    /// The Behavior tab: compact mode for instance cards.
+    ToggleCompactMode,
+    /// The Behavior tab: show play time on instances.
+    ToggleShowPlayTime,
+    /// The Behavior tab: hide nametag on skins page.
+    ToggleHideNametag,
+    /// The Behavior tab: warn before installing unknown modpacks.
+    ToggleWarnUnknownModpacks,
+    /// The Behavior tab: skip non-essential warnings.
+    ToggleSkipNonEssentialWarnings,
+    /// The Privacy tab: telemetry.
+    ToggleTelemetry,
+    /// The Privacy tab: Discord Rich Presence.
+    ToggleDiscordRpc,
+    /// The Resource Management tab: app directory path changed.
+    SetAppDirectory(String),
+    /// The Resource Management tab: always show copy details.
+    ToggleAlwaysShowCopyDetails,
+    /// The Resource Management tab: the most downloads in flight at once.
+    ///
+    /// The reference's control is a `Slider` from 1 to 10
+    /// (`ResourceManagementSettings.vue:255`'s `:min="1"` and `:256`'s
+    /// `:max="10"`); see [`Shell::number_section`] for what is drawn here
+    /// instead.
+    SetMaxConcurrentDownloads(String),
+    /// The Resource Management tab: the most files written at once, off the
+    /// reference's own `Slider` (`ResourceManagementSettings.vue:271`'s
+    /// `:min="1"` and `:272`'s `:max="50"`).
+    SetMaxConcurrentWrites(String),
+    /// The Resource Management tab: purge the app cache.
+    PurgeCache,
+
+    /// The Java Installations tab: set Java path for a version.
+    ///
+    /// The major is a `u64` because that is what the reference's own message
+    /// takes: [`crate::text_gen::app_settings_java_installations_location_title`]
+    /// fills `Java {version, number} location` from one.
+    SetJavaPath { major: u64, path: String },
     /// The name in the creation dialog changed.
     CreateName(String),
     /// The creation dialog's own button: make the instance.
@@ -1798,7 +1925,7 @@ impl Shell {
             closing_left: Duration::ZERO,
             modal_fade: Tween::at(1.0, Timing::MODAL_DIALOG),
             scrim_fade: Tween::at(1.0, Timing::MODAL_SCRIM),
-            settings_tab: SettingsTab::Appearance,
+            settings_tab: SettingsTab::ALL[0],
             maximized: false,
             viewport: DIALOG_VIEWPORT,
             glides: crate::scroll::Glides::default(),
@@ -2486,6 +2613,134 @@ impl Shell {
             }
             Message::SettingsTab(tab) => {
                 self.settings_tab = tab;
+                None
+            }
+            // ---- Settings controls ---------------------------------------------
+            Message::ToggleShowWorldsTab => {
+                self.prefs.show_worlds_tab = !self.prefs.show_worlds_tab;
+                None
+            }
+            Message::ToggleShowFilesTab => {
+                self.prefs.show_files_tab = !self.prefs.show_files_tab;
+                None
+            }
+            Message::ToggleShowScreenshotsTab => {
+                self.prefs.show_screenshots_tab = !self.prefs.show_screenshots_tab;
+                None
+            }
+            Message::ToggleShowAllScreenshots => {
+                self.prefs.show_all_screenshots_in_sidebar = !self.prefs.show_all_screenshots_in_sidebar;
+                None
+            }
+            Message::ToggleShowSkinSelector => {
+                self.prefs.show_skin_selector_in_sidebar = !self.prefs.show_skin_selector_in_sidebar;
+                None
+            }
+            Message::ToggleShowJumpIn => {
+                self.prefs.show_jump_in_section = !self.prefs.show_jump_in_section;
+                None
+            }
+            Message::SetQuickInstanceLimit(text) => {
+                // A value that does not parse leaves what is stored alone, which
+                // is what the reference's own `normalizeLimit` does with one: a
+                // field being cleared is not a request for zero recent
+                // instances.
+                if let Ok(limit) = text.trim().parse::<u32>() {
+                    // The top of the range is stored as `None`, which is the
+                    // reference's own spelling of it -- `normalizeLimit` maps a
+                    // rounded value at or above
+                    // `crate::prefs::QUICK_INSTANCE_LIMIT_MAX` to `null` rather
+                    // than to the number.
+                    self.prefs.quick_instance_limit =
+                        if limit >= crate::prefs::QUICK_INSTANCE_LIMIT_MAX {
+                        None
+                    } else {
+                        Some(limit)
+                    };
+                }
+                None
+            }
+            Message::ToggleMinimizeOnLaunch => {
+                self.prefs.minimize_on_launch = !self.prefs.minimize_on_launch;
+                None
+            }
+            Message::ToggleHideRightSidebar => {
+                self.prefs.hide_right_sidebar = !self.prefs.hide_right_sidebar;
+                None
+            }
+            Message::ToggleCompactMode => {
+                self.prefs.compact_instance_cards = !self.prefs.compact_instance_cards;
+                None
+            }
+            Message::ToggleShowPlayTime => {
+                self.prefs.show_play_time = !self.prefs.show_play_time;
+                None
+            }
+            Message::ToggleHideNametag => {
+                self.prefs.hide_nametag_skins_page = !self.prefs.hide_nametag_skins_page;
+                None
+            }
+            Message::ToggleWarnUnknownModpacks => {
+                self.prefs.warn_unknown_modpacks = !self.prefs.warn_unknown_modpacks;
+                None
+            }
+            Message::ToggleSkipNonEssentialWarnings => {
+                self.prefs.skip_non_essential_warnings = !self.prefs.skip_non_essential_warnings;
+                None
+            }
+            Message::ToggleTelemetry => {
+                self.prefs.telemetry = !self.prefs.telemetry;
+                None
+            }
+            Message::ToggleDiscordRpc => {
+                self.prefs.discord_rpc = !self.prefs.discord_rpc;
+                None
+            }
+            Message::SetAppDirectory(path) => {
+                self.prefs.app_directory = if path.is_empty() { None } else { Some(path) };
+                None
+            }
+            Message::ToggleAlwaysShowCopyDetails => {
+                self.prefs.always_show_copy_details = !self.prefs.always_show_copy_details;
+                None
+            }
+            Message::SetMaxConcurrentDownloads(text) => {
+                // Clamped rather than refused, and clamped to the reference's
+                // own slider `ResourceManagementSettings.vue` draws at `:255`
+                // and `:256`: a number the slider could not reach would be a
+                // setting no press could make again.
+                if let Ok(value) = text.trim().parse::<u32>() {
+                    self.prefs.max_concurrent_downloads = Some(value.clamp(1, 10));
+                }
+                None
+            }
+            Message::SetMaxConcurrentWrites(text) => {
+                // The same, over the writes slider's own range
+                // (`ResourceManagementSettings.vue:271`, `:272`).
+                if let Ok(value) = text.trim().parse::<u32>() {
+                    self.prefs.max_concurrent_writes = Some(value.clamp(1, 50));
+                }
+                None
+            }
+            Message::PurgeCache => {
+                // The reference asks before purging unless
+                // `skip_non_essential_warnings` is set
+                // (`handlePurgeCacheClick` in `ResourceManagementSettings.vue`),
+                // and this shell has no confirm dialog for it yet: the press
+                // purges what the engine holds. A store with no engine cannot
+                // purge at all -- a test, or a run with no cache directory it
+                // can write -- and that answer is dropped rather than drawn,
+                // because the tab it was pressed in has nowhere to put a
+                // sentence about it.
+                let _ = self.store.clear_cache();
+                None
+            }
+            Message::SetJavaPath { major, path } => {
+                if path.is_empty() {
+                    self.prefs.java_paths.remove(&major.to_string());
+                } else {
+                    self.prefs.java_paths.insert(major.to_string(), path);
+                }
                 None
             }
             Message::Locale(tag) => {
@@ -7071,7 +7326,7 @@ fn tags(&self) -> iced::Command<Message> {
     fn settings_tab_height(&self) -> Option<f32> {
         match self.settings_tab {
             SettingsTab::Appearance => Some(appearance_settings_height(self.themes_offered().len(), theme_columns(self.settings_content_width()))),
-            SettingsTab::Language => None,
+            _ => None,
         }
     }
 
@@ -7256,6 +7511,776 @@ fn tags(&self) -> iced::Command<Message> {
     #[cfg(test)]
     fn language_labels() -> Vec<String> {
         crate::locale::OFFERED.iter().map(|&tag| crate::locale::label(tag)).collect()
+    }
+
+    // ---- Features settings -----------------------------------------------
+
+    /// The *Features* tab: sidebar toggles, quick instances slider, instance tab
+    /// toggles and the Play page jump-in toggle.
+    ///
+    /// `FeaturesSettings.vue`, in the reference's own order: a sync-across-devices
+    /// row at the top, then the instance pages section, then the sidebar section
+    /// with the quick instances slider, then the Play page section.
+    fn features_settings(&self) -> Element<'_, Message> {
+        // Sync across devices row: disabled while nobody is signed in.
+        let sync_row = self.features_sync_row();
+        // Instance pages section: Worlds, Files, Screenshots tabs.
+        let instance_pages = self.features_instance_pages();
+        // Sidebar section: show all screenshots, skin selector, quick instances.
+        let sidebar = self.features_sidebar();
+        // Play page section: jump in toggle.
+        let play_page = self.features_play_page();
+        column![]
+            .width(Length::Fill)
+            .push(sync_row)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(instance_pages)
+            .push(Space::with_height(Length::Fixed(32.0)))
+            .push(sidebar)
+            .push(Space::with_height(Length::Fixed(32.0)))
+            .push(play_page)
+            .into()
+    }
+
+    /// The sync-features-across-devices row: `flex items-center justify-between
+    /// gap-4` with a heading at `text-lg` and its description at `mt-1`, and a
+    /// disabled switch while nobody is signed in.
+    fn features_sync_row(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let left = column![]
+            .width(Length::Fill)
+            .spacing(4.0)
+            .push(
+                text(Key::AppFeaturesSettingsSyncAcrossDevicesTitle.message())
+                    .size(18.0)
+                    .line_height(iced::Pixels(28.0))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .push(
+                text(Key::AppFeaturesSettingsSyncAcrossDevicesDescription.message())
+                    .size(16.0)
+                    .line_height(iced::Pixels(18.0))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        row![left, crate::ui::disabled_switch::<Message>(theme)]
+            .align_items(Alignment::Center)
+            .spacing(16.0)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// The instance pages section: Worlds, Files and Screenshots tab toggles.
+    fn features_instance_pages(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppFeaturesSettingsInstancePagesTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let worlds = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowWorldsTabTitle,
+            self.prefs.show_worlds_tab,
+            Message::ToggleShowWorldsTab,
+        );
+        let files = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowFilesTabTitle,
+            self.prefs.show_files_tab,
+            Message::ToggleShowFilesTab,
+        );
+        let screenshots = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowScreenshotsTabTitle,
+            self.prefs.show_screenshots_tab,
+            Message::ToggleShowScreenshotsTab,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(worlds)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(files)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(screenshots)
+            .into()
+    }
+
+    /// One toggle row: a heading at `text-lg` on the left with its description
+    /// under it where the reference draws one, and a switch on the right.
+    ///
+    /// One helper for every tab that draws this row, because the reference draws
+    /// one row in all of them: `FeaturesSettings.vue`, `BehaviorSettings.vue`
+    /// (`:332`, `:334`, `:336`), `PrivacySettings.vue` and
+    /// `ResourceManagementSettings.vue` each wrap an `h2` at
+    /// `text-lg font-semibold text-contrast` -- `h3` inside a section that has
+    /// its own heading -- and a `Toggle` in
+    /// `flex items-center justify-between gap-4`, with the description at
+    /// `mt-1` below the heading when the reference carries one.
+    fn settings_toggle_row(
+        &self,
+        title: Key,
+        description: Option<Key>,
+        on: bool,
+        message: Message,
+    ) -> Element<'_, Message> {
+        let switch = crate::ui::switch(self.theme, on, message);
+        self.toggle_row(title, description, switch)
+    }
+
+    /// The same row where the reference draws a `Toggle` nobody can press.
+    ///
+    /// `instances-synced-settings/index.vue` disables every row's switch while
+    /// syncing is not available (`:disabled="!canToggleGlobalOptions"`), which is
+    /// the state this launcher is in for good: it shares nothing between
+    /// instances. The rows are the reference's own words with the switch it draws
+    /// for that state, rather than a pane of its own invention.
+    fn settings_row_unavailable(
+        &self,
+        title: Key,
+        description: Option<Key>,
+    ) -> Element<'_, Message> {
+        let switch = crate::ui::disabled_switch::<Message>(self.theme);
+        self.toggle_row(title, description, switch)
+    }
+
+    /// A toggle row's own two halves: its text on the left, and whichever switch
+    /// the caller has for it on the right.
+    ///
+    /// The switch is a parameter rather than a bool because the two the reference
+    /// draws are different widgets: a `Toggle` that works, and the same one with
+    /// its press taken away. One lifetime, because the switch is drawn inside this
+    /// row and so cannot outlive the borrow of the shell that made it.
+    fn toggle_row<'a>(
+        &'a self,
+        title: Key,
+        description: Option<Key>,
+        switch: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let theme = self.theme;
+        let mut left = column![]
+            .width(Length::Fill)
+            .spacing(4.0)
+            .push(
+                text(title.message())
+                    .size(18.0)
+                    .line_height(iced::Pixels(28.0))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            );
+        if let Some(description) = description {
+            left = left.push(
+                text(description.message())
+                    .size(16.0)
+                    .line_height(iced::Pixels(18.0))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        }
+        row![left, switch]
+            .align_items(Alignment::Center)
+            .spacing(16.0)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// One of the Features tab's toggle rows, whose descriptions the reference
+    /// carries on some of them only: the sidebar's two and the Play page's one at
+    /// `mt-1`, and nothing at all under the three instance-page rows
+    /// (`FeaturesSettings.vue`'s own markup).
+    fn features_toggle_row(&self, label: Key, on: bool, message: Message) -> Element<'_, Message> {
+        let description = match label {
+            Key::AppFeaturesSettingsShowAllScreenshotsTitle => {
+                Some(Key::AppFeaturesSettingsShowAllScreenshotsDescription)
+            }
+            Key::AppFeaturesSettingsShowSkinSelectorTitle => {
+                Some(Key::AppFeaturesSettingsShowSkinSelectorDescription)
+            }
+            Key::AppFeaturesSettingsShowJumpInTitle => {
+                Some(Key::AppFeaturesSettingsShowJumpInDescription)
+            }
+            _ => None,
+        };
+        self.settings_toggle_row(label, description, on, message)
+    }
+
+    /// One section whose reference control is a `Slider`: a heading at `text-lg`,
+    /// the number the preference file holds, and the reference's own description
+    /// under it.
+    ///
+    /// Three sections of this modal are like this -- the Features tab's
+    /// quick-instances slider and the Resource Management tab's two concurrency
+    /// sliders -- and this kit has no `Slider` to draw them with, which is the
+    /// same substitution [`crate::instance_settings`]' memory section makes for
+    /// the reference's RAM slider and for the same reason. What the slider would
+    /// set is a number in [`crate::prefs::Prefs`], so the control that *is*
+    /// drawable edits that
+    /// number: the field shows what the rail and the download engine read, and
+    /// the reference's own range is enforced where the message lands.
+    fn number_section(
+        &self,
+        title: Key,
+        description: Key,
+        value: u32,
+        on_input: impl Fn(String) -> Message + 'static,
+    ) -> Element<'_, Message> {
+        let theme = self.theme;
+        // Bound before the field rather than written inside it: the field
+        // borrows the string, and a temporary would not outlive the call.
+        let value = value.to_string();
+        column![]
+            .width(Length::Fill)
+            .push(
+                text(title.message())
+                    .size(18.0)
+                    .line_height(iced::Pixels(28.0))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(settings_field(theme, &value, on_input))
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(
+                text(description.message())
+                    .size(16.0)
+                    .line_height(iced::Pixels(TIGHT_LINE))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            )
+            .into()
+    }
+
+    /// The sidebar section: show all screenshots, skin selector, and quick instances
+    /// slider.
+    fn features_sidebar(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let section_title = text(Key::AppFeaturesSettingsSidebarTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let all_screenshots = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowAllScreenshotsTitle,
+            self.prefs.show_all_screenshots_in_sidebar,
+            Message::ToggleShowAllScreenshots,
+        );
+        let skin_selector = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowSkinSelectorTitle,
+            self.prefs.show_skin_selector_in_sidebar,
+            Message::ToggleShowSkinSelector,
+        );
+        let quick_instances = self.features_quick_instances();
+        column![]
+            .width(Length::Fill)
+            .push(section_title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(all_screenshots)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(skin_selector)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(quick_instances)
+            .into()
+    }
+
+    /// The quick instances row: the reference's `Slider` from 0 to
+    /// `QUICK_INSTANCE_LIMIT_MAX` (`FeaturesSettings.vue:375`-`:380`), drawn as
+    /// the number it sets.
+    fn features_quick_instances(&self) -> Element<'_, Message> {
+        self.number_section(
+            Key::AppFeaturesSettingsQuickInstancesTitle,
+            Key::AppFeaturesSettingsQuickInstancesDescription,
+            self.prefs.quick_instance_count(),
+            Message::SetQuickInstanceLimit,
+        )
+    }
+
+    /// The Play page section: show jump-in toggle.
+    fn features_play_page(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppFeaturesSettingsPlayPageTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let jump_in = self.features_toggle_row(
+            Key::AppFeaturesSettingsShowJumpInTitle,
+            self.prefs.show_jump_in_section,
+            Message::ToggleShowJumpIn,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(jump_in)
+            .into()
+    }
+
+    // ---- Behavior settings -----------------------------------------------
+
+    /// The *Behavior* tab: sync-across-devices row, startup/navigation section,
+    /// content section, and confirmations section.
+    ///
+    /// `BehaviorSettings.vue`, in the reference's own order.
+    fn behavior_settings(&self) -> Element<'_, Message> {
+        let sync_row = self.behavior_sync_row();
+        let startup = self.behavior_startup_section();
+        let content = self.behavior_content_section();
+        let confirmations = self.behavior_confirmations_section();
+        column![]
+            .width(Length::Fill)
+            .push(sync_row)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(startup)
+            .push(Space::with_height(Length::Fixed(32.0)))
+            .push(content)
+            .push(Space::with_height(Length::Fixed(32.0)))
+            .push(confirmations)
+            .into()
+    }
+
+    /// The sync-behavior-across-devices row.
+    fn behavior_sync_row(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let left = column![]
+            .width(Length::Fill)
+            .spacing(4.0)
+            .push(
+                text(Key::AppBehaviorSettingsSyncAcrossDevicesTitle.message())
+                    .size(18.0)
+                    .line_height(iced::Pixels(28.0))
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            )
+            .push(
+                text(Key::AppBehaviorSettingsSyncAcrossDevicesDescription.message())
+                    .size(16.0)
+                    .line_height(iced::Pixels(18.0))
+                    .font(medium())
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            );
+        row![left, crate::ui::disabled_switch::<Message>(theme)]
+            .align_items(Alignment::Center)
+            .spacing(16.0)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// The startup and navigation section: minimize app and hide right sidebar.
+    fn behavior_startup_section(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppBehaviorSettingsStartupAndNavigationTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let minimize = self.settings_toggle_row(
+            Key::AppAppearanceSettingsMinimizeLauncherTitle,
+            Some(Key::AppAppearanceSettingsMinimizeLauncherDescription),
+            self.prefs.minimize_on_launch,
+            Message::ToggleMinimizeOnLaunch,
+        );
+        let sidebar = self.settings_toggle_row(
+            Key::AppAppearanceSettingsToggleSidebarTitle,
+            Some(Key::AppAppearanceSettingsToggleSidebarDescription),
+            self.prefs.hide_right_sidebar,
+            Message::ToggleHideRightSidebar,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(minimize)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(sidebar)
+            .into()
+    }
+
+    /// The content section: compact mode, show play time, hide nametag.
+    fn behavior_content_section(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppBehaviorSettingsContentTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let compact = self.settings_toggle_row(
+            Key::AppAppearanceSettingsCompactModeTitle,
+            Some(Key::AppAppearanceSettingsCompactModeDescription),
+            self.prefs.compact_instance_cards,
+            Message::ToggleCompactMode,
+        );
+        let play_time = self.settings_toggle_row(
+            Key::AppAppearanceSettingsShowPlayTimeTitle,
+            Some(Key::AppAppearanceSettingsShowPlayTimeDescription),
+            self.prefs.show_play_time,
+            Message::ToggleShowPlayTime,
+        );
+        let nametag = self.settings_toggle_row(
+            Key::AppAppearanceSettingsHideNametagTitle,
+            Some(Key::AppAppearanceSettingsHideNametagDescription),
+            self.prefs.hide_nametag_skins_page,
+            Message::ToggleHideNametag,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(compact)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(play_time)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(nametag)
+            .into()
+    }
+
+    /// The confirmations section: unknown pack warning and skip non-essential.
+    fn behavior_confirmations_section(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppBehaviorSettingsConfirmationsTitle.message())
+            .size(20.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let unknown = self.settings_toggle_row(
+            Key::AppAppearanceSettingsUnknownPackWarningTitle,
+            Some(Key::AppAppearanceSettingsUnknownPackWarningDescription),
+            self.prefs.warn_unknown_modpacks,
+            Message::ToggleWarnUnknownModpacks,
+        );
+        let skip = self.settings_toggle_row(
+            Key::AppAppearanceSettingsSkipNonEssentialWarningsTitle,
+            Some(Key::AppAppearanceSettingsSkipNonEssentialWarningsDescription),
+            self.prefs.skip_non_essential_warnings,
+            Message::ToggleSkipNonEssentialWarnings,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(16.0)))
+            .push(unknown)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(skip)
+            .into()
+    }
+
+    // ---- Privacy settings ------------------------------------------------
+
+    /// The *Privacy* tab: telemetry and Discord Rich Presence toggles.
+    ///
+    /// `PrivacySettings.vue`, in the reference's own order.
+    fn privacy_settings(&self) -> Element<'_, Message> {
+        let telemetry = self.settings_toggle_row(
+            Key::AppSettingsPrivacyTelemetryTitle,
+            Some(Key::AppSettingsPrivacyTelemetryDescription),
+            self.prefs.telemetry,
+            Message::ToggleTelemetry,
+        );
+        let discord = self.settings_toggle_row(
+            Key::AppSettingsPrivacyDiscordRichPresenceTitle,
+            Some(Key::AppSettingsPrivacyDiscordRichPresenceDescription),
+            self.prefs.discord_rpc,
+            Message::ToggleDiscordRpc,
+        );
+        // `mt-4` between the two rows and, on the first, `mt-8 first:mt-0`
+        // (`PrivacySettings.vue`): 16px between them and nothing above the one
+        // that comes first, which is the spacing a column of two already gives.
+        column![]
+            .width(Length::Fill)
+            .spacing(16.0)
+            .push(telemetry)
+            .push(discord)
+            .into()
+    }
+
+    // ---- Synced Options settings ------------------------------------------
+
+    /// The *Synced settings* tab: the settings that can be shared between
+    /// instances, in the reference's own order.
+    ///
+    /// `instances-synced-settings/index.vue`. Its `globalRows` is a list of six
+    /// options and its template draws `availableGlobalRows`, which drops
+    /// `data_packs` -- `isSyncedOptionAvailable` in `helpers/instance.ts:300` is
+    /// true for every option but that one -- so five rows are drawn here, in the
+    /// order the list has them: game options, multiplayer servers, resource
+    /// packs, command history, creative hotbars. Each is
+    /// `flex items-center justify-between gap-6` around a heading at `text-lg`
+    /// with its description under it, inside a `flex flex-col gap-4` column,
+    /// which is 16 between rows.
+    ///
+    /// Three things that pane draws are not drawn here. The *edit* `IconButton`
+    /// each editable row carries opens a modal over the shared set -- shared game
+    /// options, synced servers, shared packs -- and this launcher keeps no shared
+    /// set for one to open. `<LaunchOptions />`, the reference's own last child,
+    /// is a second section of default-instance options (window size, memory, Java
+    /// arguments, launch hooks) that is a pane of its own. And the source picker
+    /// is a modal over instances this launcher has nothing to pick between.
+    fn synced_options_settings(&self) -> Element<'_, Message> {
+        // The reference's own rows, minus the one its own filter drops.
+        let rows = [
+            (
+                Key::AppSettingsSyncedOptionsGameSettings,
+                Key::AppSettingsSyncedOptionsGameSettingsDescription,
+            ),
+            (
+                Key::AppSettingsSyncedOptionsMultiplayerServers,
+                Key::AppSettingsSyncedOptionsMultiplayerServersDescription,
+            ),
+            (
+                Key::AppSettingsSyncedOptionsResourcePacks,
+                Key::AppSettingsSyncedOptionsResourcePacksDescription,
+            ),
+            (
+                Key::AppSettingsSyncedOptionsCommandHistory,
+                Key::AppSettingsSyncedOptionsCommandHistoryDescription,
+            ),
+            (
+                Key::AppSettingsSyncedOptionsCreativeHotbars,
+                Key::AppSettingsSyncedOptionsCreativeHotbarsDescription,
+            ),
+        ];
+        let mut column = column![].width(Length::Fill).spacing(16.0);
+        for (title, description) in rows {
+            column = column.push(self.settings_row_unavailable(title, Some(description)));
+        }
+        column.into()
+    }
+
+    // ---- Java Installations settings --------------------------------------
+
+    /// The *Java Installations* tab: one Java path per major version.
+    ///
+    /// `JavaSettings.vue`, in the reference's own order -- `:34`'s
+    /// `[25, 21, 17, 8]` -- with each row the reference's own
+    /// `flex flex-col gap-2.5`, and every row but the first carrying an extra
+    /// `mt-4` on its heading. In a flex column a margin adds to the gap rather
+    /// than collapsing into it, so that pair is one 40-pixel lead
+    /// ([`JAVA_ROW_LEAD`]).
+    fn java_installations_settings(&self) -> Element<'_, Message> {
+        let versions = [25u64, 21, 17, 8];
+        let mut column = column![].width(Length::Fill);
+        for (index, &major) in versions.iter().enumerate() {
+            if index > 0 {
+                column = column.push(Space::with_height(Length::Fixed(JAVA_ROW_LEAD)));
+            }
+            column = column.push(self.java_version_row(major));
+        }
+        column.into()
+    }
+
+    /// One Java version row: the version's own heading and the field its path
+    /// goes in.
+    ///
+    /// The reference's `JavaSelector` is a picker over the JREs it has found on
+    /// this machine, and this launcher goes looking for none: it holds the path
+    /// it will run an instance with, so the row edits that path. The heading is
+    /// the version's own message rather than the raw key --
+    /// [`crate::text_gen::app_settings_java_installations_location_title`] fills
+    /// the reference's `Java {version, number} location` in.
+    fn java_version_row(&self, major: u64) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(crate::text_gen::app_settings_java_installations_location_title(major))
+            .size(18.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        // A version with nothing stored for it reads as no choice, which is the
+        // empty field the reference's selector shows for one it has not found.
+        let path = self.prefs.java_path(&major.to_string()).unwrap_or("");
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(settings_field(theme, path, move |new_path| Message::SetJavaPath {
+                major,
+                path: new_path,
+            }))
+            .into()
+    }
+
+    // ---- Resource Management settings -------------------------------------
+
+    /// The *Resource Management* tab: app directory, cache controls, the two
+    /// concurrency numbers, and database backups.
+    ///
+    /// `ResourceManagementSettings.vue`, in the reference's own order, with one
+    /// section of it missing: the reference's first child is
+    /// `ContentStorageSettings`, a panel over its *content store* -- how many
+    /// bytes are unique, shared, cached and copied, with a verification pass and
+    /// a purge for what is unused -- and this launcher installs into each
+    /// instance's own folder rather than into a store, so there is nothing for
+    /// that panel to measure. Everything below it is the tab's own settings, at
+    /// the reference's outer `gap-6`, which is 24.
+    fn resource_management_settings(&self) -> Element<'_, Message> {
+        let app_dir = self.resource_app_directory();
+        let always_show = self.resource_always_show_details();
+        let cache = self.resource_cache_section();
+        let downloads = self.resource_concurrent_downloads();
+        let writes = self.resource_concurrent_writes();
+        let backups = self.resource_backups();
+        column![]
+            .width(Length::Fill)
+            .push(app_dir)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(always_show)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(cache)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(downloads)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(writes)
+            .push(Space::with_height(Length::Fixed(24.0)))
+            .push(backups)
+            .into()
+    }
+
+    /// The app directory section: the heading, the field the path goes in, and
+    /// the reference's own description under it.
+    ///
+    /// The reference's `Input` carries a folder-search `IconButton` on its own
+    /// right that opens a native directory picker, and this launcher has no
+    /// picker to open: the path is typed. That is the one thing the reference's
+    /// words do not promise -- the field is where the directory is said, and the
+    /// sentence under it says when the answer takes effect.
+    fn resource_app_directory(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppSettingsResourceManagementAppDirectoryTitle.message())
+            .size(18.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let desc = text(Key::AppSettingsResourceManagementAppDirectoryDescription.message())
+            .size(16.0)
+            .line_height(iced::Pixels(TIGHT_LINE))
+            .font(medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+        let dir_text = self.prefs.app_directory.as_deref().unwrap_or("");
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(settings_field(theme, dir_text, Message::SetAppDirectory))
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(desc)
+            .into()
+    }
+
+    /// The always-show-copy-details toggle: the one row of this tab with a
+    /// description directly under its heading (`mt-1`, and no `leading-tight`
+    /// with it).
+    fn resource_always_show_details(&self) -> Element<'_, Message> {
+        self.settings_toggle_row(
+            Key::AppSettingsResourceManagementAlwaysShowCopyDetailsTitle,
+            Some(Key::AppSettingsResourceManagementAlwaysShowCopyDetailsDescription),
+            self.prefs.always_show_copy_details,
+            Message::ToggleAlwaysShowCopyDetails,
+        )
+    }
+
+    /// The cache section: the heading, the purge button under it, and the
+    /// reference's own description of what a purge costs.
+    ///
+    /// The reference's `Button` is `w-fit` and carries a `TrashIcon` in front of
+    /// its label, and it takes no `color`: a bare button in that kit is the
+    /// surface face, which is [`crate::ui::Kind::Standard`].
+    fn resource_cache_section(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppSettingsResourceManagementAppCacheTitle.message())
+            .size(18.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let desc = text(Key::AppSettingsResourceManagementAppCacheDescription.message())
+            .size(16.0)
+            .line_height(iced::Pixels(TIGHT_LINE))
+            .font(medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+        let button = crate::ui::button_with_icon(
+            theme,
+            "settings:resource:purge-cache",
+            Glyph::Trash,
+            Key::AppSettingsResourceManagementAppCachePurge,
+            crate::ui::Kind::Standard,
+            Length::Shrink,
+            Some(Message::PurgeCache),
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(button)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(desc)
+            .into()
+    }
+
+    /// The maximum concurrent downloads row: the reference's `Slider` from 1 to
+    /// 10 (`ResourceManagementSettings.vue:255`, `:256`), drawn as the number it
+    /// sets.
+    fn resource_concurrent_downloads(&self) -> Element<'_, Message> {
+        // `None` is "six", which is the default `crate::prefs` documents for
+        // this field in its own module note.
+        let value = self.prefs.max_concurrent_downloads.unwrap_or(6);
+        self.number_section(
+            Key::AppSettingsResourceManagementMaximumConcurrentDownloadsTitle,
+            Key::AppSettingsResourceManagementMaximumConcurrentDownloadsDescription,
+            value,
+            Message::SetMaxConcurrentDownloads,
+        )
+    }
+
+    /// The maximum concurrent writes row, off the reference's own `Slider` from
+    /// 1 to 50 (`ResourceManagementSettings.vue:271`, `:272`).
+    fn resource_concurrent_writes(&self) -> Element<'_, Message> {
+        // `None` is "four", the default `crate::prefs` documents for it.
+        let value = self.prefs.max_concurrent_writes.unwrap_or(4);
+        self.number_section(
+            Key::AppSettingsResourceManagementMaximumConcurrentWritesTitle,
+            Key::AppSettingsResourceManagementMaximumConcurrentWritesDescription,
+            value,
+            Message::SetMaxConcurrentWrites,
+        )
+    }
+
+    /// The database backups section: the heading, the folder button, and the
+    /// reference's own description of what is in there.
+    ///
+    /// The button is drawn and cannot be pressed, which is [`crate::ui::button_or`]'s
+    /// `on_press: None`: the folder it opens is the *database* backups folder of
+    /// an app that keeps a database, and this launcher keeps none -- it holds
+    /// each instance in its own folder and its own preferences in one JSON file
+    /// (see [`crate::prefs`]). A press that opened nothing, or a different
+    /// folder than the one the sentence names, would be the control lying about
+    /// what it does; a control that says it cannot is the honest half of the
+    /// reference's section.
+    fn resource_backups(&self) -> Element<'_, Message> {
+        let theme = self.theme;
+        let title = text(Key::AppSettingsResourceManagementAppDatabaseBackupsTitle.message())
+            .size(18.0)
+            .line_height(iced::Pixels(28.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        let desc = text(Key::AppSettingsResourceManagementAppDatabaseBackupsDescription.message())
+            .size(16.0)
+            .line_height(iced::Pixels(TIGHT_LINE))
+            .font(medium())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+        let button = crate::ui::button_with_icon(
+            theme,
+            "settings:resource:open-backups",
+            Glyph::FolderOpen,
+            Key::AppSettingsResourceManagementAppDatabaseBackupsOpenFolder,
+            crate::ui::Kind::Standard,
+            Length::Shrink,
+            None,
+        );
+        column![]
+            .width(Length::Fill)
+            .push(title)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(button)
+            .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
+            .push(desc)
+            .into()
     }
 
     /// How tall a dialog's body may be in the window this shell is drawing in.
@@ -7450,11 +8475,16 @@ fn tags(&self) -> iced::Command<Message> {
     ///
     /// Each arm is one of the reference's own settings components: Appearance is
     /// `layouts/shared/appearance-settings/layout.vue`, Language is
-    /// `LanguageSettings.vue`.
+    /// `LanguageSettings.vue`, Features is `FeaturesSettings.vue`, Behavior is
+    /// `BehaviorSettings.vue`, Privacy is `PrivacySettings.vue`, Synced Options is
+    /// `instances-synced-settings/index.vue`, Java Installations is `JavaSettings.vue`
+    /// and Resource Management is `ResourceManagementSettings.vue`.
     fn settings_tab_view(&self) -> Element<'_, Message> {
         let theme = self.theme;
         match self.settings_tab {
             SettingsTab::Appearance => self.appearance_settings(),
+            SettingsTab::Features => self.features_settings(),
+            SettingsTab::Behavior => self.behavior_settings(),
             SettingsTab::Language => {
                 let mut body = self.language_options();
                 if let Some(warning) = &self.accounts_warning {
@@ -7475,6 +8505,10 @@ fn tags(&self) -> iced::Command<Message> {
                 }
                 body
             }
+            SettingsTab::Privacy => self.privacy_settings(),
+            SettingsTab::SyncedOptions => self.synced_options_settings(),
+            SettingsTab::JavaInstallations => self.java_installations_settings(),
+            SettingsTab::ResourceManagement => self.resource_management_settings(),
         }
     }
 
@@ -9198,6 +10232,31 @@ fn theme_columns(width: f32) -> usize {
 /// This is what the pane's fade is decided on: the reference shows that fade
 /// whenever its scroll container has somewhere to scroll, and this pane cannot fit
 /// its own content in the 468 pixels a 720-pixel window gives it.
+/// The reference's own `Input` control, which is where a settings tab puts the
+/// one value it takes: `text-sm`, on `--surface-4` behind a 1-pixel
+/// `--surface-5` hairline with `--radius-md` on it.
+///
+/// The same box the create dialog's name field draws
+/// (`text_input(..).padding(..).size(14.0).font(medium())` over
+/// [`crate::ui::Field`]`::bordered`), and the same padding: the reference's own
+/// `p-2.5 px-3`. It is not [`crate::ui::input_sized`], which is the *search*
+/// field of the language pane and draws a magnifier in front of its text -- a
+/// path or a count with a magnifier on it would be a field claiming to be the
+/// wrong control.
+fn settings_field<'a>(
+    theme: Gen,
+    value: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    text_input("", value)
+        .on_input(on_input)
+        .padding(Padding { top: 10.0, bottom: 10.0, left: 12.0, right: 12.0 })
+        .size(14.0)
+        .font(medium())
+        .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme))))
+        .into()
+}
+
 fn appearance_settings_height(options: usize, columns: usize) -> f32 {
     let columns = columns.max(1);
     let rows = options.div_ceil(columns) as f32;
@@ -12136,29 +13195,75 @@ mod tests {
 
     #[test]
     fn the_settings_tabs_are_the_reference_s_own() {
-        // `AppSettingsModal.vue`'s `tabs` array, read in its own order. Two of its
-        // eight are ported here -- Appearance, which is `PaintbrushIcon` and
-        // `app.settings.tabs.appearance`, and Language, which is `LanguagesIcon`, the
-        // same id under `language`, and the `commonMessages.beta` badge -- and the
-        // list is asserted rather than described because the *order* is the tab
-        // order: a tab inserted in the wrong place would still draw.
-        assert_eq!(SettingsTab::ALL, [SettingsTab::Appearance, SettingsTab::Language]);
-        assert_eq!(SettingsTab::Appearance.label(), Key::AppSettingsTabsAppearance);
-        assert_eq!(SettingsTab::Appearance.label().message(), "Appearance");
-        assert_eq!(SettingsTab::Appearance.glyph(), Glyph::Paintbrush);
-        assert_eq!(SettingsTab::Appearance.badge(), None);
-        assert_eq!(SettingsTab::Language.label(), Key::AppSettingsTabsLanguage);
-        assert_eq!(SettingsTab::Language.label().message(), "Language");
-        assert_eq!(SettingsTab::Language.glyph(), Glyph::Languages);
-        assert_eq!(SettingsTab::Language.badge(), Some(Key::BadgeBeta));
-        // Both are `tabCategories.display`, whose message is `Display` -- the
-        // reference uppercases it in CSS, and the drawing layer does that itself.
-        for tab in SettingsTab::ALL {
-            assert_eq!(tab.category(), Key::SettingsSidebarLabelDisplay);
-            assert_eq!(tab.category().message(), "Display");
+        // `AppSettingsModal.vue`'s `tabs` array, read in its own order. The eight
+        // here are the ones whose own component is ported: Feature flags is
+        // `developerOnly: true`, and Profile and Social are about a Modrinth
+        // account -- see [`SettingsTab`]'s own note. The list is asserted rather
+        // than described because the *order* is the tab order: a tab inserted in
+        // the wrong place would still draw.
+        assert_eq!(
+            SettingsTab::ALL,
+            [
+                SettingsTab::Appearance,
+                SettingsTab::Features,
+                SettingsTab::Behavior,
+                SettingsTab::Language,
+                SettingsTab::Privacy,
+                SettingsTab::SyncedOptions,
+                SettingsTab::JavaInstallations,
+                SettingsTab::ResourceManagement,
+            ]
+        );
+        // Each tab's own label, icon and badge, against the same array: the
+        // messages are the ids it writes there (`app.settings.tabs.<name>`) and
+        // the icons are what it imports for them. Language is the one with a
+        // badge, `commonMessages.beta`.
+        let drawn = [
+            (SettingsTab::Appearance, Key::AppSettingsTabsAppearance, "Appearance", Glyph::Paintbrush, None),
+            (SettingsTab::Features, Key::AppSettingsTabsFeatures, "Features", Glyph::LightBulb, None),
+            (SettingsTab::Behavior, Key::AppSettingsTabsBehavior, "Behavior", Glyph::Settings2, None),
+            (SettingsTab::Language, Key::AppSettingsTabsLanguage, "Language", Glyph::Languages, Some(Key::BadgeBeta)),
+            (SettingsTab::Privacy, Key::AppSettingsTabsPrivacy, "Privacy", Glyph::Shield, None),
+            (SettingsTab::SyncedOptions, Key::AppSettingsTabsSyncedOptions, "Synced settings", Glyph::RefreshCw, None),
+            (SettingsTab::JavaInstallations, Key::AppSettingsTabsJavaInstallations, "Java installations", Glyph::Coffee, None),
+            (SettingsTab::ResourceManagement, Key::AppSettingsTabsResourceManagement, "Resource management", Glyph::Microchip, None),
+        ];
+        for (tab, label, message, glyph, badge) in drawn {
+            assert_eq!(tab.label(), label, "{message}");
+            assert_eq!(label.message(), message);
+            assert_eq!(tab.glyph(), glyph, "{message}");
+            assert_eq!(tab.badge(), badge, "{message}");
         }
+        // The headings are `tabCategories`' own three messages: `display`,
+        // `account` and `instances`. The reference uppercases them in CSS, and
+        // the drawing layer does that itself.
+        for tab in [
+            SettingsTab::Appearance,
+            SettingsTab::Features,
+            SettingsTab::Behavior,
+            SettingsTab::Language,
+        ] {
+            assert_eq!(tab.category(), Key::SettingsSidebarLabelDisplay);
+        }
+        assert_eq!(SettingsTab::Privacy.category(), Key::SettingsSidebarLabelAccount);
+        for tab in [
+            SettingsTab::SyncedOptions,
+            SettingsTab::JavaInstallations,
+            SettingsTab::ResourceManagement,
+        ] {
+            assert_eq!(tab.category(), Key::AppSettingsSidebarLabelInstances);
+        }
+        // The headings' own words, read once rather than trusted: a category
+        // whose message went missing would otherwise draw blank.
+        assert_eq!(Key::SettingsSidebarLabelDisplay.message(), "Display");
+        assert_eq!(Key::SettingsSidebarLabelAccount.message(), "Account");
+        assert_eq!(Key::AppSettingsSidebarLabelInstances.message(), "Instances");
         // Two tabs cannot share a control name, or a hover on one would light both.
-        assert_ne!(SettingsTab::Appearance.key(), SettingsTab::Language.key());
+        let mut keys: Vec<&str> = SettingsTab::ALL.iter().map(|tab| tab.key()).collect();
+        let count = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), count, "every tab carries its own control name");
     }
 
     #[test]
