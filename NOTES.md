@@ -1865,7 +1865,12 @@ sentence does not name.
 Measured after the slice, on this machine: `cargo test --workspace --all-targets
 --locked` at **1357 passed / 0 failed / 19 ignored** (179 + 8 + 859 + 4 + 33 + 274),
 and `cargo clippy --workspace --all-targets --locked -- -D clippy::correctness` with
-nothing to say.
+nothing to say. The push's own run, `37674634610` on `ef5d668`, is green through all
+five jobs with the same workspace rows (`Test workspace` 2m28s, `Lint` 1m21s), the
+live suite 19 passed / 0 failed in 160.51s, and both Windows exes staged --
+28,087,808 B (msvc) and 24,419,328 B (gnu), which are five times the sizes the rows
+above record because the slice before this one traded exe size for frames
+(`opt-level` `"z"` to `3`).
 
 ### The line height that was read backwards
 
