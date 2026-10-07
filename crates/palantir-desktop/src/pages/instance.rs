@@ -1072,6 +1072,8 @@ mod tests {
             name: "config.toml".to_string(),
             directory: false,
             bytes: 12,
+            created: None,
+            modified: None,
         }]));
         state.update(Message::Listed { round: second.round, listing: fresh }, &store);
         assert!(matches!(state.listed, Load::Ready(store::Listing::Files(_))));
@@ -1186,6 +1188,8 @@ mod tests {
                 name: format!("config-{index:05}.toml"),
                 directory: false,
                 bytes: 12,
+                created: None,
+                modified: None,
             })
             .collect();
         for theme in Gen::ALL {

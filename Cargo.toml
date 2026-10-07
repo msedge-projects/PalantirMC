@@ -30,7 +30,14 @@ uuid = { version = "1", features = ["v4"] }
 cosmic-text = { path = "vendor/cosmic-text" }
 
 [profile.release]
-opt-level = "z"
+# `3`, not `z`. This profile used to optimise for size, which is the wrong trade
+# for this binary: everything the window does per frame -- laying out the tree,
+# resolving text, rasterising -- is CPU work, and `z` gives up inlining and
+# vectorisation on exactly that work. On a machine drawing through the software
+# rasteriser (see `crates/palantir-desktop/src/gpu.rs`) the frame cost is the
+# whole of how responsive the window feels, so the frames are bought back at the
+# price of a larger executable.
+opt-level = 3
 lto = true
 codegen-units = 1
 strip = true

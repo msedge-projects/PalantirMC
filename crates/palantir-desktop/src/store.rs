@@ -1887,6 +1887,16 @@ pub struct Entry {
     pub directory: bool,
     /// Size in bytes, zero for a directory.
     pub bytes: u64,
+    /// Milliseconds since the epoch at which the entry was created, or `None`
+    /// where the filesystem does not record one.
+    ///
+    /// A stamp and not a formatted date, because the reference's Files table has
+    /// a *Created* column that is *sorted* as well as drawn: a value formatted
+    /// where it is read is a string that compares alphabetically.
+    pub created: Option<u64>,
+    /// Milliseconds since the epoch at which the entry was last written, for the
+    /// same column's *Modified* counterpart.
+    pub modified: Option<u64>,
 }
 
 /// How many lines of an instance's newest log the Logs tab draws.
@@ -2030,31 +2040,46 @@ pub fn files(directory: &Path) -> Vec<Entry> {
     for entry in read.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        let (directory, bytes) = match entry.file_type() {
-            Ok(kind) if !kind.is_symlink() => (
-                kind.is_dir(),
-                if kind.is_dir() {
-                    0
-                } else {
-                    entry.metadata().map(|meta| meta.len()).unwrap_or(0)
-                },
-            ),
+        // The metadata carries three of the row's four columns -- the size and
+        // the two stamps -- so it is taken once and read three times. It is a
+        // second cheap call per entry (`DirEntry::metadata` is an `lstat` on the
+        // name, the same shape as the `file_type` above it) and it is paid here,
+        // in a read that happens once per tab visit rather than in a frame.
+        let (directory, meta) = match entry.file_type() {
+            Ok(kind) if !kind.is_symlink() => (kind.is_dir(), entry.metadata().ok()),
             _ => {
                 let directory = path.is_dir();
-                let bytes = if directory {
-                    0
-                } else {
-                    std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0)
-                };
-                (directory, bytes)
+                (directory, std::fs::metadata(&path).ok())
             }
         };
-        entries.push(Entry { name, directory, bytes });
+        let (created, modified) = match meta.as_ref() {
+            Some(meta) => (stamp(meta.created()), stamp(meta.modified())),
+            None => (None, None),
+        };
+        // A directory has no size of its own to show, which is the reference's
+        // own empty cell rather than a zero a reader would read as *empty file*.
+        let bytes = match meta {
+            _ if directory => 0,
+            Some(meta) => meta.len(),
+            None => 0,
+        };
+        entries.push(Entry { name, directory, bytes, created, modified });
     }
     entries.sort_by(|left, right| {
         right.directory.cmp(&left.directory).then_with(|| left.name.cmp(&right.name))
     });
     entries
+}
+
+/// A file time as milliseconds since the epoch, or `None` where the filesystem
+/// does not record one.
+///
+/// Milliseconds rather than a `SystemTime`, because the value is carried in the
+/// listing and compared by the table's sort: a `SystemTime` is opaque, and this
+/// is the unit the reference's own dates are built from.
+fn stamp(time: std::io::Result<std::time::SystemTime>) -> Option<u64> {
+    let since = time.ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(since.as_millis() as u64)
 }
 
 /// The screenshots in `screenshots/`, newest name first.
@@ -3033,6 +3058,13 @@ mod tests {
             vec!["mods", "instance.cfg", "options.txt"]
         );
         assert_eq!(entries[2].bytes, 5);
+        // The two stamps the reference's table builds its *Created* and *Modified*
+        // columns from, taken off the same metadata the size is. Only `modified`
+        // is asserted: every filesystem records one, while `created` is genuinely
+        // absent on some (ext4 without a birth time), which is the empty cell the
+        // table draws rather than an error.
+        assert!(entries[0].modified.is_some(), "a directory carries a stamp too");
+        assert!(entries[2].modified.is_some(), "so does a file");
         assert!(files(&dir.join("nowhere")).is_empty());
     }
 

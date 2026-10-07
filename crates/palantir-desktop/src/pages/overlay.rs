@@ -410,7 +410,7 @@ mod tests {
     fn pressable(label: &'static str) -> Element<'static, &'static str, iced::Theme, Null> {
         mouse_area(Space::new(Length::Fixed(200.0), Length::Fixed(100.0)))
             .interaction(mouse::Interaction::Pointer)
-            .on_press(label)
+            .on_release(label)
             .into()
     }
 
@@ -420,7 +420,7 @@ mod tests {
         mouse_area(Space::new(Length::Fixed(200.0), Length::Fixed(100.0)))
             .on_enter("enter")
             .on_exit("exit")
-            .on_press(label)
+            .on_release(label)
             .into()
     }
 
@@ -465,19 +465,42 @@ mod tests {
         Rectangle::new(iced::Point::ORIGIN, iced::Size::new(400.0, 300.0))
     }
 
-    /// The one event these tests send: a left press at [`pointer`].
+    /// The first half of the one gesture these tests send: a left press at
+    /// [`pointer`].
     fn press_event() -> Event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
     }
 
-    /// That press, delivered to the stack, and what it did.
+    /// The second half: the same button coming back up in the same place.
+    fn release_event() -> Event {
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    }
+
+    /// One click, delivered to the stack, and what it did.
+    ///
+    /// Both halves are sent because the activation is on the up-stroke: a
+    /// control publishes its message on `ButtonReleased` -- `crate::ui`'s note on
+    /// `on_release` says why -- so a test that sent only the press would be
+    /// asking what a click delivers and never clicking. The status returned is
+    /// the *release's*, which is the event the control answers; the press is sent
+    /// for its side effects alone (the hover a control remembers in the tree).
     fn press(stack: Test) -> (event::Status, Vec<&'static str>) {
         with_layout(stack, |stack, tree, layout| {
             let mut messages: Vec<&'static str> = Vec::new();
             let mut shell = Shell::new(&mut messages);
-            let status = stack.on_event(
+            let _ = stack.on_event(
                 tree,
                 press_event(),
+                layout,
+                pointer(),
+                &Null,
+                &mut iced::advanced::clipboard::Null,
+                &mut shell,
+                &viewport(),
+            );
+            let status = stack.on_event(
+                tree,
+                release_event(),
                 layout,
                 pointer(),
                 &Null,
@@ -555,9 +578,20 @@ mod tests {
                 );
                 let mut published: Vec<&'static str> = Vec::new();
                 let mut shell = Shell::new(&mut published);
+                // The click's two halves, for the reason [`press`] gives.
+                let _ = stack.on_event(
+                    tree,
+                    press_event(),
+                    layout,
+                    pointer(),
+                    &Null,
+                    &mut iced::advanced::clipboard::Null,
+                    &mut shell,
+                    &viewport(),
+                );
                 let status = stack.on_event(
                     tree,
-                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                    release_event(),
                     layout,
                     pointer(),
                     &Null,
@@ -585,9 +619,20 @@ mod tests {
                 );
                 let mut published: Vec<&'static str> = Vec::new();
                 let mut shell = Shell::new(&mut published);
+                // The click's two halves, for the reason [`press`] gives.
+                let _ = stack.on_event(
+                    tree,
+                    press_event(),
+                    layout,
+                    pointer(),
+                    &Null,
+                    &mut iced::advanced::clipboard::Null,
+                    &mut shell,
+                    &viewport(),
+                );
                 let status = stack.on_event(
                     tree,
-                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                    release_event(),
                     layout,
                     pointer(),
                     &Null,

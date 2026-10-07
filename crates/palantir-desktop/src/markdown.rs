@@ -602,7 +602,7 @@ where
             let mut disclosure = column![]
                 .spacing(16.0)
                 .width(Length::Fill)
-                .push(mouse_area(caption).on_press(toggle(*number)));
+                .push(mouse_area(caption).on_release(toggle(*number)));
             if expanded {
                 let mut inner = column![].spacing(16.0).width(Length::Fill);
                 for block in body {

@@ -1574,7 +1574,7 @@ pub fn select<'a, Message: Clone + Hovered + 'a>(
         .into();
     mouse_area(container(trigger).width(Length::Fixed(width)))
         .interaction(Interaction::Pointer)
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -1863,7 +1863,7 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
             .interaction(Interaction::Pointer)
             .on_enter(Message::hover_with(key, true, MENU_HOVER))
             .on_exit(Message::hover_with(key, false, MENU_HOVER))
-            .on_press(message.clone())
+            .on_release(message.clone())
             .into();
         list = list.push(row);
     }
@@ -2010,7 +2010,7 @@ pub fn switch<'a, Message: Clone + 'a>(
     });
     mouse_area(track)
         .interaction(Interaction::Pointer)
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -2270,7 +2270,15 @@ fn button_face<'a, Message: Clone + Hovered + 'a>(
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false));
     match on_press {
-        Some(on_press) => area.on_press(on_press).into(),
+        // `on_release`, not `on_press`. iced's `on_press` fires on the
+        // *down-stroke* (`iced_widget-0.12.3/src/mouse_area.rs:337-341`), so a
+        // control acts the instant the pointer goes down -- before the click is
+        // finished, and with no chance to drag off and cancel it. Every other
+        // toolkit, and the reference's own HTML buttons, run a control's action
+        // on the up-stroke; `on_release` (`mouse_area.rs:347-351`) publishes
+        // only while the pointer is still over the control, so a press dragged
+        // away cancels itself, which is the behaviour a reader expects.
+        Some(on_press) => area.on_release(on_press).into(),
         None => area.into(),
     }
 }
@@ -2495,7 +2503,15 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false));
     match on_press {
-        Some(on_press) => area.on_press(on_press).into(),
+        // `on_release`, not `on_press`. iced's `on_press` fires on the
+        // *down-stroke* (`iced_widget-0.12.3/src/mouse_area.rs:337-341`), so a
+        // control acts the instant the pointer goes down -- before the click is
+        // finished, and with no chance to drag off and cancel it. Every other
+        // toolkit, and the reference's own HTML buttons, run a control's action
+        // on the up-stroke; `on_release` (`mouse_area.rs:347-351`) publishes
+        // only while the pointer is still over the control, so a press dragged
+        // away cancels itself, which is the behaviour a reader expects.
+        Some(on_press) => area.on_release(on_press).into(),
         None => area.into(),
     }
 }
@@ -2722,7 +2738,7 @@ pub fn check_row<'a, Message: Clone + Hovered + 'a>(
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -2799,7 +2815,7 @@ pub fn icon_button_kind<'a, Message: Clone + Hovered + 'a>(
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -2865,7 +2881,7 @@ pub fn checkbox<'a, Message: Clone + Hovered + 'a>(
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(on_toggle)
+        .on_release(on_toggle)
         .into()
 }
 
@@ -3292,7 +3308,7 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
                 .interaction(Interaction::Pointer)
                 .on_enter(Message::hover(key, true))
                 .on_exit(Message::hover(key, false))
-                .on_press(on_select(index)),
+                .on_release(on_select(index)),
         );
     }
     // `p-1` on `NavTabs.vue:9` plus the `border border-solid border-surface-4`
@@ -3427,7 +3443,7 @@ pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -3528,7 +3544,7 @@ pub fn chips<'a, Message: Clone + Hovered + 'a>(
             .on_enter(Message::hover(key, true))
             .on_exit(Message::hover(key, false));
         row = row.push(match press {
-            Some(press) => area.on_press(press),
+            Some(press) => area.on_release(press),
             None => area,
         });
     }

@@ -1973,7 +1973,7 @@ fn project_row<'a>(
     .interaction(Interaction::Pointer)
     .on_enter(Message::hover(key, true))
     .on_exit(Message::hover(key, false))
-    .on_press(Message::Project(project.id.clone()))
+    .on_release(Message::Project(project.id.clone()))
     .into()
 }
 
@@ -2618,7 +2618,7 @@ fn install_button<'a>(
         // this button's brightness filter exactly as it carries every other's.
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(Message::Install(project.id.clone(), project.title.clone(), pack))
+        .on_release(Message::Install(project.id.clone(), project.title.clone(), pack))
         .into()
 }
 

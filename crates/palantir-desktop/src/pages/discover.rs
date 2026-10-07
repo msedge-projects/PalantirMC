@@ -1490,7 +1490,7 @@ fn section<'a>(
             .width(Length::Fill)
             .padding(Padding { top: 12.0, right: 12.0, bottom: 12.0, left: 12.0 }),
     )
-    .on_press(Message::Section(id.to_string()))
+    .on_release(Message::Section(id.to_string()))
     .into()
 }
 
@@ -1523,7 +1523,7 @@ fn show_more<'a>(theme: Gen, filter: &str, expanded: bool) -> Element<'a, Messag
         bottom: 4.0,
         left: 8.0,
     }))
-    .on_press(Message::Expand(filter.to_string()))
+    .on_release(Message::Expand(filter.to_string()))
     .on_enter(Message::hover_with(key, true, 1.0))
     .on_exit(Message::hover_with(key, false, 1.0))
     .into()
@@ -2266,7 +2266,7 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     // it is, which is the number the label and the check read.
     .on_enter(Message::hover_with(key, true, 1.0))
     .on_exit(Message::hover_with(key, false, 1.0))
-    .on_press(row.press.clone())
+    .on_release(row.press.clone())
     .into()
 }
 
@@ -2296,7 +2296,7 @@ fn exclude_button<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     )
     .on_enter(Message::hover_with(key, true, 1.0))
     .on_exit(Message::hover_with(key, false, 1.0))
-    .on_press(row.exclude.clone())
+    .on_release(row.exclude.clone())
     .into()
 }
 
@@ -2869,7 +2869,7 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(Message::Open(hit.id.clone()))
+        .on_release(Message::Open(hit.id.clone()))
         .into()
 }
 

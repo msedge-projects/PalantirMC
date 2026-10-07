@@ -1477,7 +1477,7 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
                 .on_enter(Message::Hover { key, over: true, hover: None })
                 .on_exit(Message::Hover { key, over: false, hover: None });
         }
-        list = list.push(area.on_press(Message::Select(*section)));
+        list = list.push(area.on_release(Message::Select(*section)));
         if open {
             list = list.push(Space::with_height(SECTION_CONTENT_TOP));
             list = list.push(section_content(theme, state, store, *section));
@@ -1633,7 +1633,7 @@ fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
     // Unusable while a change is in flight, like every other write on this
     // page: the dialog is modal, so a second press would be a second dialog.
     if live {
-        area.on_press(Message::AddSkin).into()
+        area.on_release(Message::AddSkin).into()
     } else {
         area.into()
     }
@@ -1687,7 +1687,7 @@ fn saved_card<'a>(
     let picture: Element<'a, Message> = if live {
         mouse_area(picture)
             .interaction(iced::mouse::Interaction::Pointer)
-            .on_press(Message::Edit { key: row.entry.key.clone() })
+            .on_release(Message::Edit { key: row.entry.key.clone() })
             .into()
     } else {
         picture
@@ -2095,7 +2095,7 @@ fn arm_choice<'a>(
         .interaction(iced::mouse::Interaction::Pointer)
         .on_enter(Message::Hover { key, over: true, hover: None })
         .on_exit(Message::Hover { key, over: false, hover: None })
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 
@@ -2241,7 +2241,7 @@ fn ears_notice<'a>(theme: Gen) -> Element<'a, Message> {
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::AccentContrast))),
             )
             .interaction(iced::mouse::Interaction::Pointer)
-            .on_press(Message::OpenEars),
+            .on_release(Message::OpenEars),
         )
         .push(caption(theme, after))
         .into()

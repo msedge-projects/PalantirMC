@@ -1427,7 +1427,7 @@ fn link_button<'a, Message: Clone + crate::ui::Hovered + 'a>(
         .interaction(iced::mouse::Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(on_press)
+        .on_release(on_press)
         .into()
 }
 

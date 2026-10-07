@@ -30,6 +30,17 @@ pub struct InstanceCard {
     pub name: String,
     /// `iconKey`.
     pub icon: String,
+    /// The instance's own icon, already read off disk: the PNG that
+    /// `<icons_dir>/<key>.png` names, or `None` when the key resolves to no
+    /// file -- a builtin key, an instance nobody has given an icon, or a read
+    /// that failed.
+    ///
+    /// Read with the listing rather than where the tile is drawn, because a view
+    /// gets no disk and no frame may open a file: `crate::pages::instance`'s note
+    /// on reading a listing once is the same rule one page over. `Arc<[u8]>`
+    /// rather than `Vec<u8>` because a card is cloned per frame and this is the
+    /// one field that is not a few bytes.
+    pub icon_png: Option<std::sync::Arc<[u8]>>,
     /// Owning group, if any.
     pub group: Option<String>,
     /// `net.minecraft` component version (`""` when the pack file is unreadable).
@@ -210,6 +221,9 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
         id: entry.id.clone(),
         name: entry.name.clone(),
         icon: entry.icon.clone(),
+        // Filled by [`load`], which is the only reader with the `icons/`
+        // directory in hand.
+        icon_png: None,
         group: entry.group.clone(),
         mc_version: String::new(),
         loader: LoaderKind::Vanilla,
@@ -271,8 +285,12 @@ pub fn load(paths: &PalantirPaths) -> LoadedInstances {
             };
         }
     };
-    let cards: Vec<InstanceCard> =
+    let mut cards: Vec<InstanceCard> =
         model.entries().iter().map(|entry| summarize(&instances_dir, entry)).collect();
+    // Each card's own icon, read once with the listing rather than per frame.
+    for card in &mut cards {
+        card.icon_png = instance_icon(paths, &card.icon);
+    }
     #[cfg(test)]
     let selected = resolve_selected_id(paths, &cards);
     #[cfg(test)]
@@ -474,6 +492,28 @@ fn register_loader(instance: &Instance, uid: &str, build: &str) -> Result<(), St
 
 /// PNG magic: custom icons must really be PNGs (Prism only reads PNG icons).
 const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// The icon an `iconKey` names, read out of the launcher's own `icons/`
+/// directory.
+///
+/// The rule on disk is Prism's, and it is the one [`import_icon_file`] writes
+/// against: a key that is not a builtin resolves to `<icons_dir>/<key>.png`.
+///
+/// Every way this can come up empty is `None` rather than an error -- an empty
+/// key, a key naming no file, a file that is not a PNG, a read that failed. A
+/// card with no picture is a card drawn with an empty box, which is the
+/// reference's own placeholder, and an instance whose icon cannot be read is not
+/// an instance that failed to load.
+pub fn instance_icon(paths: &PalantirPaths, key: &str) -> Option<std::sync::Arc<[u8]>> {
+    if key.is_empty() {
+        return None;
+    }
+    let bytes = std::fs::read(paths.icons_dir().join(format!("{key}.png"))).ok()?;
+    if bytes.len() < PNG_MAGIC.len() || bytes[..PNG_MAGIC.len()] != PNG_MAGIC {
+        return None;
+    }
+    Some(std::sync::Arc::from(bytes.into_boxed_slice()))
+}
 
 /// Install a PNG as `id`'s custom icon, returning the `iconKey` to store.
 ///
@@ -846,6 +886,33 @@ mod tests {
     }
 
     #[test]
+    fn an_instance_s_icon_is_read_with_the_listing_and_a_missing_one_is_an_empty_box() {
+        let (dir, paths) = test_paths();
+        let png = dir.path().join("my pack.png");
+        std::fs::write(&png, [&PNG_MAGIC[..], b"pretend pixels"].concat()).unwrap();
+        let created = create(
+            &paths,
+            &NewInstance { icon_source: Some(png), ..NewInstance::vanilla("Iconed", "26.2") },
+        )
+        .unwrap();
+
+        // The key the instance carries resolves to the file the icon was copied
+        // to, and the card the *listing* builds carries its bytes -- read once
+        // with the scan rather than by whichever frame happens to draw the tile.
+        let loaded = load(&paths);
+        let card = loaded.cards.iter().find(|card| card.id == created.id).expect("the new instance");
+        let bytes = card.icon_png.as_deref().expect("an icon was installed");
+        assert_eq!(&bytes[..PNG_MAGIC.len()], &PNG_MAGIC[..]);
+
+        // Every way this can come up empty is an empty box rather than a failure:
+        // a builtin key, an empty key, and a file that is not a PNG at all.
+        assert!(instance_icon(&paths, "default").is_none());
+        assert!(instance_icon(&paths, "").is_none());
+        std::fs::write(paths.icons_dir().join("bogus.png"), b"not an image").unwrap();
+        assert!(instance_icon(&paths, "bogus").is_none());
+    }
+
+    #[test]
     fn memory_override_is_written_when_requested() {
         let (_dir, paths) = test_paths();
         let spec = NewInstance { max_mem_mb: Some(6144), ..NewInstance::vanilla("Memory", "26.2") };
@@ -884,6 +951,7 @@ mod tests {
             id: "x".into(),
             name: "x".into(),
             icon: "default".into(),
+            icon_png: None,
             group: None,
             mc_version: "26.2".into(),
             loader: LoaderKind::Vanilla,

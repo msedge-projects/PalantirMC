@@ -33,7 +33,7 @@
 
 use iced::mouse::Interaction;
 use iced::widget::{column, container, image, mouse_area, row, Space};
-use iced::{Alignment, Background, Border, Element, Length, Padding, Theme};
+use iced::{Alignment, Background, Border, ContentFit, Element, Length, Padding, Theme};
 
 use crate::icon;
 use crate::icons_gen::Glyph;
@@ -719,7 +719,28 @@ fn tile<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
     let art_fill = crate::theme::brightness(theme_gen::ink(theme, Ink::Surface5), factor);
     let name_ink = crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor);
     let meta_ink = crate::theme::brightness(theme_gen::ink(theme, INK_DEFAULT), factor);
-    let art = container(Space::new(Length::Fixed(TILE_ART), Length::Fixed(TILE_ART))).style(
+    // The instance's own icon, and the same empty square when there is none.
+    //
+    // `card.icon_png` was read with the listing (`crate::instances`), so this
+    // frame only fits and draws it: a view gets no disk, and the reference's own
+    // placeholder is the box itself rather than a different picture.
+    let picture = card
+        .icon_png
+        .as_deref()
+        .and_then(|png| crate::avatar::Icon::of(png, TILE_ART as u32));
+    let art_content: Element<'a, Message> = match picture {
+        // `ContentFit::Fill` rather than `Contain`: the handle is already the
+        // box's own size and already rounded, so this one cannot letterbox or
+        // square it a second time ([`crate::ui::icon_box`] draws it the same
+        // way).
+        Some(icon) => image(icon.handle())
+            .width(Length::Fixed(TILE_ART))
+            .height(Length::Fixed(TILE_ART))
+            .content_fit(ContentFit::Fill)
+            .into(),
+        None => Space::new(Length::Fixed(TILE_ART), Length::Fixed(TILE_ART)).into(),
+    };
+    let art = container(art_content).style(
         move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(art_fill)),
             border: Border {
@@ -756,7 +777,7 @@ fn tile<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover_with(key, true, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
         .on_exit(Message::hover_with(key, false, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
-        .on_press(Message::Open(card.id.clone()))
+        .on_release(Message::Open(card.id.clone()))
         .into()
 }
 
@@ -950,7 +971,7 @@ fn welcome_button<'a>(
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(message)
+        .on_release(message)
         .into()
 }
 
@@ -1056,6 +1077,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             icon: String::new(),
+            icon_png: None,
             group: None,
             mc_version: mc.to_string(),
             loader,

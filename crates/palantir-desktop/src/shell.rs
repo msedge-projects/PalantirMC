@@ -4801,7 +4801,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(Message::hover(DOWNLOAD_CHIP, true))
             .on_exit(Message::hover(DOWNLOAD_CHIP, false))
-            .on_press(Message::ToggleDownloads)
+            .on_release(Message::ToggleDownloads)
             .into()
     }
 
@@ -4836,7 +4836,7 @@ fn tags(&self) -> iced::Command<Message> {
                         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
                 )
                 .interaction(Interaction::Pointer)
-                .on_press(Message::Go(format!("/instance/{id}"))),
+                .on_release(Message::Go(format!("/instance/{id}"))),
             );
             if let Some(state) = state_label(launch.state) {
                 body = body.push(
@@ -4993,7 +4993,7 @@ fn tags(&self) -> iced::Command<Message> {
             body = body.push(
                 mouse_area(icon::icon(Glyph::StopCircle, 16.0, theme_gen::ink(theme, Ink::Red)))
                     .interaction(Interaction::Pointer)
-                    .on_press(Message::StopRun(id.to_string())),
+                    .on_release(Message::StopRun(id.to_string())),
             );
         }
         body = body.push(
@@ -5003,7 +5003,7 @@ fn tags(&self) -> iced::Command<Message> {
                 theme_gen::ink(theme, INK_SECONDARY),
             ))
             .interaction(Interaction::Pointer)
-            .on_press(Message::Go(format!("/instance/{id}/logs"))),
+            .on_release(Message::Go(format!("/instance/{id}/logs"))),
         );
         mouse_area(
             container(body)
@@ -5020,7 +5020,7 @@ fn tags(&self) -> iced::Command<Message> {
                 }),
         )
         .interaction(Interaction::Pointer)
-        .on_press(Message::SelectRun(id.to_string()))
+        .on_release(Message::SelectRun(id.to_string()))
         .into()
     }
 
@@ -5152,7 +5152,7 @@ fn tags(&self) -> iced::Command<Message> {
                 theme_gen::ink(theme, INK_SECONDARY),
             ))
             .interaction(Interaction::Pointer)
-            .on_press(Message::Go(format!("/instance/{id}/logs"))),
+            .on_release(Message::Go(format!("/instance/{id}/logs"))),
         );
         mouse_area(
             container(body)
@@ -5169,7 +5169,7 @@ fn tags(&self) -> iced::Command<Message> {
                 }),
         )
         .interaction(Interaction::Pointer)
-        .on_press(Message::SelectRun(id.to_string()))
+        .on_release(Message::SelectRun(id.to_string()))
         .into()
     }
 
@@ -5216,7 +5216,7 @@ fn tags(&self) -> iced::Command<Message> {
                 ..container::Appearance::default()
             });
         if enabled {
-            mouse_area(face).interaction(Interaction::Pointer).on_press(message).into()
+            mouse_area(face).interaction(Interaction::Pointer).on_release(message).into()
         } else {
             // No message at all rather than a message that is ignored: the
             // reference disables the button, and a control that cannot be used
@@ -5257,7 +5257,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(Message::hover(CLOSE, true))
             .on_exit(Message::hover(CLOSE, false))
-            .on_press(Message::CloseModal)
+            .on_release(Message::CloseModal)
             .into()
     }
 
@@ -5335,7 +5335,7 @@ fn tags(&self) -> iced::Command<Message> {
             });
         mouse_area(face)
             .interaction(Interaction::Pointer)
-            .on_press(Message::Sidebar(!showing))
+            .on_release(Message::Sidebar(!showing))
             .into()
     }
 
@@ -5399,7 +5399,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(Message::hover(key, true))
             .on_exit(Message::hover(key, false))
-            .on_press(message)
+            .on_release(message)
             .into()
     }
 
@@ -5528,7 +5528,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(Message::Hover(Some(slot)))
             .on_exit(Message::Hover(None))
-            .on_press(Message::Rail(slot))
+            .on_release(Message::Rail(slot))
             .into()
     }
 
@@ -6016,7 +6016,7 @@ fn tags(&self) -> iced::Command<Message> {
         .interaction(Interaction::Pointer)
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_press(Message::OpenUrl(PROMO_PLUS_URL.to_string()));
+        .on_release(Message::OpenUrl(PROMO_PLUS_URL.to_string()));
         // The fade the reference paints over the last five rem of the wash, so
         // the scroll region's last section dissolves into the ad rather than
         // stopping at a hard edge.
@@ -6190,7 +6190,7 @@ fn tags(&self) -> iced::Command<Message> {
         .interaction(Interaction::Pointer)
         .on_enter(card_crossing(CHECKLIST_HEADER, true))
         .on_exit(card_crossing(CHECKLIST_HEADER, false))
-        .on_press(Message::ToggleChecklist);
+        .on_release(Message::ToggleChecklist);
 
         let mut section = column![].width(Length::Fill).push(header);
         if self.checklist_open {
@@ -6277,7 +6277,7 @@ fn tags(&self) -> iced::Command<Message> {
                             .interaction(Interaction::Pointer)
                             // The same press the checklist's third step makes, up to
                             // and including the sentence it draws.
-                            .on_press(Message::Checklist(Step::LoginModrinth)),
+                            .on_release(Message::Checklist(Step::LoginModrinth)),
                     )
                     .width(Length::Fill)
                     .padding(PANEL_SECTION_PAD),
@@ -6384,7 +6384,7 @@ fn tags(&self) -> iced::Command<Message> {
             .on_exit(Message::hover(key, false));
         match complete {
             true => area.into(),
-            false => area.on_press(Message::Checklist(step)).into(),
+            false => area.on_release(Message::Checklist(step)).into(),
         }
     }
 
@@ -6579,7 +6579,7 @@ fn tags(&self) -> iced::Command<Message> {
                     false,
                     crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
                 ))
-                .on_press(Message::OpenUrl(link)),
+                .on_release(Message::OpenUrl(link)),
         )
     }
 
@@ -6675,7 +6675,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(card_crossing(ACCOUNTS_HEADER, true))
             .on_exit(card_crossing(ACCOUNTS_HEADER, false))
-            .on_press(Message::ToggleAccounts);
+            .on_release(Message::ToggleAccounts);
         let mut card = column![].width(Length::Fill).push(header);
         if self.accounts_open {
             card = card.push(self.accounts_body(accounts, selected));
@@ -6729,7 +6729,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(card_crossing(key, true))
             .on_exit(card_crossing(key, false))
-            .on_press(Message::SelectAccount(account.uuid.clone()));
+            .on_release(Message::SelectAccount(account.uuid.clone()));
             rows = rows.push(
                 row![]
                     .width(Length::Fill)
@@ -7004,7 +7004,7 @@ fn tags(&self) -> iced::Command<Message> {
             .interaction(Interaction::Pointer)
             .on_enter(Message::hover_with(key, true, THEME_CARD_HOVER))
             .on_exit(Message::hover_with(key, false, THEME_CARD_HOVER))
-            .on_press(Message::ColorTheme(option))
+            .on_release(Message::ColorTheme(option))
             .into()
     }
 
@@ -7999,7 +7999,7 @@ fn tags(&self) -> iced::Command<Message> {
         mouse_area(option)
             .on_enter(Message::hover_with(key, true, VERSION_ROW_HOVER))
             .on_exit(Message::hover_with(key, false, VERSION_ROW_HOVER))
-            .on_press(on_press)
+            .on_release(on_press)
             .into()
     }
 
@@ -8064,7 +8064,7 @@ fn tags(&self) -> iced::Command<Message> {
         mouse_area(row)
             .on_enter(Message::hover(key, true))
             .on_exit(Message::hover(key, false))
-            .on_press(Message::VersionSnapshots(!self.version_snapshots))
+            .on_release(Message::VersionSnapshots(!self.version_snapshots))
             .into()
     }
 
@@ -8291,7 +8291,7 @@ fn tags(&self) -> iced::Command<Message> {
                 ))
                 // A press while a transfer is in flight does nothing: two
                 // transfers of one file through one part file is a corrupted mod.
-                .on_press(target),
+                .on_release(target),
         )
     }
 
@@ -8378,7 +8378,7 @@ fn tags(&self) -> iced::Command<Message> {
                 background: Some(bed),
                 ..container::Appearance::default()
             });
-        mouse_area(scrim).on_press(Message::CloseModal).into()
+        mouse_area(scrim).on_release(Message::CloseModal).into()
     }
 }
 

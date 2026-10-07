@@ -209,7 +209,7 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             theme,
             iced::widget::mouse_area(row_body)
                 .interaction(iced::mouse::Interaction::Pointer)
-                .on_press(Message::Open),
+                .on_release(Message::Open),
         ));
     }
     blocks.push(list.into());

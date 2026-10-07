@@ -1201,7 +1201,7 @@ fn snapshot_toggle<'a>(theme: Gen, state: &State) -> Element<'a, Message> {
         .interaction(Interaction::Pointer)
         .on_enter(Hovered::hover(key, true))
         .on_exit(Hovered::hover(key, false))
-        .on_press(Message::ShowSnapshots(!state.show_snapshots))
+        .on_release(Message::ShowSnapshots(!state.show_snapshots))
         .into()
 }
 
@@ -1320,7 +1320,7 @@ fn choice_row_or<'a>(
         .on_enter(Hovered::hover(key, true))
         .on_exit(Hovered::hover(key, false));
     if let Some(message) = on_press {
-        area = area.on_press(message);
+        area = area.on_release(message);
     }
     area.into()
 }
