@@ -1810,6 +1810,77 @@ the 3,846 keys the language's own table carries, which is what the reference's
 generated coverage file is a generator writing, and the first port of the pane had
 the data and did not draw it.
 
+### Our own licence, and what is still to remove (2026-10-08)
+
+The owner asked for this launcher to be their own product rather than a GPL one,
+and took legal advice; the instruction that came back was to remove the GPL offer.
+`Cargo.toml` is `LicenseRef-Proprietary`, `LICENSE` is the owner's terms,
+`README.md`, `THIRD_PARTY_NOTICES.md` and `vendor/modrinth-app/UPSTREAM.md` were
+changed in the same commit, and this section is the part that matters more than
+any of them: **the licence field is metadata, and the obligation is not.**
+
+GPL-3.0 attaches to what came from the Modrinth App, and that material is still
+in the tree while its replacement is written. The list, and what removes each:
+
+| Still here | Where | Removing it |
+| --- | --- | --- |
+| 1,858 vendored files | `vendor/modrinth-app/` | `rm -rf vendor/modrinth-app`. `UPSTREAM.md` already promises nothing in the build reads it, so its absence changes no test and no artifact |
+| 3,846 interface sentences | `text_gen.rs`, generated | write our own English table and point `gen_text.py` at it |
+| 189 tokens in four modes | `theme_gen.rs`, `theme_tokens.rs`, generated | choose our own design system -- the owner's instruction is a matte black ground and an orange accent, so the palette is a decision rather than a compile |
+| the icon set | `icons_gen.rs`, generated from their copy | 339 of 445 are proved Lucide geometry and re-source from Lucide's own releases under ISC (see the next section); the rest are drawn here |
+| 12 PNGs | `crates/palantir-desktop/assets/hosting/` | our own art for the Servers page's empty state |
+| 279 lines citing their source | 17 files under `crates/palantir-desktop/src/` | rewritten against a spec of our own |
+| the port's own record | `REFERENCE.md`, `GATES.md`, `README.md` | retired with the gates that mirror the reference |
+
+Until that list is empty, the GPL-3.0 terms apply to the listed material and to
+the combined work -- which is why this section states it instead of leaving it to
+a licence file that no longer claims it.
+
+The route that ends the list is written down as a prompt in
+`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md`: a fresh
+repository, written from behaviour and public formats, with no file taken from
+this one, and an audit that fails on GPL text, an unlisted asset or a citation to
+another project's source. The theme it carries is the owner's: matte black
+`#0B0B0C` for the ground, orange `#FF7A1A` as the one accent, black labels on
+orange, no pure black and no pure white anywhere.
+
+### The icon set is Lucide's, and 339 of 445 files can prove which release they came from
+
+The licence question above turns on whose expression is in the tree, so it was
+measured rather than assumed. `tools/lucide_source.py` reads every icon in the
+vendored set -- 445 files: 313 at the top level, 102 tag categories and 30 tag
+loaders, of which four are refused by the generator and could not be drawn anyway
+-- and asks which published `lucide-static` release holds the same drawing.
+
+**It does not compare text.** The first pass did, and under-counted badly: it
+found 216 matches against a single release. `check.svg` is the case that shows
+why -- theirs is `<path d="M20 6L9 17l-5-5" />` and Lucide 0.562.0's is
+`<path d="M20 6 9 17l-5-5" />`, which is one implicit `lineto` written out in full
+against one left implicit, and the same drawing either way. Their build
+re-serialises what it takes, so a string comparison measures formatting. Reading
+both files through `gen_icons.py`'s own parser -- the one the build trusts -- and
+comparing the geometry that comes out is what the tool does instead.
+
+What that finds, over a ladder of 60 releases sampled from the registry:
+
+* **339 icons are that release's drawing.** 169 of them resolve to `0.100.0`,
+the oldest release the ladder samples, so the honest reading of those is "at least
+that old" rather than "taken from 0.100.0".
+* **102 are in none of the 60.** Of those, 29 are the loader marks -- Forge,
+Fabric, OptiFine, Paper and their like, which are other projects' logos and were
+never Modrinth's to license in the first place -- and the rest are drawings made
+for the reference: `affiliate`, `client`, `dropdown`, `gap`, `omorphia`,
+`page-round`, `spinner`, `unknown`, `updated` and the like, none of which exist in
+Lucide under any name.
+* **Four are refused** by the generator by name, and are absent from the tree
+anyway.
+
+The distinction decides what can be re-sourced and what has to be drawn: the
+Lucide-derived majority is ISC -- use, copy, modify and distribute for any purpose
+with or without fee, provided the notice travels -- which is why the clean-room
+prompt tells the new tree to take its icons from Lucide's own package and carry
+Lucide's `LICENSE` verbatim.
+
 ### The settings dialog's remaining six panes
 
 The dialog was ported with two panes and now carries the eight of the reference's own

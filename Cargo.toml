@@ -11,7 +11,12 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
-license = "GPL-3.0-only"
+# Our own terms, not the GPL. The owner's decision of 2026-10-08, taken on legal
+# advice, and `LICENSE` is the text. `LicenseRef-Proprietary` is the SPDX form for
+# a licence with no SPDX identifier of its own; the obligations that came with the
+# vendored reference are being removed rather than inherited, and `NOTES.md`
+# keeps the list of what is still in the tree while that work is unfinished.
+license = "LicenseRef-Proprietary"
 authors = ["Palantir Studios"]
 
 [workspace.dependencies]

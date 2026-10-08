@@ -51,11 +51,15 @@ in binary distributions alike. Adding an entry is part of taking the code.
   pin, the command to reproduce it, a file count and a byte count per directory,
   the contents by extension, everything upstream that was *not* taken with the
   size it would have cost, and the one-line command that removes the tree.
-* **Licence**: GPL-3.0 for all three trees. This repository is `GPL-3.0-only`
-  already (see `license` in `Cargo.toml`), so this is a compatible adoption and not
-  a relicensing of anything; the licence text travels with the code in
+* **Licence**: GPL-3.0 for all three trees, and those terms are not this
+  repository's to change. PalantirMC is proprietary -- `license` in `Cargo.toml`
+  is `LicenseRef-Proprietary` by the owner's decision of 2026-10-08 -- and this
+  entry is GPL-3.0 material still present while its replacement is written, so the
+  GPL-3.0 terms apply to it, and to the combined work, until it is removed. The
+  licence text travels with the code in
   `vendor/modrinth-app/LICENSE-GPL-3.0.txt`, with a copy in each of the three
-  directories as upstream ships them.
+  directories as upstream ships them; `NOTES.md` keeps the list of what remains
+  and the work that removes each item.
 * **Trademarks are not covered by that licence, and are a separate question.**
   Modrinth's name, wordmark and logo are its marks; GPL-3.0 grants rights in the
   code and not in the identity. The copies of that art in `assets/` and `ui/` are
@@ -101,8 +105,9 @@ in binary distributions alike. Adding an entry is part of taking the code.
     tables a renderer needs before it writes a face, so a bad unwrap fails the
     tool rather than shipping a file that renders nothing.
 * **Licence**: SIL Open Font License 1.1, the licence Inter is published under
-  and one this repository's GPL-3.0-only is compatible with for a
-  redistributed font. The text travels with the faces in
+  and one a proprietary application may redistribute: the OFL's condition is the
+  copyright and licence records travelling with the font, not the licence of the
+  application it is embedded in. The text travels with the faces in
   `crates/palantir-desktop/assets/fonts/OFL.txt`, which is upstream's own
   `LICENSE.txt` from the `v3.19` release verbatim -- OFL 1.1 asks for the
   copyright and licence records to accompany the font, and each face also
@@ -182,9 +187,12 @@ in binary distributions alike. Adding an entry is part of taking the code.
   the Modrinth wordmark and `geometrically.png` is a photograph of a person; both
   are covered by the licence and *not* by it in the way the next paragraph sets
   out.
-* **Licence**: GPL-3.0, the same licence as the vendored tree and as this
-  repository, with the text travelling with the source in
-  `vendor/modrinth-app/LICENSE-GPL-3.0.txt`.
+* **Licence**: GPL-3.0, the same licence as the vendored tree -- and not this
+  repository's own, which is proprietary since 2026-10-08. These twelve files are
+  GPL-3.0 material still present while their replacement is written, so those
+  terms apply to them, and to the combined work, until they are gone; the text
+  travels with the source in `vendor/modrinth-app/LICENSE-GPL-3.0.txt`, and
+  `NOTES.md` names the work that removes them.
 * **Trademarks, again**: Modrinth's wordmark is Modrinth's mark, and GPL-3.0 grants
   rights in the copy and not in the identity. The *Modrinth SMP* mark is here for
   the same reason the icon set above is: it is what the reference draws in that

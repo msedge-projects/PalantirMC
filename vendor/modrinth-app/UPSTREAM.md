@@ -122,11 +122,14 @@ normalisation on commit.
 
 ## Licence, and what adopting it means for this repository
 
-All three trees are **GPL-3.0**. This repository is already `GPL-3.0-only` — see
-`license` in `/Cargo.toml` — so this is a compatible adoption rather than a
-relicensing of anything. What it does change is the obligation, and the obligation
-is already being kept: the licence text travels with the code here, the provenance
-is this file, and `THIRD_PARTY_NOTICES.md` names it.
+All three trees are **GPL-3.0**. This repository's own terms are proprietary since
+2026-10-08 — see `license` in `/Cargo.toml`, which is `LicenseRef-Proprietary` by
+the owner's decision — and that decision does not reach in here: these files are
+GPL-3.0 by their authors' grant, the obligation travels with them, and it is being
+met where it is still owed. The licence text travels with the code here, the
+provenance is this file, and `THIRD_PARTY_NOTICES.md` names it; `NOTES.md` keeps
+the list of GPL-3.0 material that is still in the tree and the work that removes
+it.
 
 The brand marks are **not** covered by that licence and are a separate question
 from it. Modrinth's name, wordmark and logo are its trademarks, and a trademark is

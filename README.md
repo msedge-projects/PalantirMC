@@ -25,7 +25,7 @@ listed there.
 | `NOTES.md` | The engineering record — what was measured and what it cost. Sections keep their old `NEXT_STEPS.md` numbers because source comments cite them. |
 | `GATES.md` | The recorded gate results: what each gate asserts, the command that runs it, and the capture it was judged from. |
 | `REFERENCE.md` | The design reference: what was measured off the Modrinth App, token by token, and how the shell draws it. |
-| `docs/superpowers/specs/` | Dated working specs. The active one is `2026-09-24-modrinth-native-rewrite.md`. |
+| `docs/superpowers/specs/` | Dated working specs. The active one is `2026-10-08-clean-room-own-licence-rewrite.md`, which supersedes the port described by `2026-09-24-modrinth-native-rewrite.md`. |
 
 ## Layout
 
@@ -148,12 +148,24 @@ gates are environment-dependent and what a green run means for each.
 
 ## Licence and attribution
 
-PalantirMC is `GPL-3.0-only` (`Cargo.toml`), © Palantir Studios. The full text is
-`LICENSE`, and `release.yml` copies that file into the release folder, so every
-Release attaches the terms beside each exe and its `.sha256` sidecar — the zips are
-compressed from the exes *before* that copy, so the text travels next to them
-rather than inside. It vendors the Modrinth App source (GPL-3.0, pinned in
+PalantirMC is **proprietary**, © Palantir Studios — `license` in `Cargo.toml` is
+`LicenseRef-Proprietary` and the terms are `LICENSE`. `release.yml` copies that
+file into the release folder, so every Release attaches the terms beside each exe
+and its `.sha256` sidecar — the zips are compressed from the exes *before* that
+copy, so the text travels next to them rather than inside. Third-party components
+keep their own licences, which are unaffected: full notices, with provenance, in
+`THIRD_PARTY_NOTICES.md`.
+
+The repository still carries material it is in the process of replacing. It
+vendors the Modrinth App source (GPL-3.0, pinned in
 `vendor/modrinth-app/UPSTREAM.md`) as a read-only measurement reference — never
-compiled, never shipped. Full notices: `THIRD_PARTY_NOTICES.md`. Modrinth's name, wordmark and logo are its marks, and
-GPL-3.0 grants rights in the code and not in the identity: this launcher draws
-its own mark in the same slots.
+compiled, never shipped — and three generated files and one asset directory were
+compiled from it. **The GPL-3.0 terms continue to apply to that material, and to
+the combined work, until each item is removed**; `NOTES.md` keeps the list and
+`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` is the
+clean-room route that ends it — a fresh repository, written from behaviour and
+public formats, with no file taken from this one.
+
+Modrinth's name, wordmark and logo are its marks and not ours, and no licence
+grants rights in an identity: this launcher draws its own mark and its own
+illustrations in the same slots.
