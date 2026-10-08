@@ -20,6 +20,9 @@
 
 pub mod assets;
 pub mod error;
+pub mod library;
+pub mod maven;
+pub mod rules;
 pub mod version;
 
 pub use error::{Error, Result};
