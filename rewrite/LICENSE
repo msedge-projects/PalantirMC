@@ -1,0 +1,14 @@
+PalantirMC 2.0 — licence placeholder
+
+Copyright (c) 2026 Palantir Studios. All rights reserved.
+
+No licence has been granted yet.
+
+This file is a placeholder. The licence for this product is the last step of
+the rewrite, not the first: it is chosen by the owner only once
+`tools/licence_audit.py` passes on a built tree (phase 8), and the choice is
+recorded in `NOTES.md` with the date and the audit's output. Until then no
+copying, modification or distribution of this software is permitted.
+
+Third-party material shipped alongside this software keeps its own licence;
+`THIRD_PARTY_NOTICES.md` is the list.
