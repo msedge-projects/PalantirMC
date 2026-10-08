@@ -160,17 +160,29 @@ impl DataRoot {
 }
 
 /// A name from metadata joined under a root -- unless it tries to leave it.
+///
+/// The rules are string rules on purpose, so they mean the same on every
+/// platform -- path semantics do not (`/etc/passwd` is not absolute on
+/// Windows yet still leaves the root, and `C:\evil` is one harmless name on
+/// Unix). The Maven layout needs only forward slashes and never a colon,
+/// and a colon or backslash cannot appear in a Windows filename at all, so
+/// refusing them outright loses nothing and closes the drive/UNC/ADS
+/// shapes. `..` climbs everywhere, so it is refused everywhere.
 fn join_checked(root: &Path, rel: &str, what: &'static str) -> Result<PathBuf> {
-    let relative = Path::new(rel);
-    let escapes =
-        relative.is_absolute() || rel.split(['/', '\\']).any(|component| component == "..");
+    let escapes = rel.is_empty()
+        || rel.starts_with(['/', '\\'])
+        || rel.contains('\\')
+        || rel.contains(':')
+        || rel
+            .split(['/', '\\'])
+            .any(|component| component == ".." || component.is_empty());
     if escapes {
         return Err(Error::Invalid {
             what,
             why: format!("{rel:?} would escape its root"),
         });
     }
-    Ok(root.join(relative))
+    Ok(root.join(rel))
 }
 
 fn env_dir(name: &str) -> Option<PathBuf> {
@@ -227,6 +239,10 @@ mod tests {
         );
         assert!(root.library_file("../../etc/passwd").is_err());
         assert!(root.library_file("/etc/passwd").is_err());
+        assert!(root.library_file("..\\..\\evil.dll").is_err());
+        assert!(root.library_file("C:\\evil.dll").is_err());
+        assert!(root.library_file("file:stream").is_err());
+        assert!(root.library_file("").is_err());
         assert!(root.asset_object_file("ab/hash").is_ok());
         assert!(root.asset_object_file("ab/../hash").is_err());
     }
@@ -242,6 +258,13 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        assert_eq!(leaf, APP_DIR_LINUX, "unexpected data root {:?}", root.root);
+        let expected = if cfg!(target_os = "windows") {
+            APP_DIR_WINDOWS
+        } else if cfg!(target_os = "macos") {
+            APP_DIR_MACOS
+        } else {
+            APP_DIR_LINUX
+        };
+        assert_eq!(leaf, expected, "unexpected data root {:?}", root.root);
     }
 }
