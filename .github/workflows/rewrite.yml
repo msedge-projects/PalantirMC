@@ -1,0 +1,77 @@
+name: Rewrite
+
+# The clean-room tree's own gates. Narrow triggers: only `rewrite/**` and this
+# file can change its verdict, so only those start it. The old tree's `ci.yml`
+# is untouched and keeps gating what it gates.
+on:
+  push:
+    branches: [master]
+    paths: ["rewrite/**", ".github/workflows/rewrite.yml"]
+  pull_request:
+    paths: ["rewrite/**", ".github/workflows/rewrite.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: rewrite
+
+jobs:
+  gates:
+    name: Audit, lint and test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install components
+        run: rustup component add clippy rustfmt
+
+      - name: Show toolchain
+        run: |
+          rustc -vV
+          cargo -vV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rewrite/target
+          key: ${{ runner.os }}-rewrite-${{ hashFiles('rewrite/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rewrite-
+
+      # `--locked` is deliberate: a manifest and lock file that have drifted
+      # must fail here, on the machine that has never built the tree.
+      - name: Run tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness
+
+      # A hard gate from day one. Formatting is cheap when nothing has ever
+      # been unformatted, and this tree will never need an advisory step.
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      # The audit is the point of the project, so it runs first among the
+      # Python gates: prove the audit can fail (self-test), then ask it about
+      # this tree. A toolchain is on the runner already for the steps above.
+      - name: Licence audit self-test
+        run: python tools/licence_audit.py --selftest
+
+      - name: Licence audit
+        run: python tools/licence_audit.py

@@ -10,7 +10,7 @@ replaces them.
 
 | Phase | Content | Status |
 | --- | --- | --- |
-| 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | in progress |
+| 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | not started (estimate ~15–25 h) |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | not started (estimate ~15–25 h) |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | not started (estimate ~30–40 h) |
