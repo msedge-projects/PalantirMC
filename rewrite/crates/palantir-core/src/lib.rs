@@ -20,8 +20,10 @@
 
 pub mod assets;
 pub mod error;
+pub mod launch;
 pub mod library;
 pub mod maven;
+pub mod paths;
 pub mod rules;
 pub mod version;
 

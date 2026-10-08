@@ -11,7 +11,7 @@ replaces them.
 | Phase | Content | Status |
 | --- | --- | --- |
 | 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
-| 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | not started (estimate ~15–25 h) |
+| 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | not started (estimate ~15–25 h) |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | not started (estimate ~30–40 h) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | not started (estimate ~20–30 h) |
@@ -25,6 +25,41 @@ The phase list and its estimates come from the rewrite specification
 phases 1–3 are the largest block of new work. All hours are estimates.
 
 ## Decisions
+
+**2026-10-08 — phase 1 tests run against real downloaded samples, and the
+samples teach.** The fixtures are six public metadata documents (manifest,
+three version JSONs across 2013–2026, two asset indexes), fetched 2026-10-08
+and listed in `THIRD_PARTY_NOTICES.md` with their origin. They immediately
+caught three things no synthetic test would have invented: a `value`-only
+argument entry with no `rules` at all, the pre-2014 placeholders
+`${auth_session}` and `${game_assets}`, and macOS running an *older* lwjgl
+build than everyone else (`2.9.2` vs `2.9.4`) via the rule shapes' interplay.
+The round-trip test is value-exact on purpose: a launcher that drops a field
+it does not model corrupts a version document the first time it writes one
+back.
+
+**2026-10-08 — rule semantics read off the fixtures: last match wins,
+default deny.** Real rule lists wanting a platform exclusion open with an
+unconditional `{"action": "allow"}` (the lwjgl entries in 1.12.2), which
+would be redundant under default-allow; allow-lists like `{"action":
+"allow", "os": {"name": "osx"}}` carry no companion rule, which would leak
+under default-allow. Both shapes are covered by tests against the fixture.
+
+**2026-10-08 — `versionRange` is `[min, max)`.** Inferred from use: the 26.3
+sample tunes the JVM two ways around one boundary (`min: 10.0.17134` for ZGC,
+`max: 10.0.17134` for the G1 set), which partitions cleanly only with an
+exclusive max. The alternative readings would claim the boundary twice. Swap
+it if the specification says otherwise; `version.rs` and `rules.rs` say so at
+the type.
+
+**2026-10-08 — the data root is one tree, shared where the game shares.**
+Layout in `paths.rs`: versions own their jar and metadata, libraries and
+asset objects are shared across versions (N versions must not mean N copies
+of lwjgl), and everything resumable or regenerable lives under `cache/`.
+Windows lands in `%LOCALAPPDATA%` rather than roaming: a game tree is
+gigabytes and a roaming profile would carry it across the network at every
+sign-in. Every path a metadata document names is joined, never trusted --
+absolute paths and `..` are refused.
 
 **2026-10-08 — this tree lives in `rewrite/`, as its own Cargo workspace.**
 The rewrite is being built on this machine rather than elsewhere, so the
