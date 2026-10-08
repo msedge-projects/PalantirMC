@@ -5,10 +5,11 @@
 //! every later crate draws from one source of truth.
 
 // A GUI that panics is a crash with no message, so `unwrap` and `expect` are
-// denied crate-wide. The allowance below must come first: inner attributes
-// apply in sequence, and the later `deny` would otherwise cancel it.
-#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
+// denied crate-wide. Lint attributes apply in sequence and the last one
+// wins, so the test allowance must come AFTER the deny: before it, the deny
+// cancels the allowance and clippy rejects `unwrap` in the unit tests too.
 #![deny(clippy::expect_used, clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 pub mod theme;
 
