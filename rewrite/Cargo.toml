@@ -1,0 +1,20 @@
+# PalantirMC 2.0 — the clean-room tree.
+#
+# A workspace of its own, beside the old tree and never merged with it: the
+# clean-room claim this code makes is only defensible while it has never shared
+# a compilation unit — or a file — with the material the old tree still carries.
+# Nothing from that tree is a dependency, a path, or a patch here.
+[workspace]
+resolver = "2"
+members = ["crates/palantir-theme"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+# PLACEHOLDER, and deliberately so. The licence is the last step of the
+# rewrite: it is chosen only once `tools/licence_audit.py` is green on a built
+# tree (phase 8), and the choice is the owner's. Until then no third party has
+# any grant, which is exactly what "UNLICENSED" tells Cargo and readers.
+license = "UNLICENSED"
+authors = ["Palantir Studios"]

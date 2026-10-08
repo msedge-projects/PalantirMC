@@ -1,0 +1,6 @@
+# This tree is its own workspace, and the repository root's ignore file anchors
+# its patterns at the root (`/target`), so it does not cover this tree's build
+# output. Keep the same rule here.
+/target
+__pycache__/
+*.pyc
