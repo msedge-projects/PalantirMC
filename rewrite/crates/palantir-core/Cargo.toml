@@ -1,0 +1,19 @@
+[package]
+name = "palantir-core"
+description = "The Minecraft metadata formats: versions, rules, assets, launch arguments"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# The metadata formats are JSON documents and this crate is their parser;
+# serde is the standard choice, MIT OR Apache-2.0.
+serde = { workspace = true }
+# Parsing and re-emitting those documents. MIT OR Apache-2.0.
+serde_json = { workspace = true }
+# A rule can match the OS version with a regular expression, and the format
+# says so; this is the standard regex engine, MIT OR Apache-2.0.
+regex = { workspace = true }

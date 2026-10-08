@@ -6,7 +6,15 @@
 # Nothing from that tree is a dependency, a path, or a patch here.
 [workspace]
 resolver = "2"
-members = ["crates/palantir-theme"]
+members = ["crates/palantir-theme", "crates/palantir-core"]
+
+[workspace.dependencies]
+# JSON parsing for the metadata formats. MIT OR Apache-2.0.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# OS version rules in metadata are specified as regular expressions.
+# MIT OR Apache-2.0.
+regex = "1"
 
 [workspace.package]
 version = "0.1.0"

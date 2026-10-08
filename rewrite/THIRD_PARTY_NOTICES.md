@@ -24,6 +24,7 @@ failure too, so the manifest cannot rot.
 
 | Path | Origin | Licence |
 | --- | --- | --- |
+| `crates/palantir-core/tests/fixtures/*` | Mojang Studios public metadata API responses (piston-meta/launchermeta, fetched 2026-10-08) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
 <!-- Phase 0 ships no assets. First expected rows: the Lucide icons and the
      Lucide `LICENSE` beside them (origin: Lucide, ISC), and the Inter faces
      with `OFL.txt` (origin: Inter, SIL OFL 1.1). -->
