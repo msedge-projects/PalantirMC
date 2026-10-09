@@ -12,7 +12,7 @@ replaces them.
 | --- | --- | --- |
 | 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
-| 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | not started (estimate ~15–25 h) |
+| 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | not started (estimate ~30–40 h) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | not started (estimate ~20–30 h) |
 | 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
@@ -51,6 +51,51 @@ sample tunes the JVM two ways around one boundary (`min: 10.0.17134` for ZGC,
 exclusive max. The alternative readings would claim the boundary twice. Swap
 it if the specification says otherwise; `version.rs` and `rules.rs` say so at
 the type.
+
+**2026-10-08 — TLS is the OS certificate store, not a bundled root list.**
+The client is the spec's choice (`reqwest`, blocking); its TLS backend is
+rustls over `rustls-native-certs`. The bundled-root-lists feature would have
+pulled `webpki-roots`, whose licence is weak share-alike -- the rewrite's
+own rule (README: no share-alike anywhere in the tree or the graph) says no,
+so the root-list feature is off and the notices say why.
+
+**2026-10-08 — eight transfers in flight, backoff without jitter.**
+The concurrency ceiling is global because the point is sockets in flight at
+a service that throttles the greedy (8: enough to cover a round trip's idle
+time, low enough to read as polite -- the number to lower if throttled).
+Retry backoff is 250 ms doubling to 1 s over 3 retries, deterministic on
+purpose: one launcher process with few retries needs no jitter, and a fixed
+delay is testable.
+
+**2026-10-08 — one fetch per content hash, many names.** An asset index
+routinely names the same object twice; two workers fetching one hash raced
+on one part file and one store slot (the offline end-to-end test caught it
+as a missing-part rename failure). Jobs now deduplicate by hash before
+scheduling: one fetch, every layout path materialized from it.
+
+**2026-10-08 — a resume receipt must be true.** `Transfer.resumed_from` is
+the offset the winning attempt *actually* continued from: a server that
+answers 200 to a range request replaced the partial, so the receipt says 0,
+not the offset that was asked for. Wrong-hash bytes are deleted rather than
+kept -- wrong bytes are worse than no bytes -- and the store verifies at the
+door even when it already holds the hash, so a caller with wrong bytes
+surfaces a bug instead of hiding behind a copy we trust.
+
+**2026-10-08 — a `downloads` block is the complete list of what exists.**
+The live end-to-end sync asked the repository for
+`lwjgl-platform-2.9.0.jar` and got a 404: that library ships *only*
+classifier jars, and its plain jar does not exist at all (checked by hand:
+base 404, `natives-linux` 200). Resolution used to derive a base jar
+whenever the download record was missing, turning a classifiers-only
+library into a phantom file and a guaranteed failure. Now a document that
+has `downloads` gets exactly what its records name -- artifact and
+classifier alike -- and only name-only documents (older and mod-loader
+ones) derive the Maven layout from the coordinate. The phase-1 fixture
+suite had pinned the opposite as a comment ("whatever carries natives also
+contributes its base jar"); the real 1.12.2 sample contradicts it
+(`jinput-platform` and the macOS `lwjgl-platform:2.9.2` are
+classifiers-only), so that assertion now checks every resolved jar against
+the record that names it, plus the split pinned by name.
 
 **2026-10-08 — the data root is one tree, shared where the game shares.**
 Layout in `paths.rs`: versions own their jar and metadata, libraries and

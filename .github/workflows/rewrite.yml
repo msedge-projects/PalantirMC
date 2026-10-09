@@ -75,3 +75,37 @@ jobs:
 
       - name: Licence audit
         run: python tools/licence_audit.py
+
+  # The gates above are offline and deterministic, which is what makes them
+  # useful and also what makes them blind: a fixture can only prove what it
+  # contains. This job asks the real services for one real version, end to
+  # end, including a transfer that resumes from a staged interruption (~60
+  # MB: 1.5.2 is the smallest complete version). A failure here is a
+  # failure -- a service moved, or a protocol assumption broke -- so it is
+  # never skipped silently. It runs after the gates and not on pull
+  # requests: a PR's verdict should not depend on someone's network.
+  live:
+    name: Live services
+    needs: gates
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rewrite/target
+          key: ${{ runner.os }}-rewrite-live-${{ hashFiles('rewrite/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rewrite-live-
+
+      # `--ignored` runs only the live tests; `--test-threads=1` keeps their
+      # transfers sequential and the output readable.
+      - name: Download a real version, and resume a real transfer
+        run: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1

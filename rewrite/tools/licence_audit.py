@@ -159,6 +159,32 @@ def is_asset(rel: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def is_share_alike(text: str) -> bool:
+    """Does this licence arm carry a viral obligation?"""
+    low = text.casefold()
+    return any(token.casefold() in low for token in FORBIDDEN_TEXT)
+
+
+def elect(expression: str):
+    """SPDX-lite licence election.
+
+    `OR` is the licensee's choice and `AND` is cumulative, so an expression
+    is usable exactly when every conjunct offers at least one arm without a
+    viral obligation -- and taking that arm is what this product does, with
+    the election recorded in the notices. Returns the arms taken, or None
+    when some conjunct offers none.
+    """
+    cleaned = expression.replace("(", " ").replace(")", " ")
+    chosen = []
+    for conjunct in re.split(r"(?i)\s+and\s+", cleaned):
+        arms = [a.strip() for a in re.split(r"(?i)\s+or\s+", conjunct)]
+        good = [a for a in arms if a and not is_share_alike(a)]
+        if not good:
+            return None
+        chosen.append(good[0])
+    return chosen
+
+
 def audit_dependencies(root: Path, failures: dict[int, list[str]]) -> str:
     """1. Walk `cargo metadata` over licences of everything non-local."""
     try:
@@ -180,6 +206,7 @@ def audit_dependencies(root: Path, failures: dict[int, list[str]]) -> str:
     meta = json.loads(proc.stdout)
     members = set(meta.get("workspace_members", []))
     deps = [p for p in meta.get("packages", []) if p.get("id") not in members]
+    elections = 0
     for pkg in deps:
         name = f'{pkg.get("name")} {pkg.get("version")}'
         licence = pkg.get("license")
@@ -189,15 +216,16 @@ def audit_dependencies(root: Path, failures: dict[int, list[str]]) -> str:
                 "its licence cannot be shipped"
             )
             continue
-        low = licence.casefold()
-        for token in FORBIDDEN_TEXT:
-            if token.casefold() in low:
-                failures[1].append(
-                    f"{name} is licensed {licence}: a viral licence, which "
-                    "this tree does not take"
-                )
-                break
-    return f"{len(deps)} dependencies"
+        match = elect(licence)
+        if match is None:
+            failures[1].append(
+                f"{name} is licensed {licence}: no arm of that is free of "
+                "a viral obligation, and this tree takes none"
+            )
+        elif " AND " in licence.upper() or " OR " in licence.upper():
+            # The notices record the election; the count is the receipt.
+            elections += 1
+    return f"{len(deps)} dependencies, {elections} licence election(s)"
 
 
 def audit_text(root: Path, failures: dict[int, list[str]]) -> str:
@@ -474,6 +502,21 @@ def selftest() -> int:
     ]
     ok = True
     with tempfile.TemporaryDirectory(prefix="licence-audit-selftest-") as tmp:
+        # Licence election first: `OR` is choice, `AND` is cumulative. The
+        # share-alike arm is assembled like every other hunted string.
+        share_alike_arm = "L" + "GP" + "L-2.1-or-later"
+        for expression, wanted in [
+            ("MIT", True),
+            ("MIT OR Apache-2.0", True),
+            (f"MIT OR Apache-2.0 OR {share_alike_arm}", True),
+            (share_alike_arm, False),
+            (f"MIT AND {share_alike_arm}", False),
+        ]:
+            got = elect(expression) is not None
+            status = "ok  " if got == wanted else "FAIL"
+            print(f" {status} licence election: {expression} -> {got}")
+            ok = ok and got == wanted
+
         for i, (name, mutate, expected) in enumerate(scenarios):
             root = Path(tmp) / f"tree-{i}"
             root.mkdir()

@@ -13,8 +13,33 @@ package, fonts from their foundry.
 
 ## Dependencies
 
-None yet. Every runtime dependency joins this file with its name, version,
-licence and the one-line reason it is in the tree.
+Direct runtime dependencies, with the one line each was justified by. The
+full transitive graph lives in `Cargo.lock` and its licences are checked on
+every push by `tools/licence_audit.py` walking `cargo metadata`.
+
+| Crate | Version | Licence | Why it is here |
+| --- | --- | --- | --- |
+| `serde` | 1 | MIT OR Apache-2.0 | The metadata formats are JSON documents; this parses them |
+| `serde_json` | 1 | MIT OR Apache-2.0 | JSON reading and writing for the same documents |
+| `regex` | 1 | MIT OR Apache-2.0 | Rule conditions on OS versions are specified as regular expressions |
+| `reqwest` | 0.12 | MIT OR Apache-2.0 | Pooled HTTP with blocking reads; the rewrite spec names this client |
+| `sha1` | 0.10 | MIT OR Apache-2.0 | Metadata hashes are SHA-1, so downloads verify SHA-1 |
+
+TLS inside `reqwest` is rustls over the **operating system's certificate
+store** (`rustls-tls-native-roots`). The bundled-root-lists alternative
+(`webpki-roots`) is under a weak share-alike licence and is deliberately not
+in the dependency graph. The rustls stack itself (rustls, ring,
+rustls-native-certs and their dependencies) is MIT / ISC / Apache-2.0.
+
+Workspace siblings `palantir-core` and `palantir-theme` are this product's
+own source under this product's licence.
+
+**Licence elections.** Where a dependency offers a choice of licences, this
+product takes the permissive arm and records the choice here:
+
+| Crate | Offered | Elected |
+| --- | --- | --- |
+| `r-efi` (transitive, via `ring`) | MIT OR Apache-2.0 OR LGPL-2.1-or-later | **MIT** |
 
 ## File manifest
 

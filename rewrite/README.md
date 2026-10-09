@@ -20,8 +20,11 @@ What is allowed, in full:
 - icons from **Lucide's own package** (`lucide-static`, ISC), with its `LICENSE`
   travelling beside the files — never from another application's bundled copy;
 - fonts we have the right to ship (Inter, OFL 1.1);
-- dependencies that are permissive (ISC, MIT, Apache-2.0). No share-alike
-  licence anywhere in the tree or the dependency graph.
+- dependencies that are permissive (ISC, MIT, Apache-2.0). Where a
+  dependency offers a *choice* of licences, the permissive arm is elected
+  and the election recorded in `THIRD_PARTY_NOTICES.md`; what is never
+  accepted is a share-alike **obligation** -- it may exist in a dependency's
+  offer, never in what this product takes.
 
 If a design question would normally be answered by looking at a reference's
 source, it is answered as a designer instead: choose, write down why in
