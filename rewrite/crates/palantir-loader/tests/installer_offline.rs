@@ -7,7 +7,7 @@
 //! per-side data -- so the expansion rules are checked against exactly
 //! those.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use palantir_loader::installer::{
     InstallProfile, PlannedProcessor, Processor, ProcessorContext, Side, plan_processors,
@@ -30,6 +30,13 @@ fn paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         PathBuf::from("/root/versions/1.20.1/1.20.1.jar"),
         PathBuf::from("/tmp/forge-installer.jar"),
     )
+}
+
+/// Path equality, not string equality: the expansion emits this
+/// platform's separators, and the same file must compare equal however
+/// the platform spells it.
+fn same_path(planned: &str, expected: &str) -> bool {
+    Path::new(planned) == Path::new(expected)
 }
 
 fn plan_for(profile: &InstallProfile, side: Side) -> Vec<PlannedProcessor> {
@@ -104,7 +111,7 @@ fn tokens_expand_to_the_real_paths() {
     // `[coord@ext]` is the artifact's Maven path under the library root.
     let mappings = "/root/libraries/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412-mappings.txt";
     assert!(
-        all.contains(&&mappings.to_string()),
+        all.iter().any(|arg| same_path(arg, mappings)),
         "{mappings} not planned"
     );
 
@@ -112,10 +119,15 @@ fn tokens_expand_to_the_real_paths() {
     // the pipeline produces.
     let patched =
         "/root/libraries/net/minecraftforge/forge/1.20.1-47.4.26/forge-1.20.1-47.4.26-client.jar";
-    assert!(all.contains(&&patched.to_string()), "{patched} not planned"); // Built-ins as the real args use them: the game jar and the side name
+    assert!(
+        all.iter().any(|arg| same_path(arg, patched)),
+        "{patched} not planned"
+    );
+    // Built-ins as the real args use them: the game jar and the side name
     // stand alone; the BINPATCH marker is a plain literal path.
     assert!(
-        all.contains(&&"/root/versions/1.20.1/1.20.1.jar".to_string()),
+        all.iter()
+            .any(|arg| same_path(arg, "/root/versions/1.20.1/1.20.1.jar")),
         "MINECRAFT_JAR not planned"
     );
     assert!(all.contains(&&"client".to_string()), "SIDE not planned");
@@ -160,16 +172,19 @@ fn literal_forms_expand_against_the_real_markers() {
         outputs: None,
     }];
     let plan = plan_for(&profile, Side::Client);
-    assert_eq!(
-        plan[0].args,
-        vec![
-            "20230612.114412".to_string(),
-            "/root/run.sh".to_string(),
-            "/tmp/forge-installer.jar".to_string(),
-            "/root/libraries/net/minecraftforge/forge/1.20.1-47.4.26/forge-1.20.1-47.4.26-client.jar"
-                .to_string(),
-        ]
-    );
+    let expected = [
+        "20230612.114412",
+        "/root/run.sh",
+        "/tmp/forge-installer.jar",
+        "/root/libraries/net/minecraftforge/forge/1.20.1-47.4.26/forge-1.20.1-47.4.26-client.jar",
+    ];
+    assert_eq!(plan[0].args.len(), expected.len());
+    for (planned, expected) in plan[0].args.iter().zip(expected) {
+        assert!(
+            same_path(planned, expected),
+            "{planned} planned, {expected} expected"
+        );
+    }
 }
 
 #[test]

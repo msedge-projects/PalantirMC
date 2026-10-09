@@ -268,9 +268,17 @@ fn data_value(value: &str, context: &ProcessorContext<'_>) -> Result<String> {
 /// artifact under the library root.
 fn artifact_path(coord: &str, context: &ProcessorContext<'_>) -> Result<String> {
     let parsed = MavenCoord::parse(coord)?;
-    Ok(context
-        .library_dir
-        .join(parsed.rel_path())
-        .display()
-        .to_string())
+    // Join each segment rather than the whole `rel_path` at once: that
+    // string is URL-shaped (`/`-separated, because the same layout
+    // builds download URLs), and Windows joins it with one native
+    // separator only at the boundary -- the argument would come out
+    // mixed (`libraries\net/minecraft/...`) and any consumer comparing
+    // path text would see two different files.
+    let path = parsed
+        .rel_path()
+        .split('/')
+        .fold(context.library_dir.to_path_buf(), |dir, segment| {
+            dir.join(segment)
+        });
+    Ok(path.display().to_string())
 }
