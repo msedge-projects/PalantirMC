@@ -13,7 +13,7 @@ replaces them.
 | 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
-| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | in progress: inheritance merge, install (document + needs), Java runtime documents landed; loaders/importers/headless launch to come (estimate ~30–40 h) |
+| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | in progress: inheritance merge, install (document + needs), Java runtime documents, all four importers, launch plans (placeholders expanded, pre-2018 split, natives extraction) and the Forge processor runner landed; what is left is the done-when live test: each loader installs into a temp root and launches headless Java |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | not started (estimate ~20–30 h) |
 | 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
 | 6 | Discover: search, filters, project page, install | not started (estimate ~15–20 h) |
@@ -25,6 +25,14 @@ The phase list and its estimates come from the rewrite specification
 phases 1–3 are the largest block of new work. All hours are estimates.
 
 ## Decisions
+
+**2026-10-09 — the install profile's receipts decide what runs.** A Forge
+processor may not run at all: its `outputs` map is the vendor's own
+skip receipt (produced artifact, promised SHA-1), so when the artifacts
+already sit at their hashes the processor has run before and is skipped.
+The runner enforces the other direction too: a processor that exits 0 but
+leaves its promises unkept is a failure named after its jar -- the install
+would otherwise fail much later, somewhere else.
 
 **2026-10-09 — the launch plan expands placeholders itself.** The format
 leaves `${auth_player_name}`, `${classpath}` and friends in the argument

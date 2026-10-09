@@ -143,8 +143,14 @@ tests: real 1.5.2 end-to-end sync, real resumed jar).
       hands back a spawnable `std::process::Command` (supplies `-cp`
       for pre-2018 versions that name no JVM list). 6 plan tests
       against the real fixtures.
-- [ ] run the planned Forge processors as headless Java (`installer.rs`
-      plans them; the runner is still open)
+- [x] processor runner — `run_processors` in `launch.rs` spawns the
+      planned Forge processors as headless Java (jar + classpath on
+      `-cp`, `Main-Class` from the jar's manifest with continuation
+      lines joined), honours the install profile's skip receipts
+      (outputs already at their promised hashes never run), and treats
+      a run that exits badly or breaks its promises as `Error::Processor`
+      naming the jar. 7 offline tests with a cross-platform mock Java
+      (CI runs windows-latest).
 
 **Done-when for Phase 3**: each loader (vanilla, Fabric, Forge,
 NeoForge, Quilt) installs into a temp root and launches headless Java.

@@ -21,6 +21,9 @@ pub enum Error {
     /// Structurally impossible input: a version the manifest does not
     /// list, a request with no meaning as stated.
     Invalid { what: &'static str, why: String },
+    /// The vendor's own tool failed to do its job -- a Forge processor that
+    /// exited badly or produced nothing it promised.
+    Processor { jar: String, why: String },
 }
 
 impl fmt::Display for Error {
@@ -32,6 +35,7 @@ impl fmt::Display for Error {
                 write!(f, "could not use {}: {source}", path.display())
             }
             Error::Invalid { what, why } => write!(f, "{what} is not usable: {why}"),
+            Error::Processor { jar, why } => write!(f, "processor {jar} failed: {why}"),
         }
     }
 }

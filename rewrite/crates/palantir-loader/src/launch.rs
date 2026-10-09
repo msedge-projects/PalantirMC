@@ -17,10 +17,13 @@
 use std::path::{Path, PathBuf};
 
 use palantir_core::launch::{client_download, resolve_args};
+use palantir_core::maven::MavenCoord;
 use palantir_core::rules::{Os, Platform};
 use palantir_core::version::Version;
+use palantir_net::download::sha1_file;
 
 use crate::error::{Error, Result};
+use crate::installer::PlannedProcessor;
 
 /// What the process needs to start.
 #[derive(Debug, Clone)]
@@ -293,7 +296,160 @@ fn joined(paths: &[PathBuf], separator: char) -> String {
 fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
-
 fn host_separator() -> char {
     if cfg!(windows) { ';' } else { ':' }
+}
+
+// ---- Forge-family processors ----
+//
+// A Forge or NeoForge install is not finished when its files land: its
+// install profile names processors -- plain executable jars -- that patch
+// the game jar and must run before the version is launchable. `installer.rs`
+// plans them; running the plan is this half of the launch slice.
+
+/// What a processor run did.
+#[derive(Debug, Default)]
+pub struct ProcessorReport {
+    /// Jar coordinates that ran, in plan order.
+    pub ran: Vec<String>,
+    /// Jar coordinates skipped: every promised artifact was already at its
+    /// promised hash, so the processor had run before.
+    pub skipped: Vec<String>,
+}
+
+/// The command headless Java will be asked to run for one processor: its jar
+/// and classpath on `-cp`, the jar's manifest `Main-Class`, then the plan's
+/// already-expanded args.
+pub fn processor_command(
+    java: &Path,
+    library_dir: &Path,
+    planned: &PlannedProcessor,
+) -> Result<std::process::Command> {
+    let jar = artifact_path(library_dir, &planned.jar)?;
+    let mut classpath = vec![jar.clone()];
+    for coordinate in &planned.classpath {
+        classpath.push(artifact_path(library_dir, coordinate)?);
+    }
+    let joined = std::env::join_paths(&classpath).map_err(|source| Error::Invalid {
+        what: "processor classpath",
+        why: source.to_string(),
+    })?;
+
+    let mut command = std::process::Command::new(java);
+    command
+        .arg("-cp")
+        .arg(joined)
+        .arg(jar_main_class(&jar)?)
+        .args(&planned.args);
+    Ok(command)
+}
+
+/// Run the planned processors in order with `java`. A processor whose
+/// outputs already sit at their promised hashes has run before and is
+/// skipped; one that runs must leave its promised artifacts behind, or the
+/// install would fail much later, somewhere else.
+pub fn run_processors(
+    java: &Path,
+    library_dir: &Path,
+    plan: &[PlannedProcessor],
+) -> Result<ProcessorReport> {
+    let mut report = ProcessorReport::default();
+    for planned in plan {
+        if !planned.outputs.is_empty() && receipts_hold(&planned.outputs)? {
+            report.skipped.push(planned.jar.clone());
+            continue;
+        }
+        let status = processor_command(java, library_dir, planned)?
+            .status()
+            .map_err(|source| Error::Io {
+                path: java.to_path_buf(),
+                source,
+            })?;
+        if !status.success() {
+            return Err(Error::Processor {
+                jar: planned.jar.clone(),
+                why: format!("headless Java exited with {status}"),
+            });
+        }
+        if !receipts_hold(&planned.outputs)? {
+            return Err(Error::Processor {
+                jar: planned.jar.clone(),
+                why: "its promised artifacts are not there at their promised hashes".to_string(),
+            });
+        }
+        report.ran.push(planned.jar.clone());
+    }
+    Ok(report)
+}
+
+/// Do the promised artifacts sit at their promised hashes? The install
+/// profile calls these the skip receipts: when they hold, the processor has
+/// already run.
+fn receipts_hold(outputs: &[(PathBuf, String)]) -> Result<bool> {
+    for (artifact, promised) in outputs {
+        if !artifact.is_file() {
+            return Ok(false);
+        }
+        let actual = sha1_file(artifact).map_err(|source| Error::Net { source })?;
+        if !actual.eq_ignore_ascii_case(promised) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// One Maven coordinate's file under the library root.
+fn artifact_path(library_dir: &Path, coordinate: &str) -> Result<PathBuf> {
+    Ok(library_dir.join(MavenCoord::parse(coordinate)?.rel_path()))
+}
+
+/// The entry point a processor jar names in its manifest. Manifest values
+/// wrap at 72 bytes with a leading space on the continuation line, and a
+/// vendor jar may well wrap this one.
+fn jar_main_class(jar: &Path) -> Result<String> {
+    let file = std::fs::File::open(jar).map_err(|source| Error::Io {
+        path: jar.to_path_buf(),
+        source,
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|source| Error::Io {
+        path: jar.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+    })?;
+    let mut manifest = archive
+        .by_name("META-INF/MANIFEST.MF")
+        .map_err(|source| Error::Io {
+            path: jar.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+        })?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut manifest, &mut text).map_err(|source| Error::Io {
+        path: jar.to_path_buf(),
+        source,
+    })?;
+
+    let unfolded = unfold_manifest(&text);
+    for line in unfolded.lines() {
+        if let Some(value) = line.strip_prefix("Main-Class:") {
+            return Ok(value.trim().to_string());
+        }
+    }
+    Err(Error::Invalid {
+        what: "processor jar",
+        why: format!("{} names no Main-Class", jar.display()),
+    })
+}
+
+/// Join manifest continuation lines -- a leading space continues the
+/// previous logical line -- so one logical line is one string.
+fn unfold_manifest(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix(' ') {
+            out.push_str(rest);
+        } else {
+            out.push('\n');
+            out.push_str(line);
+        }
+    }
+    out
 }
