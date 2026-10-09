@@ -6,7 +6,7 @@
 # Nothing from that tree is a dependency, a path, or a patch here.
 [workspace]
 resolver = "2"
-members = ["crates/palantir-theme", "crates/palantir-core"]
+members = ["crates/palantir-theme", "crates/palantir-core", "crates/palantir-net"]
 
 [workspace.dependencies]
 # JSON parsing for the metadata formats. MIT OR Apache-2.0.
@@ -15,6 +15,12 @@ serde_json = "1"
 # OS version rules in metadata are specified as regular expressions.
 # MIT OR Apache-2.0.
 regex = "1"
+# HTTP with connection pooling and blocking reads; the rewrite spec names
+# this client. MIT OR Apache-2.0.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
+# Metadata hashes are SHA-1, so verifying a download needs exactly that.
+# MIT OR Apache-2.0.
+sha1 = "0.10"
 
 [workspace.package]
 version = "0.1.0"

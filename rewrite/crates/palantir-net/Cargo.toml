@@ -1,0 +1,25 @@
+[package]
+name = "palantir-net"
+description = "Fetching what a version needs: pooled, resumable, verified"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# The metadata formats say what to fetch and where it lands; this layer only
+# moves bytes.
+palantir-core = { path = "../palantir-core" }
+# The cache envelope on disk is JSON. MIT OR Apache-2.0.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# HTTP client with connection pooling and blocking reads; the rewrite spec
+# names this one. TLS is the OS certificate store (rustls + native roots)
+# rather than a bundled root list, which keeps a share-alike root-list
+# dependency out of the tree. MIT OR Apache-2.0.
+reqwest = { workspace = true }
+# Metadata hashes are SHA-1, so a verified download verifies SHA-1.
+# MIT OR Apache-2.0.
+sha1 = { workspace = true }
