@@ -6,7 +6,12 @@
 # Nothing from that tree is a dependency, a path, or a patch here.
 [workspace]
 resolver = "2"
-members = ["crates/palantir-theme", "crates/palantir-core", "crates/palantir-net"]
+members = [
+    "crates/palantir-theme",
+    "crates/palantir-core",
+    "crates/palantir-net",
+    "crates/palantir-loader",
+]
 
 [workspace.dependencies]
 # JSON parsing for the metadata formats. MIT OR Apache-2.0.

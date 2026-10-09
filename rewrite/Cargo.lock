@@ -543,6 +543,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "palantir-loader"
+version = "0.1.0"
+
+[[package]]
 name = "palantir-net"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,13 @@
+[package]
+name = "palantir-loader"
+description = "Turning a chosen game and loader into an installed, launchable version"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# Dependencies are added as they are used: palantir-core owns the metadata
+# formats (including `inheritsFrom` merging), palantir-net moves the bytes.
