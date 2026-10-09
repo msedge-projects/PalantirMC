@@ -182,14 +182,18 @@ fn a_run_that_keeps_its_promise_is_a_success() {
     jar_with_manifest(&jar, "Main-Class: mock.Main\r\n");
 
     let artifact = dir.join("client-slim.jar");
-    let content = b"patched by the mock";
+    // cmd's `echo` always writes CRLF, `printf` writes the bare bytes: the
+    // promise is the exact bytes the mock writes on this platform, and the
+    // runner's hash check is what proves the run kept it.
+    let content: &[u8] = if cfg!(windows) {
+        b"patched by the mock\r\n"
+    } else {
+        b"patched by the mock"
+    };
     let body = if cfg!(windows) {
-        // `set /p` with a nul stdin writes the text with no trailing newline,
-        // matching what `printf` does on the other platforms.
-        format!(
-            "<nul set /p \"=patched by the mock\" > \"{}\"",
-            artifact.display()
-        )
+        // Redirect first: `echo text> file` would swallow the space before
+        // `>` into the content and break the promised hash.
+        format!("> \"{}\" echo patched by the mock", artifact.display())
     } else {
         format!("printf 'patched by the mock' > '{}'", artifact.display())
     };
