@@ -245,6 +245,11 @@ fails when they do.
 
 ## 8. Working pace: never a dead second
 
+The clean-room rewrite under `rewrite/` keeps its own working context in
+`rewrite/AGENTS.md` (standing instructions, exact gates, phase state);
+read it before working in that tree. It is the same discipline, scoped
+to the rewrite.
+
 Owner's standing instructions (2026-10-09), for every session:
 
 - **Never wait idle on a compile, test run, or CI.** While one runs in the
