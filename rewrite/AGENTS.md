@@ -9,15 +9,18 @@ and where the work stands.
 ## 1. Standing instructions (owner, 2026-10-09)
 
 - **PROTECTED: Phase 4 (theme + shell) must not be started here —
-  and neither may any UI code.** The owner will run the UI work with
-  a different tool, under an explicit instruction that names it.
-  Reaching for phase 4 because it is "next" is precisely the accident
-  this rule exists to prevent: no scaffolding, sketches, stubs, or
-  generated UI files from any agent in this tree. This covers the
-  whole UI block (4 theme + shell, 5 instances, 6 Discover,
-  7 settings/Home/About). They stay `not started` until the owner
-  assigns them; treat touching them as a mistake to stop and report,
-  not a step to take.
+  and neither may any UI code or frontend-visible material.** The
+  owner will run the UI work with a different tool, under an explicit
+  instruction that names it. Reaching for phase 4 because it is
+  "next" is precisely the accident this rule exists to prevent: no
+  scaffolding, sketches, stubs, or generated UI files from any agent
+  in this tree — and that includes what the frontend *shows*, not
+  only its code: symbols and icons, visible strings and copy,
+  palette/theme values, or any other asset meant to be seen on
+  screen. This covers the whole UI block (4 theme + shell,
+  5 instances, 6 Discover, 7 settings/Home/About). They stay
+  `not started` until the owner assigns them; treat touching them as
+  a mistake to stop and report, not a step to take.
 - **Never wait idle on a compile, test run, or CI.** While one runs in
   the background, do the next thing: write the next module, analyze the
   next format, fetch the next fixture, review the last diff. A polling
@@ -169,6 +172,7 @@ Likely an `#[ignore]` live test, like `palantir-net`'s.
 Importers translate to "game version + loader + files" and install
 through the existing door (`install_document` / `install_loader`), with
 offline tests against real fixtures. After Phase 3: phase 4 (theme +
-shell — **protected, see §1: no UI work until the owner assigns it to
-another tool explicitly**), 5 (instances), 6 (Discover),
+shell — **protected, see §1: no UI work or frontend assets until the
+owner assigns them to another tool explicitly**), 5 (instances),
+6 (Discover),
 7 (settings/Home/About), 8 (audit green, own licence, first Release).
