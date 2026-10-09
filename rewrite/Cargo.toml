@@ -11,6 +11,7 @@ members = [
     "crates/palantir-core",
     "crates/palantir-net",
     "crates/palantir-loader",
+    "crates/test-support",
 ]
 
 [workspace.dependencies]

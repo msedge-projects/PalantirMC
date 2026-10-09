@@ -23,3 +23,7 @@ reqwest = { workspace = true }
 # Metadata hashes are SHA-1, so a verified download verifies SHA-1.
 # MIT OR Apache-2.0.
 sha1 = { workspace = true }
+
+[dev-dependencies]
+# The mock HTTP server shared with the other crates' tests. Test-only.
+test-support = { path = "../test-support" }

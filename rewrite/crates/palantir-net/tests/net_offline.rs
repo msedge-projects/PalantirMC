@@ -6,16 +6,14 @@
 //! receipt is always the same shape: the bytes on disk are right, and the
 //! server's request log says how they got there.
 
-mod common;
-
 use std::path::PathBuf;
 use std::time::Duration;
 
-use common::{MockServer, Route};
 use palantir_net::Error;
 use palantir_net::cache::{MetadataCache, cache_dir_for, is_under};
 use palantir_net::client::Http;
 use palantir_net::download::{self, DownloadOptions};
+use test_support::{MockServer, Route};
 
 fn temp_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};

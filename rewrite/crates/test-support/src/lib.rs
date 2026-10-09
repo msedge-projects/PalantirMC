@@ -5,8 +5,10 @@
 //! before success, and connections dropped mid-body. Request recording is
 //! the receipt tests assert on -- that a resume actually *sent* a Range
 //! header, that a cache hit sent nothing at all.
-
-#![allow(dead_code)] // shared by several test binaries; each uses a subset
+//!
+//! It lives here rather than beside one crate's tests because several
+//! crates now need to stand up a fake service; it is a dev-dependency and
+//! ships in no build.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -102,6 +104,22 @@ impl MockServer {
 
     pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base, path)
+    }
+
+    /// Serve one more route after startup. Documents that name URLs on
+    /// this server (a manifest pointing at versions) can only be built
+    /// once `base` exists; they come here.
+    pub fn set_route(&self, path: &str, route: Route) {
+        let fail_remaining = route.fail_first;
+        if let Ok(mut table) = self.state.lock() {
+            table.insert(
+                path.to_string(),
+                RouteState {
+                    route,
+                    fail_remaining,
+                },
+            );
+        }
     }
 
     /// Request paths in arrival order.

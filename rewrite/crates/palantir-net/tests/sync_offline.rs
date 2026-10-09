@@ -3,12 +3,9 @@
 //! with natives, an asset index whose objects repeat a hash -- and every
 //! byte landed, verified, and deduplicated.
 
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{MockServer, Route};
 use palantir_core::paths::DataRoot;
 use palantir_core::rules::{Arch, Os, Platform};
 use palantir_core::version::Version;
@@ -17,6 +14,7 @@ use palantir_net::download::{DownloadOptions, sha1_bytes};
 use palantir_net::scheduler::Scheduler;
 use palantir_net::store::ContentStore;
 use palantir_net::sync::Syncer;
+use test_support::{MockServer, Route};
 
 fn temp_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};

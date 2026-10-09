@@ -545,6 +545,13 @@ dependencies = [
 [[package]]
 name = "palantir-loader"
 version = "0.1.0"
+dependencies = [
+ "palantir-core",
+ "palantir-net",
+ "serde",
+ "serde_json",
+ "test-support",
+]
 
 [[package]]
 name = "palantir-net"
@@ -555,6 +562,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "test-support",
 ]
 
 [[package]]
@@ -1004,6 +1012,10 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "test-support"
+version = "0.1.0"
 
 [[package]]
 name = "thiserror"
