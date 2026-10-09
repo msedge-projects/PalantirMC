@@ -9,5 +9,16 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-# Dependencies are added as they are used: palantir-core owns the metadata
-# formats (including `inheritsFrom` merging), palantir-net moves the bytes.
+# The metadata formats and their `inheritsFrom` merging: a loader install is
+# one document over another's.
+palantir-core = { path = "../palantir-core" }
+# The fetch-and-verify layer: installs are a composition of its syncer.
+palantir-net = { path = "../palantir-net" }
+# The runtime documents are JSON, with unmodelled parts that ride along.
+# MIT OR Apache-2.0.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The mock HTTP server shared with the other crates' tests. Test-only.
+test-support = { path = "../test-support" }

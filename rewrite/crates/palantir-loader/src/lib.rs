@@ -31,10 +31,18 @@
 //! The map, in the order the slices are landing:
 //!
 //! 1. `install` -- vanilla: a version's needs into a data root (the
-//!    `Syncer` composition), plus the Java runtime manifest and its
-//!    download.
-//! 2. `fabric`, `quilt` -- profile fetch + merge over the game document.
-//! 3. `forge`, `neoforge` -- installer jar documents and the processor
+//!    `Syncer` composition) with its resolved document written out. **Landed.**
+//! 2. `java` -- the Java runtime index and manifest: choosing the
+//!    platform's runtime and placing its files. **Landed** (the download
+//!    lands with `launch`).
+//! 3. `profiles` -- Fabric/Quilt listings and launcher profiles,
+//!    installed over the game document. **Landed.**
+//! 4. `forge`, `neoforge` -- installer jar documents and the processor
 //!    pipeline, run as headless Java.
-//! 4. `mrpack`, `prism` -- the importers.
-//! 5. `launch` -- runtime resolution, natives extraction, and the process.
+//! 5. `mrpack`, `prism` -- the importers.
+//! 6. `launch` -- runtime resolution, natives extraction, and the process.
+
+pub mod error;
+pub mod install;
+pub mod java;
+pub mod profiles;
