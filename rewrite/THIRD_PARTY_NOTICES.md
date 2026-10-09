@@ -53,6 +53,8 @@ failure too, so the manifest cannot rot.
 | `crates/palantir-core/tests/fixtures/asset-index-*.json` | Mojang Studios public metadata API responses (launchermeta, fetched 2026-10-08) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
 | `crates/palantir-core/tests/fixtures/fabric-loader-profile-*.json` | FabricMC public metadata API response (meta.fabricmc.net/v2, fetched 2026-10-09) | API response data (facts), kept as test fixtures |
 | `crates/palantir-core/tests/fixtures/quilt-loader-profile-*.json` | QuiltMC public metadata API response (meta.quiltmc.org/v3, fetched 2026-10-09) | API response data (facts), kept as test fixtures |
+| `crates/palantir-loader/tests/fixtures/java-runtime-all.json` | Mojang Studios public metadata API response (piston-meta java-runtime product index, fetched 2026-10-09) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
+| `crates/palantir-loader/tests/fixtures/java-runtime-jre-legacy-linux.json` | Mojang Studios public metadata API response (piston-meta Java runtime manifest, fetched 2026-10-09) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
 <!-- Phase 0 ships no assets. First expected rows: the Lucide icons and the
      Lucide `LICENSE` beside them (origin: Lucide, ISC), and the Inter faces
      with `OFL.txt` (origin: Inter, SIL OFL 1.1). -->
