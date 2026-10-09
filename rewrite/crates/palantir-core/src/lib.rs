@@ -28,3 +28,4 @@ pub mod rules;
 pub mod version;
 
 pub use error::{Error, Result};
+pub use launch::{client_download, resolve_args};

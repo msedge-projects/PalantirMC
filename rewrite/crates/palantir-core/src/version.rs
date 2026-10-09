@@ -336,6 +336,51 @@ impl ArgValue {
     }
 }
 
+impl Arguments {
+    /// The literal strings in the three resolved lists, flattened through
+    /// the conditional/unconditional shapes. Rules are discarded here:
+    /// they were already applied by `resolve_args` in the rules layer.
+    pub fn strings(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let jvm = match &self.jvm {
+            Some(list) => list
+                .iter()
+                .flat_map(Argument::strings)
+                .map(String::from)
+                .collect(),
+            None => Vec::new(),
+        };
+        let game = match &self.game {
+            Some(list) => list
+                .iter()
+                .flat_map(Argument::strings)
+                .map(String::from)
+                .collect(),
+            None => Vec::new(),
+        };
+        let default_user_jvm = match &self.default_user_jvm {
+            Some(list) => list
+                .iter()
+                .flat_map(Argument::strings)
+                .map(String::from)
+                .collect(),
+            None => Vec::new(),
+        };
+        (jvm, game, default_user_jvm)
+    }
+}
+
+impl Argument {
+    /// The literal strings, whichever shape they arrived in. A reference
+    /// to the argument's rules is not carried here -- callers that need the
+    /// condition (the rules layer) read `Argument` directly.
+    pub fn strings(&self) -> &[String] {
+        match self {
+            Argument::Plain(one) => std::slice::from_ref(one),
+            Argument::Conditional { value, .. } => value.strings(),
+        }
+    }
+}
+
 /// A condition on an argument or a library.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rule {
@@ -561,6 +606,8 @@ fn merge_libraries(parent: &[Library], child: &[Library]) -> Vec<Library> {
     );
     merged
 }
+
+// ---- impls that must stay in this file so the derive macros can see them ----
 
 #[cfg(test)]
 mod tests {

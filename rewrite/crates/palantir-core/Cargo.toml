@@ -17,3 +17,7 @@ serde_json = { workspace = true }
 # A rule can match the OS version with a regular expression, and the format
 # says so; this is the standard regex engine, MIT OR Apache-2.0.
 regex = { workspace = true }
+
+# Tests that build launch plans need the loader crate's public launch API.
+[dev-dependencies]
+palantir-loader = { path = "../palantir-loader" }

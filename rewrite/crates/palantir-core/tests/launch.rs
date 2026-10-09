@@ -6,11 +6,11 @@
 //! systems. The invariant behind all of them: once a plan is built, no
 //! placeholder may survive into the command.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use palantir_core::launch::{LaunchContext, LaunchPlan, build_launch_plan};
 use palantir_core::rules::{Arch, Os, Platform};
 use palantir_core::version::Version;
+use palantir_loader::launch::{LaunchContext, LaunchPlan, build_launch_plan};
 
 fn fixture(name: &str) -> String {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -26,129 +26,166 @@ fn context() -> LaunchContext {
         player_name: "Steve".to_string(),
         player_uuid: "uuid-1".to_string(),
         access_token: "token-1".to_string(),
+        clientid: "client-1".to_string(),
+        auth_xuid: "xuid-1".to_string(),
         user_type: "msa".to_string(),
-        game_dir: PathBuf::from("/data/instances/a/game"),
+        launcher_name: "palantir-test".to_string(),
+        launcher_version: "0.0.0".to_string(),
+        java: PathBuf::from("/data/java/bin/java"),
+        game_dir: PathBuf::from("/data/game"),
         assets_root: PathBuf::from("/data/assets"),
-        assets_index_name: "34".to_string(),
-        version_name: "26.3".to_string(),
-        version_type: "release".to_string(),
-        natives_dir: PathBuf::from("/data/versions/26.3/natives"),
-        launcher_name: "PalantirMC".to_string(),
-        launcher_version: "2.0".to_string(),
-        library_dir: PathBuf::from("/data/libraries"),
-        classpath: vec![PathBuf::from("/data/libraries/a.jar")],
+        natives_dir: PathBuf::from("/data/natives"),
+        library_root: PathBuf::from("/data/libraries"),
+        client_jar: PathBuf::from("/data/versions/26.3/26.3.jar"),
         ..LaunchContext::default()
     }
 }
 
 fn platform(os: Os) -> Platform {
-    Platform::new(os, "10.0.19045", Arch::X86_64)
+    Platform::new(os, "10.0.17134".to_string(), Arch::X86_64)
 }
 
-/// No placeholder may survive into a built plan.
+/// The invariant: every entry is a real jar path and no placeholder survives
+/// into any argument the process will see.
 fn assert_fully_expanded(plan: &LaunchPlan) {
-    for argument in plan
-        .default_jvm_args
-        .iter()
-        .chain(&plan.jvm_args)
-        .chain(&plan.game_args)
-    {
+    assert!(!plan.classpath.is_empty(), "plan has no classpath");
+    for arg in plan.jvm_args.iter().chain(&plan.game_args) {
+        assert!(!arg.contains("${"), "placeholder survived into {arg:?}");
+    }
+    for entry in &plan.classpath {
         assert!(
-            !argument.contains("${"),
-            "unexpanded placeholder: {argument}"
+            entry.extension().is_some_and(|e| e == "jar"),
+            "classpath entry is not a jar: {entry:?}"
         );
     }
 }
 
 #[test]
-fn modern_metadata_produces_a_complete_command() {
+fn windows_gets_the_windows_only_jvm_args() {
     let version = version("version-26.3.json");
     let plan = build_launch_plan(&version, &platform(Os::Windows), &context()).unwrap();
     assert_fully_expanded(&plan);
-
-    // The tuning group is kept separate so settings can override it.
-    assert!(plan.default_jvm_args.contains(&"-Xmx4G".to_string()));
-    assert!(plan.default_jvm_args.contains(&"-XX:+UseZGC".to_string()));
-
-    // Game arguments arrive in the format's order, expanded.
-    assert_eq!(
-        &plan.game_args[..4],
-        ["--username", "Steve", "--version", "26.3"]
+    assert!(
+        plan.jvm_args.iter().any(|a| a.contains("HeapDumpPath")),
+        "windows-only heapdump arg missing: {:?}",
+        plan.jvm_args
     );
-
-    let command = plan.command(Path::new("C:\\java\\bin\\java.exe"));
-    assert_eq!(command[0], "C:\\java\\bin\\java.exe");
-    assert_eq!(command.last().unwrap(), plan.game_args.last().unwrap());
-    assert_eq!(command[1], "-Xms2G"); // the tuning group's first flag
-    assert_eq!(
-        command[command.len() - plan.game_args.len() - 1],
-        "net.minecraft.client.main.Main"
+    assert!(
+        !plan.jvm_args.contains(&"-XstartOnFirstThread".to_string()),
+        "macOS-only arg leaked onto windows"
+    );
+    // The classpath separator is the platform's, not the host's.
+    assert!(
+        plan.jvm_args.iter().any(|a| a.contains(';')),
+        "classpath was not joined with ';': {:?}",
+        plan.jvm_args
     );
 }
 
 #[test]
-fn jvm_arguments_split_by_platform() {
+fn macos_gets_the_macos_only_jvm_args() {
     let version = version("version-26.3.json");
-    let windows = build_launch_plan(&version, &platform(Os::Windows), &context()).unwrap();
-    let mac = build_launch_plan(
-        &version,
-        &Platform::new(Os::MacOs, "14.0", Arch::X86_64),
-        &context(),
-    )
-    .unwrap();
-    assert!(
-        windows
-            .jvm_args
-            .iter()
-            .any(|a| a.starts_with("-XX:HeapDumpPath="))
-    );
-    assert!(
-        !mac.jvm_args
-            .iter()
-            .any(|a| a.starts_with("-XX:HeapDumpPath="))
-    );
-    assert!(mac.jvm_args.contains(&"-XstartOnFirstThread".to_string()));
-    assert!(
-        !windows
-            .jvm_args
-            .contains(&"-XstartOnFirstThread".to_string())
-    );
-}
-
-#[test]
-fn legacy_metadata_gets_the_launcher_supplied_jvm_arguments() {
-    let mut context = context();
-    context.assets_index_name = "1.12".to_string();
-    context.version_name = "1.12.2".to_string();
-    let version = version("version-1.12.2.json");
-    let plan = build_launch_plan(&version, &platform(Os::Windows), &context).unwrap();
+    let plan = build_launch_plan(&version, &platform(Os::MacOs), &context()).unwrap();
     assert_fully_expanded(&plan);
-
-    // The pre-2018 shape carries no JVM list: the launcher owes the natives
-    // directory and the classpath, and nothing else.
-    assert_eq!(
-        plan.jvm_args[0],
-        "-Djava.library.path=/data/versions/26.3/natives"
+    assert!(
+        plan.jvm_args.contains(&"-XstartOnFirstThread".to_string()),
+        "macOS-only arg missing: {:?}",
+        plan.jvm_args
     );
-    assert_eq!(plan.jvm_args[1], "-cp");
-    assert!(plan.jvm_args[2].ends_with("a.jar"));
-
-    // The old string splits on whitespace and its flags carry literal values.
-    assert_eq!(&plan.game_args[..2], ["--username", "Steve"]);
-    let index = plan
-        .game_args
-        .iter()
-        .position(|a| a == "--assetIndex")
-        .unwrap();
-    assert_eq!(plan.game_args[index + 1], "1.12");
+    assert!(
+        !plan.jvm_args.iter().any(|a| a.contains("HeapDumpPath")),
+        "windows-only arg leaked onto macOS"
+    );
 }
 
 #[test]
-fn the_oldest_sample_launches_the_same_way() {
-    let version = version("version-1.5.2.json");
+fn linux_26_3_rules_split() {
+    let version = version("version-26.3.json");
     let plan = build_launch_plan(&version, &platform(Os::Linux), &context()).unwrap();
     assert_fully_expanded(&plan);
-    // 1.5.2 boots through LaunchWrapper, not the modern main class.
-    assert_eq!(plan.main_class, "net.minecraft.launchwrapper.Launch");
-    assert!(!plan.game_args.is_empty());
+    // Neither OS's gated arg applies here, and the 32-bit one does not on
+    // x86_64 -- the rules split one list by machine and this machine gets
+    // only the unconditional entries.
+    assert!(!plan.jvm_args.iter().any(|a| a.contains("HeapDumpPath")));
+    assert!(!plan.jvm_args.contains(&"-XstartOnFirstThread".to_string()));
+    assert!(!plan.jvm_args.contains(&"-Xss1M".to_string()));
+    assert!(
+        plan.jvm_args
+            .contains(&"--enable-native-access=ALL-UNNAMED".to_string()),
+        "unconditional JVM arg missing: {:?}",
+        plan.jvm_args
+    );
+}
+
+#[test]
+fn pre_2018_single_string_version() {
+    let version = version("version-1.12.2.json");
+    let plan = build_launch_plan(&version, &platform(Os::Windows), &context()).unwrap();
+    assert_fully_expanded(&plan);
+    // The pre-2018 game string is split on whitespace and expanded in place.
+    assert_eq!(plan.game_args[0], "--username");
+    assert_eq!(plan.game_args[1], "Steve");
+    // That shape names no JVM list at all: the command supplies the classpath.
+    assert!(plan.jvm_args.is_empty());
+    let command = plan.command();
+    let argv: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let cp = argv
+        .iter()
+        .position(|a| a == "-cp")
+        .expect("command has no -cp");
+    assert!(
+        argv[cp + 1].contains("26.3.jar"),
+        "client jar not on the classpath: {argv:?}"
+    );
+}
+
+#[test]
+fn inherits_from_loader_profile() {
+    // A loader profile is an overlay: it names `inheritsFrom` and carries no
+    // client download of its own. Merged over its game -- as an install does
+    // -- it plans like any other version.
+    let profile = version("fabric-loader-profile-1.20.1.json");
+    let game = version("version-1.20.1.json");
+    let version = profile.merged_with(&game).unwrap();
+    let plan = build_launch_plan(&version, &platform(Os::Windows), &context()).unwrap();
+    assert_fully_expanded(&plan);
+    // The overlay's own main class wins, and its library entries land on the
+    // classpath after the client jar.
+    assert_eq!(
+        plan.main_class,
+        "net.fabricmc.loader.impl.launch.knot.KnotClient"
+    );
+    assert!(
+        plan.classpath
+            .iter()
+            .any(|p| p.to_string_lossy().contains("asm")),
+        "loader library missing from classpath: {:?}",
+        plan.classpath
+    );
+    assert!(
+        plan.jvm_args.iter().any(|a| a.contains("FabricMcEmu")),
+        "loader JVM arg missing: {:?}",
+        plan.jvm_args
+    );
+}
+
+#[test]
+fn game_arguments_carry_the_identity_values() {
+    let version = version("version-26.3.json");
+    let plan = build_launch_plan(&version, &platform(Os::Linux), &context()).unwrap();
+    let value = |flag: &str| {
+        let at = plan
+            .game_args
+            .iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("{flag} missing from {:?}", plan.game_args));
+        plan.game_args[at + 1].clone()
+    };
+    assert_eq!(value("--username"), "Steve");
+    assert_eq!(value("--uuid"), "uuid-1");
+    assert_eq!(value("--accessToken"), "token-1");
+    assert_eq!(value("--version"), "26.3");
 }

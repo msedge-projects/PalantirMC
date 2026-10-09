@@ -134,8 +134,17 @@ tests: real 1.5.2 end-to-end sync, real resumed jar).
       `.minecraft` layout (official, TLauncher, SKLauncher, Badlion,
       Legacy, Lunar, Feather). Unknown loader ids become
       `LoaderTarget::Unknown`, never vanilla.
-- [ ] `launch` — run the planned Forge processors as headless Java,
-      natives extraction, spawn Java from `build_launch_plan`
+- [x] `launch` — natives extraction (`extract_natives`, honours the
+      `extract` excludes) and `build_launch_plan`: classpath resolved
+      from the version's own libraries for the platform, every
+      placeholder the format defines expanded (no `${...}` survives
+      into the command), pre-2018 `minecraftArguments` split, loader
+      overlays planned after `merged_with`. `LaunchPlan::command`
+      hands back a spawnable `std::process::Command` (supplies `-cp`
+      for pre-2018 versions that name no JVM list). 6 plan tests
+      against the real fixtures.
+- [ ] run the planned Forge processors as headless Java (`installer.rs`
+      plans them; the runner is still open)
 
 **Done-when for Phase 3**: each loader (vanilla, Fabric, Forge,
 NeoForge, Quilt) installs into a temp root and launches headless Java.

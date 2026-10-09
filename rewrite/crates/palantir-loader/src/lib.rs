@@ -55,6 +55,7 @@ pub mod import;
 pub mod install;
 pub mod installer;
 pub mod java;
+pub mod launch;
 pub mod mrpack;
 pub mod prism;
 pub mod profiles;

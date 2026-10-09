@@ -26,6 +26,19 @@ phases 1–3 are the largest block of new work. All hours are estimates.
 
 ## Decisions
 
+**2026-10-09 — the launch plan expands placeholders itself.** The format
+leaves `${auth_player_name}`, `${classpath}` and friends in the argument
+lists; a plan that hands those to a process is not a plan. `build_launch_plan`
+resolves the classpath from the version's own libraries (rules applied,
+Maven layout under the library root) and expands every placeholder the
+format defines in one table, so the invariant is checkable: once a plan is
+built, no `${...}` survives into the command. The caller contributes only
+the on-disk locations (`LaunchContext`) and the identity values. Pre-2018
+versions carry no JVM list at all -- their single `minecraftArguments`
+string is split on whitespace (the format's own separator) and `command()`
+supplies the missing `-cp`. Loader profiles are overlays: planned after
+`merged_with`, never raw.
+
 **2026-10-08 — phase 1 tests run against real downloaded samples, and the
 samples teach.** The fixtures are six public metadata documents (manifest,
 three version JSONs across 2013–2026, two asset indexes), fetched 2026-10-08
