@@ -267,20 +267,40 @@ pub struct LoggingFile {
 
 /// The 2018+ argument lists. `default_user_jvm` appeared in the 2026 format:
 /// JVM tuning the launcher may replace when the person has their own.
+///
+/// Each list is an `Option` because the format distinguishes a key that is
+/// absent from one that is an empty array -- a real loader profile carries
+/// `"game": []` -- and a round trip must preserve the difference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Arguments {
     #[serde(
         rename = "default-user-jvm",
         default,
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "Option::is_none"
     )]
-    pub default_user_jvm: Vec<Argument>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub jvm: Vec<Argument>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub game: Vec<Argument>,
+    pub default_user_jvm: Option<Vec<Argument>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jvm: Option<Vec<Argument>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<Vec<Argument>>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// One argument list through a merge: absent stays absent only when neither
+/// side names it; otherwise the parent's entries with the child's after.
+fn merge_arg_lists(
+    parent: &Option<Vec<Argument>>,
+    child: &Option<Vec<Argument>>,
+) -> Option<Vec<Argument>> {
+    match (parent, child) {
+        (None, None) => None,
+        (parent, child) => {
+            let mut merged = parent.clone().unwrap_or_default();
+            merged.extend(child.iter().flatten().cloned());
+            Some(merged)
+        }
+    }
 }
 
 /// One entry of an argument list: a literal, or literals possibly behind
@@ -397,6 +417,149 @@ impl Version {
     pub fn to_json_string(&self) -> Result<String> {
         serde_json::to_string(self).map_err(Error::parse("version metadata"))
     }
+
+    /// Resolve this document over the parent it names: a mod-loader install
+    /// is one document (`inheritsFrom`) laid over the game's.
+    ///
+    /// The rules below are read off the real loader profiles in
+    /// `tests/fixtures` (Fabric and Quilt, both over 1.20.1), plus the
+    /// conflict cases those samples do not contain. One principle decides
+    /// every conflict -- **the derived document is the more specific one
+    /// and wins** -- but each mechanism wins its own way:
+    ///
+    /// - scalars (`id`, `mainClass`, `type`, times): the child's value;
+    /// - `libraries`: the child's entry replaces the parent's entry with
+    ///   the same `group:artifact[:classifier]`, and the child's entries
+    ///   lead the merged list -- the classpath is searched in order, so a
+    ///   loader's jars must shadow a parent's jars with the same classes;
+    /// - `arguments` (all three lists): the child's entries *follow* the
+    ///   parent's -- command-line options are read last-wins;
+    /// - `downloads`, `logging`, unmodelled keys: per-key merge, the
+    ///   child's value wins;
+    /// - anything the child omits (`assetIndex`, `assets`, `javaVersion`,
+    ///   ...): the parent's.
+    ///
+    /// `minimumLauncherVersion` and `complianceLevel` merge to the *max*:
+    /// the combined document needs a launcher that satisfies both halves.
+    /// The result is standalone -- `inheritsFrom` is cleared -- so it can
+    /// be written to disk and handed to `build_launch_plan` as-is.
+    pub fn merged_with(&self, parent: &Version) -> Result<Version> {
+        if let Some(name) = &self.inherits_from {
+            if name != &parent.id {
+                return Err(Error::Invalid {
+                    what: "version inheritance",
+                    why: format!(
+                        "{} inherits from \"{name}\", not from \"{}\"",
+                        self.id, parent.id
+                    ),
+                });
+            }
+        }
+
+        let mut merged = parent.clone();
+        merged.id = self.id.clone();
+        merged.kind = self.kind.clone();
+        merged.time = self.time.clone();
+        merged.release_time = self.release_time.clone();
+        merged.main_class = self.main_class.clone();
+        merged.inherits_from = None;
+        merged.minimum_launcher_version = max_opt(
+            self.minimum_launcher_version,
+            parent.minimum_launcher_version,
+        );
+        merged.compliance_level = max_opt(self.compliance_level, parent.compliance_level);
+        merged.java_version = self
+            .java_version
+            .clone()
+            .or_else(|| parent.java_version.clone());
+        merged.asset_index = self
+            .asset_index
+            .clone()
+            .or_else(|| parent.asset_index.clone());
+        merged.assets = self.assets.clone().or_else(|| parent.assets.clone());
+        merged.minecraft_arguments = self
+            .minecraft_arguments
+            .clone()
+            .or_else(|| parent.minecraft_arguments.clone());
+        merged.downloads = merge_maps(&parent.downloads, &self.downloads);
+        merged.logging = merge_maps(&parent.logging, &self.logging);
+        merged.arguments = match (&parent.arguments, &self.arguments) {
+            (None, None) => None,
+            (parent_args, child_args) => {
+                let mut args = parent_args.clone().unwrap_or_default();
+                if let Some(child) = child_args {
+                    args.default_user_jvm =
+                        merge_arg_lists(&args.default_user_jvm, &child.default_user_jvm);
+                    args.jvm = merge_arg_lists(&args.jvm, &child.jvm);
+                    args.game = merge_arg_lists(&args.game, &child.game);
+                    args.extra = merge_maps(&args.extra, &child.extra);
+                }
+                Some(args)
+            }
+        };
+        merged.libraries = merge_libraries(&parent.libraries, &self.libraries);
+        merged.extra = merge_maps(&parent.extra, &self.extra);
+        Ok(merged)
+    }
+}
+
+/// The larger of two optional minima; `None` means "not stated".
+fn max_opt(a: Option<u32>, b: Option<u32>) -> Option<u32> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// Key-wise union, the child winning every key it names.
+fn merge_maps<T: Clone>(
+    parent: &BTreeMap<String, T>,
+    child: &BTreeMap<String, T>,
+) -> BTreeMap<String, T> {
+    let mut merged = parent.clone();
+    for (key, value) in child {
+        merged.insert(key.clone(), value.clone());
+    }
+    merged
+}
+
+/// A library's identity for replacement: `group:artifact[:classifier][@ext]`
+/// with the version left out -- two entries naming the same artifact at
+/// different versions are one artifact, and the child's is the one wanted.
+/// Mirrors `MavenCoord`'s layout without requiring a well-formed name.
+fn library_identity(name: &str) -> String {
+    let (name, ext) = match name.split_once('@') {
+        Some((name, ext)) => (name, Some(ext)),
+        None => (name, None),
+    };
+    let parts = name.split(':').collect::<Vec<_>>();
+    let mut identity = parts.iter().take(2).copied().collect::<Vec<_>>().join(":");
+    if parts.len() > 3 {
+        identity.push(':');
+        identity.push_str(parts[3]);
+    }
+    if let Some(ext) = ext {
+        identity.push('@');
+        identity.push_str(ext);
+    }
+    identity
+}
+
+/// The child's libraries first (classpath order), then the parent's entries
+/// the child did not replace.
+fn merge_libraries(parent: &[Library], child: &[Library]) -> Vec<Library> {
+    let replaced: std::collections::BTreeSet<String> = child
+        .iter()
+        .map(|lib| library_identity(&lib.name))
+        .collect();
+    let mut merged = child.to_vec();
+    merged.extend(
+        parent
+            .iter()
+            .filter(|lib| !replaced.contains(&library_identity(&lib.name)))
+            .cloned(),
+    );
+    merged
 }
 
 #[cfg(test)]

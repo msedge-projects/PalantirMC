@@ -157,7 +157,13 @@ fn the_zgc_boundary_partitions_windows_versions() {
     // boundary only the min side may fire -- read `max` as exclusive, or
     // both would claim it.
     let version = version("version-26.3.json");
-    let list = &version.arguments.as_ref().unwrap().default_user_jvm;
+    let list = version
+        .arguments
+        .as_ref()
+        .unwrap()
+        .default_user_jvm
+        .as_deref()
+        .unwrap_or_default();
     let tuning = |platform: &Platform| selected_strings(&version, list, platform);
 
     let old = tuning(&platform(Os::Windows, "10.0.17133"));

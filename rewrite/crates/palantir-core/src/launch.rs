@@ -127,14 +127,26 @@ pub fn build_launch_plan(
     };
 
     if let Some(arguments) = &version.arguments {
+        // An absent list is an empty one here; only the round trip cares
+        // about the difference.
         expand_list(
-            &arguments.default_user_jvm,
+            arguments.default_user_jvm.as_deref().unwrap_or_default(),
             platform,
             &vars,
             &mut plan.default_jvm_args,
         )?;
-        expand_list(&arguments.jvm, platform, &vars, &mut plan.jvm_args)?;
-        expand_list(&arguments.game, platform, &vars, &mut plan.game_args)?;
+        expand_list(
+            arguments.jvm.as_deref().unwrap_or_default(),
+            platform,
+            &vars,
+            &mut plan.jvm_args,
+        )?;
+        expand_list(
+            arguments.game.as_deref().unwrap_or_default(),
+            platform,
+            &vars,
+            &mut plan.game_args,
+        )?;
     } else if let Some(legacy) = &version.minecraft_arguments {
         // The pre-2018 shape: the two JVM arguments the format leaves to
         // the launcher, then its one string of game arguments, split on

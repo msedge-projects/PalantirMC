@@ -54,9 +54,15 @@ fn modern_version_metadata_round_trips() {
     // The 2026 shape: three argument lists, including the user-overrideable
     // JVM tuning group that the format did not have in 2018.
     let arguments = version.arguments.as_ref().unwrap();
-    assert!(!arguments.default_user_jvm.is_empty());
-    assert!(!arguments.jvm.is_empty());
-    assert!(!arguments.game.is_empty());
+    assert!(
+        !arguments
+            .default_user_jvm
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(!arguments.jvm.as_deref().unwrap_or_default().is_empty());
+    assert!(!arguments.game.as_deref().unwrap_or_default().is_empty());
     assert!(version.minecraft_arguments.is_none());
     assert_eq!(version.asset_index.as_ref().unwrap().id, "34");
     assert_eq!(version.java_version.as_ref().unwrap().major_version, 25);
@@ -89,6 +95,25 @@ fn oldest_version_metadata_round_trips() {
     let version = Version::parse(&text).unwrap();
     assert_eq!(version.asset_index.as_ref().unwrap().id, "pre-1.6");
     assert!(version.libraries.iter().all(|l| l.name.contains(':')));
+}
+
+#[test]
+fn loader_profiles_round_trip_with_their_inheritance() {
+    // Loader profiles are written back to disk by installs (their id
+    // becomes a version directory name), so they owe the same stability.
+    // `inheritsFrom` must ride along, not be consumed by the parse.
+    for name in [
+        "fabric-loader-profile-1.20.1.json",
+        "quilt-loader-profile-1.20.1.json",
+    ] {
+        let text = fixture(name);
+        round_trip(&text, Version::parse);
+        let version = Version::parse(&text).unwrap();
+        assert_eq!(version.inherits_from.as_deref(), Some("1.20.1"));
+    }
+    // And the parent they name round-trips in its own right.
+    let text = fixture("version-1.20.1.json");
+    round_trip(&text, Version::parse);
 }
 
 #[test]
