@@ -164,10 +164,20 @@ tests: real 1.5.2 end-to-end sync, real resumed jar).
       a run that exits badly or breaks its promises as `Error::Processor`
       naming the jar. 7 offline tests with a cross-platform mock Java
       (CI runs windows-latest).
+- [x] live done-when — `tests/live.rs`: five `#[ignore]`d tests, one
+      per loader (vanilla 1.5.2, Fabric/Quilt 1.14.4, Forge 1.20.1,
+      NeoForge 1.20.6). Each installs into a temp root, fetches the
+      runtime its own document names, plans from the *written*
+      document, spawns, and watches the game for 20 s. **5/5 green
+      live** (2026-10-09); run with
+      `cargo test -p palantir-loader --test live --locked -- --ignored --test-threads=1`.
 
-**Done-when for Phase 3**: each loader (vanilla, Fabric, Forge,
-NeoForge, Quilt) installs into a temp root and launches headless Java.
-Likely an `#[ignore]` live test, like `palantir-net`'s.
+**Done-when for Phase 3 — met 2026-10-09**: each loader (vanilla,
+Fabric, Forge, NeoForge, Quilt) installs into a temp root and launches
+headless Java, watched running. The five live runs also fixed five
+documented facts (packaged `data` files, `${classpath_separator}`,
+`@jar` identity, pre-2016 placeholders, uuid) — see the NOTES decisions
+entry for the day.
 
 Importers translate to "game version + loader + files" and install
 through the existing door (`install_document` / `install_loader`), with

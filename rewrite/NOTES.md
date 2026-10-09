@@ -13,7 +13,7 @@ replaces them.
 | 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
-| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | in progress: inheritance merge, install (document + needs), Java runtime documents, all four importers, launch plans (placeholders expanded, pre-2018 split, natives extraction) and the Forge processor runner landed; what is left is the done-when live test: each loader installs into a temp root and launches headless Java |
+| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | **landed** 2026-10-09: inheritance merge, install, Java runtimes, all four importers, launch plans, the Forge processor runner, and the done-when live test -- all five loaders install into a temp root and launch headless Java against their own document's runtime (5/5 green live; processors 6/6 with receipts verified; every game process watched running to its 20 s grace) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | 🚫 **protected — do not start**: the owner runs this phase with a different tool; no agent may generate UI code or frontend assets — symbols, icons, visible text, palette values (est. ~20–30 h) |
 | 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
 | 6 | Discover: search, filters, project page, install | not started (estimate ~15–20 h) |
@@ -25,6 +25,41 @@ The phase list and its estimates come from the rewrite specification
 phases 1–3 are the largest block of new work. All hours are estimates.
 
 ## Decisions
+
+**2026-10-09 — the live test earned its keep: five facts no offline
+fixture carried.** The done-when run (`palantir-loader/tests/live.rs`)
+failed against real services five times before going green, each failure
+a fact about the format or the launch:
+
+1. An *absolute* `data` value in an install profile (`/data/client.lzma`)
+   names a file packaged **inside the installer jar** -- the vendor's
+   build path, shipped whole. Planning stages the entry beside the jar
+   (the vendor installer does the same into a temp directory that dies
+   with it); both Forge and NeoForge binarypatcher runs FileNotFound
+   until they did.
+2. `${classpath_separator}` is real: the Forge family joins its module
+   path (`-p`) with it. Unexpanded, the modules never load, `--add-opens`
+   targets a module that does not exist, and the game dies in its
+   initializer. It is in the table now.
+3. `@jar` in a library name is Maven's *default* extension, so
+   `group:artifact:version@jar` and the bare coordinate are one file.
+   The merge identity said otherwise, NeoForge's overlay and its game
+   both carried slf4j, and the game's own bootstrap refused the
+   duplicate jar. The identity treats `@jar` as no annotation, and the
+   classpath absorbs repeated entries the way the syncer's jobs do.
+4. Pre-2016 documents speak `${auth_session}` and `${game_assets}`, and
+   every pre-2018 launch needs the launcher's own `-Djava.library.path`
+   beside the classpath it already supplied -- 1.5.2 was unlaunchable
+   until both landed in the expansion table and `LaunchPlan::command`.
+5. A launch context must carry a parseable player uuid: modern authlib
+   parses `--uuid` before the window opens, and the empty default killed
+   NeoForge's boot at `Main.main`.
+
+The watch's acceptance rule, now encoded in `live.rs`: the spawned game
+either survives its 20-second grace (killed by the test) or dies with
+output that names the room -- the display layer -- and never the plan:
+a missing class, a refused flag, an unexpanded placeholder, or a main
+thread dying of anything else fails the test.
 
 **2026-10-09 — phase 4 is a protected phase.** The theme + shell, and
 with it every UI phase after it (5 instances, 6 Discover, 7

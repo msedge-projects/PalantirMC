@@ -49,8 +49,11 @@ pub struct LaunchPlan {
 
 impl LaunchPlan {
     /// The command line, ready to spawn: java, the JVM args, the main class,
-    /// the game args. When the version's own JVM list names no `-cp` (every
-    /// pre-2018 version), the classpath is supplied here instead.
+    /// the game args. Two things the *launcher* historically supplied by
+    /// hand are supplied here when the version's own JVM list carries none:
+    /// the classpath (`-cp`, every pre-2018 version) and where the natives
+    /// live (`-Djava.library.path`, every pre-2018 version). A document
+    /// that names either keeps its own value -- this never doubles up.
     pub fn command(&self) -> std::process::Command {
         let mut command = std::process::Command::new(&self.java);
         command.current_dir(&self.dir);
@@ -62,6 +65,15 @@ impl LaunchPlan {
         {
             command.arg("-cp");
             command.arg(joined(&self.classpath, host_separator()));
+        }
+        if let Some(natives) = &self.natives {
+            if !self
+                .jvm_args
+                .iter()
+                .any(|arg| arg.starts_with("-Djava.library.path"))
+            {
+                command.arg(format!("-Djava.library.path={}", display(natives)));
+            }
         }
         command.arg(&self.main_class);
         command.args(&self.game_args);
@@ -92,6 +104,12 @@ pub struct LaunchContext {
     pub natives_dir: PathBuf,
     pub library_root: PathBuf,
     pub client_jar: PathBuf,
+    /// Where a pre-2016 document's `${game_assets}` points: the asset root
+    /// the game actually reads for this install -- the object store for a
+    /// modern index, the `resources/` tree a `map_to_resources` index
+    /// writes into, or a virtual index's tree. The document only names the
+    /// placeholder; the caller knows the layout the install produced.
+    pub game_assets: PathBuf,
 }
 
 impl Default for LaunchContext {
@@ -112,6 +130,9 @@ impl Default for LaunchContext {
             natives_dir: PathBuf::from(".minecraft/bin/natives"),
             library_root: PathBuf::from(".minecraft/libraries"),
             client_jar: PathBuf::from(".minecraft/versions/client/client.jar"),
+            // The map_to_resources shape the pre-1.6 era itself used; an
+            // install with another layout sets this when it builds context.
+            game_assets: PathBuf::from(".minecraft/resources"),
         }
     }
 }
@@ -141,7 +162,13 @@ pub fn build_launch_plan(
             continue;
         };
         if let Some(artifact) = resolved.artifact {
-            classpath.push(context.library_root.join(artifact.rel_path));
+            let entry = context.library_root.join(artifact.rel_path);
+            // Documents repeat entries (overlays re-list their game's
+            // libraries); one file belongs on the classpath once, exactly
+            // as the syncer's jobs absorb the repetition on the way in.
+            if !classpath.contains(&entry) {
+                classpath.push(entry);
+            }
         }
     }
 
@@ -149,7 +176,8 @@ pub fn build_launch_plan(
     let separator = if platform.os == Os::Windows { ';' } else { ':' };
     let classpath_string = joined(&classpath, separator);
 
-    let expand = |text: &str| expand_placeholders(text, version, context, &classpath_string);
+    let expand =
+        |text: &str| expand_placeholders(text, version, context, &classpath_string, separator);
 
     Ok(LaunchPlan {
         java: context.java.clone(),
@@ -239,6 +267,7 @@ fn expand_placeholders(
     version: &Version,
     context: &LaunchContext,
     classpath: &str,
+    separator: char,
 ) -> String {
     let index_name = version
         .asset_index
@@ -247,7 +276,7 @@ fn expand_placeholders(
         .or_else(|| version.assets.clone())
         .unwrap_or_default();
 
-    let table: [(&str, String); 16] = [
+    let table: [(&str, String); 19] = [
         ("${natives_directory}", display(&context.natives_dir)),
         ("${launcher_name}", context.launcher_name.clone()),
         ("${launcher_version}", context.launcher_version.clone()),
@@ -264,6 +293,15 @@ fn expand_placeholders(
         ("${game_directory}", display(&context.game_dir)),
         ("${assets_root}", display(&context.assets_root)),
         ("${assets_index_name}", index_name),
+        // The format joins path lists with the platform's own separator;
+        // the Forge family's module path (`-p`) is what uses it.
+        ("${classpath_separator}", separator.to_string()),
+        // The pre-2016 spellings, from the single-string era: `--session`
+        // carried the same token later passed as `accessToken`, and
+        // `--assetsDir ${game_assets}` names the asset root this install
+        // presents to the game.
+        ("${auth_session}", context.access_token.clone()),
+        ("${game_assets}", display(&context.game_assets)),
     ];
 
     let mut out = text.to_string();

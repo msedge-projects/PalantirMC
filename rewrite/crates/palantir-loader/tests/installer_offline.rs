@@ -7,7 +7,9 @@
 //! per-side data -- so the expansion rules are checked against exactly
 //! those.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use palantir_loader::installer::{
     InstallProfile, PlannedProcessor, Processor, ProcessorContext, Side, plan_processors,
@@ -22,13 +24,38 @@ fn forge() -> InstallProfile {
     InstallProfile::parse(&fixture("forge-1.20.1-47.4.26-install-profile.json")).unwrap()
 }
 
-/// The four context paths, as the real document will see them.
+/// A vendor installer jar in miniature: the two packaged data files the
+/// real documents' `BINPATCH` marker names. Planning an absolute data
+/// value stages the entry out of the installer jar, so the context's jar
+/// has to be a real one.
+fn installer_jar() -> PathBuf {
+    static JAR: OnceLock<PathBuf> = OnceLock::new();
+    JAR.get_or_init(|| {
+        let dir =
+            std::env::temp_dir().join(format!("palantirmc-installer-jar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("forge-installer.jar");
+        let file = std::fs::File::create(&jar).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("data/client.lzma", options).unwrap();
+        zip.write_all(b"client patch bytes").unwrap();
+        zip.start_file("data/server.lzma", options).unwrap();
+        zip.write_all(b"server patch bytes").unwrap();
+        zip.finish().unwrap();
+        jar
+    })
+    .clone()
+}
+
+/// The four context paths, as the real document will see them (its jar
+/// standing in as the installer).
 fn paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     (
         PathBuf::from("/root"),
         PathBuf::from("/root/libraries"),
         PathBuf::from("/root/versions/1.20.1/1.20.1.jar"),
-        PathBuf::from("/tmp/forge-installer.jar"),
+        installer_jar(),
     )
 }
 
@@ -124,17 +151,28 @@ fn tokens_expand_to_the_real_paths() {
         "{patched} not planned"
     );
     // Built-ins as the real args use them: the game jar and the side name
-    // stand alone; the BINPATCH marker is a plain literal path.
+    // stand alone; the BINPATCH marker names a file the installer jar
+    // packages, so the plan points at the staged copy -- a path that
+    // exists -- not at the vendor build tree's own `/data/client.lzma`.
     assert!(
         all.iter()
             .any(|arg| same_path(arg, "/root/versions/1.20.1/1.20.1.jar")),
         "MINECRAFT_JAR not planned"
     );
     assert!(all.contains(&&"client".to_string()), "SIDE not planned");
+    let staged = installer_jar()
+        .parent()
+        .unwrap()
+        .join("installer-data")
+        .join("data")
+        .join("client.lzma");
     assert!(
-        all.contains(&&"/data/client.lzma".to_string()),
-        "BINPATCH kept its braces"
+        all.iter()
+            .any(|arg| same_path(arg, &staged.display().to_string())),
+        "the packaged BINPATCH file was not staged to {}",
+        staged.display()
     );
+    assert!(staged.is_file(), "the staged file was not written");
 
     // And the skip receipts: the processor's output artifacts with their
     // promised hashes, both expanded. It produces two, slim and extra.
@@ -172,10 +210,11 @@ fn literal_forms_expand_against_the_real_markers() {
         outputs: None,
     }];
     let plan = plan_for(&profile, Side::Client);
+    let installer = installer_jar().display().to_string();
     let expected = [
         "20230612.114412",
         "/root/run.sh",
-        "/tmp/forge-installer.jar",
+        installer.as_str(),
         "/root/libraries/net/minecraftforge/forge/1.20.1-47.4.26/forge-1.20.1-47.4.26-client.jar",
     ];
     assert_eq!(plan[0].args.len(), expected.len());

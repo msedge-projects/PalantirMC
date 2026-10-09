@@ -571,7 +571,9 @@ fn merge_maps<T: Clone>(
 /// A library's identity for replacement: `group:artifact[:classifier][@ext]`
 /// with the version left out -- two entries naming the same artifact at
 /// different versions are one artifact, and the child's is the one wanted.
-/// Mirrors `MavenCoord`'s layout without requiring a well-formed name.
+/// `@jar` is Maven's *default* extension, so it names the same file as no
+/// annotation at all and must not make an identity of its own. Mirrors
+/// `MavenCoord`'s layout without requiring a well-formed name.
 fn library_identity(name: &str) -> String {
     let (name, ext) = match name.split_once('@') {
         Some((name, ext)) => (name, Some(ext)),
@@ -584,8 +586,10 @@ fn library_identity(name: &str) -> String {
         identity.push_str(parts[3]);
     }
     if let Some(ext) = ext {
-        identity.push('@');
-        identity.push_str(ext);
+        if ext != "jar" {
+            identity.push('@');
+            identity.push_str(ext);
+        }
     }
     identity
 }

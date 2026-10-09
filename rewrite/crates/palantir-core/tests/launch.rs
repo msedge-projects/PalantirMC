@@ -140,6 +140,13 @@ fn pre_2018_single_string_version() {
         argv[cp + 1].contains("26.3.jar"),
         "client jar not on the classpath: {argv:?}"
     );
+    // The other thing pre-2018 launchers supplied by hand: where the
+    // natives live. The document names no JVM list, so the command carries
+    // it without pretending the document did.
+    assert!(
+        argv.iter().any(|a| a.starts_with("-Djava.library.path=")),
+        "launcher-supplied natives path missing: {argv:?}"
+    );
 }
 
 #[test]
@@ -188,4 +195,37 @@ fn game_arguments_carry_the_identity_values() {
     assert_eq!(value("--uuid"), "uuid-1");
     assert_eq!(value("--accessToken"), "token-1");
     assert_eq!(value("--version"), "26.3");
+}
+
+#[test]
+fn one_file_appears_on_the_classpath_once() {
+    // Documents repeat entries -- overlays re-list their game's libraries,
+    // sometimes the same coordinate twice -- and the same file twice on
+    // the classpath is one too many: the game's own bootstrap reads the
+    // list as a set of jars and refuses a duplicate.
+    let json = r#"{"id": "dup", "type": "release", "mainClass": "game.Main",
+        "time": "t", "releaseTime": "r",
+        "downloads": {"client": {"sha1": "00", "size": 1,
+            "url": "http://host/client.jar"}},
+        "libraries": [
+            {"name": "com.example:dup:1.0",
+             "downloads": {"artifact": {"path": "com/example/dup/1.0/dup-1.0.jar",
+                "sha1": "11", "size": 1, "url": "http://host/dup.jar"}}},
+            {"name": "com.example:dup:1.0",
+             "downloads": {"artifact": {"path": "com/example/dup/1.0/dup-1.0.jar",
+                "sha1": "11", "size": 1, "url": "http://host/dup.jar"}}}
+        ]}"#;
+    let version = Version::parse(json).unwrap();
+    let plan = build_launch_plan(&version, &platform(Os::Linux), &context()).unwrap();
+    let repeated: Vec<&PathBuf> = plan
+        .classpath
+        .iter()
+        .filter(|p| p.to_string_lossy().contains("dup-1.0.jar"))
+        .collect();
+    assert_eq!(
+        repeated.len(),
+        1,
+        "the repeated jar landed twice: {:?}",
+        plan.classpath
+    );
 }

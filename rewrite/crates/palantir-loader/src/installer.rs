@@ -17,7 +17,10 @@
 //! - `[group:artifact:version[:classifier][@ext]]` -- the absolute path of
 //!   that artifact under the library root;
 //! - `{NAME}` where `NAME` is a `data` key -- that side's value, itself
-//!   either a bracketed artifact path or a `'quoted literal'`;
+//!   either a bracketed artifact path, a `'quoted literal'`, or an
+//!   absolute path naming a file packaged *inside the installer jar* (the
+//!   vendor's build tree, shipped whole; planning stages it beside the
+//!   jar);
 //! - the built-ins `{ROOT}`, `{INSTALLER}`, `{MINECRAFT_JAR}`, `{SIDE}`.
 //!
 //! Unknown tokens are an error naming the token: a processor run with a
@@ -252,8 +255,9 @@ fn expand_token(
     data_value(value, context)
 }
 
-/// A `data` value: a bracketed artifact path, a `'quoted literal'`, or a
-/// plain literal.
+/// A `data` value: a bracketed artifact path, a `'quoted literal'`, a plain
+/// literal -- or an absolute path, which names a file packaged inside the
+/// installer jar.
 fn data_value(value: &str, context: &ProcessorContext<'_>) -> Result<String> {
     if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
         return artifact_path(inner, context);
@@ -261,7 +265,77 @@ fn data_value(value: &str, context: &ProcessorContext<'_>) -> Result<String> {
     if let Some(inner) = value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')) {
         return Ok(inner.to_string());
     }
+    if value.starts_with('/') {
+        return stage_packaged_file(value, context);
+    }
     Ok(value.to_string())
+}
+
+/// Stage the jar entry an absolute data value names, beside the installer,
+/// and plan against the staged path.
+///
+/// The profile is generated in the vendor's build tree, so `BINPATCH`
+/// carries `/data/client.lzma` the way that tree did -- while the jar
+/// itself packages the `data/` tree it points at. The vendor's own
+/// installer resolves this the same way (into a temporary directory that
+/// dies with it); staging beside the jar keeps the plan's paths real and
+/// the run repeatable. The entry name is the value without its leading
+/// slash, and it must stay inside the staging directory the way every
+/// other name from metadata does.
+fn stage_packaged_file(value: &str, context: &ProcessorContext<'_>) -> Result<String> {
+    let entry = value.trim_start_matches('/');
+    if entry.is_empty() || entry.contains("..") || entry.contains('\\') {
+        return Err(Error::Invalid {
+            what: "install profile",
+            why: format!("{value:?} is not a file inside the installer jar"),
+        });
+    }
+    let jar_dir = context.installer.parent().ok_or_else(|| Error::Invalid {
+        what: "install profile",
+        why: format!(
+            "{} has no directory to stage packaged files beside",
+            context.installer.display()
+        ),
+    })?;
+    let staged = entry
+        .split('/')
+        .fold(jar_dir.join("installer-data"), |dir, segment| {
+            dir.join(segment)
+        });
+
+    let file = std::fs::File::open(context.installer).map_err(|source| Error::Io {
+        path: context.installer.to_path_buf(),
+        source,
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|source| Error::Io {
+        path: context.installer.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+    })?;
+    let mut source = archive.by_name(entry).map_err(|_| Error::Invalid {
+        what: "install profile",
+        why: format!("the installer jar carries no {entry} (named by {value})"),
+    })?;
+
+    // Already staged and whole: planning runs over and over on the same
+    // jar, and a file the size the zip promises is the one it wrote.
+    if staged.is_file() && std::fs::metadata(&staged).is_ok_and(|m| m.len() == source.size()) {
+        return Ok(staged.display().to_string());
+    }
+    if let Some(parent) = staged.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let mut out = std::fs::File::create(&staged).map_err(|source| Error::Io {
+        path: staged.clone(),
+        source,
+    })?;
+    std::io::copy(&mut source, &mut out).map_err(|source| Error::Io {
+        path: staged.clone(),
+        source,
+    })?;
+    Ok(staged.display().to_string())
 }
 
 /// `group:artifact:version[:classifier][@ext]` as the absolute path of the

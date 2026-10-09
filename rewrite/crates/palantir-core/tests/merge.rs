@@ -143,6 +143,34 @@ fn a_classifier_is_part_of_a_librarys_identity() {
 }
 
 #[test]
+fn jar_is_the_default_extension_and_not_an_identity() {
+    // NeoForge spells its libraries `group:artifact:version@jar` where the
+    // game spells the same coordinate bare: one file, so the child
+    // replaces the parent's entry instead of leaving both to land on the
+    // classpath (the game's own bootstrap refuses a duplicate jar).
+    let parent = Version::parse(
+        r#"{"id": "game", "type": "release", "mainClass": "a.Main",
+            "time": "t", "releaseTime": "r",
+            "libraries": [
+                {"name": "org.slf4j:slf4j-api:2.0.9"},
+                {"name": "com.example:kept:1.0"}]}"#,
+    )
+    .unwrap();
+    let child = Version::parse(
+        r#"{"id": "mod", "type": "release", "mainClass": "b.Main",
+            "time": "t", "releaseTime": "r", "inheritsFrom": "game",
+            "libraries": [{"name": "org.slf4j:slf4j-api:2.0.9@jar"}]}"#,
+    )
+    .unwrap();
+    let merged = child.merged_with(&parent).unwrap();
+    let names: Vec<&str> = merged.libraries.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["org.slf4j:slf4j-api:2.0.9@jar", "com.example:kept:1.0"]
+    );
+}
+
+#[test]
 fn inheriting_from_the_wrong_parent_is_an_error_naming_both() {
     let parent = Version::parse(
         r#"{"id": "game", "type": "release", "mainClass": "a.Main",
