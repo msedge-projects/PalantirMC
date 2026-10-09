@@ -13,7 +13,7 @@ replaces them.
 | 0 | Workspace, CI, `tools/licence_audit.py`, notices, licence placeholder | **landed** 2026-10-08: 8 tests green, audit 6/6, self-test catches all 5 planted failures |
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
-| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | not started (estimate ~30–40 h) |
+| 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | in progress: inheritance merge, install (document + needs), Java runtime documents landed; loaders/importers/headless launch to come (estimate ~30–40 h) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | not started (estimate ~20–30 h) |
 | 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
 | 6 | Discover: search, filters, project page, install | not started (estimate ~15–20 h) |
@@ -103,7 +103,29 @@ contributes its base jar"); the real 1.12.2 sample contradicts it
 classifiers-only), so that assertion now checks every resolved jar against
 the record that names it, plus the split pinned by name.
 
-**2026-10-08 — the data root is one tree, shared where the game shares.**
+**2026-10-09 — an install is a resolve, then a sync; the written document
+is the receipt.** Every loader install ends as a vanilla install: the
+overlay document (a loader profile) is merged over what it inherits, the
+*resolved* document is written to `versions/<id>/<id>.json`, and its needs
+go through the same syncer as everything else. From that moment
+`build_launch_plan` reads one document and cares nothing about how it got
+there -- Forge/NeoForge installer documents enter at the same door.
+
+**2026-10-09 — the Java runtime index is pinned by a content hash, and
+the pin is a trap.** Its URL path *is* the hash of its content
+(`.../v1/products/java-runtime/<hash>/all.json`), so the constant in
+`java.rs` is a pinned pointer that goes stale when Mojang re-issues the
+index -- a 404 for it means "update the pin", never "no runtimes". The
+first attempt at this phase used a misremembered hash and read an S3 XML
+error page as if it were the index; the fixtures now on disk are fetched
+from the pin the launcher community records, and the parser refuses a
+non-JSON body loudly.
+
+**2026-10-09 — the mock HTTP server is one crate, shared.** The
+loader tests need the same fake service the transfer tests grew (range
+answers, one-shot interruptions, request receipts); it lives in
+`test-support`, a dev-dependency of every crate that tests against a
+wire. Nothing from it ships.
 Layout in `paths.rs`: versions own their jar and metadata, libraries and
 asset objects are shared across versions (N versions must not mean N copies
 of lwjgl), and everything resumable or regenerable lives under `cache/`.

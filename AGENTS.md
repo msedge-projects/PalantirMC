@@ -240,6 +240,23 @@ table -- with a one-line note when a number is an estimate rather than a
 measurement. Update `NEXT_STEPS.md`'s stage table in the same commit as the
 slice that moved it, and take the percentage from `python tools/progress.py`
 (or, where no working `python` is on PATH, `tools/progress.cmd` -- it finds an
-interpreter and reads the same documents) rather than writing one by hand: it
-reads that table and `GATES.md`'s ledger, so the two cannot drift apart, and it
+interpreter and reads the same documents) rather than writing one by hand:it reads that table and `GATES.md`'s ledger, so the two cannot drift apart, and it
 fails when they do.
+
+## 8. Working pace: never a dead second
+
+Owner's standing instructions (2026-10-09), for every session:
+
+- **Never wait idle on a compile, test run, or CI.** While one runs in the
+  background, do the next thing: write the next module, analyze the next
+  format, fetch the next fixture, review the last diff. Polling loops that
+  do nothing else are waiting; polling that is interleaved with real work
+  is progress.
+- **Test a feature as it is written.** The moment code exists, kick its
+  tests off in the background and keep building; collect and act on the
+  result before claiming anything is done. A finished feature is one whose
+  tests have *run*, not one whose tests exist.
+- Background jobs do not outlive tool cleanup by accident: start them with
+  the background runner (not bare shell `&`), give each its own log file,
+  and read that log before reporting success. Exit codes travel in the log
+  for exactly this reason.
