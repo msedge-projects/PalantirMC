@@ -68,10 +68,16 @@ purpose: one launcher process with few retries needs no jitter, and a fixed
 delay is testable.
 
 **2026-10-08 — one fetch per content hash, many names.** An asset index
-routinely names the same object twice; two workers fetching one hash raced
-on one part file and one store slot (the offline end-to-end test caught it
-as a missing-part rename failure). Jobs now deduplicate by hash before
-scheduling: one fetch, every layout path materialized from it.
+routinely names the same object twice, and version documents repeat whole
+library entries (1.5.2 lists `jinput-platform` verbatim twice); two
+workers fetching one hash raced on one part file and one store slot. The
+Windows runner ended that race as a 0-byte part file and a failed sync
+(Linux happened to survive it), which is where the repetition was found.
+Jobs now all deduplicate by identity before scheduling -- by hash when the
+metadata has one, by URL when it does not -- one fetch, every layout path
+materialized from it. The report counts files (layout paths), so two
+names for one hash in the hash-keyed object store are one file, while in
+the resources layout the same two names are two.
 
 **2026-10-08 — a resume receipt must be true.** `Transfer.resumed_from` is
 the offset the winning attempt *actually* continued from: a server that

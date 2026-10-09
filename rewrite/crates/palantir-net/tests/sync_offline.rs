@@ -178,10 +178,14 @@ fn a_whole_version_lands_verified_and_deduplicated() {
     assert_eq!(report.libraries, 2);
     assert_eq!(report.natives, 1);
     assert_eq!(report.asset_index, 1);
-    assert_eq!(report.assets, 3);
+    // The object store is hash-keyed: `a/one.ogg` and `c/again.ogg` name
+    // one hash and land at one path, so three names are two files. The
+    // game resolves both names to that file. (In the resources layout the
+    // same three names are three files -- the count follows paths.)
+    assert_eq!(report.assets, 2);
     assert_eq!(report.reused, 0);
     assert_eq!(report.resumed, 0);
-    assert_eq!(report.fetched, 8);
+    assert_eq!(report.fetched, 7);
 
     // The layout paths hold the right bytes.
     assert_eq!(
@@ -238,7 +242,7 @@ fn a_second_sync_asks_the_network_nothing() {
     let hits_after_first = fx.server.hits().len();
     let report = fx.sync(None);
     assert_eq!(fx.server.hits().len(), hits_after_first);
-    assert_eq!(report.reused, 8, "every file should come from the store");
+    assert_eq!(report.reused, 7, "every file should come from the store");
     assert_eq!(report.fetched, 0);
     let _ = std::fs::remove_dir_all(&fx.dir);
 }
@@ -256,6 +260,62 @@ fn a_resources_index_lands_in_the_game_directory() {
     // Same bytes, second name: a copy in the game dir, one store entry.
     assert!(game_dir.join("resources/c/again.ogg").is_file());
     let _ = std::fs::remove_dir_all(&fx.dir);
+}
+
+#[test]
+fn duplicate_library_entries_fetch_their_file_once() {
+    // 1.5.2 lists `jinput-platform` verbatim twice. The repetition once
+    // meant two jobs racing on one part file and one store slot -- on a
+    // Windows runner that ended as a 0-byte part and a failed sync. One
+    // fetch, however many entries name it.
+    let natives = body(200);
+    let dir = temp_dir("duplicates");
+    let server = MockServer::start(vec![(
+        "/com/example/nat/1.0/nat-1.0-natives-linux.jar",
+        Route::new(natives.clone()),
+    )]);
+    let base = server.base.clone();
+    let entry = format!(
+        r#"{{"name": "com.example:nat:1.0",
+            "natives": {{"linux": "natives-linux"}},
+            "downloads": {{"classifiers": {{"natives-linux": {{"path": "com/example/nat/1.0/nat-1.0-natives-linux.jar",
+            "sha1": "{}", "size": {}, "url": "{base}/com/example/nat/1.0/nat-1.0-natives-linux.jar"}}}}}}}}"#,
+        sha1_bytes(&natives),
+        natives.len(),
+    );
+    let version = Version::parse(&format!(
+        r#"{{"id": "dup", "type": "release", "mainClass": "game.Main",
+          "time": "t", "releaseTime": "r", "downloads": {{}},
+          "libraries": [{entry}, {entry}]}}"#,
+    ))
+    .unwrap();
+
+    let root = DataRoot::new(dir.join("root"));
+    let http = Http::new().unwrap();
+    let scheduler = Scheduler::new(4);
+    let store = ContentStore::new(root.content_dir());
+    let syncer = Syncer::new(
+        &http,
+        &scheduler,
+        &store,
+        &root,
+        DownloadOptions {
+            retries: 2,
+            backoff: Duration::from_millis(1),
+        },
+    );
+    let platform = Platform::new(Os::Linux, "6.8.0", Arch::X86_64);
+    let (report, _client) = syncer.sync_version(&version, &platform, None).unwrap();
+
+    assert_eq!(server.hits().len(), 1, "the file must be fetched once");
+    assert_eq!(report.natives, 1);
+    assert_eq!(report.fetched, 1);
+    assert!(
+        root.library_file("com/example/nat/1.0/nat-1.0-natives-linux.jar")
+            .unwrap()
+            .is_file()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

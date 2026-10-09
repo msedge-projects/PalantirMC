@@ -6,10 +6,14 @@
 //! list into scheduler jobs that land each byte string in the content
 //! store (verified, deduplicated) and materialize it at its layout path.
 //!
-//! Jobs are deduplicated by content hash before they are scheduled. One
-//! hash can appear under many names -- an asset index routinely names the
-//! same object twice -- and two workers fetching one hash would race on a
-//! single part file and a single store slot. One fetch, many names.
+//! Jobs are deduplicated by identity before they are scheduled -- by
+//! content hash when the metadata has one, by URL when it does not. One
+//! identity can appear under many names: an asset index routinely names
+//! the same object twice, and version documents repeat whole library
+//! entries (1.5.2 lists `jinput-platform` verbatim twice). Two workers
+//! fetching one identity would race on a single part file and a single
+//! store slot -- on a Windows runner that ended in a 0-byte part file and
+//! a failed sync. One fetch, many names.
 //!
 //! What it deliberately does not do: extract natives jars (that is launch
 //! preparation, phase 3), fetch a Java runtime (also phase 3), or fetch the
@@ -60,18 +64,23 @@ pub struct SyncReport {
     pub assets: usize,
 }
 
-/// One fetch, with every layout path its bytes land at.
+/// One name a fetch lands at, and the counter that name moves.
+struct JobDest {
+    path: PathBuf,
+    counted: Counted,
+}
+
+/// One fetch, with every name its bytes land at.
 struct Job {
     url: String,
     /// Never empty: the first is where a hash-less fetch writes; the rest
     /// are materialized copies.
-    dests: Vec<PathBuf>,
+    dests: Vec<JobDest>,
     sha1: Option<String>,
     size: Option<u64>,
-    counted: Counted,
 }
 
-/// Which counter a landed file moves.
+/// Which counter a landed name moves.
 #[derive(Clone, Copy)]
 enum Counted {
     Client,
@@ -79,6 +88,37 @@ enum Counted {
     Natives,
     AssetIndex,
     Asset,
+}
+
+/// Every job of one sync, merged by identity so each distinct fetch is
+/// asked for exactly once however many names or entries name it.
+#[derive(Default)]
+struct Jobs {
+    by_key: BTreeMap<String, Job>,
+}
+
+impl Jobs {
+    fn add(&mut self, job: Job) {
+        let key = match &job.sha1 {
+            Some(sha1) => format!("sha1:{sha1}"),
+            None => format!("url:{}", job.url),
+        };
+        let entry = self.by_key.entry(key).or_insert_with(|| Job {
+            url: job.url.clone(),
+            dests: Vec::new(),
+            sha1: job.sha1.clone(),
+            size: job.size,
+        });
+        for dest in job.dests {
+            if !entry.dests.iter().any(|have| have.path == dest.path) {
+                entry.dests.push(dest);
+            }
+        }
+    }
+
+    fn into_jobs(self) -> Vec<Job> {
+        self.by_key.into_values().collect()
+    }
 }
 
 #[derive(Default)]
@@ -116,48 +156,54 @@ impl<'a> Syncer<'a> {
         platform: &Platform,
         game_dir: Option<&Path>,
     ) -> Result<(SyncReport, Option<Transfer>)> {
-        let mut jobs = Vec::new();
+        let mut jobs = Jobs::default();
 
         // The client jar: the one file named by the version itself.
         if let Some(client) = version.downloads.get("client") {
-            jobs.push(Job {
+            jobs.add(Job {
                 url: required_url(&client.url, &version.id)?,
-                dests: vec![self.root.version_jar(&version.id)],
+                dests: vec![JobDest {
+                    path: self.root.version_jar(&version.id),
+                    counted: Counted::Client,
+                }],
                 sha1: client.sha1.clone(),
                 size: client.size,
-                counted: Counted::Client,
             });
         }
 
         // Libraries this platform actually gets, with their natives jars.
+        // Documents repeat entries; `Jobs` absorbs the repetition.
         for library in &version.libraries {
             let Some(resolved) = library.resolve(platform)? else {
                 continue;
             };
             let owner = resolved.coord.group.clone();
             if let Some(artifact) = resolved.artifact.clone() {
-                jobs.push(self.file_job(&artifact, &owner, Counted::Library)?);
+                jobs.add(self.file_job(&artifact, &owner, Counted::Library)?);
             }
             if let Some(natives) = resolved.natives.clone() {
-                jobs.push(self.file_job(&natives, &owner, Counted::Natives)?);
+                jobs.add(self.file_job(&natives, &owner, Counted::Natives)?);
             }
         }
 
         // The asset index decides what the rest looks like; it must land
         // before its objects are known, so it syncs in its own pass.
         let mut tally = Tally::default();
-        self.run_jobs(jobs, &mut tally)?;
+        self.run_jobs(jobs.into_jobs(), &mut tally)?;
 
         if let Some(index_ref) = &version.asset_index {
             let index_dest = self.root.asset_index_file(&index_ref.id);
-            let index_job = Job {
+            let mut index_jobs = Jobs::default();
+            index_jobs.add(Job {
                 url: required_url(&index_ref.url, &index_ref.id)?,
-                dests: vec![index_dest.clone()],
+                dests: vec![JobDest {
+                    path: index_dest.clone(),
+                    counted: Counted::AssetIndex,
+                }],
                 sha1: index_ref.sha1.clone(),
                 size: index_ref.size,
-                counted: Counted::AssetIndex,
-            };
-            self.run_jobs(vec![index_job], &mut tally)?;
+            });
+            self.run_jobs(index_jobs.into_jobs(), &mut tally)?;
 
             let text = std::fs::read_to_string(&index_dest).map_err(|source| Error::Io {
                 path: index_dest,
@@ -175,10 +221,12 @@ impl<'a> Syncer<'a> {
     fn file_job(&self, download: &DownloadRef, owner: &str, counted: Counted) -> Result<Job> {
         Ok(Job {
             url: required_url(&download.url, owner)?,
-            dests: vec![self.root.library_file(&download.rel_path)?],
+            dests: vec![JobDest {
+                path: self.root.library_file(&download.rel_path)?,
+                counted,
+            }],
             sha1: download.sha1.clone(),
             size: download.size,
-            counted,
         })
     }
 
@@ -204,26 +252,21 @@ impl<'a> Syncer<'a> {
             AssetDestination::ObjectStore | AssetDestination::Virtual => self.root.assets_dir(),
         };
 
-        let mut by_hash: BTreeMap<String, (String, u64, Vec<PathBuf>)> = BTreeMap::new();
+        let mut jobs = Jobs::default();
         for (name, object) in &index.objects {
             let url = object.url_at(&self.asset_url_base)?;
-            let dest = base.join(index.rel_path(index_id, name)?);
-            let entry =
-                by_hash
-                    .entry(object.hash.clone())
-                    .or_insert((url, object.size, Vec::new()));
-            entry.2.push(dest);
-        }
-        Ok(by_hash
-            .into_iter()
-            .map(|(hash, (url, size, dests))| Job {
+            let path = base.join(index.rel_path(index_id, name)?);
+            jobs.add(Job {
                 url,
-                dests,
-                sha1: Some(hash),
-                size: Some(size),
-                counted: Counted::Asset,
-            })
-            .collect())
+                dests: vec![JobDest {
+                    path,
+                    counted: Counted::Asset,
+                }],
+                sha1: Some(object.hash.clone()),
+                size: Some(object.size),
+            });
+        }
+        Ok(jobs.into_jobs())
     }
 
     /// Land every job under the concurrency ceiling, fail on the first
@@ -232,18 +275,22 @@ impl<'a> Syncer<'a> {
     fn run_jobs(&self, jobs: Vec<Job>, tally: &mut Tally) -> Result<()> {
         let outcomes = self.scheduler.run(jobs, |job| self.land(job));
         for outcome in outcomes {
-            let (landed, transfer, files) = outcome?;
-            match landed {
-                Counted::Client => tally.client_transfer = Some(transfer),
-                Counted::Library => tally.report.libraries += files,
-                Counted::Natives => tally.report.natives += files,
-                Counted::AssetIndex => tally.report.asset_index += files,
-                Counted::Asset => tally.report.assets += files,
+            let (transfer, landed) = outcome?;
+            for counted in landed {
+                match counted {
+                    Counted::Client => tally.client_transfer = Some(transfer),
+                    Counted::Library => tally.report.libraries += 1,
+                    Counted::Natives => tally.report.natives += 1,
+                    Counted::AssetIndex => tally.report.asset_index += 1,
+                    Counted::Asset => tally.report.assets += 1,
+                }
+                if transfer.already_present {
+                    tally.report.reused += 1;
+                } else {
+                    tally.report.fetched += 1;
+                }
             }
-            if transfer.already_present {
-                tally.report.reused += files;
-            } else {
-                tally.report.fetched += files;
+            if !transfer.already_present {
                 tally.report.bytes += transfer.bytes;
                 if transfer.resumed_from > 0 {
                     tally.report.resumed += 1;
@@ -254,10 +301,9 @@ impl<'a> Syncer<'a> {
     }
 
     /// Land one job: store by hash when the metadata has one (dedup and a
-    /// verified door), straight to its destination when it does not. Either
+    /// verified door), straight to its first name when it does not. Either
     /// way every name in `dests` ends up holding the bytes.
-    fn land(&self, job: Job) -> Result<(Counted, Transfer, usize)> {
-        let files = job.dests.len();
+    fn land(&self, job: Job) -> Result<(Transfer, Vec<Counted>)> {
         let primary = job.dests.first().ok_or_else(|| Error::Invalid {
             what: "sync job",
             why: "a job with no destination".to_string(),
@@ -283,23 +329,31 @@ impl<'a> Syncer<'a> {
                     )?
                 }
             }
-            None => {
-                download::download(self.http, &job.url, primary, None, job.size, &self.options)?
-            }
+            None => download::download(
+                self.http,
+                &job.url,
+                &primary.path,
+                None,
+                job.size,
+                &self.options,
+            )?,
         };
         for dest in &job.dests {
             match &job.sha1 {
-                Some(sha1) => self.store.materialize(sha1, dest)?,
-                None if dest != primary => {
-                    std::fs::copy(primary, dest).map_err(|source| Error::Io {
-                        path: dest.clone(),
+                Some(sha1) => self.store.materialize(sha1, &dest.path)?,
+                None if dest.path != primary.path => {
+                    std::fs::copy(&primary.path, &dest.path).map_err(|source| Error::Io {
+                        path: dest.path.clone(),
                         source,
                     })?;
                 }
                 None => {}
             }
         }
-        Ok((job.counted, transfer, files))
+        Ok((
+            transfer,
+            job.dests.iter().map(|dest| dest.counted).collect(),
+        ))
     }
 }
 
