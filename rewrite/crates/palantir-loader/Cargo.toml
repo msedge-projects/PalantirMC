@@ -22,3 +22,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # The mock HTTP server shared with the other crates' tests. Test-only.
 test-support = { path = "../test-support" }
+zip = "2"

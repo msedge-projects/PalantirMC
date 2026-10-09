@@ -136,6 +136,22 @@ installer documents, and they taught the forms: BINPATCH is a plain
 literal, MCP_VERSION a quoted one, and one processor claims two output
 artifacts as its skip receipt.
 
+**2026-10-09 — every importer lands on one order form, and an unknown
+loader is an error, not vanilla.** The pack formats all describe the
+same install -- a game, a loader, files -- so `import.rs` is that shape
+and each format is only a translation into it: `.mrpack`, Prism/MultiMC,
+CurseForge's `manifest.json` (the CurseForge app, GDLauncher and
+ATLauncher all share it), and the vanilla `.minecraft` layout the
+official launcher, TLauncher, SKLauncher, Badlion, Legacy, Lunar and
+Feather keep around their own roots. Two rules run through all of them:
+pack-supplied paths are joined, never trusted (the `.mrpack` spec warns
+about exactly this), and a dependency id this launcher does not know is
+reported -- when it is the only loader it becomes `LoaderTarget::Unknown`
+-- because installing a LiteLoader pack as vanilla is a silent wrong
+install whose failure lands somewhere else entirely. CurseForge files
+arrive as catalogue ids with no URL or name; they stay ids until the
+catalogue answers, rather than being guessed into existence.
+
 **2026-10-09 — the mock HTTP server is one crate, shared.** The
 loader tests need the same fake service the transfer tests grew (range
 answers, one-shot interruptions, request receipts); it lives in

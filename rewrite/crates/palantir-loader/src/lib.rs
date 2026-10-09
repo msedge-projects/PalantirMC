@@ -15,9 +15,13 @@
 //!   run Java to produce the patched artifacts).
 //!
 //! The importers translate foreign *packagings* into the same shape:
-//! `.mrpack` (Modrinth's documented modpack format) and Prism/MultiMC's
-//! `instance.cfg` + `mmc-pack.json` both resolve to "a game version, a
-//! loader, a set of files" -- which is an install.
+//! Modrinth's `.mrpack`, Prism/MultiMC's `instance.cfg` +
+//! `mmc-pack.json`, CurseForge's `manifest.json` (the export format the
+//! CurseForge app, GDLauncher and ATLauncher all share), and the vanilla
+//! `.minecraft` layout every other launcher -- official, TLauncher,
+//! SKLauncher, Badlion, Legacy, Lunar, Feather -- keeps around its own
+//! roots. All resolve to "a game version, a loader, a set of files" --
+//! which is an install.
 //!
 //! What this crate does not do: anything windowed (that is `palantir-desktop`
 //! in its own time), or own the formats (that is `palantir-core`) or the
@@ -40,11 +44,18 @@
 //! 4. `installer` -- the Forge/NeoForge install profile and its processor
 //!    pipeline, planned with every token expanded. **Landed** (running
 //!    the processors lands with `launch`).
-//! 5. `mrpack`, `prism` -- the importers.
+//! 5. `import`, `mrpack`, `prism`, `curseforge`, `vanilla` -- the
+//!    importers, one per packaging, all translating to `import`'s shape.
+//!    **Landed.**
 //! 6. `launch` -- runtime resolution, natives extraction, and the process.
 
+pub mod curseforge;
 pub mod error;
+pub mod import;
 pub mod install;
 pub mod installer;
 pub mod java;
+pub mod mrpack;
+pub mod prism;
 pub mod profiles;
+pub mod vanilla;

@@ -1,0 +1,33 @@
+{
+  "profiles": {
+    "MCPatcher": {
+      "name": "MCPatcher",
+      "gameDir": "C:\\Users\\Raxenoth\\AppData\\Roaming\\.minecraft",
+      "lastVersionId": "1.8-mcpatcher",
+      "javaDir": "C:\\Program Files\\Java\\jre7\\bin\\javaw.exe",
+      "javaArgs": "-Xmx4G -XX:+UseConcMarkSweepGC -XX:+CMSIncrementalMode -XX:-UseAdaptiveSizePolicy -Xmn128M",
+      "allowedReleaseTypes": [
+        "release",
+        "snapshot"
+      ],
+      "launcherVisibilityOnGameClose": "hide launcher and re-open when game closes"
+    },
+    "raxenoth": {
+      "name": "raxenoth",
+      "gameDir": "C:\\Users\\Raxenoth\\AppData\\Roaming\\.minecraft",
+      "lastVersionId": "1.8",
+      "javaDir": "C:\\Program Files\\Java\\jre7\\bin\\javaw.exe",
+      "javaArgs": "-Xmx4G -XX:+UseConcMarkSweepGC -XX:+CMSIncrementalMode -XX:-UseAdaptiveSizePolicy -Xmn128M",
+      "allowedReleaseTypes": [
+        "release",
+        "snapshot"
+      ],
+      "launcherVisibilityOnGameClose": "hide launcher and re-open when game closes"
+    }
+  },
+  "selectedProfile": "MCPatcher",
+  "launcherVersion": {
+    "name": "1.5.3",
+    "format": 17
+  }
+}

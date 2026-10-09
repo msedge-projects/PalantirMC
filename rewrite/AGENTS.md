@@ -126,12 +126,14 @@ tests: real 1.5.2 end-to-end sync, real resumed jar).
 - [x] `java.rs` — runtime index/manifests, fetch, platform names
 - [x] `profiles.rs` — Fabric/Quilt/Forge-family listing + `install_loader`
 - [x] `installer.rs` — install-profile parse + processor planning
-- [ ] `mrpack.rs` — `.mrpack` importer (Modrinth modpack format:
-      `modrinth.index.json`, `overrides/`, `client-overrides/`,
-      `server-overrides/`; spec at
-      support.modrinth.com/en/articles/8802351)
-- [ ] `prism.rs` — Prism/MultiMC importer (`instance.cfg` +
-      `mmc-pack.json`)
+- [x] `import.rs` + `mrpack.rs` + `prism.rs` + `curseforge.rs` +
+      `vanilla.rs` — the importers. One order form (`ImportedPack`),
+      one translation per packaging: Modrinth `.mrpack`, Prism/MultiMC
+      (`instance.cfg` + `mmc-pack.json`), CurseForge `manifest.json`
+      (CurseForge app, GDLauncher, ATLauncher exports), and the vanilla
+      `.minecraft` layout (official, TLauncher, SKLauncher, Badlion,
+      Legacy, Lunar, Feather). Unknown loader ids become
+      `LoaderTarget::Unknown`, never vanilla.
 - [ ] `launch` — run the planned Forge processors as headless Java,
       natives extraction, spawn Java from `build_launch_plan`
 
