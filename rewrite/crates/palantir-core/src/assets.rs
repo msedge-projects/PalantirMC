@@ -117,8 +117,18 @@ impl AssetObject {
 
     /// Where the content service serves this object from.
     pub fn url(&self) -> Result<String> {
+        self.url_at(OBJECT_URL_BASE)
+    }
+
+    /// The same object from a mirror (or a test server): mirrors of the
+    /// object store keep its layout, so only the base differs.
+    pub fn url_at(&self, base: &str) -> Result<String> {
         let prefix = hash_prefix(&self.hash)?;
-        Ok(format!("{OBJECT_URL_BASE}/{prefix}/{}", self.hash))
+        Ok(format!(
+            "{}/{prefix}/{}",
+            base.trim_end_matches('/'),
+            self.hash
+        ))
     }
 }
 

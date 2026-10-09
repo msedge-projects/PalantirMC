@@ -98,16 +98,42 @@ fn natives_classifiers_land_on_every_desktop_platform() {
             natives.iter().any(|path| path.contains(token)),
             "no {token} natives jar selected on {os:?}: {natives:?}"
         );
-        // Whatever carries natives also contributes its base jar.
+        // The base jar appears exactly when the metadata names one. This is
+        // not a tautology: `jinput-platform` is classifiers-only in the real
+        // document (its base jar is not on the repository at all -- asking
+        // gets a 404), so it contributes its natives and no base jar, while
+        // `text2speech` contributes both.
         for lib in &resolved {
-            if lib.natives.is_some() {
-                assert!(
-                    lib.artifact.is_some(),
-                    "{} has no base jar",
-                    lib.coord.group
-                );
-            }
+            let name = format!(
+                "{}:{}:{}",
+                lib.coord.group, lib.coord.artifact, lib.coord.version
+            );
+            let source = version
+                .libraries
+                .iter()
+                .find(|l| l.name == name)
+                .unwrap_or_else(|| panic!("no metadata record for {name}"));
+            let named_artifact = match &source.downloads {
+                None => true, // name-only documents derive one
+                Some(downloads) => downloads.artifact.is_some(),
+            };
+            assert_eq!(
+                lib.artifact.is_some(),
+                named_artifact,
+                "{}: base jar does not follow its download records",
+                source.name
+            );
         }
+        // Named outright so this split cannot go vacuous again.
+        let jinput = resolved
+            .iter()
+            .find(|lib| lib.coord.artifact == "jinput-platform")
+            .expect("jinput-platform resolved");
+        assert!(
+            jinput.artifact.is_none(),
+            "jinput-platform gained a base jar"
+        );
+        assert!(jinput.natives.is_some());
     }
 }
 

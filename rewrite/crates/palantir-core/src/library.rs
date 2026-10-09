@@ -2,10 +2,14 @@
 //!
 //! A metadata `Library` is a possibility space: a jar, a natives jar, or
 //! both, gated by rules and named by Maven coordinate. Resolution turns one
-//! into exactly what this platform needs: the classpath jar (from the
-//! download record when there is one, else derived from the coordinate), and
-//! the natives jar to fetch and extract when the library names a classifier
-//! for this OS.
+//! into exactly what this platform needs: the classpath jar and the natives
+//! jar to fetch and extract when the library names a classifier for this OS.
+//!
+//! A `downloads` block is the complete list of what exists to fetch: a
+//! library whose block carries only classifiers (`lwjgl-platform`,
+//! `jinput-platform`) has no base jar at all, and the repository answers 404
+//! for one. Only name-only documents -- older and mod-loader ones -- derive
+//! the Maven layout from the coordinate.
 //!
 //! The `${arch}` in a classifier template (`natives-windows-${arch}`) is the
 //! bitness the running Java will use -- `32` or `64`.
@@ -55,10 +59,12 @@ impl Library {
         }
         let coord = MavenCoord::parse(&self.name)?;
 
-        let artifact = match self.downloads.as_ref().and_then(|d| d.artifact.as_ref()) {
-            Some(artifact) => Some(from_artifact(artifact)),
-            // No download record: derive the layout from the coordinate and
-            // the repository base (older and mod-loader documents).
+        let artifact = match self.downloads.as_ref() {
+            Some(downloads) => downloads.artifact.as_ref().map(from_artifact),
+            // No download record at all: derive the layout from the
+            // coordinate and the repository base (older and mod-loader
+            // documents). A document that has records but omits the base
+            // artifact is classifier-only, and gets none.
             None => Some(DownloadRef {
                 rel_path: coord.rel_path(),
                 url: Some(join_url(self.repo_base(), &coord.rel_path())),
@@ -98,8 +104,14 @@ impl Library {
         {
             Some(artifact) => from_artifact(artifact),
             None => {
-                // Name-only documents derive the classifier jar the same way
-                // as the base artifact.
+                // The `downloads` block is authoritative: a classifier it
+                // does not name is not on the repository (and asking for one
+                // is a 404 -- 1.5.2's lwjgl-platform names natives for three
+                // OSes but serves one). Only name-only documents derive the
+                // classifier jar from the coordinate.
+                if self.downloads.is_some() {
+                    return Ok(None);
+                }
                 let mut coord = coord.clone();
                 coord.classifier = Some(classifier.clone());
                 let rel_path = coord.rel_path();
@@ -165,6 +177,48 @@ mod tests {
             resolved.artifact.unwrap().rel_path,
             "com/example/thing/1.0/thing-1.0.jar"
         );
+        assert!(resolved.natives.is_none());
+    }
+
+    #[test]
+    fn a_classifier_only_library_has_no_base_artifact() {
+        // The real 1.5.2 shape: `downloads` carries classifiers and nothing
+        // else, and the repository has no base jar to serve.
+        let lib = library(
+            r#"{"name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.0",
+                "natives": {"windows": "natives-windows"},
+                "downloads": {"classifiers": {
+                    "natives-windows": {
+                        "path": "org/lwjgl/lwjgl/lwjgl-platform/2.9.0/lwjgl-platform-2.9.0-natives-windows.jar",
+                        "sha1": "def", "size": 9,
+                        "url": "https://libraries.minecraft.net/n.jar"}}}}"#,
+        );
+        let resolved = lib.resolve(&platform()).unwrap().unwrap();
+        assert!(resolved.artifact.is_none());
+        assert!(
+            resolved
+                .natives
+                .unwrap()
+                .rel_path
+                .ends_with("natives-windows.jar")
+        );
+    }
+
+    #[test]
+    fn a_downloads_block_is_authoritative_about_missing_classifiers() {
+        // Also real 1.5.2: this one names natives for three OSes but ships
+        // one classifier. The other two do not exist and must not be asked for.
+        let lib = library(
+            r#"{"name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.1-nightly-20130708-debug3",
+                "natives": {"windows": "natives-windows", "osx": "natives-osx"},
+                "downloads": {"classifiers": {
+                    "natives-osx": {
+                        "path": "p/lwjgl-platform-2.9.1-nightly-20130708-debug3-natives-osx.jar",
+                        "sha1": "abc", "size": 9,
+                        "url": "https://libraries.minecraft.net/o.jar"}}}}"#,
+        );
+        let resolved = lib.resolve(&platform()).unwrap().unwrap();
+        assert!(resolved.artifact.is_none());
         assert!(resolved.natives.is_none());
     }
 
