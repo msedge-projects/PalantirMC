@@ -55,6 +55,8 @@ failure too, so the manifest cannot rot.
 | `crates/palantir-core/tests/fixtures/quilt-loader-profile-*.json` | QuiltMC public metadata API response (meta.quiltmc.org/v3, fetched 2026-10-09) | API response data (facts), kept as test fixtures |
 | `crates/palantir-loader/tests/fixtures/java-runtime-all.json` | Mojang Studios public metadata API response (piston-meta java-runtime product index, fetched 2026-10-09) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
 | `crates/palantir-loader/tests/fixtures/java-runtime-jre-legacy-linux.json` | Mojang Studios public metadata API response (piston-meta Java runtime manifest, fetched 2026-10-09) | © Mojang AB, all rights reserved; API response data (facts), kept as test fixtures |
+| `crates/palantir-loader/tests/fixtures/forge-1.20.1-47.4.26-install-profile.json` | `install_profile.json` extracted from Forge's own installer jar (maven.minecraftforge.net, fetched 2026-10-09) | API response data (facts) of the Forge project, kept as a test fixture |
+| `crates/palantir-loader/tests/fixtures/neoforge-20.6.141-install-profile.json` | `install_profile.json` extracted from NeoForge's own installer jar (maven.neoforged.net, fetched 2026-10-09) | API response data (facts) of the NeoForged project, kept as a test fixture |
 <!-- Phase 0 ships no assets. First expected rows: the Lucide icons and the
      Lucide `LICENSE` beside them (origin: Lucide, ISC), and the Inter faces
      with `OFL.txt` (origin: Inter, SIL OFL 1.1). -->

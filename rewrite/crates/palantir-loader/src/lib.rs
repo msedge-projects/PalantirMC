@@ -37,12 +37,14 @@
 //!    lands with `launch`).
 //! 3. `profiles` -- Fabric/Quilt listings and launcher profiles,
 //!    installed over the game document. **Landed.**
-//! 4. `forge`, `neoforge` -- installer jar documents and the processor
-//!    pipeline, run as headless Java.
+//! 4. `installer` -- the Forge/NeoForge install profile and its processor
+//!    pipeline, planned with every token expanded. **Landed** (running
+//!    the processors lands with `launch`).
 //! 5. `mrpack`, `prism` -- the importers.
 //! 6. `launch` -- runtime resolution, natives extraction, and the process.
 
 pub mod error;
 pub mod install;
+pub mod installer;
 pub mod java;
 pub mod profiles;

@@ -121,6 +121,21 @@ error page as if it were the index; the fixtures now on disk are fetched
 from the pin the launcher community records, and the parser refuses a
 non-JSON body loudly.
 
+**2026-10-09 — the Forge-family installer is planned before it runs.**
+Both vendors' installers carry `install_profile.json` (`spec: 1`) and a
+`version.json` overlay; the overlay installs through the ordinary door,
+and the profile is a processor pipeline run as headless Java. The module
+plans the pipeline -- sides filtered, every token expanded -- before
+anything runs: `[coord]` is an artifact's Maven path, `{MARKER}` is the
+side's `data` value (bracketed path or `'quoted literal'`), and
+`{ROOT}`/`{INSTALLER}`/`{MINECRAFT_JAR}`/`{SIDE}` are the context.
+Unknown tokens are an error naming the token: a literal `{PATCHED}` in a
+processor argument would write a file called `{PATCHED}` and the failure
+would surface somewhere else entirely. The fixtures are the vendors' own
+installer documents, and they taught the forms: BINPATCH is a plain
+literal, MCP_VERSION a quoted one, and one processor claims two output
+artifacts as its skip receipt.
+
 **2026-10-09 — the mock HTTP server is one crate, shared.** The
 loader tests need the same fake service the transfer tests grew (range
 answers, one-shot interruptions, request receipts); it lives in
