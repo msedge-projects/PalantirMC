@@ -14,7 +14,7 @@ replaces them.
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | in progress: inheritance merge, install (document + needs), Java runtime documents, all four importers, launch plans (placeholders expanded, pre-2018 split, natives extraction) and the Forge processor runner landed; what is left is the done-when live test: each loader installs into a temp root and launches headless Java |
-| 4 | Theme + shell: palette, rail, title bar, page pane, right panel | not started (estimate ~20–30 h) |
+| 4 | Theme + shell: palette, rail, title bar, page pane, right panel | 🚫 **protected — do not start**: the owner runs this phase with a different tool; no agent may generate UI code (est. ~20–30 h) |
 | 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
 | 6 | Discover: search, filters, project page, install | not started (estimate ~15–20 h) |
 | 7 | Settings modal, Home, About, error surfaces | not started (estimate ~15–20 h) |
@@ -25,6 +25,15 @@ The phase list and its estimates come from the rewrite specification
 phases 1–3 are the largest block of new work. All hours are estimates.
 
 ## Decisions
+
+**2026-10-09 — phase 4 is a protected phase.** The theme + shell, and
+with it every UI phase after it (5 instances, 6 Discover, 7
+settings/Home/About), is not the coding agent's to start. The owner
+will hand the UI to a different tool under an explicit instruction;
+an agent that reaches for it because it is "next" would generate UI
+files nobody asked it for. Recorded in the phase table and in the
+`AGENTS.md` standing instructions so a session restart cannot forget
+it.
 
 **2026-10-09 — the install profile's receipts decide what runs.** A Forge
 processor may not run at all: its `outputs` map is the vendor's own
