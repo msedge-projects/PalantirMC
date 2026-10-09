@@ -317,6 +317,14 @@ fn make_link(path: &Path, target: &str) -> Result<()> {
     if path.exists() {
         return Ok(()); // already pointed
     }
+    // The manifest normally carries the parent as its own directory
+    // entry; make it anyway rather than fail on a manifest that does not.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
     std::os::unix::fs::symlink(target, path).map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,

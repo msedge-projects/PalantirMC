@@ -120,10 +120,11 @@ fn temp_dir(tag: &str) -> PathBuf {
 
 #[test]
 fn a_runtime_lands_from_the_wire() {
-    // A tiny runtime shaped exactly like the real one: a directory, an
-    // executable with both packagings offered (only `raw` is fetched), and
-    // a symbolic link. The `lzma` URL points at nothing: asking for it is
-    // a 404 and a test failure.
+    // A tiny runtime shaped like the real one's file part: a directory
+    // and an executable with both packagings offered (only `raw` is
+    // fetched). The `lzma` URL points at nothing: asking for it is a 404
+    // and a test failure. Links are their own test below -- they are a
+    // unix-only step and no Windows runtime contains one.
     let bytes: Vec<u8> = (0..100u8).collect();
     let server = MockServer::start(vec![("/java", Route::new(bytes.clone()))]);
     let manifest = RuntimeManifest::parse(&format!(
@@ -132,8 +133,7 @@ fn a_runtime_lands_from_the_wire() {
           "bin/java": {{"type": "file", "executable": true,
             "downloads": {{
               "raw": {{"sha1": "{}", "size": {}, "url": "{}/java"}},
-              "lzma": {{"sha1": "nope", "size": 1, "url": "{}/java.lzma"}}}}}},
-          "bin/runner": {{"type": "link", "target": "java"}}
+              "lzma": {{"sha1": "nope", "size": 1, "url": "{}/java.lzma"}}}}}}
         }}}}"#,
         sha1_bytes(&bytes),
         bytes.len(),
@@ -164,10 +164,6 @@ fn a_runtime_lands_from_the_wire() {
             .permissions()
             .mode();
         assert_ne!(mode & 0o111, 0, "bin/java must be executable");
-        assert_eq!(
-            std::fs::read_link(runtime.join("bin/runner")).unwrap(),
-            Path::new("java")
-        );
     }
 
     // Only the raw packaging moved, once.
@@ -178,6 +174,40 @@ fn a_runtime_lands_from_the_wire() {
     assert_eq!(again.fetched, 0);
     assert_eq!(again.reused, 1);
     assert_eq!(server.hits(), vec!["/java".to_string()]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn links_are_made_on_unix_and_refused_elsewhere() {
+    // Every runtime Mojang ships for unix has links; none for Windows
+    // does. The step therefore makes them where the platform has them and
+    // fails loudly where it does not -- never a silent skip.
+    let manifest =
+        RuntimeManifest::parse(r#"{"files": {"bin/runner": {"type": "link", "target": "java"}}}"#)
+            .unwrap();
+    let dir = temp_dir("links");
+    let runtime = dir.join("jre");
+    let http = Http::new().unwrap();
+    let options = DownloadOptions {
+        retries: 2,
+        backoff: Duration::from_millis(1),
+    };
+
+    #[cfg(unix)]
+    {
+        fetch_runtime(&http, &manifest, &runtime, options).unwrap();
+        assert_eq!(
+            std::fs::read_link(runtime.join("bin/runner")).unwrap(),
+            Path::new("java")
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        let error = fetch_runtime(&http, &manifest, &runtime, options)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("symbolic link"), "{error}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
