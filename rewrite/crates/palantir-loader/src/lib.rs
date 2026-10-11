@@ -48,8 +48,13 @@
 //!    importers, one per packaging, all translating to `import`'s shape.
 //!    **Landed.**
 //! 6. `launch` -- runtime resolution, natives extraction, and the process.
+//! 7. `dependencies` -- the required content dependencies of a catalogue
+//!    version, resolved to a plan; `mrpack::plan_files` is the same idea for
+//!    a pack's own file list. **Planning landed** (the fetch that acts on a
+//!    plan is the caller's syncer, so one owner still owns bytes).
 
 pub mod curseforge;
+pub mod dependencies;
 pub mod error;
 pub mod import;
 pub mod install;

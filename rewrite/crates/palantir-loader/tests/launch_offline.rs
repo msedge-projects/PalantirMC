@@ -8,6 +8,13 @@
 //! promise left unkept after a "successful" run is a failure.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+// A sibling thread's fork can inherit a writable mock-script descriptor until
+// exec closes it, even after its creating thread closes the file. Linux then
+// refuses that script with ETXTBSY. Serialize mock creation through processor
+// exit; the assertions still exercise the real command and receipt checks.
+static MOCK_PROCESS: Mutex<()> = Mutex::new(());
 
 use palantir_loader::installer::PlannedProcessor;
 use palantir_loader::launch::{extract_natives, processor_command, run_processors};
@@ -147,6 +154,7 @@ fn manifest_continuation_lines_are_joined() {
 
 #[test]
 fn a_matching_receipt_skips_the_run_entirely() {
+    let _process = MOCK_PROCESS.lock().unwrap();
     let dir = temp_dir("skip");
     let libraries = dir.join("libraries");
     let jar = libraries.join(
@@ -171,6 +179,7 @@ fn a_matching_receipt_skips_the_run_entirely() {
 
 #[test]
 fn a_run_that_keeps_its_promise_is_a_success() {
+    let _process = MOCK_PROCESS.lock().unwrap();
     let dir = temp_dir("runs");
     let libraries = dir.join("libraries");
     let jar = libraries.join(
@@ -207,6 +216,7 @@ fn a_run_that_keeps_its_promise_is_a_success() {
 
 #[test]
 fn a_broken_run_is_an_error_naming_the_jar() {
+    let _process = MOCK_PROCESS.lock().unwrap();
     let dir = temp_dir("failing");
     let libraries = dir.join("libraries");
     let jar = libraries.join(
@@ -227,6 +237,7 @@ fn a_broken_run_is_an_error_naming_the_jar() {
 
 #[test]
 fn a_run_that_breaks_its_promise_is_an_error() {
+    let _process = MOCK_PROCESS.lock().unwrap();
     let dir = temp_dir("promise");
     let libraries = dir.join("libraries");
     let jar = libraries.join(

@@ -8,6 +8,14 @@ and where the work stands.
 
 ## 1. Standing instructions (owner, 2026-10-09)
 
+**Assignment exception (owner, 2026-10-10):** the owner switched to the
+selected UI model and explicitly instructed it to implement phases 4–7.
+That session may write the UI, original SVGs/branding/copy and choose the
+framework and palette. The fence below still applies to unassigned agents.
+Work only in the rewrite, never from the legacy frontend. The current
+session is generation-first without CI waiting; broad release gates remain
+for follow-up verification. Record draft status honestly.
+
 - **PROTECTED: Phase 4 (theme + shell) must not be started here —
   and neither may any UI code or frontend-visible material.** The
   owner will run the UI work with a different tool, under an explicit
@@ -20,7 +28,12 @@ and where the work stands.
   screen. This covers the whole UI block (4 theme + shell,
   5 instances, 6 Discover, 7 settings/Home/About). They stay
   `not started` until the owner assigns them; treat touching them as
-  a mistake to stop and report, not a step to take.
+  a mistake to stop and report, not a step to take. The theme crate
+  is inside that fence too: `palantir-theme`'s note that "values are
+  editable — a palette is for tuning" is an invitation for the
+  owner's tool only. An agent changes no value, role, token, or
+  comment there — not even to "fix" one; if something there looks
+  wrong, stop and report it.
 - **Never wait idle on a compile, test run, or CI.** While one runs in
   the background, do the next thing: write the next module, analyze the
   next format, fetch the next fixture, review the last diff. A polling
@@ -130,7 +143,7 @@ python3 tools/licence_audit.py --selftest     # flag is --selftest
 Phases 0–2 landed and CI-green (83+ offline tests, 2 ignored live
 tests: real 1.5.2 end-to-end sync, real resumed jar).
 
-**Phase 3 (`palantir-loader`) — in progress.** Slice map, in
+**Phase 3 (`palantir-loader`) — landed 2026-10-09.** Slice map, in
 `lib.rs` too:
 
 - [x] `Version::merged_with` + merge fixtures + tests

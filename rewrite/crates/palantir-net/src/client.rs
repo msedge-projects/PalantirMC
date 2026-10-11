@@ -57,7 +57,7 @@ impl Http {
 
     /// GET a URL.
     pub fn get(&self, url: &str) -> Result<Response> {
-        self.send(url, None)
+        self.answer(url, self.inner.get(url))
     }
 
     /// GET a URL from a byte offset on (`Range: bytes=<from>-`), which is
@@ -65,14 +65,45 @@ impl Http {
     /// resume answers 200 with the whole body; callers detect that and
     /// restart cleanly rather than appending a whole file to half of one.
     pub fn get_range(&self, url: &str, from: u64) -> Result<Response> {
-        self.send(url, Some(from))
+        self.answer(
+            url,
+            self.inner
+                .get(url)
+                .header("Range", format!("bytes={from}-")),
+        )
     }
 
-    fn send(&self, url: &str, from: Option<u64>) -> Result<Response> {
-        let mut request = self.inner.get(url);
-        if let Some(from) = from {
-            request = request.header("Range", format!("bytes={from}-"));
-        }
+    /// GET carrying a bearer token. Sign-in verifies a session on a plain
+    /// GET, and the token must not travel in the query string: URLs end up
+    /// in logs and in error messages, and a token in one is a token leaked.
+    pub fn get_with_bearer(&self, url: &str, token: &str) -> Result<Response> {
+        self.answer(url, self.inner.get(url).bearer_auth(token))
+    }
+
+    /// POST a form-encoded body, which is what OAuth's device-code steps
+    /// speak.
+    pub fn post_form(&self, url: &str, form: &str) -> Result<Response> {
+        self.answer(
+            url,
+            self.inner
+                .post(url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(form.to_string()),
+        )
+    }
+
+    /// POST a JSON body: the Xbox Live steps and the Minecraft login.
+    pub fn post_json(&self, url: &str, body: &str) -> Result<Response> {
+        self.answer(
+            url,
+            self.inner
+                .post(url)
+                .header("Content-Type", "application/json")
+                .body(body.to_string()),
+        )
+    }
+
+    fn answer(&self, url: &str, request: reqwest::blocking::RequestBuilder) -> Result<Response> {
         let inner = request.send().map_err(|source| Error::Http {
             url: url.to_string(),
             status: None,

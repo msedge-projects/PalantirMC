@@ -14,17 +14,222 @@ replaces them.
 | 1 | `palantir-core`: version JSON, rules, libraries, asset index, launch arguments, data-root layout | **landed** 2026-10-08: 60 tests green, round-trips three real version documents + manifest + 2 asset indexes |
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | **landed** 2026-10-09: inheritance merge, install, Java runtimes, all four importers, launch plans, the Forge processor runner, and the done-when live test -- all five loaders install into a temp root and launch headless Java against their own document's runtime (5/5 green live; processors 6/6 with receipts verified; every game process watched running to its 20 s grace) |
-| 4 | Theme + shell: palette, rail, title bar, page pane, right panel | 🚫 **protected — do not start**: the owner runs this phase with a different tool; no agent may generate UI code or frontend assets — symbols, icons, visible text, palette values (est. ~20–30 h) |
-| 5 | Instances: create, launch, kill, logs, delete | not started (estimate ~15–25 h) |
-| 6 | Discover: search, filters, project page, install | not started (estimate ~15–20 h) |
-| 7 | Settings modal, Home, About, error surfaces | not started (estimate ~15–20 h) |
+| 4 | Theme + shell: palette, rail, title bar, page pane, right panel | **native UI checkpoint** 2026-10-10: original Field Notes design, navigation, native decorations, adaptive activity notebook, three accents and densities; Linux window smoke verified, Windows acceptance remains |
+| 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt launch and stop/log workers; actual-window file flows verified, real-game desktop acceptance and Forge-family coordination remain |
+| 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/eligibility verified; dependency/modpack resolution remains |
+| 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales and authenticated accounts remain |
 | 8 | Audit green, own licence chosen, notices complete, first Release tagged | not started (estimate ~3–5 h) |
 
 The phase list and its estimates come from the rewrite specification
 (`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` §6);
 phases 1–3 are the largest block of new work. All hours are estimates.
 
+## UI continuation — 2026-10-10
+
+**Owner clarification: complete frontend, not only shell checkpoints.** The
+follow-on frontend pass added live game-version selection, all five loader
+identities with backend availability, loader pinning, source browsing and
+read-only import review, `.mrpack` optional-file review, Microsoft device-code
+frontend state handling, project description/releases/changelog tabs, release
+filtering/load-more, author links, final compatibility/dependency install review,
+confirmed addition removal, settings modal with save/reset/revert, remember-page
+restoration, diagnostic copying, keyboard-focusable controls/selectors, and
+three further original illustrations (`identity.svg`, `downloads.svg`,
+`additions.svg`). New frontend modules: `src/controls.rs` and `src/flows.rs`.
+No new dependency or developer-service account was introduced.
+
+The frontend acceptance inventory is in the desktop README. Regression tests
+include source review without writes, archive optional metadata, stale inspection
+responses, save receipts not covering later edits, release compatibility and
+required-dependency guards, and backend-driven authentication states. Real
+window coverage includes version/loader selection, browser/import review,
+settings save/reset/revert, keyboard button activation, responsive modal panes,
+content removal confirmation and source preservation, live release/changelog
+selection and a reviewed **real Fabric API single-file install** into an isolated
+Fabric collection. The installed filename with `+` prompted filename validation
+through the safe-local-name boundary rather than identifier validation.
+Verification: 154 workspace tests passed (seven ignored live), 26 desktop tests
+passed again after final repairs, zero-warning workspace Clippy, formatting/build,
+and audit 6/6 plus self-test. Evidence: `/tmp/palantir-full-frontend/`.
+
+Backend-only gaps remain Microsoft authentication/client registration, Forge-
+family desktop processors, archive execution/dependency coordination and real-game
+Windows acceptance. Corresponding frontend choices/review/unavailable surfaces
+exist; no unavailable backend is represented by fake success, no sign-in code is
+generated, and pack review does not write files. Authenticated intermediate states
+are rendered from test-only events for coverage. These are not live auth proofs.
+No release publication, push, CI watch or licence choice occurred.
+
+
+The selected UI session produced `crates/palantir-desktop/`, a new native
+application with its own source and three original SVG files (`portal.svg`,
+`landscape.svg`, `collection.svg`). Navigation icon paths are original
+source-authored geometry. All asset notices are recorded. No legacy frontend
+implementation or assets were reused; unrelated pre-existing legacy formatting
+churn remains untouched.
+
+Run from `rewrite/`: `cargo run -p palantir-desktop --bin PalantirMC`.
+`PALANTIR_DATA_DIR` selects an isolated development data root. Instance and
+preferences schemas and explicit limitations are documented in the crate's
+README. English is the only authored catalogue; most page copy is still
+source-local, so a complete key extraction is follow-up work.
+
+Checkpoint verification from `rewrite/`: full workspace tests passed
+(146 passed, seven intentionally ignored live tests), including 18 desktop
+contract/state/file tests; workspace Clippy with `-D warnings`, formatting,
+workspace check, and the development desktop build passed. Licence audit
+passed 6/6 and its self-test passed. The processor mock initially failed
+intermittently with ETXTBSY: sibling test forks inherited writable script
+handles before exec closed them. Serializing the fixture's creation-through-
+processor-exit lifetime preserves the real spawn and receipt assertions;
+50 repeated processor suites and 15 repeated workspace runs passed afterward.
+
+Native interface smoke testing under Xvfb used the real window and isolated
+data to create and rename a collection, visit all detail and preferences
+tabs, validate/reject invalid memory, save player/memory/accent/density,
+copy a game directory, verify source preservation and account-file exclusion,
+disable/re-enable a mod, list a copied world, cancel and confirm deletion,
+retrieve live catalogue search/project notes, and inspect install eligibility.
+Small-window coverage includes 840x600 and Large density. Page navigation
+now resets its scroll offset so a previously scrolled notebook cannot hide
+a new page's title or controls. Captures, logs, and isolated user data stay
+under `/tmp/palantir-ui-final/`, outside shipped source.
+
+This is Linux native-window coverage, not Windows acceptance, a visual/legal
+review, proof of real game launch through the desktop, or proof of a completed
+live content installation. No CI watch, publish, push, or Release was performed.
+
+Known gaps: Forge/NeoForge application coordination, Microsoft sign-in,
+required-dependency and `.mrpack` resolution, optional file selection,
+additional languages, full Markdown/link/table rendering, Windows packaging,
+and actual real-game desktop acceptance. Directory import supports ordinary
+game directories and Prism/MultiMC directories, not archives; supported
+loader pins are retained. Unsupported installs fail before writing content.
+No demo/mock projects masquerade as live results. The README records persistent
+schemas, import resource limits and supported flows.
+
+Next focused slice: verify a real desktop install/launch/stop end-to-end and
+finish safe dependency/modpack coordination, then exercise the native UI on
+Windows. Product licence and release remain owner-gated. Phase checkpoints
+are not claims that every product done-when criterion has been met.
+
 ## Decisions
+
+**2026-10-11 — the launcher grows a second edition, and its account modes
+stop being symmetric.** The owner asked whether this launcher could cover
+Bedrock as well as Java and then chose the largest answer: both editions,
+each with an offline and an online mode. Java stays the engine already
+built (version document, libraries, loaders, Modrinth, offline session
+injection) and gains the online half it has been missing. Bedrock enters as
+a *managed* second edition: we find the copy Microsoft installed, launch
+it, and manage its content and worlds. We do not install it, do not
+register versions, and do not ask the player to enable Developer Mode.
+That pairing — a dual-edition shell over a managed, not installed, Bedrock
+— is the owner's choice and it is the cheap half of the idea: the expensive
+Bedrock machinery (package download, extraction, AppX registration,
+per-instance isolation) buys version switching the official launcher
+already does, while content and world management is the part nothing else
+hands the player.
+
+**2026-10-11 — two account modes per edition, and they do not mean the same
+thing.** Java's offline mode is ours: an offline identity and a fabricated
+session, no account touched — already shipped. Java's online mode will be a
+Microsoft device-code flow with an ownership check whose session is
+injected into the JVM; that needs an Azure application registration (a
+client id for a native/device-code client) which only the owner can create,
+so the frontend keeps reporting it unavailable until that id exists.
+Bedrock has no injection point at all: entitlement and sign-in are enforced
+by Windows/Xbox and by the game itself, which reads the OS Xbox identity
+rather than anything a launcher passes. Bedrock's two modes are therefore
+the launcher's behaviour, not credentials: *Offline* launches the game and
+touches no account state; *Microsoft account* assists the Store/Xbox
+sign-in and pre-checks entitlement before launching. The UI must say which
+of those it is doing, because a toggle that looks identical and means two
+different things is exactly the claim this tree has been careful not to
+make.
+
+**2026-10-11 — not doing: a no-account Bedrock launch.** The owner asked
+for one; it is refused, and recorded so a later session does not re-propose
+it. Two reasons, the first being the owner's own scheduling: with Bedrock
+scoped to the *installed* copy we own no package to launch, so the only
+route to a check-free start is patching or re-signing Microsoft's files —
+the repack-and-re-sign scope declined in the same decision. The second is
+the reason this repository exists: that check enforces a paid licence,
+online play needs Xbox Live regardless (so the mode could never be
+complete), and a circumvention would be the first artefact in this tree the
+licence audit could not defend. Nothing was built for it, and nothing
+should be.
+
+**2026-10-11 — the Bedrock facts, researched rather than invented.**
+LeviLauncher (GPL-3.0) already ships this shape, so its source is off-limits
+under the rewrite's own rule and nothing here derives from it. Everything
+below comes from XMCL's public Bedrock guide and Microsoft's own
+documentation. Version packages come from Microsoft's own delivery CDN, so
+we redistribute nothing and the audit's shipped-asset rule is untouched.
+Registering a version with Windows AppX requires Developer Mode, which is
+why it is out of scope here. Launching a packaged app and receiving its
+process id is `IApplicationActivationManager::ActivateApplication`, so a
+Bedrock session gets a real pid like a Java one. Bedrock keeps one global
+data folder rather than one per instance, and it moved with 1.21.120 from the
+UWP location
+`%LOCALAPPDATA%\Packages\Microsoft.MinecraftUWP_8wekyb3d8bbwe\LocalState\games\com.mojang`
+to the GDK layout `%APPDATA%\Minecraft Bedrock\...\games\com.mojang`, so
+both must be probed. Worlds are
+a modified LevelDB and are read-only to us: list, parse `level.dat`, back
+up, export as `.mcworld`, and never write into the database. Content is
+zips (`.mcpack`, `.mcaddon`, `.mcworld`) copied into
+`resource_packs`/`behavior_packs`/`minecraftWorlds` plus the per-world
+`world_resource_packs.json`/`world_behavior_packs.json` activation files.
+Entitlement must be owned; Beta/Preview additionally needs Insider
+registration.
+
+**2026-10-11 — delivery shape for the edition work.** One `Edition` axis in
+the desktop model — `Instance { edition, game_version, loader:
+Option<Loader> }`, loader meaningful only for Java — then a
+`palantir-bedrock` crate whose Windows-internal modules are detect, launch,
+data-path resolution, worlds, content and account state, each behind a
+trait so the pure logic unit-tests without a real package. Order: edition
+axis and its tests first, then detect/launch, then data and worlds, then
+content, then the account panel, then one Home listing both editions.
+`palantir-loader` stays Java-only and its name is now generous in spirit;
+renaming it would touch every import for no behavioural gain, so it stays
+and this note is the record. **Verification limit, stated rather than
+discovered later:** this machine is Linux, so `#[cfg(windows)]` Bedrock code
+cannot even be compiled here. Bedrock work is verifiable through trait fakes
+on the Linux runner and the real AppX path only on the `windows-latest` CI
+job, with interactive launch, sign-in and content flows only on an entitled
+Windows machine. Java-side work keeps the coverage it has. No Bedrock code
+has been written yet.
+
+**2026-10-11 — frontend work is paused by the owner.** The desktop crate and
+its assets sit on disk uncommitted and unpushed, unchanged by the edition
+decision above; resume from the desktop README's frontend inventory after
+reading the 2026-10-11 entries, not before.
+
+**2026-10-10 — selected UI model assigned phases 4–7.** The owner switched
+models and explicitly instructed this session to implement the frontend.
+The earlier protection remains for unassigned agents, not this assignment.
+The owner delegated framework, colours, original SVG/brand art, and locale
+choices. Work stays entirely in the rewrite; no legacy frontend is a base.
+
+**2026-10-10 — frontend choices.** Rust + iced 0.12.1 (MIT), already used
+by this repository as a framework, but sourced independently from its
+registry package with no legacy code or patches. Native widgets integrate
+directly with the Rust engine; no browser/IPC bridge is needed. Use the
+software renderer to keep the dependency/build surface modest. Graphite
+surfaces, warm copper primary actions, cool slate dividers, generous space,
+and an original geometric portal mark distinguish our own design. Native
+system fonts avoid shipping font binaries. English-first keyed copy with
+an explicit fallback is the locale starting point; do not claim additional
+translations exist. Original SVG assets are source files, not transcribed
+geometry. Blocking network/install work runs on a dedicated worker and
+process supervision uses its own thread; neither blocks the UI loop.
+
+Session pace: generation-first; no CI watch or repeated broad check loops.
+Essential local checks at a usable checkpoint protect against cascading
+API mistakes. Unverified/unwired flows are recorded as drafts, never as
+completed release features. Product licence and Release remain owner-gated.
+
 
 **2026-10-09 — the live test earned its keep: five facts no offline
 fixture carried.** The done-when run (`palantir-loader/tests/live.rs`)
@@ -69,8 +274,12 @@ an agent that reaches for it because it is "next" would generate UI
 files nobody asked it for. The protection covers what the frontend
 *shows*, not only its code: symbols and icons, visible strings and
 copy, palette values — frontend assets belong to the same hand-off.
-Recorded in the phase table and in the `AGENTS.md` standing
-instructions so a session restart cannot forget it.
+That includes the theme crate's own values: `palantir-theme` exists
+so later crates compile against fixed tokens, but its palette is
+frontend-visible material like any other, and "values are editable"
+there is the owner's tool's invitation, never an agent's. Recorded
+in the phase table and in the `AGENTS.md` standing instructions so a
+session restart cannot forget it.
 
 **2026-10-09 — the install profile's receipts decide what runs.** A Forge
 processor may not run at all: its `outputs` map is the vendor's own

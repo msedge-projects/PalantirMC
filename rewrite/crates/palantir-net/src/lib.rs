@@ -1,8 +1,12 @@
 //! The launcher's network layer: getting bytes and metadata, reliably.
 //!
-//! Four jobs, one crate:
+//! Five jobs, one crate:
 //!
 //! - [`client`] -- one pooled HTTP client (the spec names a blocking one);
+//! - [`auth`] -- Microsoft account, Xbox Live and Minecraft sign-in, written
+//!   from the protocols and taking its client id as a parameter, so a tree
+//!   with no registered client id reports the feature unavailable instead of
+//!   showing a code it invented;
 //! - [`cache`] -- a TTL'd cache for the small metadata documents that move
 //!   rarely, so opening the launcher twice does not ask the network twice;
 //! - [`scheduler`] -- a global concurrency limit, because an install is
@@ -22,6 +26,7 @@
 #![deny(clippy::expect_used, clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+pub mod auth;
 pub mod cache;
 pub mod client;
 pub mod download;

@@ -24,6 +24,8 @@ every push by `tools/licence_audit.py` walking `cargo metadata`.
 | `regex` | 1 | MIT OR Apache-2.0 | Rule conditions on OS versions are specified as regular expressions |
 | `reqwest` | 0.12 | MIT OR Apache-2.0 | Pooled HTTP with blocking reads; the rewrite spec names this client |
 | `sha1` | 0.10 | MIT OR Apache-2.0 | Metadata hashes are SHA-1, so downloads verify SHA-1 |
+| `iced` | 0.12.1 | MIT | Native desktop widgets and SVG rendering; sourced from the crate registry without legacy patches |
+| `zip` | 2 | MIT | Archive support in the existing loader engine |
 
 TLS inside `reqwest` is rustls over the **operating system's certificate
 store** (`rustls-tls-native-roots`). The bundled-root-lists alternative
@@ -64,6 +66,21 @@ failure too, so the manifest cannot rot.
 | `crates/palantir-loader/tests/fixtures/sodiumplus-2.4.7-server.mrpack` | Sodium Plus 2.4.7 SERVER pack (cdn.modrinth.com, fetched 2026-10-09) | Modrinth pack published MIT by its author, kept as a test fixture |
 | `crates/palantir-loader/tests/fixtures/curseforge-fabulously-optimized-manifest.json` | CurseForge export `manifest.json` from Fabulously Optimized (github.com/Fabulously-Optimized/fabulously-optimized, fetched 2026-10-09) | BSD-3-Clause, pack metadata kept as a test fixture |
 | `crates/palantir-loader/tests/fixtures/vanilla-launcher-profiles.json` | `launcher_profiles.json` of a real `.minecraft` (github.com/raxenoth/.minecraft, fetched 2026-10-09; authentication database and client token removed) | Instance metadata (facts), kept as a test fixture |
-<!-- Phase 0 ships no assets. First expected rows: the Lucide icons and the
-     Lucide `LICENSE` beside them (origin: Lucide, ISC), and the Inter faces
-     with `OFL.txt` (origin: Inter, SIL OFL 1.1). -->
+| `crates/palantir-desktop/assets/portal.svg` | Original asymmetric wayfinder artwork authored for this rewrite on 2026-10-10; filename retained for compatibility | Product original work; UNLICENSED pending owner's final licence choice |
+| `crates/palantir-desktop/assets/landscape.svg` | Original abstract terrain illustration authored for this rewrite on 2026-10-10 | Product original work; UNLICENSED pending owner's final licence choice |
+| `crates/palantir-desktop/assets/identity.svg` | Original identity-card illustration authored for the rewrite frontend on 2026-10-10 | Product original work; UNLICENSED pending owner's final licence choice |
+| `crates/palantir-desktop/assets/downloads.svg` | Original transfer-waypoint illustration authored for the rewrite frontend on 2026-10-10 | Product original work; UNLICENSED pending owner's final licence choice |
+| `crates/palantir-desktop/assets/additions.svg` | Original modular-content illustration authored for the rewrite frontend on 2026-10-10 | Product original work; UNLICENSED pending owner's final licence choice |
+| `crates/palantir-desktop/assets/collection.svg` | Original empty-shelf illustration authored for this rewrite on 2026-10-10 | Product original work; UNLICENSED pending owner's final licence choice |
+
+Navigation SVG paths in `crates/palantir-desktop/src/design.rs` are original
+source-authored geometry, not compiled from another application's assets.
+The desktop uses native system fonts and ships no font binaries.
+
+The Field Notes navigation, launcher sentences, graphite/copper palette,
+asymmetric wayfinder and empty-state geometry are independently authored.
+No artwork, branding, locale catalogue, or interface source was taken from
+the legacy frontend. Live catalogue project descriptions are their authors'
+content, not launcher artwork or interface copy. Original assets may themselves
+be copyrightable. This manifest and the automated audit do not establish legal
+non-infringement, trademark clearance, or that a design is non-copyrightable.

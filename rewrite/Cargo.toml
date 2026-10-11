@@ -11,6 +11,8 @@ members = [
     "crates/palantir-core",
     "crates/palantir-net",
     "crates/palantir-loader",
+    "crates/palantir-desktop",
+    "crates/palantir-bedrock",
     "crates/test-support",
 ]
 

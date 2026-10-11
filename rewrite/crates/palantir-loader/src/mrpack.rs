@@ -25,6 +25,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::import::{
@@ -233,4 +234,142 @@ fn loader_from(
         }
     }
     (loader, unknown)
+}
+
+/// One file a plan will place, reduced to what the caller must act on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectedFile {
+    /// Fetched and verified. `url` is the first of the record's downloads:
+    /// the format lists them in the order they should be tried.
+    Download {
+        path: String,
+        url: String,
+        sha1: Option<String>,
+        size: Option<u64>,
+    },
+    /// A record that names no download. The bytes are expected on this
+    /// machine already (a migrated install, a hand-placed file), so the plan
+    /// says so rather than fetching something blind.
+    Local { path: String },
+}
+
+/// A directory in the archive whose contents overwrite the game directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Override {
+    /// The archive directory, e.g. `overrides`.
+    pub source: String,
+    /// Where its contents land, relative to the game directory. Empty for a
+    /// layer that keeps the pack's own relative paths.
+    pub destination: String,
+}
+
+/// What a `.mrpack` will place, worked out before anything is fetched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackPlan {
+    pub files: Vec<SelectedFile>,
+    /// Overwrite layers in application order, base first.
+    pub overrides: Vec<Override>,
+}
+
+/// Plan a client install of `index`.
+///
+/// This takes the raw `modrinth.index.json` value rather than a parsed
+/// [`MrpackIndex`] because it runs at *review* time, before a pack has passed
+/// the strict importer: a reviewer has to be able to describe a pack `parse`
+/// would refuse, so the safety rules are re-applied here and a value that
+/// never went through `parse` still cannot smuggle a path out of the game
+/// directory.
+///
+/// `selected_optional` names the optional files the user accepted, by path --
+/// the same identity the importer's selection uses, so one choice cannot mean
+/// two things. Only the client's view is planned: a server install belongs to
+/// a server flow this launcher does not have, so a file marked `unsupported`
+/// for the client is absent from the plan rather than planned and refused
+/// later.
+///
+/// What it deliberately does not do is fetch: the caller's syncer owns
+/// transfers, resumption and hash verification, and a second owner here would
+/// mean two writers for the same bytes.
+pub fn plan_files(index: &Value, selected_optional: &[String]) -> Result<PackPlan> {
+    let entries = index
+        .get("files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Error::Invalid {
+            what: "modrinth.index.json",
+            why: "files is missing or is not a list".to_string(),
+        })?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Invalid {
+                what: "modrinth.index.json",
+                why: "a file entry names no path".to_string(),
+            })?
+            .to_string();
+        if !is_safe_relative(&path) {
+            return Err(Error::Invalid {
+                what: "modrinth.index.json",
+                why: format!("{path:?} would escape the game directory"),
+            });
+        }
+        match client_support(entry) {
+            Support::Unsupported => continue,
+            Support::Optional if !selected_optional.iter().any(|chosen| chosen == &path) => {
+                continue;
+            }
+            Support::Required | Support::Optional => {}
+        }
+        let url = entry
+            .get("downloads")
+            .and_then(Value::as_array)
+            .and_then(|urls| urls.iter().find_map(Value::as_str))
+            .map(str::to_string);
+        files.push(match url {
+            Some(url) => SelectedFile::Download {
+                path,
+                url,
+                sha1: entry
+                    .get("hashes")
+                    .and_then(|hashes| hashes.get("sha1"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                size: entry.get("fileSize").and_then(Value::as_u64),
+            },
+            None => SelectedFile::Local { path },
+        });
+    }
+    Ok(PackPlan {
+        files,
+        overrides: override_layers(),
+    })
+}
+
+/// The overwrite layers, in application order.
+///
+/// Order is the whole content of this list: the format defines the client
+/// layer as applied *over* the base one, so a file carried in both must end
+/// as the client's. Only the archive knows which of these directories it
+/// actually holds, so this records the layers and their precedence rather
+/// than inventing a file list the index does not contain.
+pub fn override_layers() -> Vec<Override> {
+    ["overrides", "client-overrides"]
+        .into_iter()
+        .map(|source| Override {
+            source: source.to_string(),
+            destination: String::new(),
+        })
+        .collect()
+}
+
+/// One entry's support for the client side, defaulting the way the format
+/// does: an absent `env`, or an absent side key inside it, means required.
+fn client_support(entry: &Value) -> Support {
+    entry
+        .get("env")
+        .and_then(|env| env.get("client"))
+        .and_then(Value::as_str)
+        .and_then(support_from)
+        .unwrap_or(Support::Required)
 }
