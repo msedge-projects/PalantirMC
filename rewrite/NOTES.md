@@ -113,6 +113,36 @@ finish safe dependency/modpack coordination, then exercise the native UI on
 Windows. Product licence and release remain owner-gated. Phase checkpoints
 are not claims that every product done-when criterion has been met.
 
+## Pending verification — desktop worker wiring, 2026-10-11
+
+`crates/palantir-desktop/src/backend.rs` was changed to use the library APIs the
+previous commit landed but left unwired, and **nothing in this slice was
+compiled or run**: it was written without a terminal, so the workspace has not
+yet seen `cargo fmt`, `cargo check`, clippy or the tests.
+
+- **Sign-in.** `Request::Authenticate` runs the real device-code chain
+  (`palantir_net::auth`) on its own thread, taking the client id from
+  `PALANTIR_MSA_CLIENT_ID`; with none set it still reports the feature
+  unavailable and requests no code. `Request::CancelAuthentication` stops the
+  wait through a stop flag held on the engine, and a cancelled attempt reports
+  no result afterwards. No new `Event` variant was added — the states the UI
+  already renders (requesting, device code, verifying, connected, expired,
+  failed, cancelled) carry the whole flow — so `main.rs` needed no change.
+- **Content.** A release's `required` dependencies are resolved with
+  `palantir_loader::dependencies::resolve_plan` and installed with it: planned in
+  full before the first fetch, staged and hash-verified, then renamed into place.
+  A failure anywhere refuses the whole install and removes what it staged, and
+  the completion note names the dependency count.
+- **Packs.** A `.mrpack` import source is installed from its own index
+  (`mrpack::plan_files` plus the archive's override layers, base-first so the
+  client layer's copy is the one that lands). A pack carrying optional client
+  files, or a pack file with no download and no override to carry it, is refused
+  with a message naming what is missing rather than half-installed.
+- **Tests added, all pure:** ownership-versus-network wording, a cancelled
+  sign-in reporting nothing, the install note's counts, the release document the
+  dependency walk reads, optional-pack detection, override precedence, pack path
+  escapes, and hash/URL verification. The network paths cannot run here at all.
+
 ## Decisions
 
 **2026-10-11 — the launcher grows a second edition, and its account modes

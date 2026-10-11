@@ -87,11 +87,28 @@ subsequent play repairs missing shared files. A custom Java executable overrides
 runtime management. Download/install work happens outside the window event loop.
 Launch/stop and stdout/stderr logging are connected, explicitly in offline mode.
 
-A compatible dependency-free mod/resource pack/shader release can be installed
-with SHA-1 and size verification. Existing files are not silently overwritten.
-Dependency-bearing releases and modpacks are explicitly refused, not partially
-installed. Catalogue descriptions are their authors' live content, not launcher
-interface copy or artwork.
+A compatible mod/resource pack/shader release can be installed with SHA-1 and
+size verification, together with every `required` dependency it names, resolved
+to a build that matches the collection's own game version and loader. Nothing is
+fetched until every destination is decided, so a failure refuses the whole
+install instead of leaving part of it, and the completion note says how many
+dependencies arrived with the release. Existing files are not silently
+overwritten. A `.mrpack` archive is installed from its own index: its client file
+list is planned and verified, then the archive's override layers are applied over
+it, base layer first so a file carried twice ends as the client's copy. A pack
+carrying optional client files is refused rather than installed without that
+choice, because the import request carries no selection and the review screen
+owns it. A modpack requested as content for an existing collection is still
+refused: a pack must not land over a world's own files. Catalogue descriptions
+are their authors' live content, not launcher interface copy or artwork.
+
+Microsoft sign-in is implemented and reports itself unavailable unless a client
+id is supplied. `PALANTIR_MSA_CLIENT_ID` names a registered native client; the
+device-code flow then runs off the window thread (request a code, poll, Xbox
+Live user token, XSTS, Minecraft session, profile), and cancelling stops the wait
+without a later result being reported. The profile call is also the ownership
+check, and that failure is worded as a purchase problem rather than a network
+one. With no client id, no code is requested and none is invented.
 
 ## Persistent contracts
 
