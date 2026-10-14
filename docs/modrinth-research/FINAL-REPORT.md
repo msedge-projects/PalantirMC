@@ -67,9 +67,12 @@ store exists.
 
 ## The three to refuse
 
-- **Their connectivity indicator is wrong.** It is `!navigator.onLine` and
-  reported **Offline while the app was fully online** — Browse loaded live data
-  under the chip. Ours must come from the request layer, never a browser guess.
+- **Their connectivity indicator is wrong, and it is load-bearing.** It is
+  `!navigator.onLine` and reported **Offline while the app was fully online**.
+  Worse, the same flag is bound to the "Create an instance" button's
+  `:disabled` and to the `N` shortcut's guard — so in that state **the app
+  cannot create an instance at all**. Ours must derive connectivity from the
+  request layer, never a browser guess, and must never gate an action on one.
 - **They flatten a specific error into a generic one** on the way to the UI
   ("not enough space" → "Couldn't save files"), except in one dialog where they
   get it right.

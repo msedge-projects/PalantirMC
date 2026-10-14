@@ -57,6 +57,11 @@ primary action by weight and position, and it is repeated by the `N` shortcut
 (HOME-3) and by the onboarding checklist (HOME-5), so the next step is reachable
 from three places without any of them competing.
 
+**Controls:** **`:disabled="offline"`** — `SOURCE
+apps/app-frontend/src/components/ui/WelcomeScreen.vue:99`. In this environment
+that is **true**, so the button is inert. See OQ-004: the app's false-positive
+offline state disables its own primary action.
+
 **Rationale & notes.** Three routes to one action is deliberate redundancy, and
 it is correct: a user who has just installed a launcher does not yet know
 where anything is. The checklist is the patient one, the CTA is the obvious
@@ -77,6 +82,10 @@ fastest path there.
 (`WelcomeScreen.vue:53`), guarded so it does not fire while typing in a field.
 Because the hint is printed on the screen next to the CTA, the shortcut is
 **discoverable** rather than hidden — the app advertises its own accelerator.
+
+**Controls:** the handler is wrapped in `if (!offline.value)`
+(`WelcomeScreen.vue:62`), so **the shortcut is inert whenever the app believes it
+is offline** — which is the case in this environment. Same root cause as HOME-2.
 
 **Persistence:** none.
 

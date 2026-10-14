@@ -220,6 +220,13 @@ on the trigger.
 `online`/`offline` events. **It reports Offline while the app is fully online**
 — `S-0003` loads live Modrinth data while the chip says Offline.
 
+**This is worse than cosmetic.** The same flag gates the primary action:
+`WelcomeScreen.vue:99` binds "Create an instance" to `:disabled="offline"`, and
+`handleQuickCreate` (`:62`) wraps the `N` shortcut in `if (!offline.value)`. In
+this environment the app therefore **cannot create an instance at all** — the
+button and its advertised shortcut are both inert. A wrong connectivity guess
+silently disables the app's most important action while everything else works.
+
 **Rationale & notes.** Two layers disagree inside one app: the shell says
 offline, the data layer says online, and controls gated on the chip are wrongly
 disabled. `open-questions.md` OQ-004 records the full finding. **Our

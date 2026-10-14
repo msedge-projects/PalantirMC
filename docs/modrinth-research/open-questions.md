@@ -96,6 +96,19 @@ project pages, install flows) were documented as online. Genuine offline
 states were therefore provoked deliberately rather than assumed — see the
 `unshare -n` captures.
 
+**CONSEQUENCE FOUND LATER — the false positive disables the primary action.**
+`apps/app-frontend/src/components/ui/WelcomeScreen.vue:99` binds the "Create an
+instance" button to **`:disabled="offline"`**, and `handleQuickCreate` at
+`:53-66` gates the `N` shortcut behind `if (!offline.value)`. Because
+`offline` is `true` in this environment, **both the button and the shortcut are
+inert** — which is exactly why the create-instance dialog could not be opened
+during the capture campaign despite the click landing correctly.
+
+This upgrades OQ-004 from a cosmetic wrong indicator to a **functional bug**:
+the app's own connectivity guess disables its own most important action. It is
+the single strongest argument in the whole study for deriving connectivity state
+from the request layer rather than from a browser API.
+
 ## OQ-005 — Scope of "Modrinth-UX-not-UI" for this blueprint
 
 **Question.** The owner's direction is Modrinth's *UX, not its UI*. How far
