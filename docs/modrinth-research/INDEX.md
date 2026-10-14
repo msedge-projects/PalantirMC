@@ -11,6 +11,9 @@ the master coverage matrix, and how to read the evidence.
 - **Direction:** Modrinth's **UX, not its UI**. These docs describe behaviour,
   information architecture, flow and design intent. They never propose pixel
   copies, and no upstream code or asset was taken (see `sources.md`).
+- **State:** two passes. The first covered the shell, Browse and settings; the
+  second unlocked and observed the instance / install / launch slice (see
+  `RUNLOG.md`, OQ-012). 116 screenshots, `S-0001`…`S-0126`.
 
 ---
 
@@ -201,18 +204,46 @@ This table is the mission's definition of done (§8): every row must reach
 | BR-05 | Browse | Pagination | documented | OBSERVED | S-0003 | 03 |
 | BR-06 | Browse | Project card metadata | documented | OBSERVED | S-0003 | 03 |
 | BR-07 | Browse | Facet sidebar + "Hide already installed" | documented | OBSERVED | S-0003 | 03 |
-| BR-08 | Browse | Install flow (picker→deps→confirm→progress) | see module 03 | SOURCE | — | 03 |
-| BR-09 | Browse | Project detail tabs (Description/Versions/Gallery) | see module 03 | SOURCE | — | 03 |
+| BR-08 | Browse | Install flow (scoped direct install; Install-project picker) | documented | OBSERVED + SOURCE | S-0111,S-0112,S-0122,S-0124 | 03,04 |
+| BR-09 | Browse | Project detail tabs (Description/Versions/Gallery) | documented | OBSERVED + SOURCE | S-0119,S-0120,S-0126 | 03 |
 | SET-… | Settings | 10 sections, every row | see module 06 | OBSERVED + SOURCE | S-0008… | 06 |
 | SKIN-01 | Skins | Skin selector (out of our scope) | documented | OBSERVED | S-0004 | 04 |
 | HOST-01 | Hosting | Servers tab (out of our scope) | documented | OBSERVED | S-0006 | 09 |
 | SSR-01 | Screenshots | Global screenshots viewer | documented | OBSERVED | S-0005 | 05 |
 
-> The matrix is deliberately sparse above the fold: rows for Settings, Browse
-> detail, Library, Instance detail, Accounts, Launch runtime, Updates and
-> Cross-cutting are carried in their own modules, each with its own per-item
-> coverage table, and are folded into this table in `BLUEPRINT.md`. Duplicating
-> hundreds of rows in two places is how the two copies drift apart.
+### Second-pass additions (2026-10-14) — the instance/install/launch slice
+
+Observed after the OQ-012 environment fix; each row is documented per mission §3
+in the module named in the last column.
+
+| ID | Surface | Item | Status | Evidence | Screenshots | Module |
+| --- | --- | --- | --- | --- | --- | --- |
+| HOME-04 | Home | Populated Home: "Jump in" + "Library" | documented | OBSERVED | S-0109,S-0116 | 02,04 |
+| CI-01 | Create instance | Dialog + four instance types | documented | OBSERVED | S-0094 | 02,04 |
+| CI-02 | Create instance | Custom setup: loader/version/loader-version pickers | documented | OBSERVED | S-0095,S-0096 | 04 |
+| CI-03 | Create instance | Install-project dialog + Existing-instance picker | documented | OBSERVED | S-0122,S-0124 | 03,04 |
+| LIB-01 | Library | Instance list; Jump-in/Library split; sort/group/filter | documented | OBSERVED | S-0109,S-0116 | 04 |
+| LIB-02 | Library | Instance context menu (Open folder / Export modpack / Create shortcut) | documented | OBSERVED | S-0108 | 04,05 |
+| INST-01 | Instance | Tab bar: Content / Files / Worlds / Logs / Share | documented | OBSERVED | S-0099…S-0104 | 05 |
+| INST-02 | Instance | Files browser (columns, rows, search, +) | documented | OBSERVED | S-0101 | 05 |
+| INST-03 | Instance | Worlds + servers empty state | documented | OBSERVED | S-0102 | 05 |
+| INST-04 | Instance | Logs: live view, All/Error/Warn/Info, empty state | documented | OBSERVED | S-0103 | 05 |
+| INST-05 | Instance | Share / Invite friends | documented | OBSERVED | S-0104 | 05 |
+| INST-06 | Instance | Settings → General (name/icon/duplicate/update channel/delete) | documented | OBSERVED | S-0105 | 05,06 |
+| INST-07 | Instance | Settings → Installation + Repair | documented | OBSERVED | S-0106 | 05,06,09 |
+| INST-08 | Instance | Settings → Sync overrides (5 toggles) | documented | OBSERVED | S-0107 | 05,06 |
+| INST-09 | Instance | Content list + per-row enable/update/delete | documented | OBSERVED | S-0117 | 05,09 |
+| JOBS-01 | Shell | Task manager ("Tasks" popover, Clear all) | documented | OBSERVED | S-0125 | 01,09 |
+| LAUNCH-01 | Launch | "Minecraft required" gate (the only account gate) | documented | OBSERVED | S-0100 | 07,08 |
+| LAUNCH-02 | Launch | Post-gate runtime states (verifying→playing→crashed) | absent | SOURCE only — not launched (OQ-013) | — | 08 |
+
+
+> Settings, Accounts, Updates and Cross-cutting keep their per-item detail in
+> their own modules (their tables are hundreds of rows); Browse detail, Library,
+> Instance detail, the job manager and the launch gate are now summarised as rows
+> here too, because the second pass made them observable. "One row per tab,
+> setting and function" is satisfied at the level the successor reads; the
+> exhaustive per-row tables live in the modules to avoid two copies drifting apart.
 
 ---
 
@@ -220,8 +251,11 @@ This table is the mission's definition of done (§8): every row must reach
 
 Stated up front so nobody reads more into it than is there.
 
-1. **The "Offline" chip is lying.** The app was online throughout; see OQ-004.
-   Genuine offline behaviour was provoked deliberately, not assumed.
+1. **The "Offline" chip was lying, and the mechanism is now known.** The app was
+   online throughout (see OQ-004); a second pass found *why* the chip read
+   "Offline" — WebKitGTK ← `GNetworkMonitor` ← `GIO_USE_NETWORK_MONITOR` — and
+   fixed it without patching the binary (OQ-012). It is gone from every capture
+   from `S-0093` on.
 2. **No account was ever created or used.** Sign-in surfaces are documented
    unauthenticated (what is visible) plus `SOURCE` (the real state machine),
    per mission §10.
@@ -232,6 +266,13 @@ Stated up front so nobody reads more into it than is there.
    claim comes from a single window on one private display. This is a limit on
    parallelism, not on evidence quality — no two captures were ever contended.
 5. **Screenshots are internal reference only** — never shipped (`sources.md`).
-6. **Nothing here was verified by a second pass yet.** The mission's 15%
-   re-verification is scheduled and logged in `RUNLOG.md` when it runs; until
-   then, treat `OBSERVED` single-capture claims as first-hand but unreplicated.
+6. **A 15% re-verification pass has now been run** (2026-10-14; `.md` sample of
+   12 claims): 10 pass, 1 partial (line numbers drifted, content correct), 1
+   corrected error (the settings count — the `Settings` struct has 50 fields and
+   the table 54 columns, not the 46 first reported). See `RUNLOG.md` `[V1]…[V10]`.
+   Remaining `OBSERVED` single-capture claims are first-hand but not all
+   replicated.
+7. **The launch *gate* is observed; post-launch runtime is not.** Play on an
+   unauthenticated install shows the "Minecraft required" modal `[S-0100]` — the
+   only account gate in the whole app. The Play state machine beyond it is
+   `SOURCE` only; no authentication bypass was built (OQ-013).

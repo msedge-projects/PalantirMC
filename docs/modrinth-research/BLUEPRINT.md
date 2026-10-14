@@ -10,6 +10,14 @@ Per-surface detail: `modules/01…10`. What is missing in our app:
 information architecture, flow and design intent. It never proposes a pixel
 copy, and no upstream code, asset or branding was taken.
 
+**Second observation pass (2026-10-14).** The first pass could not create an
+instance, so the instance/install/launch slice was `SOURCE`-only. A one-line
+environment fix (`GIO_USE_NETWORK_MONITOR`; OQ-012) made the webview report online
+and every one of those surfaces became observable with **no account** — the library,
+the create-instance dialog, the content-install pipeline, the instance tabs and
+settings, the task manager, and the launch gate (the app's only account gate). See
+`S-0093`…`S-0126`, the second-pass sections in `modules/01…10`, and `RUNLOG.md`.
+
 ---
 
 ## 1 — The shape of the app
@@ -19,8 +27,8 @@ that swaps per route. Default 1280×800, **minimum 1100×700** — there is no
 narrow layout at all, by design.
 
 ```
-Titlebar   logo · ‹ › · <route breadcrumb> · Offline chip · "No instances running" · avatar · – ▢ ×
-Rail       Home · Discover content · Skin selector · Screenshots · Hosting · ─ · + · Settings · leave
+Titlebar   logo · ‹ › · <route breadcrumb> · [Offline chip — bug, see OQ-012] · "No instances running" · avatar · – ▢ ×
+Rail       Home · Discover content · Skin selector · Screenshots · Hosting · ─ · + · <instance switcher> · Settings · leave
 Content    the route's page
 Sidebar    "Getting started" checklist · News · promo     (contextual, dismissible)
 ```
@@ -105,7 +113,8 @@ globals; the override mechanism is the thing to mirror.
 
 ### 2.6 Settings — `modules/06`
 
-Ten sections, **46 persisted settings**, all in **one SQLite row** (`id = 0`) in
+Ten sections, **50 persisted settings** (the `Settings` struct has 50 fields; the
+live `settings` table has 54 columns), all in **one SQLite row** (`id = 0`) in
 `app.db`. Defaults are `DEFAULT` clauses in the schema; `settings.version` is 3
 against `CURRENT_VERSION = 3`, migrated by a hand-written ladder. Key names,
 defaults, reset behaviour and the i18n strings behind each row are in the module.

@@ -10,6 +10,98 @@ All paths below are relative to that repo root. Vue SFCs are cited by template/s
 
 ---
 
+## Second observation pass (2026-10-14) — this surface is now OBSERVED
+
+The first pass could not create an instance (OQ-004), so the whole tab bar and the
+instance Settings modal were `SOURCE`-only. A second pass fixed the environment
+(OQ-012) and created a real instance ("Fabric 26.3", game 26.3, Fabric 0.19.5)
+with **no account**, then captured the surface. Everything in this section is
+`OBSERVED`; the source analysis above still stands and now has pixels behind it.
+
+**Tab bar as actually rendered.** `Content · Files · Worlds · Logs · Share`
+`[S-0099 S-0101 S-0102 S-0103 S-0104]`. Note there is **no `Screenshots` tab in
+this build's bar** — the five tabs above are what a fresh Fabric instance shows.
+That is the `Features` setting working as designed (module 06): the set of tabs is
+data-driven, so a screenshot of "the tab bar" is only ever a screenshot of *one*
+feature configuration. The source lists six possible tab bodies; five render by
+default.
+
+**INST-CONTENT — the installed-content list** `[S-0117]`. Once content exists the
+empty state is replaced by a table: columns **Project / Version / Actions**, one
+row per installed project, each row carrying the project icon + name + author,
+the resolved version string and the jar filename, and three per-row actions — an
+enable/disable toggle (on by default), an update/reinstall arrow, and a delete
+trash — plus a kebab. Controls above the table: `Upload files`, `Browse content`,
+a `Search N projects` field, a name sort, `All | Mods` filter chips, `+ Filter`,
+and `Refresh`.
+**Purpose:** the instance's own inventory, and the place a user repairs or prunes
+it. **Operation:** the toggle writes the item's disabled state (the jar stays on
+disk); the arrow reinstalls/updates that one item; the trash removes it.
+**Persistence:** per-instance, on disk under the instance's `mods/` etc.
+
+**INST-FILES — the file browser** `[S-0101]`. A breadcrumb (starting at a home
+glyph), a `Search files` field, `Refresh`, and a `+` add button over a table:
+**Name (sortable) / Size / Created / Modified / Actions**. Rows observed: `config`,
+`crash-reports`, `datapacks`, `mods`, `resourcepacks`, `saves`, `screenshots`,
+`shaderpacks` — i.e. the instance directory itself, rendered as a navigable tree
+with per-row actions. This is the honest "open folder, but inside the app"
+surface. **Purpose:** inspect and edit instance files without leaving the launcher.
+
+**INST-WORLDS** `[S-0102]`. Empty state: "No servers or worlds added" /
+"Add a server or browse to get started", with `Add server` and `Browse servers`.
+Finding: **Worlds and servers share one tab** in this build — a saved world and a
+joined server are one list.
+
+**INST-LOGS** `[S-0103]`. A `Search logs` field, a `Live Log` view selector, filter
+chips `All | Error | Warn | Info`, an `Expand` affordance, and an ASCII-art empty
+state: "Start your instance in the top right to start receiving live logs!". The
+empty state is itself a call to action (module 10's pattern) and confirms the log
+view is a *stream*, not a file dump.
+
+**INST-SHARE** `[S-0104]`. Empty state "No friends invited" / "You can share this
+instance with your friends!" + `Invite friends`. Account-gated in effect (there is
+no one to invite without a Modrinth account), so documented here as seen.
+
+**INST-SETTINGS — the instance Settings modal** `[S-0105 S-0106 S-0107]`. Title
+breadcrumb "<instance> > Settings", left nav **General · Installation · Sync
+overrides**:
+- **General** `[S-0105]`: `Name` field, `Icon` (+ the same Upload/Randomize/
+  Customize affordances as creation), `Duplicate instance` with the helper
+  "Creates a copy of this instance, including worlds, configs, mods, etc.",
+  `Update channel` = **Release (default) | Beta | Alpha** with "Only release
+  versions will be shown as available updates.", and `Delete instance` (red) with
+  the consequence sentence: "Permanently deletes an instance from your device,
+  including your worlds, configs, and all installed content. Be careful, as once
+  you delete a instance there is no way to recover it."
+- **Installation** `[S-0106]`: read-only **Installation info** (Platform `Fabric`,
+  Game version `26.3`, Fabric version `0.19.5`), a warning — "We don't recommend
+  editing your installation settings after installing content… it may cause
+  issues." — and `Repair` with "Reinstalls Minecraft dependencies and checks for
+  corruption. This may resolve issues if your game is not launching due to
+  launcher-related errors."
+- **Sync overrides** `[S-0107]`: the intro "Enable an override to keep a synced
+  setting separate for this instance.", a `Manage synced settings` button, and
+  **five independent toggles, all default off** — *Unsync game settings*
+  ("Keep this instance's options.txt separate from the synced copy."), *Unsync
+  multiplayer servers*, *Unsync resource packs*, *Unsync command history*, *Unsync
+  saved creative hotbars*. Each carries a small edit affordance.
+
+**Purpose/rationale of the instance Settings split.** Global settings are global;
+an instance view only exists to answer "how is *this* one different", so the modal
+offers exactly three things — identity (General), install facts + repair
+(Installation), and the list of things that *could* be pulled out of global sync
+(Sync overrides). The toggles are phrased as the exception ("Unsync…"), which is
+the correct default: shared-by-default, opt out per instance.
+
+**Supersedes these `[ORCH-PENDING]` markers above:** the tab-bar rendering, the
+Files/Worlds/Logs/Share bodies, the instance Settings General/Installation/Sync
+overrides pages, the per-instance override toggles, and Repair. **Still
+`[ORCH-PENDING]`:** `INST-17` export-world's rendered affordance (no world existed
+to export), and tab-bar overflow at very narrow widths (the window floors at
+1100 px; see OQ-002).
+
+---
+
 ## Coverage table
 
 | ID | label | tab | defaults | persistence key | evidence | status |

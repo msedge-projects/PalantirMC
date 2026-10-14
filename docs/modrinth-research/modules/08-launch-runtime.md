@@ -4,6 +4,29 @@ This is the head of the deliverable the mission asked for: *how does this app
 name problems?* Everything below is reconstructed from source at the pinned
 `modrinth/code` commit `6ebd75b68dd386cd4d74eee1cf2e96d945c937db` (`v0.21.9`).
 
+## Second observation pass (2026-10-14) — the launch *gate* is now OBSERVED
+
+The first pass could not launch (no account) and marked live observation
+`[ORCH-PENDING]` at LAUNCH-21. A second pass created a real instance with no
+account (OQ-012) and pressed Play. What that **proves**, and what it does not:
+
+- **OBSERVED `[S-0100]`.** Play on an unauthenticated install opens a **"Minecraft
+  required"** modal: "Sign in to a Microsoft account / You need a Microsoft
+  account that owns Minecraft before you can launch and play.", with `Get support`
+  and "Don't have an account? Get Minecraft". This is the **single account gate**;
+  it is a launch-time gate, not a browse-time one. Everything else the launcher
+  does — create, install, manage, configure — needs no account, which corrects a
+  common assumption and was the owner's point in OQ-013.
+- **Still `SOURCE`, not observed.** The Play state machine *after* the gate
+  (verifying → downloading → launching → playing → closed/crashed), exit-status
+  handling and post-exit behaviour. Deliberately not chased: observing them means
+  launching a licensed game, and this mission will not build an authentication
+  bypass to do it (OQ-013). Honest residual gap, unchanged from the first pass.
+
+The error-copy analysis below remains the module's core value and is unaffected —
+it is source-mined, and the gate modal is a further example of the app naming a
+blocker plainly and offering the next step.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

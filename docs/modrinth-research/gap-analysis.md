@@ -31,7 +31,7 @@ frequency, then effort.
 
 | # | Capability | Modrinth evidence | Our status | Target module |
 | --- | --- | --- | --- | --- |
-| 1 | **46 persisted settings with schema-owned defaults** | `OBSERVED` `settings` table; `SOURCE app-lib/src/state/settings.rs:10` | **Missing** | `palantir-desktop` settings store |
+| 1 | **50 persisted settings with schema-owned defaults** | `OBSERVED` `settings` table; `SOURCE app-lib/src/state/settings.rs:10` | **Missing** | `palantir-desktop` settings store |
 | 2 | **A `Features` section that toggles instance tabs** (Files/Worlds/Screenshots/skin-selector) | `SOURCE settings.rs:26-33` | **Missing** — we have no section for hiding our own UI | `palantir-desktop`, instance tabs |
 | 3 | **Pre-launch / wrapper / post-exit hooks** | `SOURCE settings.rs:74,487` | **Missing** | `palantir-loader` |
 | 4 | **Extra JVM args + custom environment variables** | `SOURCE settings.rs:58-59` | **Missing** | `palantir-loader` |
@@ -43,7 +43,7 @@ frequency, then effort.
 | 10 | **Feature-flag enum** gating unfinished surfaces | `SOURCE settings.rs:96-107` | **Missing** | `palantir-core` |
 
 > **Settings is the whole top ten.** That is the owner's complaint, confirmed
-> from both directions: they have 46 persisted settings across 10 sections; we
+> from both directions: they have 50 persisted settings across 10 sections; we
 > have 7 tabs and no schema-owned defaults, no hooks, no args, no env vars, no
 > directory setting. Nothing else in this analysis comes close in weight.
 

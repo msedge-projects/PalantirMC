@@ -3,6 +3,30 @@
 Reusable behaviour that spans every surface. This is the module our implementer
 should read before writing any UI, because it decides how everything else feels.
 
+## Second observation pass (2026-10-14)
+
+- **XC-11 (the offline false positive) is now fully explained and reproduced.**
+  The first pass called it a functional bug; the second pass found the mechanism
+  and the fix (WebKitGTK ← `GNetworkMonitor` ← `GIO_USE_NETWORK_MONITOR`; see
+  OQ-012) and confirmed both directions: with the default monitor the chip reads
+  "Offline" and the create CTA is dead `[S-0001 S-0070…]`; with `base` the chip is
+  gone and the CTA and `N` both work `[S-0093 S-0094]`. Lesson stands and is now
+  evidenced end-to-end: **connectivity must come from the request layer, and no
+  control may be disabled on a connectivity guess.**
+- **Empty states as calls to action** — four more examples observed: Content
+  ("No content installed" → Upload files / Browse content), Worlds ("No servers or
+  worlds added" → Add server / Browse servers), Share ("No friends invited" →
+  Invite friends) `[S-0102 S-0104 S-0099]`, and Logs, whose empty state is an
+  ASCII illustration *plus* instructions ("Start your instance in the top right…")
+  `[S-0103]`.
+- **The launch gate** `[S-0100]` is the clearest error/blocker copy in the app:
+  it names the need (a Microsoft account that **owns Minecraft**), gives the next
+  step (Get support), and offers the alternative (Get Minecraft) — the pattern
+  module 08 recommends copying, in our own words.
+- **Loading/job vocabulary** `[S-0097 S-0125]`: a running job is a titlebar chip
+  with phase + throughput, an `Installing…` button on the entity, and a `Tasks`
+  entry when done. No modal spinner; no blocking dialog. Worth mirroring.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

@@ -6,6 +6,21 @@ JSON (`apps/app-frontend/src/locales/en-US/index.json` for app strings,
 `packages/ui/src/locales/en-US/index.json` for shared strings). Where a label is
 only in the Vue `defineMessages` block I cite that file too.
 
+## Second observation pass (2026-10-14)
+
+Two things this pass adds:
+- **Per-instance overrides are now observed, not just sourced.** Module 05's second
+  pass captured the instance Settings → Sync overrides page `[S-0107]`: five
+  independent `Unsync …` toggles (game settings / multiplayer servers / resource
+  packs / command history / saved creative hotbars), **all default off**, each with
+  its own explanation, plus `Manage synced settings`. That is the concrete answer to
+  "which global settings can an instance opt out of", and it lives in the instance
+  modal, not here.
+- **The connectivity question this module's Privacy/Behavior sections touch is
+  resolved at the environment level.** The "Offline" indicator is not a setting and
+  not a user-visible state — it is the `navigator.onLine` bug; see OQ-004 and
+  OQ-012. No settings row controls it.
+
 **Headline facts, up front, because they change everything downstream:**
 
 1. **There is no settings JSON file.** At v0.21.9 settings live in a **SQLite

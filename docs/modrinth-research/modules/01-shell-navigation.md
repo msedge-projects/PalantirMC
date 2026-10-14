@@ -11,6 +11,35 @@ template begins at `App.vue:2211`, and the rail, the titlebar, the sidebar, the
 notification hosts and every global modal are mounted from it. Any work that
 changes what the app *is* rather than what a page *shows* changes this file.
 
+## Second observation pass (2026-10-14) — with an instance and with the network fixed
+
+The first pass captured the shell without an instance and with the `Offline` false
+positive active. A second pass (OQ-012) removed that and created instances, which
+resolved several shell items the first pass could only mark `[ORCH-PENDING]`:
+
+- **Connectivity chip** `[S-0093]`. With `GIO_USE_NETWORK_MONITOR` making the
+  webview report online, the "Offline" chip **disappears entirely** and the titlebar
+  shows only the running-instance pill. Confirms NAV-04 from the other direction:
+  the chip is bound to `navigator.onLine` and nothing else.
+- **Running-instance status pill** `[S-0093 S-0099]`. "No instances running" is the
+  idle text; it stays a pill beside a live job chip `[S-0097]`, and the shell
+  distinguishes "a task is running" (download chip) from "a game is running" (the
+  pill) with two separate indicators.
+- **Rail instance switcher** `[S-0116]`. With two instances the rail's switcher
+  renders **one icon per instance** (a stack), so the rail is not a fixed eight
+  slots — the switcher slot grows with the library. Any static "eight slots" count
+  is a snapshot, not an invariant.
+- **Task popover** `[S-0125]`. The titlebar download glyph is the job manager
+  (module 09); the shell owns this, not any page.
+- **Breadcrumb** `[S-0099 S-0119]`. Confirmed rendering "<instance> > <page>"
+  ("Fabric 26.3 > Settings", "Discover mods > Sodium", "Fabric 26.3 > Discover
+  mods"), which is the mechanism that makes an icon-only rail legible.
+
+Still `[ORCH-PENDING]` and unchanged: back/forward enablement across a deep-link
+cold start, breadcrumb overflow with a very deep trail, the close-to-tray question,
+native-decoration toggle, and drag-and-drop targets — none of which the second pass
+exercised.
+
 **Coordinate model.** The shell is a CSS grid
 (`App.vue:2651-2660`): row `status` (the titlebar) then row `nav` (the rail),
 with the rail in a narrow `auto` column and an empty `1fr` filler beside it.

@@ -9,6 +9,17 @@ other; both can exist several-at-once.
 All paths are relative to the pinned checkout of `modrinth/code` at
 `6ebd75b68dd386cd4d74eee1cf2e96d945c937db` (`v0.21.9`).
 
+## Second observation pass (2026-10-14)
+
+The first pass documented both flows from source and listed, in AUTH-15, the
+account-gated surfaces it could not see. A second pass created an instance with
+**no account at all** (OQ-012), which proves the account-gate boundary from the
+other side: **creating, installing and configuring an instance never asks for an
+account.** The sole gate is at launch `[S-0100]` — the "Minecraft required"
+modal — and the Modrinth-account features (Sharing, Hosting, friends) stay hidden
+or empty until Modrinth sign-in, as source predicted. No credential of any kind
+was created or used (OQ-013).
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

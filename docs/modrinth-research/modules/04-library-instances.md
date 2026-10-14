@@ -11,6 +11,69 @@ the empty-library and first-run states, and offline behaviour.
 Everything is derived from the pinned source. Rows marked `[ORCH-PENDING]` need a
 visual capture to confirm; everything else is `[SOURCE …]`.
 
+## Second observation pass (2026-10-14) — the library and its dialogs are now OBSERVED
+
+The first pass had no instance (OQ-004), so this surface was `SOURCE`-only. A
+second pass fixed the environment (OQ-012) and created two instances with **no
+account** — "Fabric 26.3" (custom setup) and "Fabulously Optimized" (modpack) —
+then captured the list and every dialog. `OBSERVED` below; the source analysis
+above still stands.
+
+**The list itself** `[S-0109 S-0116]`. Home renders two regions:
+- **"Jump in"** — a collapsible strip of the most-recent instances. Each row is
+  icon + name + `New instance` badge + "<loader> • Never played" + a `Play`
+  button + a kebab. This is the fast path: one click to the thing you last ran.
+- **"Library"** — a heading with a `Search` field, `New group`, `New instance`;
+  a toolbar of `Last played` (sort), `Custom group`, a filter glyph and
+  `+ Add filter`; then the grid of instance cards (icon, name, loader badge).
+  Long names truncate with an ellipsis in the *card* ("Fabulously Opt…") while the
+  Jump-in row keeps the full title.
+- The **left rail's instance switcher** shows one icon per instance, so the rail
+  itself reflects library size `[S-0116]`.
+
+**Purpose of the Jump-in / Library split.** "Jump in" answers *resume what I was
+doing*; "Library" answers *find and manage*. Separating them means the common case
+(play the last thing) never has to scroll past the management furniture.
+
+**Create-instance dialog** `[S-0094]`, opened by the `N` shortcut (inert in the
+first pass; see OQ-012) or the rail `+` / Home CTA. Content: a search field
+("Already know what you want to play?" / "Search mods, modpacks, and more…"),
+an `or` divider, and four instance types, each a row with an icon, title and one
+line of help:
+- **Custom setup** — "Start from scratch by picking a loader and game version."
+- **Start from a mod or modpack** — "Choose a project and we'll use its latest version."
+- **Upload a modpack** — "Install a modpack from an .mrpack file on your device."
+- **Import instance** — "Import an instance from Prism, CurseForge, or similar."
+
+**Custom setup form** `[S-0095 S-0096]`: an icon banner with `Upload` / `Randomize`
+/ `Customize`; a `Name` field (placeholder fills from the choices, e.g. "Fabric
+26.3"); `Loader` = **Vanilla | Fabric (default) | NeoForge | Forge | Quilt**;
+`Game version` dropdown (26.3 … 1.21.10, plus "Show all versions"); `Loader
+version` = **Stable (default) | Latest | Other**; `Back` / `Create instance`.
+
+**Install-project dialog and the instance picker** `[S-0122 S-0124]`. Installing a
+project that is *not* scoped to an instance opens "Install project" with `Instance
+type` = **Existing instance | New instance**. "New instance" is the create form,
+but with the `Loader` list **filtered to the project's supported platforms** (for
+Sodium: Fabric/Quilt/NeoForge, no Vanilla/Forge). "Existing instance" is the
+picker: a search field, a compatibility eye-toggle, one row per instance with an
+`Installed` state (greyed) when the project is already there, and a footer counting
+"N compatible instances". **This is the "instance picker" step the brief asked
+about — and it is a mode of the install dialog, not a separate screen.**
+
+**Instance context menu (kebab)** `[S-0108]`: `Open folder`, `Export modpack`,
+`Create shortcut`. (Pinning/duplication/deletion live in the instance Settings
+modal, not this menu — see module 05 for General.)
+
+**Modpack install creates an instance directly** `[S-0115 S-0116]`: `+ Install` on
+a modpack runs the same job pipeline as a custom setup and lands a new instance,
+with no dependency/version dialog for required content. The running job shows as a
+"Modpack content" card naming the version and "Provided by <pack>".
+
+**Supersedes these `[ORCH-PENDING]` markers above:** the populated list, the
+Jump-in/Library regions, the create-instance dialog and Custom setup form, the
+add-instance version/loader pickers, and the instance picker.
+
 ---
 
 ## Coverage table

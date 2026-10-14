@@ -94,3 +94,19 @@ They exist so the implementing agent can see behaviour and information
 architecture without opening the Modrinth App again — which is the whole point
 of the mission. Do not paste them into our UI, our docs site, or our store
 listings, and do not ship them inside the binary.
+
+## Capture environment — how the screenshots were produced
+
+The app was driven on a **private Xvfb display** (`:201`), never the owner's
+`:0`. Captures are made by screenshotting the window, OCR-ing it, and **clicking
+only controls that were read on screen** (`tools/mrcap.py`, and the phrase-aware
+`tools/mrdrive.py`). Nothing was clicked at an assumed coordinate; the two
+exceptions are green-on-green button labels OCR cannot read, which were clicked at
+a position read off a captured frame and logged.
+
+The studied binary is **unmodified**. The only environment variable of note is
+`GIO_USE_NETWORK_MONITOR=base`, which selects which connectivity implementation
+the GTK stack reports to the webview; without it the app's `navigator.onLine` is
+falsely `false`, which disables its own create-instance action. This is an
+environment fact, not a patch — see OQ-004 and OQ-012. No account or credential of
+any kind was created or used at any point.

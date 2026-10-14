@@ -11,6 +11,59 @@ empty/error/offline state.
 Everything is derived from the pinned source. Rows marked `[ORCH-PENDING]` need a
 visual capture to confirm; everything else is `[SOURCE …]`.
 
+## Second observation pass (2026-10-14) — detail page, install flow and scoped Browse are now OBSERVED
+
+The first pass ran Browse online and captured the list (`S-0003`), but the project
+detail page, the instance-scoped variant and the install pipeline were `SOURCE`-only
+(they needed an instance, which needed the OQ-004 fix). A second pass fixed the
+environment (OQ-012) and captured them. `OBSERVED` below.
+
+**Two Browse modes, one component.** Global `/browse/:type` `[S-0114]` has six
+project-type tabs — **Modpacks | Mods | Resource Packs | Data Packs | Shaders |
+Servers** — while the instance-scoped variant `[S-0111]` has **five** (no
+Servers) and adds an "Installing content" banner naming the instance, its Minecraft
+version and its loader, with the note "Game version is provided by the instance".
+The facet chips for version and loader are **pre-applied and locked** in that mode.
+Finding: Browse is context-aware, and which contexts exist is expressed by hiding
+Servers for an instance — a server project cannot be installed into a client
+instance.
+
+**Project detail page** `[S-0119 S-0120 S-0126]`. Header: icon, title, `Install`,
+a kebab, the description, then `N downloads · N followers · <category>`. Tabs:
+**Description | Versions | Gallery**, with a right sidebar **Compatibility** panel
+(Minecraft versions as chips, then Platforms).
+- *Description* `[S-0119]`: rendered markdown, including embedded images and
+  external links (Ko-fi, Discord).
+- *Versions* `[S-0120]`: filters `Channel`, `Game version`, `Platform`; a table
+  **Version / Game version / Platform / Published / Downloads**, each row prefixed
+  with a release-channel badge **A**/**B**/**R** (alpha/beta/release) and carrying
+  a per-row download and an open-external action; pagination.
+- *Gallery* `[S-0126]`: titled image cards with a description and a date.
+
+**Install flow, as actually observed** `[S-0111 S-0112 S-0115 S-0122 S-0124]`:
+- From an **instance-scoped** Browse, `+ Install` installs into that instance
+  directly. A project with no uninstalled dependencies completes with **no
+  dialog**, flipping the button to `Installed` (`S-0112`). A project with a
+  required dependency **also completes with no dialog** — installing Iris Shaders
+  silently pulled Sodium in as a second job and installed both.
+- From a **global** Browse, `Install` opens the "Install project" dialog
+  (`S-0122`), whose `Existing instance | New instance` toggle is the instance
+  picker (`S-0124`; see module 04).
+- From a **modpack card**, `+ Install` creates an instance and runs the job
+  (`S-0115`), again with no dependency dialog for required content.
+
+**This corrects one SOURCE-only assumption.** The brief's mental model —
+"instance picker → version resolution → optional/required dependencies →
+confirmation → progress" — is not a single wizard. **Required** dependencies are
+resolved and installed silently; the confirmation/picker appears only when a
+*new instance* must be made (the Install-project dialog) or in the shared-instance
+import flow (module 07). Our implementer should not build a mandatory dependency
+confirmation step for the common single-project install.
+
+**Supersedes these `[ORCH-PENDING]` markers above:** `BR-09` (project detail tabs),
+the install pipeline's observable phases, and the scoped-Browse banner. `BR-41`
+(photosensitivity modal) and `BR-42` (card right-click menu) remain unobserved.
+
 ---
 
 ## Coverage table

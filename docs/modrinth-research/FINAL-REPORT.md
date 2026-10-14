@@ -11,7 +11,7 @@
 | Binary | official `.deb` from the project's GitHub releases, SHA-256 `7c9fa6d0…8198e26` |
 | Source | `modrinth/code` pinned to tag `v0.21.9`, commit `6ebd75b6` — **the same build as the binary** |
 | Method | the app running on a private Xvfb display, driven by observed controls only (OCR → click what was read, never an assumed coordinate), plus source mining |
-| Evidence | 65 screenshots, 10 modules, 4 reference docs, 11 open questions |
+| Evidence | 116 screenshots (S-0001…S-0126), 10 modules, 4 reference docs, 13 open questions |
 
 Source and binary are pinned to one tag, so the mission's "version drift" branch
 never came into play: the UI and the code agree. The in-app footer reads
@@ -32,7 +32,7 @@ parameter, not six pages. Ten top-level routes in `routes.js`.
 Ordered by the mission's rule: what you called out, then daily-use frequency,
 then effort.
 
-1. **46 persisted settings with schema-owned defaults** — they live in *one SQLite
+1. **50 persisted settings with schema-owned defaults** — they live in *one SQLite
    row* (`id = 0`) in `app.db`, with `DEFAULT` clauses and a versioned migration
    ladder. We have 7 settings tabs and no schema-owned defaults.
 2. **A `Features` section that toggles instance tabs** — we have no equivalent.
@@ -91,20 +91,37 @@ bytes.
 - **Sign-in surfaces** — no account was created or used (mission rule). Documented
   unauthenticated plus `SOURCE`; a 14-gate list of account-gated surfaces is in
   `modules/07`.
-- **The populated library, the install flow with dependencies, launch/runtime
-  states and genuine offline states** — all need instances, which need a
-  Minecraft account. Listed in `MANIFEST.md` and marked `[ORCH-PENDING]` rather
-  than invented.
+- **Post-launch runtime only** — the Play state machine *after* the account gate
+  (verifying → playing → crashed), exit handling and post-exit behaviour. The gate
+  itself is now observed `[S-0100]`, and everything before it is observed too.
+  Running the game needs a licensed account, and no authentication bypass was built
+  (OQ-013). This is the one honest residual gap, and it is source-documented.
 - **A narrow-window layout** — does not exist; the window's floor is 1100×700.
-- **The 15% re-verification pass** — not run. Every `OBSERVED` claim is
-  first-hand from a single window on one private display, but unreplicated.
+- **Photosensitivity modal and project-card right-click menu** — still `SOURCE`
+  only (`BR-41`, `BR-42`).
+- **The 15% re-verification pass — now run** (2026-10-14): 12 claims spot-checked
+  independently, 10 pass, 1 partial (line numbers drifted, content correct), and
+  **1 corrected error** (the settings count, below). Single-display `OBSERVED`
+  claims remain first-hand, now partly replicated.
+
+## The second pass (2026-10-14), in one line
+
+The first pass could not create an instance because the app's missing connectivity
+made its own "Offline" guess true and disabled the button. A one-line environment
+fix — `GIO_USE_NETWORK_MONITOR` (OQ-012) — made the webview report online, which
+unlocked the entire instance / install / launch slice: **28 new screenshots,
+`S-0093`…`S-0126`**, and turned the library, instance detail, content-install
+pipeline, task manager and launch gate from `SOURCE` into `OBSERVED`.
 
 ## Look at these first
 
 `S-0003` (Browse with live data — the whole card/facet/pagination model),
 `S-0008` (the Settings modal and its complete section list), `S-0001` (first-run
-Home), `S-0006` (Hosting, and the one place a toast carries the only actionable
-buttons). Then `modules/06` for settings and `modules/08` for error copy.
+Home), `S-0093` (the same Home with the offline bug gone), `S-0094` (the
+create-instance dialog), `S-0100` (the launch gate — the one account gate),
+`S-0107` (per-instance sync overrides) and `S-0125` (the task manager). Then
+`modules/06` for settings, `modules/05` for the instance surface and `modules/08`
+for error copy.
 
 ## Deliverables
 

@@ -10,6 +10,28 @@
 | UPD-4 | Per-instance content updates | process | `SOURCE state/instance_content_update_checks` | documented |
 | UPD-5 | Update check scheduling | process | `SOURCE` install modules | partial |
 | UPD-6 | Repair / reinstall | action | `SOURCE` install modules | partial |
+
+## Second observation pass (2026-10-14)
+
+The first pass could not run a job or open an instance, so the whole update and
+maintenance surface was `SOURCE`/`partial`. A second pass created and populated an
+instance with no account (OQ-012) and observed:
+
+- **Task manager** `[S-0125]`. The titlebar download icon opens a **"Tasks"**
+  popover: a `Complete` group listing each finished job with its age and type
+  ("Fabulously Optimized · 4m ago · Modpack", "Fabric 26.3 · 10m ago · New
+  instance"), a per-task delete, and `Clear all`. This is the user-facing face of
+  the install/update pipeline module 03 describes. **UPD-5/UPD-6 become
+  `documented`/`OBSERVED` for the running-job and completed-job states.**
+- **The running job** `[S-0097]`. A live job shows as a titlebar chip with its
+  phase and throughput (e.g. "Fabric 26.3 2.21 MB/s"), and on the instance as an
+  `Installing…` button in place of `Play`. There is no separate progress window.
+- **Repair** `[S-0106]`. Observed in the instance's Installation page; copy as
+  quoted in module 05.
+- **Per-instance content updates** `[S-0117]`. The instance Content table carries a
+  per-row update/reinstall action; there was no newer version during the pass, so
+  the "update all" affordance and the update-in-progress state remain unobserved
+  (still `[ORCH-PENDING]` where module 05 lists them).
 | UPD-7 | Cache management | action | `OBSERVED` `cache` table | partial |
 
 ---

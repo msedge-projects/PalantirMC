@@ -4,6 +4,22 @@ The landing tab, `/` (`SOURCE apps/app-frontend/src/routes.js:8-12`). What it
 shows depends entirely on whether the user has done anything yet, and that
 dependence is the whole design.
 
+## Second observation pass (2026-10-14)
+
+Home's **two states are now both observed.** The first-run state is `S-0001`
+(welcome block, "Create an instance", "Import from launcher", Getting-started
+checklist, News feed). The **populated** state `[S-0109 S-0116]` replaces the
+welcome block with a **"Jump in"** strip over a **"Library"** grid — the full
+detail is in module 04. The transition between them is the single most important
+thing about Home: it is *derived from instance count*, not configured.
+
+`HOME-2` (the "Create an instance" CTA and its `N` shortcut) is now confirmed
+**functional, not merely present**: the CTA and the shortcut were inert only
+because `navigator.onLine` was false (OQ-004), and with the environment fixed
+(OQ-012) `N` opens the create-instance dialog `[S-0094 S-0095]`. The `N` hint
+text under the CTA ("Press N to quick create an instance") is a *documented
+accelerator advertised in the UI*, which module 10 recommends adopting.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

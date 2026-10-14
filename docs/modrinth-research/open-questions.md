@@ -433,3 +433,72 @@ width (`download-manager-bar.vue:139-149`).
 container queries and no width media queries; what looks responsive is three
 independent `ResizeObserver`s. Saying so is more useful than implying a
 breakpoint system that does not exist.
+
+---
+
+## OQ-012 — Why the create-instance action was inert, and the one-line fix (resolves OQ-004's consequence)
+
+**Question.** OQ-004 established that "Offline" is `ref(!navigator.onLine)` and that
+the same flag disables the create-instance button and the `N` shortcut. But *why*
+is `navigator.onLine` false when the app's own HTTP client is plainly online, and
+can it be made true without patching the app?
+
+**Finding — measured, not inferred.** In a WebKitGTK webview, `navigator.onLine`
+is fed from GLib's `GNetworkMonitor`, and the default monitor under Xvfb resolves
+to the NetworkManager backend, which reports `network-available = FALSE` because
+no NetworkManager daemon is running. GLib lets the backend be forced with
+`GIO_USE_NETWORK_MONITOR`. Measured with `Gio.NetworkMonitor.get_default()`:
+
+| `GIO_USE_NETWORK_MONITOR` | backend | `get_network_available()` |
+| --- | --- | --- |
+| unset | `GNetworkMonitorNM` | **False** |
+| `networkmanager` | `GNetworkMonitorNM` | False |
+| `netlink` | `GNetworkMonitorNetlink` | **True** |
+| `base` | `GNetworkMonitorBase` | **True** |
+
+**Decision.** Relaunch the studied binary with `GIO_USE_NETWORK_MONITOR=base`
+(added to the §10 degradation env) and document the mechanism. This is not a
+patch: it selects which connectivity implementation the GTK stack uses, and the
+binary remains the official 0.21.9 artifact pinned in `sources.md`.
+
+**Consequence.** The "Offline" chip disappears; the `N` shortcut and the
+create-instance CTA both work; the entire instance / install / launch slice that
+was `[ORCH-PENDING]` throughout the first pass became observable. `[S-0093]`
+proves the chip is gone; `[S-0094]` proves `N` opens the dialog.
+
+**Why this matters to us.** It is the second half of the OQ-004 lesson. The bug is
+not merely that a browser API guesses connectivity; it is that a guess a *test
+harness* can flip with one environment variable is load-bearing for the app's
+primary action. Our connectivity state must come from the request layer, and no
+control may be disabled because of it.
+
+## OQ-013 — We will not patch the app to add an offline/no-account mode
+
+**Question.** The owner asked, mid-mission, whether the source could be modified
+to allow an offline mode, so the launch/runtime slice could be observed without a
+real Minecraft account.
+
+**Finding.** Two separate things were being asked for, and only one is legitimate:
+observing the *launcher's* surfaces needs no account (now proven — everything up
+to Play is account-free); *launching the game* needs a Minecraft licence, and
+"offline mode" means bypassing Microsoft's authentication to run Minecraft
+without one.
+
+**Decision.** Refused, for two reasons. First, the requested change's purpose is
+to run a licensed game without a licence, i.e. circumventing an authentication
+control; that is not something this mission will build. Second, the mission is
+explicit that sign-in surfaces are documented from SOURCE (§10) and that the
+*official* artifact is what is studied — a locally patched build stops being the
+thing the blueprint describes.
+
+**Alternatives considered.**
+- *Ask the owner for their account.* Rejected outright: the account on offer is a
+  minor's, credential sharing violates Microsoft's terms, and it risks the
+  account. Never needed and never used.
+- *Document the launch slice from source and stop there.* **Adopted.** It is
+  already written in `modules/08` with `path:line` citations, and honesty about
+  the residual gap is preferred to a patched build (mission §1.6).
+
+**Scope of the gap that remains.** Only genuine in-game runtime: the Play state
+machine's later phases, crash/exit handling, and post-exit behaviour. Everything
+up to and including the "Minecraft required" gate is now `OBSERVED` `[S-0100]`.
