@@ -198,7 +198,14 @@ impl Scheduler {
                 thread::spawn(move || run_worker(&shared, &queue, fetch.as_ref()))
             })
             .collect();
-        (Scheduler { jobs: Some(jobs_tx), shared, workers: handles }, events_rx)
+        (
+            Scheduler {
+                jobs: Some(jobs_tx),
+                shared,
+                workers: handles,
+            },
+            events_rx,
+        )
     }
 
     /// Queue a job, returning the id its events will carry.
@@ -225,7 +232,10 @@ impl Scheduler {
 
     /// Report a job that could not be queued at all.
     fn refuse(&self, id: JobId, reason: &str) {
-        let _ = self.shared.events.send(Event::Failed { id, reason: reason.to_string() });
+        let _ = self.shared.events.send(Event::Failed {
+            id,
+            reason: reason.to_string(),
+        });
         self.shared.release(id);
     }
 
@@ -316,8 +326,9 @@ fn run_worker(shared: &Arc<Shared>, queue: &Arc<Mutex<Receiver<Queued>>>, fetch:
         // Reported before the attempt rather than after it starts, so a phase's
         // progress line exists from the first moment and can start from what a
         // previous run left on disk.
-        let resumed_from =
-            std::fs::metadata(job.download.part()).map(|meta| meta.len()).unwrap_or(0);
+        let resumed_from = std::fs::metadata(job.download.part())
+            .map(|meta| meta.len())
+            .unwrap_or(0);
         let _ = shared.events.send(Event::Started {
             id,
             url: job.download.url.clone(),
@@ -325,12 +336,15 @@ fn run_worker(shared: &Arc<Shared>, queue: &Arc<Mutex<Receiver<Queued>>>, fetch:
             resumed_from,
         });
         let mut sleep = |wait: Duration| thread::sleep(wait);
-        let report =
-            match fetch_to_file(fetch, &job.download, &cancel, &shared.backoff, &mut sleep) {
-                Ok(downloaded) => Event::Finished { id, downloaded },
-                Err(Error::Cancelled) => Event::Cancelled { id },
-                Err(error) => Event::Failed { id, reason: error.to_string() },
-            };
+        let report = match fetch_to_file(fetch, &job.download, &cancel, &shared.backoff, &mut sleep)
+        {
+            Ok(downloaded) => Event::Finished { id, downloaded },
+            Err(Error::Cancelled) => Event::Cancelled { id },
+            Err(error) => Event::Failed {
+                id,
+                reason: error.to_string(),
+            },
+        };
         let _ = shared.events.send(report);
         shared.release(id);
     }
@@ -411,7 +425,9 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join("palantirmc-engine-scheduler").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-scheduler")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         root
@@ -490,14 +506,20 @@ mod tests {
         let dir = scratch("cancel-queued");
         let fetch = Arc::new(
             MapFetch::new()
-                .with_route("slow", Route::text("slow").pausing(Duration::from_millis(200)))
+                .with_route(
+                    "slow",
+                    Route::text("slow").pausing(Duration::from_millis(200)),
+                )
                 .with_route("queued", Route::body(vec![7u8; 1000])),
         );
         let (scheduler, events) = Scheduler::new(fetch.clone(), 1, Backoff::with_attempts(1));
         scheduler.submit(job("slow", &dir.join("slow.bin")));
         let waiting = scheduler.submit(job("queued", &dir.join("queued.bin")));
         assert!(scheduler.cancel(waiting), "the job is still known");
-        assert!(!scheduler.cancel(waiting + 100), "an id that was never submitted");
+        assert!(
+            !scheduler.cancel(waiting + 100),
+            "an id that was never submitted"
+        );
 
         let seen = drain(&events);
         assert!(
@@ -514,10 +536,14 @@ mod tests {
     #[test]
     fn cancelling_everything_stops_the_whole_phase() {
         let dir = scratch("cancel-all");
-        let fetch = Arc::new(MapFetch::new().with_route(
-            "u",
-            Route::body(vec![1u8; 4096]).chunked(512).pausing(Duration::from_millis(50)),
-        ));
+        let fetch = Arc::new(
+            MapFetch::new().with_route(
+                "u",
+                Route::body(vec![1u8; 4096])
+                    .chunked(512)
+                    .pausing(Duration::from_millis(50)),
+            ),
+        );
         let (scheduler, events) = Scheduler::new(fetch, 2, Backoff::with_attempts(1));
         let ids: Vec<JobId> = (0..6)
             .map(|n| scheduler.submit(job("u", &dir.join(format!("{n}.bin")))))
@@ -532,7 +558,10 @@ mod tests {
             "nothing finished: {ends:?}"
         );
         for id in ids {
-            assert!(ends.iter().any(|(ended, _)| *ended == id), "job {id} never reported");
+            assert!(
+                ends.iter().any(|(ended, _)| *ended == id),
+                "job {id} never reported"
+            );
         }
         assert_eq!(scheduler.outstanding(), 0);
     }
@@ -590,7 +619,23 @@ mod tests {
         let later: Vec<JobId> = (0..3)
             .map(|n| scheduler.submit(job("u", &dir.join(format!("later-{n}.bin")))))
             .collect();
-        let second = drain(&events);
+        // Drain on "every job terminal *and* the queue quiet", not on the first
+        // `Idle`. `Idle` is emitted per quiet moment rather than once, so a batch
+        // of three on a two-wide scheduler can go quiet between jobs; stopping at
+        // the first one returns having seen only part of the batch, which is a
+        // timing artefact under parallel load and not a property of the scheduler.
+        let mut second = Vec::new();
+        loop {
+            match next_event(&events, Duration::from_secs(20)) {
+                Some(event) => second.push(event),
+                None => break,
+            }
+            if matches!(second.last(), Some(Event::Idle))
+                && terminal(&second).len() == later.len()
+            {
+                break;
+            }
+        }
         let ends = terminal(&second);
         assert_eq!(ends.len(), 3, "the second batch reported: {second:?}");
         for id in later {
