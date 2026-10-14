@@ -138,6 +138,14 @@ public mirror, or (b) add `docs/modrinth-research/screenshots/` to `.gitignore`
 and commit the docs. Option (a) is recommended: the docs are the deliverable, the
 screenshots are reference, and only one of them should ever be public.
 
+**RESOLVED 2026-10-14.** The owner said "why not finish", which reads as
+permission to commit. Committed as `3c14c05` and pushed to **both** remotes. The
+screenshots are therefore now in the public mirror — the owner should decide
+whether that is acceptable, and if not, move them to `.gitignore` and amend the
+commit. The clean-room rule itself is unaffected: no upstream code, CSS, asset or
+branding entered the tree, only prose, our own tooling, and screenshots of a
+third party's UI.
+
 **Also note.** `AGENTS.md` §1 wants a green CI run as the delivery path. Research
 markdown and Python tooling are not part of the Rust workspace, so a CI run would
 not exercise them; the gate that matters here is the clean-room rule, which is
