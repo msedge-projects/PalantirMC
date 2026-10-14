@@ -38,7 +38,8 @@ was created or used (OQ-013).
 | AUTH-12 | Skins and capes (scope note) | page | `packages/app-lib/src/api/minecraft_skins.rs:1` | SOURCE |
 | AUTH-13 | Account-gated surfaces | — | see "Surfaces that need an account" | SOURCE |
 | AUTH-14 | Friends presence channel | indicator | `packages/app-lib/src/state/friends.rs`, `apps/app-frontend/src/components/ui/friends/FriendsList.vue:345` | SOURCE |
-| AUTH-15 | Live observation of any of the above | — | requires a real Microsoft / Modrinth account | **[ORCH-PENDING]** — never performed; the brief forbids creating or using one |
+| AUTH-15 | Live observation of the sign-in flows | — | requires a real Microsoft / Modrinth account | **[ORCH-PENDING]** — never performed; the brief forbids creating or using one |
+| AUTH-16 | The account **gate** (launch-time, not browse-time) | dialog | `S-0100` | **OBSERVED** — creating/installing/configuring needs no account; only Play does |
 
 ---
 

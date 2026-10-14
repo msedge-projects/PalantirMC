@@ -180,10 +180,38 @@ file index. Content is **referenced by Modrinth project/version ids**, not by
 file path — which is what lets the app resolve an update without re-reading the
 directory.
 
-`[ORCH-PENDING]` — the exact JSON field names and per-instance file layout were
-not re-read line-by-line in this mission; the above is `SOURCE` at directory
-level. An implementer should read `instance_types.rs` directly before writing the
-serializer.
+**Second observation pass (2026-10-14): it is not JSON — the instance model is a
+second set of SQLite tables in the same `app.db` as settings.** Read live from two
+real instances (`OBSERVED`; the first pass had none, which is why this was
+`[ORCH-PENDING]`). The tables and their key columns:
+
+| Table | Cols | Key columns | What it holds |
+| --- | --- | --- | --- |
+| `instances` | 13 | `id` (`local:<uuid>`), `path` (profile-folder name), `applied_content_set_id`, `install_stage`, `launcher_feature_version`, `update_channel`, `name`, `icon_path`, `created`, `modified`, `last_played`, `submitted_time_played`, `recent_time_played` | the instance itself |
+| `instance_content_sets` | 11 | `id` (`content-set:<uuid>`), `instance_id`, `name`, `source_kind`, `status`, `game_version`, `protocol_version`, `loader`, `loader_version` | one row per game-version + loader pair, so an instance can carry more than one |
+| `instance_content_entries` | 13 | `id`, `instance_id`, `content_set_id`, `file_id`, `project_type`, `project_id`, `version_id`, `source_kind`, `server_requirement`, `client_requirement`, `enabled`, `added_at`, `modified_at` | installed content, keyed by **Modrinth project/version id**, with per-side requirement flags |
+| `instance_files` | 10 | `id`, `instance_id`, `relative_path`, `file_name`, `enabled`, `sha1`, `size`, `missing`, `added_at`, `modified_at` | the on-disk file index (path + sha1) |
+| `instance_launch_overrides` | 2 | `instance_id`, `overrides` (msgpack blob) | per-instance launch overrides; the blob also carries `hooks` and the `visible_tabs` map |
+| `instance_icon_configs` | 3 | `instance_id`, `background` (JSON gradient), `symbol` | the icon builder's state |
+| `instance_groups` / `instance_group_memberships` | 3 / 2 | `id`,`name`,`display_order`; `instance_id`,`group_id` | `Favorites` is seeded as `group:favorites` |
+| `instance_links` | 19 | `instance_id`, `link_kind`, then Modrinth / server / shared / imported columns | one wide table unifying how each instance is linked outward |
+
+A live example makes the id-keying concrete: instance `local:418a5ccc…` ("Fabric
+26.3") has content set `content-set:af71a61e…` with `game_version = 26.3`,
+`protocol_version = 777`, `loader = fabric`, `loader_version = 0.19.5`; its content
+entry for Fabric API is `project_id = P7dR8mSH`, `version_id = bq3SsNGk`; and its
+file index row is `mods/fabric-api-0.163.0+26.3.jar` with a sha1 and size.
+
+Other instance-scoped tables present on the same install: `instance_servers`,
+`instance_server_pack_state`, `instance_server_projection_entries`,
+`instance_sync_*`, `instance_game_option_*`, `synced_game_option_*`, `install_jobs`,
+`processes`, `screenshots`, `attached_world_data`, `join_log`, plus the account
+tables `minecraft_users`, `modrinth_users`, `minecraft_device_tokens`.
+
+`[ORCH-PENDING]` (smaller now) — the exact `instance_types.rs` `serde` field names
+and the msgpack layout inside `overrides` were not decoded field by field. Read
+`instance_types.rs` before writing the serializer, but treat the table schema
+above as the storage contract: the instance model is relational, not a document.
 
 ---
 

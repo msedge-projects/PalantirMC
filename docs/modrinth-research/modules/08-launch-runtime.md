@@ -7,8 +7,9 @@ name problems?* Everything below is reconstructed from source at the pinned
 ## Second observation pass (2026-10-14) — the launch *gate* is now OBSERVED
 
 The first pass could not launch (no account) and marked live observation
-`[ORCH-PENDING]` at LAUNCH-21. A second pass created a real instance with no
-account (OQ-012) and pressed Play. What that **proves**, and what it does not:
+`[ORCH-PENDING]`. It is now split: **LAUNCH-21** (the gate) is `OBSERVED`, and
+**LAUNCH-22** (post-gate states) stays pending. What the gate capture proves, and
+what it does not:
 
 - **OBSERVED `[S-0100]`.** Play on an unauthenticated install opens a **"Minecraft
   required"** modal: "Sign in to a Microsoft account / You need a Microsoft
@@ -51,7 +52,8 @@ blocker plainly and offering the next step.
 | LAUNCH-18 | Missing file at launch → silent auto-repair | state | `packages/app-lib/src/launcher/mod.rs:1035-1053`; `.../download.rs:224-264` | SOURCE |
 | LAUNCH-19 | Pre-launch / wrapper / post-exit hooks | — | `packages/app-lib/src/launcher/hooks.rs:1-93`; `packages/app-lib/src/api/instance/run.rs:106-236` | SOURCE |
 | LAUNCH-20 | Arguments and environment injected into the game | — | `packages/app-lib/src/launcher/args.rs:111-212`, `:330-360`; `.../launcher/mod.rs:1133-1176` | SOURCE |
-| LAUNCH-21 | Live observation of any launch state | — | needs a real Minecraft account and a game that can run | **[ORCH-PENDING]** — never performed |
+| LAUNCH-21 | Live observation of the launch **gate** | dialog | `S-0100` | **OBSERVED** — \"Minecraft required\" modal; the single account gate |
+| LAUNCH-22 | Live observation of post-gate launch states | — | needs a licensed account and a runnable game | **[ORCH-PENDING]** — not performed; no authentication bypass built (OQ-013) |
 
 ---
 

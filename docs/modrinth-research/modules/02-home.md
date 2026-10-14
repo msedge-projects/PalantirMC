@@ -30,7 +30,7 @@ accelerator advertised in the UI*, which module 10 recommends adopting.
 | HOME-4 | "Import from launcher" escape hatch | button | `OBSERVED S-0001` | documented |
 | HOME-5 | "Getting started" onboarding checklist | indicator | `OBSERVED S-0001`; `state/onboarding_checklist.rs` | documented |
 | HOME-6 | News feed | list | `OBSERVED S-0001` | partial |
-| HOME-7 | Populated state | container | `SOURCE WelcomeScreen.vue` | partial |
+| HOME-7 | Populated state | container | `OBSERVED S-0109, S-0116`; `SOURCE WelcomeScreen.vue` | documented |
 
 ---
 

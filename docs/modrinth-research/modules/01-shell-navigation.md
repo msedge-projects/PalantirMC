@@ -61,28 +61,28 @@ the capture.
 | NAV-01 | Titlebar shell / drag region | region | `App.vue:2393` | SOURCE |
 | NAV-02 | Brand mark | indicator | `App.vue:2395` | SOURCE |
 | NAV-03 | Back / forward | button | `App.vue:2397-2420` | SOURCE + `[ORCH-PENDING]` |
-| NAV-04 | Breadcrumb trail | indicator | `Breadcrumbs.vue:18-56` | SOURCE + `[ORCH-PENDING]` |
-| NAV-05 | Connectivity chip | indicator | `AppActionBar.vue:15-18` | SOURCE |
-| NAV-06 | Running-instance pill | indicator | `AppActionBar.vue:20-120` | SOURCE |
+| NAV-04 | Breadcrumb trail | indicator | `Breadcrumbs.vue:18-56` | `OBSERVED S-0099, S-0119` + SOURCE |
+| NAV-05 | Connectivity chip | indicator | `AppActionBar.vue:15-18` | `OBSERVED S-0001, S-0093` + SOURCE |
+| NAV-06 | Running-instance pill | indicator | `AppActionBar.vue:20-120` | `OBSERVED S-0001, S-0099` + SOURCE |
 | NAV-07 | App-update pill | button | `app-update-button/index.vue:3-22` | SOURCE |
-| NAV-08 | Download manager bar | indicator | `download-manager/index.vue:41-48` | SOURCE |
+| NAV-08 | Download manager bar | indicator | `download-manager/index.vue:41-48` | `OBSERVED S-0097, S-0125` + SOURCE |
 | NAV-09 | Sidebar toggle | button | `App.vue:2425-2434` | SOURCE |
 | NAV-10 | Window controls | button | `WindowControls.vue:9-33` | SOURCE + `[ORCH-PENDING]` |
-| NAV-11 | Rail — Home | tab | `App.vue:2264-2274` | SOURCE |
-| NAV-12 | Rail — Discover content | tab | `App.vue:2275-2284` | SOURCE |
-| NAV-13 | Rail — Skin selector | tab | `App.vue:2285-2291` | SOURCE |
-| NAV-14 | Rail — Screenshots | tab | `App.vue:2292-2298` | SOURCE |
-| NAV-15 | Rail — Hosting | tab | `App.vue:2299-2310` | SOURCE |
-| NAV-16 | Rail — quick instance switcher | region | `QuickInstanceSwitcher.vue:292-360` | SOURCE |
-| NAV-17 | Rail — Create instance | button | `App.vue:2311-2321` | SOURCE |
-| NAV-18 | Rail — Settings | button | `App.vue:2322-2327` | SOURCE |
-| NAV-19 | Rail — account menu | button | `App.vue:2328-2391` | SOURCE |
+| NAV-11 | Rail — Home | tab | `App.vue:2264-2274` | `OBSERVED S-0093` + SOURCE |
+| NAV-12 | Rail — Discover content | tab | `App.vue:2275-2284` | `OBSERVED S-0003, S-0114` + SOURCE |
+| NAV-13 | Rail — Skin selector | tab | `App.vue:2285-2291` | `OBSERVED S-0004` + SOURCE |
+| NAV-14 | Rail — Screenshots | tab | `App.vue:2292-2298` | `OBSERVED S-0005` + SOURCE |
+| NAV-15 | Rail — Hosting | tab | `App.vue:2299-2310` | `OBSERVED S-0006` + SOURCE |
+| NAV-16 | Rail — quick instance switcher | region | `QuickInstanceSwitcher.vue:292-360` | `OBSERVED S-0116` + SOURCE |
+| NAV-17 | Rail — Create instance | button | `App.vue:2311-2321` | `OBSERVED S-0093, S-0094` + SOURCE |
+| NAV-18 | Rail — Settings | button | `App.vue:2322-2327` | `OBSERVED S-0008` + SOURCE |
+| NAV-19 | Rail — account menu | button | `App.vue:2328-2391` | SOURCE + `[ORCH-PENDING]` |
 | NAV-20 | Search entry points | region | `browse-tab/layout.vue:49-53` | SOURCE + `[ORCH-PENDING]` |
-| NAV-21 | Shortcut — `N` quick create | shortcut | `WelcomeScreen.vue:50-68` | SOURCE |
+| NAV-21 | Shortcut — `N` quick create | shortcut | `WelcomeScreen.vue:50-68` | `OBSERVED S-0094` + SOURCE |
 | NAV-22 | Shortcut — macOS menu accelerators | shortcut | `macos/menu.rs:37-46` | SOURCE |
 | NAV-23 | Shortcut — menu keyboard model | shortcut | `button-menu.ts:109-182` | SOURCE |
-| NAV-24 | Notification surfaces | region | `App.vue:2588-2589` | SOURCE |
-| NAV-25 | Window size and state | region | `tauri.conf.json:73-89` | SOURCE |
+| NAV-24 | Notification surfaces | region | `App.vue:2588-2589` | `OBSERVED S-0015` + SOURCE |
+| NAV-25 | Window size and state | region | `tauri.conf.json:73-89` | `OBSERVED` (1280×800 at 1100×700 floor) + SOURCE |
 | NAV-26 | Close behaviour, no tray | region | `main.rs:347-457` | SOURCE + `[ORCH-PENDING]` |
 | NAV-27 | Native decorations toggle | region | `App.vue:819-823` | SOURCE + `[ORCH-PENDING]` |
 | NAV-28 | Drag-and-drop targets | region | `file-drop.ts:23-62` | SOURCE + `[ORCH-PENDING]` |
