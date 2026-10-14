@@ -166,7 +166,7 @@ no longer exposes** (`retro`).
 
 ## 3 — The data model — `data-model.md`
 
-`~/.local/share/ModrinthApp/` on Linux: `app.db` (SQLite, **59 tables**, 49
+`~/.local/share/ModrinthApp/` on Linux: `app.db` (SQLite, **54 tables**, 49
 migrations), `profiles/`, a **content store** (`store/`, `store_operations`,
 `store_blobs`, `store_retained_refs`) with staging, per-session timestamped logs,
 and webview-managed cache that is disposable.

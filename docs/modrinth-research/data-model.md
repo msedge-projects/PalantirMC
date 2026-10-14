@@ -51,7 +51,8 @@ Two things an implementer should copy:
 
 ## 2 — `app.db`
 
-`OBSERVED`: **59 tables**, 49 applied migrations, 6.4 MB on a fresh install.
+`OBSERVED`: **54 tables** (plus 5 triggers and 95 indexes), 49 applied migrations,
+6.4 MB on a fresh install.
 
 ### The tables that matter
 
@@ -77,6 +78,11 @@ Two things an implementer should copy:
 | `joined`/`join_log` | 0 | joined servers |
 | `synced_game_option_*` (5 tables) | 0 | Minecraft game options, synced |
 | `synced_hotbar_state` | 0 | synced hotbars |
+
+The `0`s are the **fresh-install** state the first pass read. After the second pass
+created two instances, the same tables read `instances` 2, `instance_groups` 1,
+`instance_content_sets` 2, `instance_content_entries` 53, `instance_files` 53,
+`instance_launch_overrides` 2. §4 below gives the columns and a live row.
 
 `SOURCE packages/app-lib/src/state/settings.rs:112` for the settings table;
 the instance/content tables are the `instance_content_*` family in the same
