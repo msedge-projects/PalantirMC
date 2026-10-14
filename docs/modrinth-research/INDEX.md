@@ -11,9 +11,11 @@ the master coverage matrix, and how to read the evidence.
 - **Direction:** Modrinth's **UX, not its UI**. These docs describe behaviour,
   information architecture, flow and design intent. They never propose pixel
   copies, and no upstream code or asset was taken (see `sources.md`).
-- **State:** two passes. The first covered the shell, Browse and settings; the
+- **State:** three passes. The first covered the shell, Browse and settings; the
   second unlocked and observed the instance / install / launch slice (see
-  `RUNLOG.md`, OQ-012). 116 screenshots, `S-0001`…`S-0126`.
+  `RUNLOG.md`, OQ-012); the third closed the shell / filter / sign-in / offline
+  items and ran a window manager plus a genuine-offline test. 134 screenshots,
+  `S-0001`…`S-0155`.
 
 ---
 
@@ -237,6 +239,28 @@ in the module named in the last column.
 | LAUNCH-01 | Launch | "Minecraft required" gate (the only account gate) | documented | OBSERVED | S-0100 | 07,08 |
 | LAUNCH-02 | Launch | Post-gate runtime states (verifying→playing→crashed) | absent | SOURCE only — not launched (OQ-013) | — | 08 |
 
+### Third-pass additions (2026-10-14, later) — the remaining shell / filter / offline items
+
+| ID | Surface | Item | Status | Evidence | Screenshots | Module |
+| --- | --- | --- | --- | --- | --- | --- |
+| NAV-03 | Shell | Back / forward, disabled→enabled | documented | OBSERVED | S-0127,S-0129 | 01 |
+| NAV-10 | Shell | Window controls (maximize) | documented | OBSERVED (WM) | S-0134 | 01 |
+| NAV-19 | Shell | Rail account control → sign-in modal | documented | OBSERVED | S-0142 | 01,07 |
+| NAV-20 | Shell | Search entry point | documented | OBSERVED | S-0144 | 01,03 |
+| NAV-26 | Shell | Close behaviour — exits, no tray | documented | OBSERVED (WM) | — | 01 |
+| NAV-27 | Shell | Native decorations toggle | documented | OBSERVED | S-0149,S-0150 | 01,06 |
+| NAV-28 | Shell | Drag-and-drop targets | absent | SOURCE only — no drag source | — | 01 |
+| BR-41 | Browse | Photosensitivity warning modal | documented | OBSERVED | S-0141 | 03,10 |
+| BR-42 | Browse | Project-card right-click menu | documented | OBSERVED | S-0130 | 03 |
+| BR-43 | Browse | Filter sidebar inventory | documented | OBSERVED | S-0131,S-0135,S-0139 | 03,06 |
+| BR-44 | Browse | Search debounce + applied query | documented | OBSERVED | S-0144 | 03 |
+| INST-14 | Instance | Populated Worlds list | documented | OBSERVED | S-0145 | 05 |
+| INST-16 | Instance | Edit world dialog | documented | OBSERVED | S-0155 | 05 |
+| INST-17 | Instance | Export world | **absent** | no such action exists | S-0146 | 05 |
+| AUTH-17 | Accounts | Modrinth sign-in modal (unauthenticated) | documented | OBSERVED | S-0142 | 07 |
+| XC-11b | Cross-cutting | Genuine offline states (`unshare -n`) | documented | OBSERVED | S-0151,S-0152 | 02,08,10 |
+| XC-12 | Cross-cutting | Window floor 1100×700 (no narrow layout) | documented | OBSERVED | S-0147 | 01,10 |
+
 
 > Settings, Accounts, Updates and Cross-cutting keep their per-item detail in
 > their own modules (their tables are hundreds of rows); Browse detail, Library,
@@ -276,3 +300,18 @@ Stated up front so nobody reads more into it than is there.
    unauthenticated install shows the "Minecraft required" modal `[S-0100]` — the
    only account gate in the whole app. The Play state machine beyond it is
    `SOURCE` only; no authentication bypass was built (OQ-013).
+8. **Drag-and-drop could not be exercised.** The drop targets are documented from
+   source (`file-drop.ts`) only: canvas-level Xdnd cannot be synthesised here (no
+   drag source, and `python-xlib` is absent). This is the one shell item left
+   genuinely unobserved (`NAV-28`).
+9. **Window controls, close behaviour and native decorations were observed only
+   with a window manager running.** Under a bare Xvfb those controls are inert, so
+   `S-0134` (maximize), the close test (`NAV-26`) and `S-0149`/`S-0150` (native
+   decorations) were captured on a second environment mode (openbox on the private
+   display). See `MANIFEST.md` "How to read the frames".
+10. **`SET-66` (the app self-update "Downloading v…" footer) is unobserved** by
+    construction: it needs a newer release to exist, and 0.21.9 is the newest tag.
+11. **The data model is settled except for an exhaustive nested-field dump.**
+    Instances are SQLite tables, `instance_launch_overrides.overrides` is SQLite
+    JSONB (decoded), and the only residual is a field-by-field expansion of every
+    nested type. See `data-model.md` §4.

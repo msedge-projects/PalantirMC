@@ -21,6 +21,22 @@ Two things this pass adds:
   not a user-visible state — it is the `navigator.onLine` bug; see OQ-004 and
   OQ-012. No settings row controls it.
 
+**Third observation pass (2026-10-14, later).** Two additions:
+
+- **`native_decorations` is a real setting with no Settings row** (`SET-…`;
+  `settings.rs:20`). It is applied at startup — `App.vue:819-823` calls
+  `setDecorations(native_decorations)` on every non-macOS platform — but no locale
+  string exists for it in either locale file, so it is only reachable by editing
+  the DB/config, not through the UI. Verified by flipping the row and restarting:
+  with `true` the app hides its **own** window controls and the OS draws the frame
+  `[S-0149 S-0150]`; with `false` the app draws its own and the OS frame is gone
+  (every 1280×800 capture). This is the closest thing to a "use native window
+  chrome" preference in the app, and it is config-only.
+- **`SET-66` (the "Downloading v{version}" modal footer) remains unobserved** —
+  it only appears when the app self-update has a **newer release to fetch**, and
+  0.21.9 is the newest tag, so it cannot be provoked without publishing a decoy
+  release. Documented from source only.
+
 **Headline facts, up front, because they change everything downstream:**
 
 1. **There is no settings JSON file.** At v0.21.9 settings live in a **SQLite

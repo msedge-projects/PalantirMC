@@ -20,6 +20,27 @@ modal — and the Modrinth-account features (Sharing, Hosting, friends) stay hid
 or empty until Modrinth sign-in, as source predicted. No credential of any kind
 was created or used (OQ-013).
 
+## Third observation pass (2026-10-14, later)
+
+The Modrinth sign-in **initiation** is now `OBSERVED` `[S-0142]`. Activating the
+rail's bottom control — whose tooltip is **"Sign into Modrinth"** — opens the
+shared modal, `AUTH-1`:
+
+- Title **"Signing in"**; heading **"Continue in your browser"**.
+- Body: *"A new tab opened to sign in. Complete the sign in there, then return to
+  the app."* with a spinner and **"Waiting for browser confirmation…"**.
+- Footer: **Cancel**, **Open browser again**, and *"Having trouble signing in?
+  Get support"*.
+
+So the Modrinth flow is a **browser (authorization-code) handoff, not a device-code
+prompt**, and the app sits in a polling "waiting" state until the browser replies —
+matching the `auth_level` state machine (`AUTH-2`). The modal **was not completed**:
+it was captured and then cancelled. `AUTH-15` therefore stays `[ORCH-PENDING]` for
+the *completed* flow (what the app looks like after the redirect, and token
+storage/expiry), which still needs a real account the mission forbids creating.
+The Minecraft side has no equivalent modal to observe unauthenticated — its only
+surfaced state is the launch gate `[S-0100]`.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |
@@ -38,8 +59,9 @@ was created or used (OQ-013).
 | AUTH-12 | Skins and capes (scope note) | page | `packages/app-lib/src/api/minecraft_skins.rs:1` | SOURCE |
 | AUTH-13 | Account-gated surfaces | — | see "Surfaces that need an account" | SOURCE |
 | AUTH-14 | Friends presence channel | indicator | `packages/app-lib/src/state/friends.rs`, `apps/app-frontend/src/components/ui/friends/FriendsList.vue:345` | SOURCE |
-| AUTH-15 | Live observation of the sign-in flows | — | requires a real Microsoft / Modrinth account | **[ORCH-PENDING]** — never performed; the brief forbids creating or using one |
+| AUTH-15 | Live observation of the sign-in flows | — | requires a real Microsoft / Modrinth account | **[ORCH-PENDING]** for completion; the **initiation** is now `OBSERVED` `S-0142` |
 | AUTH-16 | The account **gate** (launch-time, not browse-time) | dialog | `S-0100` | **OBSERVED** — creating/installing/configuring needs no account; only Play does |
+| AUTH-17 | Modrinth sign-in modal (unauthenticated) | dialog | `OBSERVED S-0142` | documented |
 
 ---
 

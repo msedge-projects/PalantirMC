@@ -27,6 +27,30 @@ should read before writing any UI, because it decides how everything else feels.
   with phase + throughput, an `Installing…` button on the entity, and a `Tasks`
   entry when done. No modal spinner; no blocking dialog. Worth mirroring.
 
+## Third observation pass (2026-10-14, later)
+
+- **Genuine offline is the missing half of `XC-11`.** With no network at all
+  (`unshare -n`) the chip is finally *honest*, and the app degrades in three
+  distinct, well-mannered ways `[S-0151 S-0152]`: a titlebar **"Offline"** chip, a
+  persistent amber banner **"Cannot reach authentication servers — … Check your
+  internet connection and try again later."**, and a per-surface empty state
+  (**"You are currently offline. Connect to the internet to browse Modrinth!"** in
+  Browse; a blank News panel on Home). Local data — the library, the instances —
+  keeps rendering, so the app does not blank out when the network goes. That is the
+  pattern to copy: **name the outage once, per surface, and keep the local model on
+  screen.**
+- **Window-management is environment, not app.** A third pass ran a window manager
+  (openbox) on the private display, which is the only way to exercise maximize
+  (`S-0134`), the close behaviour (`NAV-26`: closes the app; no tray) and native
+  decorations (`S-0149 S-0150`). Without a WM those controls are inert — worth
+  knowing when driving this app headless, and worth noting in `sources.md`.
+- **A negative finding for the gap list:** the world row menu is Edit / Open
+  folder / Create shortcut / Delete — **no Export** (`INST-17`). Docs must not
+  imply parity with a feature the reference app lacks.
+- **The floor is the design.** 840×600 clamps to **1100×700** `[S-0147]`; there is
+  no compact layout, so "responsive" for this app means "it still fits at 1100 px",
+  not "it reflows".
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

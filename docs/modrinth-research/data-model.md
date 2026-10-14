@@ -197,7 +197,7 @@ real instances (`OBSERVED`; the first pass had none, which is why this was
 | `instance_content_sets` | 11 | `id` (`content-set:<uuid>`), `instance_id`, `name`, `source_kind`, `status`, `game_version`, `protocol_version`, `loader`, `loader_version` | one row per game-version + loader pair, so an instance can carry more than one |
 | `instance_content_entries` | 13 | `id`, `instance_id`, `content_set_id`, `file_id`, `project_type`, `project_id`, `version_id`, `source_kind`, `server_requirement`, `client_requirement`, `enabled`, `added_at`, `modified_at` | installed content, keyed by **Modrinth project/version id**, with per-side requirement flags |
 | `instance_files` | 10 | `id`, `instance_id`, `relative_path`, `file_name`, `enabled`, `sha1`, `size`, `missing`, `added_at`, `modified_at` | the on-disk file index (path + sha1) |
-| `instance_launch_overrides` | 2 | `instance_id`, `overrides` (msgpack blob) | per-instance launch overrides; the blob also carries `hooks` and the `visible_tabs` map |
+| `instance_launch_overrides` | 2 | `instance_id`, `overrides` (**SQLite JSONB**) | per-instance launch overrides; decoded it is `InstanceLaunchOverridesData` with `hooks` and the `visible_tabs` map |
 | `instance_icon_configs` | 3 | `instance_id`, `background` (JSON gradient), `symbol` | the icon builder's state |
 | `instance_groups` / `instance_group_memberships` | 3 / 2 | `id`,`name`,`display_order`; `instance_id`,`group_id` | `Favorites` is seeded as `group:favorites` |
 | `instance_links` | 19 | `instance_id`, `link_kind`, then Modrinth / server / shared / imported columns | one wide table unifying how each instance is linked outward |
@@ -214,10 +214,36 @@ Other instance-scoped tables present on the same install: `instance_servers`,
 `processes`, `screenshots`, `attached_world_data`, `join_log`, plus the account
 tables `minecraft_users`, `modrinth_users`, `minecraft_device_tokens`.
 
-`[ORCH-PENDING]` (smaller now) — the exact `instance_types.rs` `serde` field names
-and the msgpack layout inside `overrides` were not decoded field by field. Read
-`instance_types.rs` before writing the serializer, but treat the table schema
-above as the storage contract: the instance model is relational, not a document.
+**The `overrides` column is JSONB, and it decodes.** The column type is
+`JSONB` — SQLite's binary JSON (SQLite ≥ 3.45; this install is 3.45.1), not
+msgpack and not text. It reads as opaque bytes until you ask SQLite to render it:
+`select json(overrides)` (or `json_extract(overrides,'$.hooks')`, both confirmed
+working). A fresh instance decodes to
+
+```json
+{"hooks":{"pre_launch":null,"wrapper":null,"post_exit":null},
+ "visible_tabs":{"files":true,"worlds":true,"screenshots":false}}
+```
+
+which is exactly `InstanceLaunchOverridesData`
+(`packages/app-lib/src/state/instances/model/launch.rs:58`): `hooks` (`Hooks`,
+`settings.rs:487` — `pre_launch`/`wrapper`/`post_exit`, each a command string) and
+`visible_tabs` (`InstanceTabVisibility` — `files`/`worlds`/`screenshots`), whose
+default is `files: true, worlds: true, screenshots: false` (`launch.rs:13-21`).
+That default is the source reason a fresh instance shows no Screenshots tab. All
+the `Option` fields (`java_path`, `extra_launch_args`, `custom_env_vars`,
+`memory`, `force_fullscreen`, `game_resolution`) are omitted when unset
+(`skip_serializing_if = "Option::is_none"`), which is why they are absent above.
+
+The `serde` names for the enums that appear as plain strings in these tables:
+`ModLoader` = `vanilla|forge|fabric|quilt|neoforge` (`instance_types.rs:80`,
+`neoforge` renders as `neo` on meta); `ProjectType` =
+`mod|datapack|resourcepack|shaderpack` (alias `shader`, `:144`); and
+`InstanceInstallStage` = `installed|minecraft_installing|pack_installed|pack_installing|not_installed`
+(`:7`). The only remaining `[ORCH-PENDING]` in this section is a fully exhaustive
+field-by-field dump of every nested type — the storage contract is settled and
+the model is relational (with JSONB only for this one ragged sub-structure), not
+a document.
 
 ---
 

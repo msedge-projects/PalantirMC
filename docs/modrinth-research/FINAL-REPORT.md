@@ -11,7 +11,7 @@
 | Binary | official `.deb` from the project's GitHub releases, SHA-256 `7c9fa6d0…8198e26` |
 | Source | `modrinth/code` pinned to tag `v0.21.9`, commit `6ebd75b6` — **the same build as the binary** |
 | Method | the app running on a private Xvfb display, driven by observed controls only (OCR → click what was read, never an assumed coordinate), plus source mining |
-| Evidence | 116 screenshots (S-0001…S-0126), 10 modules, 4 reference docs, 13 open questions |
+| Evidence | 134 screenshots (S-0001…S-0155), 10 modules, 4 reference docs, 14 open questions |
 
 Source and binary are pinned to one tag, so the mission's "version drift" branch
 never came into play: the UI and the code agree. The in-app footer reads
@@ -88,40 +88,52 @@ bytes.
 
 ## What could not be verified, and why
 
-- **Sign-in surfaces** — no account was created or used (mission rule). Documented
-  unauthenticated plus `SOURCE`; a 14-gate list of account-gated surfaces is in
-  `modules/07`.
+- **The completed sign-in flows** — no account was created or used (mission rule).
+  The Modrinth sign-in **modal** is now observed `[S-0142]`, and the rest is
+  documented unauthenticated plus `SOURCE`; a 14-gate list of account-gated
+  surfaces is in `modules/07`. `AUTH-15` stays open for the post-redirect state.
 - **Post-launch runtime only** — the Play state machine *after* the account gate
   (verifying → playing → crashed), exit handling and post-exit behaviour. The gate
   itself is now observed `[S-0100]`, and everything before it is observed too.
   Running the game needs a licensed account, and no authentication bypass was built
   (OQ-013). This is the one honest residual gap, and it is source-documented.
-- **A narrow-window layout** — does not exist; the window's floor is 1100×700.
-- **Photosensitivity modal and project-card right-click menu** — still `SOURCE`
-  only (`BR-41`, `BR-42`).
-- **The 15% re-verification pass — now run** (2026-10-14): 12 claims spot-checked
+- **A narrow-window layout** — does not exist; the window's floor is **1100×700**
+  `[S-0147]` (a request for 840×600 clamps to it).
+- **Drag-and-drop targets** (`NAV-28`) — source-only; canvas Xdnd cannot be
+  synthesised here (no drag source, `python-xlib` absent).
+- **The app self-update "Downloading v…" footer** (`SET-66`) — needs a newer
+  release than 0.21.9, which does not exist, so it is source-only by construction.
+- **The 15% re-verification pass — run** (2026-10-14): 12 claims spot-checked
   independently, 10 pass, 1 partial (line numbers drifted, content correct), and
-  **1 corrected error** (the settings count, below). Single-display `OBSERVED`
-  claims remain first-hand, now partly replicated.
+  **1 corrected error** (the settings count); a later data-model check caught a
+  second (the DB table count). Both fixed. Single-display `OBSERVED` claims remain
+  first-hand, now partly replicated.
 
-## The second pass (2026-10-14), in one line
+## The second and third passes (2026-10-14), in one line each
 
-The first pass could not create an instance because the app's missing connectivity
-made its own "Offline" guess true and disabled the button. A one-line environment
-fix — `GIO_USE_NETWORK_MONITOR` (OQ-012) — made the webview report online, which
-unlocked the entire instance / install / launch slice: **28 new screenshots,
-`S-0093`…`S-0126`**, and turned the library, instance detail, content-install
-pipeline, task manager and launch gate from `SOURCE` into `OBSERVED`.
+**Second pass:** the first pass could not create an instance because the app's
+missing connectivity made its own "Offline" guess true and disabled the button. A
+one-line environment fix — `GIO_USE_NETWORK_MONITOR` (OQ-012) — made the webview
+report online, unlocking the entire instance / install / launch slice: **28 new
+screenshots, `S-0093`…`S-0126`**.
+
+**Third pass** (this run, "do everything in the .md"): closed the remaining shell /
+filter / sign-in / offline items — with a **window manager** so window controls and
+native decorations became real, and under **`unshare -n`** for a genuine offline
+state — settling `BR-41/42`, `NAV-03/10/19/20/26/27`, `INST-14/16`, `AUTH-17` and
+the `data-model` JSONB question, and **correcting `INST-17` to absent**. **18 kept
+screenshots, `S-0127`…`S-0155`.**
 
 ## Look at these first
 
 `S-0003` (Browse with live data — the whole card/facet/pagination model),
-`S-0008` (the Settings modal and its complete section list), `S-0001` (first-run
-Home), `S-0093` (the same Home with the offline bug gone), `S-0094` (the
-create-instance dialog), `S-0100` (the launch gate — the one account gate),
-`S-0107` (per-instance sync overrides) and `S-0125` (the task manager). Then
-`modules/06` for settings, `modules/05` for the instance surface and `modules/08`
-for error copy.
+`S-0139` (the complete filter inventory, including Advanced exclusions), `S-0008`
+(the Settings modal and its section list), `S-0001` (first-run Home) and `S-0093`
+(the same Home with the offline bug gone), `S-0094` (the create-instance dialog),
+`S-0100` (the launch gate — the one account gate), `S-0142` (the Modrinth sign-in
+modal), `S-0107` (per-instance sync overrides), `S-0125` (the task manager),
+`S-0152` (genuine offline) and `S-0147` (the 1100×700 floor). Then `modules/06` for
+settings, `modules/05` for the instance surface and `modules/08` for error copy.
 
 ## Deliverables
 

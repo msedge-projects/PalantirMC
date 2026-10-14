@@ -17,6 +17,8 @@ Usage:
     mrdrive.py rightclick "phrase" [n]
     mrdrive.py hover "phrase" [n]
     mrdrive.py move X Y             move the pointer (no click)
+    mrdrive.py clickat X Y          left-click a read-off coordinate (green-on-green labels)
+    mrdrive.py rclickat X Y         right-click at a read-off coordinate (context menus)
     mrdrive.py key KEY...           send keys (xdotool names)
     mrdrive.py type TEXT            type text
     mrdrive.py wheel N              scroll N notches (positive = down)
@@ -163,6 +165,7 @@ def main():
     p = sub.add_parser("hover"); p.add_argument("phrase"); p.add_argument("n", nargs="?", type=int, default=1)
     p = sub.add_parser("move"); p.add_argument("x", type=int); p.add_argument("y", type=int)
     p = sub.add_parser("clickat"); p.add_argument("x", type=int); p.add_argument("y", type=int)
+    p = sub.add_parser("rclickat"); p.add_argument("x", type=int); p.add_argument("y", type=int)
     p = sub.add_parser("key"); p.add_argument("keys", nargs="+")
     p = sub.add_parser("type"); p.add_argument("text")
     p = sub.add_parser("wheel"); p.add_argument("n", type=int)
@@ -198,6 +201,12 @@ def main():
         # logged, never guessed.
         run("xdotool", "mousemove", "--window", wid, str(args.x), str(args.y)); time.sleep(0.25)
         run("xdotool", "click", "1"); time.sleep(1.1)
+    elif args.cmd == "rclickat":
+        # Right-click at a coordinate read off a viewed screenshot. Needed for
+        # context menus, which only a button-3 press opens. Coordinates are
+        # window-relative, exactly like clickat.
+        run("xdotool", "mousemove", "--window", wid, str(args.x), str(args.y)); time.sleep(0.25)
+        run("xdotool", "click", "3"); time.sleep(1.1)
     elif args.cmd == "key":
         focus(wid)
         for k in args.keys:

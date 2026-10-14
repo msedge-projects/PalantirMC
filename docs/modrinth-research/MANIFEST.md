@@ -10,7 +10,7 @@ referenced screenshot exists and every shipped screenshot is referenced.
 
 ## Reconciling both directions
 
-- **116 files on disk**, all referenced below.
+- **134 files on disk**, all referenced below.
 - **Retired ids (first pass)** — `S-0010` … `S-0014`. A sweep was run while the
   app was actually on the Hosting tab, so every section click missed and the five
   frames are near-duplicates of `S-0006` (`S-0011`…`S-0014` are byte-identical to
@@ -24,10 +24,22 @@ referenced screenshot exists and every shipped screenshot is referenced.
   before the project page finished navigating), `S-0121` (the Gallery click did
   not leave the Versions tab), `S-0123` (duplicate of `S-0122`). Retired, not
   reused; files deleted. The Gallery tab was re-shot as `S-0126`.
+- **Retired ids (third pass)** — `S-0128` (duplicate of `S-0114`), `S-0132`
+  (duplicate of `S-0131`), `S-0133` (the maximize click was a no-op before a
+  window manager was started), `S-0136` (duplicate of `S-0135`), `S-0137`/`S-0138`
+  (intermediate sidebar states, superseded by `S-0139`), `S-0140` (the modal again
+  at maximized size, superseded by the 1280×800 `S-0141`), `S-0143` (a focused
+  search field, indistinguishable from unfocused), `S-0148` (duplicate of
+  `S-0147`), `S-0153` (the offline `N` test, visually identical to `S-0151`),
+  `S-0154` (duplicate of `S-0127`). Retired, not reused; files deleted.
 - **Referenced but missing**: none.
 - **Second pass** (`S-0093`…`S-0126`) captured the instance / install / launch
   slice the first pass could not reach; see `RUNLOG.md` and OQ-012 for the
   environment fix that unblocked it.
+- **Third pass** (`S-0127`…`S-0155`) closed the remaining shell/filter/sign-in/
+  offline items and ran a **window manager** (openbox) so maximize, native
+  decorations and drag-and-drop became reachable, plus a genuine-offline run under
+  `unshare -n`. See `RUNLOG.md`.
 
 ## The captures
 
@@ -121,6 +133,7 @@ referenced screenshot exists and every shipped screenshot is referenced.
 | S-0090 | S-0090.png | 1280×800 | Post-relaunch create-instance attempts | Clean render restored; rail clicks work, but the create-instance CTA stays inert because of the offline guard. | modules 02, open-questions |
 | S-0091 | S-0091.png | 1280×800 | Post-relaunch create-instance attempts | Clean render restored; rail clicks work, but the create-instance CTA stays inert because of the offline guard. | modules 02, open-questions |
 | S-0092 | S-0092.png | 1280×800 | Post-relaunch create-instance attempts | Clean render restored; rail clicks work, but the create-instance CTA stays inert because of the offline guard. | modules 02, open-questions |
+
 ### Second pass — 2026-10-14 (`S-0093`…`S-0126`)
 
 The instance / install / launch slice, observed after the OQ-012 environment fix.
@@ -156,6 +169,34 @@ The instance / install / launch slice, observed after the OQ-012 environment fix
 | S-0125 | S-0125.png | 1280×800 | Tasks popover | Titlebar download icon opens "Tasks": Complete group, per-task age and type, Clear all. | modules 01, 09 |
 | S-0126 | S-0126.png | 1280×800 | Project page → Gallery | Titled image cards with descriptions and dates. Re-shoot of the retired S-0121. | modules 03 |
 
+### Third pass — 2026-10-14, later (`S-0127`…`S-0155`)
+
+The remaining shell, filter, sign-in and offline surfaces. Captured with a
+window manager present (openbox on the private display), so window controls and
+native decorations could be exercised, and with a genuine no-network run
+(`unshare -n`).
+
+| ID | File | Size | State shown | What to look at | Referenced by |
+| --- | --- | --- | --- | --- | --- |
+| S-0127 | S-0127.png | 1280×800 | Home, populated | Library with two instances; "Jump in" (Fabulously Optimized, Fabric 26.3) above the "Library" grid; the rail's instance switcher shows two icons. | modules 02, 04 |
+| S-0129 | S-0129.png | 1280×800 | Browse → Mods | The **back** arrow is enabled after navigating in (contrast `S-0127`, where it is disabled on Home); project-type tabs, search, facets. | modules 01, 03 |
+| S-0130 | S-0130.png | 1280×800 | Project card right-click | `BR-42`: a two-item context menu, "Open in Modrinth" and "Copy link". | modules 03 |
+| S-0131 | S-0131.png | 1280×800 | Browse filter sidebar, scrolled | The Category list is long (Equipment … World Generation); Environment and License follow. | modules 03, 06 |
+| S-0134 | S-0134.png | 1920×1080 | Window maximized | `NAV-10`: with a window manager, maximize fills the screen. | modules 01 |
+| S-0135 | S-0135.png | 1280×800 | Browse filter sidebar, scrolled further | Environment (Client / Server) and License (Open source) groups. | modules 03, 06 |
+| S-0139 | S-0139.png | 1920×1080 | Advanced exclusions expanded | The **full filter inventory** — Game version / Loader / Category / Environment / License / Depends on / Advanced exclusions — with the persistence note and every disclosure option, including "Photosensitivity triggers". | modules 03, 06, 10 |
+| S-0141 | S-0141.png | 1280×800 | Photosensitivity warning modal | `BR-41`: "Results are not guaranteed to be safe", the self-assigned-labels copy, "Don't show this again", "I understand". | modules 03, 10 |
+| S-0142 | S-0142.png | 1280×800 | Modrinth sign-in modal | `AUTH`: "Signing in / Continue in your browser", "Waiting for browser confirmation…", Cancel / Open browser again, "Having trouble signing in? Get support". | modules 07 |
+| S-0144 | S-0144.png | 1280×800 | Search applied | Typing "sodium" debounces and returns results with pagination. | modules 03 |
+| S-0145 | S-0145.png | 1280×800 | Instance → Worlds, populated | `INST-14`: a world row (name, Singleplayer, age, "Creative mode") with Play and a kebab; "Search 1 worlds", Add server / Browse servers, Refresh. | modules 05 |
+| S-0146 | S-0146.png | 1280×800 | World row kebab menu | **Edit / Open folder / Create shortcut / Delete** — there is **no Export** (`INST-17`). | modules 05 |
+| S-0147 | S-0147.png | 1100×700 | Window at its floor | Requesting 840×600 clamped to **1100×700**: no narrow layout exists, and at the floor nothing collapses. | modules 01, 10 |
+| S-0149 | S-0149.png | 1280×800 | `native_decorations = true` | `NAV-27`: the app hides its **own** – ▢ × controls (the top-right is empty), expecting the OS to draw the frame. | modules 01, 06 |
+| S-0150 | S-0150.png | 1920×1080 (screen) | `native_decorations = true`, whole screen | The OS (openbox) titlebar "Modrinth App" with its own min/max/close, wrapped around the app's client area. | modules 01, 06 |
+| S-0151 | S-0151.png | 1280×800 | Home, genuinely offline (`unshare -n`) | The "Offline" chip is now **correct**; a "Cannot reach authentication servers" banner; the News feed is blank; local instances still listed. | modules 02, 06, 08, 10 |
+| S-0152 | S-0152.png | 1280×800 | Browse, genuinely offline | "You are currently offline. Connect to the internet to browse Modrinth!", plus the auth-servers banner and a persisted "Photosensitivity triggers" facet chip. | modules 03, 08, 10 |
+| S-0155 | S-0155.png | 1280×800 | Edit world modal | `INST-16`: a Name field, a "Hide from the Home page" checkbox, Save changes / Reset icon / Cancel. | modules 05 |
+
 ## How to read the frames
 
 - Frames of one section are **consecutive scroll positions, not a stitch**. A
@@ -166,6 +207,14 @@ The instance / install / launch slice, observed after the OQ-012 environment fix
 - The titlebar "Offline" chip in **every first-pass frame (`S-0001`…`S-0092`)** is
   **wrong** — the app was online throughout (`S-0003` proves it), and worse, the
   same flag disabled the "Create an instance" button and the `N` shortcut. It is
-  **gone from the second pass onward (`S-0093`…)** after the `GIO_USE_NETWORK_MONITOR`
-  fix. See OQ-004 and OQ-012. Do not read the chip as an offline state, and do
-  not read the inert button as an absent feature.
+  **gone from `S-0093`…`S-0150`** after the `GIO_USE_NETWORK_MONITOR` fix, and it
+  is **correct** in the genuine-offline frames `S-0151`/`S-0152` (`unshare -n`).
+  See OQ-004 and OQ-012. Do not read the chip as an offline state, and do not
+  read the inert button as an absent feature.
+- **The third pass mixes two environment modes.** Frames through `S-0148` were
+  captured under a bare Xvfb with no window manager, so the app's own window
+  controls do nothing and maximize is a no-op. From `S-0149` on a window manager
+  (openbox) is running, which is what makes `S-0149`/`S-0150` (native decorations)
+  meaningful; that mode is also what let the close behaviour (`NAV-26`) be tested.
+- Frames captured to the **whole screen** rather than just the window are noted as
+  such (`S-0150`), because only a screen capture includes the WM-drawn frame.

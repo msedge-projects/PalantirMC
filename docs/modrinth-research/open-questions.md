@@ -502,3 +502,53 @@ thing the blueprint describes.
 **Scope of the gap that remains.** Only genuine in-game runtime: the Play state
 machine's later phases, crash/exit handling, and post-exit behaviour. Everything
 up to and including the "Minecraft required" gate is now `OBSERVED` `[S-0100]`.
+
+---
+
+## OQ-014 — The third pass: a window manager, genuine offline, and three settled facts
+
+**Question.** The remaining shell items (`NAV-03/10/19/26/27/28`, `BR-41/42`,
+`INST-16/17`, `SET-66`, `AUTH-15`) and the instance-format residual needed surfaces
+the first two passes never reached. What was the right way to reach them, and what
+did they settle?
+
+**Decisions, with the alternatives rejected.**
+
+- **Ran a window manager (openbox) on the private display.** Maximize, the close
+  behaviour and native decorations are inert under a bare Xvfb; a WM is the only
+  honest way to observe them. Rejected: documenting them from source only (they are
+  one command away from being real) and leaving the display bare (it would have
+  made three rows permanently unobservable). The mode change is recorded in
+  `sources.md` and `MANIFEST.md`, and the frames are labelled.
+- **Provoked genuine offline with `unshare -n`**, not by faking the flag. The whole
+  point of `XC-11` is that a *guessed* connectivity state must not be trusted; only
+  a real empty network namespace shows what the app does when it is truly offline.
+  Rejected: unplugging/reproducing the false positive again (that is the bug, not
+  the behaviour) and firewall rules (heavier and equally convincing).
+- **Synthesized a world to reach the Worlds tab.** The worlds surface needs a save
+  to render, and hand-building a minimal gzipped-NBT `level.dat` is within the
+  research remit. Rejected: skipping the surface (it left `INST-16`/`INST-17`
+  open) and downloading a real world pack (unnecessary network dependence).
+- **Captured the Modrinth sign-in modal but did not complete it.** The modal's
+  initiation is observable unauthenticated; completing it needs an account the
+  mission forbids. Rejected: creating a throwaway account (rule §1.4).
+
+**Facts settled, three of which correct earlier output.**
+
+1. **`INST-17` (Export world) does not exist.** The world kebab menu is Edit /
+   Open folder / Create shortcut / Delete, and no export string exists in the
+   locales. The first pass inferred it from `worlds/index.vue:23`, which merely
+   uses `WorldItem`. Marked **absent**.
+2. **`instance_launch_overrides.overrides` is SQLite JSONB**, not msgpack and not
+   text; it decodes to `InstanceLaunchOverridesData` (hooks + `visible_tabs`, with
+   `screenshots: false` by default — the reason a fresh instance has no
+   Screenshots tab). The earlier "msgpack" label is corrected in `data-model.md`;
+   the JSONB claim is from `json(overrides)` and `json_extract(...)` returning
+   parsed values on the live row.
+3. **`native_decorations` is config-only** — a real setting applied at startup with
+   no Settings row and no locale string; toggled via the DB to observe it.
+
+**Still open after the third pass.** `NAV-28` drag-and-drop (no drag source; Xdnd
+cannot be synthesized here), `SET-66` (needs a newer release), the completed
+sign-in flows (`AUTH-15`) and post-gate launch runtime (`LAUNCH-22`). All are
+recorded as limits, not guesses.

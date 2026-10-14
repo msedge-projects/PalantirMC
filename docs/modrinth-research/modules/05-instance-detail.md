@@ -95,10 +95,19 @@ the correct default: shared-by-default, opt out per instance.
 
 **Supersedes these `[ORCH-PENDING]` markers above:** the tab-bar rendering, the
 Files/Worlds/Logs/Share bodies, the instance Settings General/Installation/Sync
-overrides pages, the per-instance override toggles, and Repair. **Still
-`[ORCH-PENDING]`:** `INST-17` export-world's rendered affordance (no world existed
-to export), and tab-bar overflow at very narrow widths (the window floors at
-1100 px; see OQ-002).
+overrides pages, the per-instance override toggles, and Repair.
+
+**Third observation pass (2026-10-14, later)** added a real (synthesized) world so
+the Worlds tab could be seen populated `[S-0145]` and its per-row actions opened
+`[S-0146]`, and the Edit-world dialog captured `[S-0155]` (`INST-16`). That also
+**corrected `INST-17`**: there is no Export-world action. The kebab menu is
+**Edit / Open folder / Create shortcut / Delete**, and no world-export string
+exists in the locales; the first pass inferred an export from a source line that
+merely used `WorldItem`. `INST-17` is therefore **absent**, not pending.
+
+**Still `[ORCH-PENDING]`:** tab-bar overflow at very narrow widths — resolvable
+only if a window manager lets the window go below its 1100 px floor (see OQ-002);
+at the floor nothing collapses `[S-0147]`.
 
 ---
 
@@ -119,10 +128,10 @@ to export), and tab-bar overflow at very narrow widths (the window floors at
 | INST-11 | "Browse content" / "Upload files" (add content in context) | content button | — | n/a | `content-tab/layout.vue:1449` | documented |
 | INST-12 | Per-item overflow menu | content menu | Show file / Copy link / Freeze | per-item `locked` flag | `content/index.vue:1497` | documented |
 | INST-13 | Content update surfacing (`has_update` / `update_version_id`) | content | auto, 10 min throttle | SQLite `content_update_checks` | `layout.vue:242`, `update_check.rs:6` | documented |
-| INST-14 | Worlds list, search, filters | tab | filters empty | none | `worlds/index.vue:24` | documented |
+| INST-14 | Worlds list, search, filters | tab | filters empty | none | `OBSERVED S-0145`; `worlds/index.vue:24` | documented |
 | INST-15 | Play world / play server | button | — | quick-play args | `worlds/index.vue:92`, `:535` | documented |
-| INST-16 | Edit world / delete world | button | — | `level.dat` NAME + folder | `worlds/index.vue:95`, `:510` | documented |
-| INST-17 | Export world (to `.zip`) | button | — | writes `.zip` beside world | `worlds/index.vue:23` (uses `WorldItem`) | [ORCH-PENDING] |
+| INST-16 | Edit world / delete world | button | — | `level.dat` NAME + folder | `OBSERVED S-0155`; `worlds/index.vue:95`, `:510` | documented |
+| INST-17 | Export world (to `.zip`) | button | — | — | **absent** — no export action exists; the world kebab menu is Edit / Open folder / Create shortcut / Delete (`OBSERVED S-0146`), and no world-export string exists in the locales. The first pass inferred it from `worlds/index.vue:23` (which only *uses* `WorldItem`). | **absent** |
 | INST-18 | Open folder (world) | button | — | — | `worlds/index.vue:105` | documented |
 | INST-19 | Add server / Browse servers | button | — | instance synced servers | `worlds/index.vue:39`, `:43` | documented |
 | INST-20 | Desync server | button | server rows only | synced-option off + server removed | `worlds/index.vue:104`, `:504` | documented |
@@ -714,26 +723,28 @@ per-entity mutation endpoint — the list is cheap to refetch.
 
 ---
 
-## INST-17 — Export world
+## INST-17 — Export world — **ABSENT (corrected)**
 
-**Type:** button
+**Type:** — (no such control)
 **Nav path:** `/instance/:id/worlds`
-**Evidence:** [SOURCE apps/app-frontend/src/pages/instance/worlds/index.vue:23] (`WorldItem` list render; the export affordance lives inside `apps/app-frontend/src/components/ui/world/WorldItem.vue`)
+**Evidence:** `OBSERVED S-0146` — the world row's kebab menu is **Edit / Open
+folder / Create shortcut / Delete**, and no export action is offered. No
+world-export string exists anywhere in the locales (`packages/ui` or
+`apps/app-frontend`); the only `export` hits in the world code are JavaScript
+`export` keywords.
 
-**Purpose:** Back up or share a single save without packaging the whole instance.
+**Correction.** The first pass left this `[ORCH-PENDING]` and inferred an export
+from `worlds/index.vue:23`, which merely renders `WorldItem` in a `v-for` and never
+mentions exporting. The third pass created a real singleplayer world and opened
+its row menu, which settles it: the capability is **absent**, not unobserved. An
+implementer who adds save-backup to our launcher is adding a feature Modrinth does
+not have, not closing a parity gap.
 
-**Operation:** [ORCH-PENDING] — the export affordance is rendered inside the shared `WorldItem`
-component (`apps/app-frontend/src/components/ui/world/WorldItem.vue`), which is outside the
-per-instance page tree this slice owns. The orchestrator must open an instance → Worlds, hover a
-singleplayer row, and confirm: (a) the exact label of the action, (b) whether it writes a `.zip`
-and where, and (c) whether it is offered for server rows.
+**Purpose / Operation / Controls / Persistence:** n/a — nothing to operate.
 
-**Controls:** [ORCH-PENDING]
-
-**Persistence:** [ORCH-PENDING]
-
-**Rationale & notes:** Leaving this one open is deliberate — the evidence for the control set does
-not live in the files I was scoped to, and guessing would violate the clean-room rule.
+**Rationale & notes:** Worth recording as a *negative* finding: the docs should
+not imply a capability the reference app lacks, or the gap analysis will show a
+false parity item.
 
 ---
 
@@ -1853,17 +1864,18 @@ copies the global value back into the visible field so the user can see what the
 
 ## Open items requiring the running app
 
-- **INST-17 (Export world)** — `[ORCH-PENDING]`. The affordance lives in
-  `apps/app-frontend/src/components/ui/world/WorldItem.vue`, outside this slice's tree. Orchestrator:
-  open an instance with at least one singleplayer world → Worlds tab → hover/overflow a world row →
-  confirm the action's exact label, whether it writes a `.zip` and to which directory, and whether it
-  appears for server rows.
+- **INST-17 (Export world)** — **resolved: the feature is absent.** The third pass
+  created a real world and opened its row menu `[S-0146]`; the actions are Edit /
+  Open folder / Create shortcut / Delete, with no export. Corrected in the
+  coverage table and in the `INST-17` section above.
 - **Visual layout confirmation** — `[ORCH-PENDING]` for tab-bar overflow behaviour at narrow widths.
   `NavTabs` hides icons below `sm` (`NavTabs.vue:32`) and, when `pageNav` is used, wraps in a
   horizontally scrollable strip (`NavTabs.vue:4`); on the instance page `pageNav` is false, so what
   actually happens when all six tabs exceed the window width could not be determined from source
   alone (the `<nav>` is `w-fit`, so it likely overflows the container without a scroller).
-  Orchestrator: resize the window narrow on an instance with all tabs enabled.
+  Orchestrator: resize the window narrow on an instance with all tabs enabled. **Partly answered:**
+  the window floors at 1100×700 `[S-0147]`, so six tabs never need to overflow before the floor; the
+  sub-`sm` icon-hiding branch is therefore unreachable in the app.
 - **Whether `update_channel` changes are applied retroactively** — `[ORCH-PENDING]`. Source shows a
   watcher that re-runs `initProjects('must_revalidate')` on channel change
   (`content/index.vue:1809`), and the Rust check records `update_channel` per check

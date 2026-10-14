@@ -35,10 +35,29 @@ resolved several shell items the first pass could only mark `[ORCH-PENDING]`:
   ("Fabric 26.3 > Settings", "Discover mods > Sodium", "Fabric 26.3 > Discover
   mods"), which is the mechanism that makes an icon-only rail legible.
 
-Still `[ORCH-PENDING]` and unchanged: back/forward enablement across a deep-link
-cold start, breadcrumb overflow with a very deep trail, the close-to-tray question,
-native-decoration toggle, and drag-and-drop targets — none of which the second pass
-exercised.
+A **third pass** (2026-10-14, later; `RUNLOG.md`) closed most of what the second
+left, and this time with a **window manager** running on the private display for
+the parts that need one:
+
+- **Back / forward** `[S-0127 S-0129]` — confirmed disabled on the first page and
+  enabled once you have navigated in.
+- **Search entry point** `[S-0144]` — the Browse search focuses and debounces.
+- **Account menu** `[S-0142]` — the rail's bottom control is labelled "Sign into
+  Modrinth"; activating it opens the Modrinth sign-in modal (module 07).
+- **Window controls** `[S-0134]` and **close behaviour** — with openbox present,
+  maximize fills the screen and the close control makes the whole app exit: **no
+  close-to-tray and no lingering tray process** (verified by process count, not by
+  pixels). `NAV-27` native decorations `[S-0149 S-0150]`: with
+  `native_decorations = true` the app hides its **own** – ▢ × controls and lets the
+  OS draw the frame.
+- **The floor** `[S-0147]` — requesting 840×600 clamps to **1100×700**; at the
+  floor nothing collapses, which is the whole point of a fixed minimum.
+
+**Still `[ORCH-PENDING]`:** `NAV-28` drag-and-drop targets — canvas-level Xdnd
+cannot be synthesised in this environment (no drag source, and `python-xlib` is
+not installed), so the targets are documented from `file-drop.ts` only. Also
+still pending: back/forward enablement across a deep-link *cold start*, and
+breadcrumb overflow with a very deep trail.
 
 **Coordinate model.** The shell is a CSS grid
 (`App.vue:2651-2660`): row `status` (the titlebar) then row `nav` (the rail),
@@ -60,14 +79,14 @@ the capture.
 | --- | --- | --- | --- | --- |
 | NAV-01 | Titlebar shell / drag region | region | `App.vue:2393` | SOURCE |
 | NAV-02 | Brand mark | indicator | `App.vue:2395` | SOURCE |
-| NAV-03 | Back / forward | button | `App.vue:2397-2420` | SOURCE + `[ORCH-PENDING]` |
+| NAV-03 | Back / forward | button | `App.vue:2397-2420` | `OBSERVED S-0127, S-0129` + SOURCE |
 | NAV-04 | Breadcrumb trail | indicator | `Breadcrumbs.vue:18-56` | `OBSERVED S-0099, S-0119` + SOURCE |
-| NAV-05 | Connectivity chip | indicator | `AppActionBar.vue:15-18` | `OBSERVED S-0001, S-0093` + SOURCE |
+| NAV-05 | Connectivity chip | indicator | `AppActionBar.vue:15-18` | `OBSERVED S-0001, S-0093, S-0151` + SOURCE |
 | NAV-06 | Running-instance pill | indicator | `AppActionBar.vue:20-120` | `OBSERVED S-0001, S-0099` + SOURCE |
 | NAV-07 | App-update pill | button | `app-update-button/index.vue:3-22` | SOURCE |
 | NAV-08 | Download manager bar | indicator | `download-manager/index.vue:41-48` | `OBSERVED S-0097, S-0125` + SOURCE |
 | NAV-09 | Sidebar toggle | button | `App.vue:2425-2434` | SOURCE |
-| NAV-10 | Window controls | button | `WindowControls.vue:9-33` | SOURCE + `[ORCH-PENDING]` |
+| NAV-10 | Window controls | button | `WindowControls.vue:9-33` | `OBSERVED S-0134` (maximize) + SOURCE |
 | NAV-11 | Rail — Home | tab | `App.vue:2264-2274` | `OBSERVED S-0093` + SOURCE |
 | NAV-12 | Rail — Discover content | tab | `App.vue:2275-2284` | `OBSERVED S-0003, S-0114` + SOURCE |
 | NAV-13 | Rail — Skin selector | tab | `App.vue:2285-2291` | `OBSERVED S-0004` + SOURCE |
@@ -76,16 +95,16 @@ the capture.
 | NAV-16 | Rail — quick instance switcher | region | `QuickInstanceSwitcher.vue:292-360` | `OBSERVED S-0116` + SOURCE |
 | NAV-17 | Rail — Create instance | button | `App.vue:2311-2321` | `OBSERVED S-0093, S-0094` + SOURCE |
 | NAV-18 | Rail — Settings | button | `App.vue:2322-2327` | `OBSERVED S-0008` + SOURCE |
-| NAV-19 | Rail — account menu | button | `App.vue:2328-2391` | SOURCE + `[ORCH-PENDING]` |
-| NAV-20 | Search entry points | region | `browse-tab/layout.vue:49-53` | SOURCE + `[ORCH-PENDING]` |
+| NAV-19 | Rail — account menu | button | `App.vue:2328-2391` | `OBSERVED S-0142` (opens the Modrinth sign-in modal) + SOURCE |
+| NAV-20 | Search entry points | region | `browse-tab/layout.vue:49-53` | `OBSERVED S-0144` + SOURCE |
 | NAV-21 | Shortcut — `N` quick create | shortcut | `WelcomeScreen.vue:50-68` | `OBSERVED S-0094` + SOURCE |
 | NAV-22 | Shortcut — macOS menu accelerators | shortcut | `macos/menu.rs:37-46` | SOURCE |
 | NAV-23 | Shortcut — menu keyboard model | shortcut | `button-menu.ts:109-182` | SOURCE |
 | NAV-24 | Notification surfaces | region | `App.vue:2588-2589` | `OBSERVED S-0015` + SOURCE |
-| NAV-25 | Window size and state | region | `tauri.conf.json:73-89` | `OBSERVED` (1280×800 at 1100×700 floor) + SOURCE |
-| NAV-26 | Close behaviour, no tray | region | `main.rs:347-457` | SOURCE + `[ORCH-PENDING]` |
-| NAV-27 | Native decorations toggle | region | `App.vue:819-823` | SOURCE + `[ORCH-PENDING]` |
-| NAV-28 | Drag-and-drop targets | region | `file-drop.ts:23-62` | SOURCE + `[ORCH-PENDING]` |
+| NAV-25 | Window size and state | region | `tauri.conf.json:73-89` | `OBSERVED` (1280×800 at 1100×700 floor, `S-0147`) + SOURCE |
+| NAV-26 | Close behaviour, no tray | region | `main.rs:347-457` | `OBSERVED` (close exits the process; no tray) + SOURCE |
+| NAV-27 | Native decorations toggle | region | `App.vue:819-823` | `OBSERVED S-0149, S-0150` + SOURCE |
+| NAV-28 | Drag-and-drop targets | region | `file-drop.ts:1-70` | SOURCE + `[ORCH-PENDING]` |
 | NAV-29 | Deep links and file open | region | `main.rs:176-195` | SOURCE |
 
 ---

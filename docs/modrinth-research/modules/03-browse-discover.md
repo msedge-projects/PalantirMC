@@ -64,6 +64,51 @@ confirmation step for the common single-project install.
 the install pipeline's observable phases, and the scoped-Browse banner. `BR-41`
 (photosensitivity modal) and `BR-42` (card right-click menu) remain unobserved.
 
+## Third observation pass (2026-10-14, later) — filters, search and the two open items
+
+A third pass drove Browse specifically. Both previously-pending items are now
+`OBSERVED`, and the filter sidebar is inventoried end to end.
+
+- **`BR-42` — card right-click menu** `[S-0130]`. Right-clicking a project card
+  opens a two-item context menu: **Open in Modrinth** (globe icon, opens the
+  project URL) and **Copy link** (clipboard icon). Source: `handleRightClick`
+  builds exactly those two actions (`use-app-server-browse.ts:276`), so the menu
+  is deliberately minimal — the card already carries the "Add to an instance"
+  action, and everything else lives on the detail page.
+- **`BR-41` — photosensitivity warning modal** `[S-0141]`. It appears when the
+  **Photosensitivity triggers** exclusion is *first* selected in the sidebar's
+  Advanced exclusions group, unless it has been dismissed: title **"Results are
+  not guaranteed to be safe"**, body copy that these labels are **self-assigned
+  by creators** and untested, "Using any content on Modrinth is at your own
+  risk. Please stay safe! 💚", a **Don't show this again** checkbox and an
+  **I understand** button. The trigger is a watcher on the exclusion selection
+  (`sidebar.vue:40-58`), and dismissing with the checkbox writes
+  `dismissed_photosensitivity_filter_warning` to settings.
+- **The filter inventory** `[S-0131 S-0135 S-0139]`. The Browse sidebar is a
+  sequence of collapsible filter groups. Observed order: **Game version**,
+  **Loader**, **Category** (long: Adventure, Challenging, Combat … Equipment,
+  Food, Game Mechanics … Utility, World Generation), **Environment**
+  (Client / Server), **License** (Open source …), **Depends on** (a project
+  search), and **Advanced exclusions** last — carrying its own persistence note
+  ("Advanced exclusions are saved across sessions. Opening a shared link with
+  filters will override them.") and the disclosure options **AI-generated
+  content**, **Generative AI functionality**, **Advertisements**,
+  **Photosensitivity triggers**, **External system interactions**, **Telemetry**,
+  **Paid features**, **Archived**, and more. Design note: the trust-signal
+  exclusions are grouped last and are *exclusions* (opted out of), never taste
+  filters that silently reshape results.
+- **Search** `[S-0144]`. Typing in the search field debounces; "sodium" returns
+  ranked results with pagination. The field holds focus and updates results
+  without a submit.
+- **A persisted-facet confirmation** `[S-0152]`. The selected "Photosensitivity
+  triggers" exclusion survived an app restart and re-rendered as a removable
+  facet chip above the results — the persistence note, demonstrated.
+- **Genuine offline** `[S-0151 S-0152]`. With no network at all (`unshare -n`)
+  Browse renders the empty state **"You are currently offline. Connect to the
+  internet to browse Modrinth!"** beneath a "Cannot reach authentication
+  servers" banner, and the project-type tabs stay in place. Source for the
+  gate: `BR-40`, `browse-tab/layout.vue:259`.
+
 ---
 
 ## Coverage table
@@ -110,8 +155,10 @@ the install pipeline's observable phases, and the scoped-Browse banner. `BR-41`
 | BR-38 | Server-context browse + selection queue | indicator | `apps/app-frontend/src/pages/Browse.vue:905` | confirmed |
 | BR-39 | Server browse facets (region / language / status / type) | toggle | `packages/ui/src/utils/server-search.ts:147` | confirmed |
 | BR-40 | Empty / no-results / offline / error states | indicator | `packages/ui/src/layouts/shared/browse-tab/layout.vue:259` | confirmed |
-| BR-41 | Photosensitivity warning modal | dialog | `packages/ui/src/components/modal/PhotosensitivityWarningModal.vue` (referenced) | `[ORCH-PENDING]` |
-| BR-42 | Context menu on a project card (right-click) | menu | `apps/app-frontend/src/composables/browse/use-app-server-browse.ts` | `[ORCH-PENDING]` |
+| BR-41 | Photosensitivity warning modal | dialog | `OBSERVED S-0141`; `packages/ui/src/layouts/shared/browse-tab/sidebar.vue:37,138` | documented |
+| BR-42 | Context menu on a project card (right-click) | menu | `OBSERVED S-0130`; `apps/app-frontend/src/composables/browse/use-app-server-browse.ts:276` | documented |
+| BR-43 | Filter sidebar inventory (basic + Advanced exclusions) | region | `OBSERVED S-0131, S-0135, S-0139` | documented |
+| BR-44 | Search: debounce + applied query | field | `OBSERVED S-0144` | documented |
 
 ---
 

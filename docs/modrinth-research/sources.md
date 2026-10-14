@@ -110,3 +110,14 @@ the GTK stack reports to the webview; without it the app's `navigator.onLine` is
 falsely `false`, which disables its own create-instance action. This is an
 environment fact, not a patch — see OQ-004 and OQ-012. No account or credential of
 any kind was created or used at any point.
+
+**Two capture modes are on record.** Most frames were taken under a **bare Xvfb**
+(no window manager), where the app's own window controls are inert and maximize is
+a no-op. For the window-control, close-behaviour and native-decoration frames
+(`S-0134`, `S-0149`, `S-0150`) a lightweight window manager, **openbox**, was also
+run on `:201` (`systemd-run --unit=ob201 … openbox`); only with a WM do those
+controls do anything, and only a whole-screen capture then includes the WM-drawn
+frame. The **genuine-offline** frames (`S-0151`, `S-0152`) were taken with the app
+started inside `unshare -n` (its own empty network namespace) and with the default
+network monitor, so the app really had no network. Everything else — the binary,
+the pinned source, the data — is identical across modes.

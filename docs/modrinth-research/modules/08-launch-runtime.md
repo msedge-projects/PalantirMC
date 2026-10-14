@@ -28,6 +28,19 @@ The error-copy analysis below remains the module's core value and is unaffected 
 it is source-mined, and the gate modal is a further example of the app naming a
 blocker plainly and offering the next step.
 
+**Third observation pass (2026-10-14, later)** provoked a **genuine offline**
+state with no network at all (`unshare -n`), which is the environment `LAUNCH-16`
+("No internet") describes. Observed: a titlebar **"Offline"** chip that is
+*correct* this time, and a persistent amber banner **"Cannot reach authentication
+servers — Minecraft authentication servers may be down right now. Check your
+internet connection and try again later."** `[S-0151 S-0152]`. Browse renders
+**"You are currently offline. Connect to the internet to browse Modrinth!"**.
+Pressing `N` opened nothing, which is the same guard as the first pass but now for
+the *right* reason. What is still **not** observed: any of the launch-time error
+*bodies* (`LAUNCH-15` corrupted download, `LAUNCH-17` no-loader repair, the crash
+and disk-full states) — those need a launch, and `LAUNCH-22` (post-gate runtime)
+remains `[ORCH-PENDING]`.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |

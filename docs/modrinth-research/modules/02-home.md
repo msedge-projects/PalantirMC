@@ -20,6 +20,18 @@ because `navigator.onLine` was false (OQ-004), and with the environment fixed
 text under the CTA ("Press N to quick create an instance") is a *documented
 accelerator advertised in the UI*, which module 10 recommends adopting.
 
+**Third observation pass (2026-10-14, later).** Two more facts about Home:
+
+- **"Jump in" mixes instances *and* worlds.** After a singleplayer world existed,
+  the strip listed it alongside the instances (`[S-0151]`), each with its own
+  Play and kebab — so the "resume what I was doing" region is not instance-only,
+  which is a deliberate and useful widening of the concept.
+- **Offline Home degrades rather than blanks** `[S-0151]`: the "Cannot reach
+  authentication servers" banner appears at the top, the **News** panel goes
+  blank, but the "Jump in" strip and the Library keep rendering from local data.
+  The create path stays gated on connectivity (`navigator.onLine`), so `N` opens
+  nothing while offline — see OQ-004/OQ-012 and module 10.
+
 ## Coverage table
 
 | ID | label | type | evidence | status |
