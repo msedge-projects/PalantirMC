@@ -124,17 +124,23 @@ impl SettingsTab {
         Self::Behaviour,
         Self::Features,
     ];
-    fn name(self) -> &'static str {
+    /// The catalogue key behind this tab's word. [`Self::name`] reads the
+    /// word through the active language, so the strip, the narrow layout
+    /// and any future surface all draw from one catalogue entry.
+    fn key(self) -> locale::Key {
         match self {
-            Self::Appearance => "Appearance",
-            Self::Language => "Language",
-            Self::Java => "Java & player",
-            Self::Window => "Window",
-            Self::Resources => "Resources",
-            Self::Privacy => "Privacy",
-            Self::Behaviour => "Behaviour",
-            Self::Features => "Features",
+            Self::Appearance => locale::Key::Appearance,
+            Self::Language => locale::Key::Language,
+            Self::Java => locale::Key::Java,
+            Self::Window => locale::Key::Window,
+            Self::Resources => locale::Key::Resources,
+            Self::Privacy => locale::Key::Privacy,
+            Self::Behaviour => locale::Key::Behaviour,
+            Self::Features => locale::Key::Features,
         }
+    }
+    fn name(self, language: &str) -> &'static str {
+        locale::message(self.key(), language)
     }
 }
 #[derive(Debug, Clone)]
@@ -220,6 +226,7 @@ enum Message {
     Memory(String),
     Accent(Accent),
     Scale(Scale),
+    Language(locale::Language),
     Activity(bool),
     SaveSettings,
     WindowWidth(String),
@@ -1305,6 +1312,7 @@ impl Application for App {
             )),
             Message::Accent(value) => self.preferences.accent = value,
             Message::Scale(value) => self.preferences.scale = value,
+            Message::Language(value) => self.preferences.language = value.code.to_string(),
             Message::Activity(value) => self.preferences.show_activity = value,
             Message::FeatureOverview(value) => {
                 self.preferences.features.show_overview = value;
@@ -2788,7 +2796,7 @@ if !item.custom.is_empty(){let hooks=[item.custom.hooks.pre_launch.as_ref().map(
         let mut tabs = column![].spacing(6);
         for tab in SettingsTab::ALL {
             tabs = tabs.push(action(
-                tab.name(),
+                tab.name(&self.preferences.language),
                 Message::SettingsTab(tab),
                 if self.settings_tab == tab {
                     Button::Selected
@@ -2799,7 +2807,7 @@ if !item.custom.is_empty(){let hooks=[item.custom.hooks.pre_launch.as_ref().map(
         }
         let pane:Element<'_,Message>=match self.settings_tab{
             SettingsTab::Appearance=>card(column![subtitle("A tone of your own"),muted("Choose an accent. Changes appear immediately; save to keep them."),label("Accent"),controls::picker(Accent::ALL,Some(self.preferences.accent),Message::Accent),label("Interface density"),controls::picker(Scale::ALL,Some(self.preferences.scale),Message::Scale),controls::toggle("Show the activity notebook",self.preferences.show_activity,Message::Activity),muted("Transitions are intentionally instantaneous in this build. No motion setting is needed to turn them off.")].spacing(16)),
-            SettingsTab::Language=>card(column![subtitle("Words that belong here"),label("English"),muted("English is the only authored language catalogue. We do not ship another launcher's translations."),muted("Additional language catalogues need original translations and complete coverage before they can be selected."),muted("System fonts and advanced shaping are used for non-Latin project names.")].spacing(16)),
+            SettingsTab::Language=>card(column![subtitle("Words that belong here"),label("Language"),controls::picker(locale::Language::ALL,locale::Language::from_code(&self.preferences.language),Message::Language),muted("Every catalogue is original work and covers every word this interface routes through it; a tag no catalogue names reads the English default."),muted("We do not ship another launcher's translations. A new catalogue joins the list only when its coverage is complete."),muted("System fonts and advanced shaping are used for non-Latin project names.")].spacing(16)),
             SettingsTab::Java=>{
                 let mut pane=column![subtitle("Runtime & player"),label("Offline player name (fallback)"),input("Player",&self.preferences.player_name).on_input(Message::Player).padding(12),muted("The offline account list under Account status is the primary way to change identity. This name is used only while no account is selected."),label("Java executable"),input("Leave blank for automatic management",&self.preferences.java).on_input(Message::Java).padding(12),muted("Automatic management uses the runtime named by the game's metadata. A custom path is executed directly, never as a shell command."),subtitle("Java installations"),muted("Runtimes you have added. Choose one to use it for launches; removing it from the list never deletes files on disk.")].spacing(14);
                 if self.preferences.java_installs.is_empty(){pane=pane.push(muted("No runtimes added yet. Automatic management covers every collection without an override."));}
@@ -2824,7 +2832,7 @@ if !item.custom.is_empty(){let hooks=[item.custom.hooks.pre_launch.as_ref().map(
                 compact_tabs = compact_tabs.push(
                     row(pair.iter().map(|tab| {
                         action(
-                            tab.name(),
+                            tab.name(&self.preferences.language),
                             Message::SettingsTab(*tab),
                             if *tab == self.settings_tab {
                                 Button::Selected
@@ -3035,8 +3043,28 @@ mod ui_tests {
         assert_eq!(SettingsTab::ALL.len(), 8);
         assert_eq!(InstanceTab::ALL.len(), 5);
         for tab in SettingsTab::ALL {
-            assert!(!tab.name().is_empty());
+            assert!(!tab.name("en").is_empty());
+            assert!(!tab.name("ja").is_empty());
         }
+    }
+    #[test]
+    fn choosing_a_catalogue_moves_the_routed_words() {
+        let (mut app, _requests) = isolated_app();
+        let german = locale::Language::from_code("de").unwrap();
+        let _ = app.update(Message::Language(german));
+        assert_eq!(app.preferences.language, "de");
+        assert_eq!(
+            locale::message(locale::Key::Home, &app.preferences.language),
+            "Start"
+        );
+        assert_eq!(
+            SettingsTab::Privacy.name(&app.preferences.language),
+            "Datenschutz"
+        );
+        assert_eq!(
+            locale::Language::from_code(&app.preferences.language),
+            Some(german)
+        );
     }
     fn isolated_app() -> (App, mpsc::Receiver<backend::Request>) {
         let (worker, requests) = mpsc::channel();
