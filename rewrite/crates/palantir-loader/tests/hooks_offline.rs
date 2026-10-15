@@ -57,7 +57,13 @@ fn mock_script(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn dump_argv_body() -> &'static str {
     #[cfg(windows)]
     {
-        "(for %%a in (%*) do @echo %%a) > argv.txt"
+        // `%%a` is the token as Command wrote it on the command line --
+        // quotes and all -- but a real Win32 program recovers the argument
+        // value through its argv parser, the way `"$@"` does on POSIX. The
+        // recorder must expand `%%~a`, which drops exactly the enclosing
+        // quotes, or a spaced argument reads back as `"My World"` instead
+        // of `My World` and the mock measures Command's quoting, not argv.
+        "(for %%a in (%*) do @echo %%~a) > argv.txt"
     }
     #[cfg(not(windows))]
     {
