@@ -207,7 +207,9 @@ switched to the selected UI model and instructed it to implement phases
 implemented under `crates/palantir-desktop` and recorded in `NOTES.md` and
 the root `UI-HANDOFF.md`; the research roadmap's "ship 0, 1, 3, 4, 9" work
 order landed in three passes (2026-10-12 … 2026-10-14) plus the
-minimum-size defect pass (2026-10-15). Still open: additional locales, real
-Microsoft native-client acceptance, catalogue-to-new-pack download,
-real-game desktop acceptance, Windows interactive acceptance; Phase 8's
-first Release is not cut.
+minimum-size defect pass (2026-10-15). The same day: additional locales
+landed (en/de/fr/ja, compiler-enforced coverage), and the catalogue-to-new-
+pack download and the real-game desktop launch were both verified through
+the actual window against live services (`tools/pack_live.py`,
+`tools/play_live.py`). Still open: real Microsoft native-client acceptance,
+Windows interactive acceptance; Phase 8's first Release is not cut.

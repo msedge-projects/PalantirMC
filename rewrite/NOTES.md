@@ -15,14 +15,35 @@ replaces them.
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | **landed** 2026-10-09: inheritance merge, install, Java runtimes, all four importers, launch plans, the Forge processor runner, and the done-when live test -- all five loaders install into a temp root and launch headless Java against their own document's runtime (5/5 green live; processors 6/6 with receipts verified; every game process watched running to its 20 s grace) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | **native UI checkpoint** 2026-10-10: original Field Notes design, navigation, native decorations, adaptive activity notebook, three accents and densities; Linux window smoke verified, Windows acceptance remains |
-| 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10, Forge family added 2026-10-12: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt/Forge/NeoForge launch and stop/log workers (the Forge family installs from the vendors' own installer jars and runs their processor pipelines with the managed runtime); actual-window file flows verified, real-game desktop acceptance and Windows interactive acceptance remain |
+| 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10, Forge family added 2026-10-12: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt/Forge/NeoForge launch and stop/log workers (the Forge family installs from the vendors' own installer jars and runs their processor pipelines with the managed runtime); actual-window file flows verified; real-game desktop acceptance verified 2026-10-15 (`tools/play_live.py`: vanilla 1.5.2 created and played with offline identity in the actual window, the managed runtime's java watched running 20s); Windows interactive acceptance remains |
 | 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/dependency install verified; reviewed local `.mrpack` optional selection is connected; catalogue-to-new-pack download verified 2026-10-15 in the actual window against the live catalogue (`tools/pack_live.py`, 26 pack files landed in a brand-new collection) |
-| 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales and live Microsoft native-client acceptance remain |
+| 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales landed 2026-10-15 (en/de/fr/ja catalogues with compiler-enforced complete coverage, selectable in the Language pane); live Microsoft native-client acceptance remains |
 | 8 | Audit green, own licence chosen, notices complete, first Release tagged | not started (estimate ~3–5 h) |
 
 The phase list and its estimates come from the rewrite specification
 (`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` §6);
 phases 1–3 are the largest block of new work. All hours are estimates.
+
+## Live acceptance — the real game from the desktop Play button, 2026-10-15
+
+Phase 5's last gap closed the same way as the pack flow: the actual window,
+driven for real. `tools/play_live.py` created a vanilla 1.5.2 collection
+(`world-1792093584066458666`), pressed *Play with offline identity*, and
+watched the game's own process for 20 s -- the same bar as the loader
+suite's live launches, but arrived at through the desktop. The first Play
+downloaded 762 files (the game jar, its libraries, the pre-1.6 asset
+index, and the managed `jre-legacy` runtime) before spawning; the watched
+process is that runtime's `java` on the real 1.5.2 classpath.
+
+The first attempt at this acceptance **passed on a false positive**: the
+process rule asked for the substring "java" plus this run's data path, and
+matched the *observer's own shell* -- a poll command that merely echoed the
+word. The rule is now argv0-is-java plus a Minecraft main class token among
+the arguments (1.5.2's document names
+`net.minecraft.launchwrapper.Launch`; modern ones name
+`net.minecraft.client.main.Main`), which no bystander can satisfy. A
+passing assertion must name its subject; "something matched" is not
+receipt evidence.
 
 ## Live acceptance — catalogue-to-new-pack download, 2026-10-15
 
