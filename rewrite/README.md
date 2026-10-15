@@ -56,3 +56,36 @@ python tools/licence_audit.py --selftest
 
 `cargo fmt --all -- --check` is a hard gate here from day one. Status and the
 reasoning behind each decision live in `NOTES.md`.
+
+## Packaging the desktop
+
+The desktop is the only deliverable this tree builds; every other crate is a
+library it links. The release build is the ordinary one, from this tree's own
+lock file:
+
+```
+cargo build --release --locked -p palantir-desktop
+```
+
+The binary lands at `target/release/PalantirMC.exe`. `--locked` matters more here
+than anywhere else: a packaged binary has to be the tree the gates passed, not a
+quiet dependency bump that only the packaging machine saw.
+
+CI does the same build on `windows-latest` once the gates are green and uploads
+the binary as a run artifact named `PalantirMC-<ref>-<run id>`. It also checks
+the file exists and is a plausible size, because a build command's exit status
+does not by itself prove a runnable artifact came out of it. Windows is not a
+preference there: it is the only platform that compiles this tree's
+`#[cfg(windows)]` code at all.
+
+That artifact is an unsigned development build. It proves the release profile
+links and produces a binary, and nothing more — there is no installer, no code
+signing (which would need credentials this repository does not hold), and no
+check of which DLLs the exe imports. Running it on a machine that has never had
+a Rust toolchain is still the only real portability test.
+
+Publishing is deliberately not automated. The product licence is still the
+owner's `UNLICENSED` placeholder, and choosing that licence and tagging the first
+Release is step 8 in `NOTES.md`: the owner's decision, taken on a built tree with
+a green audit. A workflow that published on its own would be making that decision
+by accident.

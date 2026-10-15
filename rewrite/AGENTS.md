@@ -199,3 +199,15 @@ shell — **protected, see §1: no UI work or frontend assets until the
 owner assigns them to another tool explicitly**), 5 (instances),
 6 (Discover),
 7 (settings/Home/About), 8 (audit green, own licence, first Release).
+
+**UI work order — assigned 2026-10-10; this supersedes the phase-4 fence
+text in §1 for work already done under that assignment.** The owner
+switched to the selected UI model and instructed it to implement phases
+4–7. Theme + shell, instances, Discover and settings/Home/About are
+implemented under `crates/palantir-desktop` and recorded in `NOTES.md` and
+the root `UI-HANDOFF.md`; the research roadmap's "ship 0, 1, 3, 4, 9" work
+order landed in three passes (2026-10-12 … 2026-10-14) plus the
+minimum-size defect pass (2026-10-15). Still open: additional locales, real
+Microsoft native-client acceptance, catalogue-to-new-pack download,
+real-game desktop acceptance, Windows interactive acceptance; Phase 8's
+first Release is not cut.

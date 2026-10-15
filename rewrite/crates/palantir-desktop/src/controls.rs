@@ -12,6 +12,23 @@ pub fn action<'a, M: Clone + 'a>(
         .on_press(message.clone());
     content(button.into(), message)
 }
+/// A small pill control for an immediate choice, like a content type
+/// filter. Keyboard-focusable like every other action.
+pub fn chip<'a, M: Clone + 'a>(
+    caption: impl ToString,
+    selected: bool,
+    message: M,
+) -> Element<'a, M> {
+    let button = iced::widget::button(crate::design::label(caption).size(13))
+        .padding([6, 12])
+        .style(if selected {
+            crate::design::Button::Selected
+        } else {
+            crate::design::Button::Quiet
+        })
+        .on_press(message.clone());
+    content(button.into(), message)
+}
 pub fn content<'a, M: Clone + 'a>(content: Element<'a, M>, message: M) -> Element<'a, M> {
     Element::new(Action {
         content,

@@ -1,5 +1,5 @@
-use iced::widget::{Text, button, container, svg, text};
-use iced::{Background, Border, Color, Element, Theme};
+use iced::widget::{Text, button, column, container, row, svg, text};
+use iced::{Background, Border, Color, Element, Length, Theme};
 
 pub const BG: Color = rgb(0x10151C);
 pub const SURFACE: Color = rgb(0x171D25);
@@ -9,6 +9,8 @@ pub const INK: Color = rgb(0xE8EDF2);
 pub const MUTED: Color = rgb(0x8F9EAC);
 pub const COPPER: Color = rgb(0xE9AD7C);
 pub const DANGER: Color = rgb(0xEF9393);
+/// The accent laid over the inset well — a selected chip's or tab's plate.
+pub const PLATE: Color = rgb(0x4B4643);
 
 const fn rgb(hex: u32) -> Color {
     Color::from_rgb(
@@ -94,14 +96,14 @@ impl button::StyleSheet for Button {
         let (fill, ink) = match self {
             Self::Primary => (theme.palette().primary, BG),
             Self::Quiet => (INSET, INK),
-            Self::Selected => (INSET, theme.palette().primary),
+            Self::Selected => (PLATE, theme.palette().primary),
             Self::Danger => (rgb(0x3E292D), DANGER),
         };
         button::Appearance {
             background: Some(Background::Color(fill)),
             text_color: ink,
             border: Border {
-                radius: 9.0.into(),
+                radius: 999.0.into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -112,7 +114,7 @@ impl button::StyleSheet for Button {
         appearance.border = Border {
             width: 1.0,
             color: theme.palette().primary,
-            radius: 9.0.into(),
+            radius: 999.0.into(),
         };
         appearance
     }
@@ -227,8 +229,71 @@ impl iced::overlay::menu::StyleSheet for Field {
         }
     }
 }
+/// A rounded well that frames an icon — the tile at the head of a
+/// catalogue card.
+pub fn icon_tile<'a, M: 'a>(inner: Element<'a, M>) -> Element<'a, M> {
+    container(inner)
+        .width(52)
+        .height(52)
+        .center_x()
+        .center_y()
+        .style(well)
+        .into()
+}
+
+/// A small pill of muted text: a status or a statistic on a card.
+pub fn badge<'a, M: 'a>(value: impl ToString) -> Element<'a, M> {
+    container(muted(value).size(11))
+        .padding([4, 10])
+        .style(pill)
+        .into()
+}
+fn pill(_: &Theme) -> container::Appearance {
+    container::Appearance {
+        background: Some(INSET.into()),
+        border: Border {
+            radius: 999.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The browsing-list card: icon tile, title, one meta line, a row of
+/// badges, and the action cluster at the right. The composition is ours;
+/// only the plain pattern "icon, name, meta, actions" is shared with
+/// catalogue UIs at large.
+pub fn project_card<'a, M: Clone + 'a>(
+    icon: Element<'a, M>,
+    title: impl ToString,
+    meta: impl ToString,
+    badges: Vec<String>,
+    actions: Element<'a, M>,
+) -> Element<'a, M> {
+    let mut middle = column![label(title).size(17), muted(meta).size(12)]
+        .spacing(5)
+        .width(Length::Fill);
+    if !badges.is_empty() {
+        let mut row = row![].spacing(6);
+        for value in badges {
+            row = row.push(badge(value));
+        }
+        middle = middle.push(row);
+    }
+    container(
+        row![icon, middle, actions]
+            .spacing(14)
+            .align_items(iced::Alignment::Center),
+    )
+    .padding(16)
+    .style(panel)
+    .into()
+}
+
 pub fn emblem<'a, M: 'a>(kind: &str) -> Element<'a, M> {
     let bytes: &'static [u8] = match kind {
+        "worlds" => include_bytes!("../assets/worlds.svg"),
+        "help" => include_bytes!("../assets/help.svg"),
         "account" => include_bytes!("../assets/identity.svg"),
         "download" => include_bytes!("../assets/downloads.svg"),
         _ => include_bytes!("../assets/additions.svg"),
@@ -279,6 +344,10 @@ pub fn icon<'a, M: 'a>(name: &str, selected: bool) -> Element<'a, M> {
         "logs" => "<path d='M5 3h14v18H5ZM8 7h8m-8 4h8m-8 4h5'/>",
         "check" => "<path d='m4 12 5 5L20 6'/>",
         "settings" => "<path d='M4 6h16M4 12h16M4 18h16'/><path d='M8 3v6m8 0v6m-6 0v6'/>",
+        "worlds" => "<path d='m3 8 9-5 9 5v9l-9 5-9-5Zm9-5v19M3 8l9 5 9-5'/>",
+        "help" => {
+            "<path d='M8 8c0-6 10-6 10 0 0 3-6 3-6 6m0 4v1'/><circle cx='12' cy='12' r='10'/>"
+        }
         _ => "<circle cx='12' cy='12' r='9'/><path d='M12 10v7m0-11v1'/>",
     };
     let ink = if selected { "#E9AD7C" } else { "#8F9EAC" };

@@ -245,9 +245,6 @@ pub fn import_directory(
     if plan.is_empty() {
         return Err("No worlds, configuration, or content files found in that directory.".into());
     }
-    if !loader.desktop_supported() {
-        return Err("This loader can be reviewed, but its desktop installer is not connected. Nothing was copied.".into());
-    }
     let mut item = model::create(root, &name, &game, loader)?;
     item.loader_version = pin;
     // Persist the pinned loader before copying so a recoverable partial import
@@ -352,7 +349,7 @@ pub fn inspect_source(source: &Path) -> Result<model::ImportReview> {
             .filter(|f| f.env.as_ref().and_then(|e| e.client.as_deref()) == Some("optional"))
             .map(|f| f.path.clone())
             .collect();
-        return Ok(model::ImportReview { source: source.display().to_string(), name: pack.name, game: pack.game, loader, files: index.files.len(), bytes: index.files.iter().map(|f| f.file_size.unwrap_or(0)).sum(), optional, notes: vec!["Pack metadata inspected without extracting or downloading files.".into(), "Archive installation and optional-file execution require backend pack coordination; no collection will be created by this review.".into()], copy_supported: false });
+        return Ok(model::ImportReview { source: source.display().to_string(), name: pack.name, game: pack.game, loader, files: index.files.len(), bytes: index.files.iter().map(|f| f.file_size.unwrap_or(0)).sum(), optional,        notes: vec!["Pack metadata inspected without extracting or downloading files.".into(), "Installing the archive runs from its own index into a new collection. The optional client files are the ones chosen on this review; the required ones always land.".into()], copy_supported: false, archive_sha1: Some(palantir_net::download::sha1_file(&source).map_err(|e| e.to_string())?) });
     }
     if !source.is_dir() {
         return Err("Choose a game directory, Prism directory, or .mrpack file.".into());
@@ -424,10 +421,14 @@ pub fn inspect_source(source: &Path) -> Result<model::ImportReview> {
                 .into(),
             "The copy is revalidated when submitted; symbolic links are refused.".into(),
         ],
-        copy_supported: loader.desktop_supported(),
+        // A directory copy is a launcher-owned file copy: no loader installer
+        // runs here, so it is not the loader that decides whether it is
+        // possible. The loader's own install happens later, on first play.
+        copy_supported: true,
+        archive_sha1: None,
     })
 }
-fn imported_loader(
+pub(crate) fn imported_loader(
     target: &palantir_loader::import::LoaderTarget,
 ) -> Result<(Loader, Option<String>)> {
     use palantir_loader::import::LoaderTarget;

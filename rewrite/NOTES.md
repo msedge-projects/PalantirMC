@@ -15,14 +15,545 @@ replaces them.
 | 2 | `palantir-net`: pooled client, scheduler, resumable downloads, metadata cache, content store | **landed** 2026-10-08: 83 offline tests green (mock server) + 2 live proofs: real 1.5.2 synced end to end (9 libraries, 2 natives, 749 assets, every file hash-verified) and a real interrupted jar resumed from its 256 KB mark |
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | **landed** 2026-10-09: inheritance merge, install, Java runtimes, all four importers, launch plans, the Forge processor runner, and the done-when live test -- all five loaders install into a temp root and launch headless Java against their own document's runtime (5/5 green live; processors 6/6 with receipts verified; every game process watched running to its 20 s grace) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | **native UI checkpoint** 2026-10-10: original Field Notes design, navigation, native decorations, adaptive activity notebook, three accents and densities; Linux window smoke verified, Windows acceptance remains |
-| 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt launch and stop/log workers; actual-window file flows verified, real-game desktop acceptance and Forge-family coordination remain |
-| 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/eligibility verified; dependency/modpack resolution remains |
-| 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales and authenticated accounts remain |
+| 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10, Forge family added 2026-10-12: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt/Forge/NeoForge launch and stop/log workers (the Forge family installs from the vendors' own installer jars and runs their processor pipelines with the managed runtime); actual-window file flows verified, real-game desktop acceptance and Windows interactive acceptance remain |
+| 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/dependency install verified; reviewed local `.mrpack` optional selection is connected, catalogue-to-new-pack download remains |
+| 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales and live Microsoft native-client acceptance remain |
 | 8 | Audit green, own licence chosen, notices complete, first Release tagged | not started (estimate ~3–5 h) |
 
 The phase list and its estimates come from the rewrite specification
 (`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` §6);
 phases 1–3 are the largest block of new work. All hours are estimates.
+
+## UI continuation — minimum-size defect pass, 2026-10-15
+
+The work order's ship-set is in (passes recorded below and in the root
+`UI-HANDOFF.md`); this pass was defect-only, driven by actual-window captures
+at the supported minimum sizes (840×600, 1024×576, 1280×576, and the
+1024/1280/1600-wide sweep). Four defects, each fixed at one site with its
+measurement in the comment there:
+
+- The library card's action cluster squeezed the name column into one row of
+  pills — long names wrapped to five lines at the minimum window size. The
+  cluster now stacks through `App::actions` at narrow effective widths
+  (width / scale < 1100), and the name keeps its column.
+- The instance header's Actions/Play cluster had the same squeeze beside the
+  title; at 840×600, 1024×576 and 1280×576 the captures showed the row
+  collapsing into the tab picker, which then rendered as an unlabelled
+  Overview control where the cluster should be. Same helper, same threshold.
+- The sidebar lockup wrapped its tagline mid-phrase at the compact width, and
+  iced's scrollbar drew over the wordmark and the buttons' right edges (iced
+  draws a scrollable's bar over its content and reserves no space for it).
+  The mark/gap/tagline take tighter sizes below 1100 effective, and the
+  sidebar's padding now lives *inside* the scrollable, so the bar draws over
+  padding instead of the lockup.
+- The same missing gutter let a panel body's bar cover card borders;
+  `panel_shell` gives its rows, notice and body one 14px gutter against the
+  10px bar, so right edges match with or without it.
+
+Verification: `tools/ui_smoke.py` actual-window runs at the probed sizes
+(OCR over settled states, fuzzy within two character edits) and the gallery's
+offscreen per-screen rendering. Capture evidence is this-machine-only, in
+`/tmp/minfix/` (transient). No game was launched; real-game desktop
+acceptance and Windows interactive acceptance remain unclaimed.
+
+## UI continuation — research-driven settings slices, 2026-10-14 (second pass)
+
+The research agent's blueprint landed under `docs/modrinth-research/` and its
+`roadmap.md` was consumed as the work order (its "ship 0, 1, 3, 4, 9" rule).
+All five shipped: 0, 1 and 3 in the first record below, 4 and 9 in the second.
+
+- **Slice 0 — settings store.** `Preferences` gains a schema `version`
+  (0 = pre-schema file) and `model::migrate` on load: older files declare the
+  current version (every missing field arrives through serde defaults), a file
+  from a *newer* build is refused by name instead of guessed at. Round-trip
+  test sets every field away from default and compares struct equality.
+  Deviation from the roadmap's letter, recorded: the store stays in
+  `palantir-desktop::model` rather than moving to `palantir-core` — app settings
+  in the engine crate would drag UI concerns into the engine; the acceptance
+  criteria (one defaults home, additive fields, round-trip, asserted version)
+  all hold where it lives.
+- **Slice 1 — Features section.** A `Features` settings pane with five
+  toggles that hide instance tabs (Overview/Content/Worlds/Logs/Manage).
+  `InstanceTab::shown` is the single predicate behind the strip, the narrow
+  picker, and the selection guard, so a hidden tab cannot surface through any
+  of them; hiding the active tab falls back to the first visible one, and
+  hiding all five renders an honest empty state pointing at Preferences.
+  Default-on everywhere. Tabs not built yet (files, screenshots) are named in
+  the struct comment under the same `show_*` convention — deliberately no dead
+  toggles for surfaces that do not exist.
+- **Slice 3 — launch args / env / hooks.** New `palantir-loader::hooks`:
+  `command_words`/`quote_words` (shell-quoter pair; the reference's v1
+  whitespace-split quoting trap cannot occur because parsing is real),
+  `env_pairs` (split at the *first* `=`, order preserved), `Hooks`
+  (pre-launch / wrapper / post-exit) and `LaunchCustom`. Launch wiring:
+  pre-launch runs to completion and a failure stops the launch by name; the
+  wrapper becomes the program with java folded after it (`gamemoderun java …`);
+  env + extra args apply in stored order after the plan's own arguments; the
+  post-exit hook fires on clean exit, crash, and monitoring failure alike,
+  with failures reported as events. All hooks execute directly — no shell ever
+  sees them. `hooks_offline.rs` pins the acceptance criteria with mock
+  processes: argv order, `=` in env values, a hook path containing a space
+  (the quoting regression), wrapper folding, and visible hook failures.
+
+The launch-settings dialog gained the customs fields (args, env, three hooks)
+and the app now issues `text_input::focus("dialog-first")` for the two
+per-collection dialogs exactly as create/rename get — without it, typed input
+had nowhere to land (found by the smoke, not by a test).
+
+The third pass of this slice set closed the two that remained:
+
+- **Slice 4 — Java installation management.** Preferences' Java & player pane
+  gains a "Java installations" roster; each entry carries the version line its
+  probe reported plus the path. "Add a Java executable…" opens a path dialog
+  and sends `Request::JavaProbe`: the candidate is asked for its version before
+  anything joins the list, and a refusal names the path ("…is gone") and
+  leaves the roster untouched — the smoke's mock runtime proves both
+  directions on a real window. "Use for launches" sets the launcher's runtime
+  (the active entry reads "In use"); "Remove from list" drops the entry and
+  clears the selection when it *was* that runtime, and never deletes files on
+  disk — the roster is a list of paths, not a package manager. Acceptance
+  criteria, each checked: an added runtime appears and drives launches and a
+  removed one is no longer selectable
+  (`java_roster_probes_a_runtime_and_removes_it_again`); a stale collection
+  override naming a removed runtime refuses the launch *by name* before
+  anything happens (`model::ensure_java`, called from launch prep in
+  `backend.rs`) with a message that says where to go next; per-instance
+  override beats the launcher's runtime and clearing it restores the global
+  (`model::effective_java`, pinned in the model tests).
+- **Slice 9 — instance actions and the destructive inventory.** The reference
+  serves its set as a context menu; the roadmap's own rule is that every action
+  needs a keyboard-reachable path, "not just a right-click" — so the set is a
+  dialog of plain buttons: "Actions" on the library card and the instance
+  header opens `Dialog::InstanceActions` with Open collection, Play, Rename,
+  Duplicate, Back up or export a world…, Open game folder, and Delete
+  collection…. Every entry is Tab-and-Enter reachable and nothing hides behind
+  a right-click only. Deviation from the roadmap's letter, recorded at the
+  owner's decision: "export" wires to the world backup/export surface (the
+  collection opens on its Worlds tab) rather than an instance exporter — the
+  engine has no whole-collection export and one was not built for this slice;
+  the menu says so in place. Delete keeps the confirmation that names what
+  goes away and whose receipt lands in the open dialog; while a session or
+  task runs, the entry becomes "Stop current work before deleting", matching
+  the Manage tab's rule. `the_actions_menu_is_the_complete_keyboard_path_for_one_collection`
+  pins the whole set, its order, and that delete goes through its confirmation
+  first.
+
+Three defects this pass's extended smoke exposed, all fixed:
+
+1. **The probe receipt dumped the user out of Preferences.** The Java-add
+   dialog had *replaced* `Dialog::Preferences` in the single dialog slot, so
+   `JavaProbed` clearing the slot landed the user on the page behind — the
+   smoke's `click("Behaviour")` after an add failed for this reason. The
+   receipt now returns to Preferences on the Java tab (an add is a step of
+   that visit, not a way out of it); a probe answer for a dialog that has
+   since closed is ignored.
+2. **Immediate saves could roll back on close.** Roster and account changes
+   write to disk at once, but `saved_preferences` advanced only on the dialog
+   save, so closing Preferences reverted the visible state to a baseline that
+   predates the add. `save_preferences_now` now keeps the exact snapshot sent
+   as `pending_preferences`, and the write's receipt promotes it to the
+   confirmed baseline; a revert goes to that snapshot, never to an older one.
+3. **The save receipt buried the action's own.** The worker's generic
+   "Preferences saved." replaced "Java runtime added to the list." in the
+   single note slot the moment the write landed. The save now carries the
+   receipt it must leave on screen (`pending_note`); the generic confirmation
+   is only the fallback for a plain dialog save.
+
+**Operational rule from the owner: never drive windows or keystrokes on the
+owner's working display.** An earlier smoke debugging pass in this session ran
+against the ambient `DISPLAY` (the owner's `:0`) before the rule was set; no
+further run did. Every verified run is on a private Xvfb on a display number
+the owner is not using — `:101` for the first pass, `:103` (`setsid nohup
+Xvfb :103 -screen 0 1920x1080x24 -nolisten tcp`) for the later ones. The
+owner's correction to the wording is the rule itself: not "use :101", but
+"use a display the owner is not using". It lives in `tools/ui_smoke.py`'s
+header, not just in this note.
+
+Verified at the third pass's end: 349 workspace tests pass (0 failed; the
+live suites stay ignored), `cargo fmt --all -- --check` and workspace Clippy
+`--locked -- -D warnings` clean. The extended `tools/ui_smoke.py` passes twice
+consecutively on `:103`: world export byte-verified, overwrite refusal,
+keyboard flows, 840×600 byte-exact import, the Window pane (854×480 saved; a
+half-filled pair refused by name), Features (Worlds tab hidden — verified
+absent from the tab strip with the nav band excluded — and restored), the
+launch-settings dialog (2048 MiB override saved, verified from the stored
+summary the page then shows, and cleared back to the launcher default),
+duplicate-with-name, the Java roster on a real window (a dead path refused by
+name, then the mock runtime added under its reported version, selected for
+launches, and removed until the empty state returns), and the per-collection
+actions menu (opened, its export and delete entries observed, delete's
+confirmation naming what goes away before it is closed without deleting).
+Driver fixes made along the way: OCR reads a magnified copy of the same
+capture with boxes scaled back (14px primary labels were below tesseract's
+read size) — 3× garbled short button words ("Actions" came out "ae"), so the
+scale is now 4×, and `words()` unions two tesseract passes (default +
+sparse) because the two mis-segment different words (the settings rail's
+"Features" reads "ean eee" in the default pass alone); one button is clicked
+by the half of its label OCR can hold ("and review" for "Resolve and review
+files" — "Resolve" persistently reads "Recnive", same precedent as
+`click("jar or")`); the click recovery alternates scroll direction inside the
+window; `activate(steps)` crosses multi-field dialogs to reach below-fold
+primary actions; and the home card is looked for over several captures, with
+the miss reporting what was actually seen rather than a bare StopIteration.
+
+## UI continuation — window settings and per-collection launch settings, 2026-10-14
+
+The owner asked for the Modrinth App's missing tabs, settings and functions and
+assigned the research pass to a separate agent (its mission brief is
+`MODRINTH-RESEARCH-PROMPT.md`; its blueprint will land under
+`docs/modrinth-research/`). This continuation closes implementation gaps that
+need no research: the settings rows Modrinth has and we did not.
+
+**Window resolution is now a real function, not a missing row.** Preferences
+gain a **Window** pane (width/height, blank = the game's own default) and each
+collection's Manage pane gains a **Game window** section with its own override
+dialog and a "Use launcher default" clear. Precedence is collection → launcher
+→ game default, decided in `model::effective_resolution` so one rule covers
+every caller.
+
+Decisions and their reasons:
+
+- A size is **both sides or neither**, 320–16384 px per side. A half-filled
+  pair is refused at the field, before persistence: a launch command must never
+  carry a size the player did not actually choose.
+- **Blank means unset**, not zero. The drafts render unset as blank
+  (`draft_side`) and the saved indicator compares *parsed* values, so "0" vs
+  "" cannot read as unsaved work.
+- The engine already had the format's contract: `--width/--height` sit behind
+  the `has_custom_resolution` feature rule and are filled from
+  `${resolution_width}`/`${resolution_height}` placeholders. The launch opens
+  that gate **only** when a size is set and fills both placeholders
+  (`backend.rs` `prepare_and_launch`); with no size, no flag reaches the game.
+  That contract is pinned at the engine boundary by
+  `palantir-core/tests/launch.rs::custom_resolution_is_gated_and_filled_by_the_launch`
+  using the real 26.3 document shape.
+- Per-collection state is `Instance.window: Option<WindowOverride>` with
+  serde defaults, so every pre-existing `instance.json` and `preferences.json`
+  loads unchanged (`model::tests::older_files_gain_window_defaults`). Stored
+  values are re-validated at launch: a hand-edited descriptor cannot smuggle an
+  impossible size into a command.
+- The collection dialog saves through a worker request keyed `window:{id}`;
+  the receipt closes exactly that dialog, mirroring the rename flow. Reopening
+  the dialog prefills from the stored override; blank drafts save `None`.
+
+**Per-collection launch settings** follow the same shape: Manage gains a
+**Launch settings** section with a memory budget override (512–32768 MiB) and
+a Java executable override, each blank meaning "follow the launcher". The
+precedence rule again lives in the model (`effective_memory`, `effective_java`):
+collection → launcher preference → the managed runtime the game's metadata
+names. The launch command's `-Xmx` and executable come from those two functions
+only. A runtime path is executed directly and never through a shell, so a
+control character in a stored path is refused (`validate_java_override`), and
+stored overrides are re-validated at launch exactly like window sizes. The
+dialog saves through a `runtime:{id}`-keyed request with the same receipt,
+prefill and "Use launcher defaults" clear.
+
+Verified: 329 workspace tests pass (0 failed, 7 live-ignored; +9 on the 320
+baseline — window slice: 3 model, 1 engine contract, 2 desktop; launch-settings
+slice: 2 model, 1 desktop), `cargo fmt --all -- --check` and workspace Clippy
+`--locked -- -D warnings` clean, licence audit 6/6. The dialog prefills,
+half-filled/invalid refusals, clears, and save-receipt guarding are desktop
+tests; precedence and stale-storage validation are model tests; the
+`--width/--height` gate is pinned at the engine boundary. The settings
+tab-count expectation in `all_required_settings_and_instance_surfaces_are_named`
+was updated 6 → 7 for the new pane (the test exists to name every surface, not
+to freeze the count).
+
+The actual-window smoke passes against the new binary (two consecutive runs:
+world export byte-verified, overwrite refusal, keyboard help/activation,
+840×600 byte-exact import), so the slices did not disturb the flows it covers;
+the new settings wiring itself is compile-and-test covered, not smoke-covered.
+One early smoke run flaked on an OCR miss of the Worlds tab: the driver's
+`click` recovery scrolled downward only, which can carry a top control out of
+view (and at 840×600 its click point sat below the window). The fallback now
+alternates scroll direction inside the window; both runs after that pass.
+
+## UI continuation — reviewed world and local-content operations, 2026-10-13
+
+The owner resumed the selected UI model. Work stays in the rewrite; no legacy
+frontend source/assets or new dependency/service was used. The existing Field
+Notes palette, iced software renderer, original assets and JSON contracts remain.
+New `palantir-desktop/src/local.rs` plus `local_tests.rs` connect world and content
+reviews to the worker; `backend.rs`, `main.rs`, `bedrock.rs`, `surfaces.rs` and
+`gallery.rs` carry worker/state/view integration. Launch remains
+`cargo run -p palantir-desktop --bin PalantirMC` from `rewrite/`.
+
+- Both editions make complete world copies (Java `.zip`, Bedrock `.mcworld`),
+  not editable or selective snapshots. Review hashes every file and confirmation
+  rechecks; existing outputs and outputs inside the world are refused. Output
+  parents must already exist. Archives are streamed, then entry hashes and source
+  receipts verified. Limits: 32 GiB, 100,000 files, 40 directory levels.
+- Local Java mods/resources/shaders copy to the selected collection. Bedrock
+  single-pack imports use the manifest's destination and UUID, extract checked
+  paths, and optionally enable resource/behaviour packs for one reviewed world.
+  Other activation entries remain unchanged. Missing selection means no world
+  list write. Multi-pack containers, links, path escapes, case duplicates and
+  Windows-reserved names are refused. File trust/compatibility is not certified.
+- Reviews need the player to acknowledge closing the game; actual Java sessions
+  and task conflicts are checked by both UI and worker. Bedrock is still not
+  tracked, so the acknowledgment cannot prove the game is closed. Detection is
+  refreshed before Bedrock review/confirmation rather than trusting UI paths.
+- Bedrock world titles now call the engine reader. Verification found its prior
+  big-endian-only reader did not handle actual Bedrock's eight-byte header and
+  little-endian NBT; that path is fixed and pinned. Export now uses exclusive
+  output creation and streams data; activation staging also uses exclusive
+  creation so linked/stale temporary files cannot be truncated. Pack manifests
+  are bounded to 1 MiB. `palantir-net::download::sha1_reader` reuses the existing
+  digest implementation for streaming archive verification.
+- The world-options toggle that implied incomplete snapshots was removed: both
+  backup/export preserve the complete world. Loader review now displays the
+  saved pin instead of accepting a draft pin that Play did not apply. No new
+  shipped assets or preferences are introduced.
+
+**Verified on final source:** workspace Clippy `--all-targets --locked --
+-D warnings` clean; workspace tests 310 pass, 0 fail, 7 live ignored (71 desktop,
+56 Bedrock); formatting and development build pass. Licence audit 6/6 and its
+self-test pass. Initial checks caught a header-detection error and a complex
+return type; both were repaired, not suppressed, and affected checks rerun.
+Actual Linux-window acceptance exported a Java world with every archive entry
+byte-matched to its unchanged source, refused an existing output, and imported
+resource packs with independently matched bytes. The final binary repeated local
+import at 840×600 with scroll/confirmation, F1 help, and Tab/Enter activation.
+Captures/test data are `/tmp/palantir-ui-connected/`, not shipped artifacts.
+
+**Final completion repair:** readable Bedrock titles and the empty-state warning
+now share the same filter. Previously a title match could appear alongside
+"No matching folders" because the warning checked only opaque folder names.
+Added a regression and updated explicit gallery sample world metadata. Final
+changed-crate Clippy, build and all 72 desktop tests pass; the unaffected suites
+retain their recorded results (311 total passing tests, 7 live ignored). Actual
+gallery-window interaction verifies title match versus no match without claiming
+that sample data is a detected Windows installation.
+
+**Limits:** Windows installed-game execution, Microsoft live credentials and
+actual desktop game startup were not exercised. Bedrock export/extraction/
+activation are proven with temporary files, not a Windows-owned live world.
+Filesystem review is not a crash-atomic transaction and cannot prevent arbitrary
+concurrent external replacement; close the game first. Pack activation failure
+may leave the pack installed, with explicit instructions to enable it in-game.
+Multi-pack `.mcaddon`, Preview discovery, entitlement pre-check, session tracking,
+additional languages and final release acceptance remain. No commit, push,
+account provisioning, publishing, tag or release occurred; unrelated legacy
+changes remain untouched.
+
+## Engine continuation — the five outstanding backend gaps, 2026-10-12
+
+The owner paused frontend work and selected all five non-UI tasks from the
+recorded gap list. Nothing here is a new product decision: each item closes a
+hole this file already named, and no dependency, service account, asset or
+licence choice was added. New code is `palantir-loader/src/forge.rs`,
+`palantir-net/src/session.rs`, `palantir-bedrock/src/{worlds,content}.rs` and
+their tests; the desktop's `backend.rs`/`model.rs`/UI copy and the rewrite CI
+workflow changed to match.
+
+**Forge and NeoForge install and launch for real.** `palantir_loader::forge`
+reads the vendor's own Maven metadata (`maven-metadata.xml`) to list releases,
+maps a version number back to its game (`1.20.1-47.4.26` -> `1.20.1`; the
+NeoForge scheme `20.6.141` -> `1.20.6`, `21.0.167` -> `1.21`), fetches the
+installer jar, installs the overlay document it carries, places the profile's
+toolchain libraries and returns the processor plan. The desktop resolves the
+runtime from the *installed* document and runs the processors before natives
+extraction, reporting how many ran and how many were skipped on their receipts.
+The old `desktop_supported()` guard is gone from the model and every call site.
+A `base` seam (`installer_url_at`, `VendorInstall::base`) exists for the same
+reason `profiles::LoaderSources::at` does: without it the installer fetch could
+only ever reach the real vendor host, which would have left the whole function
+with no offline coverage.
+
+Reading the vendors' real documents rather than trusting the shape the code
+was written from changed two things, both now pinned by tests. **Maven's
+metadata is in deploy order, and neither vendor's is a release order:** Forge's
+live file opens its 1.20.1 run descending (`47.4.5`, `47.4.4`, `47.4.3`, ...)
+and thousands of lines later ends it ascending (`47.4.26`), while its 1.21 run
+starts at `51.0.33` and descends — so "the last entry is the newest" would have
+auto-installed `51.0.2` for a 1.21 collection and got 1.20.1 right by luck. The
+list is compared numerically now. **And the game's ids moved to a
+year-and-release scheme:** `26.1`, `26.2` and `26.3` are real ids in the version
+manifest and `1.26` is not one, which NeoForge's leading pair follows, so its
+mapping has a second branch instead of prefixed a `1.` that no longer exists.
+Both were caught by checking the live files (recorded here as facts, not
+estimates) and the desktop's automatic release choice is the caller that
+noticed.
+
+**Authenticated Java launch.** `palantir_net::session` stores a signed-in
+session (`StoredSession`): atomic write, mode 0600 from creation on unix, a
+symlinked or malformed file refused rather than read, and an expiry that is
+decided against the stored instant (a session with no stated lifetime is
+expired). The device-code answer now keeps the refresh token the
+`offline_access` scope buys (`auth::TokenSet`), and `auth::refresh_session`
+renews with it. A review set to the Microsoft account launches with that
+session, renews once when it has expired, and **refuses** when it cannot -- it
+never quietly falls back to the offline identity, which is the one claim this
+half of the feature had to make.
+
+**Bedrock worlds and content, engine side.** `worlds.rs` reads `level.dat` with
+its own bounds-checked NBT reader (gzipped or raw, nesting and declared lengths
+capped so a hostile file is an error and not a panic), lists worlds read-only
+(an unreadable world is still listed, so a player never thinks it vanished) and
+writes a byte-exact `.mcworld` copy without ever writing into the world folder.
+`content.rs` reads a pack's own `manifest.json` to decide resource/behaviour/
+skin (the file name cannot), refuses a fabricated uuid or an ambiguous
+`.mcaddon`, and reads/updates a world's `world_resource_packs.json` /
+`world_behavior_packs.json` atomically. The desktop does **not** call either yet;
+the screens say so.
+
+**`.mrpack` optional files.** `Request::Import` carries the review's selection,
+where `None` means "not shown yet" (refused, nothing created) and an explicit
+selection -- including an empty one -- installs, so declining every optional
+file is a decision rather than an inability to proceed.
+
+**Windows packaging.** The rewrite workflow gains a `package` job: on
+`windows-latest`, after the gates, a `--locked` release build of the desktop,
+an assertion that the binary exists and is above a size floor, and an artifact
+upload. It deliberately does not tag or publish -- the product licence is the
+owner's placeholder and phase 8 is owner-gated.
+
+### Verification of this continuation
+
+From `/PalantirMC/rewrite`: `cargo fmt --all -- --check` clean; workspace Clippy
+with `--locked -- -D warnings` clean; **299 tests passed, 0 failed, 7 live
+ignored**; licence audit **6/6** with all self-test scenarios passing. The two
+new loader test files drive the *real* `forge::install` against the shared mock
+vendor Maven, asserting the resolved document, the toolchain placement, the
+packaged `data` file actually staged out of the jar, and the refusal path; the
+desktop tests now move real bytes through `install_pack_archive` over a mock
+server (which needed a test-only `Engine::at(root)` rather than the
+environment-reading constructor) and prove the optional-file decision and the
+hash-mismatch refusal; the net tests drive `refresh_session` over the mock.
+
+Not verified here, and not claimed: a live install from either vendor's real
+Maven (the ignored live tests are unchanged and were not run), a live Microsoft
+sign-in (it needs an Azure client id only the owner can create), the Windows
+AppX path (only `windows-latest` compiles it), and the actual desktop window --
+the UI was paused, so no Xvfb smoke run was performed this session and the
+new launch/session flows have compile-and-worker coverage only.
+
+Remaining, in the order they now matter: wiring the desktop's Bedrock
+world/pack screens to the engine modules above, Java world backup, authenticated
+live acceptance with a registered client, Windows interactive acceptance, and
+phase 8's licence and first Release (owner-gated). No commit, push, publish or
+Release was performed by this continuation.
+
+## UI continuation — dependency-aware file review, 2026-10-12
+
+The next frontend slice connects Explore's required-dependency worker through
+an exact-file review rather than deleting its old safety guard outright. Source
+changes stay in `crates/palantir-desktop/src/{main,flows,model,backend}.rs`; the
+README and UI hand-off carry the current status. No new dependency, framework,
+asset, product licence choice, or service account was introduced. Existing
+instance/preferences JSON schemas and Java/Bedrock separation remain unchanged.
+
+Contract: `Request::ReviewContent(review_id, instance_id, project, release_id)`
+returns `Event::ContentReview(review_id, Result<ContentPlan>)`. The receipt holds
+collection/project/release ids, game, loader, collection name, and an ordered
+list of destination folder/filename, URL, SHA-1, optional size, and verified-
+existing flag. Every review/retry invalidates the prior request id; late results
+cannot enable confirmation or reopen closed dialogs. The review screen displays
+the exact files, dependency count, known download size, unknown-size disclosure,
+and reuse/download state, with loading, retry, changed selection, and worker
+failure states. Only a matching completed plan permits confirmation.
+
+`Request::Content` now carries the reviewed plan. The worker resolves again and
+compares before downloading anything. Matching regular existing files are
+hash/size verified and retained; differing bytes, links, and duplicate destination
+names are refused. Staging names include file indices to avoid same-hash staging
+collisions. After downloads, destination state is checked again. Placement uses
+exclusive file creation and rolls back only this operation's created files if
+placement fails. This is not a crash-atomic transaction; interrupted transfers
+can keep resumable partial bytes. Hash/size assertions were not weakened, and
+the old test forbidding all dependencies was replaced by the requested rule:
+unresolved reviews cannot install; resolved dependencies can, unless busy.
+
+Final verification from `/PalantirMC/rewrite`: formatting, locked workspace
+check, zero-warning workspace Clippy, desktop build, and **233 workspace tests
+passed, 0 failed, 7 live ignored** (49 desktop). Audit **6/6** and all self-test
+scenarios passed. New coverage includes required-only lookup, duplicate filenames,
+service errors, hash/size reuse, changed receipts, commit rollback without
+clobbering existing files, and stale/closed-dialog responses. The initial
+borrow-check failure was repaired and every affected check rerun.
+
+Actual-window evidence: live search → Sodium Extra project → 1.20.1 release →
+Fabric collection selection → resolved three-file review → confirm. No jars
+existed during review; after confirmation Sodium Extra (370701 bytes), Sodium
+(971552 bytes), and Fabric API (2137232 bytes) all matched the catalogue's SHA-1
+and size. Re-review showed **0 downloads**, and deleting a dependency after
+review caused confirmation to refuse the changed plan before downloading; the
+isolated file was restored afterward. The final review was exercised at 840×600.
+Smoke OCR needed coordinate/settling corrections for filled buttons; corrected
+flows passed with assertions intact. Evidence/data stay under
+`/tmp/palantir-dependency-ui/`, not shipped assets. Those downloaded mods remain
+user-content test data, not bundled code or dependencies of this launcher.
+
+Remaining: archive/optional-file UI execution, Forge-family desktop coordination,
+authenticated Java launch/session storage, Bedrock account/content/world features,
+and Windows interactive acceptance. This install proof does not claim the mods
+were launched in-game. No commit, push, publishing, or Release was performed.
+
+## UI continuation — resumed 2026-10-12 (earlier checkpoint)
+
+The owner explicitly resumed frontend work with the selected model. This slice
+keeps the existing native iced/Field Notes stack rather than rebuilding the
+shell. The sidebar's Java/Bedrock edition switch opens separate Java collection
+and managed Bedrock surfaces. The switch is session-local, defaults to Java,
+and leaves existing instance/preferences JSON contracts unchanged. Discovered
+Windows packages are not stored as Java instances: an edition switch cannot
+feed a Bedrock package through a Java loader or catalogue-content installer.
+This deliberately avoids migrating `Instance.loader` to an optional field
+before there is a persistent Bedrock descriptor to represent.
+
+New source: `crates/palantir-desktop/src/bedrock.rs` (screen/account guidance and
+read-only folder helpers). Changes also touch `main.rs`, `model.rs`, `flows.rs`,
+`backend.rs`, the desktop manifest, and the rewrite lockfile. The desktop now
+uses the existing workspace `palantir-bedrock` crate; no third-party dependency,
+asset, copied material, or service account was added. Existing original artwork
+and shared keyboard-focusable controls are reused. The README and root UI
+hand-off document the resumption and exact supported behaviour.
+
+Connected actions: detect Release/Preview packages on a worker thread, request
+shell activation, inspect existing world/resource/behaviour-pack directory
+names, and open allowlisted detected folders. Actions re-detect the Windows
+package before activation or folder use. Reads do not create missing folders,
+follow linked content directories, parse/change LevelDB, edit pack activation,
+or write game files. Preview's data path remains explicitly unknown. UI states
+cover loading, no installed copies, platform/service failure, missing data, and
+launch busy. Shell activation is reported as a request, never a tracked running
+session or a fabricated PID.
+
+Bedrock's account surface separates local launch from Windows/Store/Xbox
+sign-in, with explicit entitlement/no-bypass wording. It does not offer a Java
+device-code button, claim to switch the OS account, or claim an installed
+package proves ownership. Java's sign-in copy was updated to describe the real
+verification chain and disclose that Play is still offline; the current worker
+verifies ownership/profile but does not retain a playable authenticated session.
+
+Verification, on the final source from `/PalantirMC/rewrite`:
+- `cargo fmt --all -- --check`, workspace check with `--locked`, workspace
+  Clippy with `-D warnings`, and the development desktop build passed.
+- `cargo test --workspace --locked`: **228 passed, 0 failed, 7 live ignored**;
+  44 desktop tests including six new edition/state/read-only-file checks.
+- Licence audit **6/6**, and all audit self-test scenarios passed.
+- Actual final Linux-window flows under Xvfb: create a Java collection, switch
+  Java → Bedrock → Java, verify its descriptor bytes are unchanged, inspect the
+  real Windows-only error and account guidance, navigate Installed copies,
+  and exercise 840×600/Large-density account/Escape/Tab/Enter edition navigation.
+  Screenshots/OCR evidence and isolated data remain in `/tmp/palantir-ui-resume/`.
+  Initial smoke automation needed display, coordinate, and worker-readiness
+  corrections; corrected final window flows passed without changing assertions
+  about application behaviour. `xdotool windowclose` destroys the X11 drawable
+  rather than requesting a normal close and triggered an upstream winit panic
+  during smoke teardown. A separate restart closed through `WM_DELETE_WINDOW`
+  exited cleanly with an empty error log; force-destroy teardown is not claimed
+  as graceful-close coverage. No game was launched by these window checks.
+
+Limits: this is a local native-UI checkpoint, not Windows interactive acceptance
+or proof of Bedrock entitlement/launch. Installed-copy layouts are exercised
+through test-only events; live package discovery cannot succeed on Linux.
+Bedrock account pre-checks, pack importing, world backup/export, Preview data,
+and process tracking remain. The already-landed Java dependency and archive
+worker APIs remain guarded off in the UI; optional choices are not sent to the
+pack worker yet. Finish those as a focused review/install slice, then authenticated
+Java session handling and real Windows acceptance. No push, publication, licence
+selection, or Release was performed in this continuation.
 
 ## UI continuation — 2026-10-10
 
@@ -113,7 +644,13 @@ finish safe dependency/modpack coordination, then exercise the native UI on
 Windows. Product licence and release remain owner-gated. Phase checkpoints
 are not claims that every product done-when criterion has been met.
 
-## Pending verification — desktop worker wiring, 2026-10-11
+## Desktop worker wiring, 2026-10-11 (historical pre-verification record)
+
+The pending note below records the worker's initial hand-off, not its current
+verification state. The later backend session compiled/tested the final wiring
+(222 tests, zero-warning Clippy, audit 6/6) and Rewrite CI succeeded on `a2d24b6`.
+The 2026-10-12 continuation above rechecks the current workspace. Network/live
+limitations and the UI guards noted there still apply.
 
 `crates/palantir-desktop/src/backend.rs` was changed to use the library APIs the
 previous commit landed but left unwired, and **nothing in this slice was
