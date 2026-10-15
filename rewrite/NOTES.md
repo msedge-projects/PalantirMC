@@ -16,13 +16,36 @@ replaces them.
 | 3 | `palantir-loader`: vanilla, Fabric, Forge, NeoForge, Quilt; `.mrpack` and Prism importers | **landed** 2026-10-09: inheritance merge, install, Java runtimes, all four importers, launch plans, the Forge processor runner, and the done-when live test -- all five loaders install into a temp root and launch headless Java against their own document's runtime (5/5 green live; processors 6/6 with receipts verified; every game process watched running to its 20 s grace) |
 | 4 | Theme + shell: palette, rail, title bar, page pane, right panel | **native UI checkpoint** 2026-10-10: original Field Notes design, navigation, native decorations, adaptive activity notebook, three accents and densities; Linux window smoke verified, Windows acceptance remains |
 | 5 | Instances: create, launch, kill, logs, delete | **native UI checkpoint** 2026-10-10, Forge family added 2026-10-12: five detail tabs, create/import/rename/confirmed deletion, content toggling, managed vanilla/Fabric/Quilt/Forge/NeoForge launch and stop/log workers (the Forge family installs from the vendors' own installer jars and runs their processor pipelines with the managed runtime); actual-window file flows verified, real-game desktop acceptance and Windows interactive acceptance remain |
-| 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/dependency install verified; reviewed local `.mrpack` optional selection is connected, catalogue-to-new-pack download remains |
+| 6 | Discover: search, filters, project page, install | **native UI checkpoint** 2026-10-10: live search/type/order/version filters, pagination, native project notes and stopped-collection install selection; actual-window live search/detail/dependency install verified; reviewed local `.mrpack` optional selection is connected; catalogue-to-new-pack download verified 2026-10-15 in the actual window against the live catalogue (`tools/pack_live.py`, 26 pack files landed in a brand-new collection) |
 | 7 | Settings modal, Home, About, error surfaces | **native UI checkpoint** 2026-10-10: six preferences panes, persistent accent/density/player/resources, Home/About, account status and modal errors; Linux window flows verified; additional locales and live Microsoft native-client acceptance remain |
 | 8 | Audit green, own licence chosen, notices complete, first Release tagged | not started (estimate ~3–5 h) |
 
 The phase list and its estimates come from the rewrite specification
 (`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` §6);
 phases 1–3 are the largest block of new work. All hours are estimates.
+
+## Live acceptance — catalogue-to-new-pack download, 2026-10-15
+
+The work order's last Discover gap closed by driving the actual window
+against the live catalogue: `tools/pack_live.py` searched for *Simply
+Optimized*, opened the top result's modpack (**Simply Optimized Reloaded**,
+NeoForge 26.1.2), chose a release, configured the new collection, reviewed
+the downloaded `.mrpack`, and installed it. The acceptance is on disk, not
+in the click log: a brand-new collection `world-1792092219875021113` holds
+28 files (26 under `game/`) -- the pack's indexed content and its overrides --
+while the verified archive stayed in the shared `pack-archives/` cache.
+
+Three findings the driver turned up along the way, all recorded in the
+script's own comments:
+
+- the Discover type chips default to **Mods**, so a modpack query under them
+  legitimately answers "No matching additions"; choosing *Modpacks* is part
+  of the route, not a workaround.
+- the accent-filled primary buttons' 14px labels drop out of tesseract's
+  psm 3 and psm 11 whole-page passes entirely; a psm 6 pass reads them
+  ("Add to a collection..." at x=848 y=321 reads clean at 4x/psm 6).
+- multi-word phrases must be matched within one OCR pass's reading order;
+  merging passes first interleaves duplicate tokens and breaks every phrase.
 
 ## UI continuation — minimum-size defect pass, 2026-10-15
 
