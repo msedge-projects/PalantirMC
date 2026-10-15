@@ -2394,6 +2394,12 @@ dependencies = [
 [[package]]
 name = "palantir-bedrock"
 version = "0.1.0"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "zip",
+]
 
 [[package]]
 name = "palantir-core"
@@ -2410,11 +2416,13 @@ name = "palantir-desktop"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "palantir-bedrock",
  "palantir-core",
  "palantir-loader",
  "palantir-net",
  "serde",
  "serde_json",
+ "test-support",
  "zip",
 ]
 

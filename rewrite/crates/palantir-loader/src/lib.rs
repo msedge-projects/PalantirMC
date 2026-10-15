@@ -56,6 +56,8 @@
 pub mod curseforge;
 pub mod dependencies;
 pub mod error;
+pub mod forge;
+pub mod hooks;
 pub mod import;
 pub mod install;
 pub mod installer;

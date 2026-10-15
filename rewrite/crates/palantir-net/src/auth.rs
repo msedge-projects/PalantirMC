@@ -87,13 +87,33 @@ fn default_interval() -> u64 {
     5
 }
 
+/// What a finished sign-in hands back.
+///
+/// The device-code request asks for the `offline_access` scope, which is
+/// precisely what makes Microsoft issue a refresh token -- so a launcher that
+/// kept only the access token would turn a renewable session into one that dies
+/// with the token and send the player back to type a fresh code for no reason.
+/// The lifetime travels with the tokens for the same reason: the session file
+/// records when the token stops being usable, and it can only do that if the
+/// service's own answer is carried here instead of guessed at the call site.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct TokenSet {
+    pub access_token: String,
+    /// Absent when the service issued none; the sign-in is still usable.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    /// Seconds the access token is good for, as the service states it.
+    #[serde(default)]
+    pub expires_in: u64,
+}
+
 /// One answer to a poll. `Pending` and `SlowDown` are both "not yet", and
 /// `SlowDown` additionally asks for a longer wait -- treating it as an error
 /// is how a launcher gives up on a player who is simply still typing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Poll {
-    /// The Microsoft access token.
-    Token(String),
+    /// The tokens the player's sign-in bought.
+    Token(TokenSet),
     /// The player has not finished signing in.
     Pending,
     /// The player is still working; wait longer between polls.
@@ -227,18 +247,15 @@ pub fn xsts_error(body: &str) -> Option<String> {
 /// body.
 pub fn classify_oauth_error(status: u16, body: &str) -> Result<Poll> {
     if (200..300).contains(&status) {
-        #[derive(Deserialize)]
-        // Only the token is taken from this answer: the lifetime belongs to the
-        // caller that polls again, and pretending to track it here would be a
-        // second source of truth for when a session ends.
-        struct Answer {
-            access_token: String,
-        }
-        let answer: Answer = serde_json::from_str(body).map_err(|source| Error::Invalid {
+        // The whole set is read here, not just the access token: the refresh
+        // token and the stated lifetime are what let a caller store a session
+        // that outlives this process, and dropping them at the door is the one
+        // place that information cannot be recovered from later.
+        let tokens: TokenSet = serde_json::from_str(body).map_err(|source| Error::Invalid {
             what: "token answer",
             why: format!("{source}: {body}"),
         })?;
-        return Ok(Poll::Token(answer.access_token));
+        return Ok(Poll::Token(tokens));
     }
     #[derive(Deserialize)]
     struct Refusal {
@@ -301,6 +318,64 @@ pub fn poll_token(http: &Http, endpoint: &str, client_id: &str, device_code: &st
     let status = response.status();
     let body = response.text()?;
     classify_oauth_error(status, &body)
+}
+
+/// The body of a refresh: the refresh token from an earlier sign-in, which is
+/// what buys a new access token without asking the player anything at all.
+///
+/// The scopes are repeated because the token endpoint answers with a token
+/// scoped to what the request asked for; omitting them yields a token that
+/// cannot sign in to Xbox Live, which fails two steps later instead of here.
+pub fn refresh_form(client_id: &str, refresh_token: &str) -> String {
+    format!(
+        "grant_type={}&client_id={}&refresh_token={}&scope={}",
+        encode_form_component("refresh_token"),
+        encode_form_component(client_id),
+        encode_form_component(refresh_token),
+        encode_form_component("XboxLive.signin offline_access")
+    )
+}
+
+/// Exchange a stored refresh token for a fresh set.
+///
+/// A refusal is reported as the service's own answer and nothing else: the
+/// caller's only honest options are to fall back to a device-code sign-in or to
+/// tell the player, and both need to know that the refresh failed. Treating it
+/// as "still signed in" would launch the game with an expired token; treating
+/// it as "signed out" would hide a real service error behind a routine screen.
+///
+/// A refreshed answer that carries no new refresh token keeps the one that was
+/// used, which stays valid: Microsoft rotates refresh tokens only when it
+/// chooses to, and dropping the old one would end the session at the next
+/// access-token expiry.
+pub fn refresh_session(
+    http: &Http,
+    endpoint: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<TokenSet> {
+    let response = http.post_form(endpoint, &refresh_form(client_id, refresh_token))?;
+    let status = response.status();
+    let body = response.text()?;
+    match classify_oauth_error(status, &body)? {
+        Poll::Token(tokens) => Ok(keeping_refresh(tokens, refresh_token)),
+        // The polling answers cannot come from a refresh -- "not yet" has no
+        // meaning without a device code to poll -- so each one is reported as
+        // the refusal it actually is rather than mapped onto a wait.
+        Poll::Pending | Poll::SlowDown | Poll::Expired | Poll::Denied => Err(Error::Http {
+            url: endpoint.to_string(),
+            status: Some(status),
+            why: format!("the session refresh was refused: {}", body.trim()),
+        }),
+    }
+}
+
+/// Carry the used refresh token forward when the answer offered no new one.
+fn keeping_refresh(mut tokens: TokenSet, used: &str) -> TokenSet {
+    if tokens.refresh_token.is_none() {
+        tokens.refresh_token = Some(used.to_string());
+    }
+    tokens
 }
 
 /// Exchange the Microsoft access token for an Xbox Live user token.
@@ -514,7 +589,11 @@ mod tests {
     fn polling_answers_map_to_their_meanings() {
         assert_eq!(
             classify_oauth_error(200, r#"{"access_token":"t","expires_in":86400}"#).unwrap(),
-            Poll::Token("t".into())
+            Poll::Token(TokenSet {
+                access_token: "t".into(),
+                refresh_token: None,
+                expires_in: 86400,
+            })
         );
         assert_eq!(
             classify_oauth_error(400, r#"{"error":"authorization_pending"}"#).unwrap(),
@@ -534,6 +613,66 @@ mod tests {
                 Poll::Denied
             );
         }
+    }
+
+    #[test]
+    fn a_token_answer_keeps_the_refresh_token_it_offers() {
+        let answer = classify_oauth_error(
+            200,
+            r#"{"access_token":"a","refresh_token":"r","expires_in":3600}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            answer,
+            Poll::Token(TokenSet {
+                access_token: "a".into(),
+                refresh_token: Some("r".into()),
+                expires_in: 3600,
+            })
+        );
+        // A service that states no lifetime or no refresh token still answered
+        // a sign-in; neither absence is a reason to refuse the session.
+        assert_eq!(
+            classify_oauth_error(200, r#"{"access_token":"a"}"#).unwrap(),
+            Poll::Token(TokenSet {
+                access_token: "a".into(),
+                refresh_token: None,
+                expires_in: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn a_refresh_asks_for_a_scoped_token_and_keeps_a_missing_rotation() {
+        let form = refresh_form("abc-123", "ref+resh");
+        assert!(form.starts_with("grant_type=refresh_token&client_id=abc-123&"));
+        assert!(form.contains("refresh_token=ref%2Bresh"), "{form}");
+        assert!(
+            form.contains("scope=XboxLive.signin%20offline_access"),
+            "{form}"
+        );
+        let rotated = keeping_refresh(
+            TokenSet {
+                access_token: "new".into(),
+                refresh_token: Some("next".into()),
+                expires_in: 60,
+            },
+            "used",
+        );
+        assert_eq!(rotated.refresh_token.as_deref(), Some("next"));
+        let unrotated = keeping_refresh(
+            TokenSet {
+                access_token: "new".into(),
+                refresh_token: None,
+                expires_in: 60,
+            },
+            "used",
+        );
+        assert_eq!(
+            unrotated.refresh_token.as_deref(),
+            Some("used"),
+            "the token that was used is still the one a refresh needs"
+        );
     }
 
     #[test]

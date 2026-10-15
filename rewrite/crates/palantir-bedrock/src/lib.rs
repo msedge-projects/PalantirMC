@@ -21,9 +21,11 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 pub mod addons;
+pub mod content;
 pub mod install;
 pub mod paths;
 pub mod windows;
+pub mod worlds;
 
 pub use install::BedrockInstall;
 pub use paths::Channel;

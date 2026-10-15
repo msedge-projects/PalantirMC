@@ -11,7 +11,7 @@
 //! profile call cannot be exercised through it. The 404 -- the one that means
 //! "this account owns nothing" -- is exercised, and is the one that matters.
 
-use palantir_net::auth::{self, Poll};
+use palantir_net::auth::{self, Poll, TokenSet};
 use palantir_net::client::Http;
 use test_support::{MockServer, Route};
 
@@ -50,7 +50,14 @@ fn polling_returns_the_token_when_the_service_answers() {
         Route::new(r#"{"access_token":"msa-token","expires_in":3600}"#),
     )]);
     let poll = auth::poll_token(&http(), &server.url("/token"), "client-id", "secret").unwrap();
-    assert_eq!(poll, Poll::Token("msa-token".into()));
+    assert_eq!(
+        poll,
+        Poll::Token(TokenSet {
+            access_token: "msa-token".into(),
+            refresh_token: None,
+            expires_in: 3600,
+        })
+    );
     assert_eq!(server.hits(), vec!["/token"]);
 }
 
@@ -161,4 +168,98 @@ fn only_the_profile_call_reads_a_404_as_ownership() {
     .unwrap_err();
     assert!(!auth::is_not_owned(&error), "{error}");
     assert!(error.to_string().contains("404"), "{error}");
+}
+
+#[test]
+fn a_refresh_carries_the_form_the_builder_writes_to_the_endpoint_it_names() {
+    // The mock records a request's path and nothing else -- not its method and
+    // not its body -- so the body is pinned where it can be: `refresh_form` is
+    // a pure string and is asserted exactly, while the recorded path proves the
+    // call reached the endpoint the caller handed it. A refresh that named the
+    // wrong client id would be refused by the service, and this is the test
+    // that would have to change if the form stopped naming it.
+    let expected = concat!(
+        "grant_type=refresh_token&client_id=client-1",
+        "&refresh_token=refresh-1&scope=XboxLive.signin%20offline_access"
+    );
+    assert_eq!(auth::refresh_form("client-1", "refresh-1"), expected);
+
+    let server = MockServer::start(vec![(
+        "/token",
+        Route::new(
+            r#"{"access_token":"new-access","refresh_token":"refresh-2","expires_in":3600}"#,
+        ),
+    )]);
+    let tokens =
+        auth::refresh_session(&http(), &server.url("/token"), "client-1", "refresh-1").unwrap();
+    assert_eq!(
+        tokens,
+        TokenSet {
+            access_token: "new-access".into(),
+            refresh_token: Some("refresh-2".into()),
+            expires_in: 3600,
+        }
+    );
+    assert_eq!(server.hits(), vec!["/token"]);
+}
+
+#[test]
+fn a_refresh_answer_that_rotates_nothing_keeps_the_token_it_used() {
+    // Microsoft rotates refresh tokens only when it chooses to. Dropping the one
+    // that was just spent would end the session at the next access-token expiry
+    // with no way back except another device code, so the used token is carried
+    // forward through the whole refresh call, not only inside `keeping_refresh`.
+    let server = MockServer::start(vec![(
+        "/token",
+        Route::new(r#"{"access_token":"new-access","expires_in":3600}"#),
+    )]);
+    let tokens =
+        auth::refresh_session(&http(), &server.url("/token"), "client-1", "refresh-1").unwrap();
+    assert_eq!(tokens.access_token, "new-access");
+    assert_eq!(tokens.refresh_token.as_deref(), Some("refresh-1"));
+    assert_eq!(tokens.expires_in, 3600);
+}
+
+#[test]
+fn a_refused_refresh_is_an_error_and_never_an_empty_session() {
+    // A refresh that failed must not read as "still signed in": the launcher
+    // would hand the game an expired token and the player would see a stripped
+    // session with nothing pointing at the real cause. The shared mock renders
+    // every `always_status` other than 429 as a 404, so the 400-with-a-refusal
+    // body branch is unreachable through it -- these are the statuses it can
+    // serve, and both must be refusals that name the service.
+    for status in [404u16, 429] {
+        let mut route = Route::new("");
+        route.always_status = Some(status);
+        let server = MockServer::start(vec![("/token", route)]);
+        let error = auth::refresh_session(&http(), &server.url("/token"), "client-1", "refresh-1")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&format!("answered {status}")), "{error}");
+        assert!(error.contains("the sign-in service"), "{error}");
+        assert_eq!(
+            server.hits(),
+            vec!["/token"],
+            "the refusal was not asked for"
+        );
+    }
+}
+
+#[test]
+fn a_poll_answer_that_carries_a_refresh_token_keeps_it_in_the_set() {
+    // The device-code flow asks for the `offline_access` scope, so the answer is
+    // supposed to carry a refresh token. Keeping it here is what makes the
+    // stored session renewable later; losing it makes every session last only
+    // as long as its access token.
+    let answer = r#"{"access_token":"msa-token","refresh_token":"refresh-1","expires_in":3600}"#;
+    let server = MockServer::start(vec![("/token", Route::new(answer))]);
+    let poll = auth::poll_token(&http(), &server.url("/token"), "client-id", "secret").unwrap();
+    assert_eq!(
+        poll,
+        Poll::Token(TokenSet {
+            access_token: "msa-token".into(),
+            refresh_token: Some("refresh-1".into()),
+            expires_in: 3600,
+        })
+    );
 }

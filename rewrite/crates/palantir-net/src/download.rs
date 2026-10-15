@@ -143,11 +143,16 @@ pub fn sha1_file(path: &Path) -> Result<String> {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut hasher = Sha1::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|source| Error::Io {
+    sha1_reader(&mut file).map_err(|source| Error::Io {
         path: path.to_path_buf(),
         source,
-    })?;
+    })
+}
+
+/// Hash a stream without holding its bytes in memory (including archive entries).
+pub fn sha1_reader(reader: &mut impl std::io::Read) -> std::io::Result<String> {
+    let mut hasher = Sha1::new();
+    std::io::copy(reader, &mut hasher)?;
     Ok(hex(&hasher.finalize()))
 }
 

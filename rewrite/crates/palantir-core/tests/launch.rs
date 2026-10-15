@@ -61,6 +61,45 @@ fn assert_fully_expanded(plan: &LaunchPlan) {
 }
 
 #[test]
+fn custom_resolution_is_gated_and_filled_by_the_launch() {
+    let version = version("version-26.3.json");
+    // Without the feature and its two values, no size reaches the game:
+    // it opens at its own default.
+    let plan = build_launch_plan(&version, &platform(Os::Linux), &context()).unwrap();
+    assert_fully_expanded(&plan);
+    assert!(
+        !plan.game_args.iter().any(|a| a == "--width"),
+        "an unset resolution still passed --width: {:?}",
+        plan.game_args
+    );
+    // The feature opens the gate the format defines; the placeholders fill it.
+    let mut platform = platform(Os::Linux);
+    platform
+        .features
+        .insert("has_custom_resolution".to_string(), true);
+    let mut context = context();
+    context
+        .placeholders
+        .insert("resolution_width".to_string(), "1280".to_string());
+    context
+        .placeholders
+        .insert("resolution_height".to_string(), "720".to_string());
+    let plan = build_launch_plan(&version, &platform, &context).unwrap();
+    assert_fully_expanded(&plan);
+    let args: Vec<&str> = plan.game_args.iter().map(String::as_str).collect();
+    let width = args
+        .iter()
+        .position(|a| *a == "--width")
+        .expect("--width missing from the plan");
+    assert_eq!(args.get(width + 1), Some(&"1280"));
+    let height = args
+        .iter()
+        .position(|a| *a == "--height")
+        .expect("--height missing from the plan");
+    assert_eq!(args.get(height + 1), Some(&"720"));
+}
+
+#[test]
 fn windows_gets_the_windows_only_jvm_args() {
     let version = version("version-26.3.json");
     let plan = build_launch_plan(&version, &platform(Os::Windows), &context()).unwrap();
