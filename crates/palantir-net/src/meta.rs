@@ -82,7 +82,10 @@ impl BlockingHttpFetcher {
     /// `timeout` is enforced on every request via
     /// `RequestBuilder::timeout`.
     pub fn new(timeout: Duration) -> Self {
-        BlockingHttpFetcher { client: reqwest::blocking::Client::new(), timeout }
+        BlockingHttpFetcher {
+            client: reqwest::blocking::Client::new(),
+            timeout,
+        }
     }
 
     /// Return the per-request timeout this fetcher enforces.
@@ -126,7 +129,11 @@ impl BlockingHttpFetcher {
         if !status.is_success() {
             let sentence =
                 crate::engine::http::failure_sentence(&crate::engine::http::failure_body(response));
-            return Err(crate::Error::status_with(url, status.as_u16(), sentence.as_deref()));
+            return Err(crate::Error::status_with(
+                url,
+                status.as_u16(),
+                sentence.as_deref(),
+            ));
         }
         Ok(response)
     }
@@ -165,7 +172,9 @@ pub struct MapFetcher {
 impl MapFetcher {
     /// Create an empty map fetcher.
     pub fn new() -> Self {
-        MapFetcher { map: HashMap::new() }
+        MapFetcher {
+            map: HashMap::new(),
+        }
     }
 
     /// Insert a URL body mapping, replacing any previous entry.
@@ -222,7 +231,11 @@ impl OnlineMetaStore {
     pub fn new(base_url: impl Into<String>, cache_dir: impl Into<PathBuf>) -> Self {
         let raw = base_url.into();
         let trimmed = raw.trim_end_matches('/').to_string();
-        let base_url = if trimmed.is_empty() { DEFAULT_META_BASE_URL.to_string() } else { trimmed };
+        let base_url = if trimmed.is_empty() {
+            DEFAULT_META_BASE_URL.to_string()
+        } else {
+            trimmed
+        };
         OnlineMetaStore {
             base_url,
             cache_dir: cache_dir.into(),
@@ -300,9 +313,8 @@ impl OnlineMetaStore {
                 return parse_version_list(&bytes, path, uid);
             }
         }
-        self.fetch_and_cache(&url, &paths[0], fetcher).and_then(|bytes| {
-            parse_version_list(&bytes, &paths[0], uid)
-        })
+        self.fetch_and_cache(&url, &paths[0], fetcher)
+            .and_then(|bytes| parse_version_list(&bytes, &paths[0], uid))
     }
 
     fn version_cache_path(&self, uid: &str, version: &str) -> PathBuf {
@@ -346,8 +358,9 @@ impl OnlineMetaStore {
         cache_path: &Path,
         fetcher: &dyn Fetcher,
     ) -> Result<Vec<u8>, palantir_core::error::Error> {
-        let bytes: Vec<u8> =
-            fetcher.fetch(url).map_err(|e| -> palantir_core::error::Error { e.into() })?;
+        let bytes: Vec<u8> = fetcher
+            .fetch(url)
+            .map_err(|e| -> palantir_core::error::Error { e.into() })?;
         if let Some(parent) = cache_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -389,10 +402,13 @@ fn parse_version_list(
     let text = String::from_utf8_lossy(bytes).into_owned();
     let value: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| palantir_core::error::Error::json(path, e.to_string()))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| palantir_core::error::Error::json(path, "version list root must be an object"))?;
-    let fv = obj.get("formatVersion").and_then(|v| v.as_i64()).unwrap_or(0);
+    let obj = value.as_object().ok_or_else(|| {
+        palantir_core::error::Error::json(path, "version list root must be an object")
+    })?;
+    let fv = obj
+        .get("formatVersion")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if fv != 0 && fv != 1 {
         return Err(palantir_core::error::Error::format(
             path,
@@ -420,8 +436,15 @@ fn parse_version_list(
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
-                type_: o.get("type").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                recommended: o.get("recommended").and_then(|v| v.as_bool()).unwrap_or(false),
+                type_: o
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                recommended: o
+                    .get("recommended")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
                 volatile: o.get("volatile").and_then(|v| v.as_bool()).unwrap_or(false),
                 release_time: o
                     .get("releaseTime")
@@ -430,7 +453,11 @@ fn parse_version_list(
                     .to_string(),
                 requires,
                 conflicts,
-                sha256: o.get("sha256").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                sha256: o
+                    .get("sha256")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
             });
         }
     }
@@ -528,8 +555,8 @@ mod tests {
     #[test]
     fn store_with_timeout_overrides() {
         let tmp = tempfile::tempdir().unwrap();
-        let s = OnlineMetaStore::new("https://m/v1", tmp.path())
-            .with_timeout(Duration::from_secs(3));
+        let s =
+            OnlineMetaStore::new("https://m/v1", tmp.path()).with_timeout(Duration::from_secs(3));
         assert_eq!(s.timeout(), Duration::from_secs(3));
     }
 
@@ -588,11 +615,17 @@ mod tests {
         assert_eq!(vf.main_class, "M");
         assert!(vf.has_order);
         // write-through: cache file exists in OfflineMetaStore layout
-        let cached = tmp.path().join("meta").join("net.minecraft").join("1.20.4.json");
+        let cached = tmp
+            .path()
+            .join("meta")
+            .join("net.minecraft")
+            .join("1.20.4.json");
         assert!(cached.exists());
         // second store with empty fetcher hits disk, not network
         let s2 = store_in(tmp.path());
-        let vf2 = s2.version_file_with("net.minecraft", "1.20.4", &MapFetcher::new()).unwrap();
+        let vf2 = s2
+            .version_file_with("net.minecraft", "1.20.4", &MapFetcher::new())
+            .unwrap();
         assert_eq!(vf2.main_class, "M");
     }
 
@@ -612,7 +645,9 @@ mod tests {
     fn version_file_with_propagates_fetcher_error_as_core_format() {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
-        let err = s.version_file_with("nope", "0", &MapFetcher::new()).unwrap_err();
+        let err = s
+            .version_file_with("nope", "0", &MapFetcher::new())
+            .unwrap_err();
         match err {
             palantir_core::error::Error::Format { detail, .. } => {
                 assert!(detail.contains("no mocked response"))
@@ -636,11 +671,17 @@ mod tests {
         assert_eq!(list[0].version, "1.20.4");
         assert!(list[0].recommended);
         // Written in the layout Prism itself reads.
-        let cached = tmp.path().join("meta").join("net.minecraft").join("index.json");
+        let cached = tmp
+            .path()
+            .join("meta")
+            .join("net.minecraft")
+            .join("index.json");
         assert!(cached.exists());
         // offline hit
         let s2 = store_in(tmp.path());
-        let list2 = s2.version_list_with("net.minecraft", &MapFetcher::new()).unwrap();
+        let list2 = s2
+            .version_list_with("net.minecraft", &MapFetcher::new())
+            .unwrap();
         assert_eq!(list2.len(), 1);
     }
 
@@ -658,7 +699,9 @@ mod tests {
         )
         .unwrap();
         let s = store_in(tmp.path());
-        let list = s.version_list_with("net.minecraft", &MapFetcher::new()).unwrap();
+        let list = s
+            .version_list_with("net.minecraft", &MapFetcher::new())
+            .unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].version, "1.20.4");
     }

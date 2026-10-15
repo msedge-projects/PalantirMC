@@ -70,12 +70,21 @@ pub fn host_runtime_os(ctx: &RuntimeContext) -> String {
 
 /// The version-list URL for the runtimes.
 pub fn runtime_list_url(base_url: &str) -> String {
-    format!("{}/{}/index.json", base_url.trim_end_matches('/'), JAVA_RUNTIMES_UID)
+    format!(
+        "{}/{}/index.json",
+        base_url.trim_end_matches('/'),
+        JAVA_RUNTIMES_UID
+    )
 }
 
 /// The version-file URL for one runtime major (`java21`).
 pub fn runtime_file_url(base_url: &str, version: &str) -> String {
-    format!("{}/{}/{}.json", base_url.trim_end_matches('/'), JAVA_RUNTIMES_UID, version)
+    format!(
+        "{}/{}/{}.json",
+        base_url.trim_end_matches('/'),
+        JAVA_RUNTIMES_UID,
+        version
+    )
 }
 
 /// The metadata version that answers one Java major (`21` → `java21`).
@@ -114,25 +123,37 @@ impl RuntimeEntry {
 /// into a download of nothing; the caller reports "no runtime for this
 /// platform" when nothing is left, which is the honest outcome.
 pub fn parse_runtimes(bytes: &[u8], path: &std::path::Path) -> crate::Result<Vec<RuntimeEntry>> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|error| {
-        crate::Error::json(path, error.to_string())
-    })?;
-    let entries = value.get("runtimes").and_then(Value::as_array).ok_or_else(|| {
-        crate::Error::format(path, "a Java runtime file must carry a 'runtimes' array")
-    })?;
+    let value: Value = serde_json::from_slice(bytes)
+        .map_err(|error| crate::Error::json(path, error.to_string()))?;
+    let entries = value
+        .get("runtimes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::Error::format(path, "a Java runtime file must carry a 'runtimes' array")
+        })?;
     let mut out = Vec::new();
     for entry in entries {
         let Some(object) = entry.as_object() else {
             continue;
         };
-        let url = object.get("url").and_then(Value::as_str).unwrap_or_default();
-        let os = object.get("runtimeOS").and_then(Value::as_str).unwrap_or_default();
+        let url = object
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let os = object
+            .get("runtimeOS")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if url.is_empty() || os.is_empty() {
             continue;
         }
         out.push(RuntimeEntry {
             os: os.to_string(),
-            name: object.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+            name: object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             kind: object
                 .get("downloadType")
                 .and_then(Value::as_str)
@@ -171,7 +192,9 @@ pub fn pick_runtime<'a>(
     os: &str,
     name: &str,
 ) -> Option<&'a RuntimeEntry> {
-    entries.iter().find(|entry| entry.os == os && entry.name == name)
+    entries
+        .iter()
+        .find(|entry| entry.os == os && entry.name == name)
 }
 
 /// One file of a JRE manifest.
@@ -199,15 +222,19 @@ pub struct RuntimeFile {
 pub fn parse_manifest(bytes: &[u8], path: &std::path::Path) -> crate::Result<Vec<RuntimeFile>> {
     let value: Value = serde_json::from_slice(bytes)
         .map_err(|error| crate::Error::json(path, error.to_string()))?;
-    let files = value.get("files").and_then(Value::as_object).ok_or_else(|| {
-        crate::Error::format(path, "a JRE manifest must carry a 'files' object")
-    })?;
+    let files = value
+        .get("files")
+        .and_then(Value::as_object)
+        .ok_or_else(|| crate::Error::format(path, "a JRE manifest must carry a 'files' object"))?;
     let mut out = Vec::new();
     for (rel, entry) in files {
         if entry.get("type").and_then(Value::as_str).unwrap_or("file") != "file" {
             continue;
         }
-        let Some(raw) = entry.get("downloads").and_then(|downloads| downloads.get("raw")) else {
+        let Some(raw) = entry
+            .get("downloads")
+            .and_then(|downloads| downloads.get("raw"))
+        else {
             continue;
         };
         let url = raw.get("url").and_then(Value::as_str).unwrap_or_default();
@@ -217,9 +244,16 @@ pub fn parse_manifest(bytes: &[u8], path: &std::path::Path) -> crate::Result<Vec
         out.push(RuntimeFile {
             path: rel.replace('\\', "/"),
             url: url.to_string(),
-            sha1: raw.get("sha1").and_then(Value::as_str).unwrap_or_default().to_string(),
+            sha1: raw
+                .get("sha1")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             size: raw.get("size").and_then(Value::as_i64).unwrap_or(0),
-            executable: entry.get("executable").and_then(Value::as_bool).unwrap_or(false),
+            executable: entry
+                .get("executable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         });
     }
     Ok(out)
@@ -254,7 +288,10 @@ mod tests {
     fn an_unknown_architecture_is_appended_rather_than_guessed() {
         // The failure this prevents is handing a new CPU architecture x64
         // binaries, which installs a runtime that cannot execute.
-        assert_eq!(host_runtime_os(&ctx("linux", "loongarch64")), "linux-loongarch64");
+        assert_eq!(
+            host_runtime_os(&ctx("linux", "loongarch64")),
+            "linux-loongarch64"
+        );
         assert_eq!(host_runtime_os(&ctx("windows", "arm32")), "windows-arm32");
     }
 
@@ -295,8 +332,11 @@ mod tests {
 
     #[test]
     fn a_runtime_file_without_a_runtimes_array_is_an_error() {
-        let err = parse_runtimes(b"{\"uid\": \"net.minecraft.java\"}", std::path::Path::new("java21.json"))
-            .unwrap_err();
+        let err = parse_runtimes(
+            b"{\"uid\": \"net.minecraft.java\"}",
+            std::path::Path::new("java21.json"),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("runtimes"), "{err}");
     }
 
@@ -317,7 +357,9 @@ mod tests {
         ];
         // One tag, several names: the name decides.
         assert_eq!(
-            pick_runtime(&entries, "windows-x64", "java-runtime-delta").unwrap().url,
+            pick_runtime(&entries, "windows-x64", "java-runtime-delta")
+                .unwrap()
+                .url,
             "https://delta"
         );
         // Right name, wrong platform: not installable here.

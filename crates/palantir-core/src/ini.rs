@@ -57,7 +57,11 @@ impl IniMap {
     /// case of the existing entry is preserved).
     pub fn set(&mut self, key: &str, value: impl Into<String>) {
         let value = value.into();
-        if let Some(slot) = self.entries.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(key)) {
+        if let Some(slot) = self
+            .entries
+            .iter_mut()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        {
             slot.1 = value;
         } else {
             self.entries.push((key.to_string(), value));
@@ -146,7 +150,9 @@ fn unescape_key(s: &str) -> String {
             i += 1;
             continue;
         }
-        let hex: String = bytes[first_digit..first_digit + num_digits].iter().collect();
+        let hex: String = bytes[first_digit..first_digit + num_digits]
+            .iter()
+            .collect();
         match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
             Some(c) => {
                 out.push(c);
@@ -725,8 +731,16 @@ fn base64_encode(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -767,7 +781,11 @@ mod tests {
     #[test]
     fn qt_parse_sections_map_to_slash_keys() {
         // Qt's actual encoding: [General] header + \-prefixed keys.
-        let map = parse_qt("[General]\n\\UI\\Foo_Page\\Columns=x\nplain=1\n", Path::new("t")).unwrap();
+        let map = parse_qt(
+            "[General]\n\\UI\\Foo_Page\\Columns=x\nplain=1\n",
+            Path::new("t"),
+        )
+        .unwrap();
         assert_eq!(map.get("UI/Foo_Page/Columns"), Some("x"));
         assert_eq!(map.get("plain"), Some("1"));
     }
@@ -778,7 +796,11 @@ mod tests {
         // lines. "[%General]" is the escaped real section "General/" (Qt
         // `readIniFile`: "%general" -> section, not root), while "[general]"
         // (case-insensitive "general") is the root.
-        let map = parse_qt("[UI]\n\\a=1\n[%General]\n\\b=2\n[general]\n\\c=3\n", Path::new("t")).unwrap();
+        let map = parse_qt(
+            "[UI]\n\\a=1\n[%General]\n\\b=2\n[general]\n\\c=3\n",
+            Path::new("t"),
+        )
+        .unwrap();
         assert_eq!(map.get("UI/a"), Some("1"));
         assert_eq!(map.get("General/b"), Some("2"));
         assert_eq!(map.get("c"), Some("3"));
@@ -828,7 +850,10 @@ mod tests {
         let map = load_ini(text, Path::new("t")).unwrap();
         assert_eq!(map.get("ConfigVersion"), Some("1.3"));
         assert_eq!(map.get("linkedInstances"), Some("[\"one,Wide\"]"));
-        assert_eq!(map.get("WideBarVisibility_Main"), Some(base64_encode(b"AAAA").as_str()));
+        assert_eq!(
+            map.get("WideBarVisibility_Main"),
+            Some(base64_encode(b"AAAA").as_str())
+        );
         assert_eq!(map.get("name"), Some("Old"));
     }
 
@@ -843,7 +868,13 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(
             lines,
-            vec!["[General]", "ConfigVersion=1.3", "iconKey=default", "InstanceType=OneSix", "name=Test"]
+            vec![
+                "[General]",
+                "ConfigVersion=1.3",
+                "iconKey=default",
+                "InstanceType=OneSix",
+                "name=Test"
+            ]
         );
     }
 
@@ -867,7 +898,8 @@ mod tests {
         let text = save_ini(&map);
         // [General] first, then the UI section with the \-encoded key.
         // `save_ini` injects `ConfigVersion=1.3` by design.
-        let expected = "[General]\nConfigVersion=1.3\nroot=1\n\n[UI]\n\\Foo_Page\\Columns=\"x,y\"\n";
+        let expected =
+            "[General]\nConfigVersion=1.3\nroot=1\n\n[UI]\n\\Foo_Page\\Columns=\"x,y\"\n";
         assert_eq!(text, expected);
         let back = parse_qt(&text, Path::new("t")).unwrap();
         assert_eq!(back.get("UI/Foo_Page/Columns"), Some("x,y"));
@@ -913,7 +945,11 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            assert_eq!(back.get(&format!("k{i}")), Some(v), "round trip failed for {v:?}");
+            assert_eq!(
+                back.get(&format!("k{i}")),
+                Some(v),
+                "round trip failed for {v:?}"
+            );
         }
     }
 
@@ -935,6 +971,9 @@ mod tests {
         let text = "ConfigVersion=1.2\nWideBarVisibility_Main=AAAA\n";
         let map = load_ini(text, Path::new("t")).unwrap();
         assert_eq!(map.get("ConfigVersion"), Some("1.3"));
-        assert_eq!(map.get("WideBarVisibility_Main"), Some(base64_encode(b"AAAA").as_str()));
+        assert_eq!(
+            map.get("WideBarVisibility_Main"),
+            Some(base64_encode(b"AAAA").as_str())
+        );
     }
 }

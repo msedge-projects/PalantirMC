@@ -257,11 +257,17 @@ impl State {
             .collect();
         match self.sort {
             Sort::LastPlayed | Sort::HoursPlayed => visible.sort_by(|left, right| {
-                right.playtime_secs.cmp(&left.playtime_secs).then_with(|| left.name.cmp(&right.name))
+                right
+                    .playtime_secs
+                    .cmp(&left.playtime_secs)
+                    .then_with(|| left.name.cmp(&right.name))
             }),
             Sort::Name => visible.sort_by(|left, right| left.name.cmp(&right.name)),
             Sort::GameVersion => visible.sort_by(|left, right| {
-                right.mc_version.cmp(&left.mc_version).then_with(|| left.name.cmp(&right.name))
+                right
+                    .mc_version
+                    .cmp(&left.mc_version)
+                    .then_with(|| left.name.cmp(&right.name))
             }),
             Sort::Loader => visible.sort_by(|left, right| {
                 right
@@ -290,12 +296,15 @@ impl State {
         // trigger, a pointer crossing or a wheel -- a browser closes nothing by
         // scrolling past it -- which leaves every press and every key the reader
         // makes.
-        if !matches!(message, Message::Toggle(..) | Message::Hover { .. } | Message::Wheel(..)) {
+        if !matches!(
+            message,
+            Message::Toggle(..) | Message::Hover { .. } | Message::Wheel(..)
+        ) {
             self.menu = None;
         }
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Search(text) => self.search = text,
             Message::Sort(sort) => self.sort = sort,
@@ -304,7 +313,11 @@ impl State {
             // open. Pressing the same trigger twice is how a reader backs out
             // of the panel without choosing anything.
             Message::Toggle(menu) => {
-                self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+                self.menu = if self.menu == Some(menu) {
+                    None
+                } else {
+                    Some(menu)
+                };
             }
             // Reported rather than applied, like `Open`: what makes an instance is
             // the store and where the flow goes is the shell, so this comes back
@@ -377,7 +390,10 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
         // the page gives up is a scrollbar on a window shorter than the
         // welcome; at every size this shell opens at, the welcome fits, and
         // `min-h-full` draws no scrollbar at those sizes either.
-        let mut page = column![].width(Length::Fill).height(Length::Fill).spacing(GAP);
+        let mut page = column![]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(GAP);
         for block in blocks {
             page = page.push(block);
         }
@@ -392,9 +408,12 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             page::body(blocks, GAP, Message::Wheel)
         }
         _ => page::body(
-            vec![page::draw(theme, store.instances(), "your instances", |cards| {
-                cards_placeholder(theme, cards)
-            })],
+            vec![page::draw(
+                theme,
+                store.instances(),
+                "your instances",
+                |cards| cards_placeholder(theme, cards),
+            )],
             GAP,
             Message::Wheel,
         ),
@@ -539,7 +558,11 @@ fn toolbar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // the preset quote on the empty state). The applied-filter chips that would
     // follow it are `size="lg"` outlined buttons, one per chosen filter, and
     // there are none.
-    let filter = icon::icon(Glyph::Filter, FILTER_MARK, theme_gen::ink(theme, INK_DEFAULT));
+    let filter = icon::icon(
+        Glyph::Filter,
+        FILTER_MARK,
+        theme_gen::ink(theme, INK_DEFAULT),
+    );
     // `SortMenu`'s *second* combobox, which the row had been missing. It groups
     // by `displayState.group`, whose stored default is `'Group'`
     // (`use-library.ts`: `{ group: 'Group', sortBy: 'Last played', ... }`), and
@@ -618,10 +641,13 @@ fn menu<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
         ),
     };
     Some(
-        row![Space::with_width(offset), ui::select_menu(theme, namespace, COMBOBOX_WIDTH, &options, chosen)]
-            .align_items(Alignment::Start)
-            .width(Length::Fill)
-            .into(),
+        row![
+            Space::with_width(offset),
+            ui::select_menu(theme, namespace, COMBOBOX_WIDTH, &options, chosen)
+        ]
+        .align_items(Alignment::Start)
+        .width(Length::Fill)
+        .into(),
     )
 }
 
@@ -672,8 +698,7 @@ const TILE_GAP: f32 = 12.0;
 const TILE_COLUMNS: usize = 5;
 /// 1280 - 65 (rail) - 300 (panel) - 2 * 24 (the page's inset).
 const GRID_WIDTH: f32 = 867.0;
-const TILE_WIDTH: f32 =
-    (GRID_WIDTH - TILE_GAP * (TILE_COLUMNS as f32 - 1.0)) / TILE_COLUMNS as f32;
+const TILE_WIDTH: f32 = (GRID_WIDTH - TILE_GAP * (TILE_COLUMNS as f32 - 1.0)) / TILE_COLUMNS as f32;
 /// `p-3`, which is also the art's inset inside the tile.
 const TILE_PAD: f32 = 12.0;
 /// `aspect-square min-w-full`: the art is as wide as the tile's inside.
@@ -740,16 +765,14 @@ fn tile<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
             .into(),
         None => Space::new(Length::Fixed(TILE_ART), Length::Fixed(TILE_ART)).into(),
     };
-    let art = container(art_content).style(
-        move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(art_fill)),
-            border: Border {
-                radius: theme_gen::span(Span::RadiusLg).into(),
-                ..Border::default()
-            },
-            ..container::Appearance::default()
+    let art = container(art_content).style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(art_fill)),
+        border: Border {
+            radius: theme_gen::span(Span::RadiusLg).into(),
+            ..Border::default()
         },
-    );
+        ..container::Appearance::default()
+    });
     let lines = column![]
         .spacing(4.0)
         .width(Length::Fill)
@@ -765,18 +788,34 @@ fn tile<'a>(theme: Gen, card: &'a InstanceCard) -> Element<'a, Message> {
                 .font(medium())
                 .style(iced::theme::Text::Color(meta_ink)),
         );
-    let body = container(column![art, lines].spacing(TILE_GAP).align_items(Alignment::Start))
-        .width(Length::Fixed(TILE_WIDTH))
-        .padding(TILE_PAD)
-        .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(fill)),
-            border: Border { color: border, width: 1.0, radius: TILE_RADIUS.into() },
-            ..container::Appearance::default()
-        });
+    let body = container(
+        column![art, lines]
+            .spacing(TILE_GAP)
+            .align_items(Alignment::Start),
+    )
+    .width(Length::Fixed(TILE_WIDTH))
+    .padding(TILE_PAD)
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(fill)),
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: TILE_RADIUS.into(),
+        },
+        ..container::Appearance::default()
+    });
     mouse_area(body)
         .interaction(Interaction::Pointer)
-        .on_enter(Message::hover_with(key, true, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
-        .on_exit(Message::hover_with(key, false, crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS))
+        .on_enter(Message::hover_with(
+            key,
+            true,
+            crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+        ))
+        .on_exit(Message::hover_with(
+            key,
+            false,
+            crate::theme::INSTANCE_CARD_HOVER_BRIGHTNESS,
+        ))
         .on_release(Message::Open(card.id.clone()))
         .into()
 }
@@ -868,7 +907,10 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
             text(Key::AppWelcomeScreenImportPrompt.message())
                 .size(14.0)
                 .font(regular())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
         )
         .push(welcome_button(
             theme,
@@ -894,7 +936,12 @@ fn welcome<'a>(theme: Gen) -> Element<'a, Message> {
         // `justify-center` on the column that holds the hero: what is left of the
         // page after the padding and the foot is the hero's box, and the hero sits
         // in the middle of it.
-        .push(container(hero).width(Length::Fill).height(Length::Fill).center_y())
+        .push(
+            container(hero)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_y(),
+        )
         .push(foot)
         .into()
 }
@@ -909,7 +956,10 @@ fn drawn_title<'a>(theme: Gen, key: Key) -> Element<'a, Message> {
     text(key.message())
         .size(24.0)
         .font(semibold())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into()
 }
 
@@ -958,13 +1008,21 @@ fn welcome_button<'a>(
         .align_items(Alignment::Center),
     )
     .height(Length::Fixed(ui::CONTROL))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: ui::BUTTON_PAD, right: ui::BUTTON_PAD })
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: ui::BUTTON_PAD,
+        right: ui::BUTTON_PAD,
+    })
     // `Shrink`, which is what content-sized means: the box is the row's own
     // width rather than the column's 288.
     .center_y()
     .style(move |_theme: &Theme| container::Appearance {
         background: Some(Background::Color(crate::theme::brightness(fill, factor))),
-        border: Border { radius: 14.0.into(), ..Border::default() },
+        border: Border {
+            radius: 14.0.into(),
+            ..Border::default()
+        },
         ..container::Appearance::default()
     });
     mouse_area(face)
@@ -1006,7 +1064,10 @@ fn hint_run<'a>(theme: Gen, run: &str) -> Element<'a, Message> {
     text(run.to_string())
         .size(14.0)
         .font(regular())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )))
         .into()
 }
 
@@ -1029,7 +1090,12 @@ fn shortcut_chip<'a>(theme: Gen, key: &str) -> Element<'a, Message> {
     // longer one grows rather than wraps.
     .width(Length::Fixed((label + 8.0).max(SHORTCUT_HEIGHT)))
     .height(Length::Fixed(SHORTCUT_HEIGHT))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: 4.0, right: 4.0 })
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: 4.0,
+        right: 4.0,
+    })
     .center_x()
     .center_y()
     .style(move |_theme: &Theme| container::Appearance {
@@ -1145,17 +1211,28 @@ mod tests {
         let mut state = State::default();
         // Last played first, which is the reference's opening order.
         assert_eq!(
-            state.visible(&cards).iter().map(|card| card.id.as_str()).collect::<Vec<_>>(),
+            state
+                .visible(&cards)
+                .iter()
+                .map(|card| card.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["atm", "sodium", "vanilla"]
         );
         state.sort = Sort::Name;
         assert_eq!(
-            state.visible(&cards).iter().map(|card| card.id.as_str()).collect::<Vec<_>>(),
+            state
+                .visible(&cards)
+                .iter()
+                .map(|card| card.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["atm", "sodium", "vanilla"]
         );
         state.sort = Sort::Loader;
-        let loaders: Vec<String> =
-            state.visible(&cards).iter().map(|card| card.loader.label().to_string()).collect();
+        let loaders: Vec<String> = state
+            .visible(&cards)
+            .iter()
+            .map(|card| card.loader.label().to_string())
+            .collect();
         // Descending by loader name, and ties broken by the instance's name, so the
         // order is stable rather than depending on the directory walk.
         let mut sorted = loaders.clone();
@@ -1166,7 +1243,11 @@ mod tests {
         for sort in [Sort::Created, Sort::Modified] {
             state.sort = sort;
             assert_eq!(
-                state.visible(&cards).iter().map(|card| card.id.as_str()).collect::<Vec<_>>(),
+                state
+                    .visible(&cards)
+                    .iter()
+                    .map(|card| card.id.as_str())
+                    .collect::<Vec<_>>(),
                 vec!["atm", "sodium", "vanilla"]
             );
         }
@@ -1180,12 +1261,18 @@ mod tests {
         // first reader of the first run.
         let sentence = Key::AppWelcomeScreenQuickCreateHint.message();
         let (before, slot, after) = crate::text::tagged(sentence, "shortcut").expect("a slot");
-        assert_eq!((before, slot, after), ("Press ", "N", " to quick create an instance"));
+        assert_eq!(
+            (before, slot, after),
+            ("Press ", "N", " to quick create an instance")
+        );
         // Together they are the sentence without its markup, which is also what
         // `text::tagged`'s own gate asserts; here it is the screen's copy that is
         // being held to it.
         assert_eq!(format!("{before}{slot}{after}").matches("<").count(), 0);
-        assert_eq!(Key::AppWelcomeScreenImportPrompt.message(), "Escaping another launcher?");
+        assert_eq!(
+            Key::AppWelcomeScreenImportPrompt.message(),
+            "Escaping another launcher?"
+        );
         for theme in Gen::ALL {
             drop(welcome(*theme));
         }
@@ -1199,15 +1286,16 @@ mod tests {
         // 289 wide. What is asserted here is the arithmetic that replaced it -- the
         // label, its icon, the 8 between them and twice the button's padding,
         // which is `ButtonFrame.vue`'s `lg` row -- and the chip's own minimum.
-        let cta = 2.0 * ui::BUTTON_PAD
-            + 20.0
-            + 8.0
-            + ui::advance("Create an instance", semibold(), 16.0);
+        let cta =
+            2.0 * ui::BUTTON_PAD + 20.0 + 8.0 + ui::advance("Create an instance", semibold(), 16.0);
         assert!(
             cta <= 214.0,
             "the call to action measures {cta:.1}, wider than the reference's 214"
         );
-        assert!(cta >= 190.0, "the call to action measures {cta:.1}, narrower than its own parts");
+        assert!(
+            cta >= 190.0,
+            "the call to action measures {cta:.1}, narrower than its own parts"
+        );
         // `min-w-5`: a one-character chip is square rather than 16 wide.
         assert!(ui::advance("N", regular(), 12.0) + 8.0 <= SHORTCUT_HEIGHT);
     }
@@ -1225,12 +1313,23 @@ mod tests {
         assert_eq!(columns, TILE_COLUMNS);
         assert!((TILE_WIDTH - 163.8).abs() < 0.05, "five tiles of 163.8");
         assert_eq!(TILE_ART, TILE_WIDTH - 24.0);
-        assert!(TILE_ART < TILE_WIDTH, "the art leaves the padding beside it");
+        assert!(
+            TILE_ART < TILE_WIDTH,
+            "the art leaves the padding beside it"
+        );
         // And every shape of list draws: empty, a short row, rows that are full,
         // and a list that ends in the middle of one.
         for count in [0, 1, 4, 5, 6, 13] {
             let cards: Vec<InstanceCard> = (0..count)
-                .map(|index| card(&format!("i{index}"), "Instance", 0, "1.21.4", LoaderKind::Vanilla))
+                .map(|index| {
+                    card(
+                        &format!("i{index}"),
+                        "Instance",
+                        0,
+                        "1.21.4",
+                        LoaderKind::Vanilla,
+                    )
+                })
                 .collect();
             let refs: Vec<&InstanceCard> = cards.iter().collect();
             for theme in Gen::ALL {
@@ -1244,16 +1343,27 @@ mod tests {
         // The gate on its own, over every state a store can be in: this is the
         // whole of `Index.vue`'s own `isReady && !hasCreatedInstance` as this page
         // reads it, and the shell reads the same function for its quick-create key.
-        assert!(first_run(&Load::Empty), "read, and there is nothing to play");
-        assert!(first_run(&Load::Ready(Vec::new())), "the same answer by hand");
-        assert!(!first_run(&Load::Ready(sample())), "a library with instances in it");
+        assert!(
+            first_run(&Load::Empty),
+            "read, and there is nothing to play"
+        );
+        assert!(
+            first_run(&Load::Ready(Vec::new())),
+            "the same answer by hand"
+        );
+        assert!(
+            !first_run(&Load::Ready(sample())),
+            "a library with instances in it"
+        );
         assert!(!first_run(&Load::Idle), "a page that has not asked yet");
         assert!(!first_run(&Load::Loading));
         assert!(!first_run(&Load::Failed("no".to_string())));
 
         // And the page it produces, over a root that really does answer `Empty`:
         // every theme draws it without the toolbar, the search field or a card.
-        let root = std::env::temp_dir().join("palantirmc-home-welcome").join("first-run");
+        let root = std::env::temp_dir()
+            .join("palantirmc-home-welcome")
+            .join("first-run");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch root");
         let store = Store::load(&palantir_core::paths::PalantirPaths::at(root));
@@ -1335,9 +1445,9 @@ mod tests {
         // that "Sort by"/"Group by" are `aria-label`s on those icons rather
         // than text in the row -- which is what the two comboboxes on the browse
         // page do, and the reason [`ui::Prefix`] has two arms.
-        let Some(source) = reference_file(
-            "app-frontend/src/components/ui/library/library-toolbar/sort-menu.vue",
-        ) else {
+        let Some(source) =
+            reference_file("app-frontend/src/components/ui/library/library-toolbar/sort-menu.vue")
+        else {
             return;
         };
         // The two `#prefix` slots, in the order the two comboboxes appear.
@@ -1351,7 +1461,11 @@ mod tests {
                     .to_string()
             })
             .collect();
-        assert_eq!(slots.len(), 2, "one `#prefix` slot per combobox in the toolbar");
+        assert_eq!(
+            slots.len(),
+            2,
+            "one `#prefix` slot per combobox in the toolbar"
+        );
         for (at, icon) in ["ArrowUpDownIcon", "LayoutGridIcon"].iter().enumerate() {
             assert!(
                 slots[at].contains(icon),
@@ -1382,8 +1496,16 @@ mod tests {
                  here instead would be neither the mark nor its name"
             );
         }
-        assert_eq!(SORT_MARK, Glyph::ArrowUpDown, "the first slot's `ArrowUpDownIcon`");
-        assert_eq!(GROUP_MARK, Glyph::LayoutGrid, "the second slot's `LayoutGridIcon`");
+        assert_eq!(
+            SORT_MARK,
+            Glyph::ArrowUpDown,
+            "the first slot's `ArrowUpDownIcon`"
+        );
+        assert_eq!(
+            GROUP_MARK,
+            Glyph::LayoutGrid,
+            "the second slot's `LayoutGridIcon`"
+        );
         // And the two labels the marks answer to are the two the slots name,
         // read off the ids rather than spelled out: `app.library.sort.label` and
         // `app.library.group-by.label`, which are the keys this port holds as
@@ -1411,7 +1533,11 @@ mod tests {
         // for them. The panel is built from [`Group::ALL`], so the list is the
         // vocabulary the reader sees.
         assert_eq!(Group::ALL.len(), 5);
-        assert_eq!(Group::default(), Group::Custom, "a fresh profile stores 'Group'");
+        assert_eq!(
+            Group::default(),
+            Group::Custom,
+            "a fresh profile stores 'Group'"
+        );
         let labels: Vec<&str> = Group::ALL.iter().map(|group| group.label()).collect();
         assert_eq!(
             labels,
@@ -1467,7 +1593,11 @@ mod tests {
         // A pointer crossing and a wheel are not presses: a browser closes
         // nothing by scrolling past it, so neither does this.
         for message in [
-            Message::Hover { key: "home:sort", over: true, hover: None },
+            Message::Hover {
+                key: "home:sort",
+                over: true,
+                hover: None,
+            },
             Message::Wheel(
                 "home:library",
                 crate::scroll::Wheel {

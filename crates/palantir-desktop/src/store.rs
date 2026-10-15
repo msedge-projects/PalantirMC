@@ -44,16 +44,16 @@ use palantir_core::instance::Instance;
 use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::Settings;
+use palantir_net::engine::Search as ApiSearch;
 use palantir_net::engine::{
     Backoff, Build as LoaderBuildSource, Cancel, Fetch, HttpPool, Loader, LoaderMeta, Manifest,
     MetadataCache, ModrinthApi, PistonMeta, Request,
 };
-use palantir_net::engine::Search as ApiSearch;
 use palantir_net::modrinth::{
     ModrinthMember, ModrinthProject, ModrinthProjectVersion, NewsArticle, Tags,
 };
 use palantir_net::{
-    MinecraftSkins, MicrosoftAuth, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
+    MicrosoftAuth, MinecraftSkins, SkinChange, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
 };
 use serde::{Deserialize, Serialize};
 
@@ -63,10 +63,10 @@ use crate::install;
 use crate::instances::{self, ImportCandidate, InstanceCard, NewInstance};
 use crate::mods::{self, ModEntry};
 use crate::page::Load;
-use crate::route::InstanceTab;
 use crate::pages::discover::Hit;
 use crate::pages::project::Project;
 use crate::pages::user::Profile;
+use crate::route::InstanceTab;
 use crate::route::ProjectType;
 use crate::skin::Appearance;
 use crate::wire::Wire;
@@ -192,7 +192,9 @@ impl std::fmt::Debug for Engine {
     /// reach rather than the pool's own fields, so the pool is named and not
     /// printed.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Engine").field("fetch", &"<the engine's own pool>").finish_non_exhaustive()
+        f.debug_struct("Engine")
+            .field("fetch", &"<the engine's own pool>")
+            .finish_non_exhaustive()
     }
 }
 
@@ -205,7 +207,10 @@ impl Engine {
     /// already created by `ensure_layout`, and a second cache directory would be
     /// a second set of stale answers nobody knows about.
     pub fn new(paths: &PalantirPaths) -> Engine {
-        Engine::over(paths.meta_dir(), Arc::new(HttpPool::new(DEFAULT_LIMIT, DEFAULT_TIMEOUT)))
+        Engine::over(
+            paths.meta_dir(),
+            Arc::new(HttpPool::new(DEFAULT_LIMIT, DEFAULT_TIMEOUT)),
+        )
     }
 
     /// The same engine over an explicit cache directory and fetch seam.
@@ -219,7 +224,10 @@ impl Engine {
         Engine {
             fetch: fetch.clone(),
             api: Arc::new(ModrinthApi::new(cache, fetch.clone())),
-            piston: Arc::new(PistonMeta::new(MetadataCache::new(dir.clone(), DEFAULT_TTL), fetch.clone())),
+            piston: Arc::new(PistonMeta::new(
+                MetadataCache::new(dir.clone(), DEFAULT_TTL),
+                fetch.clone(),
+            )),
             loaders: Arc::new(LoaderMeta::new(MetadataCache::new(dir, DEFAULT_TTL), fetch)),
         }
     }
@@ -579,7 +587,11 @@ impl Store {
     ///
     /// Vanilla asks nothing and answers with nothing, because there is no such
     /// service and no such build: the picker draws no build list for it.
-    pub fn loader_builds(&self, loader: LoaderKind, game: &str) -> Result<Vec<LoaderBuild>, String> {
+    pub fn loader_builds(
+        &self,
+        loader: LoaderKind,
+        game: &str,
+    ) -> Result<Vec<LoaderBuild>, String> {
         let Some(loader) = Loader::from_name(loader.modrinth_name()) else {
             return Ok(Vec::new());
         };
@@ -680,12 +692,16 @@ impl Store {
     /// [`LaunchState::Idle`] for every instance that is not running, so a page
     /// asks this with its own id and never has to compare anything itself.
     pub fn launch_state(&self, id: &str) -> LaunchState {
-        self.launches.get(id).map_or(LaunchState::Idle, |launch| launch.state)
+        self.launches
+            .get(id)
+            .map_or(LaunchState::Idle, |launch| launch.state)
     }
 
     /// The launch's own last word, when it is about `id`.
     pub fn launch_line(&self, id: &str) -> Option<&str> {
-        self.launches.get(id).and_then(|launch| launch.line.as_deref())
+        self.launches
+            .get(id)
+            .and_then(|launch| launch.line.as_deref())
     }
 
     /// The instance list, in whatever state it is in.
@@ -748,7 +764,11 @@ impl Store {
             java_path: if override_java {
                 settings.get_str("JavaPath", "")
             } else {
-                defaults.java.default_binary().unwrap_or_default().to_string()
+                defaults
+                    .java
+                    .default_binary()
+                    .unwrap_or_default()
+                    .to_string()
             },
             override_java,
             memory_min: if override_memory {
@@ -956,8 +976,12 @@ impl Store {
         }
         let text = palantir_core::util::read_text(&path)
             .map_err(|error| format!("reading {} failed: {error}", path.display()))?;
-        let file: LinkFile = serde_json::from_str(&text)
-            .map_err(|error| format!("{} is not a link this launcher wrote: {error}", path.display()))?;
+        let file: LinkFile = serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "{} is not a link this launcher wrote: {error}",
+                path.display()
+            )
+        })?;
         if file.kind != MODRINTH_MODPACK {
             return Err(format!(
                 "{} is linked as a {}, a kind of link this launcher does not draw yet",
@@ -968,7 +992,10 @@ impl Store {
         if file.project_id.trim().is_empty() || file.version_id.trim().is_empty() {
             return Err(format!("{} names no project or version", path.display()));
         }
-        Ok(Some(InstanceLink { project_id: file.project_id, version_id: file.version_id }))
+        Ok(Some(InstanceLink {
+            project_id: file.project_id,
+            version_id: file.version_id,
+        }))
     }
 
     /// Write an instance's link, atomically.
@@ -1033,8 +1060,12 @@ impl Store {
         let project = api
             .project(&link.project_id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
-        let members = api.members(&link.project_id, &cancel, &backoff).unwrap_or_default();
-        let versions = api.versions(&link.project_id, &cancel, &backoff).unwrap_or_default();
+        let members = api
+            .members(&link.project_id, &cancel, &backoff)
+            .unwrap_or_default();
+        let versions = api
+            .versions(&link.project_id, &cancel, &backoff)
+            .unwrap_or_default();
         Ok(Some(LinkedModpack {
             project_id: link.project_id,
             title: project.title,
@@ -1153,7 +1184,9 @@ impl Store {
             game_versions: api
                 .tag_game_versions(&cancel, &backoff)
                 .map_err(|error| error.to_string())?,
-            loaders: api.tag_loaders(&cancel, &backoff).map_err(|error| error.to_string())?,
+            loaders: api
+                .tag_loaders(&cancel, &backoff)
+                .map_err(|error| error.to_string())?,
         })
     }
 
@@ -1258,7 +1291,10 @@ impl Store {
             .filter_map(|url| {
                 let bytes = self.project_icon(url).ok()?;
                 let icon = avatar::Icon::of(&bytes, avatar::ICON_SIDE)?;
-                Some(avatar::Fetched { url: url.clone(), icon })
+                Some(avatar::Fetched {
+                    url: url.clone(),
+                    icon,
+                })
             })
             .collect()
     }
@@ -1377,13 +1413,17 @@ impl Store {
         let projects = api
             .user_projects(&user.id, &cancel, &backoff)
             .map_err(|error| error.to_string())?;
-        let projects_v3 = api.user_projects_v3(&user.id, &cancel, &backoff).unwrap_or_default();
+        let projects_v3 = api
+            .user_projects_v3(&user.id, &cancel, &backoff)
+            .unwrap_or_default();
         // The fourth document, and the second v3 read: a profile's filter strip ends
         // in a *Collections* tab whenever this answers with at least one, which is
         // why a read that fails leaves the strip as it was rather than breaking it.
         // Public and anonymous -- measured, and it is the curl output in this
         // function's docs.
-        let collections = api.user_collections_v3(&user.id, &cancel, &backoff).unwrap_or_default();
+        let collections = api
+            .user_collections_v3(&user.id, &cancel, &backoff)
+            .unwrap_or_default();
         let avatar = if user.avatar_url.is_empty() {
             Err("This account has no avatar.".to_string())
         } else {
@@ -1409,7 +1449,14 @@ impl Store {
                 .map(|collection| collection.icon_url.clone()),
         );
         let icons = self.project_icons(&urls);
-        Ok(Profile::of(user, projects, projects_v3, collections, avatar, icons))
+        Ok(Profile::of(
+            user,
+            projects,
+            projects_v3,
+            collections,
+            avatar,
+            icons,
+        ))
     }
 
     /// Install one project into one instance.
@@ -1429,7 +1476,11 @@ impl Store {
     /// `project_type`, and a launcher that let a page tell it where to write would
     /// be trusting the page's copy of an answer the service has since replaced.
     /// Both reads are cached, so a press right after a page load costs nothing.
-    pub fn install_project(&self, project_id: &str, instance_id: &str) -> Result<Installed, String> {
+    pub fn install_project(
+        &self,
+        project_id: &str,
+        instance_id: &str,
+    ) -> Result<Installed, String> {
         let Some(engine) = &self.engine else {
             return Err(not_implemented("Installing a project"));
         };
@@ -1543,7 +1594,10 @@ impl Store {
             Ok(()) => summary,
             Err(error) => format!("{summary} (the link to it could not be recorded: {error})"),
         };
-        Ok(Outcome::Pack { id: installed.id.clone(), line })
+        Ok(Outcome::Pack {
+            id: installed.id.clone(),
+            line,
+        })
     }
 
     /// Re-install one instance's files, checking what is already on disk.
@@ -1691,7 +1745,9 @@ impl Store {
         // does it.
         match self.save_instance_link(instance_id, &wanted) {
             Ok(()) => Ok(summary),
-            Err(error) => Ok(format!("{summary} (the link could not be updated: {error})")),
+            Err(error) => Ok(format!(
+                "{summary} (the link could not be updated: {error})"
+            )),
         }
     }
 
@@ -1821,7 +1877,10 @@ pub struct LoaderBuild {
 
 impl From<LoaderBuildSource> for LoaderBuild {
     fn from(build: LoaderBuildSource) -> LoaderBuild {
-        LoaderBuild { version: build.version, stable: build.stable }
+        LoaderBuild {
+            version: build.version,
+            stable: build.stable,
+        }
     }
 }
 
@@ -1882,9 +1941,7 @@ pub fn needs_account(what: &str) -> String {
 /// a worker that dies before answering at all -- a panic in a `Drop`, a thread the
 /// OS refuses -- is the same shape with a sentence of its own, because a receiver
 /// whose sender went with the thread resolves rather than waiting forever.
-pub async fn off_thread<T, E>(
-    work: impl FnOnce() -> Result<T, E> + Send + 'static,
-) -> Result<T, E>
+pub async fn off_thread<T, E>(work: impl FnOnce() -> Result<T, E> + Send + 'static) -> Result<T, E>
 where
     T: Send + 'static,
     E: From<String> + Send + 'static,
@@ -1894,7 +1951,9 @@ where
         let _ = sender.send(work());
     });
     receiver.await.unwrap_or_else(|_| {
-        Err(E::from("the request stopped before it answered".to_string()))
+        Err(E::from(
+            "the request stopped before it answered".to_string(),
+        ))
     })
 }
 
@@ -2040,7 +2099,11 @@ pub fn worlds(instance_dir: &Path) -> Vec<World> {
             .and_then(|meta| meta.modified().ok())
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|since| since.as_secs());
-        worlds.push(World { name, played: modified.is_some(), modified });
+        worlds.push(World {
+            name,
+            played: modified.is_some(),
+            modified,
+        });
     }
     worlds.sort_by(|left, right| left.name.cmp(&right.name));
     worlds
@@ -2097,10 +2160,19 @@ pub fn files(directory: &Path) -> Vec<Entry> {
             Some(meta) => meta.len(),
             None => 0,
         };
-        entries.push(Entry { name, directory, bytes, created, modified });
+        entries.push(Entry {
+            name,
+            directory,
+            bytes,
+            created,
+            modified,
+        });
     }
     entries.sort_by(|left, right| {
-        right.directory.cmp(&left.directory).then_with(|| left.name.cmp(&right.name))
+        right
+            .directory
+            .cmp(&left.directory)
+            .then_with(|| left.name.cmp(&right.name))
     });
     entries
 }
@@ -2126,7 +2198,12 @@ pub fn screenshots(instance_dir: &Path) -> Vec<String> {
         .into_iter()
         .filter(|entry| !entry.directory)
         .filter(|entry| {
-            let extension = entry.name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+            let extension = entry
+                .name
+                .rsplit('.')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             matches!(extension.as_str(), "png" | "jpg" | "jpeg")
         })
         .map(|entry| entry.name)
@@ -2180,15 +2257,17 @@ pub fn bytes_label(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palantir_net::engine::request::{MapFetch, Route};
     use palantir_net::engine::modrinth::{user_collections_v3_url, user_projects_v3_url};
+    use palantir_net::engine::request::{MapFetch, Route};
     use palantir_net::modrinth::{
         project_members_url, project_url, user_projects_url, user_url, version_url, NEWS_URL,
     };
     use palantir_net::PISTON_MANIFEST_URL;
 
     fn scratch(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join("palantirmc-store-tests").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-store-tests")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         root
@@ -2200,7 +2279,10 @@ mod tests {
         // must not read like a failure of their machine.
         let reason = not_implemented("Discover's search");
         assert!(reason.contains("is not implemented yet"), "{reason}");
-        assert!(!reason.contains("stage"), "a stage number is a word for developers: {reason}");
+        assert!(
+            !reason.contains("stage"),
+            "a stage number is a word for developers: {reason}"
+        );
         assert!(reason.starts_with("Discover's search"), "{reason}");
         assert!(!reason.to_lowercase().contains("error"), "{reason}");
     }
@@ -2286,7 +2368,10 @@ mod tests {
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
         fetch.set_route(&project_members_url("AANobbMI"), Route::text(MEMBERS_BODY));
-        fetch.set_route(&version_url("AANobbMI"), Route::text(MODRINTH_VERSIONS_BODY));
+        fetch.set_route(
+            &version_url("AANobbMI"),
+            Route::text(MODRINTH_VERSIONS_BODY),
+        );
         let store = store_over("project", fetch.clone());
 
         let project = store.project("AANobbMI").expect("the project");
@@ -2357,7 +2442,10 @@ mod tests {
         // and the collections are why the strip ends in *Collections* at all.
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
-        fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
+        fetch.set_route(
+            &user_projects_url("P3U9o13d"),
+            Route::text(PROFILE_USER_PROJECTS_BODY),
+        );
         fetch.set_route(
             &user_projects_v3_url("P3U9o13d"),
             Route::text(PROFILE_USER_PROJECTS_V3_BODY),
@@ -2409,7 +2497,10 @@ mod tests {
         // wrong for a project of two types rather than a profile that is gone.
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&user_url("FlameFire"), Route::text(PROFILE_USER_BODY));
-        fetch.set_route(&user_projects_url("P3U9o13d"), Route::text(PROFILE_USER_PROJECTS_BODY));
+        fetch.set_route(
+            &user_projects_url("P3U9o13d"),
+            Route::text(PROFILE_USER_PROJECTS_BODY),
+        );
         // No route for either v3 list: `MapFetch` fails a URL nobody scripted.
         let store = store_over("profile-no-v3", fetch.clone());
 
@@ -2417,7 +2508,10 @@ mod tests {
         assert_eq!(profile.projects.len(), 2);
         assert!(profile.projects_v3.is_empty());
         assert!(profile.collections.is_empty());
-        assert_eq!(profile.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
+        assert_eq!(
+            profile.types(),
+            vec![ProjectType::Mod, ProjectType::Modpack]
+        );
         assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 1);
         // A collections list that could not be read costs the tab and nothing else.
         assert!(!profile.has_collections());
@@ -2432,7 +2526,10 @@ mod tests {
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
         // No route for the members: `MapFetch` fails a URL nobody scripted.
-        fetch.set_route(&version_url("AANobbMI"), Route::text(MODRINTH_VERSIONS_BODY));
+        fetch.set_route(
+            &version_url("AANobbMI"),
+            Route::text(MODRINTH_VERSIONS_BODY),
+        );
         let store = store_over("project-no-team", fetch.clone());
 
         let project = store.project("AANobbMI").expect("the project");
@@ -2505,27 +2602,44 @@ mod tests {
             &version_url("AANobbMI"),
             Route::text(&versions_with_files(&install::sha1_hex(body))),
         );
-        fetch.set_route("https://cdn.modrinth.com/data/sodium.jar", Route::body(body.to_vec()));
+        fetch.set_route(
+            "https://cdn.modrinth.com/data/sodium.jar",
+            Route::body(body.to_vec()),
+        );
         let store = store_with_instance("install-project", fetch.clone());
 
-        let installed = store.install_project("AANobbMI", "atm10").expect("an install");
+        let installed = store
+            .install_project("AANobbMI", "atm10")
+            .expect("an install");
         assert_eq!(installed.project, "Sodium");
         assert_eq!(
             installed.version, "mc1.21.4-0.6.5",
             "the newest version for this instance, not the newest release"
         );
         assert_eq!(installed.file.filename, "sodium-fabric-0.6.5.jar");
-        assert_eq!(installed.summary(), "Installed Sodium mc1.21.4-0.6.5 into atm10");
-        let path = store.instance_dir("atm10").join("mods").join("sodium-fabric-0.6.5.jar");
+        assert_eq!(
+            installed.summary(),
+            "Installed Sodium mc1.21.4-0.6.5 into atm10"
+        );
+        let path = store
+            .instance_dir("atm10")
+            .join("mods")
+            .join("sodium-fabric-0.6.5.jar");
         assert_eq!(installed.file.path, path);
         assert_eq!(std::fs::read(&path).expect("the file"), b"a mod jar");
         assert!(installed.file.verified, "the published sha1 was checked");
         assert_eq!(installed.file.bytes, body.len() as u64);
-        assert_eq!(fetch.count(), 3, "the document, the version list and the file");
+        assert_eq!(
+            fetch.count(),
+            3,
+            "the document, the version list and the file"
+        );
 
         // Pressed again, nothing is transferred: the file is already there and
         // matched the digest the API published, and the two documents are cached.
-        let again = store.install_project("AANobbMI", "atm10").expect("the same install");
+        let again = store
+            .install_project("AANobbMI", "atm10")
+            .expect("the same install");
         assert_eq!(again.version, installed.version);
         assert_eq!(fetch.count(), 3, "a second press costs nothing");
     }
@@ -2538,7 +2652,9 @@ mod tests {
         let store = store_with_instance("install-refusals", fetch.clone());
 
         // No such instance: named rather than guessed at.
-        let reason = store.install_project("AANobbMI", "gone").expect_err("no instance");
+        let reason = store
+            .install_project("AANobbMI", "gone")
+            .expect_err("no instance");
         assert!(reason.contains("gone"), "{reason}");
         // A version list with nothing for this instance: the sentence names what
         // the instance *is*, which is what the reader can act on.
@@ -2546,12 +2662,19 @@ mod tests {
         bare.set_route(&project_url("AANobbMI"), Route::text(PROJECT_BODY));
         bare.set_route(&version_url("AANobbMI"), Route::text("[]"));
         let store = store_with_instance("install-no-version", bare.clone());
-        let reason = store.install_project("AANobbMI", "atm10").expect_err("no version");
-        assert!(reason.contains("Fabric 1.21.4"), "the target is named: {reason}");
+        let reason = store
+            .install_project("AANobbMI", "atm10")
+            .expect_err("no version");
+        assert!(
+            reason.contains("Fabric 1.21.4"),
+            "the target is named: {reason}"
+        );
         assert_eq!(bare.count(), 2, "and no file was asked for");
         // A store with no engine, and one with no launcher behind it: the two
         // ways this cannot be attempted at all.
-        let reason = Store::default().install_project("AANobbMI", "atm10").expect_err("no engine");
+        let reason = Store::default()
+            .install_project("AANobbMI", "atm10")
+            .expect_err("no engine");
         assert!(reason.contains("is not implemented yet"), "{reason}");
         assert!(store.install_project("AANobbMI", "gone").is_err());
     }
@@ -2596,7 +2719,10 @@ mod tests {
         assert_eq!(news.len(), 2, "the whole feed; the panel takes four of it");
         assert_eq!(news[0].title, "Sync settings across instances");
         assert_eq!(news[0].date_label(), "September 7, 2026");
-        assert_eq!(news[1].summary, "", "an article with no summary is still an article");
+        assert_eq!(
+            news[1].summary, "",
+            "an article with no summary is still an article"
+        );
         assert_eq!(fetch.count(), 1);
         // The feed is a document, so the second read is the engine's own cache:
         // the panel is drawn on every frame and must not ask again.
@@ -2643,7 +2769,9 @@ mod tests {
             zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
         writer.start_file("modrinth.index.json", options).unwrap();
         writer.write_all(index.to_string().as_bytes()).unwrap();
-        writer.start_file("overrides/config/cobblemon.json", options).unwrap();
+        writer
+            .start_file("overrides/config/cobblemon.json", options)
+            .unwrap();
         writer.write_all(b"{}").unwrap();
         writer.finish().unwrap().into_inner()
     }
@@ -2682,7 +2810,10 @@ mod tests {
         fetch.set_route(&project_url("cobblemon"), Route::text(PACK_PROJECT_BODY));
         fetch.set_route(
             &version_url("cobblemon"),
-            Route::text(&pack_versions_body(&install::sha1_hex(&archive), archive.len())),
+            Route::text(&pack_versions_body(
+                &install::sha1_hex(&archive),
+                archive.len(),
+            )),
         );
         fetch.set_route(
             "https://cdn.modrinth.com/data/cobblemon.mrpack",
@@ -2697,9 +2828,16 @@ mod tests {
         let Outcome::Pack { id, line } = store.install_pack("cobblemon").expect("a pack") else {
             panic!("a pack install is the shape that makes an instance")
         };
-        assert_eq!(id, "Cobblemon", "named after the project the reader pressed");
+        assert_eq!(
+            id, "Cobblemon",
+            "named after the project the reader pressed"
+        );
         assert_eq!(line, "Installed Cobblemon as Cobblemon, 1 file");
-        assert_eq!(fetch.count(), 4, "the document, the versions, the archive, one file");
+        assert_eq!(
+            fetch.count(),
+            4,
+            "the document, the versions, the archive, one file"
+        );
         let root = store.instance_dir(&id);
         assert_eq!(
             std::fs::read(root.join("mods").join("cobblemon.jar")).expect("the pack mod"),
@@ -2710,8 +2848,14 @@ mod tests {
             "the overrides tree is written at the instance root, with `overrides/` stripped"
         );
         let pack = palantir_core::util::read_text(&root.join("mmc-pack.json")).expect("a profile");
-        assert!(pack.contains("1.21.4"), "the instance is the pack's game: {pack}");
-        assert!(pack.contains("net.fabricmc.fabric-loader"), "and its loader: {pack}");
+        assert!(
+            pack.contains("1.21.4"),
+            "the instance is the pack's game: {pack}"
+        );
+        assert!(
+            pack.contains("net.fabricmc.fabric-loader"),
+            "and its loader: {pack}"
+        );
 
         // And the instance remembers which project and version it came from,
         // which is the whole of what the installation tab's modpack card draws.
@@ -2722,7 +2866,11 @@ mod tests {
                 version_id: "pack-1".to_string(),
             })
         );
-        assert_eq!(fetch.count(), 4, "and a link read is a file read, not a request");
+        assert_eq!(
+            fetch.count(),
+            4,
+            "and a link read is a file read, not a request"
+        );
     }
 
     #[test]
@@ -2751,8 +2899,14 @@ mod tests {
         };
         store.save_instance_link("atm10", &link).expect("a write");
         let text = palantir_core::util::read_text(&dir.join(LINK_FILE)).expect("the file");
-        assert!(text.contains("modrinth_modpack"), "the reference's own type: {text}");
-        assert_eq!(store.instance_link("atm10").expect("a link"), Some(link.clone()));
+        assert!(
+            text.contains("modrinth_modpack"),
+            "the reference's own type: {text}"
+        );
+        assert_eq!(
+            store.instance_link("atm10").expect("a link"),
+            Some(link.clone())
+        );
 
         // A file this build cannot believe is an error rather than a `None`: one
         // says "this instance came from nothing", the other says "it came from
@@ -2763,11 +2917,19 @@ mod tests {
             r#"{"type":"shared_instance","project_id":"x","version_id":"y"}"#,
         )
         .expect("a hand-written link");
-        let reason = store.instance_link("atm10").expect_err("a kind this launcher does not draw");
-        assert!(reason.contains("shared_instance"), "the refusal names the kind: {reason}");
+        let reason = store
+            .instance_link("atm10")
+            .expect_err("a kind this launcher does not draw");
+        assert!(
+            reason.contains("shared_instance"),
+            "the refusal names the kind: {reason}"
+        );
         std::fs::write(dir.join(LINK_FILE), "{ not json").expect("a broken link");
         let reason = store.instance_link("atm10").expect_err("junk");
-        assert!(reason.contains(LINK_FILE), "the refusal names the file: {reason}");
+        assert!(
+            reason.contains(LINK_FILE),
+            "the refusal names the file: {reason}"
+        );
 
         // Unlinking takes the link and leaves everything else: the instance, its
         // `mmc-pack.json` and every file the pack install put in it.
@@ -2778,7 +2940,10 @@ mod tests {
             !store.clear_instance_link("atm10").expect("a second clear"),
             "unlinking an unlinked instance says there was nothing to take"
         );
-        assert!(dir.join("mmc-pack.json").is_file() || dir.is_dir(), "the instance stays");
+        assert!(
+            dir.join("mmc-pack.json").is_file() || dir.is_dir(),
+            "the instance stays"
+        );
     }
 
     #[test]
@@ -2789,28 +2954,52 @@ mod tests {
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(&project_url("cobblemon"), Route::text(PACK_PROJECT_BODY));
         fetch.set_route(&project_members_url("cobblemon"), Route::text(MEMBERS_BODY));
-        fetch.set_route(&version_url("cobblemon"), Route::text(&pack_versions_body("0", 1)));
+        fetch.set_route(
+            &version_url("cobblemon"),
+            Route::text(&pack_versions_body("0", 1)),
+        );
         let store = store_without_instances("linked-modpack", fetch.clone());
         std::fs::create_dir_all(store.instance_dir("atm10")).expect("an instance folder");
         assert_eq!(store.linked_modpack("atm10").expect("no link"), None);
-        assert_eq!(fetch.count(), 0, "an instance with no link asks nobody anything");
+        assert_eq!(
+            fetch.count(),
+            0,
+            "an instance with no link asks nobody anything"
+        );
 
         let linked = |version_id: &str| InstanceLink {
             project_id: "cobblemon".to_string(),
             version_id: version_id.to_string(),
         };
-        store.save_instance_link("atm10", &linked("pack-1")).expect("a write");
-        let named = store.linked_modpack("atm10").expect("a read").expect("a link");
+        store
+            .save_instance_link("atm10", &linked("pack-1"))
+            .expect("a write");
+        let named = store
+            .linked_modpack("atm10")
+            .expect("a read")
+            .expect("a link");
         assert_eq!(named.project_id, "cobblemon");
         assert_eq!(named.title, "Cobblemon", "the project document's own title");
         assert_eq!(named.author, "jellysquid3", "the team's Project Lead");
-        assert_eq!(named.version, "1.6.1", "found in the version list by its id");
-        assert_eq!(fetch.count(), 3, "the document, the team and the versions list");
+        assert_eq!(
+            named.version, "1.6.1",
+            "found in the version list by its id"
+        );
+        assert_eq!(
+            fetch.count(),
+            3,
+            "the document, the team and the versions list"
+        );
 
         // A version its author has deleted is a caption this card cannot draw, and
         // the card is still a card -- the reference's own `version?.version_number`.
-        store.save_instance_link("atm10", &linked("pack-gone")).expect("a write");
-        let named = store.linked_modpack("atm10").expect("a read").expect("a link");
+        store
+            .save_instance_link("atm10", &linked("pack-gone"))
+            .expect("a write");
+        let named = store
+            .linked_modpack("atm10")
+            .expect("a read")
+            .expect("a link");
         assert_eq!(named.version, "", "no version number, and no failure");
         assert_eq!(named.title, "Cobblemon");
 
@@ -2818,7 +3007,8 @@ mod tests {
         // title it made up.
         let bare = Store::load(&PalantirPaths::at(scratch("linked-no-engine")));
         std::fs::create_dir_all(bare.instance_dir("atm10")).expect("an instance folder");
-        bare.save_instance_link("atm10", &linked("pack-1")).expect("a write");
+        bare.save_instance_link("atm10", &linked("pack-1"))
+            .expect("a write");
         assert_eq!(
             bare.linked_modpack("atm10").expect_err("no engine"),
             not_implemented("The project this instance came from")
@@ -2840,13 +3030,19 @@ mod tests {
             "Mojang's own `latest.release`, not a re-derived one"
         );
         assert_eq!(
-            list.versions.iter().map(|version| version.id.as_str()).collect::<Vec<_>>(),
+            list.versions
+                .iter()
+                .map(|version| version.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["25w02a", "1.21.4", "b1.7.3"],
             "the manifest's own order, newest first"
         );
         assert!(!list.versions[0].release, "a snapshot is not a release");
         assert!(list.versions[1].release);
-        assert!(!list.versions[2].release, "an old beta is not a release either");
+        assert!(
+            !list.versions[2].release,
+            "an old beta is not a release either"
+        );
         assert_eq!(fetch.count(), 1);
         // And the create flow's own fallback reads the same document, which is
         // cached: a second request here would be the second answer this test
@@ -2872,9 +3068,12 @@ mod tests {
         let paths = PalantirPaths::at(&home);
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(PISTON_MANIFEST_URL, Route::text(MANIFEST_BODY));
-        let mut store = Store::load(&paths)
-            .with_engine(Engine::over(scratch("create-cache"), fetch.clone()));
-        assert!(matches!(store.instances(), Load::Empty), "a home with nothing in it");
+        let mut store =
+            Store::load(&paths).with_engine(Engine::over(scratch("create-cache"), fetch.clone()));
+        assert!(
+            matches!(store.instances(), Load::Empty),
+            "a home with nothing in it"
+        );
 
         let id = store
             .create_instance("Scratch instance", None, LoaderKind::Vanilla, None)
@@ -2883,7 +3082,11 @@ mod tests {
             store.instance_dir(&id).join("instance.cfg").exists(),
             "the instance is written where the launcher keeps them"
         );
-        assert_eq!(fetch.count(), 1, "the version came from Mojang's own list, once");
+        assert_eq!(
+            fetch.count(),
+            1,
+            "the version came from Mojang's own list, once"
+        );
         // And what was written is what the library draws from, once it is read
         // again -- which is the half a create without a reload would not have.
         store.reload();
@@ -2917,12 +3120,20 @@ mod tests {
         use palantir_net::engine::Loader;
 
         let fetch = Arc::new(MapFetch::new());
-        fetch.set_route(&Loader::Fabric.list_url("1.21.4"), Route::text(FABRIC_BUILDS));
+        fetch.set_route(
+            &Loader::Fabric.list_url("1.21.4"),
+            Route::text(FABRIC_BUILDS),
+        );
         let store = store_over("loader-builds", fetch.clone());
 
-        let builds = store.loader_builds(LoaderKind::Fabric, "1.21.4").expect("a build list");
+        let builds = store
+            .loader_builds(LoaderKind::Fabric, "1.21.4")
+            .expect("a build list");
         assert_eq!(
-            builds.iter().map(|build| build.version.as_str()).collect::<Vec<_>>(),
+            builds
+                .iter()
+                .map(|build| build.version.as_str())
+                .collect::<Vec<_>>(),
             vec!["0.19.5", "0.19.4"]
         );
         assert!(builds[0].stable, "Fabric's own flag, carried through");
@@ -2956,7 +3167,12 @@ mod tests {
             .with_engine(Engine::over(scratch("create-loader-cache"), fetch.clone()));
 
         let id = store
-            .create_instance("Fabric instance", Some("1.21.4"), LoaderKind::Fabric, Some("0.19.5"))
+            .create_instance(
+                "Fabric instance",
+                Some("1.21.4"),
+                LoaderKind::Fabric,
+                Some("0.19.5"),
+            )
             .expect("an instance");
         // The loader is a *component with a version* in the pack profile, which is
         // what the launch resolves: a chip that changed nothing on disk would be a
@@ -2986,7 +3202,10 @@ mod tests {
         // change to either end of the seam fails here rather than in a window.
         let fetch = Arc::new(MapFetch::new());
         let store = store_over("search", fetch.clone());
-        let query = ApiSearch::new("sodium").of_type("mod").sorted_by("downloads").with_limit(20);
+        let query = ApiSearch::new("sodium")
+            .of_type("mod")
+            .sorted_by("downloads")
+            .with_limit(20);
         fetch.set_route(&query.url(), Route::text(SEARCH_BODY));
 
         let hits = store.search(&query).expect("an answer");
@@ -3019,8 +3238,8 @@ mod tests {
         let query = ApiSearch::new("sodium");
         fetch.set_route(&query.url(), Route::text(SEARCH_BODY));
         let asked = query.clone();
-        let hits =
-            futures::executor::block_on(off_thread(move || store.search(&asked))).expect("an answer");
+        let hits = futures::executor::block_on(off_thread(move || store.search(&asked)))
+            .expect("an answer");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "Sodium");
     }
@@ -3031,7 +3250,9 @@ mod tests {
         // that answers 404 comes back as a reason, and the page prints it.
         let fetch = Arc::new(MapFetch::new());
         let store = store_over("search-failure", fetch);
-        let reason = store.search(&ApiSearch::new("sodium")).expect_err("a failure");
+        let reason = store
+            .search(&ApiSearch::new("sodium"))
+            .expect_err("a failure");
         assert!(reason.contains("404"), "{reason}");
         assert!(!reason.is_empty());
     }
@@ -3043,9 +3264,14 @@ mod tests {
         // them they are looking at.
         let plain = Store::default();
         assert!(plain.engine().is_none());
-        let reason = plain.search(&ApiSearch::new("sodium")).expect_err("no engine");
+        let reason = plain
+            .search(&ApiSearch::new("sodium"))
+            .expect_err("no engine");
         assert_eq!(reason, not_implemented("Discover's search"));
-        assert!(Store::default().with_engine(Engine::over(scratch("engine"), Arc::new(MapFetch::new()))).engine().is_some());
+        assert!(Store::default()
+            .with_engine(Engine::over(scratch("engine"), Arc::new(MapFetch::new())))
+            .engine()
+            .is_some());
     }
 
     #[test]
@@ -3057,20 +3283,27 @@ mod tests {
         assert_eq!(store.instances(), &Load::Empty);
         // And an id that is not there is empty rather than a failure.
         assert_eq!(store.instance("nothing"), Load::Empty);
-        assert_eq!(store.instance_dir("nothing"), store.instances_dir().join("nothing"));
+        assert_eq!(
+            store.instance_dir("nothing"),
+            store.instances_dir().join("nothing")
+        );
     }
 
     #[test]
     fn the_worlds_are_read_from_saves_and_know_whether_they_were_played() {
         let dir = scratch("worlds");
         std::fs::create_dir_all(dir.join("saves").join("Played")).expect("a world");
-        std::fs::write(dir.join("saves").join("Played").join("level.dat"), b"x").expect("level.dat");
+        std::fs::write(dir.join("saves").join("Played").join("level.dat"), b"x")
+            .expect("level.dat");
         std::fs::create_dir_all(dir.join("saves").join("Never saved")).expect("a folder");
         std::fs::write(dir.join("saves").join("loose.txt"), b"x").expect("a loose file");
         let found = worlds(&dir);
         assert_eq!(found.len(), 2, "a loose file is not a world");
         assert_eq!(found[0].name, "Never saved");
-        assert!(!found[0].played, "a folder with no level.dat was never saved");
+        assert!(
+            !found[0].played,
+            "a folder with no level.dat was never saved"
+        );
         assert!(found[1].played);
         assert!(found[1].modified.is_some());
         // A directory that does not exist is no worlds, not a panic.
@@ -3088,7 +3321,10 @@ mod tests {
         assert!(entries[0].directory);
         assert_eq!(entries[0].bytes, 0);
         assert_eq!(
-            entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["mods", "instance.cfg", "options.txt"]
         );
         assert_eq!(entries[2].bytes, 5);
@@ -3097,7 +3333,10 @@ mod tests {
         // is asserted: every filesystem records one, while `created` is genuinely
         // absent on some (ext4 without a birth time), which is the empty cell the
         // table draws rather than an error.
-        assert!(entries[0].modified.is_some(), "a directory carries a stamp too");
+        assert!(
+            entries[0].modified.is_some(),
+            "a directory carries a stamp too"
+        );
         assert!(entries[2].modified.is_some(), "so does a file");
         assert!(files(&dir.join("nowhere")).is_empty());
     }
@@ -3107,11 +3346,18 @@ mod tests {
         let dir = scratch("shots");
         let shots = dir.join("screenshots");
         std::fs::create_dir_all(&shots).expect("the folder");
-        for name in ["2026-01-01_12.00.00.png", "2026-02-02_12.00.00.png", "notes.txt"] {
+        for name in [
+            "2026-01-01_12.00.00.png",
+            "2026-02-02_12.00.00.png",
+            "notes.txt",
+        ] {
             std::fs::write(shots.join(name), b"x").expect("a file");
         }
         let names = screenshots(&dir);
-        assert_eq!(names, vec!["2026-02-02_12.00.00.png", "2026-01-01_12.00.00.png"]);
+        assert_eq!(
+            names,
+            vec!["2026-02-02_12.00.00.png", "2026-01-01_12.00.00.png"]
+        );
         assert!(screenshots(&dir.join("nowhere")).is_empty());
     }
 
@@ -3131,15 +3377,21 @@ mod tests {
         // The game's own output wins, and the launcher's account of the run is
         // what there is when the game never wrote one -- the case a failed launch
         // leaves behind.
-        std::fs::write(dir.join("logs").join("launcher.log"), "preparing\nnot launching")
-            .expect("a launcher log");
+        std::fs::write(
+            dir.join("logs").join("launcher.log"),
+            "preparing\nnot launching",
+        )
+        .expect("a launcher log");
         let with_both = log_tail(&dir, 10).expect("a tail");
         assert!(
             with_both.ends_with("line 99") && !with_both.contains("preparing"),
             "the game's own log wins while there is one: {with_both}"
         );
         std::fs::remove_file(dir.join("logs").join("latest.log")).expect("remove the game log");
-        assert_eq!(log_tail(&dir, 10).as_deref(), Some("preparing\nnot launching"));
+        assert_eq!(
+            log_tail(&dir, 10).as_deref(),
+            Some("preparing\nnot launching")
+        );
     }
 
     #[test]
@@ -3161,7 +3413,10 @@ mod tests {
         assert_eq!(store.launch_state("atm10"), LaunchState::Running);
         assert_eq!(store.launch_state("sodium"), LaunchState::Idle);
         assert_eq!(store.launch_line("sodium"), None);
-        assert_eq!(store.launch_line("atm10"), Some("process started, streaming output…"));
+        assert_eq!(
+            store.launch_line("atm10"),
+            Some("process started, streaming output…")
+        );
         store.set_launch(
             "atm10",
             Launch {
@@ -3170,7 +3425,10 @@ mod tests {
             },
         );
         assert_eq!(store.launch_state("atm10"), LaunchState::Idle);
-        assert!(store.launch_line("atm10").is_some(), "the last word outlives the run");
+        assert!(
+            store.launch_line("atm10").is_some(),
+            "the last word outlives the run"
+        );
     }
 
     #[test]
@@ -3179,26 +3437,76 @@ mod tests {
         // list of runs, and the chip's name, stop control and logs button are the
         // selected one's.
         let mut store = Store::default();
-        store.set_launch("atm10", Launch { state: LaunchState::Running, line: None });
-        assert_eq!(store.selected_launch(), Some("atm10"), "the run that was started holds the chip");
-        store.set_launch("sodium", Launch { state: LaunchState::Starting, line: None });
-        assert_eq!(store.selected_launch(), Some("sodium"), "and the next press moves it");
+        store.set_launch(
+            "atm10",
+            Launch {
+                state: LaunchState::Running,
+                line: None,
+            },
+        );
+        assert_eq!(
+            store.selected_launch(),
+            Some("atm10"),
+            "the run that was started holds the chip"
+        );
+        store.set_launch(
+            "sodium",
+            Launch {
+                state: LaunchState::Starting,
+                line: None,
+            },
+        );
+        assert_eq!(
+            store.selected_launch(),
+            Some("sodium"),
+            "and the next press moves it"
+        );
         let running: Vec<&str> = store.running_launches().iter().map(|(id, _)| *id).collect();
-        assert_eq!(running, vec!["atm10", "sodium"], "both of them are running, in instance order");
+        assert_eq!(
+            running,
+            vec!["atm10", "sodium"],
+            "both of them are running, in instance order"
+        );
 
         // The selection is a name, and the name can stop running: the chip is
         // then about another run rather than about a process that is gone.
-        store.set_launch("sodium", Launch { state: LaunchState::Idle, line: None });
+        store.set_launch(
+            "sodium",
+            Launch {
+                state: LaunchState::Idle,
+                line: None,
+            },
+        );
         assert_eq!(store.selected_launch(), Some("atm10"));
         store.select_launch("sodium");
-        assert_eq!(store.selected_launch(), Some("atm10"), "a stopped run cannot be its subject");
-        store.set_launch("sodium", Launch { state: LaunchState::Running, line: None });
-        assert_eq!(store.selected_launch(), Some("sodium"), "and a pressed row wins while it goes");
+        assert_eq!(
+            store.selected_launch(),
+            Some("atm10"),
+            "a stopped run cannot be its subject"
+        );
+        store.set_launch(
+            "sodium",
+            Launch {
+                state: LaunchState::Running,
+                line: None,
+            },
+        );
+        assert_eq!(
+            store.selected_launch(),
+            Some("sodium"),
+            "and a pressed row wins while it goes"
+        );
 
         // An entry that has ended keeps its last word and leaves the list, which
         // is what lets the header of an instance nobody is running still say what
         // happened to it.
-        store.set_launch("sodium", Launch { state: LaunchState::Idle, line: Some("bye".to_string()) });
+        store.set_launch(
+            "sodium",
+            Launch {
+                state: LaunchState::Idle,
+                line: Some("bye".to_string()),
+            },
+        );
         assert_eq!(store.launch_line("sodium"), Some("bye"));
         assert_eq!(store.running_launches().len(), 1);
     }
@@ -3225,8 +3533,10 @@ mod tests {
         let store = store_with_instance("settings-round-trip", fetch);
         let fresh = store.instance_settings("atm10").expect("the settings");
         assert!(!fresh.override_memory && !fresh.override_java && !fresh.override_java_args);
-        assert!(fresh.memory_min > 0 && fresh.memory_max >= fresh.memory_min,
-            "an instance that overrides nothing still shows a heap: {fresh:?}");
+        assert!(
+            fresh.memory_min > 0 && fresh.memory_max >= fresh.memory_min,
+            "an instance that overrides nothing still shows a heap: {fresh:?}"
+        );
 
         let edit = InstanceSettings {
             java_path: "C:/jdk21/bin/javaw.exe".to_string(),
@@ -3237,7 +3547,9 @@ mod tests {
             jvm_args: "-XX:+UseG1GC".to_string(),
             override_java_args: true,
         };
-        store.save_instance_settings("atm10", &edit).expect("a save");
+        store
+            .save_instance_settings("atm10", &edit)
+            .expect("a save");
         assert_eq!(store.instance_settings("atm10").expect("read back"), edit);
     }
 
@@ -3257,14 +3569,18 @@ mod tests {
             jvm_args: "-XX:+UseG1GC".to_string(),
             override_java_args: true,
         };
-        store.save_instance_settings("atm10", &on).expect("a save with every gate on");
+        store
+            .save_instance_settings("atm10", &on)
+            .expect("a save with every gate on");
         let off = InstanceSettings {
             override_java: false,
             override_memory: false,
             override_java_args: false,
             ..on.clone()
         };
-        store.save_instance_settings("atm10", &off).expect("a save with every gate off");
+        store
+            .save_instance_settings("atm10", &off)
+            .expect("a save with every gate off");
 
         let file = std::fs::read_to_string(store.instance_dir("atm10").join("instance.cfg"))
             .expect("the instance file");
@@ -3273,7 +3589,10 @@ mod tests {
         }
         let back = store.instance_settings("atm10").expect("read back");
         assert!(!back.override_memory && !back.override_java && !back.override_java_args);
-        assert_ne!(back.memory_max, 8192, "the launcher's own ceiling is what is in force now");
+        assert_ne!(
+            back.memory_max, 8192,
+            "the launcher's own ceiling is what is in force now"
+        );
     }
 
     #[test]
@@ -3285,12 +3604,16 @@ mod tests {
 
         edit.memory_min = 64;
         edit.memory_max = 4096;
-        let below = store.save_instance_settings("atm10", &edit).expect_err("under the floor");
+        let below = store
+            .save_instance_settings("atm10", &edit)
+            .expect_err("under the floor");
         assert!(below.contains("floor"), "{below}");
 
         edit.memory_min = 4096;
         edit.memory_max = 2048;
-        let upside_down = store.save_instance_settings("atm10", &edit).expect_err("upside down");
+        let upside_down = store
+            .save_instance_settings("atm10", &edit)
+            .expect_err("upside down");
         assert!(upside_down.contains("below the minimum"), "{upside_down}");
 
         // Neither refusal wrote anything: the file still says what it said.
@@ -3304,7 +3627,9 @@ mod tests {
         // one profile, no second copy of the facts anywhere.
         let fetch = Arc::new(MapFetch::new());
         let store = store_with_instance("installation-read", fetch);
-        let installation = store.instance_installation("atm10").expect("the installation");
+        let installation = store
+            .instance_installation("atm10")
+            .expect("the installation");
         assert_eq!(installation.platform, LoaderKind::Fabric);
         assert_eq!(installation.game_version, "1.21.4");
         assert_eq!(installation.loader_build, "0.16.9");
@@ -3317,17 +3642,24 @@ mod tests {
         // touch the components this tab does not own.
         let fetch = Arc::new(MapFetch::new());
         let store = store_with_instance("installation-write", fetch);
-        let mut edit = store.instance_installation("atm10").expect("the installation");
+        let mut edit = store
+            .instance_installation("atm10")
+            .expect("the installation");
         edit.platform = LoaderKind::NeoForge;
         edit.loader_build = "21.4.157".to_string();
         edit.game_version = "1.21.1".to_string();
-        store.save_instance_installation("atm10", &edit).expect("a save");
+        store
+            .save_instance_installation("atm10", &edit)
+            .expect("a save");
 
         let back = store.instance_installation("atm10").expect("read back");
         assert_eq!(back, edit);
         let file = std::fs::read_to_string(store.instance_dir("atm10").join("mmc-pack.json"))
             .expect("the profile");
-        assert!(!file.contains("net.fabricmc.fabric-loader"), "the old loader is gone:\n{file}");
+        assert!(
+            !file.contains("net.fabricmc.fabric-loader"),
+            "the old loader is gone:\n{file}"
+        );
         assert!(file.contains("net.neoforged"), "{file}");
 
         // And back to vanilla: the loader goes, the game version stays where the
@@ -3337,7 +3669,9 @@ mod tests {
             game_version: "1.21.1".to_string(),
             loader_build: String::new(),
         };
-        store.save_instance_installation("atm10", &vanilla).expect("a vanilla save");
+        store
+            .save_instance_installation("atm10", &vanilla)
+            .expect("a vanilla save");
         let back = store.instance_installation("atm10").expect("read back");
         assert_eq!(back, vanilla);
         let file = std::fs::read_to_string(store.instance_dir("atm10").join("mmc-pack.json"))
@@ -3350,16 +3684,21 @@ mod tests {
     fn an_installation_that_could_not_be_resolved_is_a_sentence_rather_than_a_written_line() {
         let fetch = Arc::new(MapFetch::new());
         let store = store_with_instance("installation-refusals", fetch);
-        let mut edit = store.instance_installation("atm10").expect("the installation");
+        let mut edit = store
+            .instance_installation("atm10")
+            .expect("the installation");
 
         edit.game_version = "   ".to_string();
-        let nothing_to_run = store.save_instance_installation("atm10", &edit).expect_err("no game");
+        let nothing_to_run = store
+            .save_instance_installation("atm10", &edit)
+            .expect_err("no game");
         assert!(nothing_to_run.contains("game version"), "{nothing_to_run}");
 
         edit.game_version = "1.21.4".to_string();
         edit.loader_build = String::new();
-        let nothing_to_load =
-            store.save_instance_installation("atm10", &edit).expect_err("no build");
+        let nothing_to_load = store
+            .save_instance_installation("atm10", &edit)
+            .expect_err("no build");
         assert!(nothing_to_load.contains("Fabric"), "{nothing_to_load}");
 
         // A loader this launcher does not model is refused rather than dropped:
@@ -3374,9 +3713,15 @@ mod tests {
             ..Default::default()
         });
         profile.save(&path).expect("the profile saved");
-        let edit = store.instance_installation("atm10").expect("the installation");
-        let unmodelled =
-            store.save_instance_installation("atm10", &edit).expect_err("not modelled");
-        assert!(unmodelled.contains("com.mumfrey.liteloader"), "{unmodelled}");
+        let edit = store
+            .instance_installation("atm10")
+            .expect("the installation");
+        let unmodelled = store
+            .save_instance_installation("atm10", &edit)
+            .expect_err("not modelled");
+        assert!(
+            unmodelled.contains("com.mumfrey.liteloader"),
+            "{unmodelled}"
+        );
     }
 }

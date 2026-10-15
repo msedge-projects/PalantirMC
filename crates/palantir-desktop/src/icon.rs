@@ -107,10 +107,23 @@ mod tests {
             for size in [16.0, 20.0, 24.0, 48.0] {
                 let (scale, offset) = fit(glyph, size);
                 let (drawn_width, drawn_height) = (width * scale, height * scale);
-                assert!(drawn_width <= size + SLACK, "{} wide in {size}", glyph.name());
-                assert!(drawn_height <= size + SLACK, "{} tall in {size}", glyph.name());
-                let touches = (drawn_width - size).abs() < SLACK || (drawn_height - size).abs() < SLACK;
-                assert!(touches, "{} does not reach the edge of {size}", glyph.name());
+                assert!(
+                    drawn_width <= size + SLACK,
+                    "{} wide in {size}",
+                    glyph.name()
+                );
+                assert!(
+                    drawn_height <= size + SLACK,
+                    "{} tall in {size}",
+                    glyph.name()
+                );
+                let touches =
+                    (drawn_width - size).abs() < SLACK || (drawn_height - size).abs() < SLACK;
+                assert!(
+                    touches,
+                    "{} does not reach the edge of {size}",
+                    glyph.name()
+                );
                 // Centred: the margins on the two axes add up to what is left.
                 assert!(
                     (offset.x * 2.0 - (size - drawn_width)).abs() < SLACK,
@@ -122,7 +135,11 @@ mod tests {
                     "{} is not centred vertically in {size}",
                     glyph.name()
                 );
-                assert!(offset.x >= -SLACK && offset.y >= -SLACK, "{} is off its box", glyph.name());
+                assert!(
+                    offset.x >= -SLACK && offset.y >= -SLACK,
+                    "{} is off its box",
+                    glyph.name()
+                );
             }
         }
     }
@@ -163,7 +180,11 @@ mod tests {
         for (name, glyph) in icons_gen::ALL {
             let parts = icons_gen::parts(*glyph, 1.0, Color::WHITE);
             assert!(!parts.is_empty(), "{name} draws nothing");
-            assert_eq!(parts.len(), glyph.elements().len(), "{name} lost an element");
+            assert_eq!(
+                parts.len(),
+                glyph.elements().len(),
+                "{name} lost an element"
+            );
             let mut icon_fills = 0;
             for (_, paint) in parts {
                 match paint {

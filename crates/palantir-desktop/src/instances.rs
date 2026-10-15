@@ -12,11 +12,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::model::InstanceEntry;
 use palantir_core::instance::Instance;
 use palantir_core::pack::PackProfile;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::settings::defaults;
-use crate::model::InstanceEntry;
 
 use crate::catalog::LoaderKind;
 use crate::mods::list_mods;
@@ -75,7 +75,12 @@ impl InstanceCard {
         if self.loader == LoaderKind::Vanilla || self.loader_version.is_empty() {
             self.mc_version.clone()
         } else {
-            format!("{} {} · {}", self.loader.label(), self.loader_version, self.mc_version)
+            format!(
+                "{} {} · {}",
+                self.loader.label(),
+                self.loader_version,
+                self.mc_version
+            )
         }
     }
 
@@ -242,7 +247,9 @@ pub fn summarize(instances_dir: &Path, entry: &InstanceEntry) -> InstanceCard {
             return card;
         }
     };
-    card.max_mem_mb = instance.settings().get_i64("MaxMemAlloc", defaults::MAX_MEM_ALLOC);
+    card.max_mem_mb = instance
+        .settings()
+        .get_i64("MaxMemAlloc", defaults::MAX_MEM_ALLOC);
     card.last_launch_millis = instance.last_launch_millis().max(0);
     match PackProfile::load(&instance.mmc_pack_path()) {
         Ok(profile) => {
@@ -285,8 +292,11 @@ pub fn load(paths: &PalantirPaths) -> LoadedInstances {
             };
         }
     };
-    let mut cards: Vec<InstanceCard> =
-        model.entries().iter().map(|entry| summarize(&instances_dir, entry)).collect();
+    let mut cards: Vec<InstanceCard> = model
+        .entries()
+        .iter()
+        .map(|entry| summarize(&instances_dir, entry))
+        .collect();
     // Each card's own icon, read once with the listing rather than per frame.
     for card in &mut cards {
         card.icon_png = instance_icon(paths, &card.icon);
@@ -295,7 +305,10 @@ pub fn load(paths: &PalantirPaths) -> LoadedInstances {
     let selected = resolve_selected_id(paths, &cards);
     #[cfg(test)]
     let status = if cards.is_empty() {
-        format!("No instances yet — press N to create one (looked in {}).", instances_dir.display())
+        format!(
+            "No instances yet — press N to create one (looked in {}).",
+            instances_dir.display()
+        )
     } else {
         format!("{} instance(s) ready", cards.len())
     };
@@ -436,8 +449,15 @@ pub fn create(paths: &PalantirPaths, spec: &NewInstance) -> Result<CreatedInstan
     // writes it: the gate plus the path, because Prism reads `JavaPath` only
     // behind `OverrideJavaLocation`. A blank path is "nothing was chosen", so
     // it leaves the instance with no opinion rather than an empty one.
-    if let Some(java) = spec.java_path.as_deref().map(str::trim).filter(|path| !path.is_empty()) {
-        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+    if let Some(java) = spec
+        .java_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        instance
+            .settings_mut()
+            .set_bool("OverrideJavaLocation", true);
         instance.settings_mut().set_str("JavaPath", java);
     }
 
@@ -547,7 +567,9 @@ pub fn set_instance_icon(paths: &PalantirPaths, id: &str, source: &Path) -> Resu
     let mut instance = Instance::open(&paths.configured_instances_dir().join(id))
         .map_err(|error| format!("cannot open '{id}': {error}"))?;
     instance.set_icon_key(&key);
-    instance.save().map_err(|error| format!("saving '{id}' failed: {error}"))?;
+    instance
+        .save()
+        .map_err(|error| format!("saving '{id}' failed: {error}"))?;
     Ok(key)
 }
 
@@ -578,10 +600,16 @@ pub fn candidate_roots() -> Vec<(PathBuf, &'static str)> {
         }
     };
     if let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) {
-        push(appdata.join("PrismLauncher").join("instances"), "Prism Launcher");
+        push(
+            appdata.join("PrismLauncher").join("instances"),
+            "Prism Launcher",
+        );
     }
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        push(home.join(".local/share/PrismLauncher/instances"), "Prism Launcher");
+        push(
+            home.join(".local/share/PrismLauncher/instances"),
+            "Prism Launcher",
+        );
         push(
             home.join("Library/Application Support/PrismLauncher/instances"),
             "Prism Launcher",
@@ -593,7 +621,9 @@ pub fn candidate_roots() -> Vec<(PathBuf, &'static str)> {
 /// Scan one instances directory for importable instances.
 pub fn scan_root(instances_dir: &Path, origin: &'static str) -> Vec<ImportCandidate> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(instances_dir) else { return out };
+    let Ok(entries) = std::fs::read_dir(instances_dir) else {
+        return out;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -604,9 +634,18 @@ pub fn scan_root(instances_dir: &Path, origin: &'static str) -> Vec<ImportCandid
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        out.push(ImportCandidate { name, source: path, origin });
+        out.push(ImportCandidate {
+            name,
+            source: path,
+            origin,
+        });
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.source.cmp(&b.source)));
+    out.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.source.cmp(&b.source))
+    });
     out
 }
 
@@ -626,7 +665,10 @@ pub fn existing_ids(instances_dir: &Path) -> Vec<String> {
     Instance::discover(instances_dir)
         .unwrap_or_default()
         .iter()
-        .filter_map(|dir| dir.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .filter_map(|dir| {
+            dir.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .collect()
 }
 
@@ -691,7 +733,8 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
-    let entries = std::fs::read_dir(src).map_err(|e| format!("reading '{}': {e}", src.display()))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("reading '{}': {e}", src.display()))?;
     std::fs::create_dir_all(dst).map_err(|e| format!("creating '{}': {e}", dst.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("listing '{}': {e}", src.display()))?;
@@ -735,13 +778,23 @@ mod tests {
         let (_dir, paths) = test_paths();
         let created = create(&paths, &fabric_spec("Fabric Dreams", "1.21.1", "0.19.5")).unwrap();
         assert_eq!(created.id, "Fabric Dreams");
-        assert!(created.warnings.is_empty(), "warnings: {:?}", created.warnings);
+        assert!(
+            created.warnings.is_empty(),
+            "warnings: {:?}",
+            created.warnings
+        );
 
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         let profile = PackProfile::load(&instance.mmc_pack_path()).unwrap();
-        assert_eq!(profile.get("net.fabricmc.fabric-loader").unwrap().version, "0.19.5");
+        assert_eq!(
+            profile.get("net.fabricmc.fabric-loader").unwrap().version,
+            "0.19.5"
+        );
         assert_eq!(profile.get("net.minecraft").unwrap().version, "1.21.1");
-        assert!(instance.mods_dir().is_dir(), "mods folder is created up front");
+        assert!(
+            instance.mods_dir().is_dir(),
+            "mods folder is created up front"
+        );
 
         // The loader is a component of the profile, and *only* that: a patch
         // file here would replace the metadata's version file for the loader
@@ -783,7 +836,10 @@ mod tests {
                 .any(|component| LoaderKind::from_uid(&component.uid).is_some()),
             "vanilla must not carry a loader component"
         );
-        assert!(!instance.patches_dir().join("net.fabricmc.fabric-loader.json").exists());
+        assert!(!instance
+            .patches_dir()
+            .join("net.fabricmc.fabric-loader.json")
+            .exists());
 
         // …and the card agrees with the disk.
         let model = crate::model::InstanceListModel::load(&paths).unwrap();
@@ -806,7 +862,10 @@ mod tests {
         // is what makes the path mean anything at all — writing one without the
         // other is how a setting ends up stored and ignored.
         assert!(instance.settings().get_bool("OverrideJavaLocation", false));
-        assert_eq!(instance.settings().get_str("JavaPath", ""), "C:/jdk21/bin/javaw.exe");
+        assert_eq!(
+            instance.settings().get_str("JavaPath", ""),
+            "C:/jdk21/bin/javaw.exe"
+        );
 
         // Nothing chosen leaves the instance with no opinion rather than an
         // empty path the settings page would show as a choice.
@@ -848,7 +907,9 @@ mod tests {
         let blank = NewInstance::vanilla("   ", "26.2");
         assert!(create(&paths, &blank).unwrap_err().contains("name"));
         let no_game = NewInstance::vanilla("Fine", " ");
-        assert!(create(&paths, &no_game).unwrap_err().contains("game version"));
+        assert!(create(&paths, &no_game)
+            .unwrap_err()
+            .contains("game version"));
     }
 
     #[test]
@@ -868,10 +929,17 @@ mod tests {
         std::fs::write(&png, [&PNG_MAGIC[..], b"pretend pixels"].concat()).unwrap();
         let created = create(
             &paths,
-            &NewInstance { icon_source: Some(png.clone()), ..NewInstance::vanilla("Iconed", "26.2") },
+            &NewInstance {
+                icon_source: Some(png.clone()),
+                ..NewInstance::vanilla("Iconed", "26.2")
+            },
         )
         .unwrap();
-        assert!(created.warnings.is_empty(), "warnings: {:?}", created.warnings);
+        assert!(
+            created.warnings.is_empty(),
+            "warnings: {:?}",
+            created.warnings
+        );
         let icon = paths.icons_dir().join("my pack.png");
         assert!(icon.is_file());
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
@@ -892,7 +960,10 @@ mod tests {
         std::fs::write(&png, [&PNG_MAGIC[..], b"pretend pixels"].concat()).unwrap();
         let created = create(
             &paths,
-            &NewInstance { icon_source: Some(png), ..NewInstance::vanilla("Iconed", "26.2") },
+            &NewInstance {
+                icon_source: Some(png),
+                ..NewInstance::vanilla("Iconed", "26.2")
+            },
         )
         .unwrap();
 
@@ -900,7 +971,11 @@ mod tests {
         // to, and the card the *listing* builds carries its bytes -- read once
         // with the scan rather than by whichever frame happens to draw the tile.
         let loaded = load(&paths);
-        let card = loaded.cards.iter().find(|card| card.id == created.id).expect("the new instance");
+        let card = loaded
+            .cards
+            .iter()
+            .find(|card| card.id == created.id)
+            .expect("the new instance");
         let bytes = card.icon_png.as_deref().expect("an icon was installed");
         assert_eq!(&bytes[..PNG_MAGIC.len()], &PNG_MAGIC[..]);
 
@@ -915,13 +990,19 @@ mod tests {
     #[test]
     fn memory_override_is_written_when_requested() {
         let (_dir, paths) = test_paths();
-        let spec = NewInstance { max_mem_mb: Some(6144), ..NewInstance::vanilla("Memory", "26.2") };
+        let spec = NewInstance {
+            max_mem_mb: Some(6144),
+            ..NewInstance::vanilla("Memory", "26.2")
+        };
         let created = create(&paths, &spec).unwrap();
         let instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         assert_eq!(instance.settings().get_i64("MaxMemAlloc", 0), 6144);
         assert!(instance.settings().get_bool("OverrideMemory", false));
         let model = crate::model::InstanceListModel::load(&paths).unwrap();
-        assert_eq!(summarize(&paths.instances_dir(), &model.entries()[0]).max_mem_mb, 6144);
+        assert_eq!(
+            summarize(&paths.instances_dir(), &model.entries()[0]).max_mem_mb,
+            6144
+        );
     }
 
     #[test]
@@ -929,8 +1010,11 @@ mod tests {
         let (_dir, paths) = test_paths();
         create(&paths, &fabric_spec("Beta", "1.21.1", "0.19.5")).unwrap();
         create(&paths, &NewInstance::vanilla("alpha", "26.2")).unwrap();
-        std::fs::write(paths.global_config(), "[General]\nConfigVersion=1.3\nSelectedInstance=alpha\n")
-            .unwrap();
+        std::fs::write(
+            paths.global_config(),
+            "[General]\nConfigVersion=1.3\nSelectedInstance=alpha\n",
+        )
+        .unwrap();
 
         let loaded = load(&paths);
         let names: Vec<&str> = loaded.cards.iter().map(|card| card.name.as_str()).collect();
@@ -940,8 +1024,11 @@ mod tests {
         assert!(loaded.cards[0].problem.is_none());
 
         // A stale pre-selection is ignored.
-        std::fs::write(paths.global_config(), "[General]\nConfigVersion=1.3\nSelectedInstance=Gone\n")
-            .unwrap();
+        std::fs::write(
+            paths.global_config(),
+            "[General]\nConfigVersion=1.3\nSelectedInstance=Gone\n",
+        )
+        .unwrap();
         assert!(load(&paths).selected.is_none());
     }
 
@@ -970,9 +1057,17 @@ mod tests {
         assert_eq!(card.loader_label(), "Vanilla 26.2");
         card.loader = LoaderKind::Fabric;
         card.loader_version = "0.19.5".into();
-        assert_eq!(card.loader_label(), "Fabric 26.2", "the build is not the header's fact");
+        assert_eq!(
+            card.loader_label(),
+            "Fabric 26.2",
+            "the build is not the header's fact"
+        );
         card.mc_version.clear();
-        assert_eq!(card.loader_label(), "Fabric", "an empty half is dropped, not padded");
+        assert_eq!(
+            card.loader_label(),
+            "Fabric",
+            "an empty half is dropped, not padded"
+        );
 
         // The playtime counts down and says the largest unit it reaches, in words.
         assert_eq!(card.playtime_label(), "Never played");
@@ -981,15 +1076,31 @@ mod tests {
         card.playtime_secs = 90;
         assert_eq!(card.playtime_label(), "1 minute");
         card.playtime_secs = 3 * 3600 + 12 * 60;
-        assert_eq!(card.playtime_label(), "3 hours", "and not 3 hours 12 minutes");
+        assert_eq!(
+            card.playtime_label(),
+            "3 hours",
+            "and not 3 hours 12 minutes"
+        );
 
         // The clock has two arms: the relative age, or the one word.
         let now = 1_700_000_000_000;
         assert_eq!(last_played_label(0, now), "Never played");
-        assert_eq!(last_played_label(now - 30_000, now), "Last played a few seconds ago");
-        assert_eq!(last_played_label(now - 90_000, now), "Last played 1 minute ago");
-        assert_eq!(last_played_label(now - 3 * 3_600_000, now), "Last played 3 hours ago");
-        assert_eq!(last_played_label(now + 60_000, now), "Last played a few seconds ago");
+        assert_eq!(
+            last_played_label(now - 30_000, now),
+            "Last played a few seconds ago"
+        );
+        assert_eq!(
+            last_played_label(now - 90_000, now),
+            "Last played 1 minute ago"
+        );
+        assert_eq!(
+            last_played_label(now - 3 * 3_600_000, now),
+            "Last played 3 hours ago"
+        );
+        assert_eq!(
+            last_played_label(now + 60_000, now),
+            "Last played a few seconds ago"
+        );
     }
 
     #[test]
@@ -998,7 +1109,10 @@ mod tests {
         let created = create(&paths, &fabric_spec("Stamped", "1.21.1", "0.19.5")).unwrap();
         let model = crate::model::InstanceListModel::load(&paths).unwrap();
         let card = summarize(&paths.instances_dir(), &model.entries()[0]);
-        assert_eq!(card.last_launch_millis, 0, "a pack that has never run has no stamp");
+        assert_eq!(
+            card.last_launch_millis, 0,
+            "a pack that has never run has no stamp"
+        );
 
         let mut instance = Instance::open(&paths.instances_dir().join(&created.id)).unwrap();
         instance.set_last_launch_millis(1_700_000_000_000);
@@ -1032,7 +1146,12 @@ mod tests {
 
         let id = import_instance(&paths, &source).unwrap();
         assert_eq!(id, "Borrowed");
-        assert!(paths.instances_dir().join("Borrowed").join("mods").join("sodium.jar").is_file());
+        assert!(paths
+            .instances_dir()
+            .join("Borrowed")
+            .join("mods")
+            .join("sodium.jar")
+            .is_file());
         let again = import_instance(&paths, &source).unwrap();
         assert_ne!(again, id);
         assert!(import_instance(&paths, &dir.path().join("nope")).is_err());
@@ -1075,15 +1194,25 @@ mod tests {
         std::fs::create_dir_all(root.join("stray-folder")).unwrap();
 
         let found = scan_root(&root, "Prism Launcher");
-        assert_eq!(found.len(), 1, "a real instance is a folder with instance.cfg");
+        assert_eq!(
+            found.len(),
+            1,
+            "a real instance is a folder with instance.cfg"
+        );
         assert_eq!(found[0].name, "Borrowed");
         assert_eq!(found[0].origin, "Prism Launcher");
-        assert_eq!(scan_root(&root.join("missing"), "Prism Launcher"), Vec::new());
+        assert_eq!(
+            scan_root(&root.join("missing"), "Prism Launcher"),
+            Vec::new()
+        );
 
         let kept = skip_existing(found.clone(), &["SomethingElse".to_string()]);
         assert_eq!(kept.len(), 1);
         let skipped = skip_existing(found, &["Borrowed".to_string()]);
-        assert!(skipped.is_empty(), "an id we already have is not offered again");
+        assert!(
+            skipped.is_empty(),
+            "an id we already have is not offered again"
+        );
 
         // The machine-wide scan is a thin wrapper over the two above.
         let _ = find_importable(&paths);

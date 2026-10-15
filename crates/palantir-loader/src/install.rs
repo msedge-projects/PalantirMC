@@ -48,7 +48,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper to build an [`Error::Io`].
 fn io_err(path: &std::path::Path, source: std::io::Error) -> Error {
-    Error::Io { path: path.to_path_buf(), source }
+    Error::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 /// Convert a [`palantir_core::error::Error`] into [`Error::Core`].
@@ -79,7 +82,9 @@ pub fn write_patch(
         .unwrap_or_default()
         .to_string();
     if version.is_empty() {
-        return Err(Error::Core("patch is missing a non-empty \"version\"".to_string()));
+        return Err(Error::Core(
+            "patch is missing a non-empty \"version\"".to_string(),
+        ));
     }
     let patches_dir = instance.patches_dir();
     std::fs::create_dir_all(&patches_dir).map_err(|e| io_err(&patches_dir, e))?;
@@ -124,7 +129,9 @@ mod tests {
             palantir_core::instance::Instance::create(dir.path(), "Patch Test", "1.20.1").unwrap();
         let patch = override_patch();
         write_patch(&instance, "net.fabricmc.fabric-loader", &patch).unwrap();
-        let patch_path = instance.patches_dir().join("net.fabricmc.fabric-loader.json");
+        let patch_path = instance
+            .patches_dir()
+            .join("net.fabricmc.fabric-loader.json");
         assert!(patch_path.is_file());
         let text = std::fs::read_to_string(&patch_path).unwrap();
         let back: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -144,8 +151,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let instance =
             palantir_core::instance::Instance::create(dir.path(), "Owned", "1.20.1").unwrap();
-        write_patch(instance, String::from("net.fabricmc.fabric-loader"), override_patch())
-            .unwrap();
+        write_patch(
+            instance,
+            String::from("net.fabricmc.fabric-loader"),
+            override_patch(),
+        )
+        .unwrap();
     }
 
     #[test]

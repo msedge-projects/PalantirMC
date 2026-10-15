@@ -41,14 +41,17 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use iced::advanced::widget::{tree, Tree};
+use iced::advanced::{layout, mouse, renderer, Layout, Widget};
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
 use iced::widget::{column, container, image, mouse_area, row, text_input, Space};
 use iced::window;
-use iced::advanced::widget::{tree, Tree};
-use iced::advanced::{layout, mouse, renderer, Layout, Widget};
 use iced::{
-    gradient, mouse::{Cursor, Interaction}, window::Id, Alignment, Background, Border, Color,
-    Element, Length, Padding, Point, Radians, Rectangle, Renderer, Subscription, Theme, Vector,
+    gradient,
+    mouse::{Cursor, Interaction},
+    window::Id,
+    Alignment, Background, Border, Color, Element, Length, Padding, Point, Radians, Rectangle,
+    Renderer, Subscription, Theme, Vector,
 };
 
 use crate::accounts::{AccountEntry, AccountsStore};
@@ -59,23 +62,25 @@ use crate::launch::{self, ActiveRunData, ChildSlot};
 
 use crate::checklist::{Checklist, Step};
 use crate::icon;
-use crate::style::{
-    disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
-    INK_PLATE_TEXT, INK_SECONDARY,
-};
 use crate::icons_gen::{self, Glyph};
 use crate::install;
 use crate::instances::InstanceCard;
 use crate::motion::{Timing, Tween};
 use crate::page::{Load, ROW_GAP};
-use crate::text_gen::Key;
-use crate::pages::{self, discover, home, instance, project, screenshots, servers, skins, user, Screen};
-use palantir_net::engine::Search as ApiSearch;
-use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
+use crate::pages::{
+    self, discover, home, instance, project, screenshots, servers, skins, user, Screen,
+};
 use crate::route::{self, Address, Mark, Rail};
 use crate::store::{self, Engine, Store};
-use crate::ui::{text, Hovered};
+use crate::style::{
+    disabled, heading, medium, semibold, INK_CONTRAST, INK_DEFAULT, INK_HOVER_BG, INK_PLATE,
+    INK_PLATE_TEXT, INK_SECONDARY,
+};
+use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Raw, Theme as Gen};
+use crate::ui::{text, Hovered};
+use palantir_net::engine::Search as ApiSearch;
+use palantir_net::modrinth::{NewsArticle, NEWS_PAGE_URL};
 
 /// What asking the reader for a file left to do.
 ///
@@ -1205,7 +1210,11 @@ impl Default for RailSettings {
     /// `use-app-settings.ts` ships `showSkinSelectorInSidebar: true` -- and
     /// screenshots on as well.
     fn default() -> RailSettings {
-        RailSettings { hide_sidebar: false, show_skins: true, show_screenshots: true }
+        RailSettings {
+            hide_sidebar: false,
+            show_skins: true,
+            show_screenshots: true,
+        }
     }
 }
 
@@ -1265,7 +1274,8 @@ pub enum BuildChoice {
 
 impl BuildChoice {
     /// The three chips, in the reference's own order.
-    pub const ALL: [BuildChoice; 3] = [BuildChoice::Stable, BuildChoice::Latest, BuildChoice::Other];
+    pub const ALL: [BuildChoice; 3] =
+        [BuildChoice::Stable, BuildChoice::Latest, BuildChoice::Other];
 
     /// The chip's label, which is the reference's own message for it.
     pub fn label(self) -> Key {
@@ -1332,7 +1342,11 @@ fn exclusion_facet(ids: &[String]) -> Option<String> {
     if ids.is_empty() {
         return None;
     }
-    let list = ids.iter().map(|id| format!("\"{id}\"")).collect::<Vec<String>>().join(",");
+    let list = ids
+        .iter()
+        .map(|id| format!("\"{id}\""))
+        .collect::<Vec<String>>()
+        .join(",");
     Some(format!("project_id NOT IN [{list}]"))
 }
 
@@ -1353,7 +1367,9 @@ fn shown_job<'a>(
             return Some((key.as_str(), progress));
         }
     }
-    jobs.iter().next().map(|(id, progress)| (id.as_str(), progress))
+    jobs.iter()
+        .next()
+        .map(|(id, progress)| (id.as_str(), progress))
 }
 
 /// The download panel's own sentence: what is being fetched, how many of them are
@@ -1408,11 +1424,19 @@ const VERSION_ROW_HOVER: f32 = 1.15;
 /// rather than a key -- and a second variant of the same name would not compile.
 impl crate::ui::Hovered for Message {
     fn hover(key: &'static str, over: bool) -> Message {
-        Message::Control { key, over, hover: None }
+        Message::Control {
+            key,
+            over,
+            hover: None,
+        }
     }
 
     fn hover_with(key: &'static str, over: bool, hover: f32) -> Message {
-        Message::Control { key, over, hover: Some(hover) }
+        Message::Control {
+            key,
+            over,
+            hover: Some(hover),
+        }
     }
 }
 
@@ -1540,9 +1564,14 @@ impl SettingsTab {
     /// The heading the tab sits under.
     fn category(self) -> Key {
         match self {
-            SettingsTab::Appearance | SettingsTab::Features | SettingsTab::Behavior | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
+            SettingsTab::Appearance
+            | SettingsTab::Features
+            | SettingsTab::Behavior
+            | SettingsTab::Language => Key::SettingsSidebarLabelDisplay,
             SettingsTab::Privacy => Key::SettingsSidebarLabelAccount,
-            SettingsTab::SyncedOptions | SettingsTab::JavaInstallations | SettingsTab::ResourceManagement => Key::AppSettingsSidebarLabelInstances,
+            SettingsTab::SyncedOptions
+            | SettingsTab::JavaInstallations
+            | SettingsTab::ResourceManagement => Key::AppSettingsSidebarLabelInstances,
         }
     }
 
@@ -1804,7 +1833,10 @@ pub enum Message {
     /// The major is a `u64` because that is what the reference's own message
     /// takes: [`crate::text_gen::app_settings_java_installations_location_title`]
     /// fills `Java {version, number} location` from one.
-    SetJavaPath { major: u64, path: String },
+    SetJavaPath {
+        major: u64,
+        path: String,
+    },
     /// The name in the creation dialog changed.
     CreateName(String),
     /// The creation dialog's own button: make the instance.
@@ -1914,7 +1946,10 @@ impl Shell {
             screenshots_slot: settings.show_screenshots,
             hovered: None,
             panel_arrow: Tween::at(1.0, Timing::PANEL_ARROW),
-            plates: Rail::ALL.iter().map(|_| Tween::at(0.0, Timing::NAV_PLATE)).collect(),
+            plates: Rail::ALL
+                .iter()
+                .map(|_| Tween::at(0.0, Timing::NAV_PLATE))
+                .collect(),
             page_fade: Tween::at(1.0, Timing::PAGE_FADE),
             plate_clock: std::time::Instant::now(),
             modal: None,
@@ -2079,7 +2114,10 @@ impl Shell {
     /// The tween for a rail slot.
     fn plate(&self, slot: Rail) -> Tween {
         let index = Rail::ALL.iter().position(|rail| *rail == slot).unwrap_or(0);
-        self.plates.get(index).copied().unwrap_or_else(|| Tween::at(0.0, Timing::NAV_PLATE))
+        self.plates
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| Tween::at(0.0, Timing::NAV_PLATE))
     }
 
     /// The path a rail slot leads to, where it leads anywhere.
@@ -2118,7 +2156,11 @@ impl Shell {
         // reset the clock so idle reading time never advances a new leg.
         self.advance_to(std::time::Instant::now());
         for (index, slot) in Rail::ALL.iter().enumerate() {
-            let target = if self.mark(*slot) == Some(Mark::Primary) { 1.0 } else { 0.0 };
+            let target = if self.mark(*slot) == Some(Mark::Primary) {
+                1.0
+            } else {
+                0.0
+            };
             if let Some(tween) = self.plates.get_mut(index) {
                 tween.retarget(target);
             }
@@ -2157,7 +2199,8 @@ impl Shell {
             return;
         }
         self.forward.clear();
-        self.back.push(std::mem::replace(&mut self.address, address));
+        self.back
+            .push(std::mem::replace(&mut self.address, address));
         self.settle();
         self.retarget_screen();
         self.forget_pointer();
@@ -2180,7 +2223,8 @@ impl Shell {
         let Some(previous) = self.back.pop() else {
             return;
         };
-        self.forward.push(std::mem::replace(&mut self.address, previous));
+        self.forward
+            .push(std::mem::replace(&mut self.address, previous));
         self.settle();
         // Back and forward move between pages the same way a link does: the page
         // that is already built keeps what it can (a tab change is not a new page)
@@ -2338,8 +2382,7 @@ impl Shell {
         // Both halves of a dialog's arrival or departure, and the dialog's own
         // unmount: a shell whose dialog is 30ms from being dropped has to be sent
         // the frame that drops it, or it stays drawn for ever.
-        if self.modal_fade.is_running() || self.scrim_fade.is_running() || self.closing.is_some()
-        {
+        if self.modal_fade.is_running() || self.scrim_fade.is_running() || self.closing.is_some() {
             return true;
         }
         // The panel toggle's arrow is mid-turn, which is the only motion the
@@ -2352,7 +2395,10 @@ impl Shell {
         if self.glides.animating() {
             return true;
         }
-        anim::clock().lock().map(|clock| clock.animating()).unwrap_or(false)
+        anim::clock()
+            .lock()
+            .map(|clock| clock.animating())
+            .unwrap_or(false)
     }
 
     /// Whether the right panel belongs on screen.
@@ -2629,11 +2675,13 @@ impl Shell {
                 None
             }
             Message::ToggleShowAllScreenshots => {
-                self.prefs.show_all_screenshots_in_sidebar = !self.prefs.show_all_screenshots_in_sidebar;
+                self.prefs.show_all_screenshots_in_sidebar =
+                    !self.prefs.show_all_screenshots_in_sidebar;
                 None
             }
             Message::ToggleShowSkinSelector => {
-                self.prefs.show_skin_selector_in_sidebar = !self.prefs.show_skin_selector_in_sidebar;
+                self.prefs.show_skin_selector_in_sidebar =
+                    !self.prefs.show_skin_selector_in_sidebar;
                 None
             }
             Message::ToggleShowJumpIn => {
@@ -2653,10 +2701,10 @@ impl Shell {
                     // than to the number.
                     self.prefs.quick_instance_limit =
                         if limit >= crate::prefs::QUICK_INSTANCE_LIMIT_MAX {
-                        None
-                    } else {
-                        Some(limit)
-                    };
+                            None
+                        } else {
+                            Some(limit)
+                        };
                 }
                 None
             }
@@ -2766,7 +2814,12 @@ impl Shell {
             }
             Message::InstallPack => {
                 if !self.installing {
-                    if let Some(Modal::Install { project, pack: true, .. }) = &self.modal {
+                    if let Some(Modal::Install {
+                        project,
+                        pack: true,
+                        ..
+                    }) = &self.modal
+                    {
                         // The same guard for the same reason, one step stronger:
                         // this press unpacks an archive and then downloads every
                         // file it lists.
@@ -2905,7 +2958,11 @@ impl Shell {
                 self.build = Some(build);
                 None
             }
-            Message::LoaderBuilds { loader, game, builds } => {
+            Message::LoaderBuilds {
+                loader,
+                game,
+                builds,
+            } => {
                 // The answer is dropped unless it is the answer to the question
                 // in force: see [`Shell::loader_builds_for`].
                 if self.loader_builds_for.as_ref() == Some(&(loader, game)) {
@@ -3025,7 +3082,11 @@ impl Shell {
                 self.installation_needs();
                 None
             }
-            Message::InstallationBuilds { loader, game, builds } => {
+            Message::InstallationBuilds {
+                loader,
+                game,
+                builds,
+            } => {
                 // The answer is dropped unless it is the answer to the question
                 // in force: see [`crate::instance_settings::State::builds_for`].
                 if let Some(Modal::InstanceSettings(state)) = &mut self.modal {
@@ -3492,7 +3553,10 @@ impl Shell {
         let Some(Modal::InstanceSettings(state)) = &mut self.modal else {
             return;
         };
-        match self.store.save_instance_installation(&state.id, &state.installation()) {
+        match self
+            .store
+            .save_instance_installation(&state.id, &state.installation())
+        {
             Ok(()) => self.modal = None,
             Err(problem) => state.error = Some(problem),
         }
@@ -3722,7 +3786,10 @@ impl Shell {
     /// answer or into [`crate::store::not_implemented`]'s sentence.
     fn versions_command(&self) -> iced::Command<Message> {
         let store = self.store.clone();
-        iced::Command::perform(crate::store::off_thread(move || store.versions()), Message::Versions)
+        iced::Command::perform(
+            crate::store::off_thread(move || store.versions()),
+            Message::Versions,
+        )
     }
 
     /// Ask the loader's own service which builds it published for the game
@@ -3740,7 +3807,11 @@ impl Shell {
         let asked = game.clone();
         iced::Command::perform(
             crate::store::off_thread(move || store.loader_builds(loader, &game)),
-            move |builds| Message::LoaderBuilds { loader, game: asked.clone(), builds },
+            move |builds| Message::LoaderBuilds {
+                loader,
+                game: asked.clone(),
+                builds,
+            },
         )
     }
 
@@ -3773,7 +3844,11 @@ impl Shell {
         let back = asked.clone();
         iced::Command::perform(
             crate::store::off_thread(move || store.loader_builds(loader, &asked)),
-            move |builds| Message::InstallationBuilds { loader, game: back.clone(), builds },
+            move |builds| Message::InstallationBuilds {
+                loader,
+                game: back.clone(),
+                builds,
+            },
         )
     }
 
@@ -3898,9 +3973,11 @@ impl Shell {
     /// both need it and a dialog that showed one version while creating another
     /// is the failure this exists to prevent.
     fn chosen_version(&self) -> Option<String> {
-        self.version_choice
-            .clone()
-            .or_else(|| self.versions.ready().map(|list| list.latest_release.clone()))
+        self.version_choice.clone().or_else(|| {
+            self.versions
+                .ready()
+                .map(|list| list.latest_release.clone())
+        })
     }
 
     /// The request the page on screen owes, if it owes one.
@@ -3976,15 +4053,17 @@ impl Shell {
                     Some(token) => store.appearance(&account.username, token),
                     None => {
                         return Err(
-                            "Sign in to a Microsoft account to see the skins it owns."
-                                .to_string(),
+                            "Sign in to a Microsoft account to see the skins it owns.".to_string()
                         )
                     }
                 }?;
                 // The launcher's own store is read on this thread too: a row's Ears
                 // marker is in its PNG, and decoding a handful of 64x64 textures is
                 // not work for the thread that draws.
-                Ok(skins::Loaded { appearance, saved: stored_rows(&store) })
+                Ok(skins::Loaded {
+                    appearance,
+                    saved: stored_rows(&store),
+                })
             }),
             move |result| Message::Screen(pages::Message::skins_result(&asked, result)),
         )
@@ -4023,9 +4102,7 @@ impl Shell {
         iced::Command::perform(
             crate::store::off_thread(move || match account.access_token.as_deref() {
                 Some(token) => store.wear(token, change),
-                None => Err(
-                    "Sign in to a Microsoft account to change what it wears.".to_string(),
-                ),
+                None => Err("Sign in to a Microsoft account to change what it wears.".to_string()),
             }),
             move |result| Message::Screen(pages::Message::skin_worn(&worn, result)),
         )
@@ -4081,10 +4158,10 @@ impl Shell {
                             crate::store::off_thread(move || {
                                 let result = match account.access_token.as_deref() {
                                     Some(token) => store.wear(token, change),
-                                    None => Err(
-                                        "Sign in to a Microsoft account to add a skin."
-                                            .to_string(),
-                                    ),
+                                    None => {
+                                        Err("Sign in to a Microsoft account to add a skin."
+                                            .to_string())
+                                    }
                                 };
                                 if result.is_ok() {
                                     keep_picked(&store, &picked);
@@ -4157,13 +4234,13 @@ impl Shell {
                     // Taking the skin off is the one change with nothing to describe: the
                     // service's own DELETE (`SkinChange::NoSkin`), which G106 implemented
                     // and left unreachable until there was a control to reach it from.
-                    skins::Act::TakeOff => match account.access_token.as_deref() {
-                        Some(token) => store.wear(token, palantir_net::SkinChange::NoSkin),
-                        None => Err(
-                            "Sign in to a Microsoft account to change what it wears."
-                                .to_string(),
-                        ),
-                    },
+                    skins::Act::TakeOff => {
+                        match account.access_token.as_deref() {
+                            Some(token) => store.wear(token, palantir_net::SkinChange::NoSkin),
+                            None => Err("Sign in to a Microsoft account to change what it wears."
+                                .to_string()),
+                        }
+                    }
                     // Save writes the row and puts it on. The row is written first, so the
                     // two choices the editor collected are the reader's whatever the
                     // service does with the upload; the texture is read back from the
@@ -4179,9 +4256,7 @@ impl Shell {
                         let Some(entry) =
                             crate::saved_skins::load(paths).get(&outcome.key).cloned()
                         else {
-                            return Err(
-                                "That saved skin is no longer in the store.".to_string()
-                            );
+                            return Err("That saved skin is no longer in the store.".to_string());
                         };
                         let texture = crate::saved_skins::texture(paths, &entry)?;
                         match account.access_token.as_deref() {
@@ -4197,10 +4272,8 @@ impl Shell {
                                     texture,
                                 },
                             ),
-                            None => Err(
-                                "Sign in to a Microsoft account to change what it wears."
-                                    .to_string(),
-                            ),
+                            None => Err("Sign in to a Microsoft account to change what it wears."
+                                .to_string()),
                         }
                     }
                 }
@@ -4235,7 +4308,10 @@ impl Shell {
     /// request, and the panel is drawn on the first frame the window has.
     fn news_command(&self) -> iced::Command<Message> {
         let store = self.store.clone();
-        iced::Command::perform(crate::store::off_thread(move || store.news()), Message::News)
+        iced::Command::perform(
+            crate::store::off_thread(move || store.news()),
+            Message::News,
+        )
     }
 
     /// Run a search and bring the answer back as a page message.
@@ -4258,27 +4334,27 @@ impl Shell {
         } else {
             asked.query.clone()
         };
-        iced::Command::perform(crate::store::off_thread(move || store.search(&query)), move |result| {
-            Message::Screen(pages::Message::search_result(&asked, result))
-        })
+        iced::Command::perform(
+            crate::store::off_thread(move || store.search(&query)),
+            move |result| Message::Screen(pages::Message::search_result(&asked, result)),
+        )
     }
 
     /// Read the tag lists the browse sidebar's options are made of.
-///
-/// Blocking for the reason every other read here is: the requests are network
-/// round trips and this runs on the frame thread, so it goes through
-/// [`crate::store::off_thread`] like its siblings. It is asked once per page, not
-/// once per search -- the answer changes when Modrinth ships a release -- and the
-/// engine holds each list, so a second visit to Discover costs no request at all.
-fn tags(&self) -> iced::Command<Message> {
-    let store = self.store.clone();
-    iced::Command::perform(
-        crate::store::off_thread(move || store.tags()),
-        |result| Message::Screen(pages::Message::tags(result)),
-    )
-}
+    ///
+    /// Blocking for the reason every other read here is: the requests are network
+    /// round trips and this runs on the frame thread, so it goes through
+    /// [`crate::store::off_thread`] like its siblings. It is asked once per page, not
+    /// once per search -- the answer changes when Modrinth ships a release -- and the
+    /// engine holds each list, so a second visit to Discover costs no request at all.
+    fn tags(&self) -> iced::Command<Message> {
+        let store = self.store.clone();
+        iced::Command::perform(crate::store::off_thread(move || store.tags()), |result| {
+            Message::Screen(pages::Message::tags(result))
+        })
+    }
 
-/// The same search with the projects this launcher already has taken out.
+    /// The same search with the projects this launcher already has taken out.
     ///
     /// `Browse.vue`'s `instanceFilters` pushes `{ type: 'project_id', option:
     /// 'project_id:<id>', negative: true }` for every installed project while the
@@ -4299,7 +4375,9 @@ fn tags(&self) -> iced::Command<Message> {
         let mut ids: Vec<String> = Vec::new();
         if let Load::Ready(cards) = self.store.instances() {
             for card in cards {
-                let Ok(Some(link)) = self.store.instance_link(&card.id) else { continue };
+                let Ok(Some(link)) = self.store.instance_link(&card.id) else {
+                    continue;
+                };
                 if !ids.contains(&link.project_id) {
                     ids.push(link.project_id);
                 }
@@ -4339,9 +4417,7 @@ fn tags(&self) -> iced::Command<Message> {
             // same empty boxes as a fetch that failed (`crate::avatar` has that as a
             // named departure, not an accident).
             crate::store::off_thread(move || Ok::<_, String>(store.project_icons(&urls))),
-            |arrived| {
-                Message::Screen(pages::Message::search_icons(arrived.unwrap_or_default()))
-            },
+            |arrived| Message::Screen(pages::Message::search_icons(arrived.unwrap_or_default())),
         )
     }
 
@@ -4353,9 +4429,10 @@ fn tags(&self) -> iced::Command<Message> {
     fn project(&self, asked: project::Asked) -> iced::Command<Message> {
         let store = self.store.clone();
         let id = asked.id.clone();
-        iced::Command::perform(crate::store::off_thread(move || store.project(&id)), move |result| {
-            Message::Screen(pages::Message::project_result(&asked, result))
-        })
+        iced::Command::perform(
+            crate::store::off_thread(move || store.project(&id)),
+            move |result| Message::Screen(pages::Message::project_result(&asked, result)),
+        )
     }
 
     /// Install one project into one instance, and bring the outcome back as a
@@ -4376,7 +4453,11 @@ fn tags(&self) -> iced::Command<Message> {
             // landed, which version of it and which instance are all facts the
             // page asked for a transfer rather than for, and the sentence is
             // drawn in the same shape whether it worked or not.
-            |result| Message::Installed(result.map(|installed| store::Outcome::File(installed.summary()))),
+            |result| {
+                Message::Installed(
+                    result.map(|installed| store::Outcome::File(installed.summary())),
+                )
+            },
         )
     }
 
@@ -4404,7 +4485,11 @@ fn tags(&self) -> iced::Command<Message> {
     /// reason: a Microsoft account launches with its tokens, and renewing them is
     /// the worker's first step.
     fn account(&self) -> launch::AccountRef {
-        match self.accounts.as_ref().and_then(AccountsStore::selected_account) {
+        match self
+            .accounts
+            .as_ref()
+            .and_then(AccountsStore::selected_account)
+        {
             Some(account) => launch::AccountRef::from_entry(account),
             // No account file, or no account chosen: the offline session the
             // launcher has always been able to play with.
@@ -4634,7 +4719,13 @@ fn tags(&self) -> iced::Command<Message> {
     /// Record what one run is doing, for the pages to draw.
     fn say(&mut self, id: &str, line: String) {
         let state = self.store.launch_state(id);
-        self.store.set_launch(id, store::Launch { state, line: Some(line) });
+        self.store.set_launch(
+            id,
+            store::Launch {
+                state,
+                line: Some(line),
+            },
+        );
     }
 
     /// Put one running instance in another state, keeping the line it is on.
@@ -4743,7 +4834,10 @@ fn tags(&self) -> iced::Command<Message> {
             ..container::Appearance::default()
         };
         let mut window = column![].width(Length::Fill).height(Length::Fill).push(
-            container(self.head()).width(Length::Fill).height(Length::Fixed(BAR)).style(chrome),
+            container(self.head())
+                .width(Length::Fill)
+                .height(Length::Fixed(BAR))
+                .style(chrome),
         );
         // The two panels the bar opens, between the bar and the page they are
         // about, in the order the reference stacks them under its own head: the
@@ -4813,74 +4907,77 @@ fn tags(&self) -> iced::Command<Message> {
         // `move` closure that names `self` captures the borrow, and the element
         // it is attached to outlives the method.
         let theme = self.theme;
-        let row = row![]
-            .align_items(Alignment::Center)
-            .padding(Padding { top: 0.0, bottom: 0.0, left: RAIL_PAD, right: 0.0 })
-            .push(image(brand::logo_handle()).height(Length::Fixed(LOGO)))
-            // The wordmark beside the mark, which is the reference's own head:
-            // its `TextLogo` is one SVG carrying both -- the mark, then
-            // "modrinth" in `text-contrast` -- so the name is part of the
-            // identity the reader sees on every page, not only in the About
-            // page and the title bar.
-            //
-            // 25px is measured rather than picked. That SVG is 593 units tall
-            // and its letterforms occupy y 98..490 of it, so at the head's own
-            // 28px height the reference's wordmark has a cap height of
-            // 18.5px; Inter's is 0.727 em, and 18.5 / 0.727 is 25.4. The 2px
-            // space is optical: the mark's own art is a 28px square whose ink
-            // stops ~5.6px short of its right edge, so this lands the gap the
-            // reference's SVG has between the two.
-            .push(Space::with_width(2.0))
-            .push(
-                text(brand::APP_NAME)
-                    .size(25.0)
-                    .font(heading())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            // The reference's `ml-2` then a `gap-2` group of the two history
-            // buttons.
-            .push(Space::with_width(8.0))
-            .push(self.history_button(Glyph::ChevronLeft, !self.back.is_empty(), Message::Back))
-            .push(Space::with_width(8.0))
-            .push(self.history_button(
-                Glyph::ChevronRight,
-                !self.forward.is_empty(),
-                Message::Forward,
-            ))
-            // `Breadcrumbs.vue`'s own `pl-4`, which is the reference's whole gap
-            // between the history pair and the trail -- the head's flex row puts
-            // nothing between them and the trail pads itself.
-            .push(Space::with_width(CRUMB_INSET))
-            .push(self.breadcrumbs())
-            // The reference's own order on the right of the status bar: the
-            // action bar, then the panel toggle, then the window controls. The
-            // action bar is what makes a run watchable from any page -- the
-            // reference keeps it here rather than on the instance page for exactly
-            // that reason, and this shell used to draw the run only in the header
-            // of the instance it belonged to.
-            // The stretch between the trail and the controls is the bar's own
-            // drag handle: it is a `Fill` space, so it is the one part of this row
-            // with no control in it and therefore the one part that can be
-            // grabbed without a button swallowing the press.
-            //
-            // `with_size` rather than `with_width`, and the height is the whole
-            // point: the row is `align_items(Center)`, so a child that is only
-            // `Shrink` tall gets *zero* pixels, and a drag area with no height is
-            // a drag area that cannot be grabbed. This is what made the first
-            // attempt at this look correct in the source and dead on screen.
-            .push(self.drag_area(Space::new(Length::Fill, Length::Fill)))
-            // The toggle comes *before* the action bar, which is the reference's
-            // own order (`App.vue`'s head section puts the `IconButton` ahead of
-            // the `AppActionBar` div), and it is not drawn at all on a page that
-            // forces the panel: `v-if="!forceSidebar && appSettings.toggleSidebar"`.
-            // On Discover, Project and User there is nothing the arrow could do
-            // -- the panel is up whatever the toggle says -- so drawing one there
-            // is a control that lies about what the reader can change.
-            .push_maybe(self.panel_toggle_shown().then(|| self.panel_toggle()))
-            // `mr-3` on the toggle, then the action bar's own.
-            .push(Space::with_width(12.0))
-            .push(self.action_bar())
-            .push(Space::with_width(12.0));
+        let row =
+            row![]
+                .align_items(Alignment::Center)
+                .padding(Padding {
+                    top: 0.0,
+                    bottom: 0.0,
+                    left: RAIL_PAD,
+                    right: 0.0,
+                })
+                .push(image(brand::logo_handle()).height(Length::Fixed(LOGO)))
+                // The wordmark beside the mark, which is the reference's own head:
+                // its `TextLogo` is one SVG carrying both -- the mark, then
+                // "modrinth" in `text-contrast` -- so the name is part of the
+                // identity the reader sees on every page, not only in the About
+                // page and the title bar.
+                //
+                // 25px is measured rather than picked. That SVG is 593 units tall
+                // and its letterforms occupy y 98..490 of it, so at the head's own
+                // 28px height the reference's wordmark has a cap height of
+                // 18.5px; Inter's is 0.727 em, and 18.5 / 0.727 is 25.4. The 2px
+                // space is optical: the mark's own art is a 28px square whose ink
+                // stops ~5.6px short of its right edge, so this lands the gap the
+                // reference's SVG has between the two.
+                .push(Space::with_width(2.0))
+                .push(text(brand::APP_NAME).size(25.0).font(heading()).style(
+                    iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+                ))
+                // The reference's `ml-2` then a `gap-2` group of the two history
+                // buttons.
+                .push(Space::with_width(8.0))
+                .push(self.history_button(Glyph::ChevronLeft, !self.back.is_empty(), Message::Back))
+                .push(Space::with_width(8.0))
+                .push(self.history_button(
+                    Glyph::ChevronRight,
+                    !self.forward.is_empty(),
+                    Message::Forward,
+                ))
+                // `Breadcrumbs.vue`'s own `pl-4`, which is the reference's whole gap
+                // between the history pair and the trail -- the head's flex row puts
+                // nothing between them and the trail pads itself.
+                .push(Space::with_width(CRUMB_INSET))
+                .push(self.breadcrumbs())
+                // The reference's own order on the right of the status bar: the
+                // action bar, then the panel toggle, then the window controls. The
+                // action bar is what makes a run watchable from any page -- the
+                // reference keeps it here rather than on the instance page for exactly
+                // that reason, and this shell used to draw the run only in the header
+                // of the instance it belonged to.
+                // The stretch between the trail and the controls is the bar's own
+                // drag handle: it is a `Fill` space, so it is the one part of this row
+                // with no control in it and therefore the one part that can be
+                // grabbed without a button swallowing the press.
+                //
+                // `with_size` rather than `with_width`, and the height is the whole
+                // point: the row is `align_items(Center)`, so a child that is only
+                // `Shrink` tall gets *zero* pixels, and a drag area with no height is
+                // a drag area that cannot be grabbed. This is what made the first
+                // attempt at this look correct in the source and dead on screen.
+                .push(self.drag_area(Space::new(Length::Fill, Length::Fill)))
+                // The toggle comes *before* the action bar, which is the reference's
+                // own order (`App.vue`'s head section puts the `IconButton` ahead of
+                // the `AppActionBar` div), and it is not drawn at all on a page that
+                // forces the panel: `v-if="!forceSidebar && appSettings.toggleSidebar"`.
+                // On Discover, Project and User there is nothing the arrow could do
+                // -- the panel is up whatever the toggle says -- so drawing one there
+                // is a control that lies about what the reader can change.
+                .push_maybe(self.panel_toggle_shown().then(|| self.panel_toggle()))
+                // `mr-3` on the toggle, then the action bar's own.
+                .push(Space::with_width(12.0))
+                .push(self.action_bar())
+                .push(Space::with_width(12.0));
         container(row.push(self.window_controls()))
             .width(Length::Fill)
             .height(Length::Fixed(BAR))
@@ -4936,11 +5033,21 @@ fn tags(&self) -> iced::Command<Message> {
                     theme_gen::ink(theme, INK_DEFAULT),
                 ));
             }
-            let mut entry = row![].align_items(Alignment::Center).spacing(CRUMB_ENTRY_GAP);
+            let mut entry = row![]
+                .align_items(Alignment::Center)
+                .spacing(CRUMB_ENTRY_GAP);
             if let Some(glyph) = crumb.icon {
-                entry = entry.push(icon::icon(glyph, CRUMB_ICON, theme_gen::ink(theme, INK_DEFAULT)));
+                entry = entry.push(icon::icon(
+                    glyph,
+                    CRUMB_ICON,
+                    theme_gen::ink(theme, INK_DEFAULT),
+                ));
             }
-            let ink = if index == last { INK_CONTRAST } else { INK_DEFAULT };
+            let ink = if index == last {
+                INK_CONTRAST
+            } else {
+                INK_DEFAULT
+            };
             row = row.push(
                 entry.push(
                     text(crumb.label.clone())
@@ -5039,7 +5146,12 @@ fn tags(&self) -> iced::Command<Message> {
         );
         let chip = container(body)
             .height(Length::Fixed(BAR_CHIP))
-            .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 12.0 })
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: 12.0,
+                right: 12.0,
+            })
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 background: background.map(|background| {
@@ -5088,18 +5200,18 @@ fn tags(&self) -> iced::Command<Message> {
                     text(instance_name(&self.store, &id))
                         .size(13.0)
                         .font(semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 )
                 .interaction(Interaction::Pointer)
                 .on_release(Message::Go(format!("/instance/{id}"))),
             );
             if let Some(state) = state_label(launch.state) {
-                body = body.push(
-                    text(state)
-                        .size(13.0)
-                        .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-                );
+                body = body.push(text(state).size(13.0).font(medium()).style(
+                    iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+                ));
             }
             // The chevron over the other running instances, which the reference
             // draws only when there is a second one: with one run there is nothing
@@ -5109,7 +5221,11 @@ fn tags(&self) -> iced::Command<Message> {
                 body = body.push(crate::ui::icon_button(
                     theme,
                     BAR_SWITCHERS,
-                    if self.switchers { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                    if self.switchers {
+                        Glyph::ChevronUp
+                    } else {
+                        Glyph::ChevronDown
+                    },
                     16.0,
                     Message::ToggleRuns,
                 ));
@@ -5144,12 +5260,20 @@ fn tags(&self) -> iced::Command<Message> {
                 text(Key::AppActionBarNoInstancesRunning.message())
                     .size(13.0)
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         }
         container(body)
             .height(Length::Fixed(BAR_CHIP))
-            .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 12.0 })
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: 12.0,
+                right: 12.0,
+            })
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 border: Border {
@@ -5183,10 +5307,20 @@ fn tags(&self) -> iced::Command<Message> {
         }
         let panel = container(rows)
             .width(Length::Fixed(SWITCHER_PANEL))
-            .padding(Padding { top: 4.0, bottom: 4.0, left: 4.0, right: 4.0 });
+            .padding(Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 4.0,
+                right: 4.0,
+            });
         container(row![Space::with_width(Length::Fill), panel])
             .width(Length::Fill)
-            .padding(Padding { top: 8.0, bottom: 8.0, left: RAIL_PAD, right: CONTROLS_WIDTH })
+            .padding(Padding {
+                top: 8.0,
+                bottom: 8.0,
+                left: RAIL_PAD,
+                right: CONTROLS_WIDTH,
+            })
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
                 border: Border {
@@ -5224,31 +5358,39 @@ fn tags(&self) -> iced::Command<Message> {
                 text(instance_name(&self.store, id))
                     .size(13.0)
                     .font(if selected { semibold() } else { medium() })
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .width(Length::Fill),
         );
         if selected {
             // `StarIcon` on the process the bar is about, so the mark moves with
             // the press that makes a row this one.
-            body = body.push(icon::icon(Glyph::Star, 14.0, theme_gen::ink(theme, INK_SECONDARY)));
+            body = body.push(icon::icon(
+                Glyph::Star,
+                14.0,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ));
         }
         if let Some(label) = state_label(state) {
-            body = body.push(
-                text(label)
-                    .size(12.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-            );
+            body = body.push(text(label).size(12.0).font(medium()).style(
+                iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+            ));
         }
         // A stop control where there is something to stop, which is the chip's own
         // rule: while a run prepares there is no process in its slot, and a stop
         // for one would be a word with nothing behind it.
         if state == store::LaunchState::Running {
             body = body.push(
-                mouse_area(icon::icon(Glyph::StopCircle, 16.0, theme_gen::ink(theme, Ink::Red)))
-                    .interaction(Interaction::Pointer)
-                    .on_release(Message::StopRun(id.to_string())),
+                mouse_area(icon::icon(
+                    Glyph::StopCircle,
+                    16.0,
+                    theme_gen::ink(theme, Ink::Red),
+                ))
+                .interaction(Interaction::Pointer)
+                .on_release(Message::StopRun(id.to_string())),
             );
         }
         body = body.push(
@@ -5263,7 +5405,12 @@ fn tags(&self) -> iced::Command<Message> {
         mouse_area(
             container(body)
                 .width(Length::Fill)
-                .padding(Padding { top: 6.0, bottom: 6.0, left: 8.0, right: 8.0 })
+                .padding(Padding {
+                    top: 6.0,
+                    bottom: 6.0,
+                    left: 8.0,
+                    right: 8.0,
+                })
                 .style(move |_theme: &Theme| container::Appearance {
                     background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
                     border: Border {
@@ -5288,7 +5435,10 @@ fn tags(&self) -> iced::Command<Message> {
             .height(Length::Fixed(INDICATOR))
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, ink))),
-                border: Border { radius: 999.0.into(), ..Border::default() },
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             })
             .into()
@@ -5319,7 +5469,10 @@ fn tags(&self) -> iced::Command<Message> {
                 text("Tasks")
                     .size(14.0)
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(self.job_count(self.jobs.len()))
             .push(Space::with_width(Length::Fill));
@@ -5337,7 +5490,12 @@ fn tags(&self) -> iced::Command<Message> {
         let body = column![].spacing(8.0).push(head).push(rows);
         container(body)
             .width(Length::Fill)
-            .padding(Padding { top: 10.0, bottom: 10.0, left: RAIL_PAD, right: CONTROLS_WIDTH })
+            .padding(Padding {
+                top: 10.0,
+                bottom: 10.0,
+                left: RAIL_PAD,
+                right: CONTROLS_WIDTH,
+            })
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
                 border: Border {
@@ -5382,13 +5540,19 @@ fn tags(&self) -> iced::Command<Message> {
                         text(instance_name(&self.store, id))
                             .size(13.0)
                             .font(if selected { semibold() } else { medium() })
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                            .style(iced::theme::Text::Color(theme_gen::ink(
+                                theme,
+                                INK_CONTRAST,
+                            ))),
                     )
                     .push(
                         text(progress_line(progress))
                             .size(12.0)
                             .font(medium())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                            .style(iced::theme::Text::Color(theme_gen::ink(
+                                theme,
+                                INK_SECONDARY,
+                            ))),
                     ),
             )
             .width(Length::Fill),
@@ -5412,7 +5576,12 @@ fn tags(&self) -> iced::Command<Message> {
         mouse_area(
             container(body)
                 .width(Length::Fill)
-                .padding(Padding { top: 6.0, bottom: 6.0, left: 8.0, right: 8.0 })
+                .padding(Padding {
+                    top: 6.0,
+                    bottom: 6.0,
+                    left: 8.0,
+                    right: 8.0,
+                })
                 .style(move |_theme: &Theme| container::Appearance {
                     background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
                     border: Border {
@@ -5443,10 +5612,18 @@ fn tags(&self) -> iced::Command<Message> {
                 .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Brand))),
         )
         .height(Length::Fixed(20.0))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 6.0, right: 6.0 })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: 6.0,
+            right: 6.0,
+        })
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::GreenHighlight))),
+            background: Some(Background::Color(theme_gen::ink(
+                theme,
+                Ink::GreenHighlight,
+            ))),
             border: Border {
                 color: theme_gen::ink(theme, Ink::Brand),
                 width: 1.0,
@@ -5458,7 +5635,12 @@ fn tags(&self) -> iced::Command<Message> {
     }
 
     /// A history button: a 28px square, `!border !border-surface-4`.
-    fn history_button(&self, glyph: Glyph, enabled: bool, message: Message) -> Element<'_, Message> {
+    fn history_button(
+        &self,
+        glyph: Glyph,
+        enabled: bool,
+        message: Message,
+    ) -> Element<'_, Message> {
         let ink = self.icon_ink(enabled);
         let border = theme_gen::ink(self.theme, Ink::Surface4);
         let face = container(icon::icon(glyph, HEAD_ICON, ink))
@@ -5467,11 +5649,18 @@ fn tags(&self) -> iced::Command<Message> {
             .center_x()
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
-                border: Border { color: border, width: 1.0, radius: HEAD_RADIUS.into() },
+                border: Border {
+                    color: border,
+                    width: 1.0,
+                    radius: HEAD_RADIUS.into(),
+                },
                 ..container::Appearance::default()
             });
         if enabled {
-            mouse_area(face).interaction(Interaction::Pointer).on_release(message).into()
+            mouse_area(face)
+                .interaction(Interaction::Pointer)
+                .on_release(message)
+                .into()
         } else {
             // No message at all rather than a message that is ignored: the
             // reference disables the button, and a control that cannot be used
@@ -5505,7 +5694,11 @@ fn tags(&self) -> iced::Command<Message> {
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(plate)),
-                border: Border { color: ring, width: 1.0, radius: 999.0.into() },
+                border: Border {
+                    color: ring,
+                    width: 1.0,
+                    radius: 999.0.into(),
+                },
                 ..container::Appearance::default()
             });
         mouse_area(face)
@@ -5560,8 +5753,14 @@ fn tags(&self) -> iced::Command<Message> {
         // every angle a rotation would show, which is the same argument
         // [`Shell::checklist`]'s two chevrons are drawn on.
         let turn = self.panel_arrow.value().clamp(0.0, 1.0);
-        let left = Color { a: ink.a * (1.0 - turn), ..ink };
-        let right = Color { a: ink.a * turn, ..ink };
+        let left = Color {
+            a: ink.a * (1.0 - turn),
+            ..ink
+        };
+        let right = Color {
+            a: ink.a * turn,
+            ..ink
+        };
         let arrows = if turn >= 1.0 {
             icon::icon(Glyph::RightArrow, CONTROLS_ICON, ink)
         } else if turn <= 0.0 {
@@ -5575,7 +5774,10 @@ fn tags(&self) -> iced::Command<Message> {
                 iced::Vector::ZERO,
                 icon::icon(Glyph::LeftArrow, CONTROLS_ICON, left),
             )
-            .over(iced::Vector::ZERO, icon::icon(Glyph::RightArrow, CONTROLS_ICON, right))
+            .over(
+                iced::Vector::ZERO,
+                icon::icon(Glyph::RightArrow, CONTROLS_ICON, right),
+            )
             .into()
         };
         let face = container(arrows)
@@ -5585,7 +5787,10 @@ fn tags(&self) -> iced::Command<Message> {
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 background,
-                border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
+                border: Border {
+                    radius: CONTROL_RADIUS.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             });
         mouse_area(face)
@@ -5599,11 +5804,20 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let bar = row![]
             .align_items(Alignment::Center)
-            .padding(Padding { top: 0.0, bottom: 0.0, left: CONTROLS_PAD, right: CONTROLS_PAD })
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: CONTROLS_PAD,
+                right: CONTROLS_PAD,
+            })
             .push(self.control_button(Glyph::Minimize, Message::Minimize))
             .push(Space::with_width(CONTROLS_GAP))
             .push(self.control_button(
-                if self.maximized { Glyph::Restore } else { Glyph::Maximize },
+                if self.maximized {
+                    Glyph::Restore
+                } else {
+                    Glyph::Maximize
+                },
                 Message::ToggleMaximize,
             ))
             .push(Space::with_width(CONTROLS_GAP))
@@ -5647,7 +5861,10 @@ fn tags(&self) -> iced::Command<Message> {
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(plate)),
-                border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
+                border: Border {
+                    radius: CONTROL_RADIUS.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             });
         mouse_area(face)
@@ -5708,7 +5925,10 @@ fn tags(&self) -> iced::Command<Message> {
             .align_items(Alignment::Center)
             .push(rail_separator(self.theme))
             .push(self.rail_button(Rail::CreateInstance));
-        container(strip).width(Length::Fill).height(Length::Fill).into()
+        container(strip)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// The rail's five link slots, in `App.vue`'s order, with the two
@@ -5770,7 +5990,11 @@ fn tags(&self) -> iced::Command<Message> {
             glyph,
             background,
             plate: if plate.value() > 0.0 {
-                Some((plate.value(), Timing::NAV_PLATE_FROM_SCALE + (1.0 - Timing::NAV_PLATE_FROM_SCALE) * plate.value()))
+                Some((
+                    plate.value(),
+                    Timing::NAV_PLATE_FROM_SCALE
+                        + (1.0 - Timing::NAV_PLATE_FROM_SCALE) * plate.value(),
+                ))
             } else {
                 None
             },
@@ -5820,7 +6044,10 @@ fn tags(&self) -> iced::Command<Message> {
             // `1 - fade` of the page's own colour, so the page reaches full
             // strength exactly when the tween settles and the wash is dropped
             // rather than left at an alpha of zero.
-            let wash = Color { a: 1.0 - fade, ..theme_gen::ink(theme, Ink::Bg) };
+            let wash = Color {
+                a: 1.0 - fade,
+                ..theme_gen::ink(theme, Ink::Bg)
+            };
             crate::pages::overlay::Stack::at(
                 iced::Vector::ZERO,
                 column![
@@ -5885,9 +6112,8 @@ fn tags(&self) -> iced::Command<Message> {
         // One layer is not the page's to draw: the page's own, which is the
         // hosting toast, and which goes *over* the gutter and *under* the shadow
         // and the rule. See [`Shell::page_overlay`].
-        let mut layers =
-            crate::pages::overlay::Stack::at(Vector::ZERO, page)
-                .over(self.pane_gutter_at(), pane_gutter(theme));
+        let mut layers = crate::pages::overlay::Stack::at(Vector::ZERO, page)
+            .over(self.pane_gutter_at(), pane_gutter(theme));
         if let Some((at, overlay)) = self.page_overlay(theme, page_width) {
             // Clipped to the page column, which is `.app-viewport` and the reason
             // the toast can be drawn out here at all. The box is stated in this
@@ -5982,7 +6208,10 @@ fn tags(&self) -> iced::Command<Message> {
             pages::Screen::Servers(_) => {
                 let (at, overlay) = servers::page_overlay(theme, page)?;
                 let scrolled = at - Vector::new(0.0, self.glides.offset(crate::scroll::PAGE));
-                Some((scrolled, overlay.map(pages::Message::Servers).map(Message::Screen)))
+                Some((
+                    scrolled,
+                    overlay.map(pages::Message::Servers).map(Message::Screen),
+                ))
             }
             _ => None,
         }
@@ -6049,7 +6278,9 @@ fn tags(&self) -> iced::Command<Message> {
         // it.
         if let Some(pages::Screen::Discover(state)) = Some(&self.screen) {
             sections = sections.push(
-                pages::discover::sidebar(theme, state).map(pages::Message::Discover).map(Message::Screen),
+                pages::discover::sidebar(theme, state)
+                    .map(pages::Message::Discover)
+                    .map(Message::Screen),
             );
         }
         // *Playing as* is `v-show="hasLoggedIntoMinecraft"`, which is the
@@ -6069,16 +6300,26 @@ fn tags(&self) -> iced::Command<Message> {
         // always the one that was just pressed.
         if let Some(note) = &self.modrinth_note {
             sections = sections.push(
-                container(self.panel_note_block(Key::OnboardingChecklistLoginModrinth.message(), note, MODRINTH_NOTE_DISMISS, Message::DismissModrinthNote))
-                    .width(Length::Fill)
-                    .padding(PANEL_SECTION_PAD),
+                container(self.panel_note_block(
+                    Key::OnboardingChecklistLoginModrinth.message(),
+                    note,
+                    MODRINTH_NOTE_DISMISS,
+                    Message::DismissModrinthNote,
+                ))
+                .width(Length::Fill)
+                .padding(PANEL_SECTION_PAD),
             );
         }
         if let Some(note) = &self.accounts_note {
             sections = sections.push(
-                container(self.panel_note_block(Key::MinecraftAccountSignIn.message(), note, ACCOUNTS_NOTE_DISMISS, Message::DismissAccountsNote))
-                    .width(Length::Fill)
-                    .padding(PANEL_SECTION_PAD),
+                container(self.panel_note_block(
+                    Key::MinecraftAccountSignIn.message(),
+                    note,
+                    ACCOUNTS_NOTE_DISMISS,
+                    Message::DismissAccountsNote,
+                ))
+                .width(Length::Fill)
+                .padding(PANEL_SECTION_PAD),
             );
         }
         // The news section, where the reference has it: after the accounts card and
@@ -6090,9 +6331,14 @@ fn tags(&self) -> iced::Command<Message> {
         }
         if let Some(note) = &self.link_note {
             sections = sections.push(
-                container(self.panel_note_block("link", note, LINK_NOTE_DISMISS, Message::DismissLinkNote))
-                    .width(Length::Fill)
-                    .padding(PANEL_SECTION_PAD),
+                container(self.panel_note_block(
+                    "link",
+                    note,
+                    LINK_NOTE_DISMISS,
+                    Message::DismissLinkNote,
+                ))
+                .width(Length::Fill)
+                .padding(PANEL_SECTION_PAD),
             );
         }
         // `border-l` over the wash: iced paints a `Border` on all four sides, so
@@ -6113,14 +6359,12 @@ fn tags(&self) -> iced::Command<Message> {
         // sections plus the reserve. That is the pair the handle is computed
         // from, so a reserve taken outside the region would take 48 pixels off
         // the numerator and none off the denominator.
-        let sections = container(sections)
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                bottom: PANEL_PROMO_RESERVE,
-                left: 0.0,
-                right: 0.0,
-            });
+        let sections = container(sections).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            bottom: PANEL_PROMO_RESERVE,
+            left: 0.0,
+            right: 0.0,
+        });
         let scroll = crate::scroll::region(crate::scroll::PANEL, sections, Message::Wheel)
             .direction(bar_direction())
             .style(bar(theme))
@@ -6140,9 +6384,12 @@ fn tags(&self) -> iced::Command<Message> {
             // `672 - 48 - 48 - 80 - 250 = 246`.
             crate::pages::overlay::Stack::at(
                 Vector::ZERO,
-                column![container(scroll).width(Length::Fill).height(Length::Fill), self.promo()]
-                    .width(Length::Fill)
-                    .height(Length::Fill),
+                column![
+                    container(scroll).width(Length::Fill).height(Length::Fill),
+                    self.promo()
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill),
             )
             // `over_control` and not `over`, because this block is the reference's
             // `z-10` link and not a picture of one: the link is `App.vue:2554`'s
@@ -6281,8 +6528,14 @@ fn tags(&self) -> iced::Command<Message> {
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Gradient(gradient::Gradient::Linear(
                     gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2))
-                        .add_stop(0.0, Color::from_rgba(24.0 / 255.0, 30.0 / 255.0, 31.0 / 255.0, 0.0))
-                        .add_stop(0.8, Color::from_rgba(23.0 / 255.0, 29.0 / 255.0, 30.0 / 255.0, 1.0)),
+                        .add_stop(
+                            0.0,
+                            Color::from_rgba(24.0 / 255.0, 30.0 / 255.0, 31.0 / 255.0, 0.0),
+                        )
+                        .add_stop(
+                            0.8,
+                            Color::from_rgba(23.0 / 255.0, 29.0 / 255.0, 30.0 / 255.0, 1.0),
+                        ),
                 ))),
                 ..container::Appearance::default()
             });
@@ -6347,7 +6600,9 @@ fn tags(&self) -> iced::Command<Message> {
     /// section's own gate: the reference asks a plugin for the flag and this
     /// launcher asks the file both it and the other launcher write.
     fn logged_into_minecraft(&self) -> bool {
-        self.accounts.as_ref().is_some_and(|store| !store.list().is_empty())
+        self.accounts
+            .as_ref()
+            .is_some_and(|store| !store.list().is_empty())
     }
 
     /// The checklist as this launcher's facts have it.
@@ -6417,7 +6672,11 @@ fn tags(&self) -> iced::Command<Message> {
                     // iced cannot rotate a glyph, so the two chevrons are drawn,
                     // as they are on the accounts card.
                     .push(icon::icon(
-                        if self.checklist_open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                        if self.checklist_open {
+                            Glyph::ChevronUp
+                        } else {
+                            Glyph::ChevronDown
+                        },
                         CARD_MARK,
                         header_ink,
                     )),
@@ -6476,17 +6735,15 @@ fn tags(&self) -> iced::Command<Message> {
         Some(
             column![]
                 .width(Length::Fill)
-                .push(
-                    container(section).width(Length::Fill).padding(Padding {
-                        top: PANEL_SECTION_PAD,
-                        bottom: PANEL_SECTION_PAD,
-                        // `px-3`: the checklist's own horizontal padding is 12
-                        // rather than the panel sections' 16, which is the
-                        // reference's `px-3 p-4`.
-                        left: CHECKLIST_PAD,
-                        right: CHECKLIST_PAD,
-                    }),
-                )
+                .push(container(section).width(Length::Fill).padding(Padding {
+                    top: PANEL_SECTION_PAD,
+                    bottom: PANEL_SECTION_PAD,
+                    // `px-3`: the checklist's own horizontal padding is 12
+                    // rather than the panel sections' 16, which is the
+                    // reference's `px-3 p-4`.
+                    left: CHECKLIST_PAD,
+                    right: CHECKLIST_PAD,
+                }))
                 .push(hairline(theme, false))
                 .into(),
         )
@@ -6560,7 +6817,11 @@ fn tags(&self) -> iced::Command<Message> {
     fn checklist_step<'a>(&'a self, step: Step, complete: bool) -> Element<'a, Message> {
         let theme = self.theme;
         let key = crate::ui::scoped("panel:checklist", &format!("{step:?}"));
-        let (factor, _) = if complete { (1.0, 0.0) } else { crate::ui::interaction(key) };
+        let (factor, _) = if complete {
+            (1.0, 0.0)
+        } else {
+            crate::ui::interaction(key)
+        };
         // `move` because the frame's own style closure is `'static` and this is
         // called from inside it; both captured values are `Copy`.
         let fade = move |color: Color| {
@@ -6602,11 +6863,14 @@ fn tags(&self) -> iced::Command<Message> {
         let label = text(step.label().message())
             .size(14.0)
             .font(medium())
-            .style(iced::theme::Text::Color(fade(theme_gen::ink(theme, if complete {
-                INK_SECONDARY
-            } else {
-                INK_CONTRAST
-            }))));
+            .style(iced::theme::Text::Color(fade(theme_gen::ink(
+                theme,
+                if complete {
+                    INK_SECONDARY
+                } else {
+                    INK_CONTRAST
+                },
+            ))));
         let row = container(
             row![]
                 .width(Length::Fill)
@@ -6625,7 +6889,10 @@ fn tags(&self) -> iced::Command<Message> {
         })
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(fade(theme_gen::ink(theme, Ink::ButtonBg)))),
+            background: Some(Background::Color(fade(theme_gen::ink(
+                theme,
+                Ink::ButtonBg,
+            )))),
             border: Border {
                 color: fade(theme_gen::ink(theme, Ink::ButtonBorder)),
                 width: 1.0,
@@ -6663,7 +6930,10 @@ fn tags(&self) -> iced::Command<Message> {
                             text(Key::AppSidebarPlayingAs.message())
                                 .size(PANEL_HEADING)
                                 .font(medium())
-                                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                                .style(iced::theme::Text::Color(theme_gen::ink(
+                                    theme,
+                                    INK_DEFAULT,
+                                ))),
                         )
                         // `mt-2` is the card's own, and the card carries it.
                         .push(container(self.accounts_card()).padding(Padding {
@@ -6700,7 +6970,13 @@ fn tags(&self) -> iced::Command<Message> {
                 note,
             ))
             .push(Space::with_width(Length::Fill))
-            .push(crate::ui::icon_button(theme, dismiss_key, Glyph::X, 16.0, dismiss))
+            .push(crate::ui::icon_button(
+                theme,
+                dismiss_key,
+                Glyph::X,
+                16.0,
+                dismiss,
+            ))
             .into()
     }
 
@@ -6783,9 +7059,7 @@ fn tags(&self) -> iced::Command<Message> {
         };
         articles
             .iter()
-            .filter(|article| {
-                !article.title.is_empty() && crate::open::is_openable(&article.link)
-            })
+            .filter(|article| !article.title.is_empty() && crate::open::is_openable(&article.link))
             .take(MAX_NEWS)
             .collect()
     }
@@ -6800,24 +7074,21 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let key = crate::ui::scoped("panel:news", &article.link);
         let (factor, _) = crate::ui::interaction(key);
-        let mut body = column![]
-            .width(Length::Fill)
-            .spacing(4.0)
-            .push(
-                text(article.title.clone())
-                    .size(14.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            );
+        let mut body = column![].width(Length::Fill).spacing(4.0).push(
+            text(article.title.clone())
+                .size(14.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
+        );
         if !article.summary.is_empty() {
             body = body.push(crate::ui::paragraph(theme, &article.summary));
         }
-        body = body.push(
-            text(article.date_label())
-                .size(12.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        );
+        body = body.push(text(article.date_label()).size(12.0).font(medium()).style(
+            iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+        ));
         let link = article.link.clone();
         crate::ui::card_at(
             theme,
@@ -6880,7 +7151,10 @@ fn tags(&self) -> iced::Command<Message> {
                 ));
             return card_frame(theme, CARD_FRAME_PAD, body);
         }
-        let selected = self.accounts.as_ref().and_then(AccountsStore::selected_uuid);
+        let selected = self
+            .accounts
+            .as_ref()
+            .and_then(AccountsStore::selected_uuid);
         let title = card_title(accounts, selected);
         let (factor, _) = crate::ui::interaction(ACCOUNTS_HEADER);
         let header = container(
@@ -6891,15 +7165,12 @@ fn tags(&self) -> iced::Command<Message> {
                 .push(
                     column![]
                         .width(Length::Fill)
-                        .push(
-                            text(title)
-                                .size(14.0)
-                                .font(medium())
-                                .style(iced::theme::Text::Color(crate::theme::brightness(
-                                    theme_gen::ink(theme, INK_CONTRAST),
-                                    factor,
-                                ))),
-                        )
+                        .push(text(title).size(14.0).font(medium()).style(
+                            iced::theme::Text::Color(crate::theme::brightness(
+                                theme_gen::ink(theme, INK_CONTRAST),
+                                factor,
+                            )),
+                        ))
                         .push(
                             text(Key::MinecraftAccountLabel.message())
                                 .size(CARD_LABEL)
@@ -6914,7 +7185,11 @@ fn tags(&self) -> iced::Command<Message> {
                 // opens (`class="rotate-180"`). iced cannot rotate a glyph, and
                 // the two chevrons are the same picture drawn twice.
                 .push(icon::icon(
-                    if self.accounts_open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                    if self.accounts_open {
+                        Glyph::ChevronUp
+                    } else {
+                        Glyph::ChevronDown
+                    },
                     CARD_MARK,
                     crate::theme::brightness(theme_gen::ink(theme, INK_CONTRAST), factor),
                 )),
@@ -6951,7 +7226,12 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let mut rows = column![]
             .width(Length::Fill)
-            .padding(Padding { top: 4.0, bottom: 8.0, left: 0.0, right: 0.0 })
+            .padding(Padding {
+                top: 4.0,
+                bottom: 8.0,
+                left: 0.0,
+                right: 0.0,
+            })
             .push(hairline(theme, false));
         for account in accounts {
             let chosen = selected == Some(account.uuid.as_str());
@@ -6962,7 +7242,11 @@ fn tags(&self) -> iced::Command<Message> {
                 .spacing(CARD_ROW_GAP)
                 .align_items(Alignment::Center)
                 .push(icon::icon(
-                    if chosen { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+                    if chosen {
+                        Glyph::RadioButtonChecked
+                    } else {
+                        Glyph::RadioButton
+                    },
                     CARD_MARK,
                     crate::theme::brightness(
                         theme_gen::ink(theme, if chosen { Ink::Brand } else { INK_SECONDARY }),
@@ -6978,13 +7262,11 @@ fn tags(&self) -> iced::Command<Message> {
                             factor,
                         ))),
                 );
-            let name = mouse_area(
-                container(name).width(Length::Fill).padding(CARD_ROW_PAD),
-            )
-            .interaction(Interaction::Pointer)
-            .on_enter(card_crossing(key, true))
-            .on_exit(card_crossing(key, false))
-            .on_release(Message::SelectAccount(account.uuid.clone()));
+            let name = mouse_area(container(name).width(Length::Fill).padding(CARD_ROW_PAD))
+                .interaction(Interaction::Pointer)
+                .on_enter(card_crossing(key, true))
+                .on_exit(card_crossing(key, false))
+                .on_release(Message::SelectAccount(account.uuid.clone()));
             rows = rows.push(
                 row![]
                     .width(Length::Fill)
@@ -7044,14 +7326,20 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(THEME_TITLE_SIZE)
                     .line_height(iced::Pixels(THEME_TITLE_LINE))
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Contrast))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        Ink::Contrast,
+                    ))),
             )
             .push(
                 text(Key::SettingsDisplayThemeDescription.message())
                     .size(THEME_BODY_SIZE)
                     .line_height(iced::Pixels(THEME_BODY_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        Ink::Secondary,
+                    ))),
             );
         column![]
             .width(Length::Fill)
@@ -7122,7 +7410,10 @@ fn tags(&self) -> iced::Command<Message> {
         let (portion, rest) = (THEME_BAR2_SHARE * 100.0, (1.0 - THEME_BAR2_SHARE) * 100.0);
         let bar2 = row![
             theme_bar(dim(skin.bar2), Length::FillPortion(portion as u16)),
-            Space::new(Length::FillPortion(rest as u16), Length::Fixed(THEME_BAR_HEIGHT)),
+            Space::new(
+                Length::FillPortion(rest as u16),
+                Length::Fixed(THEME_BAR_HEIGHT)
+            ),
         ]
         .width(Length::Fill)
         .height(Length::Fixed(THEME_BAR_HEIGHT));
@@ -7134,7 +7425,10 @@ fn tags(&self) -> iced::Command<Message> {
                 ))
                 .style(move |_theme: &Theme| container::Appearance {
                     background: Some(Background::Color(dim(skin.line))),
-                    border: Border { radius: THEME_MOCK_RADIUS.into(), ..Border::default() },
+                    border: Border {
+                        radius: THEME_MOCK_RADIUS.into(),
+                        ..Border::default()
+                    },
                     ..container::Appearance::default()
                 }),
                 column![]
@@ -7182,7 +7476,11 @@ fn tags(&self) -> iced::Command<Message> {
         let mut label = row![]
             .align_items(Alignment::Center)
             .push(crate::icon::icon(
-                if selected { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+                if selected {
+                    Glyph::RadioButtonChecked
+                } else {
+                    Glyph::RadioButton
+                },
                 THEME_LABEL_ICON,
                 dim(if selected {
                     theme_gen::ink(theme, Ink::Brand)
@@ -7212,13 +7510,17 @@ fn tags(&self) -> iced::Command<Message> {
                     }))),
             );
         if option == ColorTheme::Light || option == self.preferred_dark_theme() {
-            label = label.push(Space::with_width(Length::Fixed(THEME_ICON_GAP))).push(
-                crate::icon::icon(
-                    if option == ColorTheme::Light { Glyph::Sun } else { Glyph::Moon },
+            label = label
+                .push(Space::with_width(Length::Fixed(THEME_ICON_GAP)))
+                .push(crate::icon::icon(
+                    if option == ColorTheme::Light {
+                        Glyph::Sun
+                    } else {
+                        Glyph::Moon
+                    },
                     THEME_LABEL_ICON,
                     dim(theme_gen::ink(theme, Ink::Secondary)),
-                ),
-            );
+                ));
         }
         let label = container(label)
             .width(Length::Fill)
@@ -7252,7 +7554,10 @@ fn tags(&self) -> iced::Command<Message> {
         .padding(Padding::from(1.0))
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(card_line)),
-            border: Border { radius: THEME_CARD_RADIUS.into(), ..Border::default() },
+            border: Border {
+                radius: THEME_CARD_RADIUS.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         });
         mouse_area(card)
@@ -7278,14 +7583,20 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(THEME_ROW_TITLE_SIZE)
                     .line_height(iced::Pixels(THEME_TITLE_LINE))
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Contrast))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        Ink::Contrast,
+                    ))),
             )
             .push(
                 text(Key::SettingsDisplayThemeSyncAcrossDevicesDescription.message())
                     .size(THEME_BODY_SIZE)
                     .line_height(iced::Pixels(THEME_BODY_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Secondary))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        Ink::Secondary,
+                    ))),
             );
         row![left, crate::ui::disabled_switch::<Message>(theme)]
             .align_items(Alignment::Center)
@@ -7325,7 +7636,10 @@ fn tags(&self) -> iced::Command<Message> {
     /// drawn.
     fn settings_tab_height(&self) -> Option<f32> {
         match self.settings_tab {
-            SettingsTab::Appearance => Some(appearance_settings_height(self.themes_offered().len(), theme_columns(self.settings_content_width()))),
+            SettingsTab::Appearance => Some(appearance_settings_height(
+                self.themes_offered().len(),
+                theme_columns(self.settings_content_width()),
+            )),
             _ => None,
         }
     }
@@ -7346,7 +7660,10 @@ fn tags(&self) -> iced::Command<Message> {
     /// language's names against the room a card has for one.
     #[cfg(test)]
     fn theme_labels(&self) -> Vec<&'static str> {
-        self.themes_offered().iter().map(|option| option.label_key().message()).collect()
+        self.themes_offered()
+            .iter()
+            .map(|option| option.label_key().message())
+            .collect()
     }
 
     /// The languages Settings offers, as the reference's own language page draws
@@ -7388,11 +7705,18 @@ fn tags(&self) -> iced::Command<Message> {
                     // `text-xl`'s own line, 1.75rem, on a 20-pixel heading.
                     .line_height(iced::Pixels(28.0))
                     .font(heading())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             // `class="mb-4 mt-2"` on the admonition: eight above, sixteen under.
             .push(Space::new(Length::Fill, Length::Fixed(8.0)))
-            .push(crate::ui::admonition_body(theme, crate::ui::Severity::Warning, &warning))
+            .push(crate::ui::admonition_body(
+                theme,
+                crate::ui::Severity::Warning,
+                &warning,
+            ))
             .push(Space::new(Length::Fill, Length::Fixed(16.0)))
             // `<p class="m-0 mb-4 text-secondary">`, which inherits the body line.
             .push(
@@ -7400,7 +7724,10 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(16.0)
                     .line_height(iced::Pixels(THEME_BODY_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             )
             .push(Space::new(Length::Fill, Length::Fixed(16.0)))
             .push(crate::ui::input_sized(
@@ -7435,7 +7762,12 @@ fn tags(&self) -> iced::Command<Message> {
                     ))),
             )
             .width(Length::Fill)
-            .padding(Padding { top: 12.0, bottom: 4.0, left: 0.0, right: 0.0 }),
+            .padding(Padding {
+                top: 12.0,
+                bottom: 4.0,
+                left: 0.0,
+                right: 0.0,
+            }),
         );
         if matches.is_empty() {
             // `<div class="p-4 text-secondary">No languages match your search.</div>`
@@ -7443,14 +7775,18 @@ fn tags(&self) -> iced::Command<Message> {
                 .push(Space::new(Length::Fill, Length::Fixed(4.0)))
                 .push(
                     container(
-                        text(Key::SettingsLanguageLanguagesSearchNoResults.message().to_string())
-                            .size(16.0)
-                            .line_height(iced::Pixels(THEME_BODY_LINE))
-                            .font(medium())
-                            .style(iced::theme::Text::Color(theme_gen::ink(
-                                theme,
-                                INK_SECONDARY,
-                            ))),
+                        text(
+                            Key::SettingsLanguageLanguagesSearchNoResults
+                                .message()
+                                .to_string(),
+                        )
+                        .size(16.0)
+                        .line_height(iced::Pixels(THEME_BODY_LINE))
+                        .font(medium())
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_SECONDARY,
+                        ))),
                     )
                     .padding(Padding::from(16.0)),
                 );
@@ -7510,7 +7846,10 @@ fn tags(&self) -> iced::Command<Message> {
     /// order is [`crate::locale::OFFERED`]'s, which is the reference's.
     #[cfg(test)]
     fn language_labels() -> Vec<String> {
-        crate::locale::OFFERED.iter().map(|&tag| crate::locale::label(tag)).collect()
+        crate::locale::OFFERED
+            .iter()
+            .map(|&tag| crate::locale::label(tag))
+            .collect()
     }
 
     // ---- Features settings -----------------------------------------------
@@ -7555,14 +7894,20 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(18.0)
                     .line_height(iced::Pixels(28.0))
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text(Key::AppFeaturesSettingsSyncAcrossDevicesDescription.message())
                     .size(16.0)
                     .line_height(iced::Pixels(18.0))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         row![left, crate::ui::disabled_switch::<Message>(theme)]
             .align_items(Alignment::Center)
@@ -7578,7 +7923,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let worlds = self.features_toggle_row(
             Key::AppFeaturesSettingsShowWorldsTabTitle,
             self.prefs.show_worlds_tab,
@@ -7658,23 +8006,26 @@ fn tags(&self) -> iced::Command<Message> {
         switch: Element<'a, Message>,
     ) -> Element<'a, Message> {
         let theme = self.theme;
-        let mut left = column![]
-            .width(Length::Fill)
-            .spacing(4.0)
-            .push(
-                text(title.message())
-                    .size(18.0)
-                    .line_height(iced::Pixels(28.0))
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            );
+        let mut left = column![].width(Length::Fill).spacing(4.0).push(
+            text(title.message())
+                .size(18.0)
+                .line_height(iced::Pixels(28.0))
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
+        );
         if let Some(description) = description {
             left = left.push(
                 text(description.message())
                     .size(16.0)
                     .line_height(iced::Pixels(18.0))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         }
         row![left, switch]
@@ -7735,7 +8086,10 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(18.0)
                     .line_height(iced::Pixels(28.0))
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
             .push(settings_field(theme, &value, on_input))
@@ -7745,7 +8099,10 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(16.0)
                     .line_height(iced::Pixels(TIGHT_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             )
             .into()
     }
@@ -7758,7 +8115,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let all_screenshots = self.features_toggle_row(
             Key::AppFeaturesSettingsShowAllScreenshotsTitle,
             self.prefs.show_all_screenshots_in_sidebar,
@@ -7801,7 +8161,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let jump_in = self.features_toggle_row(
             Key::AppFeaturesSettingsShowJumpInTitle,
             self.prefs.show_jump_in_section,
@@ -7849,14 +8212,20 @@ fn tags(&self) -> iced::Command<Message> {
                     .size(18.0)
                     .line_height(iced::Pixels(28.0))
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text(Key::AppBehaviorSettingsSyncAcrossDevicesDescription.message())
                     .size(16.0)
                     .line_height(iced::Pixels(18.0))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         row![left, crate::ui::disabled_switch::<Message>(theme)]
             .align_items(Alignment::Center)
@@ -7872,7 +8241,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let minimize = self.settings_toggle_row(
             Key::AppAppearanceSettingsMinimizeLauncherTitle,
             Some(Key::AppAppearanceSettingsMinimizeLauncherDescription),
@@ -7902,7 +8274,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let compact = self.settings_toggle_row(
             Key::AppAppearanceSettingsCompactModeTitle,
             Some(Key::AppAppearanceSettingsCompactModeDescription),
@@ -7940,7 +8315,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(20.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let unknown = self.settings_toggle_row(
             Key::AppAppearanceSettingsUnknownPackWarningTitle,
             Some(Key::AppAppearanceSettingsUnknownPackWarningDescription),
@@ -8082,7 +8460,10 @@ fn tags(&self) -> iced::Command<Message> {
             .size(18.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         // A version with nothing stored for it reads as no choice, which is the
         // empty field the reference's selector shows for one it has not found.
         let path = self.prefs.java_path(&major.to_string()).unwrap_or("");
@@ -8090,9 +8471,11 @@ fn tags(&self) -> iced::Command<Message> {
             .width(Length::Fill)
             .push(title)
             .push(Space::with_height(Length::Fixed(SECTION_LEAD)))
-            .push(settings_field(theme, path, move |new_path| Message::SetJavaPath {
-                major,
-                path: new_path,
+            .push(settings_field(theme, path, move |new_path| {
+                Message::SetJavaPath {
+                    major,
+                    path: new_path,
+                }
             }))
             .into()
     }
@@ -8147,12 +8530,18 @@ fn tags(&self) -> iced::Command<Message> {
             .size(18.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let desc = text(Key::AppSettingsResourceManagementAppDirectoryDescription.message())
             .size(16.0)
             .line_height(iced::Pixels(TIGHT_LINE))
             .font(medium())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            )));
         let dir_text = self.prefs.app_directory.as_deref().unwrap_or("");
         column![]
             .width(Length::Fill)
@@ -8188,12 +8577,18 @@ fn tags(&self) -> iced::Command<Message> {
             .size(18.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let desc = text(Key::AppSettingsResourceManagementAppCacheDescription.message())
             .size(16.0)
             .line_height(iced::Pixels(TIGHT_LINE))
             .font(medium())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            )));
         let button = crate::ui::button_with_icon(
             theme,
             "settings:resource:purge-cache",
@@ -8258,12 +8653,18 @@ fn tags(&self) -> iced::Command<Message> {
             .size(18.0)
             .line_height(iced::Pixels(28.0))
             .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
         let desc = text(Key::AppSettingsResourceManagementAppDatabaseBackupsDescription.message())
             .size(16.0)
             .line_height(iced::Pixels(TIGHT_LINE))
             .font(medium())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            )));
         let button = crate::ui::button_with_icon(
             theme,
             "settings:resource:open-backups",
@@ -8296,17 +8697,17 @@ fn tags(&self) -> iced::Command<Message> {
 
     /// The dialog's frame: the same width, padding, surface and close button
     /// whichever modal it holds.
-    fn dialog<'a>(
-        &'a self,
-        title: Key,
-        body: Element<'a, Message>,
-    ) -> Element<'a, Message> {
+    fn dialog<'a>(&'a self, title: Key, body: Element<'a, Message>) -> Element<'a, Message> {
         self.dialog_titled(title.message(), body)
     }
 
     /// The same frame for a title this shell built rather than a key: the
     /// instance-settings modal names the instance it is about.
-    fn dialog_titled<'a>(&'a self, title: &str, body: Element<'a, Message>) -> Element<'a, Message> {
+    fn dialog_titled<'a>(
+        &'a self,
+        title: &str,
+        body: Element<'a, Message>,
+    ) -> Element<'a, Message> {
         let theme = self.theme;
         container(
             column![]
@@ -8314,12 +8715,9 @@ fn tags(&self) -> iced::Command<Message> {
                 .push(
                     row![]
                         .align_items(Alignment::Center)
-                        .push(
-                            text(title.to_string())
-                                .size(20.0)
-                                .font(heading())
-                                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                        )
+                        .push(text(title.to_string()).size(20.0).font(heading()).style(
+                            iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+                        ))
                         .push(Space::with_width(Length::Fill))
                         .push(self.history_button(Glyph::X, true, Message::CloseModal)),
                 )
@@ -8341,13 +8739,11 @@ fn tags(&self) -> iced::Command<Message> {
                     // which is exactly the ten the body is broken for — so the
                     // reservation [`DIALOG_SCROLLBAR`] documents is now the
                     // reservation rather than an allowance for the wrong number.
-                    container(crate::scroll::region(
-                        crate::scroll::DIALOG,
-                        body,
-                        Message::Wheel,
+                    container(
+                        crate::scroll::region(crate::scroll::DIALOG, body, Message::Wheel)
+                            .direction(bar_direction())
+                            .style(bar(theme)),
                     )
-                    .direction(bar_direction())
-                    .style(bar(theme)))
                     .width(Length::Fixed(DIALOG_INNER))
                     .max_height(self.dialog_body_room()),
                 ),
@@ -8356,7 +8752,10 @@ fn tags(&self) -> iced::Command<Message> {
         .padding(DIALOG_PAD)
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::RaisedBg))),
-            border: Border { radius: 16.0.into(), ..Border::default() },
+            border: Border {
+                radius: 16.0.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         })
         .into()
@@ -8437,7 +8836,9 @@ fn tags(&self) -> iced::Command<Message> {
         )
         .style(crate::scroll::no_bar());
         let pane_height = pane;
-        let pane_scrolled = self.settings_tab_height().is_some_and(|height| height > pane_height);
+        let pane_scrolled = self
+            .settings_tab_height()
+            .is_some_and(|height| height > pane_height);
         let pane_content: Element<'_, Message> = if pane_scrolled {
             // Two children in a cell: the scroll region, then the fade drawn 64
             // above the region's bottom edge. The negative spacing is how this kit
@@ -8456,7 +8857,9 @@ fn tags(&self) -> iced::Command<Message> {
             .width(Length::Fill)
             .into()
         } else {
-            container(pane_content).height(Length::Fixed(pane_height)).into()
+            container(pane_content)
+                .height(Length::Fixed(pane_height))
+                .into()
         };
         let content = container(pane_content)
             .width(Length::Fill)
@@ -8537,19 +8940,23 @@ fn tags(&self) -> iced::Command<Message> {
                         // floor -- 588 rows in the reference's capture.
                         .line_height(iced::Pixels(THEME_MODAL_TITLE_LINE))
                         .font(heading())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 )
                 .push(Space::with_width(Length::Fill))
                 .push(self.dialog_close()),
         )
         .width(Length::Fill)
         .padding(DIALOG_PAD);
-        let rule = container(Space::new(Length::Fill, Length::Fixed(1.0))).style(
-            move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
-                ..container::Appearance::default()
-            },
-        );
+        let rule =
+            container(Space::new(Length::Fill, Length::Fixed(1.0))).style(move |_theme: &Theme| {
+                container::Appearance {
+                    background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+                    ..container::Appearance::default()
+                }
+            });
         // The body's own padding, `TabbedModal.vue`'s `p-6 pb-3 pr-0`, with its
         // bottom short by the one pixel the reference's own box does not have to
         // spend. `pb-3` is 12; this is 11, and the reason is the dialog's own
@@ -8559,9 +8966,12 @@ fn tags(&self) -> iced::Command<Message> {
         // by one gives an even 590, so the border lands on 65 exactly and every row
         // above this padding is the reference's own -- only the dialog's last two
         // rows (a padding row and the bottom border) sit one higher.
-        let body = container(body)
-            .width(Length::Fill)
-            .padding(Padding { top: 24.0, bottom: 11.0, left: 24.0, right: 0.0 });
+        let body = container(body).width(Length::Fill).padding(Padding {
+            top: 24.0,
+            bottom: 11.0,
+            left: 24.0,
+            right: 0.0,
+        });
         // `NewModal.vue`'s own box: `rounded-2xl border border-solid
         // border-surface-5` around the content. The border is *outside* the content
         // here -- an outer container one pixel wider than the inner one on every
@@ -8581,11 +8991,16 @@ fn tags(&self) -> iced::Command<Message> {
             }
         });
         container(frame)
-            .width(Length::Fixed(SETTINGS_WIDTH.min(self.viewport.width - 160.0).max(320.0)))
+            .width(Length::Fixed(
+                SETTINGS_WIDTH.min(self.viewport.width - 160.0).max(320.0),
+            ))
             .padding(Padding::from(SETTINGS_BORDER))
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
-                border: Border { radius: SETTINGS_RADIUS.into(), ..Border::default() },
+                border: Border {
+                    radius: SETTINGS_RADIUS.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             })
             .into()
@@ -8613,7 +9028,10 @@ fn tags(&self) -> iced::Command<Message> {
                 text(Key::CreationFlowModalCustomSetupNameLabel.message())
                     .size(14.0)
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text_input(
@@ -8621,10 +9039,17 @@ fn tags(&self) -> iced::Command<Message> {
                     &self.create_name,
                 )
                 .on_input(Message::CreateName)
-                .padding(Padding { top: 10.0, bottom: 10.0, left: 12.0, right: 12.0 })
+                .padding(Padding {
+                    top: 10.0,
+                    bottom: 10.0,
+                    left: 12.0,
+                    right: 12.0,
+                })
                 .size(14.0)
                 .font(medium())
-                .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme)))),
+                .style(iced::theme::TextInput::Custom(Box::new(
+                    crate::ui::Field::bordered(theme),
+                ))),
             )
             // The reference's own order on this step: the loader first, then the
             // game version it has to have been published for, then which build of
@@ -8691,14 +9116,20 @@ fn tags(&self) -> iced::Command<Message> {
             text(label.message())
                 .size(14.0)
                 .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
         );
         if let Some(value) = value {
             heading = heading.push(Space::with_width(Length::Fill)).push(
                 text(value)
                     .size(14.0)
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         }
         heading.into()
@@ -8774,21 +9205,27 @@ fn tags(&self) -> iced::Command<Message> {
                     // `MultiSelect`/`Combobox` list is an `overlayscrollbars`
                     // instance like every other list in the reference
                     // (`MultiSelect.vue:1487-1489`, `Combobox.vue:1121-1123`).
-                    container(crate::scroll::region(
-                        crate::scroll::VERSIONS,
-                        column(rows).width(Length::Fill),
-                        Message::Wheel,
+                    container(
+                        crate::scroll::region(
+                            crate::scroll::VERSIONS,
+                            column(rows).width(Length::Fill),
+                            Message::Wheel,
+                        )
+                        .direction(bar_direction())
+                        .style(bar(theme)),
                     )
-                    .direction(bar_direction())
-                    .style(bar(theme)))
-                        .width(Length::Fill)
-                        .max_height(VERSION_LIST_HEIGHT)
-                        .into()
+                    .width(Length::Fill)
+                    .max_height(VERSION_LIST_HEIGHT)
+                    .into()
                 }
             }
         };
         let (key, label, glyph) = if self.version_snapshots {
-            (VERSION_HIDE_SNAPSHOTS, Key::ButtonHideSnapshots, Glyph::EyeOff)
+            (
+                VERSION_HIDE_SNAPSHOTS,
+                Key::ButtonHideSnapshots,
+                Glyph::EyeOff,
+            )
         } else {
             (VERSION_SHOW_ALL, Key::ButtonShowAllVersions, Glyph::Eye)
         };
@@ -8824,7 +9261,9 @@ fn tags(&self) -> iced::Command<Message> {
             .map(|loader| loader_chip_key(*loader))
             .collect();
         let chips = crate::ui::chips(self.theme, &keys, &labels, |index| {
-            Some(Message::LoaderChoice(crate::catalog::LoaderKind::all()[index]))
+            Some(Message::LoaderChoice(
+                crate::catalog::LoaderKind::all()[index],
+            ))
         });
         column![]
             .spacing(8.0)
@@ -8842,7 +9281,12 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let labels: Vec<(String, bool)> = BuildChoice::ALL
             .iter()
-            .map(|choice| (choice.label().message().to_string(), self.build_choice == *choice))
+            .map(|choice| {
+                (
+                    choice.label().message().to_string(),
+                    self.build_choice == *choice,
+                )
+            })
             .collect();
         let keys: Vec<&'static str> = BuildChoice::ALL.iter().map(|choice| choice.key()).collect();
         let stable = self.stable_offered();
@@ -8940,16 +9384,18 @@ fn tags(&self) -> iced::Command<Message> {
                         .into_iter()
                         .map(|build| self.build_row(build))
                         .collect();
-                    container(crate::scroll::region(
-                        crate::scroll::BUILDS,
-                        column(rows).width(Length::Fill),
-                        Message::Wheel,
+                    container(
+                        crate::scroll::region(
+                            crate::scroll::BUILDS,
+                            column(rows).width(Length::Fill),
+                            Message::Wheel,
+                        )
+                        .direction(bar_direction())
+                        .style(bar(theme)),
                     )
-                    .direction(bar_direction())
-                    .style(bar(theme)))
-                        .width(Length::Fill)
-                        .max_height(VERSION_LIST_HEIGHT)
-                        .into()
+                    .width(Length::Fill)
+                    .max_height(VERSION_LIST_HEIGHT)
+                    .into()
                 }
             }
         };
@@ -8992,7 +9438,12 @@ fn tags(&self) -> iced::Command<Message> {
         let version = build.version.clone();
         let selected = self.build.as_deref() == Some(version.as_str());
         let key = crate::ui::scoped("shell:build", &version);
-        self.option_row(key, version.clone(), selected, Message::BuildPicked(version))
+        self.option_row(
+            key,
+            version.clone(),
+            selected,
+            Message::BuildPicked(version),
+        )
     }
 
     /// One option of a picker's list, drawn identically wherever it is offered.
@@ -9006,7 +9457,10 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let (factor, _) = crate::ui::interaction(key);
         let (background, ink) = if selected {
-            (theme_gen::ink(theme, Ink::GreenHighlight), theme_gen::ink(theme, Ink::Green))
+            (
+                theme_gen::ink(theme, Ink::GreenHighlight),
+                theme_gen::ink(theme, Ink::Green),
+            )
         } else {
             (
                 crate::theme::brightness(theme_gen::ink(theme, Ink::Surface4), factor),
@@ -9123,16 +9577,23 @@ fn tags(&self) -> iced::Command<Message> {
         }
         if self.import_found.is_empty() {
             body = body.push(
-                text(Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundTitle.message())
-                    .size(16.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                text(
+                    Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundTitle.message(),
+                )
+                .size(16.0)
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
             );
             body = body.push(
-                text(Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundText.message())
-                    .size(14.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+                text(
+                    Key::CreationFlowModalImportInstanceNotificationNoInstancesFoundText.message(),
+                )
+                .size(14.0)
+                .font(medium())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             );
         } else {
             for candidate in &self.import_found {
@@ -9153,15 +9614,9 @@ fn tags(&self) -> iced::Command<Message> {
                                             INK_CONTRAST,
                                         ))),
                                 )
-                                .push(
-                                    text(candidate.origin)
-                                        .size(13.0)
-                                        .font(medium())
-                                        .style(iced::theme::Text::Color(theme_gen::ink(
-                                            theme,
-                                            INK_SECONDARY,
-                                        ))),
-                                ),
+                                .push(text(candidate.origin).size(13.0).font(medium()).style(
+                                    iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+                                )),
                         )
                         .push(Space::with_width(Length::Fill))
                         .push(crate::ui::button_or_sized(
@@ -9192,17 +9647,26 @@ fn tags(&self) -> iced::Command<Message> {
     /// A pack is the one project for which the question has a single answer, so
     /// the list is not drawn: it becomes an instance of its own, and the dialog
     /// says so and asks for the press.
-    fn install_dialog<'a>(&'a self, project: &str, title: &str, pack: bool) -> Element<'a, Message> {
+    fn install_dialog<'a>(
+        &'a self,
+        project: &str,
+        title: &str,
+        pack: bool,
+    ) -> Element<'a, Message> {
         let theme = self.theme;
-        let mut body = column![]
-            .spacing(10.0)
-            .push(
-                text(if title.is_empty() { project.to_string() } else { title.to_string() })
-                    .size(16.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            ;
+        let mut body = column![].spacing(10.0).push(
+            text(if title.is_empty() {
+                project.to_string()
+            } else {
+                title.to_string()
+            })
+            .size(16.0)
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            ))),
+        );
         // The reference's own word for it (`app.project.version.installing`), shown
         // only while a transfer is running: a dialog that always said *Installing*
         // would be lying about a launcher that is waiting to be told where.
@@ -9211,7 +9675,10 @@ fn tags(&self) -> iced::Command<Message> {
                 text(Key::AppProjectVersionInstalling.message())
                     .size(14.0)
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         }
         if pack {
@@ -9229,7 +9696,10 @@ fn tags(&self) -> iced::Command<Message> {
                 ))
                 .size(14.0)
                 .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
             );
             body = body.push(crate::ui::button_sized(
                 theme,
@@ -9259,7 +9729,10 @@ fn tags(&self) -> iced::Command<Message> {
                         text(Key::AppLibraryGroupNoInstancesFound.message())
                             .size(14.0)
                             .font(medium())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                            .style(iced::theme::Text::Color(theme_gen::ink(
+                                theme,
+                                INK_SECONDARY,
+                            ))),
                     );
                     body = body.push(crate::ui::button_sized(
                         theme,
@@ -9293,20 +9766,15 @@ fn tags(&self) -> iced::Command<Message> {
         let theme = self.theme;
         let key = crate::ui::scoped("shell:install", &card.id);
         let (factor, _) = crate::ui::interaction(key);
-        let details = column![]
-            .spacing(2.0)
-            .push(
-                text(card.name.clone())
-                    .size(14.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
-            .push(
-                text(card.subtitle())
-                    .size(13.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-            );
+        let details =
+            column![]
+                .spacing(2.0)
+                .push(text(card.name.clone()).size(14.0).font(semibold()).style(
+                    iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+                ))
+                .push(text(card.subtitle()).size(13.0).font(medium()).style(
+                    iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+                ));
         let target = Message::InstallInto(card.id.clone());
         crate::ui::card_at(
             theme,
@@ -9353,9 +9821,11 @@ fn tags(&self) -> iced::Command<Message> {
         let dialog = match self.dialog_drawn() {
             Some(Modal::Create) => self.create_dialog(),
             Some(Modal::Import) => self.import_dialog(),
-            Some(Modal::Install { project, title, pack }) => {
-                self.install_dialog(project, title, *pack)
-            }
+            Some(Modal::Install {
+                project,
+                title,
+                pack,
+            }) => self.install_dialog(project, title, *pack),
             Some(Modal::InstanceSettings(state)) => self.dialog_titled(
                 &format!("{} · {}", state.name, Key::LabelSettings.message()),
                 crate::instance_settings::view(self.theme, state).map(Message::InstanceSettings),
@@ -9401,8 +9871,8 @@ fn tags(&self) -> iced::Command<Message> {
         // The dialog is the stack's own box, so the veil -- a `Fill` layer drawn
         // at no offset -- covers exactly the dialog and no more. `at` rather
         // than `over`, because the dialog is live and the veil is not.
-        let dialog =
-            crate::pages::overlay::Stack::at(iced::Vector::ZERO, dialog).over(iced::Vector::ZERO, veil);
+        let dialog = crate::pages::overlay::Stack::at(iced::Vector::ZERO, dialog)
+            .over(iced::Vector::ZERO, veil);
         let scrim = container(dialog)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -9449,7 +9919,10 @@ impl<Message> canvas::Program<Message> for RailButton {
             frame.fill(&Path::circle(center, PLATE_RADIUS), color);
         }
         if let Some((opacity, scale)) = self.plate {
-            let color = Color { a: self.plate_ink.a * opacity, ..self.plate_ink };
+            let color = Color {
+                a: self.plate_ink.a * opacity,
+                ..self.plate_ink
+            };
             frame.fill(&Path::circle(center, PLATE_RADIUS * scale), color);
         }
         // The icon sits in the middle of the plate, at `RAIL_ICON` pixels
@@ -9490,7 +9963,10 @@ fn stored_rows(store: &Store) -> Vec<skins::SavedRow> {
                 .and_then(|bytes| crate::skin::cut(&bytes))
                 .and_then(|cut| cut.ears)
                 .is_some();
-            skins::SavedRow { entry: entry.clone(), ears }
+            skins::SavedRow {
+                entry: entry.clone(),
+                ears,
+            }
         })
         .collect()
 }
@@ -9522,7 +9998,12 @@ fn write_skin_order(store: &Store, keys: &[String]) -> Result<(), String> {
 /// missing from a section they have not opened is a smaller failure than a sentence saying
 /// the skin they can see on their account did not go up.
 fn keep_picked(store: &Store, change: &palantir_net::SkinChange) {
-    let palantir_net::SkinChange::Upload { variant, file_name, texture } = change else {
+    let palantir_net::SkinChange::Upload {
+        variant,
+        file_name,
+        texture,
+    } = change
+    else {
         // The picker only ever builds an upload; any other change is not this function's.
         return;
     };
@@ -9596,12 +10077,18 @@ struct Crumb {
 impl Crumb {
     /// An entry whose visual is one of the reference's own icons.
     fn with_icon(glyph: Glyph, label: impl Into<String>) -> Self {
-        Crumb { icon: Some(glyph), label: label.into() }
+        Crumb {
+            icon: Some(glyph),
+            label: label.into(),
+        }
     }
 
     /// An entry whose visual the reference fetches, so there is none here.
     fn plain(label: impl Into<String>) -> Self {
-        Crumb { icon: None, label: label.into() }
+        Crumb {
+            icon: None,
+            label: label.into(),
+        }
     }
 }
 
@@ -9638,7 +10125,10 @@ fn crumbs(address: &Address, instance_name: Option<&str>) -> Vec<Crumb> {
     match &address.route {
         // `Index.vue`'s `useRootBreadcrumb`: `app.navigation.home` with a
         // `PlayIcon`.
-        route::Route::Home => vec![Crumb::with_icon(Glyph::Play, Key::AppNavigationHome.message())],
+        route::Route::Home => vec![Crumb::with_icon(
+            Glyph::Play,
+            Key::AppNavigationHome.message(),
+        )],
         // `Browse.vue`'s own: `app.browse.discover-project-type` with a
         // `CompassIcon`. This launcher's Discover is never browsing inside a
         // server or an instance, so the label is always the project type.
@@ -9650,7 +10140,10 @@ fn crumbs(address: &Address, instance_name: Option<&str>) -> Vec<Crumb> {
         // it is one here too.
         route::Route::Skins => vec![Crumb::with_icon(Glyph::Shirt, "Skin selector")],
         route::Route::Screenshots => {
-            vec![Crumb::with_icon(Glyph::Image, Key::AppScreenshotsHeading.message())]
+            vec![Crumb::with_icon(
+                Glyph::Image,
+                Key::AppScreenshotsHeading.message(),
+            )]
         }
         // `Servers.vue`, which spells its own name "Hosting".
         route::Route::Servers => vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")],
@@ -9668,7 +10161,9 @@ fn crumbs(address: &Address, instance_name: Option<&str>) -> Vec<Crumb> {
         // `instance/layout.vue`: the instance's name with its own art, and no
         // tab -- the tabs are `NavTabs` under the head, not crumbs in it.
         route::Route::Instance { id, .. } => vec![Crumb::plain(
-            instance_name.map(str::to_string).unwrap_or_else(|| id.clone()),
+            instance_name
+                .map(str::to_string)
+                .unwrap_or_else(|| id.clone()),
         )],
     }
 }
@@ -9689,7 +10184,10 @@ fn hairline(theme: Gen, vertical: bool) -> Element<'static, Message> {
         .width(width)
         .height(height)
         .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::BrandGradientBorder))),
+            background: Some(Background::Color(theme_gen::ink(
+                theme,
+                Ink::BrandGradientBorder,
+            ))),
             ..container::Appearance::default()
         })
         .into()
@@ -9975,7 +10473,9 @@ where
         renderer: &Renderer,
         operation: &mut dyn iced::advanced::widget::Operation<Message>,
     ) {
-        self.content.as_widget().operate(tree, layout, renderer, operation);
+        self.content
+            .as_widget()
+            .operate(tree, layout, renderer, operation);
     }
 
     fn on_event(
@@ -10002,7 +10502,9 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(tree, layout, cursor, viewport, renderer)
+        self.content
+            .as_widget()
+            .mouse_interaction(tree, layout, cursor, viewport, renderer)
     }
 
     fn draw(
@@ -10026,11 +10528,13 @@ where
             width: self.box_.width,
             height: self.box_.height,
         };
-        let Some(bounds) = box_.intersection(viewport) else { return };
+        let Some(bounds) = box_.intersection(viewport) else {
+            return;
+        };
         renderer.with_layer(bounds, |renderer| {
-            self.content.as_widget().draw(
-                tree, renderer, theme, style, layout, cursor, viewport,
-            );
+            self.content
+                .as_widget()
+                .draw(tree, renderer, theme, style, layout, cursor, viewport);
         });
     }
 }
@@ -10189,7 +10693,11 @@ fn quick_create_press(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modi
 /// are `button-base`, whose own rule is `filter: brightness(0.85)`, so the two
 /// surfaces that dim name the factor they end at where the crossing is made.
 fn card_crossing(key: &'static str, over: bool) -> Message {
-    Message::Control { key, over, hover: Some(CARD_PRESS_HOVER) }
+    Message::Control {
+        key,
+        over,
+        hover: Some(CARD_PRESS_HOVER),
+    }
 }
 
 /// The bed a modal sits on, copied from `NewModal.vue`'s `.modal-overlay.standard`.
@@ -10250,10 +10758,17 @@ fn settings_field<'a>(
 ) -> Element<'a, Message> {
     text_input("", value)
         .on_input(on_input)
-        .padding(Padding { top: 10.0, bottom: 10.0, left: 12.0, right: 12.0 })
+        .padding(Padding {
+            top: 10.0,
+            bottom: 10.0,
+            left: 12.0,
+            right: 12.0,
+        })
         .size(14.0)
         .font(medium())
-        .style(iced::theme::TextInput::Custom(Box::new(crate::ui::Field::bordered(theme))))
+        .style(iced::theme::TextInput::Custom(Box::new(
+            crate::ui::Field::bordered(theme),
+        )))
         .into()
 }
 
@@ -10273,7 +10788,10 @@ fn theme_bar(colour: Color, width: Length) -> Element<'static, Message> {
         .height(Length::Fixed(THEME_BAR_HEIGHT))
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(colour)),
-            border: Border { radius: THEME_MOCK_RADIUS.into(), ..Border::default() },
+            border: Border {
+                radius: THEME_MOCK_RADIUS.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         })
         .into()
@@ -10382,7 +10900,15 @@ fn modal_scrim(viewport: iced::Size, opacity: f32) -> Background {
     // interpolate to each other rather than to nothing.
     let stops: Vec<(f32, Color)> = stops
         .into_iter()
-        .map(|(offset, colour)| (offset, Color { a: colour.a * opacity, ..colour }))
+        .map(|(offset, colour)| {
+            (
+                offset,
+                Color {
+                    a: colour.a * opacity,
+                    ..colour
+                },
+            )
+        })
         .collect();
     let stops = &stops;
     let span = viewport.height + 2.0 * MODAL_SCRIM_INSET;
@@ -10405,7 +10931,11 @@ fn ramp_at(stops: &[(f32, Color)], fraction: f32) -> Color {
     for &(offset, colour) in stops.iter().skip(1) {
         if fraction <= offset {
             let span = offset - low.0;
-            let amount = if span <= 0.0 { 1.0 } else { (fraction - low.0) / span };
+            let amount = if span <= 0.0 {
+                1.0
+            } else {
+                (fraction - low.0) / span
+            };
             return Color {
                 r: low.1.r + (colour.r - low.1.r) * amount,
                 g: low.1.g + (colour.g - low.1.g) * amount,
@@ -10531,7 +11061,10 @@ fn split_stop(stop: &str) -> Option<(&str, Option<&str>)> {
             ')' => depth = depth.saturating_sub(1),
             _ if character.is_whitespace() && depth == 0 => {
                 let position = stop[index..].trim();
-                return Some((stop[..index].trim(), (!position.is_empty()).then_some(position)));
+                return Some((
+                    stop[..index].trim(),
+                    (!position.is_empty()).then_some(position),
+                ));
             }
             _ => {}
         }
@@ -10566,14 +11099,20 @@ fn split_top_level(value: &str) -> Vec<String> {
     if !current.trim().is_empty() {
         parts.push(current);
     }
-    parts.into_iter().filter(|part| !part.trim().is_empty()).collect()
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect()
 }
 
 /// Read `#rgb`, `#rrggbb`, `rgb()` or `rgba()`.
 fn parse_color(value: &str) -> Option<Color> {
     let value = value.trim();
     if let Some(hex) = value.strip_prefix('#') {
-        let digits: Vec<u8> = hex.chars().filter_map(|c| c.to_digit(16).map(|d| d as u8)).collect();
+        let digits: Vec<u8> = hex
+            .chars()
+            .filter_map(|c| c.to_digit(16).map(|d| d as u8))
+            .collect();
         return match digits.len() {
             3 => Some(Color::from_rgb8(
                 digits[0] * 17,
@@ -10904,7 +11443,11 @@ impl iced::Application for Shell {
         // which is what keeps an idle window -- and a launcher with nothing running
         // -- from waking anything up.
         let moving = self.animating();
-        let frames = if moving { self.frames() } else { Subscription::none() };
+        let frames = if moving {
+            self.frames()
+        } else {
+            Subscription::none()
+        };
 
         Subscription::batch([
             frames,
@@ -11034,19 +11577,32 @@ mod tests {
         // every tab and a tab press takes a quarter of a second to land, never
         // fade a page change and pages appear with a flash.
         let mut shell = shell_at("/");
-        assert_eq!(shell.page_fade.value(), 1.0, "the first page is already there");
+        assert_eq!(
+            shell.page_fade.value(),
+            1.0,
+            "the first page is already there"
+        );
 
         // A different page: Home -> Discover.
         press(&mut shell, Message::Go("/browse/modpack".to_string()));
-        assert!(shell.page_fade.value() < 1.0, "a new page starts transparent");
-        assert!(shell.page_fade.is_running(), "and the clock has to stay awake");
+        assert!(
+            shell.page_fade.value() < 1.0,
+            "a new page starts transparent"
+        );
+        assert!(
+            shell.page_fade.is_running(),
+            "and the clock has to stay awake"
+        );
         assert!(shell.animating(), "or the page would never finish arriving");
 
         // It arrives on the reference's own timing rather than in one frame.
         let began = shell.plate_clock;
         shell.advance_to(began + std::time::Duration::from_millis(125));
         let half = shell.page_fade.value();
-        assert!(half > 0.0 && half < 1.0, "125ms in it is still arriving: {half}");
+        assert!(
+            half > 0.0 && half < 1.0,
+            "125ms in it is still arriving: {half}"
+        );
         shell.advance_to(began + std::time::Duration::from_millis(300));
         assert_eq!(shell.page_fade.value(), 1.0, "250ms is the whole of it");
         assert!(!shell.animating(), "and then the clock stops");
@@ -11074,7 +11630,10 @@ mod tests {
         let mut tween = Tween::at(0.0, Timing::PAGE_FADE);
         tween.retarget(1.0);
         tween.advance(std::time::Duration::from_millis(125));
-        assert!((tween.value() - 0.5).abs() < 0.01, "ease-in-out is symmetric");
+        assert!(
+            (tween.value() - 0.5).abs() < 0.01,
+            "ease-in-out is symmetric"
+        );
     }
 
     #[test]
@@ -11132,7 +11691,11 @@ mod tests {
     }
 
     fn settings(hide_sidebar: bool, show_skins: bool, show_screenshots: bool) -> RailSettings {
-        RailSettings { hide_sidebar, show_skins, show_screenshots }
+        RailSettings {
+            hide_sidebar,
+            show_skins,
+            show_screenshots,
+        }
     }
 
     #[test]
@@ -11201,7 +11764,10 @@ mod tests {
         assert_eq!(RAIL_PITCH, 52.0);
         // `.app-contents`'s corner is `var(--radius-xl)`, which is the
         // generated table's own 20px rather than a number written here twice.
-        assert_eq!(PAGE_RADIUS, theme_gen::span(crate::theme_gen::Span::RadiusXl));
+        assert_eq!(
+            PAGE_RADIUS,
+            theme_gen::span(crate::theme_gen::Span::RadiusXl)
+        );
         // The `md` icon-only `IconButton` and the head's `!h-7 !w-7` buttons.
         assert_eq!(CONTROLS_BUTTON, 9.0 * 4.0);
         assert_eq!(CONTROLS_ICON, 5.0 * 4.0);
@@ -11258,25 +11824,43 @@ mod tests {
         // option on the image, which is on too. A fresh install of the reference
         // draws all eight.
         let all = shell_at("/").slots();
-        assert_eq!(all.len(), Rail::ALL.len(), "a fresh install draws every slot");
+        assert_eq!(
+            all.len(),
+            Rail::ALL.len(),
+            "a fresh install draws every slot"
+        );
         assert!(all.contains(&Rail::Skins));
         assert!(all.contains(&Rail::Screenshots));
         // The order is the reference's, whatever is hidden.
         assert_eq!(all.as_slice(), Rail::ALL);
         // Either slot can be turned off on its own, and the settings are the
         // only thing that changes the list.
-        let mut shell =
-            Shell::new(Address::at(Route::Home), Gen::Dark, &settings(false, false, true));
+        let mut shell = Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &settings(false, false, true),
+        );
         assert!(!shell.slots().contains(&Rail::Skins));
         assert!(shell.slots().contains(&Rail::Screenshots));
-        assert_eq!(shell.slots().len(), Rail::ALL.len() - 1, "the shirt is hidden");
+        assert_eq!(
+            shell.slots().len(),
+            Rail::ALL.len() - 1,
+            "the shirt is hidden"
+        );
         press(&mut shell, Message::Sidebar(true));
         assert_eq!(shell.slots().len(), Rail::ALL.len() - 1);
-        let shell =
-            Shell::new(Address::at(Route::Home), Gen::Dark, &settings(false, true, false));
+        let shell = Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &settings(false, true, false),
+        );
         assert!(shell.slots().contains(&Rail::Skins));
         assert!(!shell.slots().contains(&Rail::Screenshots));
-        assert_eq!(shell.slots().len(), Rail::ALL.len() - 1, "the image is hidden");
+        assert_eq!(
+            shell.slots().len(),
+            Rail::ALL.len() - 1,
+            "the image is hidden"
+        );
     }
 
     #[test]
@@ -11331,7 +11915,10 @@ mod tests {
         // one. The shell asks for exactly that pair and then stops, so an idle
         // launcher is not a launcher drawing forever.
         let mut shell = shell_at("/browse/modpack");
-        assert!(shell.repainting(), "a window that has just opened owes a frame");
+        assert!(
+            shell.repainting(),
+            "a window that has just opened owes a frame"
+        );
         press(&mut shell, Message::Repaint);
         assert!(shell.repainting(), "one kick is not the pair");
         press(&mut shell, Message::Repaint);
@@ -11353,7 +11940,10 @@ mod tests {
         press(&mut shell, Message::Rail(Rail::CreateInstance));
         press(&mut shell, Message::CreateName("Sodium test".to_string()));
         press(&mut shell, Message::Create);
-        assert!(shell.creating, "the button is unusable while it is in flight");
+        assert!(
+            shell.creating,
+            "the button is unusable while it is in flight"
+        );
         assert!(
             !shell.create_requested,
             "the flag is what `handle` takes to build the command, so it is already spent"
@@ -11363,7 +11953,10 @@ mod tests {
             Message::Created(Err("give the instance a name".to_string())),
         );
         assert_eq!(shell.modal, Some(Modal::Create), "the dialog stays up");
-        assert_eq!(shell.create_error.as_deref(), Some("give the instance a name"));
+        assert_eq!(
+            shell.create_error.as_deref(),
+            Some("give the instance a name")
+        );
         assert!(!shell.creating, "and the button is usable again");
         // Typing again clears it: the sentence was about the name that changed.
         press(&mut shell, Message::CreateName("Sodium".to_string()));
@@ -11378,7 +11971,9 @@ mod tests {
         let mut shell = shell_at("/");
         press(
             &mut shell,
-            Message::Screen(pages::Message::Home(pages::home::Message::ImportFromLauncher)),
+            Message::Screen(pages::Message::Home(
+                pages::home::Message::ImportFromLauncher,
+            )),
         );
         assert_eq!(shell.modal, Some(Modal::Import));
         assert!(shell.import_found.is_empty());
@@ -11389,19 +11984,27 @@ mod tests {
     /// to run, and no account file, which is the offline session a fresh install
     /// starts with.
     fn shell_with_home(name: &str) -> Shell {
-        let root = std::env::temp_dir().join("palantirmc-shell-launch").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-shell-launch")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch root");
         let paths = palantir_core::paths::PalantirPaths::at(root);
-        Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
-            .with_store(Store::load(&paths))
-            .with_prefs(paths, crate::prefs::Prefs::default())
+        Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &RailSettings::default(),
+        )
+        .with_store(Store::load(&paths))
+        .with_prefs(paths, crate::prefs::Prefs::default())
     }
 
     /// A shell whose launcher has one instance, so the install dialog has
     /// something to offer it.
     fn shell_with_instance(name: &str) -> Shell {
-        let root = std::env::temp_dir().join("palantirmc-shell-install").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-shell-install")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch root");
         let paths = palantir_core::paths::PalantirPaths::at(root);
@@ -11410,9 +12013,13 @@ mod tests {
             &crate::instances::NewInstance::vanilla("atm10", "1.21.4"),
         )
         .expect("an instance");
-        Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
-            .with_store(Store::load(&paths))
-            .with_prefs(paths, crate::prefs::Prefs::default())
+        Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &RailSettings::default(),
+        )
+        .with_store(Store::load(&paths))
+        .with_prefs(paths, crate::prefs::Prefs::default())
     }
 
     #[test]
@@ -11426,10 +12033,20 @@ mod tests {
             Message::Screen(pages::Message::Project(project::Message::Install)),
         );
         match &shell.modal {
-            Some(Modal::Install { project, title, pack }) => {
+            Some(Modal::Install {
+                project,
+                title,
+                pack,
+            }) => {
                 assert_eq!(project, "sodium");
-                assert_eq!(title, "", "the page has drawn nothing yet, so it names no title");
-                assert!(!pack, "and the page has not loaded, so it cannot say it is a pack");
+                assert_eq!(
+                    title, "",
+                    "the page has drawn nothing yet, so it names no title"
+                );
+                assert!(
+                    !pack,
+                    "and the page has not loaded, so it cannot say it is a pack"
+                );
             }
             other => panic!("the install dialog: {other:?}"),
         }
@@ -11459,7 +12076,10 @@ mod tests {
         );
         assert_eq!(shell.modal, None, "the dialog is done");
         assert!(!shell.installing);
-        assert_eq!(shell.screen.project_notice(), Some("Installed Sodium 0.6.5 into atm10"));
+        assert_eq!(
+            shell.screen.project_notice(),
+            Some("Installed Sodium 0.6.5 into atm10")
+        );
 
         // A failure keeps the dialog up, because the answer to it is another
         // instance -- which is a choice drawn in the dialog and nowhere else.
@@ -11472,7 +12092,10 @@ mod tests {
             &mut shell,
             Message::Installed(Err("Sodium has no version for Fabric 1.21.4".to_string())),
         );
-        assert_eq!(shell.install_error.as_deref(), Some("Sodium has no version for Fabric 1.21.4"));
+        assert_eq!(
+            shell.install_error.as_deref(),
+            Some("Sodium has no version for Fabric 1.21.4")
+        );
         assert!(
             matches!(shell.modal, Some(Modal::Install { .. })),
             "the reader picks another instance rather than being told to start over"
@@ -11517,10 +12140,19 @@ mod tests {
         // The three strings the dialog adds are existing keys rather than new
         // copy, and they are asserted here because a generator that moved under
         // them would otherwise be a dialog with the wrong words in it.
-        assert_eq!(Key::AppUserProjectInstallToInstance.message(), "Install to instance");
+        assert_eq!(
+            Key::AppUserProjectInstallToInstance.message(),
+            "Install to instance"
+        );
         assert_eq!(Key::AppProjectVersionInstalling.message(), "Installing");
-        assert_eq!(Key::AppWelcomeScreenCreateInstance.message(), "Create an instance");
-        assert_eq!(Key::AppLibraryGroupNoInstancesFound.message(), "No instances found");
+        assert_eq!(
+            Key::AppWelcomeScreenCreateInstance.message(),
+            "Create an instance"
+        );
+        assert_eq!(
+            Key::AppLibraryGroupNoInstancesFound.message(),
+            "No instances found"
+        );
     }
 
     #[test]
@@ -11537,7 +12169,10 @@ mod tests {
         );
         // The page has drawn nothing, so the shell cannot know it is a pack: this
         // is the same dialog the file install gets.
-        assert!(matches!(shell.modal, Some(Modal::Install { pack: false, .. })));
+        assert!(matches!(
+            shell.modal,
+            Some(Modal::Install { pack: false, .. })
+        ));
         // Whatever the page said, the pack action is the one that runs it, and a
         // pack action from a dialog that is not a pack's does nothing at all.
         press(&mut shell, Message::InstallPack);
@@ -11576,7 +12211,10 @@ mod tests {
         // -- the outcome is injected -- so there is no folder to find either way.)
         assert_eq!(
             shell.address().route,
-            Route::Instance { id: "Cobblemon".to_string(), tab: route::InstanceTab::Content },
+            Route::Instance {
+                id: "Cobblemon".to_string(),
+                tab: route::InstanceTab::Content
+            },
             "the reader is left looking at the instance the outcome named"
         );
 
@@ -11597,7 +12235,10 @@ mod tests {
             shell.install_error.as_deref(),
             Some("that archive is not a readable pack")
         );
-        assert!(matches!(shell.modal, Some(Modal::Install { pack: true, .. })));
+        assert!(matches!(
+            shell.modal,
+            Some(Modal::Install { pack: true, .. })
+        ));
         for theme in Gen::ALL {
             shell.theme = *theme;
             drop(shell.render());
@@ -11640,7 +12281,11 @@ mod tests {
         // Four, in the feed's own order -- the reference's own slice of it -- and
         // the fifth and sixth are not drawn at all.
         let shown = shell.news_shown();
-        assert_eq!(shown.len(), MAX_NEWS, "the panel draws a fixed number of cards");
+        assert_eq!(
+            shown.len(),
+            MAX_NEWS,
+            "the panel draws a fixed number of cards"
+        );
         assert_eq!(shown[0].title, "Article 0");
         assert_eq!(shown[3].title, "Article 3");
         assert!(shell.news_section().is_some());
@@ -11649,18 +12294,36 @@ mod tests {
         // are not cards: a press hands the URL to the operating system, so a card
         // that could not be opened would be a control that does nothing.
         shell.news = Load::Ready(vec![
-            news_article("", "https://modrinth.com/news/article/untitled", "2026-09-01T00:00:00.000Z"),
-            news_article("A local file", "file:///etc/passwd", "2026-09-01T00:00:00.000Z"),
-            news_article("Openable", "https://modrinth.com/news/article/good", "2026-09-02T00:00:00.000Z"),
+            news_article(
+                "",
+                "https://modrinth.com/news/article/untitled",
+                "2026-09-01T00:00:00.000Z",
+            ),
+            news_article(
+                "A local file",
+                "file:///etc/passwd",
+                "2026-09-01T00:00:00.000Z",
+            ),
+            news_article(
+                "Openable",
+                "https://modrinth.com/news/article/good",
+                "2026-09-02T00:00:00.000Z",
+            ),
         ]);
         assert_eq!(shell.news_shown().len(), 1);
 
         // The one press a test can make without starting a browser: a link the
         // opener refuses. It is said under the section rather than dropped, and the
         // dismiss clears it.
-        press(&mut shell, Message::OpenUrl("file:///etc/passwd".to_string()));
+        press(
+            &mut shell,
+            Message::OpenUrl("file:///etc/passwd".to_string()),
+        );
         let note = shell.link_note.clone().expect("a sentence");
-        assert!(note.contains("is not a link this launcher will open"), "{note}");
+        assert!(
+            note.contains("is not a link this launcher will open"),
+            "{note}"
+        );
         press(&mut shell, Message::DismissLinkNote);
         assert!(shell.link_note.is_none());
 
@@ -11697,8 +12360,14 @@ mod tests {
             !run.account.kind.is_online(),
             "no account chosen is the offline session, not a refusal to launch"
         );
-        assert_eq!(run.account.username, "Player", "which is the same player every time");
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Starting);
+        assert_eq!(
+            run.account.username, "Player",
+            "which is the same player every time"
+        );
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Starting
+        );
         assert_eq!(shell.store.launch_line("atm10"), Some("preparing 'atm10'"));
         // A second instance's page asks for *that* instance, and the shell runs
         // both: the address is what the page is drawn from, and one launcher can
@@ -11706,11 +12375,23 @@ mod tests {
         // twice.
         press(&mut shell, Message::Go("/instance/other".into()));
         play(&mut shell);
-        let ids: Vec<&str> = shell.runs.iter().map(|run| run.data.instance_id.as_str()).collect();
-        assert_eq!(ids, vec!["atm10", "other"], "a run per press, and one per instance");
+        let ids: Vec<&str> = shell
+            .runs
+            .iter()
+            .map(|run| run.data.instance_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["atm10", "other"],
+            "a run per press, and one per instance"
+        );
         assert_eq!(shell.next_run_id, 2, "each run has an id of its own");
         play(&mut shell);
-        assert_eq!(shell.runs.len(), 2, "a launch is not started twice behind one game");
+        assert_eq!(
+            shell.runs.len(),
+            2,
+            "a launch is not started twice behind one game"
+        );
     }
 
     #[test]
@@ -11728,7 +12409,10 @@ mod tests {
                 progress: crate::install::Progress::new("libraries", 3, 12, 0),
             }),
         );
-        assert_eq!(shell.store.launch_line("atm10"), Some("libraries 3/12 (25%)"));
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some("libraries 3/12 (25%)")
+        );
         press(
             &mut shell,
             Message::Launched(launch::LaunchEvent::Log {
@@ -11736,19 +12420,31 @@ mod tests {
                 lines: vec!["resolving version 1.21.4".to_string()],
             }),
         );
-        assert_eq!(shell.store.launch_line("atm10"), Some("resolving version 1.21.4"));
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        assert_eq!(
+            shell.store.launch_line("atm10"),
+            Some("resolving version 1.21.4")
+        );
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Started { run_id: 1 }),
+        );
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Running
+        );
         assert_eq!(
             shell.store.launch_line("atm10"),
             Some("resolving version 1.21.4"),
             "the game coming up changes the control and not the run's own line"
         );
         // And the stale frame: a done from a run this shell has already replaced.
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
-            run_id: 1,
-            note: "process exited (exit status: 0)".to_string(),
-        }));
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 1,
+                note: "process exited (exit status: 0)".to_string(),
+            }),
+        );
         assert!(shell.runs.is_empty(), "the run is over");
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Idle);
         assert_eq!(
@@ -11758,11 +12454,17 @@ mod tests {
         );
         play(&mut shell);
         assert_eq!(shell.runs.first().map(|run| run.data.run_id), Some(2));
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
-            run_id: 1,
-            note: "stale".to_string(),
-        }));
-        assert!(!shell.runs.is_empty(), "a stale done must not clear the run that is going");
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 1,
+                note: "stale".to_string(),
+            }),
+        );
+        assert!(
+            !shell.runs.is_empty(),
+            "a stale done must not clear the run that is going"
+        );
         press(
             &mut shell,
             Message::Launched(launch::LaunchEvent::Progress {
@@ -11803,21 +12505,36 @@ mod tests {
             store::LaunchState::Starting,
             "nothing to kill yet"
         );
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Started { run_id: 1 }),
+        );
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Running
+        );
         press(
             &mut shell,
             Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
         );
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
-        assert!(!shell.runs.is_empty(), "the run is not over until the worker says so");
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Stopping
+        );
+        assert!(
+            !shell.runs.is_empty(),
+            "the run is not over until the worker says so"
+        );
         // A stop for an instance that is not the one running is ignored rather
         // than killing the wrong game, and so is a second one for the same run.
         press(
             &mut shell,
             Message::Screen(pages::Message::Instance(pages::instance::Message::Stop)),
         );
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Stopping
+        );
     }
 
     #[test]
@@ -11827,7 +12544,9 @@ mod tests {
         // because the file is. The test asserts the file, not the struct: a
         // store that was updated and never saved is the same as one that was
         // never updated.
-        let root = std::env::temp_dir().join("palantirmc-shell-launch").join("accounts");
+        let root = std::env::temp_dir()
+            .join("palantirmc-shell-launch")
+            .join("accounts");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch root");
         let path = root.join("accounts.json");
@@ -11842,17 +12561,30 @@ mod tests {
                 Some(true),
             ))
             .expect("an account");
-        accounts.select("069a79f444e94726a5befca90e38aaf5").expect("selected");
+        accounts
+            .select("069a79f444e94726a5befca90e38aaf5")
+            .expect("selected");
         accounts.save().expect("written");
         let paths = palantir_core::paths::PalantirPaths::at(root.clone());
-        let mut shell = Shell::new(Address::at(Route::Home), Gen::Dark, &RailSettings::default())
-            .with_store(Store::load(&paths))
-            .with_prefs(paths, crate::prefs::Prefs::default())
-            .with_accounts(accounts, None);
+        let mut shell = Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &RailSettings::default(),
+        )
+        .with_store(Store::load(&paths))
+        .with_prefs(paths, crate::prefs::Prefs::default())
+        .with_accounts(accounts, None);
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
         assert!(
-            shell.runs.first().expect("a run").data.account.kind.is_online(),
+            shell
+                .runs
+                .first()
+                .expect("a run")
+                .data
+                .account
+                .kind
+                .is_online(),
             "a Microsoft account launches with its own session"
         );
         press(
@@ -11866,7 +12598,10 @@ mod tests {
             })),
         );
         let written = std::fs::read_to_string(&path).expect("the file");
-        assert!(written.contains("new-token"), "the renewal did not reach the disk: {written}");
+        assert!(
+            written.contains("new-token"),
+            "the renewal did not reach the disk: {written}"
+        );
         assert!(written.contains("new-refresh"), "{written}");
         // And a renewal for an account this launcher does not know is dropped
         // rather than invented.
@@ -11903,16 +12638,28 @@ mod tests {
     fn version_list() -> store::VersionList {
         store::VersionList {
             latest_release: "1.21.4".to_string(),
-            versions: [("25w02a", false), ("1.21.4", true), ("1.21.3", true), ("b1.7.3", false)]
-                .into_iter()
-                .map(|(id, release)| store::GameVersion { id: id.to_string(), release })
-                .collect(),
+            versions: [
+                ("25w02a", false),
+                ("1.21.4", true),
+                ("1.21.3", true),
+                ("b1.7.3", false),
+            ]
+            .into_iter()
+            .map(|(id, release)| store::GameVersion {
+                id: id.to_string(),
+                release,
+            })
+            .collect(),
         }
     }
 
     /// The versions the picker would draw, in the order it draws them.
     fn version_ids(shell: &Shell) -> Vec<&str> {
-        shell.version_matches().into_iter().map(|version| version.id.as_str()).collect()
+        shell
+            .version_matches()
+            .into_iter()
+            .map(|version| version.id.as_str())
+            .collect()
     }
 
     #[test]
@@ -11925,17 +12672,34 @@ mod tests {
         let mut shell = shell_with_home("action-bar");
         press(&mut shell, Message::Go("/instance/atm10".into()));
         play(&mut shell);
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Starting);
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Starting
+        );
         press(&mut shell, Message::Go("/browse/modpack".into()));
         assert_eq!(
             shell.store.launch_state("atm10"),
             store::LaunchState::Starting,
             "the run is the launcher's, not the page's"
         );
-        assert_eq!(state_label(store::LaunchState::Starting), Some("Starting..."));
-        assert_eq!(state_label(store::LaunchState::Stopping), Some("Stopping..."));
-        assert_eq!(state_label(store::LaunchState::Running), None, "nothing to say");
-        assert_eq!(state_label(store::LaunchState::Idle), None, "and nothing running");
+        assert_eq!(
+            state_label(store::LaunchState::Starting),
+            Some("Starting...")
+        );
+        assert_eq!(
+            state_label(store::LaunchState::Stopping),
+            Some("Stopping...")
+        );
+        assert_eq!(
+            state_label(store::LaunchState::Running),
+            None,
+            "nothing to say"
+        );
+        assert_eq!(
+            state_label(store::LaunchState::Idle),
+            None,
+            "and nothing running"
+        );
         // The bar's own stop, while the launcher is still *preparing*: there is no
         // child process to kill yet, so the control is not drawn and this message
         // is not one it can send. What a press would do otherwise is change a word
@@ -11946,10 +12710,19 @@ mod tests {
             store::LaunchState::Starting,
             "nothing to stop yet"
         );
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Running);
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Started { run_id: 1 }),
+        );
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Running
+        );
         press(&mut shell, Message::StopRun("atm10".to_string()));
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Stopping
+        );
         // And the name the chip draws: the library's own when it has been read,
         // the id when it has not -- which is the arm an instance removed while it
         // was running lands in.
@@ -11992,8 +12765,14 @@ mod tests {
         drop(shell.render());
         // The game coming up is the end of the fetch: the level goes with it, and
         // so does the panel a bar would have been left in.
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id: 1 }));
-        assert!(shell.jobs.is_empty(), "the level goes with the fetch that set it");
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Started { run_id: 1 }),
+        );
+        assert!(
+            shell.jobs.is_empty(),
+            "the level goes with the fetch that set it"
+        );
         assert!(!shell.downloads);
         // A run that ends clears both too, for the same reason.
         press(&mut shell, Message::ToggleDownloads);
@@ -12004,10 +12783,13 @@ mod tests {
                 progress: crate::install::Progress::starting("natives"),
             }),
         );
-        press(&mut shell, Message::Launched(launch::LaunchEvent::Done {
-            run_id: 1,
-            note: "process exited (exit status: 0)".to_string(),
-        }));
+        press(
+            &mut shell,
+            Message::Launched(launch::LaunchEvent::Done {
+                run_id: 1,
+                note: "process exited (exit status: 0)".to_string(),
+            }),
+        );
         assert!(shell.jobs.is_empty());
         assert!(!shell.downloads);
         assert!(shell.runs.is_empty());
@@ -12030,7 +12812,11 @@ mod tests {
             .iter()
             .map(|(id, _)| *id)
             .collect();
-        assert_eq!(running, vec!["atm10", "sodium"], "both runs are the bar's to list");
+        assert_eq!(
+            running,
+            vec!["atm10", "sodium"],
+            "both runs are the bar's to list"
+        );
         assert_eq!(
             shell.store.selected_launch(),
             Some("sodium"),
@@ -12071,10 +12857,16 @@ mod tests {
             play(&mut shell);
         }
         for run_id in [1, 2] {
-            press(&mut shell, Message::Launched(launch::LaunchEvent::Started { run_id }));
+            press(
+                &mut shell,
+                Message::Launched(launch::LaunchEvent::Started { run_id }),
+            );
         }
         press(&mut shell, Message::StopRun("atm10".to_string()));
-        assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Stopping);
+        assert_eq!(
+            shell.store.launch_state("atm10"),
+            store::LaunchState::Stopping
+        );
         assert_eq!(
             shell.store.launch_state("sodium"),
             store::LaunchState::Running,
@@ -12093,7 +12885,10 @@ mod tests {
             }),
         );
         assert_eq!(shell.store.launch_state("atm10"), store::LaunchState::Idle);
-        assert_eq!(shell.store.launch_state("sodium"), store::LaunchState::Running);
+        assert_eq!(
+            shell.store.launch_state("sodium"),
+            store::LaunchState::Running
+        );
         press(
             &mut shell,
             Message::Launched(launch::LaunchEvent::Done {
@@ -12101,7 +12896,10 @@ mod tests {
                 note: "stale".to_string(),
             }),
         );
-        assert_eq!(shell.store.launch_state("sodium"), store::LaunchState::Running);
+        assert_eq!(
+            shell.store.launch_state("sodium"),
+            store::LaunchState::Running
+        );
         assert_eq!(shell.runs.len(), 1);
     }
 
@@ -12112,8 +12910,14 @@ mod tests {
         // otherwise: a chip that went blank because the run it names stopped
         // downloading would hide work that is happening.
         let mut jobs = BTreeMap::new();
-        jobs.insert("atm10".to_string(), install::Progress::new("libraries", 1, 4, 0));
-        jobs.insert("sodium".to_string(), install::Progress::new("assets", 1, 2, 0));
+        jobs.insert(
+            "atm10".to_string(),
+            install::Progress::new("libraries", 1, 4, 0),
+        );
+        jobs.insert(
+            "sodium".to_string(),
+            install::Progress::new("assets", 1, 2, 0),
+        );
         assert_eq!(
             shown_job(&jobs, Some("sodium")).map(|(id, _)| id),
             Some("sodium"),
@@ -12151,7 +12955,11 @@ mod tests {
             );
         }
         let levels: Vec<&str> = shell.jobs.keys().map(String::as_str).collect();
-        assert_eq!(levels, vec!["atm10", "sodium"], "one job per run that is fetching");
+        assert_eq!(
+            levels,
+            vec!["atm10", "sodium"],
+            "one job per run that is fetching"
+        );
         // The job arrives with the run, so the chip -- and the row the panel marks
         // -- is about the instance that was just started.
         assert_eq!(shell.store.selected_launch(), Some("sodium"));
@@ -12189,8 +12997,14 @@ mod tests {
         let mut shell = shell_at("/");
         let _ = shell.act(Message::Rail(Rail::CreateInstance));
         assert_eq!(shell.modal, Some(Modal::Create));
-        assert!(matches!(shell.versions, Load::Loading), "the dialog waits on its own request");
-        assert!(shell.versions_requested, "and the request has not left `act` yet");
+        assert!(
+            matches!(shell.versions, Load::Loading),
+            "the dialog waits on its own request"
+        );
+        assert!(
+            shell.versions_requested,
+            "and the request has not left `act` yet"
+        );
         press(&mut shell, Message::Versions(Ok(version_list())));
         assert_eq!(shell.versions.ready(), Some(&version_list()));
         assert!(
@@ -12209,7 +13023,10 @@ mod tests {
     fn loader_build_list() -> Vec<store::LoaderBuild> {
         [("0.19.5", true), ("0.19.3-beta.1", false), ("0.19.2", true)]
             .into_iter()
-            .map(|(version, stable)| store::LoaderBuild { version: version.to_string(), stable })
+            .map(|(version, stable)| store::LoaderBuild {
+                version: version.to_string(),
+                stable,
+            })
             .collect()
     }
 
@@ -12233,7 +13050,10 @@ mod tests {
         // here is that `act` raised it.
         let _ = shell.act(Message::Versions(Ok(version_list())));
         assert!(matches!(shell.loader_builds, Load::Loading));
-        assert!(shell.loader_builds_requested, "and the request has not left `act` yet");
+        assert!(
+            shell.loader_builds_requested,
+            "and the request has not left `act` yet"
+        );
         assert_eq!(
             asked_for(&shell),
             Some((crate::catalog::LoaderKind::Fabric, "1.21.4".to_string())),
@@ -12267,8 +13087,14 @@ mod tests {
         let mut shell = shell_at("/");
         press(&mut shell, Message::Rail(Rail::CreateInstance));
         press(&mut shell, Message::Versions(Ok(version_list())));
-        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Quilt));
-        assert_eq!(asked_for(&shell).map(|(loader, _)| loader), Some(crate::catalog::LoaderKind::Quilt));
+        press(
+            &mut shell,
+            Message::LoaderChoice(crate::catalog::LoaderKind::Quilt),
+        );
+        assert_eq!(
+            asked_for(&shell).map(|(loader, _)| loader),
+            Some(crate::catalog::LoaderKind::Quilt)
+        );
         press(
             &mut shell,
             Message::LoaderBuilds {
@@ -12320,7 +13146,10 @@ mod tests {
         // has no list to wait for.
         let mut shell = shell_at("/");
         press(&mut shell, Message::Rail(Rail::CreateInstance));
-        assert!(!shell.create_usable(), "the list has not even been asked for");
+        assert!(
+            !shell.create_usable(),
+            "the list has not even been asked for"
+        );
         press(&mut shell, Message::Versions(Ok(version_list())));
         assert!(!shell.create_usable(), "and it is still coming");
         press(
@@ -12334,15 +13163,24 @@ mod tests {
         assert!(shell.create_usable());
         // Vanilla is not a service: its chips drop the build row and the list with
         // it, and there is nothing to wait for.
-        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Vanilla));
-        assert!(matches!(shell.loader_builds, Load::Idle), "the Fabric list is gone");
+        press(
+            &mut shell,
+            Message::LoaderChoice(crate::catalog::LoaderKind::Vanilla),
+        );
+        assert!(
+            matches!(shell.loader_builds, Load::Idle),
+            "the Fabric list is gone"
+        );
         assert_eq!(shell.chosen_build(), None, "vanilla installs no build");
         assert!(shell.create_usable());
         drop(shell.render());
         // A loader whose list *failed* is a sentence on the row and a button the
         // reader can still press: the alternative is a dialog with no way out of
         // it, and the failure is already said where it happened.
-        press(&mut shell, Message::LoaderChoice(crate::catalog::LoaderKind::Forge));
+        press(
+            &mut shell,
+            Message::LoaderChoice(crate::catalog::LoaderKind::Forge),
+        );
         press(
             &mut shell,
             Message::LoaderBuilds {
@@ -12390,14 +13228,24 @@ mod tests {
         let mut shell = shell_at("/");
         press(&mut shell, Message::Rail(Rail::CreateInstance));
         press(&mut shell, Message::Versions(Ok(version_list())));
-        assert_eq!(version_ids(&shell), vec!["1.21.4", "1.21.3"], "releases until asked for more");
+        assert_eq!(
+            version_ids(&shell),
+            vec!["1.21.4", "1.21.3"],
+            "releases until asked for more"
+        );
         press(&mut shell, Message::VersionSnapshots(true));
-        assert_eq!(version_ids(&shell), vec!["25w02a", "1.21.4", "1.21.3", "b1.7.3"]);
+        assert_eq!(
+            version_ids(&shell),
+            vec!["25w02a", "1.21.4", "1.21.3", "b1.7.3"]
+        );
         // A version is found by the part of it a user remembers rather than only
         // by its beginning: `21.3` is the end of `1.21.3`.
         press(&mut shell, Message::VersionQuery("21.3".to_string()));
         assert_eq!(version_ids(&shell), vec!["1.21.3"]);
-        press(&mut shell, Message::VersionQuery("nothing publishes this".to_string()));
+        press(
+            &mut shell,
+            Message::VersionQuery("nothing publishes this".to_string()),
+        );
         assert!(version_ids(&shell).is_empty());
         // A picker that found nothing is a sentence, and the sentence is drawn by
         // the same code path as the list: this is the render that proves it.
@@ -12419,7 +13267,10 @@ mod tests {
         // question to Mojang rather than a version this dialog invented.
         let mut shell = shell_at("/");
         press(&mut shell, Message::Rail(Rail::CreateInstance));
-        press(&mut shell, Message::Versions(Err(store::not_implemented("Minecraft's version list"))));
+        press(
+            &mut shell,
+            Message::Versions(Err(store::not_implemented("Minecraft's version list"))),
+        );
         assert!(matches!(shell.versions, Load::Failed(_)));
         assert_eq!(shell.chosen_version(), None);
         drop(shell.render());
@@ -12577,7 +13428,10 @@ mod tests {
             shell.viewport, DIALOG_VIEWPORT,
             "the shell starts at the size the entry point opens it at"
         );
-        press(&mut shell, Message::Viewport(iced::Size::new(1000.0, 600.0)));
+        press(
+            &mut shell,
+            Message::Viewport(iced::Size::new(1000.0, 600.0)),
+        );
         assert_eq!(
             shell.viewport,
             iced::Size::new(1000.0, 600.0),
@@ -12589,7 +13443,11 @@ mod tests {
         // And the dialog is built at every one of them -- a scroll region the kit
         // cannot build is a modal that panics.
         press(&mut shell, Message::Rail(Rail::Settings));
-        for size in [DIALOG_VIEWPORT, iced::Size::new(980.0, 640.0), iced::Size::new(1920.0, 1080.0)] {
+        for size in [
+            DIALOG_VIEWPORT,
+            iced::Size::new(980.0, 640.0),
+            iced::Size::new(1920.0, 1080.0),
+        ] {
             press(&mut shell, Message::Viewport(size));
             drop(shell.render());
         }
@@ -12628,7 +13486,10 @@ mod tests {
         // identity rather than as a literal, so that moving the dialog's width,
         // its padding or the bar cannot silently widen the content again: the
         // padding, the bar and the body's own width *are* the dialog.
-        assert_eq!(DIALOG_PAD * 2.0 + DIALOG_SCROLLBAR + DIALOG_INNER, DIALOG_WIDTH);
+        assert_eq!(
+            DIALOG_PAD * 2.0 + DIALOG_SCROLLBAR + DIALOG_INNER,
+            DIALOG_WIDTH
+        );
         assert!(
             DIALOG_INNER < DIALOG_WIDTH - 2.0 * DIALOG_PAD,
             "a body broken for the full padding leaves its last chip under the bar"
@@ -12686,9 +13547,15 @@ mod tests {
         // The user's toggle, or a page that forces it: `App.vue`'s
         // `forceSidebar` on browse, project and user pages.
         let shell = shell_at("/");
-        assert!(shell.panel_shown(), "the panel is on unless it was turned off");
-        let hidden =
-            Shell::new(Address::at(Route::Home), Gen::Dark, &settings(true, false, true));
+        assert!(
+            shell.panel_shown(),
+            "the panel is on unless it was turned off"
+        );
+        let hidden = Shell::new(
+            Address::at(Route::Home),
+            Gen::Dark,
+            &settings(true, false, true),
+        );
         assert!(!hidden.panel_shown());
         for path in ["/browse/modpack", "/project/sodium", "/user/jelly"] {
             let forced = Shell::new(
@@ -12699,11 +13566,17 @@ mod tests {
             assert!(forced.panel_shown(), "{path} forces the panel open");
         }
         let instance = Shell::new(
-            Address::at(Route::Instance { id: "atm10".into(), tab: InstanceTab::Content }),
+            Address::at(Route::Instance {
+                id: "atm10".into(),
+                tab: InstanceTab::Content,
+            }),
             Gen::Dark,
             &settings(true, false, true),
         );
-        assert!(!instance.panel_shown(), "an instance page does not force it");
+        assert!(
+            !instance.panel_shown(),
+            "an instance page does not force it"
+        );
     }
 
     #[test]
@@ -12742,11 +13615,7 @@ mod tests {
         // the scroll region rather than a section inside it, which is what the
         // `pb-12` on the scroll is for -- a section that had the ad scroll past
         // it would be the reference's page with an extra step added.
-        for (path, shown) in [
-            ("/", true),
-            ("/browse/modpack", true),
-            ("/skins", true),
-        ] {
+        for (path, shown) in [("/", true), ("/browse/modpack", true), ("/skins", true)] {
             let shell = Shell::new(
                 Address::parse(path).expect(path),
                 Gen::Dark,
@@ -12759,7 +13628,10 @@ mod tests {
             Gen::Dark,
             &settings(true, false, true),
         );
-        assert!(!off.promo_shown(), "a panel that is down has no ad under it");
+        assert!(
+            !off.promo_shown(),
+            "a panel that is down has no ad under it"
+        );
 
         // The two heights the reference writes twice: the ad's own 250, and the
         // five rem of fade above it. The fade exists so the last section
@@ -12781,7 +13653,10 @@ mod tests {
         let steve = AccountEntry::offline("Steve");
         let uuid = steve.uuid.clone();
         // The account in force is the one the file says.
-        assert_eq!(card_title(std::slice::from_ref(&steve), Some(&uuid)), "Steve");
+        assert_eq!(
+            card_title(std::slice::from_ref(&steve), Some(&uuid)),
+            "Steve"
+        );
         // Nothing selected, or a selection for an account that is gone: the
         // reference's own sentence rather than the wrong account.
         assert_eq!(
@@ -12792,7 +13667,10 @@ mod tests {
             card_title(&[steve], Some("99999999999999999999999999999999")),
             Key::MinecraftAccountSelectAccount.message()
         );
-        assert_eq!(card_title(&[], None), Key::MinecraftAccountSelectAccount.message());
+        assert_eq!(
+            card_title(&[], None),
+            Key::MinecraftAccountSelectAccount.message()
+        );
         // The uuid is the profile id and an offline account's is derived, so the
         // card names the same player Prism does.
         assert_eq!(uuid, crate::accounts::offline_uuid("Steve"));
@@ -12807,7 +13685,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("accounts.json");
         let mut shell = shell_with_accounts(&path);
-        assert!(!shell.accounts_open, "the reference's accordion starts closed");
+        assert!(
+            !shell.accounts_open,
+            "the reference's accordion starts closed"
+        );
         for theme in Gen::ALL {
             shell.theme = *theme;
             let _ = shell.panel();
@@ -12851,15 +13732,27 @@ mod tests {
         assert!(quick_create_press(&lower, Modifiers::default()));
         // Shift is not one of the reference's guards: it compares the lower-cased
         // key, so `Shift+N` opens the creation flow there too.
-        assert!(quick_create_press(&Key::Character("N".into()), Modifiers::SHIFT));
+        assert!(quick_create_press(
+            &Key::Character("N".into()),
+            Modifiers::SHIFT
+        ));
         for modifiers in [Modifiers::CTRL, Modifiers::ALT, Modifiers::LOGO] {
             assert!(!quick_create_press(&lower, modifiers), "{modifiers:?}");
         }
         // Anything that is not the letter, including a named key that happens to
         // start with it.
-        assert!(!quick_create_press(&Key::Character("m".into()), Modifiers::default()));
-        assert!(!quick_create_press(&Key::Character("".into()), Modifiers::default()));
-        assert!(!quick_create_press(&Key::Named(Named::Enter), Modifiers::default()));
+        assert!(!quick_create_press(
+            &Key::Character("m".into()),
+            Modifiers::default()
+        ));
+        assert!(!quick_create_press(
+            &Key::Character("".into()),
+            Modifiers::default()
+        ));
+        assert!(!quick_create_press(
+            &Key::Named(Named::Enter),
+            Modifiers::default()
+        ));
 
         // And the screen's own gate: Home with nothing to play and no dialog over
         // it. The subscription is built from this, so a key that arrives on any
@@ -12890,10 +13783,16 @@ mod tests {
         let shell = shell_with_instance("panel-checklist");
         let checklist = shell.checklist();
         assert!(checklist.show(), "two steps are outstanding");
-        assert!(checklist.complete(Step::CreateInstance), "the library holds one");
+        assert!(
+            checklist.complete(Step::CreateInstance),
+            "the library holds one"
+        );
         assert!(!checklist.complete(Step::LoginMinecraft));
         assert!(!checklist.complete(Step::LoginModrinth));
-        assert!(!checklist.friends_visible(), "and the friends list waits behind it");
+        assert!(
+            !checklist.friends_visible(),
+            "and the friends list waits behind it"
+        );
         // `App.vue` draws *Playing as* `v-show="hasLoggedIntoMinecraft"`, and that
         // flag is the checklist's own second fact now: no account, no card. Every
         // theme is drawn because the section's inks come from the generated
@@ -12949,7 +13848,10 @@ mod tests {
         let sentence = Key::FriendsSignInToAddFriends.message();
         assert!(sentence.contains("<link>"), "the table keeps the markup");
         let (before, slot, after) = crate::text::tagged(sentence, "link").expect("a slot");
-        assert_eq!(format!("{before}{slot}{after}"), "Sign in to a Modrinth account to add friends and see what they're playing!");
+        assert_eq!(
+            format!("{before}{slot}{after}"),
+            "Sign in to a Modrinth account to add friends and see what they're playing!"
+        );
         // No heading while there are no credentials, which is the reference's own
         // `v-if="userCredentials"` around it.
         assert_eq!(Key::FriendsHeading.message(), "Friends");
@@ -13025,7 +13927,10 @@ mod tests {
         );
         press(&mut shell, Message::DismissModrinthNote);
         assert!(shell.modrinth_note.is_none());
-        assert!(shell.accounts_note.is_some(), "the other sentence is still there");
+        assert!(
+            shell.accounts_note.is_some(),
+            "the other sentence is still there"
+        );
         // And nothing a press could not finish is finished: the section is still up
         // with both sign-ins outstanding, which is the honest picture of a launcher
         // that has neither flow yet.
@@ -13066,7 +13971,10 @@ mod tests {
         let (back, _) = AccountsStore::load_with_report(&path);
         assert_eq!(back.list().len(), 1);
         assert_eq!(back.list()[0].username, "Steve");
-        assert!(back.selected_uuid().is_none(), "the removed account was in force");
+        assert!(
+            back.selected_uuid().is_none(),
+            "the removed account was in force"
+        );
 
         // A uuid that is not in the file is the store's own sentence rather than
         // a silent nothing.
@@ -13127,8 +14035,14 @@ mod tests {
         }
         // The two the reference writes out in full, against its own strings.
         let dark = parse_gradient(theme_gen::raw(Gen::Dark, Raw::BrandGradientBg)).expect("dark");
-        assert_eq!(dark.1[0].1, Color::from_rgba(14.0 / 255.0, 35.0 / 255.0, 19.0 / 255.0, 0.2));
-        assert_eq!(dark.1[1].1, Color::from_rgba(55.0 / 255.0, 137.0 / 255.0, 73.0 / 255.0, 0.1));
+        assert_eq!(
+            dark.1[0].1,
+            Color::from_rgba(14.0 / 255.0, 35.0 / 255.0, 19.0 / 255.0, 0.2)
+        );
+        assert_eq!(
+            dark.1[1].1,
+            Color::from_rgba(55.0 / 255.0, 137.0 / 255.0, 73.0 / 255.0, 0.1)
+        );
         let light =
             parse_gradient(theme_gen::raw(Gen::Light, Raw::BrandGradientBg)).expect("light");
         assert_eq!(
@@ -13162,10 +14076,19 @@ mod tests {
         assert_eq!(retro.1[0].1, Color::from_rgb8(0x3a, 0x3b, 0x38));
         assert_eq!(retro.1[0].1, retro.1[1].1);
         // And nothing it cannot read is guessed at.
-        for value in ["", "linear-gradient(", "linear-gradient(0deg)", "nonsense", "rgb(1, 2)"] {
+        for value in [
+            "",
+            "linear-gradient(",
+            "linear-gradient(0deg)",
+            "nonsense",
+            "rgb(1, 2)",
+        ] {
             assert!(parse_gradient(value).is_none(), "{value} should not parse");
         }
-        assert_eq!(parse_color("#1bd96a"), Some(Color::from_rgb8(0x1b, 0xd9, 0x6a)));
+        assert_eq!(
+            parse_color("#1bd96a"),
+            Some(Color::from_rgb8(0x1b, 0xd9, 0x6a))
+        );
         assert_eq!(parse_color("#fff"), Some(Color::from_rgb8(255, 255, 255)));
         assert_eq!(
             parse_color("rgb(1, 2, 3)"),
@@ -13219,14 +14142,62 @@ mod tests {
         // the icons are what it imports for them. Language is the one with a
         // badge, `commonMessages.beta`.
         let drawn = [
-            (SettingsTab::Appearance, Key::AppSettingsTabsAppearance, "Appearance", Glyph::Paintbrush, None),
-            (SettingsTab::Features, Key::AppSettingsTabsFeatures, "Features", Glyph::LightBulb, None),
-            (SettingsTab::Behavior, Key::AppSettingsTabsBehavior, "Behavior", Glyph::Settings2, None),
-            (SettingsTab::Language, Key::AppSettingsTabsLanguage, "Language", Glyph::Languages, Some(Key::BadgeBeta)),
-            (SettingsTab::Privacy, Key::AppSettingsTabsPrivacy, "Privacy", Glyph::Shield, None),
-            (SettingsTab::SyncedOptions, Key::AppSettingsTabsSyncedOptions, "Synced settings", Glyph::RefreshCw, None),
-            (SettingsTab::JavaInstallations, Key::AppSettingsTabsJavaInstallations, "Java installations", Glyph::Coffee, None),
-            (SettingsTab::ResourceManagement, Key::AppSettingsTabsResourceManagement, "Resource management", Glyph::Microchip, None),
+            (
+                SettingsTab::Appearance,
+                Key::AppSettingsTabsAppearance,
+                "Appearance",
+                Glyph::Paintbrush,
+                None,
+            ),
+            (
+                SettingsTab::Features,
+                Key::AppSettingsTabsFeatures,
+                "Features",
+                Glyph::LightBulb,
+                None,
+            ),
+            (
+                SettingsTab::Behavior,
+                Key::AppSettingsTabsBehavior,
+                "Behavior",
+                Glyph::Settings2,
+                None,
+            ),
+            (
+                SettingsTab::Language,
+                Key::AppSettingsTabsLanguage,
+                "Language",
+                Glyph::Languages,
+                Some(Key::BadgeBeta),
+            ),
+            (
+                SettingsTab::Privacy,
+                Key::AppSettingsTabsPrivacy,
+                "Privacy",
+                Glyph::Shield,
+                None,
+            ),
+            (
+                SettingsTab::SyncedOptions,
+                Key::AppSettingsTabsSyncedOptions,
+                "Synced settings",
+                Glyph::RefreshCw,
+                None,
+            ),
+            (
+                SettingsTab::JavaInstallations,
+                Key::AppSettingsTabsJavaInstallations,
+                "Java installations",
+                Glyph::Coffee,
+                None,
+            ),
+            (
+                SettingsTab::ResourceManagement,
+                Key::AppSettingsTabsResourceManagement,
+                "Resource management",
+                Glyph::Microchip,
+                None,
+            ),
         ];
         for (tab, label, message, glyph, badge) in drawn {
             assert_eq!(tab.label(), label, "{message}");
@@ -13245,7 +14216,10 @@ mod tests {
         ] {
             assert_eq!(tab.category(), Key::SettingsSidebarLabelDisplay);
         }
-        assert_eq!(SettingsTab::Privacy.category(), Key::SettingsSidebarLabelAccount);
+        assert_eq!(
+            SettingsTab::Privacy.category(),
+            Key::SettingsSidebarLabelAccount
+        );
         for tab in [
             SettingsTab::SyncedOptions,
             SettingsTab::JavaInstallations,
@@ -13274,7 +14248,11 @@ mod tests {
         // the settings dialog gives a tab at 1280x720 -- the capture's cards span
         // x 513..787 and 804..1078.
         let shell = shell_at("/");
-        assert_eq!(shell.settings_content_width(), 566.0, "the pane's inner width");
+        assert_eq!(
+            shell.settings_content_width(),
+            566.0,
+            "the pane's inner width"
+        );
         assert_eq!(theme_columns(566.0), 2, "two tracks at the captured window");
         assert_eq!(theme_columns(THEME_CARD_MIN), 1, "one track cannot be two");
         assert_eq!(theme_columns(THEME_CARD_MIN * 2.0 + THEME_GAP), 2);
@@ -13283,11 +14261,20 @@ mod tests {
         let card = (566.0 - THEME_GAP) / 2.0;
         assert_eq!(card, 275.0);
         // The card's own stack: a border, the preview band, the label row, a border.
-        assert_eq!(THEME_PREVIEW_HEIGHT + THEME_LABEL_HEIGHT + 2.0, THEME_CARD_HEIGHT);
+        assert_eq!(
+            THEME_PREVIEW_HEIGHT + THEME_LABEL_HEIGHT + 2.0,
+            THEME_CARD_HEIGHT
+        );
         // The preview band: `1.5rem` around the mock, whose 66 pixels are a border,
         // `1rem`, the `2rem` icon, `1rem` and the border again.
-        assert_eq!(THEME_PREVIEW_PAD * 2.0 + THEME_MOCK_HEIGHT, THEME_PREVIEW_HEIGHT);
-        assert_eq!(2.0 + THEME_MOCK_PAD * 2.0 + THEME_MOCK_ICON, THEME_MOCK_HEIGHT);
+        assert_eq!(
+            THEME_PREVIEW_PAD * 2.0 + THEME_MOCK_HEIGHT,
+            THEME_PREVIEW_HEIGHT
+        );
+        assert_eq!(
+            2.0 + THEME_MOCK_PAD * 2.0 + THEME_MOCK_ICON,
+            THEME_MOCK_HEIGHT
+        );
         // And the mock's own contents, against the capture's own columns: the mock
         // is 225 wide (x 538..762), and its first bar starts 82 pixels into the card
         // -- the card's border, the preview's 24, the mock's border and 16, the icon
@@ -13296,13 +14283,22 @@ mod tests {
         // that; a browser's fractional card width rounds it to 149 or 150 and this
         // kit's whole pixels come to 151.
         let mock = card - 2.0 - 2.0 * THEME_PREVIEW_PAD;
-        assert_eq!(mock, 225.0, "the mock's own width, against the capture's 225");
+        assert_eq!(
+            mock, 225.0,
+            "the mock's own width, against the capture's 225"
+        );
         let bars = mock - 2.0 - 2.0 * THEME_MOCK_PAD - THEME_MOCK_ICON - THEME_MOCK_GAP;
         assert_eq!(bars, 151.0, "the bars' column, against the capture's 150");
-        assert_eq!(1.0 + THEME_PREVIEW_PAD + 1.0 + THEME_MOCK_PAD + THEME_MOCK_ICON + THEME_MOCK_GAP, 82.0);
+        assert_eq!(
+            1.0 + THEME_PREVIEW_PAD + 1.0 + THEME_MOCK_PAD + THEME_MOCK_ICON + THEME_MOCK_GAP,
+            82.0
+        );
         // The second bar's top is the icon's own grid: two rows and the gap between
         // them are its 32 pixels, so a row is 12 and the second bar starts at 12 + 8.
-        assert_eq!(THEME_BAR2_TOP, (THEME_MOCK_ICON - THEME_MOCK_GAP) / 2.0 + THEME_MOCK_GAP);
+        assert_eq!(
+            THEME_BAR2_TOP,
+            (THEME_MOCK_ICON - THEME_MOCK_GAP) / 2.0 + THEME_MOCK_GAP
+        );
         // A name has to fit one card's label: the capture puts `Sync with system`
         // inside 197 pixels of room.
         let room = theme_label_room(566.0);
@@ -13341,14 +14337,23 @@ mod tests {
         // 65vh of 720 is 468, and it is a *float* 468: `720.0 * 0.65` is
         // 467.99997 in f32, which is the value the layout will use and the value a
         // tolerance has to admit.
-        assert!((settings_content_min(window) - 468.0).abs() < 0.001, "65vh of 720");
+        assert!(
+            (settings_content_min(window) - 468.0).abs() < 0.001,
+            "65vh of 720"
+        );
         let interior = 24.0 + 36.0 + 24.0 + 1.0 + 24.0 + settings_content_min(window) + 11.0;
         // 588 of content, 590 as a border box. The reference's box is 591 (589 of
         // content and the browser's two border pixels), which is a half-pixel when
         // centered in a 720-pixel window and is painted from row 65 all the same;
         // 590 is even, so this box lands on 65 without a half-pixel anywhere.
-        assert!((interior - 588.0).abs() < 0.01, "{interior} is not the content's 588");
-        assert!((interior + 2.0 - 590.0).abs() < 0.01, "nor the border box's 590");
+        assert!(
+            (interior - 588.0).abs() < 0.01,
+            "{interior} is not the content's 588"
+        );
+        assert!(
+            (interior + 2.0 - 590.0).abs() < 0.01,
+            "nor the border box's 590"
+        );
         let top = (window.height - (interior + 2.0)) / 2.0;
         assert!((top - 65.0).abs() < 0.01, "the top border lands on {top}");
         // And the divider's column, which the reference's capture puts at x=488: the
@@ -13357,7 +14362,11 @@ mod tests {
         // 177), the body's own `p-6` is 24, and the divider is the last pixel of the
         // 288-wide track -- 176 + 1 + 24 + 288 - 1 = 488.
         let left = (window.width - SETTINGS_WIDTH) / 2.0;
-        assert_eq!(left + 1.0 + 24.0 + SETTINGS_NAV - 1.0, 488.0, "the captured divider");
+        assert_eq!(
+            left + 1.0 + 24.0 + SETTINGS_NAV - 1.0,
+            488.0,
+            "the captured divider"
+        );
     }
 
     /// Move the shell's clock to `millis` after the shell was built.
@@ -13380,11 +14389,21 @@ mod tests {
         // one, because a single value cannot carry two curves.
         let mut shell = shell_at("/");
         assert_eq!(shell.modal, None);
-        assert_eq!(shell.modal_fade.value(), 1.0, "a shell with no dialog has no fade to run");
+        assert_eq!(
+            shell.modal_fade.value(),
+            1.0,
+            "a shell with no dialog has no fade to run"
+        );
 
         press(&mut shell, Message::Rail(Rail::Settings));
-        assert!(shell.modal_fade.is_running(), "the dialog fades in when it is put up");
-        assert!(shell.scrim_fade.is_running(), "and so does the bed behind it");
+        assert!(
+            shell.modal_fade.is_running(),
+            "the dialog fades in when it is put up"
+        );
+        assert!(
+            shell.scrim_fade.is_running(),
+            "and so does the bed behind it"
+        );
         assert_eq!(shell.modal_fade.value(), 0.0, "from nothing");
         assert!(shell.animating(), "so the frame clock stays awake");
 
@@ -13394,7 +14413,10 @@ mod tests {
         tick_to(&mut shell, 100);
         let mid_dialog = shell.modal_fade.value();
         let mid_scrim = shell.scrim_fade.value();
-        assert!(mid_dialog > 0.0 && mid_dialog < 1.0, "half way: {mid_dialog}");
+        assert!(
+            mid_dialog > 0.0 && mid_dialog < 1.0,
+            "half way: {mid_dialog}"
+        );
         assert!(mid_scrim > 0.0 && mid_scrim < 1.0, "half way: {mid_scrim}");
         // `ease-out` is most of the way there by the middle and `ease-in-out` is
         // barely started, which is the difference between the two curves and the
@@ -13406,7 +14428,11 @@ mod tests {
         );
 
         tick_to(&mut shell, 200);
-        assert_eq!(shell.modal_fade.value(), 1.0, "the dialog lands on its target exactly");
+        assert_eq!(
+            shell.modal_fade.value(),
+            1.0,
+            "the dialog lands on its target exactly"
+        );
         assert_eq!(shell.scrim_fade.value(), 1.0);
         assert!(!shell.modal_fade.is_running() && !shell.scrim_fade.is_running());
     }
@@ -13423,9 +14449,19 @@ mod tests {
         press(&mut shell, Message::CloseModal);
 
         assert_eq!(shell.modal, None, "it stops answering messages at once");
-        assert_eq!(shell.closing, Some(Modal::Settings), "but it is still on screen");
-        assert!(shell.dialog_drawn().is_some(), "so the layer is still drawn");
-        assert!(shell.animating(), "and the shell is still asking for frames");
+        assert_eq!(
+            shell.closing,
+            Some(Modal::Settings),
+            "but it is still on screen"
+        );
+        assert!(
+            shell.dialog_drawn().is_some(),
+            "so the layer is still drawn"
+        );
+        assert!(
+            shell.animating(),
+            "and the shell is still asking for frames"
+        );
 
         // The countdown is the reference's own 300ms from the press, not from
         // the dialog arriving and not from the leave ending: the element stays
@@ -13438,14 +14474,21 @@ mod tests {
         // dialog the moment its tween landed -- at 200ms -- would fail the
         // first of them rather than pass both.
         tick_to(&mut shell, 299);
-        assert_eq!(shell.closing, Some(Modal::Settings), "still mounted one millisecond early");
+        assert_eq!(
+            shell.closing,
+            Some(Modal::Settings),
+            "still mounted one millisecond early"
+        );
         assert_eq!(shell.closing_left, Duration::from_millis(1));
 
         tick_to(&mut shell, 301);
         assert_eq!(shell.closing, None, "300ms later it is out of the tree");
         assert_eq!(shell.closing_left, Duration::ZERO);
         assert!(shell.dialog_drawn().is_none());
-        assert!(!shell.animating(), "and the shell stops asking for frames for it");
+        assert!(
+            !shell.animating(),
+            "and the shell stops asking for frames for it"
+        );
     }
 
     #[test]
@@ -13462,7 +14505,10 @@ mod tests {
         let before = shell.scrim_fade.value();
         press(&mut shell, Message::CloseModal);
         assert_eq!(shell.scrim_fade.value(), before);
-        assert!(!shell.scrim_fade.is_running(), "no leave leg nobody asked for");
+        assert!(
+            !shell.scrim_fade.is_running(),
+            "no leave leg nobody asked for"
+        );
         assert_eq!(shell.closing, None);
         assert!(!shell.animating());
     }
@@ -13480,7 +14526,11 @@ mod tests {
         press(&mut shell, Message::Rail(Rail::CreateInstance));
         assert_eq!(shell.closing, None, "the one on its way out is dropped");
         assert_eq!(shell.modal, Some(Modal::Create));
-        assert_eq!(shell.modal_fade.value(), 0.0, "and the newcomer starts at nothing");
+        assert_eq!(
+            shell.modal_fade.value(),
+            0.0,
+            "and the newcomer starts at nothing"
+        );
     }
 
     #[test]
@@ -13488,7 +14538,11 @@ mod tests {
         // `App.vue`: `transition-transform` and `rotate-180`, which is
         // 150ms on `cubic-bezier(0.4, 0, 0.2, 1)`.
         let mut shell = shell_at("/");
-        assert_eq!(shell.panel_arrow.value(), 1.0, "the panel is up, so the arrow points in");
+        assert_eq!(
+            shell.panel_arrow.value(),
+            1.0,
+            "the panel is up, so the arrow points in"
+        );
         press(&mut shell, Message::Sidebar(false));
         assert!(shell.panel_arrow.is_running());
         assert!(shell.animating(), "a half turn keeps the clock awake");
@@ -13501,7 +14555,11 @@ mod tests {
 
         // And it turns on the way back up rather than snapping.
         press(&mut shell, Message::Sidebar(true));
-        assert_eq!(shell.panel_arrow.value(), 0.0, "the turn starts where the arrow is");
+        assert_eq!(
+            shell.panel_arrow.value(),
+            0.0,
+            "the turn starts where the arrow is"
+        );
     }
 
     #[test]
@@ -13517,7 +14575,12 @@ mod tests {
         else {
             panic!("the scrim is a gradient");
         };
-        let stops: Vec<Color> = linear.stops.iter().flatten().map(|stop| stop.color).collect();
+        let stops: Vec<Color> = linear
+            .stops
+            .iter()
+            .flatten()
+            .map(|stop| stop.color)
+            .collect();
         assert_eq!(stops.len(), 2, "the reference's overlay has two stops");
         // `to bottom`, which iced's `to_distance` turns into a direction down
         // the box rather than up it.
@@ -13527,12 +14590,22 @@ mod tests {
         // `--color-bg-raised` in dark: #27292e. The level of tolerance is the
         // one an eight-bit composite can differ by between two rasterisers.
         let chrome = (39.0f32, 41.0f32, 46.0f32);
-        for (colour, measured) in [(stops[0], (32.0f32, 43.0f32, 43.0f32)), (stops[1], (18.0f32, 25.0, 29.0))] {
+        for (colour, measured) in [
+            (stops[0], (32.0f32, 43.0f32, 43.0f32)),
+            (stops[1], (18.0f32, 25.0, 29.0)),
+        ] {
             // `Color`'s channels are 0..1 and the measurements are 0..255.
-            let over =
-                |under: f32, ink: f32| ink * 255.0 * colour.a + under * (1.0 - colour.a);
-            let got = (over(chrome.0, colour.r), over(chrome.1, colour.g), over(chrome.2, colour.b));
-            for (near, want) in [(got.0, measured.0), (got.1, measured.1), (got.2, measured.2)] {
+            let over = |under: f32, ink: f32| ink * 255.0 * colour.a + under * (1.0 - colour.a);
+            let got = (
+                over(chrome.0, colour.r),
+                over(chrome.1, colour.g),
+                over(chrome.2, colour.b),
+            );
+            for (near, want) in [
+                (got.0, measured.0),
+                (got.1, measured.1),
+                (got.2, measured.2),
+            ] {
                 assert!((near - want).abs() <= 1.0, "{got:?} is not {measured:?}");
             }
         }
@@ -13582,7 +14655,11 @@ mod tests {
         // asserted uniformly so that the day one of them changes is the day the
         // shell's hover and selection states get looked at again.
         let plate = theme_gen::ink(Gen::Light, INK_PLATE);
-        assert_eq!(plate, theme_gen::ink(Gen::Light, Ink::Brand), "light is solid brand");
+        assert_eq!(
+            plate,
+            theme_gen::ink(Gen::Light, Ink::Brand),
+            "light is solid brand"
+        );
         assert_eq!(plate.a, 1.0, "light is not a wash");
         for theme in [Gen::Dark, Gen::Oled] {
             let plate = theme_gen::ink(theme, INK_PLATE);
@@ -13592,7 +14669,11 @@ mod tests {
                 (brand.r, brand.g, brand.b),
                 "{theme:?}: the wash is the accent"
             );
-            assert_eq!((plate.a * 255.0).round(), 64.0, "{theme:?}: the accent at 25%");
+            assert_eq!(
+                (plate.a * 255.0).round(),
+                64.0,
+                "{theme:?}: the accent at 25%"
+            );
         }
         let retro = theme_gen::ink(Gen::Retro, INK_PLATE);
         assert_eq!(retro.a, 1.0, "retro is opaque too");
@@ -13660,23 +14741,48 @@ mod tests {
         // say: the servers page is *Hosting*, and the instance, project and user
         // pages are named after the thing rather than after a section and an id.
         assert_eq!(crumb("/"), vec![Crumb::with_icon(Glyph::Play, "Home")]);
-        assert_eq!(crumb("/browse/mod"), vec![Crumb::with_icon(Glyph::Compass, "Discover mods")]);
+        assert_eq!(
+            crumb("/browse/mod"),
+            vec![Crumb::with_icon(Glyph::Compass, "Discover mods")]
+        );
         assert_eq!(crumb("/browse/modpack").len(), 1);
-        assert_eq!(crumb("/skins"), vec![Crumb::with_icon(Glyph::Shirt, "Skin selector")]);
-        assert_eq!(crumb("/screenshots"), vec![Crumb::with_icon(Glyph::Image, "Screenshots")]);
-        assert_eq!(crumb("/hosting/manage/"), vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")]);
-        assert_eq!(crumb("/hosting/manage/srv/backups"), vec![Crumb::with_icon(Glyph::ServerStack, "srv")]);
-        assert_eq!(crumb("/project/sodium/versions"), vec![Crumb::plain("sodium")]);
+        assert_eq!(
+            crumb("/skins"),
+            vec![Crumb::with_icon(Glyph::Shirt, "Skin selector")]
+        );
+        assert_eq!(
+            crumb("/screenshots"),
+            vec![Crumb::with_icon(Glyph::Image, "Screenshots")]
+        );
+        assert_eq!(
+            crumb("/hosting/manage/"),
+            vec![Crumb::with_icon(Glyph::ServerStack, "Hosting")]
+        );
+        assert_eq!(
+            crumb("/hosting/manage/srv/backups"),
+            vec![Crumb::with_icon(Glyph::ServerStack, "srv")]
+        );
+        assert_eq!(
+            crumb("/project/sodium/versions"),
+            vec![Crumb::plain("sodium")]
+        );
         assert_eq!(crumb("/user/jelly"), vec![Crumb::plain("jelly")]);
         // The tabs are `NavTabs` under the head, not crumbs in it: an instance's
         // crumb is the instance's name however the page was reached.
-        for tab in ["/instance/ATM10", "/instance/ATM10/projects/shader", "/instance/ATM10/logs"] {
+        for tab in [
+            "/instance/ATM10",
+            "/instance/ATM10/projects/shader",
+            "/instance/ATM10/logs",
+        ] {
             assert_eq!(crumb(tab), vec![Crumb::plain("ATM10")], "{tab}");
         }
         // And the store's name for the instance is the reference's label, the
         // address's id only standing in until the scan has produced it.
         let address = Address::parse("/instance/ATM10").expect("the path parses");
-        assert_eq!(crumbs(&address, Some("All The Mods")), vec![Crumb::plain("All The Mods")]);
+        assert_eq!(
+            crumbs(&address, Some("All The Mods")),
+            vec![Crumb::plain("All The Mods")]
+        );
         // The fetched visuals are `None`: an icon is one the reference registers,
         // and these three are images.
         assert_eq!(crumb("/user/jelly")[0].icon, None);
@@ -13694,7 +14800,10 @@ mod tests {
         assert_eq!(flags.size, Some((1280, 720)));
         assert_eq!(
             flags.opening().route,
-            Route::Instance { id: "ATM10".into(), tab: InstanceTab::Files }
+            Route::Instance {
+                id: "ATM10".into(),
+                tab: InstanceTab::Files
+            }
         );
         // A path that is not a page opens Home rather than failing to open.
         let bogus = Flags::from_args(["--page", "/nowhere"].into_iter().map(String::from));
@@ -13714,12 +14823,23 @@ mod tests {
         let sample = [
             Route::Home,
             Route::Servers,
-            Route::Server { id: "srv".into(), tab: route::ServerTab::Access },
-            Route::Discover { project_type: route::ProjectType::Modpack },
+            Route::Server {
+                id: "srv".into(),
+                tab: route::ServerTab::Access,
+            },
+            Route::Discover {
+                project_type: route::ProjectType::Modpack,
+            },
             Route::Skins,
             Route::Screenshots,
-            Route::User { user: "jelly".into(), project_type: None },
-            Route::Project { id: "sodium".into(), tab: ProjectTab::Gallery },
+            Route::User {
+                user: "jelly".into(),
+                project_type: None,
+            },
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Gallery,
+            },
             Route::Instance {
                 id: "a/b".into(),
                 tab: InstanceTab::ContentFilter(route::ProjectType::Shader),
@@ -13737,13 +14857,23 @@ mod tests {
                 drop(shell.render());
             }
             for theme in Gen::ALL {
-                let shell = Shell::new(Address::at(route.clone()), *theme, &RailSettings::default());
+                let shell =
+                    Shell::new(Address::at(route.clone()), *theme, &RailSettings::default());
                 drop(shell.render());
             }
         }
         // The pane's body is a page rather than a placeholder, on every shape the
         // route table has -- which is the claim the name of this test makes.
-        for path in ["/", "/browse/modpack", "/skins", "/screenshots", "/hosting/manage/", "/user/jelly", "/project/sodium", "/instance/ATM10/logs"] {
+        for path in [
+            "/",
+            "/browse/modpack",
+            "/skins",
+            "/screenshots",
+            "/hosting/manage/",
+            "/user/jelly",
+            "/project/sodium",
+            "/instance/ATM10/logs",
+        ] {
             let shell = shell_at(path);
             assert!(shell.pages_are_drawn(), "{path} draws a page");
         }
@@ -13784,7 +14914,10 @@ mod tests {
             .expect("the clock")
             .tick(std::time::Instant::now() + crate::anim::INTERACTION_DURATION);
         assert_eq!(drawn(key), (crate::theme::hover_brightness(), 1.0));
-        assert!(!shell.animating(), "the rail settled too, so nothing is moving");
+        assert!(
+            !shell.animating(),
+            "the rail settled too, so nothing is moving"
+        );
     }
 
     #[test]
@@ -13834,7 +14967,10 @@ mod tests {
         }
         let mut bytes = Vec::new();
         ::image::DynamicImage::ImageRgba8(face)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                ::image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -13886,7 +15022,10 @@ mod tests {
         let rows = stored_rows(&shell.store);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].entry.name, "broken");
-        assert!(!rows[0].ears, "bytes that are not a texture carry no marker");
+        assert!(
+            !rows[0].ears,
+            "bytes that are not a texture carry no marker"
+        );
     }
 
     #[test]
@@ -13980,11 +15119,8 @@ mod tests {
 
         // What the page asks for is *keys* -- its rows' digests -- in the new order,
         // because that is what the reference's `set_custom_skin_order` takes too.
-        write_skin_order(
-            &shell.store,
-            &[first.key.clone(), second.key.clone()],
-        )
-        .expect("the order is written");
+        write_skin_order(&shell.store, &[first.key.clone(), second.key.clone()])
+            .expect("the order is written");
         assert_eq!(
             names(&shell.store),
             ["first", "second"],
@@ -14022,7 +15158,10 @@ mod tests {
         // command is built from: what the press leaves here is the whole order -- the
         // page's list with two neighbours swapped -- and the page waiting on it.
         let Some(Asked::Reorder(order)) = shell.act(Message::Screen(pages::Message::Skins(
-            skins::Message::Move { key: "b".to_string(), step: skins::Step::Up },
+            skins::Message::Move {
+                key: "b".to_string(),
+                step: skins::Step::Up,
+            },
         ))) else {
             panic!("the press is an ask the shell takes");
         };
@@ -14040,10 +15179,12 @@ mod tests {
         // A second move while the first is out is not an ask at all: two reorders would
         // be two read-modify-writes of the same index.
         assert_eq!(
-            shell.act(Message::Screen(pages::Message::Skins(skins::Message::Move {
-                key: "a".to_string(),
-                step: skins::Step::Down,
-            }))),
+            shell.act(Message::Screen(pages::Message::Skins(
+                skins::Message::Move {
+                    key: "a".to_string(),
+                    step: skins::Step::Down,
+                }
+            ))),
             None
         );
     }
@@ -14064,8 +15205,14 @@ mod tests {
             panic!("the gear opens the instance-settings modal");
         };
         assert_eq!(state.id, "atm10");
-        assert_eq!(state.name, "atm10", "the dialog is titled by the instance it is about");
-        assert!(state.loaded, "the read landed, so the form has values under it");
+        assert_eq!(
+            state.name, "atm10",
+            "the dialog is titled by the instance it is about"
+        );
+        assert!(
+            state.loaded,
+            "the read landed, so the form has values under it"
+        );
 
         press(
             &mut shell,
@@ -14106,7 +15253,9 @@ mod tests {
         );
         press(
             &mut shell,
-            Message::InstanceSettings(crate::instance_settings::Message::MemoryMin("twelve".into())),
+            Message::InstanceSettings(crate::instance_settings::Message::MemoryMin(
+                "twelve".into(),
+            )),
         );
         press(
             &mut shell,
@@ -14118,7 +15267,11 @@ mod tests {
         let problem = state.error.as_deref().expect("a sentence");
         assert!(problem.contains("twelve"), "{problem}");
         assert!(
-            !shell.store.instance_settings("atm10").expect("read back").override_memory,
+            !shell
+                .store
+                .instance_settings("atm10")
+                .expect("read back")
+                .override_memory,
             "nothing was written"
         );
         drop(shell.render());
@@ -14142,7 +15295,11 @@ mod tests {
             panic!("the gear opens the instance-settings modal");
         };
         assert_eq!(
-            (state.platform, state.game_version.as_str(), state.loader_build.as_str()),
+            (
+                state.platform,
+                state.game_version.as_str(),
+                state.loader_build.as_str()
+            ),
             (crate::catalog::LoaderKind::Vanilla, "1.21.4", ""),
             "the installation half opens on what the profile says"
         );
@@ -14179,7 +15336,10 @@ mod tests {
             Message::InstanceSettings(crate::instance_settings::Message::SaveInstallation),
         );
         assert!(shell.modal.is_none(), "a landed save closes the modal");
-        let written = shell.store.instance_installation("atm10").expect("read back");
+        let written = shell
+            .store
+            .instance_installation("atm10")
+            .expect("read back");
         assert_eq!(written.platform, crate::catalog::LoaderKind::Quilt);
         assert_eq!(written.game_version, "1.21.1");
         assert_eq!(written.loader_build, "0.9.2");
@@ -14309,7 +15469,11 @@ mod tests {
         let Some(Modal::InstanceSettings(state)) = &shell.modal else {
             panic!("repairing does not close the modal");
         };
-        assert_eq!(state.repair, Load::Loading, "the form is busy from the press");
+        assert_eq!(
+            state.repair,
+            Load::Loading,
+            "the form is busy from the press"
+        );
         assert!(
             shell.installation_repair_requested.is_none(),
             "and the request left in the same frame"
@@ -14415,7 +15579,11 @@ mod tests {
         let Some(Modal::InstanceSettings(state)) = &shell.modal else {
             panic!("re-installing does not close the modal");
         };
-        assert_eq!(state.reinstall, Load::Loading, "the form is busy from the press");
+        assert_eq!(
+            state.reinstall,
+            Load::Loading,
+            "the form is busy from the press"
+        );
         assert!(
             shell.installation_reinstall_requested.is_none(),
             "and the request left in the same frame"
@@ -14484,13 +15652,20 @@ mod tests {
         // The Java/installation reads the tab made when it opened are settled
         // first, so the one question this test is about is the one the shell
         // asks next.
-        press(&mut shell, Message::InstallationVersions(Ok(version_list())));
+        press(
+            &mut shell,
+            Message::InstallationVersions(Ok(version_list())),
+        );
 
         shell.request_change_version("pack-2");
         let Some(Modal::InstanceSettings(state)) = &shell.modal else {
             panic!("the modal is up");
         };
-        assert_eq!(state.change, Load::Loading, "the rows stop pressing from the press");
+        assert_eq!(
+            state.change,
+            Load::Loading,
+            "the rows stop pressing from the press"
+        );
         assert_eq!(
             shell.installation_change_requested,
             Some(("atm10".to_string(), "pack-2".to_string())),
@@ -14538,7 +15713,10 @@ mod tests {
             panic!("the sentence is drawn on the form");
         };
         assert!(
-            state.change.ready().is_some_and(|line| line.contains("1.6.2")),
+            state
+                .change
+                .ready()
+                .is_some_and(|line| line.contains("1.6.2")),
             "got: {:?}",
             state.change
         );
@@ -14548,11 +15726,13 @@ mod tests {
             "the link is read off the disk, not assumed from the press"
         );
         assert_eq!(
-            state.modpack, Load::Loading,
+            state.modpack,
+            Load::Loading,
             "the card is asked again, because it names the version"
         );
         assert_eq!(
-            state.pack_versions, Load::Idle,
+            state.pack_versions,
+            Load::Idle,
             "and the list follows when the card's answer lands -- one question per frame"
         );
         press(
@@ -14568,7 +15748,8 @@ mod tests {
             panic!("the modal is up");
         };
         assert_eq!(
-            state.pack_versions, Load::Loading,
+            state.pack_versions,
+            Load::Loading,
             "the list is read once the card's answer lands, so its mark can move"
         );
         drop(shell.render());
@@ -14585,7 +15766,11 @@ mod tests {
         // centres the bar in it: a margin of zero would put a six-pixel bar
         // flush against the window and land at 1274.
         assert_eq!(bar_at(1280.0), 1272.0);
-        assert_eq!(bar_at(1280.0) + SCROLLBAR, 1278.0, "six columns, 1272..1277");
+        assert_eq!(
+            bar_at(1280.0) + SCROLLBAR,
+            1278.0,
+            "six columns, 1272..1277"
+        );
         // The reserve is ten, which is the same ten the dialog bodies are broken
         // for: two, six, two. `DIALOG_SCROLLBAR` is the number that has to keep
         // meaning "the room this bar takes", and it is asserted as the identity
@@ -14595,8 +15780,15 @@ mod tests {
         // to cover rather than the six the reference reserves, so the strip is
         // ten wide with the reference's six at its right-hand end.
         assert_eq!(ICED_BAR, 10.0);
-        assert!(ICED_BAR > SCROLLBAR, "a gutter narrower than the bar would show part of it");
-        assert_eq!(GUTTER_BAR + GUTTER, ICED_BAR, "four of the page's own ink, then the gutter");
+        assert!(
+            ICED_BAR > SCROLLBAR,
+            "a gutter narrower than the bar would show part of it"
+        );
+        assert_eq!(
+            GUTTER_BAR + GUTTER,
+            ICED_BAR,
+            "four of the page's own ink, then the gutter"
+        );
         assert_eq!(GUTTER, 6.0, "x=974..979, six columns of the reserved band");
     }
 
@@ -14626,7 +15818,11 @@ mod tests {
         // on the pane's left edge (`ref/user-ref.png`, `y=300`) and the reserved
         // band's two on the pane's right edge (`x=974`, `x=975`).
         assert_eq!(under(SHADOW_HARD), (0x15, 0x17, 0x1A), "x=65, y=49");
-        assert_eq!(under(SHADOW_MID), (0x15, 0x17, 0x1B), "x=66..71, y=50..55, x=975..979");
+        assert_eq!(
+            under(SHADOW_MID),
+            (0x15, 0x17, 0x1B),
+            "x=66..71, y=50..55, x=975..979"
+        );
         assert_eq!(under(SHADOW_SOFT), (0x16, 0x18, 0x1B), "x=72, y=56, x=974");
         // And under nothing, the page's own `--surface-1`, which is what the
         // reference measures at x=964..973 and at x=73 / y=57.
@@ -14651,13 +15847,19 @@ mod tests {
         use iced::widget::scrollable::StyleSheet as _;
         let bar = Bar { theme: Gen::Dark };
         let appearance = bar.active(&widget_theme(Gen::Dark));
-        assert!(appearance.scrollbar.background.is_none(), "the track is transparent");
+        assert!(
+            appearance.scrollbar.background.is_none(),
+            "the track is transparent"
+        );
         assert_eq!(
             theme_gen::ink_rgba(Gen::Dark, Ink::Scrollbar),
             [0x42, 0x44, 0x4a, 0xff],
             "the handle is the reference's own --color-scrollbar"
         );
-        assert_eq!(appearance.scrollbar.scroller.color, theme_gen::ink(Gen::Dark, Ink::Scrollbar));
+        assert_eq!(
+            appearance.scrollbar.scroller.color,
+            theme_gen::ink(Gen::Dark, Ink::Scrollbar)
+        );
         // Fully rounded ends: a radius wider than half the bar is half the bar,
         // which is what `--radius-lg` (1rem) comes to on a six-pixel box.
         assert!(SCROLLBAR / 3.0 <= SCROLLBAR / 2.0);
@@ -14672,8 +15874,7 @@ mod tests {
             bar.dragging(&widget_theme(Gen::Dark)),
         ] {
             assert_eq!(
-                other.scrollbar.scroller.color,
-                appearance.scrollbar.scroller.color,
+                other.scrollbar.scroller.color, appearance.scrollbar.scroller.color,
                 "there is no measured hover colour to draw"
             );
             assert!(other.scrollbar.background.is_none());
@@ -14710,7 +15911,10 @@ mod tests {
                 Gen::Dark,
                 &settings(!panel, true, true),
             );
-            press(&mut shell, Message::Viewport(iced::Size::new(1280.0, 720.0)));
+            press(
+                &mut shell,
+                Message::Viewport(iced::Size::new(1280.0, 720.0)),
+            );
             assert_eq!(shell.panel_shown(), panel, "{address}");
             let pane = 1280.0 - RAIL - if panel { PANEL } else { 0.0 };
             // The page's region ends at the pane's right edge, so iced's bar is
@@ -14725,7 +15929,11 @@ mod tests {
             // at 1280x720 with the panel up is `x=980`: the strip owns
             // `970..980`, which is exactly the ten columns iced's default bar
             // occupied at `x=970..979` in the audit's capture.
-            assert_eq!(RAIL + shell.pane_gutter_at().x + ICED_BAR, RAIL + pane, "{address}");
+            assert_eq!(
+                RAIL + shell.pane_gutter_at().x + ICED_BAR,
+                RAIL + pane,
+                "{address}"
+            );
             // The strip can only ever cover padding, because a page's own inset
             // keeps content clear of the pane's edge by more than the bar's
             // width. `p-6` is the library pages' and sixteen is Skins', so the
@@ -14752,9 +15960,16 @@ mod tests {
                     Gen::Dark,
                     &settings(!panel, true, true),
                 );
-                press(&mut shell, Message::Viewport(iced::Size::new(width, height)));
+                press(
+                    &mut shell,
+                    Message::Viewport(iced::Size::new(width, height)),
+                );
                 let pane = width - RAIL - if panel { PANEL } else { 0.0 };
-                assert_eq!(shell.pane_gutter_at().x + ICED_BAR, pane, "{width}x{height} panel={panel}");
+                assert_eq!(
+                    shell.pane_gutter_at().x + ICED_BAR,
+                    pane,
+                    "{width}x{height} panel={panel}"
+                );
                 assert!(pane > ICED_BAR, "the pane is wider than the strip it draws");
                 drop(shell.render());
             }
@@ -14782,7 +15997,10 @@ mod tests {
                     Gen::Dark,
                     &settings(!panel, true, true),
                 );
-                press(&mut shell, Message::Viewport(iced::Size::new(1280.0, 720.0)));
+                press(
+                    &mut shell,
+                    Message::Viewport(iced::Size::new(1280.0, 720.0)),
+                );
                 let page = 1280.0 - RAIL - if panel { PANEL } else { 0.0 };
                 assert_eq!(
                     shell.page_overlay(shell.theme, page).is_some(),

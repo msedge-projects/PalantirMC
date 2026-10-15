@@ -257,12 +257,12 @@ impl<'a> Arguments<'a> {
 /// The last two should not happen -- the generator refuses a locale it cannot
 /// render -- and returning `None` rather than a guess is what makes them a
 /// fallback instead of a wrong sentence if they ever do.
-pub fn render<'a>(
-    key: crate::text_gen::Key,
-    args: &'a [(&'a str, Value<'a>)],
-) -> Option<String> {
+pub fn render<'a>(key: crate::text_gen::Key, args: &'a [(&'a str, Value<'a>)]) -> Option<String> {
     let template = crate::locale::lookup(key)?;
-    let arguments = Arguments { language: crate::locale::active().language, values: args };
+    let arguments = Arguments {
+        language: crate::locale::active().language,
+        values: args,
+    };
     let mut out = String::new();
     walk(template, &arguments, None, &mut out)?;
     Some(out)
@@ -427,7 +427,10 @@ fn arms(parts: &[String], _kind: &str) -> Option<Vec<(String, String)>> {
         if index >= chars.len() {
             break;
         }
-        let brace = chars[index..].iter().position(|character| *character == '{')? + index;
+        let brace = chars[index..]
+            .iter()
+            .position(|character| *character == '{')?
+            + index;
         let key: String = chars[index..brace].iter().collect();
         let key = key.trim().to_string();
         if key.is_empty() {
@@ -450,7 +453,11 @@ fn arms(parts: &[String], _kind: &str) -> Option<Vec<(String, String)>> {
 /// taking the first match is that rule -- `other` is skipped in the walk and
 /// returned separately, because it matches everything and would otherwise shadow
 /// every category below it.
-fn choose(arms: &[(String, String)], wanted: &str, exact: Option<u64>) -> (Option<String>, Option<String>) {
+fn choose(
+    arms: &[(String, String)],
+    wanted: &str,
+    exact: Option<u64>,
+) -> (Option<String>, Option<String>) {
     let mut other = None;
     for (key, body) in arms {
         if key == "other" {
@@ -495,7 +502,11 @@ pub fn tagged<'a>(message: &'a str, tag: &str) -> Option<(&'a str, &'a str, &'a 
     let start = message.find(&open)?;
     let rest = start + open.len();
     let end = rest + message.get(rest..)?.find(&close)?;
-    Some((&message[..start], &message[rest..end], &message[end + close.len()..]))
+    Some((
+        &message[..start],
+        &message[rest..end],
+        &message[end + close.len()..],
+    ))
 }
 
 /// A message's `{name}` placeholder, and the sentence on either side of it.
@@ -564,7 +575,10 @@ mod tests {
         assert_eq!(slot, "Sign in to a Modrinth account");
         assert_eq!(after, " to add friends and see what they're playing!");
         // Text on both sides, which is the shape most tagged copy has.
-        assert_eq!(tagged("a <b>bold</b> word", "b"), Some(("a ", "bold", " word")));
+        assert_eq!(
+            tagged("a <b>bold</b> word", "b"),
+            Some(("a ", "bold", " word"))
+        );
         // A tag nobody asked for is not a slot, and neither is a tag that was
         // opened and never closed: half a sentence is worse than none.
         assert_eq!(tagged("a <b>bold</b> word", "link"), None);
@@ -581,7 +595,13 @@ mod tests {
 
     #[test]
     fn the_english_rule_is_one_for_one_and_other_for_everything_else() {
-        for (value, one) in [(0u64, false), (1, true), (2, false), (11, false), (100, false)] {
+        for (value, one) in [
+            (0u64, false),
+            (1, true),
+            (2, false),
+            (11, false),
+            (100, false),
+        ] {
             let plural = Plural::Number(value);
             assert_eq!(plural.is("one"), one, "{value}");
             assert_eq!(plural.is("other"), !one, "{value}");
@@ -596,7 +616,11 @@ mod tests {
         assert!(!compacted.is("one"));
         assert!(compacted.is("other"));
         assert_eq!(compacted.bare(), "1.2K");
-        assert_eq!(compacted.grouped(), "1.2K", "a category is already formatted");
+        assert_eq!(
+            compacted.grouped(),
+            "1.2K",
+            "a category is already formatted"
+        );
         let one = Plural::Category("one");
         assert!(one.is("one"));
         assert!(!one.is("other"));
@@ -666,7 +690,10 @@ mod tests {
         let three = render_count(3);
         assert_ne!(zero, two, "zero and two are different arms");
         assert_ne!(two, three, "two and few are different arms");
-        assert!(three.contains('3'), "`#` is the count it belongs to: {three}");
+        assert!(
+            three.contains('3'),
+            "`#` is the count it belongs to: {three}"
+        );
         assert!(zero.contains("لقطة"), "the Arabic arm: {zero}");
 
         // Russian has one/few/many, and the digit is there in each.

@@ -109,7 +109,9 @@ fn pressing(state: Pointer, event: &Event) -> Option<bool> {
     }
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => changed(state.down, true),
-        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => changed(state.down, false),
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+            changed(state.down, false)
+        }
         _ => None,
     }
 }
@@ -193,12 +195,9 @@ where
         renderer: &Renderer,
         operation: &mut dyn iced::advanced::widget::Operation<Message>,
     ) {
-        self.content.as_widget().operate(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            operation,
-        );
+        self.content
+            .as_widget()
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn on_event(
@@ -322,8 +321,16 @@ mod tests {
     #[test]
     fn a_crossing_is_reported_only_when_the_side_changes() {
         assert_eq!(crossing(false, true), Some(true), "an arrival is reported");
-        assert_eq!(crossing(true, false), Some(false), "a departure is reported");
-        assert_eq!(crossing(false, false), None, "moving inside must not report");
+        assert_eq!(
+            crossing(true, false),
+            Some(false),
+            "a departure is reported"
+        );
+        assert_eq!(
+            crossing(false, false),
+            None,
+            "moving inside must not report"
+        );
         assert_eq!(crossing(true, true), None, "moving outside must not report");
     }
 
@@ -362,16 +369,32 @@ mod tests {
 
     #[test]
     fn a_press_is_reported_on_the_way_down_and_the_way_up() {
-        let over = Pointer { over: true, down: false };
+        let over = Pointer {
+            over: true,
+            down: false,
+        };
         assert_eq!(pressing(over, &press()), Some(true), "down on the control");
-        let held = Pointer { over: true, down: true };
+        let held = Pointer {
+            over: true,
+            down: true,
+        };
         assert_eq!(pressing(held, &release()), Some(false), "and up on it");
         // The events in between are the moves a held button generates, and
         // none of them is a change.
         assert_eq!(pressing(held, &press()), None, "a repeat is not a press");
-        assert_eq!(pressing(over, &release()), None, "a release that was never ours");
         assert_eq!(
-            pressing(Pointer { over: false, down: false }, &press()),
+            pressing(over, &release()),
+            None,
+            "a release that was never ours"
+        );
+        assert_eq!(
+            pressing(
+                Pointer {
+                    over: false,
+                    down: false
+                },
+                &press()
+            ),
             None,
             "a press outside the control is not its press"
         );
@@ -386,8 +409,14 @@ mod tests {
             mouse::Button::Middle,
             mouse::Button::Other(4),
         ] {
-            let over = Pointer { over: true, down: false };
-            assert_eq!(pressing(over, &Event::Mouse(mouse::Event::ButtonPressed(button))), None);
+            let over = Pointer {
+                over: true,
+                down: false,
+            };
+            assert_eq!(
+                pressing(over, &Event::Mouse(mouse::Event::ButtonPressed(button))),
+                None
+            );
         }
     }
 
@@ -397,12 +426,21 @@ mod tests {
         // puts the control back at rest — so the wrapper drops the hold rather
         // than publishing a release that would light a control the hand is not
         // on. After the leave, the release that follows is not ours.
-        let mut state = Pointer { over: true, down: true };
+        let mut state = Pointer {
+            over: true,
+            down: true,
+        };
         if let Some(over) = crossing(state.over, false) {
             state.over = over;
             state.down = false;
         }
-        assert_eq!(state, Pointer { over: false, down: false });
+        assert_eq!(
+            state,
+            Pointer {
+                over: false,
+                down: false
+            }
+        );
         assert_eq!(pressing(state, &release()), None);
     }
 }

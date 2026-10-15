@@ -26,8 +26,8 @@ use std::time::Duration;
 
 use palantir_net::engine::{
     next_event, Backoff, Cancel, Digest, Download, Event, Fetch, HttpPool, InstallerMeta, Job,
-    JobId, LoaderMeta, MetadataCache, PistonMeta, Scheduler, DEFAULT_LIMIT, DEFAULT_TTL,
-    DEFAULT_TIMEOUT,
+    JobId, LoaderMeta, MetadataCache, PistonMeta, Scheduler, DEFAULT_LIMIT, DEFAULT_TIMEOUT,
+    DEFAULT_TTL,
 };
 
 /// One file to fetch, and the digest that says it arrived.
@@ -82,7 +82,10 @@ impl Wire {
     /// The directory is the caller's rather than one chosen here, because a
     /// second cache is a second set of stale answers nobody knows about.
     pub fn new(cache_dir: impl Into<PathBuf>) -> Wire {
-        Wire::over(cache_dir, Arc::new(HttpPool::new(DEFAULT_LIMIT, DEFAULT_TIMEOUT)))
+        Wire::over(
+            cache_dir,
+            Arc::new(HttpPool::new(DEFAULT_LIMIT, DEFAULT_TIMEOUT)),
+        )
     }
 
     /// The same wire over an explicit client and directory.
@@ -170,7 +173,9 @@ impl Wire {
             }
             match Digest::parse(&job.digest) {
                 Ok(digest) => queued.push((index, Download::checked(&job.url, &job.dest, digest))),
-                Err(_) => results[index] = Some(Err(format!("{}: not a digest", job.dest.display()))),
+                Err(_) => {
+                    results[index] = Some(Err(format!("{}: not a digest", job.dest.display())))
+                }
             }
         }
         let refused = jobs.len() - queued.len();
@@ -181,10 +186,12 @@ impl Wire {
             report(refused, 0);
         }
         if queued.is_empty() {
-            return results.into_iter().map(|result| result.unwrap_or(Ok(0))).collect();
+            return results
+                .into_iter()
+                .map(|result| result.unwrap_or(Ok(0)))
+                .collect();
         }
-        let (scheduler, events) =
-            Scheduler::new(self.fetch.clone(), workers.max(1), self.backoff);
+        let (scheduler, events) = Scheduler::new(self.fetch.clone(), workers.max(1), self.backoff);
         let ids: Vec<(JobId, usize)> = queued
             .iter()
             .map(|(index, download)| (scheduler.submit(Job::new(download.clone())), *index))
@@ -245,7 +252,9 @@ mod tests {
 
     /// A directory of this test's own, emptied first.
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("palantirmc-wire-tests").join(name);
+        let dir = std::env::temp_dir()
+            .join("palantirmc-wire-tests")
+            .join(name);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("a scratch directory");
         dir
@@ -293,10 +302,18 @@ mod tests {
         let jobs = [FileJob::new("https://cdn.invalid/asset", &dest, "")];
         let results = wire.files(&jobs, 1, &mut |_, _| {});
         assert_eq!(results[0], Ok(2048), "the other half came off the network");
-        assert_eq!(fs::read(&dest).expect("the file"), body, "and the file is whole");
+        assert_eq!(
+            fs::read(&dest).expect("the file"),
+            body,
+            "and the file is whole"
+        );
         let requests = fetch.requests();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].offset, Some(2048), "from where the part file stopped");
+        assert_eq!(
+            requests[0].offset,
+            Some(2048),
+            "from where the part file stopped"
+        );
     }
 
     #[test]
@@ -308,7 +325,11 @@ mod tests {
         let dest = dir.join("mod.jar");
         let fetch = Arc::new(MapFetch::new());
         let wire = Wire::over(dir.join("cache"), fetch.clone());
-        let jobs = [FileJob::new("https://cdn.invalid/mod.jar", &dest, "not-a-digest")];
+        let jobs = [FileJob::new(
+            "https://cdn.invalid/mod.jar",
+            &dest,
+            "not-a-digest",
+        )];
         let results = wire.files(&jobs, 1, &mut |_, _| {});
         assert!(results[0].is_err(), "{:?}", results[0]);
         assert_eq!(fetch.count(), 0, "the request was never made");

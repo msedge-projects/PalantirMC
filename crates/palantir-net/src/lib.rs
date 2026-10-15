@@ -49,10 +49,9 @@ pub mod modrinth;
 
 pub use auth::{
     file_part_name, msa_auth_session, skin_upload_body, xsts_message, AuthError,
-    BlockingHttpTransport, DeviceCodeResponse, HttpTransport, HttpResponse, MapTransport,
-    MinecraftCape, MinecraftSession, MinecraftSkin, MinecraftSkins, MicrosoftAuth,
-    MicrosoftOAuth, MsaToken, MultipartBody, OfflineSession, PollOutcome, SkinChange,
-    DEFAULT_MICROSOFT_CLIENT_ID,
+    BlockingHttpTransport, DeviceCodeResponse, HttpResponse, HttpTransport, MapTransport,
+    MicrosoftAuth, MicrosoftOAuth, MinecraftCape, MinecraftSession, MinecraftSkin, MinecraftSkins,
+    MsaToken, MultipartBody, OfflineSession, PollOutcome, SkinChange, DEFAULT_MICROSOFT_CLIENT_ID,
 };
 pub use download::{
     download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,
@@ -61,14 +60,13 @@ pub use download::{
 pub use engine::{
     artifact_path, component_uid, fetch_to_file, find_java, install, install_client, installer_url,
     is_retryable, maven_roots, maven_sha1, next_event, parse_installer, translate_profile, Backoff,
-    Build, Cancel, Cached, ClientInstall, ClientInstallReport, ContentStore, DataValue, Digest,
+    Build, Cached, Cancel, ClientInstall, ClientInstallReport, ContentStore, DataValue, Digest,
     Download, Downloaded, Event, Fetch, HttpPool, InstallCtx, InstallSpec, InstalledProcessor,
-    InstallerMeta, Job, JobId, Limit, Loader,
-    LoaderMeta, Manifest, ManifestVersion, MetadataCache, ModrinthApi, Outcome, ParsedInstaller,
-    PistonMeta, Processor, Request, Response, Scheduler, Search, Stored, CENTRAL_MAVEN,
-    CLIENT_SIDE, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL, DEFAULT_WORKERS, FORGE_MAVEN,
-    IMMUTABLE_TTL, MAX_BUILDS, MOJANG_LIBRARIES, NEOFORGE_MAVEN, PISTON_MANIFEST_URL, SEARCH_TTL,
-    USER_AGENT,
+    InstallerMeta, Job, JobId, Limit, Loader, LoaderMeta, Manifest, ManifestVersion, MetadataCache,
+    ModrinthApi, Outcome, ParsedInstaller, PistonMeta, Processor, Request, Response, Scheduler,
+    Search, Stored, CENTRAL_MAVEN, CLIENT_SIDE, DEFAULT_LIMIT, DEFAULT_TIMEOUT, DEFAULT_TTL,
+    DEFAULT_WORKERS, FORGE_MAVEN, IMMUTABLE_TTL, MAX_BUILDS, MOJANG_LIBRARIES, NEOFORGE_MAVEN,
+    PISTON_MANIFEST_URL, SEARCH_TTL, USER_AGENT,
 };
 pub use meta::{BlockingHttpFetcher, Fetcher, MapFetcher, OnlineMetaStore, DEFAULT_META_BASE_URL};
 pub use modrinth::{
@@ -164,7 +162,11 @@ impl Error {
     /// For a transport problem, where no status arrived. Use [`Error::status`]
     /// when the server answered.
     pub fn http(url: impl Into<String>, detail: impl Into<String>) -> Self {
-        Error::Http { url: url.into(), detail: detail.into(), status: None }
+        Error::Http {
+            url: url.into(),
+            detail: detail.into(),
+            status: None,
+        }
     }
 
     /// Build an HTTP error from a status code the server sent.
@@ -191,22 +193,35 @@ impl Error {
             Some(sentence) => format!("http status {status}: {sentence}"),
             None => format!("http status {status}"),
         };
-        Error::Http { url: url.into(), detail, status: Some(status) }
+        Error::Http {
+            url: url.into(),
+            detail,
+            status: Some(status),
+        }
     }
 
     /// Wrap an [`std::io::Error`] with path context.
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
-        Error::Io { path: path.into(), source }
+        Error::Io {
+            path: path.into(),
+            source,
+        }
     }
 
     /// Build a JSON error for `path` with a parser `detail` message.
     pub fn json(path: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Error::Json { path: path.into(), detail: detail.into() }
+        Error::Json {
+            path: path.into(),
+            detail: detail.into(),
+        }
     }
 
     /// Build a format error for `path` with a human-readable `detail`.
     pub fn format(path: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Error::Format { path: path.into(), detail: detail.into() }
+        Error::Format {
+            path: path.into(),
+            detail: detail.into(),
+        }
     }
 
     /// Build a hash-mismatch error for `path`.
@@ -215,7 +230,11 @@ impl Error {
         expected: impl Into<String>,
         actual: impl Into<String>,
     ) -> Self {
-        Error::HashMismatch { path: path.into(), expected: expected.into(), actual: actual.into() }
+        Error::HashMismatch {
+            path: path.into(),
+            expected: expected.into(),
+            actual: actual.into(),
+        }
     }
 
     /// Convert into the [`palantir_core::error::Error`] seam.
@@ -236,9 +255,14 @@ impl Error {
                 PathBuf::from("<cancelled>"),
                 "the transfer was cancelled",
             ),
-            Error::HashMismatch { path, expected, actual } => {
-                palantir_core::error::Error::format(path, format!("sha256 mismatch: expected {expected}, got {actual}"))
-            }
+            Error::HashMismatch {
+                path,
+                expected,
+                actual,
+            } => palantir_core::error::Error::format(
+                path,
+                format!("sha256 mismatch: expected {expected}, got {actual}"),
+            ),
         }
     }
 }
@@ -259,7 +283,11 @@ mod tests {
     fn http_constructor_roundtrips_fields() {
         let e = Error::http("https://example.invalid/x.json", "timeout");
         match e {
-            Error::Http { url, detail, status } => {
+            Error::Http {
+                url,
+                detail,
+                status,
+            } => {
                 assert_eq!(url, "https://example.invalid/x.json");
                 assert_eq!(detail, "timeout");
                 // A transport problem never got an answer, so it has no status.
@@ -365,9 +393,8 @@ mod tests {
 
     #[test]
     fn from_impl_delegates_to_into_core() {
-        let core: palantir_core::error::Error = palantir_core::error::Error::from(
-            Error::format("/tmp/x", "via-from"),
-        );
+        let core: palantir_core::error::Error =
+            palantir_core::error::Error::from(Error::format("/tmp/x", "via-from"));
         match core {
             palantir_core::error::Error::Format { detail, .. } => assert_eq!(detail, "via-from"),
             _ => panic!("expected core Format"),

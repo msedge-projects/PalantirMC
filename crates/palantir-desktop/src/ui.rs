@@ -41,15 +41,17 @@ use crate::pages::overlay::Stack;
 use iced::advanced::text::Renderer as TextRenderer;
 use iced::widget::text::{Shaping, StyleSheet as TextStyle};
 use iced::widget::{column, container, image, mouse_area, row, text_input, Space, Text};
+use iced::{mouse::Interaction, Theme};
 use iced::{Alignment, Background, Border, Color, ContentFit, Element, Length, Padding};
-use iced::{Theme, mouse::Interaction};
 
 use crate::anim;
 use crate::avatar;
 use crate::icon;
 use crate::icons_gen::Glyph;
 use crate::page::ROW_GAP;
-use crate::style::{heading, inter, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
+use crate::style::{
+    heading, inter, medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY,
+};
 use crate::text_gen::Key;
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
 
@@ -155,10 +157,20 @@ const TRACKED: [(&str, f32, iced::font::Weight, f32); 6] = [
     ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT, 0.5686),
     // `ButtonFrame.vue`'s `lg` `text-base font-semibold`, measured on
     // `/hosting/manage`; 0.1806 is the fit, and 0.1818 is what its 150.0 box asks.
-    ("New server", Size::Lg.label(), iced::font::Weight::Semibold, 0.1806),
+    (
+        "New server",
+        Size::Lg.label(),
+        iced::font::Weight::Semibold,
+        0.1806,
+    ),
     // `TagItem.vue`'s `text-sm font-normal`, measured on the first card of
     // `/user/FlameFire`.
-    ("Client and server", TAG_LABEL_SIZE, iced::font::Weight::Normal, 0.1598),
+    (
+        "Client and server",
+        TAG_LABEL_SIZE,
+        iced::font::Weight::Normal,
+        0.1598,
+    ),
     // The card's own *Install to instance*, at `ButtonFrame`'s `md`. Its extra is
     // not fitted from glyph origins the way the four above are -- it is derived,
     // because the reference's box is 189 wide and `md`'s chrome is `px-2.5` twice
@@ -172,7 +184,12 @@ const TRACKED: [(&str, f32, iced::font::Weight, f32); 6] = [
     // cards used to add `521 + 6 - 1` to their summary column to cover this
     // button being six pixels narrow, and with the button right the column is
     // the 521 the grid derives.
-    ("Install to instance", Size::Md.label(), iced::font::Weight::Semibold, 0.3467),
+    (
+        "Install to instance",
+        Size::Md.label(),
+        iced::font::Weight::Semibold,
+        0.3467,
+    ),
 ];
 
 /// What [`tracking`] is asked for, and [`TRACKED`]'s own lookup.
@@ -343,7 +360,12 @@ fn shape_width_in(
     let mut buffer =
         cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(size, size * LEADING));
     buffer.set_size(system, MEASURE_SPAN, MEASURE_SPAN);
-    buffer.set_text(system, label, to_attributes(font), cosmic_text::Shaping::Advanced);
+    buffer.set_text(
+        system,
+        label,
+        to_attributes(font),
+        cosmic_text::Shaping::Advanced,
+    );
     buffer.shape_until_scroll(system);
     measure(&buffer).width
 }
@@ -368,7 +390,12 @@ fn glyph_pens(label: &str, font: iced::Font, size: f32) -> (Vec<f32>, f32) {
     let mut buffer =
         cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(size, size * LEADING));
     buffer.set_size(system, MEASURE_SPAN, MEASURE_SPAN);
-    buffer.set_text(system, label, to_attributes(font), cosmic_text::Shaping::Advanced);
+    buffer.set_text(
+        system,
+        label,
+        to_attributes(font),
+        cosmic_text::Shaping::Advanced,
+    );
     buffer.shape_until_scroll(system);
     let total = measure(&buffer).width;
     // Which character each byte offset belongs to, so a cluster's byte index out
@@ -487,10 +514,14 @@ pub trait Hovered: Sized {
 /// identities -- one per card the user has ever seen -- rather than per-frame
 /// values.
 pub fn scoped(namespace: &str, id: &str) -> &'static str {
-    static NAMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, &'static str>>> =
-        std::sync::OnceLock::new();
+    static NAMES: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, &'static str>>,
+    > = std::sync::OnceLock::new();
     let name = format!("{namespace}:{id}");
-    let mut table = match NAMES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())).lock() {
+    let mut table = match NAMES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+    {
         Ok(table) => table,
         // A poisoned table is a panic that happened while a name was being
         // looked up. Recover rather than refusing to draw the control.
@@ -516,11 +547,19 @@ macro_rules! hovered {
     ($message:ty) => {
         impl $crate::ui::Hovered for $message {
             fn hover(key: &'static str, over: bool) -> Self {
-                Self::Hover { key, over, hover: None }
+                Self::Hover {
+                    key,
+                    over,
+                    hover: None,
+                }
             }
 
             fn hover_with(key: &'static str, over: bool, hover: f32) -> Self {
-                Self::Hover { key, over, hover: Some(hover) }
+                Self::Hover {
+                    key,
+                    over,
+                    hover: Some(hover),
+                }
             }
         }
     };
@@ -560,7 +599,13 @@ pub fn selection(key: &'static str, selected: bool, timing: crate::motion::Timin
         Ok(mut clock) => clock.selection(key, selected, timing, std::time::Instant::now()),
         // A poisoned clock is a panic that happened while a tween was being
         // read. Draw the selected state rather than propagating it.
-        Err(_) => if selected { 1.0 } else { 0.0 },
+        Err(_) => {
+            if selected {
+                1.0
+            } else {
+                0.0
+            }
+        }
     }
 }
 
@@ -889,7 +934,10 @@ pub fn icon_box<'a, Message: 'a>(
 }
 
 /// A card: `--surface-3`, `--radius-lg`, a `--surface-4` hairline.
-pub fn card<'a, Message: 'a>(theme: Gen, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+pub fn card<'a, Message: 'a>(
+    theme: Gen,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
     card_at(theme, 1.0, content)
 }
 
@@ -931,7 +979,12 @@ pub fn framed<'a, Message: 'a>(
     container(content)
         .width(Length::Fill)
         .height(Length::Fixed(CONTROL))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 12.0 })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: 12.0,
+            right: 12.0,
+        })
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
             // `--base` is the reference's sunken surface and the one its search
@@ -1129,7 +1182,11 @@ pub fn is_loader_tag(tag: &str) -> bool {
     // that tag both its glyph and its *BTA (Babric)* label, because both are the
     // one message. Named here rather than worked around at the call site, because
     // the exception is upstream's and there is exactly one of it.
-    let message = if tag == "bta-fabric" { "bta-babric" } else { tag };
+    let message = if tag == "bta-fabric" {
+        "bta-babric"
+    } else {
+        tag
+    };
     crate::text_gen::from_name(&format!("tag.loader.{message}")).is_some()
 }
 
@@ -1300,7 +1357,10 @@ impl Field {
     /// A field that paints its own frame, for a caller that is not building one
     /// of this module's rows around it -- the shell's create dialog is one.
     pub fn bordered(theme: Gen) -> Field {
-        Field { theme, chrome: Chrome::Bordered }
+        Field {
+            theme,
+            chrome: Chrome::Bordered,
+        }
     }
 }
 
@@ -1384,16 +1444,28 @@ pub fn search<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let field = text_input(placeholder, value)
         .on_input(on_input)
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 0.0, right: 0.0 })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+            right: 0.0,
+        })
         .size(14.0)
         .font(medium())
-        .style(iced::theme::TextInput::Custom(Box::new(Field { theme, chrome: Chrome::Bare })));
-     framed(
+        .style(iced::theme::TextInput::Custom(Box::new(Field {
+            theme,
+            chrome: Chrome::Bare,
+        })));
+    framed(
         theme,
         row![]
             .align_items(Alignment::Center)
             .spacing(ROW_GAP)
-            .push(icon::icon(Glyph::Search, CONTROL_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+            .push(icon::icon(
+                Glyph::Search,
+                CONTROL_ICON,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ))
             .push(field),
     )
 }
@@ -1546,21 +1618,33 @@ pub fn select<'a, Message: Clone + Hovered + 'a>(
                 text(value.to_string())
                     .size(TRIGGER_TEXT)
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST
+                    ))),
             ]
             .align_items(Alignment::Center)
             .spacing(TRIGGER_VALUE_GAP),
         )
         .push(Space::with_width(Length::Fill))
         .push(icon::icon(
-            if open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+            if open {
+                Glyph::ChevronUp
+            } else {
+                Glyph::ChevronDown
+            },
             TRIGGER_CHEVRON,
             theme_gen::ink(theme, INK_CONTRAST),
         ));
     let trigger: Element<'a, Message> = container(body)
         .width(Length::Fill)
         .height(Length::Fixed(TRIGGER_HEIGHT))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: TRIGGER_PAD, right: TRIGGER_PAD })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: TRIGGER_PAD,
+            right: TRIGGER_PAD,
+        })
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface4))),
@@ -1738,8 +1822,15 @@ fn menu_shadow_rings() -> Vec<(f32, f32)> {
     // The depth each band is drawn to: the core first, then one band per step
     // outwards to the edge of the fade.
     let mut depths: Vec<f32> = Vec::with_capacity(MENU_SHADOW_RINGS + 1);
-    depths.push(MENU_SHADOW_ALPHA *
-        (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, MENU_SHADOW_SPREAD / 2.0)));
+    depths.push(
+        MENU_SHADOW_ALPHA
+            * (1.0
+                - smoothstep(
+                    -MENU_SHADOW_FADE,
+                    MENU_SHADOW_FADE,
+                    MENU_SHADOW_SPREAD / 2.0,
+                )),
+    );
     for band in 1..=MENU_SHADOW_RINGS {
         let d = (band as f32 - 0.5) * step;
         depths.push(MENU_SHADOW_ALPHA * (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, d)));
@@ -1843,19 +1934,22 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
                 .line_height(iced::Pixels(MENU_LINE))
                 .font(semibold())
                 .style(iced::theme::Text::Color(ink))]
-                .width(Length::Fill)
-                .align_items(Alignment::Center)
-                .padding(Padding {
-                    top: MENU_PAD_V,
-                    bottom: MENU_PAD_V,
-                    left: MENU_PAD_H,
-                    right: MENU_PAD_H,
-                }),
+            .width(Length::Fill)
+            .align_items(Alignment::Center)
+            .padding(Padding {
+                top: MENU_PAD_V,
+                bottom: MENU_PAD_V,
+                left: MENU_PAD_H,
+                right: MENU_PAD_H,
+            }),
         )
         .width(Length::Fill)
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(plate)),
-            border: Border { radius: radius.into(), ..Border::default() },
+            border: Border {
+                radius: radius.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         })
         .into();
@@ -1872,7 +1966,12 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
     // options inside it -- so they are inset here by the same pixel.
     let panel = container(list)
         .width(Length::Fixed(width))
-        .padding(Padding { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 })
+        .padding(Padding {
+            top: 1.0,
+            bottom: 1.0,
+            left: 1.0,
+            right: 1.0,
+        })
         .style(move |_theme: &Theme| menu_panel(theme));
     // Two hairlines and one option per choice: the panel's own height, which is
     // what the box under the shadow has to know to reserve the halo's room.
@@ -1896,12 +1995,10 @@ pub fn select_menu<'a, Message: Clone + Hovered + 'a, L: AsRef<str>>(
     // by twice it, with the shape's own radius grown the same way.
     let inset = -MENU_SHADOW_SPREAD;
     for (reach, alpha) in menu_shadow_rings() {
-        let ring: Element<'a, Message> = container(
-            Space::new(
-                Length::Fixed(width - 2.0 * inset + 2.0 * reach),
-                Length::Fixed(height - 2.0 * inset + 2.0 * reach),
-            ),
-        )
+        let ring: Element<'a, Message> = container(Space::new(
+            Length::Fixed(width - 2.0 * inset + 2.0 * reach),
+            Length::Fixed(height - 2.0 * inset + 2.0 * reach),
+        ))
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, alpha))),
             border: Border {
@@ -1974,14 +2071,22 @@ pub fn switch<'a, Message: Clone + 'a>(
         // `bg-black/90`, which is a colour rather than a token: the reference
         // paints the knob with a literal translucent black on both themes it
         // travels across.
-        Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 }
+        Color {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.9,
+        }
     } else {
         theme_gen::ink(theme, INK_SECONDARY)
     };
     let knob = container(Space::new(Length::Fixed(KNOB), Length::Fixed(KNOB))).style(
         move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(knob_ink)),
-            border: Border { radius: (KNOB / 2.0).into(), ..Border::default() },
+            border: Border {
+                radius: (KNOB / 2.0).into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         },
     );
@@ -1989,7 +2094,12 @@ pub fn switch<'a, Message: Clone + 'a>(
         .align_items(Alignment::Center)
         .width(Length::Fixed(TRACK_W))
         .height(Length::Fixed(TRACK_H))
-        .padding(Padding { top: INSET, bottom: INSET, left: INSET, right: INSET });
+        .padding(Padding {
+            top: INSET,
+            bottom: INSET,
+            left: INSET,
+            right: INSET,
+        });
     track = if on {
         track.push(Space::with_width(Length::Fill)).push(knob)
     } else {
@@ -2040,7 +2150,10 @@ pub fn disabled_switch<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     let knob = container(Space::new(Length::Fixed(KNOB), Length::Fixed(KNOB))).style(
         move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(knob)),
-            border: Border { radius: (KNOB / 2.0).into(), ..Border::default() },
+            border: Border {
+                radius: (KNOB / 2.0).into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         },
     );
@@ -2049,7 +2162,12 @@ pub fn disabled_switch<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
             .align_items(Alignment::Center)
             .width(Length::Fixed(TRACK_W))
             .height(Length::Fixed(TRACK_H))
-            .padding(Padding { top: INSET, bottom: INSET, left: INSET, right: INSET })
+            .padding(Padding {
+                top: INSET,
+                bottom: INSET,
+                left: INSET,
+                right: INSET,
+            })
             .push(knob)
             .push(Space::with_width(Length::Fill)),
     )
@@ -2233,7 +2351,11 @@ fn button_face<'a, Message: Clone + Hovered + 'a>(
         ),
         Kind::Quiet => (None, None, theme_gen::ink(theme, INK_CONTRAST)),
     };
-    let ink = if usable { ink } else { crate::style::faded(ink) };
+    let ink = if usable {
+        ink
+    } else {
+        crate::style::faded(ink)
+    };
     let background = background
         .map(|background| match background {
             Background::Color(color) => Background::Color(crate::theme::brightness(color, factor)),
@@ -2248,7 +2370,12 @@ fn button_face<'a, Message: Clone + Hovered + 'a>(
     let face = container(face(crate::theme::brightness(ink, factor)))
         .width(width)
         .height(Length::Fixed(CONTROL))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: BUTTON_PAD, right: BUTTON_PAD })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: BUTTON_PAD,
+            right: BUTTON_PAD,
+        })
         // Centred on both axes because a button's face is `justify-center` in the
         // reference whatever the slot holds; `center_x` is the one the full-width
         // buttons need, and on a shrinking one it changes nothing.
@@ -2325,14 +2452,24 @@ pub fn button_or_sized<'a, Message: Clone + Hovered + 'a>(
     size: Size,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    sized_face(theme, key, kind, size, Length::Shrink, false, false, on_press, move |ink| {
-        text(label.message())
-            .size(size.label())
-            .line_height(iced::Pixels(size.line()))
-            .font(size.font())
-            .style(iced::theme::Text::Color(ink))
-            .into()
-    })
+    sized_face(
+        theme,
+        key,
+        kind,
+        size,
+        Length::Shrink,
+        false,
+        false,
+        on_press,
+        move |ink| {
+            text(label.message())
+                .size(size.label())
+                .line_height(iced::Pixels(size.line()))
+                .font(size.font())
+                .style(iced::theme::Text::Color(ink))
+                .into()
+        },
+    )
 }
 
 /// The same button with a label that is a string rather than a generated key.
@@ -2351,14 +2488,24 @@ pub fn button_text_sized<'a, Message: Clone + Hovered + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let label = label.to_string();
-    sized_face(theme, key, kind, size, Length::Shrink, false, false, Some(on_press), move |ink| {
-        text(label.clone())
-            .size(size.label())
-            .line_height(iced::Pixels(size.line()))
-            .font(size.font())
-            .style(iced::theme::Text::Color(ink))
-            .into()
-    })
+    sized_face(
+        theme,
+        key,
+        kind,
+        size,
+        Length::Shrink,
+        false,
+        false,
+        Some(on_press),
+        move |ink| {
+            text(label.clone())
+                .size(size.label())
+                .line_height(iced::Pixels(size.line()))
+                .font(size.font())
+                .style(iced::theme::Text::Color(ink))
+                .into()
+        },
+    )
 }
 
 /// A button at one row of [`Size`] with an icon in front of its label, at the
@@ -2373,20 +2520,30 @@ pub fn button_with_icon_sized<'a, Message: Clone + Hovered + 'a>(
     width: Length,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    sized_face(theme, key, kind, size, width, false, false, on_press, move |ink| {
-        row![]
-            .spacing(size.gap())
-            .align_items(Alignment::Center)
-            .push(icon::icon(glyph, size.icon(), ink))
-            .push(tracked_text(
-                label.message(),
-                size.font(),
-                size.label(),
-                Some(size.line()),
-                ink,
-            ))
-            .into()
-    })
+    sized_face(
+        theme,
+        key,
+        kind,
+        size,
+        width,
+        false,
+        false,
+        on_press,
+        move |ink| {
+            row![]
+                .spacing(size.gap())
+                .align_items(Alignment::Center)
+                .push(icon::icon(glyph, size.icon(), ink))
+                .push(tracked_text(
+                    label.message(),
+                    size.font(),
+                    size.label(),
+                    Some(size.line()),
+                    ink,
+                ))
+                .into()
+        },
+    )
 }
 
 /// A square icon button: `IconButton.vue`, which is `ButtonFrame` with
@@ -2404,9 +2561,17 @@ pub fn icon_button_sized<'a, Message: Clone + Hovered + 'a>(
     size: Size,
     on_press: Message,
 ) -> Element<'a, Message> {
-    sized_face(theme, key, kind, size, Length::Shrink, true, true, Some(on_press), move |ink| {
-        icon::icon(glyph, size.icon(), ink)
-    })
+    sized_face(
+        theme,
+        key,
+        kind,
+        size,
+        Length::Shrink,
+        true,
+        true,
+        Some(on_press),
+        move |ink| icon::icon(glyph, size.icon(), ink),
+    )
 }
 
 /// The face of a button at one row of [`Size`]: its frame, its fill, and the
@@ -2467,9 +2632,18 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
         Some(color) => Some(color),
         // Transparent at rest, so a quiet or outlined button keeps the surface
         // it sits on until the pointer arrives.
-        None => Some(Color { a: amount, ..theme_gen::ink(theme, Ink::Surface4) }),
+        None => Some(Color {
+            a: amount,
+            ..theme_gen::ink(theme, Ink::Surface4)
+        }),
     };
-    let dim = |color: Color| if usable { color } else { crate::style::at_opacity(color, 0.5) };
+    let dim = |color: Color| {
+        if usable {
+            color
+        } else {
+            crate::style::at_opacity(color, 0.5)
+        }
+    };
     let ink = crate::theme::brightness(dim(ink), factor);
     let fill = fill.map(|color| Background::Color(crate::theme::brightness(dim(color), factor)));
     let ring = ring.map(|color| crate::theme::brightness(dim(color), factor));
@@ -2477,7 +2651,11 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
         // `w-7`..`w-12` and `!px-0` on an icon-only button: the width is the
         // row's own height and the padding is gone, which is what makes it a
         // square -- a circle once `rounded-full` is on it.
-        .width(if icon_only { Length::Fixed(size.square()) } else { width })
+        .width(if icon_only {
+            Length::Fixed(size.square())
+        } else {
+            width
+        })
         .height(Length::Fixed(size.height()))
         .padding(Padding {
             top: 0.0,
@@ -2499,7 +2677,11 @@ fn sized_face<'a, Message: Clone + Hovered + 'a>(
     let area = mouse_area(face)
         // `disabled:cursor-not-allowed`: a button nobody may press draws the
         // forbidden cursor rather than the pointer that says it can be pressed.
-        .interaction(if usable { Interaction::Pointer } else { Interaction::NotAllowed })
+        .interaction(if usable {
+            Interaction::Pointer
+        } else {
+            Interaction::NotAllowed
+        })
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false));
     match on_press {
@@ -2598,20 +2780,37 @@ pub fn input_sized<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let field = text_input(placeholder, value)
         .on_input(on_input)
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 0.0, right: 0.0 })
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+            right: 0.0,
+        })
         .size(size.label())
         .font(medium())
-        .style(iced::theme::TextInput::Custom(Box::new(Field { theme, chrome: Chrome::Bare })));
+        .style(iced::theme::TextInput::Custom(Box::new(Field {
+            theme,
+            chrome: Chrome::Bare,
+        })));
     container(
         row![]
             .align_items(Alignment::Center)
             .spacing(size.gap())
-            .push(icon::icon(Glyph::Search, 20.0, theme_gen::ink(theme, INK_SECONDARY)))
+            .push(icon::icon(
+                Glyph::Search,
+                20.0,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ))
             .push(field),
     )
     .width(Length::Fill)
     .height(Length::Fixed(size.height()))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: size.pad(), right: size.pad() })
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: size.pad(),
+        right: size.pad(),
+    })
     .center_y()
     .style(move |_theme: &Theme| container::Appearance {
         // `appearanceClass`: `border-surface-5 bg-surface-4`.
@@ -2666,7 +2865,13 @@ pub fn check_row<'a, Message: Clone + Hovered + 'a>(
             theme_gen::ink(theme, Ink::Brand),
         )
     } else {
-        (Color { a: amount, ..theme_gen::ink(theme, Ink::Surface3) }, Color::TRANSPARENT)
+        (
+            Color {
+                a: amount,
+                ..theme_gen::ink(theme, Ink::Surface3)
+            },
+            Color::TRANSPARENT,
+        )
     };
     let contrast = theme_gen::ink(theme, INK_CONTRAST);
     let secondary = theme_gen::ink(theme, INK_SECONDARY);
@@ -2697,26 +2902,34 @@ pub fn check_row<'a, Message: Clone + Hovered + 'a>(
         );
     }
     let circle = if checked {
-        container(icon::icon(Glyph::Check, 16.0, theme_gen::ink(theme, Ink::AccentContrast)))
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(24.0))
-            .center_x()
-            .center_y()
-            .style(move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
-                border: Border { radius: 999.0.into(), ..Border::default() },
-                ..container::Appearance::default()
-            })
+        container(icon::icon(
+            Glyph::Check,
+            16.0,
+            theme_gen::ink(theme, Ink::AccentContrast),
+        ))
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(24.0))
+        .center_x()
+        .center_y()
+        .style(move |_theme: &Theme| container::Appearance {
+            background: Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
+            border: Border {
+                radius: 999.0.into(),
+                ..Border::default()
+            },
+            ..container::Appearance::default()
+        })
     } else {
-        container(Space::new(Length::Fixed(24.0), Length::Fixed(24.0)))
-            .style(move |_theme: &Theme| container::Appearance {
+        container(Space::new(Length::Fixed(24.0), Length::Fixed(24.0))).style(
+            move |_theme: &Theme| container::Appearance {
                 border: Border {
                     radius: 999.0.into(),
                     width: 1.0,
                     color: theme_gen::ink(theme, Ink::Surface5),
                 },
                 ..container::Appearance::default()
-            })
+            },
+        )
     };
     let face = container(
         row![]
@@ -2727,11 +2940,20 @@ pub fn check_row<'a, Message: Clone + Hovered + 'a>(
     )
     .width(Length::Fill)
     .height(Length::Fixed(40.0))
-    .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: 8.0,
+        right: 8.0,
+    })
     .center_y()
     .style(move |_theme: &Theme| container::Appearance {
         background: Some(Background::Color(fill)),
-        border: Border { color: edge, width: 1.0, radius: 14.0.into() },
+        border: Border {
+            color: edge,
+            width: 1.0,
+            radius: 14.0.into(),
+        },
         ..container::Appearance::default()
     });
     mouse_area(face)
@@ -2808,7 +3030,10 @@ pub fn icon_button_kind<'a, Message: Clone + Hovered + 'a>(
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
             background: plate.map(Background::Color),
-            border: Border { radius: CONTROL_RADIUS.into(), ..Border::default() },
+            border: Border {
+                radius: CONTROL_RADIUS.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         });
     mouse_area(face)
@@ -2857,7 +3082,11 @@ pub fn checkbox<'a, Message: Clone + Hovered + 'a>(
             theme_gen::ink(theme, INK_DEFAULT),
         )
     };
-    let glyph = if indeterminate { Glyph::Minus } else { Glyph::Check };
+    let glyph = if indeterminate {
+        Glyph::Minus
+    } else {
+        Glyph::Check
+    };
     let face = container(icon::icon(
         glyph,
         CHECK_SIZE,
@@ -2907,13 +3136,21 @@ pub fn metadata_row<'a, Message: 'a>(
         // The dot is drawn in front of the item rather than behind it, which is
         // the same picture: nothing else in the row occupies the gap.
         if index > 0 {
-            row = row.push(container(Space::new(Length::Fixed(METADATA_DOT), Length::Fixed(METADATA_DOT))).center_y().style(
-                move |_theme: &Theme| container::Appearance {
+            row = row.push(
+                container(Space::new(
+                    Length::Fixed(METADATA_DOT),
+                    Length::Fixed(METADATA_DOT),
+                ))
+                .center_y()
+                .style(move |_theme: &Theme| container::Appearance {
                     background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface5))),
-                    border: Border { radius: 999.0.into(), ..Border::default() },
+                    border: Border {
+                        radius: 999.0.into(),
+                        ..Border::default()
+                    },
                     ..container::Appearance::default()
-                },
-            ));
+                }),
+            );
             // `gap-x-[1.625rem]` is the whole gap, dot included: 26 less the
             // dot's own six, halved either side of it.
             row = row.push(Space::with_width((METADATA_GAP - METADATA_DOT) / 2.0));
@@ -2921,7 +3158,11 @@ pub fn metadata_row<'a, Message: 'a>(
         let item = row![]
             .align_items(Alignment::Center)
             .spacing(8.0)
-            .push(icon::icon(*glyph, METADATA_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+            .push(icon::icon(
+                *glyph,
+                METADATA_ICON,
+                theme_gen::ink(theme, INK_SECONDARY),
+            ))
             .push(
                 text(label.clone())
                     .size(METADATA_LABEL)
@@ -2929,7 +3170,10 @@ pub fn metadata_row<'a, Message: 'a>(
                     // the row is as tall as the icon beside it either way.
                     .line_height(iced::Pixels(METADATA_LABEL))
                     .font(crate::style::medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             );
         row = row.push(item);
     }
@@ -2988,7 +3232,6 @@ pub const TAB_LINE: f32 = 20.0;
 /// on eleven ink rows, and the strip's own height pins the root at sixteen pixels
 /// (see [`TAB_STRIP`]).
 pub const TAB_LABEL_WEIGHT: iced::font::Weight = iced::font::Weight::Bold;
-
 
 /// The tab's own height: `py-2` around [`TAB_LINE`].
 pub const TAB_HEIGHT: f32 = TAB_LINE + 16.0;
@@ -3285,22 +3528,28 @@ pub fn tabs_with_glyphs<'a, Message: Clone + Hovered + 'a>(
                 crate::theme::brightness(icon_ink, factor),
             ));
         }
-        let tab = container(
-            face.push(tracked_text(
-                label,
-                inter(TAB_LABEL_WEIGHT),
-                TAB_LABEL,
-                // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
-                Some(TAB_LINE),
-                crate::theme::brightness(ink, factor),
-            )),
-        )
+        let tab = container(face.push(tracked_text(
+            label,
+            inter(TAB_LABEL_WEIGHT),
+            TAB_LABEL,
+            // `text-sm`'s own line: twenty pixels of fourteen-pixel text.
+            Some(TAB_LINE),
+            crate::theme::brightness(ink, factor),
+        )))
         // `py-2` around the line, which is a 36-pixel tab; the port fixed it at 32
         // and let the label sit wherever the leftover space put it.
-        .padding(Padding { top: 8.0, bottom: 8.0, left: TAB_PAD, right: TAB_PAD })
+        .padding(Padding {
+            top: 8.0,
+            bottom: 8.0,
+            left: TAB_PAD,
+            right: TAB_PAD,
+        })
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(fill)),
-            border: Border { radius: 999.0.into(), ..Border::default() },
+            border: Border {
+                radius: 999.0.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         });
         track = track.push(
@@ -3403,13 +3652,21 @@ pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
                     .font(heading())
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::Brand))),
             )
-            .padding(Padding { top: 2.0, bottom: 2.0, left: 6.0, right: 6.0 })
+            .padding(Padding {
+                top: 2.0,
+                bottom: 2.0,
+                left: 6.0,
+                right: 6.0,
+            })
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(
                     theme,
                     Ink::ColorBrandHighlight,
                 ))),
-                border: Border { radius: 999.0.into(), ..Border::default() },
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             }),
         );
@@ -3431,12 +3688,24 @@ pub fn nav_item<'a, Message: Clone + Hovered + 'a>(
     let plate = mix(rested, theme_gen::ink(theme, Ink::ButtonBgSelected), chosen);
     let row = container(label_row)
         .width(Length::Fill)
-        .height(Length::Fixed(if badge.is_some() { NAV_ITEM_BADGE } else { NAV_ITEM }))
-        .padding(Padding { top: 0.0, bottom: 0.0, left: NAV_ITEM_PAD, right: NAV_ITEM_PAD })
+        .height(Length::Fixed(if badge.is_some() {
+            NAV_ITEM_BADGE
+        } else {
+            NAV_ITEM
+        }))
+        .padding(Padding {
+            top: 0.0,
+            bottom: 0.0,
+            left: NAV_ITEM_PAD,
+            right: NAV_ITEM_PAD,
+        })
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(plate)),
-            border: Border { radius: NAV_ITEM_RADIUS.into(), ..Border::default() },
+            border: Border {
+                radius: NAV_ITEM_RADIUS.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         });
     mouse_area(row)
@@ -3464,10 +3733,18 @@ pub fn nav_heading<'a, Message: 'a>(theme: Gen, label: &str) -> Element<'a, Mess
             // the reference weights the category heading above a run of tabs one step
             // heavier than the tabs.
             .font(heading())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            ))),
     )
     .width(Length::Fill)
-    .padding(Padding { top: 8.0, bottom: 4.0, left: 16.0, right: 16.0 })
+    .padding(Padding {
+        top: 8.0,
+        bottom: 4.0,
+        left: 16.0,
+        right: 16.0,
+    })
     .into()
 }
 
@@ -3509,38 +3786,61 @@ pub fn chips<'a, Message: Clone + Hovered + 'a>(
                 theme_gen::ink(theme, INK_CONTRAST),
             )
         };
-        let ink = if usable { ink } else { crate::style::faded(ink) };
+        let ink = if usable {
+            ink
+        } else {
+            crate::style::faded(ink)
+        };
         // The check is the selected chip's own, and it is the reference's: a
         // colour alone would leave a choice that only reads as a choice to
         // somebody who can see it.
-        let mut face = row![].spacing(6.0).align_items(Alignment::Center).width(Length::Shrink);
+        let mut face = row![]
+            .spacing(6.0)
+            .align_items(Alignment::Center)
+            .width(Length::Shrink);
         if selected {
-            face = face.push(icon::icon(Glyph::Check, 16.0, crate::theme::brightness(ink, factor)));
+            face = face.push(icon::icon(
+                Glyph::Check,
+                16.0,
+                crate::theme::brightness(ink, factor),
+            ));
         }
-        face = face.push(
-            text(label.clone())
-                .size(14.0)
-                .font(heading())
-                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
-        );
+        face = face.push(text(label.clone()).size(14.0).font(heading()).style(
+            iced::theme::Text::Color(crate::theme::brightness(ink, factor)),
+        ));
         let chip = container(face)
             .height(Length::Fixed(CONTROL))
             // 10px rather than the button's 16: the reference's own chips are
             // `!px-2.5`, which is the padding that keeps a row of five inside
             // the dialog it is drawn in.
-            .padding(Padding { top: 0.0, bottom: 0.0, left: 10.0, right: 10.0 })
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: 10.0,
+                right: 10.0,
+            })
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
-                background: Some(Background::Color(crate::theme::brightness(background, factor))),
+                background: Some(Background::Color(crate::theme::brightness(
+                    background, factor,
+                ))),
                 border: Border {
-                    color: if usable { border } else { crate::style::faded(border) },
+                    color: if usable {
+                        border
+                    } else {
+                        crate::style::faded(border)
+                    },
                     width: 1.0,
                     radius: CONTROL_RADIUS.into(),
                 },
                 ..container::Appearance::default()
             });
         let area = mouse_area(chip)
-            .interaction(if usable { Interaction::Pointer } else { Interaction::Idle })
+            .interaction(if usable {
+                Interaction::Pointer
+            } else {
+                Interaction::Idle
+            })
             .on_enter(Message::hover(key, true))
             .on_exit(Message::hover(key, false));
         row = row.push(match press {
@@ -3583,13 +3883,18 @@ impl Severity {
     /// over this modal's own raised surface.
     fn surface(self, theme: Gen) -> (Color, Color) {
         match self {
-            Severity::Info => (theme_gen::ink(theme, Ink::Blue), theme_gen::ink(theme, Ink::BlueBg)),
-            Severity::Warning => {
-                (theme_gen::ink(theme, Ink::Orange), theme_gen::ink(theme, Ink::OrangeBg))
-            }
-            Severity::Critical => {
-                (theme_gen::ink(theme, Ink::Red), theme_gen::ink(theme, Ink::RedBg))
-            }
+            Severity::Info => (
+                theme_gen::ink(theme, Ink::Blue),
+                theme_gen::ink(theme, Ink::BlueBg),
+            ),
+            Severity::Warning => (
+                theme_gen::ink(theme, Ink::Orange),
+                theme_gen::ink(theme, Ink::OrangeBg),
+            ),
+            Severity::Critical => (
+                theme_gen::ink(theme, Ink::Red),
+                theme_gen::ink(theme, Ink::RedBg),
+            ),
         }
     }
 }
@@ -3606,7 +3911,11 @@ impl Severity {
 /// passes that pane an `Admonition` with nothing but the slot in it, and the
 /// capture's own box measures 114 rows -- 16 of padding, four 20-pixel lines,
 /// 16 more, and the two border pixels.
-pub fn admonition_body<'a, Message: 'a>(theme: Gen, severity: Severity, body: &str) -> Element<'a, Message> {
+pub fn admonition_body<'a, Message: 'a>(
+    theme: Gen,
+    severity: Severity,
+    body: &str,
+) -> Element<'a, Message> {
     let (glyph, ink) = severity.icon_and_ink(theme);
     let (edge, fill) = severity.surface(theme);
     container(
@@ -3638,7 +3947,11 @@ pub fn admonition_body<'a, Message: 'a>(theme: Gen, severity: Severity, body: &s
     .padding(Padding::from(17.0))
     .style(move |_theme: &Theme| container::Appearance {
         background: Some(Background::Color(fill)),
-        border: Border { color: edge, width: 1.0, radius: 16.0.into() },
+        border: Border {
+            color: edge,
+            width: 1.0,
+            radius: 16.0.into(),
+        },
         ..container::Appearance::default()
     })
     .into()
@@ -3661,12 +3974,9 @@ pub fn admonition<'a, Message: 'a>(
             .push(
                 column![]
                     .spacing(4.0)
-                    .push(
-                        text(header.to_string())
-                            .size(14.0)
-                            .font(semibold())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                    )
+                    .push(text(header.to_string()).size(14.0).font(semibold()).style(
+                        iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+                    ))
                     .push(
                         text(body.to_string())
                             .size(14.0)
@@ -3686,7 +3996,10 @@ pub fn progress<'a, Message: 'a>(theme: Gen, fraction: f32) -> Element<'a, Messa
             .height(Length::Fixed(6.0))
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::Brand))),
-                border: Border { radius: 999.0.into(), ..Border::default() },
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             }),
     )
@@ -3694,18 +4007,17 @@ pub fn progress<'a, Message: 'a>(theme: Gen, fraction: f32) -> Element<'a, Messa
     .height(Length::Fixed(6.0))
     .style(move |_theme: &Theme| container::Appearance {
         background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
-        border: Border { radius: 999.0.into(), ..Border::default() },
+        border: Border {
+            radius: 999.0.into(),
+            ..Border::default()
+        },
         ..container::Appearance::default()
     })
     .into()
 }
 
 /// A label and a value on one line, the reference's metadata row.
-pub fn metadata<'a, Message: 'a>(
-    theme: Gen,
-    label: Key,
-    value: &str,
-) -> Element<'a, Message> {
+pub fn metadata<'a, Message: 'a>(theme: Gen, label: Key, value: &str) -> Element<'a, Message> {
     row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
@@ -3713,7 +4025,10 @@ pub fn metadata<'a, Message: 'a>(
             text(label.message())
                 .size(14.0)
                 .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
         )
         .push(
             text(value.to_string())
@@ -3725,20 +4040,23 @@ pub fn metadata<'a, Message: 'a>(
 }
 
 /// An icon and a label, which is how a statistic is drawn.
-pub fn icon_label<'a, Message: 'a>(
-    theme: Gen,
-    glyph: Glyph,
-    label: &str,
-) -> Element<'a, Message> {
+pub fn icon_label<'a, Message: 'a>(theme: Gen, glyph: Glyph, label: &str) -> Element<'a, Message> {
     row![]
         .spacing(6.0)
         .align_items(Alignment::Center)
-        .push(icon::icon(glyph, 16.0, theme_gen::ink(theme, INK_SECONDARY)))
+        .push(icon::icon(
+            glyph,
+            16.0,
+            theme_gen::ink(theme, INK_SECONDARY),
+        ))
         .push(
             text(label.to_string())
                 .size(13.0)
                 .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
         )
         .into()
 }
@@ -3806,7 +4124,11 @@ mod tests {
                     walk(&path, root, found);
                 } else if path.extension().is_some_and(|kind| kind == "rs") {
                     if let Ok(source) = std::fs::read_to_string(&path) {
-                        let name = path.strip_prefix(root).unwrap_or(&path).display().to_string();
+                        let name = path
+                            .strip_prefix(root)
+                            .unwrap_or(&path)
+                            .display()
+                            .to_string();
                         found.push((name, source));
                     }
                 }
@@ -3853,7 +4175,12 @@ mod tests {
         use iced::advanced::graphics::text::Paragraph;
         use iced::advanced::text::{LineHeight, Paragraph as _, Text as Laid};
 
-        for label in ["Dark", "Sync with system", "English (United States)", "简体中文"] {
+        for label in [
+            "Dark",
+            "Sync with system",
+            "English (United States)",
+            "简体中文",
+        ] {
             let font = heading();
             let laid = Laid {
                 content: label,
@@ -3900,10 +4227,38 @@ mod tests {
         // machine's installed ones. See [`shape_width_in`].
         let mut system = app_font_system();
         for (label, size, weight, extra, hmtx, reference) in [
-            ("Data Packs", TAB_LABEL, TAB_LABEL_WEIGHT, 0.7351, 76.54, 83.15),
-            ("Modpacks", TAB_LABEL, TAB_LABEL_WEIGHT, 0.3950, 71.50, 74.27),
-            ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT, 0.5686, 77.74, 83.42),
-            ("New server", Size::Lg.label(), iced::font::Weight::Semibold, 0.1806, 88.36, 90.0),
+            (
+                "Data Packs",
+                TAB_LABEL,
+                TAB_LABEL_WEIGHT,
+                0.7351,
+                76.54,
+                83.15,
+            ),
+            (
+                "Modpacks",
+                TAB_LABEL,
+                TAB_LABEL_WEIGHT,
+                0.3950,
+                71.50,
+                74.27,
+            ),
+            (
+                "Collections",
+                TAB_LABEL,
+                TAB_LABEL_WEIGHT,
+                0.5686,
+                77.74,
+                83.42,
+            ),
+            (
+                "New server",
+                Size::Lg.label(),
+                iced::font::Weight::Semibold,
+                0.1806,
+                88.36,
+                90.0,
+            ),
         ] {
             let font = inter(weight);
             let fitted = tracking(label, font, size);
@@ -3952,13 +4307,21 @@ mod tests {
             ("Modpacks", TAB_LABEL, TAB_LABEL_WEIGHT),
             ("Collections", TAB_LABEL, TAB_LABEL_WEIGHT),
             ("New server", Size::Lg.label(), iced::font::Weight::Semibold),
-            ("Client and server", TAG_LABEL_SIZE, iced::font::Weight::Normal),
+            (
+                "Client and server",
+                TAG_LABEL_SIZE,
+                iced::font::Weight::Normal,
+            ),
         ] {
             let font = inter(weight);
             let extra = tracking(label, font, size);
             assert!(extra > 0.0, "`{label}` is in the table and reads as zero");
             let (pens, total) = glyph_pens(label, font, size);
-            assert_eq!(pens.len(), label.chars().count(), "`{label}`: one pen a character");
+            assert_eq!(
+                pens.len(),
+                label.chars().count(),
+                "`{label}`: one pen a character"
+            );
             let count = pens.len();
             let mut slots = 0.0f32;
             for index in 0..count {
@@ -4041,17 +4404,26 @@ mod tests {
                 "`{label}` is measured at {weight:?}"
             );
             assert!(
-                crate::text_gen::ALL.iter().any(|key| key.message() == label),
+                crate::text_gen::ALL
+                    .iter()
+                    .any(|key| key.message() == label),
                 "`{label}` is in the table but is not a string any key draws"
             );
         }
         let tab = |label: &str| tracking(label, inter(TAB_LABEL_WEIGHT), TAB_LABEL);
         assert!(tab("Data Packs") > 0.0 && tab("Modpacks") > 0.0 && tab("Collections") > 0.0);
-        assert_eq!(tab("All"), 0.0, "*All* is drawn and measured not to want it");
+        assert_eq!(
+            tab("All"),
+            0.0,
+            "*All* is drawn and measured not to want it"
+        );
         // A tab label is not a button label: the same string at the button's size
         // is not the measurement, and the table must not answer for it.
         assert_eq!(tracking("New server", semibold(), TAB_LABEL), 0.0);
-        assert_eq!(tracking("Data Packs", inter(TAB_LABEL_WEIGHT), TAB_LABEL * 2.0), 0.0);
+        assert_eq!(
+            tracking("Data Packs", inter(TAB_LABEL_WEIGHT), TAB_LABEL * 2.0),
+            0.0
+        );
     }
 
     #[test]
@@ -4082,7 +4454,8 @@ mod tests {
                 "every label is offered once, in the reference's order, at {avail}"
             );
             for row in &rows {
-                let row_labels: Vec<&str> = row.iter().map(|&index| labels[index].as_str()).collect();
+                let row_labels: Vec<&str> =
+                    row.iter().map(|&index| labels[index].as_str()).collect();
                 let width = row_width(&row_labels, ROW_GAP);
                 // A row of *one* label that is wider than the space is the case
                 // [`wrap_labels`] documents: a name with nowhere to fit still gets
@@ -4176,7 +4549,10 @@ mod tests {
                 if let Some(face) = system.db().face(glyph.font_id) {
                     let name = format!(
                         "{} {}",
-                        face.families.first().map(|(name, _)| name.as_str()).unwrap_or("?"),
+                        face.families
+                            .first()
+                            .map(|(name, _)| name.as_str())
+                            .unwrap_or("?"),
                         face.weight.0
                     );
                     if !faces.contains(&name) {
@@ -4192,10 +4568,8 @@ mod tests {
     /// whatever this machine has installed.
     fn app_font_system() -> cosmic_text::FontSystem {
         cosmic_text::FontSystem::new_with_fonts(crate::FONTS.iter().map(|bytes| {
-            cosmic_text::fontdb::Source::Binary(
-                std::sync::Arc::new(bytes.to_vec())
-                    as std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>,
-            )
+            cosmic_text::fontdb::Source::Binary(std::sync::Arc::new(bytes.to_vec())
+                as std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>)
         }))
     }
 
@@ -4289,7 +4663,11 @@ mod tests {
         let first = scoped("ui:test:card", "sodium");
         let again = scoped("ui:test:card", "sodium");
         let other = scoped("ui:test:card", "lithium");
-        assert_eq!(first.as_ptr(), again.as_ptr(), "the same card, the same name");
+        assert_eq!(
+            first.as_ptr(),
+            again.as_ptr(),
+            "the same card, the same name"
+        );
         assert_ne!(first, other);
         assert_ne!(
             first,
@@ -4305,10 +4683,17 @@ mod tests {
         // untouched control is at rest rather than mid-hover.
         let key = "ui:test:probe";
         anim::clock().lock().expect("the clock").clear();
-        assert_eq!(interaction(key), (1.0, 0.0), "nothing has been reported yet");
+        assert_eq!(
+            interaction(key),
+            (1.0, 0.0),
+            "nothing has been reported yet"
+        );
 
         // The crossing is a message, and handling it is what starts the tween.
-        let Probe::Crossed { key: reported, over } = Probe::hover(key, true);
+        let Probe::Crossed {
+            key: reported,
+            over,
+        } = Probe::hover(key, true);
         assert_eq!(reported, key);
         assert!(over);
         pointer(reported, over);
@@ -4345,7 +4730,10 @@ mod tests {
         // The border is `--surface-4`, and the reference's dark token is
         // `#34363c` (`assets/styles/variables.scss:238`) -- the byte at y=201 and
         // at y=246 of that capture.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface4), [0x34, 0x36, 0x3c, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Surface4),
+            [0x34, 0x36, 0x3c, 0xff]
+        );
         // `--shadow-card` still names all three of its numbers here, so that a
         // backend which can draw the shadow has them: iced's `Shadow` has no
         // `spread_radius` and this value's spread is 0px, so nothing of it is
@@ -4357,7 +4745,10 @@ mod tests {
             assert!(shadow.color.a > 0.0, "{theme:?}: a shadow nobody can see");
         }
         // Dark's own colour, from `variables.scss:368`.
-        assert_eq!(card_shadow(Gen::Dark).color, Color::from_rgba(0.0, 0.0, 0.0, 0.25));
+        assert_eq!(
+            card_shadow(Gen::Dark).color,
+            Color::from_rgba(0.0, 0.0, 0.0, 0.25)
+        );
     }
 
     #[test]
@@ -4386,7 +4777,10 @@ mod tests {
         assert_eq!(iced::Shadow::default().color, Color::TRANSPARENT);
         // The pill is `#27292E` and the plate composites over exactly that, so the
         // fill a shadow lands on is not a colour this port chooses.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg), [0x27, 0x29, 0x2e, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg),
+            [0x27, 0x29, 0x2e, 0xff]
+        );
         // And the ring, the height and the padding are unchanged by this, because
         // the shadow was never part of any of them.
         assert_eq!(TAB_STRIP, 46.0);
@@ -4404,8 +4798,14 @@ mod tests {
         // `#24543D` on its high-precision one, which is a one-byte difference in
         // two of the three channels and nothing anybody could see in a code
         // review.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBgSelected), [0x1b, 0xd9, 0x6a, 0x40]);
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg), [0x27, 0x29, 0x2e, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBgSelected),
+            [0x1b, 0xd9, 0x6a, 0x40]
+        );
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::RaisedBg),
+            [0x27, 0x29, 0x2e, 0xff]
+        );
         assert_eq!(&plate(Gen::Dark).into_rgba8()[..3], &[0x24, 0x54, 0x3d]);
         // Opaque on purpose: the composite is already done, and a plate that
         // still carried the alpha would ask the backend for the same answer twice.
@@ -4431,7 +4831,10 @@ mod tests {
             theme_gen::ink_rgba(Gen::Dark, Ink::Secondary),
             [0x96, 0xa2, 0xb0, 0xff]
         );
-        assert_eq!(theme_gen::ink(Gen::Dark, Ink::Secondary), theme_gen::ink(Gen::Dark, INK_SECONDARY));
+        assert_eq!(
+            theme_gen::ink(Gen::Dark, Ink::Secondary),
+            theme_gen::ink(Gen::Dark, INK_SECONDARY)
+        );
         assert_ne!(
             theme_gen::ink(Gen::Dark, Ink::Secondary),
             theme_gen::ink(Gen::Dark, INK_DEFAULT),
@@ -4487,14 +4890,26 @@ mod tests {
         // dark look (`variables.scss:239`) and `#dddddd` in the light one
         // (`variables.scss:8`). The capture reads `#42444A` on the top edge of
         // every pill of the /user/FlameFire page, and the port drew no ring at all.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface5), [0x42, 0x44, 0x4a, 0xff]);
-        assert_eq!(theme_gen::ink_rgba(Gen::Light, Ink::Surface5), [0xdd, 0xdd, 0xdd, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Surface5),
+            [0x42, 0x44, 0x4a, 0xff]
+        );
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Light, Ink::Surface5),
+            [0xdd, 0xdd, 0xdd, 0xff]
+        );
         // The fill beside it is `--color-button-bg`, which is `--surface-4`
         // (`variables.scss:329` into `:238`) -- the `#34363C` the capture reads and
         // which was already right, and which is *not* the ring: two different
         // surfaces, one apart.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBg), [0x34, 0x36, 0x3c, 0xff]);
-        assert_ne!(theme_gen::ink(Gen::Dark, Ink::Surface5), theme_gen::ink(Gen::Dark, Ink::ButtonBg));
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBg),
+            [0x34, 0x36, 0x3c, 0xff]
+        );
+        assert_ne!(
+            theme_gen::ink(Gen::Dark, Ink::Surface5),
+            theme_gen::ink(Gen::Dark, Ink::ButtonBg)
+        );
     }
 
     #[test]
@@ -4527,7 +4942,10 @@ mod tests {
         assert_eq!(TAG_GAP, 4.0, "`gap-1` between the icon and the label");
         // And the icon takes its colour from the label, because `baseClass` gives
         // `[&>svg]` a size and no ink of its own.
-        assert_eq!(theme_gen::ink(Gen::Dark, Ink::Secondary), theme_gen::ink(Gen::Dark, INK_SECONDARY));
+        assert_eq!(
+            theme_gen::ink(Gen::Dark, Ink::Secondary),
+            theme_gen::ink(Gen::Dark, INK_SECONDARY)
+        );
     }
 
     #[test]
@@ -4593,12 +5011,14 @@ mod tests {
             // is also a loader key answers with the loader's glyph. `minecraft` is
             // the only such pair, and `getTagIcon` gives it the loader, so this is
             // asserted rather than assumed.
-            let expected =
-                if crate::icons_gen::TAG_LOADERS.iter().any(|(loader, _)| *loader == tag) {
-                    crate::icons_gen::Glyph::by_name(&format!("tags/loaders/{tag}"))
-                } else {
-                    crate::icons_gen::Glyph::by_name(name)
-                };
+            let expected = if crate::icons_gen::TAG_LOADERS
+                .iter()
+                .any(|(loader, _)| *loader == tag)
+            {
+                crate::icons_gen::Glyph::by_name(&format!("tags/loaders/{tag}"))
+            } else {
+                crate::icons_gen::Glyph::by_name(name)
+            };
             assert_eq!(tag_icon(tag), expected, "{tag}");
         }
     }
@@ -4612,9 +5032,17 @@ mod tests {
         // has, and not a wrong shape.
         for tag in ["geyser", "legacy-fabric", "purpur", "quilt"] {
             assert!(is_loader_tag(tag), "{tag} is a loader the reference has");
-            assert_eq!(tag_icon(tag), None, "{tag} has a glyph this port does not draw");
+            assert_eq!(
+                tag_icon(tag),
+                None,
+                "{tag} has a glyph this port does not draw"
+            );
         }
-        assert_eq!(crate::icons_gen::TAG_LOADERS.len(), 26, "30 less the four refused");
+        assert_eq!(
+            crate::icons_gen::TAG_LOADERS.len(),
+            26,
+            "30 less the four refused"
+        );
         assert_eq!(crate::icons_gen::TAG_CATEGORIES.len(), 102);
     }
 
@@ -4627,7 +5055,10 @@ mod tests {
         for theme in Gen::ALL {
             // The card's surface is never the page's: a card painted
             // `--color-bg` would be invisible on the page it sits on.
-            assert_ne!(theme_gen::ink(*theme, Ink::Surface3), theme_gen::ink(*theme, Ink::Bg));
+            assert_ne!(
+                theme_gen::ink(*theme, Ink::Surface3),
+                theme_gen::ink(*theme, Ink::Bg)
+            );
         }
         // And it *is* the chrome's colour, in every theme: `--surface-3` and
         // `--color-bg-raised` carry the same value in all four, and a card is
@@ -4655,7 +5086,10 @@ mod tests {
         for theme in Gen::ALL {
             let labels = [("Home".to_string(), true), ("Discover".to_string(), false)];
             let keys = ["ui:test:tab:home", "ui:test:tab:discover"];
-            drop(tabs(*theme, &keys, &labels, |_: usize| Probe::Crossed { key: keys[0], over: true }));
+            drop(tabs(*theme, &keys, &labels, |_: usize| Probe::Crossed {
+                key: keys[0],
+                over: true,
+            }));
             drop(search(*theme, "Search mods", "sodium", |_: String| ()));
             drop(select::<Probe>(
                 *theme,
@@ -4663,7 +5097,10 @@ mod tests {
                 "Relevance",
                 256.0,
                 false,
-                Probe::Crossed { key: "ui:test:select", over: false },
+                Probe::Crossed {
+                    key: "ui:test:select",
+                    over: false,
+                },
             ));
             // Both arms of [`Prefix`] build: the text one above, which is what
             // the browse page's two comboboxes wear, and the glyph one below,
@@ -4674,15 +5111,30 @@ mod tests {
                 "Last played",
                 200.0,
                 false,
-                Probe::Crossed { key: "ui:test:select", over: false },
+                Probe::Crossed {
+                    key: "ui:test:select",
+                    over: false,
+                },
             ));
             drop(select_menu(
                 *theme,
                 "ui:test:menu",
                 256.0,
                 &[
-                    ("Relevance".to_string(), Probe::Crossed { key: "ui:test:menu", over: false }),
-                    ("Downloads".to_string(), Probe::Crossed { key: "ui:test:menu", over: false }),
+                    (
+                        "Relevance".to_string(),
+                        Probe::Crossed {
+                            key: "ui:test:menu",
+                            over: false,
+                        },
+                    ),
+                    (
+                        "Downloads".to_string(),
+                        Probe::Crossed {
+                            key: "ui:test:menu",
+                            over: false,
+                        },
+                    ),
                 ],
                 "Relevance",
             ));
@@ -4692,8 +5144,16 @@ mod tests {
                 // iced's own `button(…)` and holds every one of them to
                 // `hover_button`. A bare call here is not iced's button -- it is
                 // this module's -- and the path is how the text says so.
-                let face: Element<'_, Probe> =
-                    crate::ui::button(*theme, "ui:test:button", Key::AppNavigationHome, kind, Probe::Crossed { key: "ui:test:button", over: false });
+                let face: Element<'_, Probe> = crate::ui::button(
+                    *theme,
+                    "ui:test:button",
+                    Key::AppNavigationHome,
+                    kind,
+                    Probe::Crossed {
+                        key: "ui:test:button",
+                        over: false,
+                    },
+                );
                 drop(face);
             }
             drop(icon_button(
@@ -4701,11 +5161,24 @@ mod tests {
                 "ui:test:icon",
                 Glyph::Play,
                 20.0,
-                Probe::Crossed { key: "ui:test:icon", over: false },
+                Probe::Crossed {
+                    key: "ui:test:icon",
+                    over: false,
+                },
             ));
             drop(admonition::<()>(*theme, Severity::Info, "header", "body"));
-            drop(admonition::<()>(*theme, Severity::Warning, "header", "body"));
-            drop(admonition::<()>(*theme, Severity::Critical, "header", "body"));
+            drop(admonition::<()>(
+                *theme,
+                Severity::Warning,
+                "header",
+                "body",
+            ));
+            drop(admonition::<()>(
+                *theme,
+                Severity::Critical,
+                "header",
+                "body",
+            ));
             drop(progress::<()>(*theme, 0.4));
             drop(tag::<()>(*theme, "1.1.2"));
             drop(metadata::<()>(*theme, Key::LabelSortBy, "Relevance"));
@@ -4765,9 +5238,9 @@ mod tests {
             input.contains("[&>svg]:size-5"),
             "Input.vue:12 sizes a leading icon at `size-5`; CONTROL_ICON is that number"
         );
-        let Some(list) = reference_file(
-            "app-frontend/src/components/ui/onboarding-checklist/index.vue",
-        ) else {
+        let Some(list) =
+            reference_file("app-frontend/src/components/ui/onboarding-checklist/index.vue")
+        else {
             return;
         };
         assert!(
@@ -4807,7 +5280,10 @@ mod tests {
         assert_eq!(TRIGGER_HEIGHT, 36.0, "`h-9` on ButtonFrame.vue's `md` row");
         assert_eq!(TRIGGER_GAP, 6.0, "`gap-1.5`, the same row");
         assert_eq!(TRIGGER_PAD, 10.0, "`px-2.5`, the same row");
-        assert_eq!(TRIGGER_TEXT, 16.0, "`text-base`, the same row, inherited twice");
+        assert_eq!(
+            TRIGGER_TEXT, 16.0,
+            "`text-base`, the same row, inherited twice"
+        );
         assert_eq!(TRIGGER_VALUE_GAP, 8.0, "`gap-2`, Combobox.vue:71's own row");
         assert_eq!(TRIGGER_CHEVRON, 20.0, "`size-5` on the trigger's chevron");
         assert_ne!(
@@ -4924,12 +5400,18 @@ mod tests {
         assert_eq!(MENU_RADIUS, 14.0, "`rounded-[14px]` on the dropdown");
         assert_eq!(MENU_PAD_H, 16.0, "`px-4` on an option");
         assert_eq!(MENU_PAD_V, 12.0, "`py-3` on the same");
-        assert_eq!(MENU_LINE, 20.0, "the label's line, `leading-tight` at sixteen");
+        assert_eq!(
+            MENU_LINE, 20.0,
+            "the label's line, `leading-tight` at sixteen"
+        );
         // `estimateDropdownHeight`: 44 for an option with no sub-label, which is
         // every option these four menus draw.
         assert_eq!(MENU_OPTION, MENU_PAD_V * 2.0 + MENU_LINE);
         assert_eq!(MENU_OPTION, 44.0, "Combobox.vue:357's own arithmetic");
-        assert_eq!(MENU_HOVER, 1.15, "`hover:brightness-[115%]`, not the global 1.25");
+        assert_eq!(
+            MENU_HOVER, 1.15,
+            "`hover:brightness-[115%]`, not the global 1.25"
+        );
 
         for theme in Gen::ALL {
             let panel = menu_panel(*theme);
@@ -4938,10 +5420,17 @@ mod tests {
                 Some(Background::Color(theme_gen::ink(*theme, Ink::Surface4))),
                 "`bg-surface-4`"
             );
-            assert_eq!(panel.border.color, theme_gen::ink(*theme, Ink::Surface5), "`border-surface-5`");
+            assert_eq!(
+                panel.border.color,
+                theme_gen::ink(*theme, Ink::Surface5),
+                "`border-surface-5`"
+            );
             assert_eq!(panel.border.width, 1.0, "`border` is one pixel");
             let radius: [f32; 4] = panel.border.radius.into();
-            assert_eq!(radius, [MENU_RADIUS; 4], "`rounded-[14px]`, all four corners");
+            assert_eq!(
+                radius, [MENU_RADIUS; 4],
+                "`rounded-[14px]`, all four corners"
+            );
             // The one thing this frame does not carry is an `iced::Shadow`,
             // because that lands on this very fill (see [`select_menu`]'s
             // measurement); the shadow is drawn as rings under the frame.
@@ -4983,7 +5472,10 @@ mod tests {
             .find(|line| line.contains("px-4 py-3"))
             .expect("Combobox.vue still gives an option `px-4 py-3`");
         for class in ["px-4", "py-3", "transition-all", "duration-150"] {
-            assert!(option.contains(class), "the option row is `{option}`; `{class}` is read off it");
+            assert!(
+                option.contains(class),
+                "the option row is `{option}`; `{class}` is read off it"
+            );
         }
 
         // And the shadow's own four numbers with the ring arithmetic they come
@@ -4992,9 +5484,15 @@ mod tests {
         assert_eq!(MENU_SHADOW_OFFSET_Y, 25.0, "the `25px` it sits down by");
         assert_eq!(MENU_SHADOW_BLUR, 50.0, "`50px`");
         assert_eq!(MENU_SHADOW_SPREAD, -12.0, "`-12px`");
-        assert_eq!(MENU_SHADOW_FADE, 25.0, "a CSS blur of 50 is a Gaussian of 25");
+        assert_eq!(
+            MENU_SHADOW_FADE, 25.0,
+            "a CSS blur of 50 is a Gaussian of 25"
+        );
         assert_eq!(MENU_SHADOW_SIDE, 13.0, "the fade's 25 less the spread's 12");
-        assert_eq!(MENU_SHADOW_BELOW, 38.0, "and the 25 the shadow sits down by");
+        assert_eq!(
+            MENU_SHADOW_BELOW, 38.0,
+            "and the 25 the shadow sits down by"
+        );
         // And the cap the reference stops its list at, which none of the drawing
         // reads because no menu this kit draws reaches it -- see
         // [`MENU_MAX_OPTIONS`]. The sorting is the close one: seven rows against
@@ -5002,8 +5500,14 @@ mod tests {
         // every other combobox in the tree keeps. If a menu is ever added that
         // runs past one of the two, this is the assertion that has to move
         // first, and the wheel routing it names has to move with it.
-        assert_eq!(MENU_MAX_OPTIONS, 300.0, "`DEFAULT_MAX_HEIGHT` (`Combobox.vue:250`)");
-        assert_eq!(MENU_MAX_OPTIONS_SORT, 320.0, "`sort-menu.vue`'s `:max-height`");
+        assert_eq!(
+            MENU_MAX_OPTIONS, 300.0,
+            "`DEFAULT_MAX_HEIGHT` (`Combobox.vue:250`)"
+        );
+        assert_eq!(
+            MENU_MAX_OPTIONS_SORT, 320.0,
+            "`sort-menu.vue`'s `:max-height`"
+        );
         assert!(
             MENU_MAX_OPTIONS_SORT > MENU_MAX_OPTIONS,
             "the library's sort is the one combobox that raises the default, and \
@@ -5019,8 +5523,15 @@ mod tests {
             "and the browse page's sort fits under the default it does not override"
         );
         let rings = menu_shadow_rings();
-        assert_eq!(rings.len(), MENU_SHADOW_RINGS + 1, "the core and one ring per step");
-        assert_eq!(rings[0].0, 0.0, "the innermost ring is the shadow's own shape");
+        assert_eq!(
+            rings.len(),
+            MENU_SHADOW_RINGS + 1,
+            "the core and one ring per step"
+        );
+        assert_eq!(
+            rings[0].0, 0.0,
+            "the innermost ring is the shadow's own shape"
+        );
         assert!(
             (rings[rings.len() - 1].0 - MENU_SHADOW_FADE).abs() < 1e-4,
             "and the outermost is the far edge of the fade"
@@ -5031,22 +5542,33 @@ mod tests {
         // second time and the two are compared band by band -- code and test can
         // only agree by both being right.
         let step = MENU_SHADOW_FADE / MENU_SHADOW_RINGS as f32;
-        let model = |d: f32| MENU_SHADOW_ALPHA * (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, d));
+        let model =
+            |d: f32| MENU_SHADOW_ALPHA * (1.0 - smoothstep(-MENU_SHADOW_FADE, MENU_SHADOW_FADE, d));
         let mut previous = MENU_SHADOW_ALPHA;
         for (band, (reach, alpha)) in rings.iter().enumerate() {
-            assert!(*alpha > 0.0 && *alpha < 1.0, "band {band}: alpha {alpha} is not a fill");
+            assert!(
+                *alpha > 0.0 && *alpha < 1.0,
+                "band {band}: alpha {alpha} is not a fill"
+            );
             let composite = 1.0
                 - rings[band..]
                     .iter()
                     .fold(1.0, |kept, (_reach, alpha)| kept * (1.0 - alpha));
-            let d = if band == 0 { MENU_SHADOW_SPREAD / 2.0 } else { reach - step / 2.0 };
+            let d = if band == 0 {
+                MENU_SHADOW_SPREAD / 2.0
+            } else {
+                reach - step / 2.0
+            };
             assert!(
                 (composite - model(d)).abs() < 1e-5,
                 "band {band}: the rings composite to {composite}, the model says {}",
                 model(d)
             );
             // And the halo gets no deeper as it walks outwards.
-            assert!(composite <= previous + 1e-6, "band {band} is deeper than the one inside it");
+            assert!(
+                composite <= previous + 1e-6,
+                "band {band} is deeper than the one inside it"
+            );
             previous = composite;
         }
         // And enough of those steps are big enough to be drawn at all. This is
@@ -5057,7 +5579,10 @@ mod tests {
         // unit of the eighteen the model asks for; five pass it.
         let page = theme_gen::ink(Gen::Dark, Ink::Bg);
         let darkest = (page.r * 255.0).min(page.g * 255.0).min(page.b * 255.0);
-        let visible = rings.iter().filter(|(_reach, alpha)| alpha * darkest >= 0.5).count();
+        let visible = rings
+            .iter()
+            .filter(|(_reach, alpha)| alpha * darkest >= 0.5)
+            .count();
         assert!(
             visible >= 3,
             "only {visible} of {} rings move a pixel of the page's own ink ({darkest})",

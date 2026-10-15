@@ -109,7 +109,9 @@ pub struct OfflineMetaStore {
 impl OfflineMetaStore {
     /// Store rooted at `meta_dir` (usually `paths.meta_dir()`).
     pub fn new(meta_dir: impl Into<PathBuf>) -> OfflineMetaStore {
-        OfflineMetaStore { meta_dir: meta_dir.into() }
+        OfflineMetaStore {
+            meta_dir: meta_dir.into(),
+        }
     }
 
     fn version_path(&self, uid: &str, version: &str) -> PathBuf {
@@ -146,9 +148,15 @@ impl MetaStore for OfflineMetaStore {
         let obj = value
             .as_object()
             .ok_or_else(|| Error::json(&path, "version list root must be an object"))?;
-        let fv = obj.get("formatVersion").and_then(|v| v.as_i64()).unwrap_or(0);
+        let fv = obj
+            .get("formatVersion")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         if fv != 0 && fv != 1 {
-            return Err(Error::format(&path, format!("unknown metadata format version {fv}")));
+            return Err(Error::format(
+                &path,
+                format!("unknown metadata format version {fv}"),
+            ));
         }
         let mut out = Vec::new();
         if let Some(items) = obj.get("versions").and_then(|v| v.as_array()) {
@@ -166,14 +174,33 @@ impl MetaStore for OfflineMetaStore {
                     .unwrap_or_default();
                 out.push(VersionEntry {
                     uid: uid.to_string(),
-                    version: o.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                    type_: o.get("type").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                    recommended: o.get("recommended").and_then(|v| v.as_bool()).unwrap_or(false),
+                    version: o
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    type_: o
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    recommended: o
+                        .get("recommended")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                     volatile: o.get("volatile").and_then(|v| v.as_bool()).unwrap_or(false),
-                    release_time: o.get("releaseTime").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                    release_time: o
+                        .get("releaseTime")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     requires,
                     conflicts,
-                    sha256: o.get("sha256").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                    sha256: o
+                        .get("sha256")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                 });
             }
         }
@@ -365,7 +392,8 @@ pub fn resolve(
         let mut progress = false;
         let mut index = 0;
         while index < slots.len() {
-            if slots[index].disabled || slots[index].file.is_some() || slots[index].error.is_some() {
+            if slots[index].disabled || slots[index].file.is_some() || slots[index].error.is_some()
+            {
                 index += 1;
                 continue;
             }
@@ -442,7 +470,11 @@ pub fn resolve(
                             file.version.clone()
                         };
                     }
-                    slots[index].target = if file.version.is_empty() { target } else { file.version.clone() };
+                    slots[index].target = if file.version.is_empty() {
+                        target
+                    } else {
+                        file.version.clone()
+                    };
                     slots[index].file = Some(file);
                     slots[index].custom = patched;
                     progress = true;
@@ -497,7 +529,10 @@ pub fn resolve(
                     custom: slot.custom,
                     problems: file.problems.clone(),
                 });
-                loaded.push(Loaded { uid: slot.uid.clone(), file });
+                loaded.push(Loaded {
+                    uid: slot.uid.clone(),
+                    file,
+                });
             }
             None => {
                 let detail = slot.error.clone().unwrap_or_default();
@@ -538,7 +573,10 @@ pub fn resolve(
             if !enabled_uids.contains(require.uid.as_str()) {
                 resolution.problems.push(crate::version::Problem {
                     severity: ProblemSeverity::Warning,
-                    message: format!("component '{}' requires '{}', which is not present", item.uid, require.uid),
+                    message: format!(
+                        "component '{}' requires '{}', which is not present",
+                        item.uid, require.uid
+                    ),
                 });
             } else if !require.equals_version.is_empty() {
                 let other = loaded
@@ -589,9 +627,15 @@ mod tests {
 
     impl MetaStore for MapStore {
         fn version_file(&mut self, uid: &str, version: &str) -> Result<VersionFile> {
-            let v = self.files.get(&(uid.to_string(), version.to_string())).cloned().ok_or_else(|| {
-                Error::Resolve { uid: uid.into(), version: version.into(), detail: "not in store".into() }
-            })?;
+            let v = self
+                .files
+                .get(&(uid.to_string(), version.to_string()))
+                .cloned()
+                .ok_or_else(|| Error::Resolve {
+                    uid: uid.into(),
+                    version: version.into(),
+                    detail: "not in store".into(),
+                })?;
             VersionFile::parse(&v, Path::new("meta.json"), false)
         }
 
@@ -625,10 +669,26 @@ mod tests {
             json!({"uid": "org.lwjgl3", "version": "3.3.2", "order": 1, "+traits": ["lwjgl3"]}),
         );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1.20.4".into(), important: true, ..Default::default() },
-            Component { uid: "org.lwjgl3".into(), version: "3.3.2".into(), important: true, ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1.20.4".into(),
+                important: true,
+                ..Default::default()
+            },
+            Component {
+                uid: "org.lwjgl3".into(),
+                version: "3.3.2".into(),
+                important: true,
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no/patches"), &mut store, &RuntimeContext::current_host()).unwrap();
+        let r = resolve(
+            &profile,
+            Path::new("/no/patches"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
         assert_eq!(r.severity(), ProblemSeverity::None);
         assert_eq!(r.profile.minecraft_version, "1.20.4");
         assert_eq!(r.profile.main_class, "net.minecraft.client.main.Main");
@@ -644,23 +704,62 @@ mod tests {
             r#"{"uid": "custom.thing", "version": "1", "order": 5, "mainClass": "custom.Main"}"#,
         )
         .unwrap();
-        let mut store = MapStore::with("custom.thing", "1", json!({"uid": "custom.thing", "mainClass": "meta.Main"}));
-        let profile = profile_with(vec![Component { uid: "custom.thing".into(), version: "1".into(), ..Default::default() }]);
-        let r = resolve(&profile, tmp.path(), &mut store, &RuntimeContext::current_host()).unwrap();
+        let mut store = MapStore::with(
+            "custom.thing",
+            "1",
+            json!({"uid": "custom.thing", "mainClass": "meta.Main"}),
+        );
+        let profile = profile_with(vec![Component {
+            uid: "custom.thing".into(),
+            version: "1".into(),
+            ..Default::default()
+        }]);
+        let r = resolve(
+            &profile,
+            tmp.path(),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
         assert!(r.components[0].custom);
         assert_eq!(r.profile.main_class, "custom.Main");
     }
 
     #[test]
     fn disabled_components_are_skipped() {
-        let mut store = MapStore::with("net.minecraft", "1", json!({"uid": "net.minecraft", "mainClass": "M"}));
+        let mut store = MapStore::with(
+            "net.minecraft",
+            "1",
+            json!({"uid": "net.minecraft", "mainClass": "M"}),
+        );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1".into(), ..Default::default() },
-            Component { uid: "org.quiltmc.quilt-loader".into(), version: "1".into(), disabled: true, ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "org.quiltmc.quilt-loader".into(),
+                version: "1".into(),
+                disabled: true,
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no"), &mut store, &RuntimeContext::current_host()).unwrap();
+        let r = resolve(
+            &profile,
+            Path::new("/no"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
         assert_eq!(r.profile.main_class, "M");
-        assert!(r.components.iter().find(|c| c.uid == "org.quiltmc.quilt-loader").unwrap().disabled);
+        assert!(
+            r.components
+                .iter()
+                .find(|c| c.uid == "org.quiltmc.quilt-loader")
+                .unwrap()
+                .disabled
+        );
         // disabled loader's absence does not produce conflict problems
         assert!(r.problems.is_empty());
     }
@@ -669,12 +768,29 @@ mod tests {
     fn unresolvable_component_is_reported_not_fatal() {
         let mut store = MapStore::with("net.minecraft", "1", json!({"uid": "net.minecraft"}));
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1".into(), ..Default::default() },
-            Component { uid: "net.minecraftforge".into(), version: "99.0".into(), ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "net.minecraftforge".into(),
+                version: "99.0".into(),
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no"), &mut store, &RuntimeContext::current_host()).unwrap();
+        let r = resolve(
+            &profile,
+            Path::new("/no"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
         assert_eq!(r.severity(), ProblemSeverity::Error);
-        assert!(r.problems.iter().any(|p| p.message.contains("net.minecraftforge")));
+        assert!(r
+            .problems
+            .iter()
+            .any(|p| p.message.contains("net.minecraftforge")));
         // the rest still merged
         assert_eq!(r.profile.minecraft_version, "");
     }
@@ -686,16 +802,38 @@ mod tests {
             ("net.minecraftforge".into(), "1".into()),
             json!({"uid": "net.minecraftforge", "conflicts": [{"uid": "net.fabricmc.fabric-loader"}]}),
         );
-        store
-            .files
-            .insert(("net.fabricmc.fabric-loader".into(), "1".into()), json!({"uid": "net.fabricmc.fabric-loader"}));
+        store.files.insert(
+            ("net.fabricmc.fabric-loader".into(), "1".into()),
+            json!({"uid": "net.fabricmc.fabric-loader"}),
+        );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1".into(), ..Default::default() },
-            Component { uid: "net.minecraftforge".into(), version: "1".into(), ..Default::default() },
-            Component { uid: "net.fabricmc.fabric-loader".into(), version: "1".into(), ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "net.minecraftforge".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "net.fabricmc.fabric-loader".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no"), &mut store, &RuntimeContext::current_host()).unwrap();
-        assert!(r.problems.iter().any(|p| p.severity == ProblemSeverity::Error && p.message.contains("conflicts")));
+        let r = resolve(
+            &profile,
+            Path::new("/no"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
+        assert!(r
+            .problems
+            .iter()
+            .any(|p| p.severity == ProblemSeverity::Error && p.message.contains("conflicts")));
     }
 
     #[test]
@@ -705,13 +843,32 @@ mod tests {
             "1",
             json!({"uid": "net.minecraftforge", "requires": [{"uid": "net.minecraft", "equals": "1.20.1"}]}),
         );
-        store.files.insert(("net.minecraft".into(), "1.20.4".into()), json!({"uid": "net.minecraft", "version": "1.20.4"}));
+        store.files.insert(
+            ("net.minecraft".into(), "1.20.4".into()),
+            json!({"uid": "net.minecraft", "version": "1.20.4"}),
+        );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1.20.4".into(), ..Default::default() },
-            Component { uid: "net.minecraftforge".into(), version: "1".into(), ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1.20.4".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "net.minecraftforge".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no"), &mut store, &RuntimeContext::current_host()).unwrap();
-        assert!(r.problems.iter().any(|p| p.message.contains("requires 'net.minecraft' version '1.20.1'")));
+        let r = resolve(
+            &profile,
+            Path::new("/no"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
+        assert!(r.problems.iter().any(|p| p
+            .message
+            .contains("requires 'net.minecraft' version '1.20.1'")));
     }
 
     /// A vanilla instance writes an `org.lwjgl3` slot with no version of its
@@ -734,12 +891,35 @@ mod tests {
             json!({"uid": "org.lwjgl3", "version": "3.3.3", "order": 3, "+traits": ["lwjgl3"]}),
         );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1.21.1".into(), important: true, ..Default::default() },
-            Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1.21.1".into(),
+                important: true,
+                ..Default::default()
+            },
+            Component {
+                uid: "org.lwjgl3".into(),
+                important: true,
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no/patches"), &mut store, &RuntimeContext::current_host()).unwrap();
-        assert_eq!(r.severity(), ProblemSeverity::None, "problems: {:?}", r.problems);
-        assert!(r.profile.has_trait("lwjgl3"), "LWJGL never reached the profile");
+        let r = resolve(
+            &profile,
+            Path::new("/no/patches"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
+        assert_eq!(
+            r.severity(),
+            ProblemSeverity::None,
+            "problems: {:?}",
+            r.problems
+        );
+        assert!(
+            r.profile.has_trait("lwjgl3"),
+            "LWJGL never reached the profile"
+        );
         let lwjgl = r.components.iter().find(|c| c.uid == "org.lwjgl3").unwrap();
         assert_eq!(lwjgl.version, "3.3.3");
     }
@@ -770,13 +950,41 @@ mod tests {
             }),
         );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1.21.1".into(), important: true, ..Default::default() },
-            Component { uid: "net.fabricmc.fabric-loader".into(), version: "0.16.5".into(), important: true, ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1.21.1".into(),
+                important: true,
+                ..Default::default()
+            },
+            Component {
+                uid: "net.fabricmc.fabric-loader".into(),
+                version: "0.16.5".into(),
+                important: true,
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no/patches"), &mut store, &RuntimeContext::current_host()).unwrap();
-        assert_eq!(r.severity(), ProblemSeverity::None, "problems: {:?}", r.problems);
-        assert!(r.profile.has_trait("intermediary"), "mappings never reached the profile");
-        let added = r.components.iter().find(|c| c.uid == "net.fabricmc.intermediary").unwrap();
+        let r = resolve(
+            &profile,
+            Path::new("/no/patches"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
+        assert_eq!(
+            r.severity(),
+            ProblemSeverity::None,
+            "problems: {:?}",
+            r.problems
+        );
+        assert!(
+            r.profile.has_trait("intermediary"),
+            "mappings never reached the profile"
+        );
+        let added = r
+            .components
+            .iter()
+            .find(|c| c.uid == "net.fabricmc.intermediary")
+            .unwrap();
         assert_eq!(added.version, "1.21.1");
     }
 
@@ -804,11 +1012,31 @@ mod tests {
             }),
         );
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1.21.1".into(), important: true, ..Default::default() },
-            Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1.21.1".into(),
+                important: true,
+                ..Default::default()
+            },
+            Component {
+                uid: "org.lwjgl3".into(),
+                important: true,
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no/patches"), &mut store, &RuntimeContext::current_host()).unwrap();
-        assert_eq!(r.severity(), ProblemSeverity::None, "problems: {:?}", r.problems);
+        let r = resolve(
+            &profile,
+            Path::new("/no/patches"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
+        assert_eq!(
+            r.severity(),
+            ProblemSeverity::None,
+            "problems: {:?}",
+            r.problems
+        );
         // The slot stays visible, with no version and nothing loaded: the
         // profile's own shape, reported rather than silently deleted.
         let lwjgl = r
@@ -834,10 +1062,23 @@ mod tests {
     fn a_versionless_component_nobody_requires_is_still_an_error() {
         let mut store = MapStore::with("net.minecraft", "1", json!({"uid": "net.minecraft"}));
         let profile = profile_with(vec![
-            Component { uid: "net.minecraft".into(), version: "1".into(), ..Default::default() },
-            Component { uid: "org.example.something".into(), ..Default::default() },
+            Component {
+                uid: "net.minecraft".into(),
+                version: "1".into(),
+                ..Default::default()
+            },
+            Component {
+                uid: "org.example.something".into(),
+                ..Default::default()
+            },
         ]);
-        let r = resolve(&profile, Path::new("/no"), &mut store, &RuntimeContext::current_host()).unwrap();
+        let r = resolve(
+            &profile,
+            Path::new("/no"),
+            &mut store,
+            &RuntimeContext::current_host(),
+        )
+        .unwrap();
         assert_eq!(r.severity(), ProblemSeverity::Error);
         assert!(r
             .problems
@@ -849,13 +1090,34 @@ mod tests {
     #[test]
     fn an_exact_requirement_outranks_a_suggestion() {
         let mut map = BTreeMap::new();
-        compose_into(&mut map, &Require { uid: "org.example".into(), equals_version: String::new(), suggests: "3.3.3".into() });
-        compose_into(&mut map, &Require { uid: "org.example".into(), equals_version: "3.2.0".into(), suggests: String::new() });
+        compose_into(
+            &mut map,
+            &Require {
+                uid: "org.example".into(),
+                equals_version: String::new(),
+                suggests: "3.3.3".into(),
+            },
+        );
+        compose_into(
+            &mut map,
+            &Require {
+                uid: "org.example".into(),
+                equals_version: "3.2.0".into(),
+                suggests: String::new(),
+            },
+        );
         let composed = &map["org.example"];
         assert_eq!(composed.equals_version, "3.2.0");
         assert_eq!(composed.suggests, "3.3.3");
         // Two suggestions keep the higher version, in either order.
-        compose_into(&mut map, &Require { uid: "org.example".into(), equals_version: String::new(), suggests: "3.4.1".into() });
+        compose_into(
+            &mut map,
+            &Require {
+                uid: "org.example".into(),
+                equals_version: String::new(),
+                suggests: "3.4.1".into(),
+            },
+        );
         assert_eq!(map["org.example"].suggests, "3.4.1");
     }
 

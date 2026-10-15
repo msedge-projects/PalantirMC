@@ -62,7 +62,10 @@ fn instance_cfg_reproduces_prism_bytes_from_the_same_settings() {
     // and loading the golden file gives the same settings back
     let loaded = Settings::load(&tmp.path().join("instance.cfg")).unwrap();
     assert_eq!(loaded.get_str("name", ""), "Fabric 1.21.1");
-    assert_eq!(loaded.get_str("notes", ""), "multi line\nwith ; and = chars");
+    assert_eq!(
+        loaded.get_str("notes", ""),
+        "multi line\nwith ; and = chars"
+    );
     assert_eq!(loaded.get_i64("MaxMemAlloc", 0), 8192);
     assert!(loaded.get_bool("OverrideMemory", false));
 }
@@ -75,19 +78,32 @@ fn mmc_pack_reproduces_prism_bytes_and_parses_the_golden() {
 
     let profile = PackProfile::load(&path).unwrap();
     assert_eq!(profile.components().len(), 2);
-    assert_eq!(profile.get("net.minecraft").unwrap().cached_version, "1.21.1");
-    assert_eq!(profile.get("net.fabricmc.fabric-loader").unwrap().cached_name, "Fabric Loader");
+    assert_eq!(
+        profile.get("net.minecraft").unwrap().cached_version,
+        "1.21.1"
+    );
+    assert_eq!(
+        profile
+            .get("net.fabricmc.fabric-loader")
+            .unwrap()
+            .cached_name,
+        "Fabric Loader"
+    );
     assert_eq!(profile.to_text(), MMC_PACK_GOLDEN);
 }
 
 #[test]
 fn legacy_multimc_instance_cfg_migrates_like_prism() {
     // Old MultiMC format: '#'-comments, \n escapes, no ConfigVersion.
-    let legacy = "name=Old MultiMC\nnotes=line1\\nline2 with \\# hash and ; and =\nInstanceType=OneSix\n";
+    let legacy =
+        "name=Old MultiMC\nnotes=line1\\nline2 with \\# hash and ; and =\nInstanceType=OneSix\n";
     let map = palantir_core::ini::load_ini(legacy, std::path::Path::new("instance.cfg")).unwrap();
     assert_eq!(map.get("ConfigVersion"), Some("1.3"));
     assert_eq!(map.get("name"), Some("Old MultiMC"));
-    assert_eq!(map.get("notes"), Some("line1\nline2 with # hash and ; and ="));
+    assert_eq!(
+        map.get("notes"),
+        Some("line1\nline2 with # hash and ; and =")
+    );
     // and it re-saves in the modern format
     let rewritten = palantir_core::ini::save_ini(&map);
     assert!(rewritten.starts_with("[General]\nConfigVersion=1.3\n"));
@@ -157,7 +173,9 @@ fn seed_meta_cache(meta_dir: &std::path::Path) {
     )
     .unwrap();
     std::fs::write(
-        meta_dir.join("net.fabricmc.fabric-loader").join("0.16.5.json"),
+        meta_dir
+            .join("net.fabricmc.fabric-loader")
+            .join("0.16.5.json"),
         json::to_document_string(&serde_json::json!({
             "formatVersion": 1,
             "uid": "net.fabricmc.fabric-loader",
@@ -177,7 +195,9 @@ fn seed_meta_cache(meta_dir: &std::path::Path) {
     )
     .unwrap();
     std::fs::write(
-        meta_dir.join("net.fabricmc.intermediary").join("1.21.1.json"),
+        meta_dir
+            .join("net.fabricmc.intermediary")
+            .join("1.21.1.json"),
         json::to_document_string(&serde_json::json!({
             "formatVersion": 1,
             "uid": "net.fabricmc.intermediary",
@@ -223,7 +243,11 @@ fn resolve_fabric_instance_end_to_end() {
     // Neither launcher writes it against Mojang's own file, which keeps those
     // libraries itself, so it is added here rather than inherited from
     // `Instance::create`.
-    profile.append(Component { uid: "org.lwjgl3".into(), important: true, ..Default::default() });
+    profile.append(Component {
+        uid: "org.lwjgl3".into(),
+        important: true,
+        ..Default::default()
+    });
     profile.save(&instance.mmc_pack_path()).unwrap();
 
     let mut store = OfflineMetaStore::new(paths.meta_dir());
@@ -240,16 +264,31 @@ fn resolve_fabric_instance_end_to_end() {
         "the fixture stopped covering the versionless LWJGL slot"
     );
     let resolution = resolve(&saved, &instance.patches_dir(), &mut store, &ctx).unwrap();
-    assert_eq!(resolution.severity(), ProblemSeverity::None, "problems: {:?}", resolution.problems);
+    assert_eq!(
+        resolution.severity(),
+        ProblemSeverity::None,
+        "problems: {:?}",
+        resolution.problems
+    );
     assert_eq!(resolution.profile.minecraft_version, "1.21.1");
-    assert_eq!(resolution.profile.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
+    assert_eq!(
+        resolution.profile.main_class,
+        "net.fabricmc.loader.impl.launch.knot.KnotClient"
+    );
     assert!(resolution.profile.has_trait("fabric"));
-    assert_eq!(resolution.profile.addn_jvm_arguments, vec!["-Dfabric.gameJar=minecraft.jar"]);
+    assert_eq!(
+        resolution.profile.addn_jvm_arguments,
+        vec!["-Dfabric.gameJar=minecraft.jar"]
+    );
 
     // Both slots the pack does not version were decided during resolution: the
     // LWJGL slot from the requirement that named it, and the mappings from the
     // game version, added because the loader Requires them.
-    let lwjgl = resolution.components.iter().find(|c| c.uid == "org.lwjgl3").unwrap();
+    let lwjgl = resolution
+        .components
+        .iter()
+        .find(|c| c.uid == "org.lwjgl3")
+        .unwrap();
     assert_eq!(lwjgl.version, "3.3.3");
     let mappings = resolution
         .components
@@ -260,7 +299,10 @@ fn resolve_fabric_instance_end_to_end() {
     assert!(resolution.profile.has_trait("intermediary"));
 
     // The Fabric loader's `equals` requirement is satisfied by net.minecraft.
-    assert!(!resolution.problems.iter().any(|p| p.message.contains("requires")));
+    assert!(!resolution
+        .problems
+        .iter()
+        .any(|p| p.message.contains("requires")));
 }
 
 #[test]
@@ -269,7 +311,9 @@ fn launch_script_golden_matches_protocol() {
         minecraft_version: "1.21.1".into(),
         minecraft_version_type: "release".into(),
         minecraft_assets: Some(palantir_core::version::AssetIndexInfo::bare("17")),
-        minecraft_arguments: "--username ${auth_player_name} --version ${version_name} --assetsDir ${assets_root}".into(),
+        minecraft_arguments:
+            "--username ${auth_player_name} --version ${version_name} --assetsDir ${assets_root}"
+                .into(),
         main_class: "net.fabricmc.loader.impl.launch.knot.KnotClient".into(),
         ..Default::default()
     };
@@ -283,7 +327,11 @@ fn launch_script_golden_matches_protocol() {
         None,
         None,
         &mc_args,
-        launch::WindowParams { width: 854, height: 480, maximized: false },
+        launch::WindowParams {
+            width: 854,
+            height: 480,
+            maximized: false,
+        },
         palantir_core::PRODUCT_NAME,
         "9.0",
         "Fabric 1.21.1",
@@ -312,7 +360,11 @@ fn launch_script_golden_matches_protocol() {
 fn require_serialization_uses_equals_key_like_meta_format() {
     // Meta::serializeRequires writes "equals" (meta/JsonFormat.cpp), even
     // though the C++ field is named equalsVersion.
-    let r = Require { uid: "net.minecraft".into(), equals_version: "1.21.1".into(), suggests: String::new() };
+    let r = Require {
+        uid: "net.minecraft".into(),
+        equals_version: "1.21.1".into(),
+        suggests: String::new(),
+    };
     let v = r.to_json();
     assert_eq!(v["equals"], "1.21.1");
     assert!(v.get("suggests").is_none());

@@ -31,9 +31,15 @@ impl Instance {
         let settings = Settings::load(&cfg)?;
         let inst_type = settings.get_str("InstanceType", "");
         if !inst_type.is_empty() && inst_type != "OneSix" {
-            return Err(Error::format(cfg, format!("unsupported InstanceType '{inst_type}'")));
+            return Err(Error::format(
+                cfg,
+                format!("unsupported InstanceType '{inst_type}'"),
+            ));
         }
-        Ok(Instance { root: root.to_path_buf(), settings })
+        Ok(Instance {
+            root: root.to_path_buf(),
+            settings,
+        })
     }
 
     /// Like [`Instance::open`] but returns `None` for folders without
@@ -52,7 +58,8 @@ impl Instance {
     /// (Prism relies on directory order, which is alphabetical in practice).
     pub fn discover(instances_dir: &Path) -> Result<Vec<PathBuf>> {
         let mut out: Vec<PathBuf> = Vec::new();
-        let root_canonical = std::fs::canonicalize(instances_dir).unwrap_or_else(|_| instances_dir.to_path_buf());
+        let root_canonical =
+            std::fs::canonicalize(instances_dir).unwrap_or_else(|_| instances_dir.to_path_buf());
         let entries = match std::fs::read_dir(instances_dir) {
             Ok(e) => e,
             Err(e) => return Err(Error::io(instances_dir, e)),
@@ -225,7 +232,8 @@ impl Instance {
     /// Force the instance type (normalizes to `OneSix` like
     /// `MinecraftInstance::loadSpecificSettings` does).
     pub fn set_instance_type(&mut self, t: &str) {
-        self.settings.set_str("InstanceType", if t == "OneSix" { "OneSix" } else { t });
+        self.settings
+            .set_str("InstanceType", if t == "OneSix" { "OneSix" } else { t });
     }
 
     /// Linked instance ids (`linkedInstances`, stored as a compact JSON
@@ -246,7 +254,11 @@ impl Instance {
 
     /// Set linked instance ids.
     pub fn set_linked_instances(&mut self, ids: &[String]) {
-        let json = serde_json::Value::Array(ids.iter().map(|s| serde_json::Value::String(s.clone())).collect());
+        let json = serde_json::Value::Array(
+            ids.iter()
+                .map(|s| serde_json::Value::String(s.clone()))
+                .collect(),
+        );
         self.settings.set_str("linkedInstances", json.to_string());
     }
 
@@ -380,7 +392,10 @@ mod tests {
         assert!(inst.local_libraries_dir().is_dir());
         let mut s = Settings::empty("x");
         s.set_i64("totalTimePlayed", -5);
-        let mut inst2 = Instance { root: inst.root.clone(), settings: s };
+        let mut inst2 = Instance {
+            root: inst.root.clone(),
+            settings: s,
+        };
         assert_eq!(inst2.total_time_played_secs(), 0);
         inst2.add_play_time_secs(-100); // clamped, no change
         assert_eq!(inst2.total_time_played_secs(), 0);
@@ -394,7 +409,10 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("not_an_instance")).unwrap();
         std::fs::write(dir.path().join("file.txt"), "x").unwrap();
         let found = Instance::discover(dir.path()).unwrap();
-        let ids: Vec<String> = found.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        let ids: Vec<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
         assert_eq!(ids, vec!["a", "b"]);
     }
 
@@ -406,8 +424,10 @@ mod tests {
         {
             std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
             let found = Instance::discover(dir.path()).unwrap();
-            let ids: Vec<String> =
-                found.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+            let ids: Vec<String> = found
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
             assert_eq!(ids, vec!["real"]);
         }
     }
@@ -415,12 +435,21 @@ mod tests {
     #[test]
     fn open_rejects_missing_cfg_and_unknown_instance_type() {
         let dir = tmp();
-        assert!(matches!(Instance::open(dir.path()), Err(Error::InstanceNotFound(_))));
+        assert!(matches!(
+            Instance::open(dir.path()),
+            Err(Error::InstanceNotFound(_))
+        ));
         let bad = dir.path().join("bad");
         std::fs::create_dir_all(&bad).unwrap();
-        std::fs::write(bad.join("instance.cfg"), "InstanceType=Legacy\nConfigVersion=1.3\n").unwrap();
+        std::fs::write(
+            bad.join("instance.cfg"),
+            "InstanceType=Legacy\nConfigVersion=1.3\n",
+        )
+        .unwrap();
         assert!(Instance::open(&bad).is_err());
-        assert!(Instance::try_open(&dir.path().join("empty")).unwrap().is_none());
+        assert!(Instance::try_open(&dir.path().join("empty"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -447,7 +476,10 @@ mod tests {
         assert!(inst.linked_instances().is_empty());
         inst.set_linked_instances(&["other".to_string(), "second".to_string()]);
         assert_eq!(inst.linked_instances(), vec!["other", "second"]);
-        assert_eq!(inst.settings.map().get("linkedInstances"), Some("[\"other\",\"second\"]"));
+        assert_eq!(
+            inst.settings.map().get("linkedInstances"),
+            Some("[\"other\",\"second\"]")
+        );
     }
 
     #[test]

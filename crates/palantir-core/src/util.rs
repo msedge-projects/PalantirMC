@@ -21,15 +21,30 @@ pub fn read_text(path: &Path) -> Result<String> {
 /// then renamed over the target (mirrors `QSaveFile` / `PSaveFile` commit).
 /// The temp file is removed on any failure.
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-    let name = path.file_name().map(std::ffi::OsStr::to_owned).unwrap_or_default();
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let name = path
+        .file_name()
+        .map(std::ffi::OsStr::to_owned)
+        .unwrap_or_default();
     // Checking existence and then creating is a race: simultaneous saves can
     // truncate one another's temporary file. Reserve each candidate atomically.
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let (tmp, mut file) = loop {
         let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = dir.join(format!(".{}.tmp-{}-{serial}", name.to_string_lossy(), std::process::id()));
-        match fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        let tmp = dir.join(format!(
+            ".{}.tmp-{}-{serial}",
+            name.to_string_lossy(),
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
             Ok(file) => break (tmp, file),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(Error::io(path, error)),
@@ -73,8 +88,15 @@ pub fn sanitize_dir_name(name: &str) -> String {
             out.push(c);
         }
     }
-    let trimmed = out.trim_start_matches('.').trim_end_matches(['.', ' ']).to_string();
-    if trimmed.is_empty() { "Unnamed".to_string() } else { trimmed }
+    let trimmed = out
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' '])
+        .to_string();
+    if trimmed.is_empty() {
+        "Unnamed".to_string()
+    } else {
+        trimmed
+    }
 }
 
 /// Produce a directory name that does not yet exist inside `parent`,
@@ -107,7 +129,10 @@ mod tests {
 
     #[test]
     fn sanitize_replaces_forbidden_and_control_chars() {
-        assert_eq!(sanitize_dir_name("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(
+            sanitize_dir_name("a/b\\c:d*e?f\"g<h>i|j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
         assert_eq!(sanitize_dir_name("ok\u{7}name"), "ok_name");
     }
 
@@ -134,23 +159,32 @@ mod tests {
         let path = dir.path().join("shared.cfg");
         let barrier = std::sync::Barrier::new(8);
         std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..8u8).map(|value| {
-                let path = &path;
-                let barrier = &barrier;
-                scope.spawn(move || {
-                    let bytes = vec![value; 256 * 1024];
-                    barrier.wait();
-                    atomic_write(path, &bytes)
+            let handles: Vec<_> = (0..8u8)
+                .map(|value| {
+                    let path = &path;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        let bytes = vec![value; 256 * 1024];
+                        barrier.wait();
+                        atomic_write(path, &bytes)
+                    })
                 })
-            }).collect();
+                .collect();
             for handle in handles {
                 handle.join().unwrap().unwrap();
             }
         });
         let bytes = fs::read(&path).unwrap();
         assert_eq!(bytes.len(), 256 * 1024);
-        assert!(bytes.iter().all(|byte| *byte == bytes[0]), "no interleaved payloads");
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary files left");
+        assert!(
+            bytes.iter().all(|byte| *byte == bytes[0]),
+            "no interleaved payloads"
+        );
+        assert_eq!(
+            fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "no temporary files left"
+        );
     }
 
     #[test]
@@ -160,7 +194,16 @@ mod tests {
         atomic_write(&path, b"hello").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"hello");
         // no temp leftovers
-        let leftovers: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".tmp-")).collect();
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp-")
+            })
+            .collect();
         assert!(leftovers.is_empty());
     }
 }

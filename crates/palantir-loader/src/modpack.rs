@@ -59,7 +59,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper to build an [`Error::Io`].
 fn io_err(path: &Path, source: std::io::Error) -> Error {
-    Error::Io { path: path.to_path_buf(), source }
+    Error::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 /// Convert a [`palantir_core::error::Error`] into a local [`Error::Core`].
@@ -117,8 +120,10 @@ fn read_zip_text(
         .by_name(name)
         .map_err(|e| Error::Zip(e.to_string()))?;
     let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|e| Error::Io { path: PathBuf::from(name), source: e })?;
+    file.read_to_string(&mut text).map_err(|e| Error::Io {
+        path: PathBuf::from(name),
+        source: e,
+    })?;
     Ok(text)
 }
 
@@ -164,7 +169,9 @@ fn extract_overrides(
     let mut index: usize = 0;
     while index < len {
         let (raw_name, is_dir, unix_mode) = {
-            let file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
+            let file = archive
+                .by_index(index)
+                .map_err(|e| Error::Zip(e.to_string()))?;
             (file.name().to_owned(), file.is_dir(), file.unix_mode())
         };
         // Silence unused-variable on non-unix targets where permissions are a no-op.
@@ -193,17 +200,17 @@ fn extract_overrides(
                     std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
                 }
             }
-            let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
-            let mut out =
-                std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
+            let mut file = archive
+                .by_index(index)
+                .map_err(|e| Error::Zip(e.to_string()))?;
+            let mut out = std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
             std::io::copy(&mut file, &mut out).map_err(|e| io_err(&out_path, e))?;
             #[cfg(unix)]
             {
                 if let Some(mode) = unix_mode {
                     use std::os::unix::fs::PermissionsExt as _;
                     let perms = std::fs::Permissions::from_mode(mode);
-                    std::fs::set_permissions(&out_path, perms)
-                        .map_err(|e| io_err(&out_path, e))?;
+                    std::fs::set_permissions(&out_path, perms).map_err(|e| io_err(&out_path, e))?;
                 }
             }
         }
@@ -255,7 +262,10 @@ fn parse_curse_loader_id(id: &str, mc_version: &str) -> Option<(String, String)>
 }
 
 /// Register loader components in the instance's `mmc-pack.json`.
-fn register_loaders(instance: &palantir_core::instance::Instance, loaders: &[(String, String)]) -> Result<()> {
+fn register_loaders(
+    instance: &palantir_core::instance::Instance,
+    loaders: &[(String, String)],
+) -> Result<()> {
     if loaders.is_empty() {
         return Ok(());
     }
@@ -294,7 +304,9 @@ pub fn import_mrpack(
     })?;
     let mc_version = plan.minecraft.as_str();
     if mc_version.is_empty() {
-        return Err(Error::InvalidPack("empty dependencies.minecraft".to_string()));
+        return Err(Error::InvalidPack(
+            "empty dependencies.minecraft".to_string(),
+        ));
     }
     let instance = palantir_core::instance::Instance::create(instances_dir, name, mc_version)
         .map_err(core_err)?;
@@ -473,7 +485,10 @@ fn plan_mrpack(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Result<
         None => return Ok(plan),
     };
     for entry in entries {
-        let path = entry.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let path = entry
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         // `env.client == "unsupported"` is the pack saying the file is for the
         // server. Installing it anyway is a client that crashes on startup, so
         // the pack's own answer is honoured rather than second-guessed.
@@ -506,7 +521,8 @@ fn plan_mrpack(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Result<
             size: entry.get("fileSize").and_then(|v| v.as_u64()).unwrap_or(0),
         };
         if file.downloads.is_empty() {
-            plan.skipped.push(format!("{path} (the index lists no download URL)"));
+            plan.skipped
+                .push(format!("{path} (the index lists no download URL)"));
         } else if file.relative_path().is_none() {
             plan.skipped
                 .push(format!("{path} (unsafe path — refusing to write it)"));
@@ -541,7 +557,10 @@ fn plan_curseforge(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Res
             .to_string(),
         ..PackPlan::default()
     };
-    if let Some(arr) = minecraft.and_then(|m| m.get("modLoaders")).and_then(|v| v.as_array()) {
+    if let Some(arr) = minecraft
+        .and_then(|m| m.get("modLoaders"))
+        .and_then(|v| v.as_array())
+    {
         let mut primary: Option<(String, String)> = None;
         let mut first: Option<(String, String)> = None;
         for entry in arr {
@@ -554,7 +573,11 @@ fn plan_curseforge(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Res
             if first.is_none() {
                 first = Some(parsed.clone());
             }
-            if entry.get("primary").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if entry
+                .get("primary")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 primary = Some(parsed);
                 break;
             }
@@ -656,12 +679,14 @@ mod tests {
             "overrides": "overrides"
         });
         let bytes = build_zip(&[
-            ("modrinth.index.json", serde_json::to_vec(&index).unwrap().as_slice()),
+            (
+                "modrinth.index.json",
+                serde_json::to_vec(&index).unwrap().as_slice(),
+            ),
             ("overrides/config/test.cfg", b"hello"),
         ]);
         let dir = tempfile::tempdir().unwrap();
-        let root =
-            import_mrpack(bytes.as_slice(), dir.path(), "Mr Test").unwrap();
+        let root = import_mrpack(bytes.as_slice(), dir.path(), "Mr Test").unwrap();
         assert!(root.join("config").join("test.cfg").is_file());
         assert_eq!(
             std::fs::read(root.join("config").join("test.cfg")).unwrap(),
@@ -686,12 +711,14 @@ mod tests {
             "files": []
         });
         let bytes = build_zip(&[
-            ("manifest.json", serde_json::to_vec(&manifest).unwrap().as_slice()),
+            (
+                "manifest.json",
+                serde_json::to_vec(&manifest).unwrap().as_slice(),
+            ),
             ("overrides/config/c.cfg", b"curse"),
         ]);
         let dir = tempfile::tempdir().unwrap();
-        let root =
-            import_curseforge(bytes.as_slice(), dir.path(), "Curse Test").unwrap();
+        let root = import_curseforge(bytes.as_slice(), dir.path(), "Curse Test").unwrap();
         assert_eq!(
             std::fs::read(root.join("config").join("c.cfg")).unwrap(),
             b"curse"
@@ -709,7 +736,10 @@ mod tests {
             "overrides": "overrides"
         });
         let bytes = build_zip(&[
-            ("modrinth.index.json", serde_json::to_vec(&index).unwrap().as_slice()),
+            (
+                "modrinth.index.json",
+                serde_json::to_vec(&index).unwrap().as_slice(),
+            ),
             ("overrides/../../evil.txt", b"bad"),
         ]);
         let dir = tempfile::tempdir().unwrap();
@@ -725,7 +755,10 @@ mod tests {
         );
         assert_eq!(
             parse_curse_loader_id("fabric-0.16.9-1.20.1", "1.20.1"),
-            Some(("net.fabricmc.fabric-loader".to_string(), "0.16.9".to_string()))
+            Some((
+                "net.fabricmc.fabric-loader".to_string(),
+                "0.16.9".to_string()
+            ))
         );
         assert_eq!(parse_curse_loader_id("unknown-1.0", "1.20.1"), None);
     }
@@ -768,13 +801,20 @@ mod tests {
         assert_eq!(plan.minecraft, "1.20.1");
         assert_eq!(
             plan.loaders,
-            vec![("net.fabricmc.fabric-loader".to_string(), "0.16.9".to_string())]
+            vec![(
+                "net.fabricmc.fabric-loader".to_string(),
+                "0.16.9".to_string()
+            )]
         );
         // The server-only file is the pack's own decision and is not installed;
         // the unsafe and URL-less entries are reported, not written.
         assert_eq!(plan.files.len(), 1);
         assert_eq!(plan.files[0].path, "mods/sodium.jar");
-        assert_eq!(plan.files[0].downloads.len(), 2, "mirrors are kept in order");
+        assert_eq!(
+            plan.files[0].downloads.len(),
+            2,
+            "mirrors are kept in order"
+        );
         assert_eq!(plan.files[0].sha1.as_deref(), Some("aa11"));
         assert_eq!(plan.files[0].size, 400);
         assert_eq!(plan.skipped_count(), 2);
@@ -797,9 +837,15 @@ mod tests {
             size: 0,
         };
         if cfg!(windows) {
-            assert!(drive.relative_path().is_none(), "a drive path is not relative");
+            assert!(
+                drive.relative_path().is_none(),
+                "a drive path is not relative"
+            );
         } else {
-            assert_eq!(drive.relative_path(), Some(PathBuf::from("C:\\windows\\x.jar")));
+            assert_eq!(
+                drive.relative_path(),
+                Some(PathBuf::from("C:\\windows\\x.jar"))
+            );
         }
         assert!(PackFile {
             path: "/etc/x.jar".to_string(),
@@ -884,8 +930,11 @@ mod tests {
         // re-install must not touch.
         std::fs::write(root.join("config").join("pack.cfg"), b"old").unwrap();
         std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
-        std::fs::write(root.join("saves").join("world").join("level.dat"), b"my world")
-            .unwrap();
+        std::fs::write(
+            root.join("saves").join("world").join("level.dat"),
+            b"my world",
+        )
+        .unwrap();
         std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
 
         let plan = apply_mrpack(bytes.as_slice(), &instance).unwrap();

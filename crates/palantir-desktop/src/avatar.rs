@@ -579,7 +579,11 @@ fn masked_as(
         ((side - width) / 2) as i64,
         ((side - height) / 2) as i64,
     );
-    let kept = if circle { circle_mask(side) } else { mask(side) };
+    let kept = if circle {
+        circle_mask(side)
+    } else {
+        mask(side)
+    };
     let centre = side as f32 / 2.0;
     let mut pixels = canvas.into_raw();
     for (index, kept) in kept.iter().enumerate() {
@@ -707,7 +711,10 @@ impl Icon {
     ///
     /// The `side` passed here is still the *card's* side and not the canvas's, so
     /// the disc is the size the reference draws whatever the caller's box is.
-    #[allow(dead_code, reason = "`pages/user.rs:544` is the only caller that wants this")]
+    #[allow(
+        dead_code,
+        reason = "`pages/user.rs:544` is the only caller that wants this"
+    )]
     pub fn shadowed_circle(bytes: &[u8], side: u32) -> Option<Icon> {
         let card = masked_as(bytes, side, true, true, button_bg(Gen::Dark))?;
         let picture = with_card_shadow(card, Shadow::of(Gen::Dark));
@@ -745,11 +752,13 @@ mod tests {
 
     /// A PNG of one colour, in memory, the way `skin.rs`'s tests make one.
     fn picture(width: u32, height: u32) -> Vec<u8> {
-        let square =
-            image::RgbaImage::from_pixel(width, height, image::Rgba([200, 40, 90, 255]));
+        let square = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 40, 90, 255]));
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(square)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -768,14 +777,13 @@ mod tests {
     /// A PNG of one colour in an arbitrary colour, for the tests that assert a
     /// blend rather than a copy.
     fn painted(width: u32, height: u32, colour: [u8; 4]) -> Vec<u8> {
-        let square = image::RgbaImage::from_pixel(
-            width,
-            height,
-            image::Rgba(colour),
-        );
+        let square = image::RgbaImage::from_pixel(width, height, image::Rgba(colour));
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(square)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -815,14 +823,25 @@ mod tests {
         // Symmetric about both axes: a mask that is not is a rounding that leans.
         for y in 0..side {
             for x in 0..side {
-                assert_eq!(at(x, y), at(side - 1 - x, y), "not mirrored in x at {x},{y}");
-                assert_eq!(at(x, y), at(x, side - 1 - y), "not mirrored in y at {x},{y}");
+                assert_eq!(
+                    at(x, y),
+                    at(side - 1 - x, y),
+                    "not mirrored in x at {x},{y}"
+                );
+                assert_eq!(
+                    at(x, y),
+                    at(x, side - 1 - y),
+                    "not mirrored in y at {x},{y}"
+                );
             }
         }
         // And most of a rounded square is kept: the corners are a few percent.
         let kept = mask.iter().filter(|kept| **kept).count();
         let total = (side * side) as usize;
-        assert!(kept * 100 / total >= 96, "the mask cut {kept} of {total} pixels");
+        assert!(
+            kept * 100 / total >= 96,
+            "the mask cut {kept} of {total} pixels"
+        );
     }
 
     #[test]
@@ -860,7 +879,10 @@ mod tests {
         let picture = masked(&picture(200, 40), ICON_SIDE).expect("a PNG must decode");
         assert_eq!(picture.side, ICON_SIDE);
         let (top, bottom) = ((ICON_SIDE - 20) / 2, (ICON_SIDE - 20) / 2 + 20);
-        assert_eq!(at(&picture, ICON_SIDE / 2, ICON_SIDE / 2), [200, 40, 90, 255]);
+        assert_eq!(
+            at(&picture, ICON_SIDE / 2, ICON_SIDE / 2),
+            [200, 40, 90, 255]
+        );
         // The letterbox is the element's own background on both sides of it --
         // `Avatar.vue:286`, and what a browser paints there -- and the picture
         // reaches the box's full width where it is.
@@ -868,7 +890,11 @@ mod tests {
             let [red, green, blue, _] = theme_gen::ink_rgba(Gen::Dark, Ink::ButtonBg);
             [red, green, blue, u8::MAX]
         };
-        assert_eq!(at(&picture, ICON_SIDE / 2, 0), background, "the letterbox is the button");
+        assert_eq!(
+            at(&picture, ICON_SIDE / 2, 0),
+            background,
+            "the letterbox is the button"
+        );
         assert_eq!(at(&picture, ICON_SIDE / 2, top - 1), background);
         assert_eq!(at(&picture, ICON_SIDE / 2, top), [200, 40, 90, 255]);
         assert_eq!(at(&picture, ICON_SIDE / 2, bottom - 1), [200, 40, 90, 255]);
@@ -893,7 +919,11 @@ mod tests {
         let row = 48;
         // Every pixel of the centre row survives the mask, and the two at its ends
         // are the gutter -- filled, not clear.
-        assert_eq!(at(&disc, 0, row), [52, 54, 60, 255], "the gutter is button-bg");
+        assert_eq!(
+            at(&disc, 0, row),
+            [52, 54, 60, 255],
+            "the gutter is button-bg"
+        );
         assert_eq!(at(&disc, 95, row), [52, 54, 60, 255]);
         let painted = (0..96).filter(|x| at(&disc, *x, row)[3] != 0).count();
         assert_eq!(painted, 96, "the disc is the box's full width");
@@ -917,8 +947,14 @@ mod tests {
         // The reference's own flat colour across the top of this disc, so the blend
         // below is the one the capture was measured with.
         let art = [52, 58, 63, 255];
-        let disc = masked_as(&painted(300, 307, art), 96, true, true, button_bg(Gen::Dark))
-            .expect("a PNG");
+        let disc = masked_as(
+            &painted(300, 307, art),
+            96,
+            true,
+            true,
+            button_bg(Gen::Dark),
+        )
+        .expect("a PNG");
         let row = 48;
         // The reference measures `#52575b` at the top of the disc's centre column,
         // which is 15% of white over the picture's `#343a3f` in the truncating
@@ -926,8 +962,16 @@ mod tests {
         // where its own gutter shows through the outline -- 3 units under the same
         // blend over our `#34363c` gutter, which is the reference compositing its
         // 1px ring a little less than full coverage over that column.
-        assert_eq!(at(&disc, 0, row), [82, 83, 89, 255], "the ring over the gutter");
-        assert_eq!(at(&disc, row, 0), [82, 87, 91, 255], "the ring over the picture");
+        assert_eq!(
+            at(&disc, 0, row),
+            [82, 83, 89, 255],
+            "the ring over the gutter"
+        );
+        assert_eq!(
+            at(&disc, row, 0),
+            [82, 87, 91, 255],
+            "the ring over the picture"
+        );
         assert_eq!(at(&disc, 95, row), [82, 83, 89, 255]);
         assert_eq!(at(&disc, row, 95), [82, 87, 91, 255]);
         // One pixel in, the picture is untouched -- a ring, not a wash.
@@ -1279,7 +1323,11 @@ mod tests {
             .flat_map(|y| (0..tiny.side).map(move |x| (x, y)))
             .map(|(x, y)| at(&tiny, x, y))
             .collect();
-        assert_eq!(colours.len(), 2, "the icon's own colour and the cleared corners");
+        assert_eq!(
+            colours.len(),
+            2,
+            "the icon's own colour and the cleared corners"
+        );
         // The same picture is what a card is handed, and the handle it draws with.
         let icon = Icon::of(&picture(16, 16), ICON_SIDE).expect("a PNG");
         drop(icon.handle());

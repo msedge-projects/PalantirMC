@@ -47,7 +47,10 @@ pub fn sha256_hex(data: &[u8]) -> String {
 pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), crate::Error> {
     let expected = expected_hex.trim().to_ascii_lowercase();
     if expected.len() != 64 || !expected.bytes().all(is_hex_digit) {
-        return Err(crate::Error::format(path, format!("invalid sha256 hex '{expected_hex}'")));
+        return Err(crate::Error::format(
+            path,
+            format!("invalid sha256 hex '{expected_hex}'"),
+        ));
     }
     // The engine verifier streams fixed-size chunks, so checking a cached
     // runtime archive does not allocate the entire archive again.
@@ -66,15 +69,10 @@ pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), crate::Error
 /// body whole cost `2 x threads x file size` — eight 37 MB jars is what put this
 /// launcher's footprint into the hundreds of megabytes during a first install.
 /// Streaming makes that peak a constant [`WRITE_BUFFER`] per worker instead.
-pub fn download_bytes(
-    fetcher: &dyn Fetcher,
-    url: &str,
-    dest: &Path,
-) -> Result<u64, crate::Error> {
+pub fn download_bytes(fetcher: &dyn Fetcher, url: &str, dest: &Path) -> Result<u64, crate::Error> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| crate::Error::io(parent, e))?;
+            std::fs::create_dir_all(parent).map_err(|e| crate::Error::io(parent, e))?;
         }
     }
     let part = part_path(dest);
@@ -218,9 +216,8 @@ pub fn download_many_with_progress(
             let (url, dest) = &jobs[index];
             (
                 url.clone(),
-                result.unwrap_or_else(|| {
-                    Err(crate::Error::format(dest, "download worker panicked"))
-                }),
+                result
+                    .unwrap_or_else(|| Err(crate::Error::format(dest, "download worker panicked"))),
             )
         })
         .collect()
@@ -255,7 +252,10 @@ mod tests {
 
     impl ChunkedFetcher {
         fn new(chunk: &[u8], chunks: usize) -> Self {
-            ChunkedFetcher { chunk: chunk.to_vec(), chunks }
+            ChunkedFetcher {
+                chunk: chunk.to_vec(),
+                chunks,
+            }
         }
     }
 
@@ -267,11 +267,7 @@ mod tests {
             Err(crate::Error::http(url, "connection lost"))
         }
 
-        fn fetch_to(
-            &self,
-            url: &str,
-            _sink: &mut dyn std::io::Write,
-        ) -> Result<u64, crate::Error> {
+        fn fetch_to(&self, url: &str, _sink: &mut dyn std::io::Write) -> Result<u64, crate::Error> {
             Err(crate::Error::http(url, "connection lost"))
         }
     }
@@ -330,8 +326,7 @@ mod tests {
             self.rendezvous(url)?;
             sink.write_all(&self.body)
                 .map_err(|e| crate::Error::http(url, e.to_string()))?;
-            u64::try_from(self.body.len())
-                .map_err(|_| crate::Error::http(url, "body too large"))
+            u64::try_from(self.body.len()).map_err(|_| crate::Error::http(url, "body too large"))
         }
     }
 
@@ -394,19 +389,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("a.bin");
         std::fs::write(&path, b"abc").unwrap();
-        verify_sha256(&path, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-            .unwrap();
+        verify_sha256(
+            &path,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        )
+        .unwrap();
     }
 
     #[test]
     fn verify_sha256_handles_multiple_chunks_and_a_partial_tail() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("large.bin");
-        let bytes: Vec<u8> = (0..(3 * WRITE_BUFFER + 17)).map(|i| (i % 251) as u8).collect();
+        let bytes: Vec<u8> = (0..(3 * WRITE_BUFFER + 17))
+            .map(|i| (i % 251) as u8)
+            .collect();
         std::fs::write(&path, &bytes).unwrap();
         verify_sha256(&path, &sha256_hex(&bytes)).unwrap();
         let wrong = sha256_hex(&bytes[..bytes.len() - 1]);
-        assert!(matches!(verify_sha256(&path, &wrong), Err(crate::Error::HashMismatch { .. })));
+        assert!(matches!(
+            verify_sha256(&path, &wrong),
+            Err(crate::Error::HashMismatch { .. })
+        ));
     }
 
     #[test]
@@ -414,8 +417,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("a.bin");
         std::fs::write(&path, b"abc").unwrap();
-        verify_sha256(&path, "  BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\n")
-            .unwrap();
+        verify_sha256(
+            &path,
+            "  BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -429,7 +435,9 @@ mod tests {
         )
         .unwrap_err();
         match err {
-            crate::Error::HashMismatch { expected, actual, .. } => {
+            crate::Error::HashMismatch {
+                expected, actual, ..
+            } => {
                 assert!(expected.starts_with("e3b0"));
                 assert_eq!(actual, sha256_hex(b"abc"));
             }
@@ -476,8 +484,14 @@ mod tests {
         let fetcher = ChunkedFetcher::new(b"0123456789", 3);
         let written = download_bytes(&fetcher, "https://x/big.jar", &dest).unwrap();
         assert_eq!(written, 30);
-        assert_eq!(std::fs::read(&dest).unwrap(), b"012345678901234567890123456789");
-        assert!(!part_path(&dest).exists(), "the part file is renamed, not left");
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            b"012345678901234567890123456789"
+        );
+        assert!(
+            !part_path(&dest).exists(),
+            "the part file is renamed, not left"
+        );
     }
 
     /// A stream that stops half way must not leave a file behind.
@@ -559,12 +573,8 @@ mod tests {
         // Unroutable address + short timeout: must fail fast without network.
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("a.jar");
-        let err = download_file(
-            "http://192.0.2.1/a.jar",
-            &dest,
-            Duration::from_millis(800),
-        )
-        .unwrap_err();
+        let err =
+            download_file("http://192.0.2.1/a.jar", &dest, Duration::from_millis(800)).unwrap_err();
         match err {
             crate::Error::Http { url, .. } => assert_eq!(url, "http://192.0.2.1/a.jar"),
             _ => panic!("expected Http"),
@@ -618,8 +628,14 @@ mod tests {
         let mut f = MapFetcher::new();
         f.insert("https://x/good.bin", b"good".to_vec());
         let jobs = vec![
-            ("https://x/good.bin".to_string(), tmp.path().join("good.bin")),
-            ("https://x/missing.bin".to_string(), tmp.path().join("missing.bin")),
+            (
+                "https://x/good.bin".to_string(),
+                tmp.path().join("good.bin"),
+            ),
+            (
+                "https://x/missing.bin".to_string(),
+                tmp.path().join("missing.bin"),
+            ),
         ];
         let results = download_many(&f, &jobs, 2);
         assert_eq!(results.len(), 2);
@@ -647,7 +663,10 @@ mod tests {
         let jobs = vec![
             ("https://x/a.bin".to_string(), tmp.path().join("a.bin")),
             // No body for this one: it fails, and still counts as finished.
-            ("https://x/missing.bin".to_string(), tmp.path().join("missing.bin")),
+            (
+                "https://x/missing.bin".to_string(),
+                tmp.path().join("missing.bin"),
+            ),
             ("https://x/c.bin".to_string(), tmp.path().join("c.bin")),
         ];
 
@@ -658,7 +677,10 @@ mod tests {
 
         assert_eq!(events.len(), 3, "one event per job: {events:?}");
         assert_eq!(
-            events.iter().map(|(finished, _)| *finished).collect::<Vec<_>>(),
+            events
+                .iter()
+                .map(|(finished, _)| *finished)
+                .collect::<Vec<_>>(),
             vec![1, 2, 3],
             "the count rises by one per job, in completion order: {events:?}"
         );
@@ -666,9 +688,16 @@ mod tests {
             events.windows(2).all(|pair| pair[0].1 <= pair[1].1),
             "bytes only ever add up: {events:?}"
         );
-        assert_eq!(events.last().unwrap().1, 8, "3 + 5 bytes, the failure adds none");
+        assert_eq!(
+            events.last().unwrap().1,
+            8,
+            "3 + 5 bytes, the failure adds none"
+        );
         assert_eq!(results.len(), 3);
-        assert!(results[1].1.is_err(), "the missing file still reports its error");
+        assert!(
+            results[1].1.is_err(),
+            "the missing file still reports its error"
+        );
     }
 
     #[test]
@@ -677,7 +706,10 @@ mod tests {
         let mut calls = 0usize;
         let results = download_many_with_progress(&f, &[], 4, &mut |_, _| calls += 1);
         assert!(results.is_empty());
-        assert_eq!(calls, 0, "there is no progress to report before there is work");
+        assert_eq!(
+            calls, 0,
+            "there is no progress to report before there is work"
+        );
     }
 
     #[test]

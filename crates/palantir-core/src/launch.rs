@@ -168,12 +168,27 @@ pub fn profile_var_map(
     let mut m = BTreeMap::new();
     m.insert("profile_name".into(), instance_name.to_string());
     m.insert("version_name".into(), profile.minecraft_version.clone());
-    m.insert("version_type".into(), profile.minecraft_version_type.clone());
-    m.insert("game_directory".into(), game_root.to_string_lossy().into_owned());
-    m.insert("game_assets".into(), game_assets.to_string_lossy().into_owned());
-    m.insert("assets_root".into(), assets_root.to_string_lossy().into_owned());
+    m.insert(
+        "version_type".into(),
+        profile.minecraft_version_type.clone(),
+    );
+    m.insert(
+        "game_directory".into(),
+        game_root.to_string_lossy().into_owned(),
+    );
+    m.insert(
+        "game_assets".into(),
+        game_assets.to_string_lossy().into_owned(),
+    );
+    m.insert(
+        "assets_root".into(),
+        assets_root.to_string_lossy().into_owned(),
+    );
     m.insert("assets_index_name".into(), profile.assets_or_default().id);
-    m.insert("library_directory".into(), library_directory.to_string_lossy().into_owned());
+    m.insert(
+        "library_directory".into(),
+        library_directory.to_string_lossy().into_owned(),
+    );
     let _ = instance_id; // kept in the signature to mirror the C++ context
     m
 }
@@ -252,7 +267,9 @@ pub fn process_minecraft_args(
                 args.push("--port".into());
                 args.push(target.port.to_string());
             }
-        } else if !target.world.is_empty() && profile.has_trait("feature:is_quick_play_singleplayer") {
+        } else if !target.world.is_empty()
+            && profile.has_trait("feature:is_quick_play_singleplayer")
+        {
             args.push("--quickPlaySingleplayer".into());
             args.push(target.world.clone());
         }
@@ -316,8 +333,14 @@ pub fn instance_env_vars(
     let mut m = BTreeMap::new();
     m.insert("INST_NAME".into(), instance_name.to_string());
     m.insert("INST_ID".into(), instance_id.to_string());
-    m.insert("INST_DIR".into(), instance_root.to_string_lossy().into_owned());
-    m.insert("INST_MC_DIR".into(), game_root.to_string_lossy().into_owned());
+    m.insert(
+        "INST_DIR".into(),
+        instance_root.to_string_lossy().into_owned(),
+    );
+    m.insert(
+        "INST_MC_DIR".into(),
+        game_root.to_string_lossy().into_owned(),
+    );
     m.insert("INST_JAVA".into(), java_path.to_string_lossy().into_owned());
     m.insert("INST_JAVA_ARGS".into(), java_args_joined.to_string());
     m.insert("NO_COLOR".into(), "1".to_string());
@@ -446,7 +469,11 @@ pub fn create_launch_script(
     if profile.has_trait("legacyServices") {
         out.push_str("onlineFixes true\n");
     }
-    let launcher = if profile.is_legacy() { "legacy" } else { "standard" };
+    let launcher = if profile.is_legacy() {
+        "legacy"
+    } else {
+        "standard"
+    };
     out.push_str(&format!("launcher {launcher}\n"));
     out
 }
@@ -475,7 +502,11 @@ mod tests {
     }
 
     /// A data root with one usable instance in it.
-    fn rooted() -> (tempfile::TempDir, crate::paths::PalantirPaths, crate::instance::Instance) {
+    fn rooted() -> (
+        tempfile::TempDir,
+        crate::paths::PalantirPaths,
+        crate::instance::Instance,
+    ) {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::paths::PalantirPaths::at(dir.path());
         std::fs::create_dir_all(paths.instances_dir()).unwrap();
@@ -496,17 +527,32 @@ mod tests {
         let map = instance_var_map(&paths, &instance, &profile());
 
         assert_eq!(map["assets_root"], paths.assets_dir().to_string_lossy());
-        assert_eq!(map["library_directory"], paths.libraries_dir().to_string_lossy());
-        assert_eq!(map["game_directory"], instance.game_root().to_string_lossy());
+        assert_eq!(
+            map["library_directory"],
+            paths.libraries_dir().to_string_lossy()
+        );
+        assert_eq!(
+            map["game_directory"],
+            instance.game_root().to_string_lossy()
+        );
         assert_eq!(map["assets_index_name"], "17");
         // A modern index is hash-addressed, so `${game_assets}` is the shared
         // folder for that index id — not the instance, and not `resources/`.
-        assert_eq!(map["game_assets"], paths.assets_dir().join("17").to_string_lossy());
+        assert_eq!(
+            map["game_assets"],
+            paths.assets_dir().join("17").to_string_lossy()
+        );
 
         // And the paths are not merely "somewhere else": they are the folders
         // the shared files live in, while the instance's own are different.
-        assert_ne!(map["assets_root"], instance.root().join("assets").to_string_lossy());
-        assert_ne!(map["library_directory"], instance.local_libraries_dir().to_string_lossy());
+        assert_ne!(
+            map["assets_root"],
+            instance.root().join("assets").to_string_lossy()
+        );
+        assert_ne!(
+            map["library_directory"],
+            instance.local_libraries_dir().to_string_lossy()
+        );
         assert!(!paths.assets_dir().starts_with(instance.root()));
         assert!(!paths.libraries_dir().starts_with(instance.root()));
     }
@@ -521,8 +567,14 @@ mod tests {
         let mut legacy = profile();
         legacy.minecraft_assets = Some(AssetIndexInfo::bare("legacy"));
         let map = instance_var_map(&paths, &instance, &legacy);
-        assert_eq!(map["game_assets"], instance.resources_dir().to_string_lossy());
-        assert_eq!(map["game_assets"], instance.game_root().join("resources").to_string_lossy());
+        assert_eq!(
+            map["game_assets"],
+            instance.resources_dir().to_string_lossy()
+        );
+        assert_eq!(
+            map["game_assets"],
+            instance.game_root().join("resources").to_string_lossy()
+        );
         // The shared folders do not move for it.
         assert_eq!(map["assets_root"], paths.assets_dir().to_string_lossy());
     }
@@ -594,7 +646,9 @@ mod tests {
         assert!(
             !with.iter().any(|arg| arg.contains("${")),
             "the session did not fill: {:?}",
-            with.iter().filter(|arg| arg.contains("${")).collect::<Vec<_>>()
+            with.iter()
+                .filter(|arg| arg.contains("${"))
+                .collect::<Vec<_>>()
         );
 
         // And the other direction, for the profile's half: `profile_var_map`
@@ -623,8 +677,14 @@ mod tests {
 
     #[test]
     fn split_args_handles_quotes_like_commandline() {
-        assert_eq!(split_command_args("-Xmx1G -Dfoo=bar"), vec!["-Xmx1G", "-Dfoo=bar"]);
-        assert_eq!(split_command_args("-Xms\"1 2G\" -Xmx4G"), vec!["-Xms1 2G", "-Xmx4G"]);
+        assert_eq!(
+            split_command_args("-Xmx1G -Dfoo=bar"),
+            vec!["-Xmx1G", "-Dfoo=bar"]
+        );
+        assert_eq!(
+            split_command_args("-Xms\"1 2G\" -Xmx4G"),
+            vec!["-Xms1 2G", "-Xmx4G"]
+        );
         assert_eq!(split_command_args("   "), Vec::<String>::new());
         assert_eq!(split_command_args("\"a b\"c"), vec!["a bc"]);
         assert_eq!(split_command_args("-X\"m\"x"), vec!["-Xmx"]);
@@ -642,7 +702,11 @@ mod tests {
             user_properties: "{}".into(),
             demo: false,
         };
-        let target = LaunchTarget { address: "mc.example.com".into(), port: 25565, world: String::new() };
+        let target = LaunchTarget {
+            address: "mc.example.com".into(),
+            port: 25565,
+            world: String::new(),
+        };
         let args = process_minecraft_args(&p, Some(&session), Some(&target), &vars());
         assert!(args.contains(&"--username".to_string()) && args.contains(&"Steve".to_string()));
         assert!(args.contains(&"1.20.4".to_string()));
@@ -655,19 +719,34 @@ mod tests {
     fn quick_play_used_when_trait_present() {
         let mut p = profile();
         p.traits.insert("feature:is_quick_play_multiplayer".into());
-        let target = LaunchTarget { address: "s".into(), port: 1234, world: String::new() };
+        let target = LaunchTarget {
+            address: "s".into(),
+            port: 1234,
+            world: String::new(),
+        };
         let args = process_minecraft_args(&p, None, Some(&target), &vars());
-        assert!(args.windows(2).any(|w| w[0] == "--quickPlayMultiplayer" && w[1] == "s:1234"));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--quickPlayMultiplayer" && w[1] == "s:1234"));
         let mut p = profile();
         p.traits.insert("feature:is_quick_play_singleplayer".into());
-        let target = LaunchTarget { address: String::new(), port: 0, world: "World".into() };
+        let target = LaunchTarget {
+            address: String::new(),
+            port: 0,
+            world: "World".into(),
+        };
         let args = process_minecraft_args(&p, None, Some(&target), &vars());
-        assert!(args.windows(2).any(|w| w[0] == "--quickPlaySingleplayer" && w[1] == "World"));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--quickPlaySingleplayer" && w[1] == "World"));
     }
 
     #[test]
     fn demo_flag_added_for_demo_sessions() {
-        let session = AuthSession { demo: true, ..Default::default() };
+        let session = AuthSession {
+            demo: true,
+            ..Default::default()
+        };
         let args = process_minecraft_args(&profile(), Some(&session), None, &vars());
         assert!(args.contains(&"--demo".to_string()));
     }
@@ -756,7 +835,9 @@ mod tests {
         assert!(!java_arguments(&mac2).contains(&"-XstartOnFirstThread".to_string()));
 
         let win = java_arguments(&base_opts(crate::paths::System::Windows));
-        assert!(win.iter().any(|a| a.starts_with("-XX:HeapDumpPath=MojangTricks")));
+        assert!(win
+            .iter()
+            .any(|a| a.starts_with("-XX:HeapDumpPath=MojangTricks")));
 
         let mut linux = base_opts(crate::paths::System::Linux);
         linux.has_lwjgl2 = true;
@@ -770,11 +851,15 @@ mod tests {
     fn perm_gen_emitted_only_for_old_java_and_non_default() {
         let mut old = base_opts(crate::paths::System::Linux);
         old.java_major = 7;
-        assert!(!java_arguments(&old).iter().any(|a| a.starts_with("-XX:PermSize"))); // default 64
+        assert!(!java_arguments(&old)
+            .iter()
+            .any(|a| a.starts_with("-XX:PermSize"))); // default 64
         old.perm_gen = 128;
         assert!(java_arguments(&old).contains(&"-XX:PermSize=128m".to_string()));
         old.java_major = 8;
-        assert!(!java_arguments(&old).iter().any(|a| a.starts_with("-XX:PermSize")));
+        assert!(!java_arguments(&old)
+            .iter()
+            .any(|a| a.starts_with("-XX:PermSize")));
     }
 
     #[test]
@@ -783,7 +868,9 @@ mod tests {
         opts.online_fixes = true;
         opts.java_major = 17;
         let a = java_arguments(&opts);
-        assert!(a.windows(2).any(|w| w[0] == "--add-opens" && w[1] == "java.base/java.net=ALL-UNNAMED"));
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "--add-opens" && w[1] == "java.base/java.net=ALL-UNNAMED"));
         opts.java_major = 7;
         assert!(!java_arguments(&opts).contains(&"--add-opens".to_string()));
     }
@@ -804,14 +891,22 @@ mod tests {
         let mut p = profile();
         p.traits.insert("first".into());
         p.traits.insert("second".into());
-        let session = AuthSession { player_name: "Steve".into(), session: "sess".into(), ..Default::default() };
+        let session = AuthSession {
+            player_name: "Steve".into(),
+            session: "sess".into(),
+            ..Default::default()
+        };
         let mc_args = process_minecraft_args(&p, Some(&session), None, &vars());
         let script = create_launch_script(
             &p,
             Some(&session),
             None,
             &mc_args,
-            WindowParams { width: 854, height: 480, maximized: false },
+            WindowParams {
+                width: 854,
+                height: 480,
+                maximized: false,
+            },
             crate::PRODUCT_NAME,
             "9.0",
             "My Inst",
@@ -840,7 +935,18 @@ mod tests {
         let mut p = profile();
         p.traits.insert("legacyLaunch".into());
         let script = create_launch_script(
-            &p, None, None, &[], WindowParams { width: 854, height: 480, maximized: true }, "B", "1", "L",
+            &p,
+            None,
+            None,
+            &[],
+            WindowParams {
+                width: 854,
+                height: 480,
+                maximized: true,
+            },
+            "B",
+            "1",
+            "L",
         );
         assert!(script.contains("windowParams maximized\n"));
         assert!(script.contains("launcher legacy\n"));

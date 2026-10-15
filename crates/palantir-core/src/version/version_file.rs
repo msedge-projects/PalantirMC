@@ -96,7 +96,11 @@ pub struct VersionFile {
 impl VersionFile {
     /// Highest problem severity recorded on this file.
     pub fn problem_severity(&self) -> ProblemSeverity {
-        self.problems.iter().map(|p| p.severity).max().unwrap_or(ProblemSeverity::None)
+        self.problems
+            .iter()
+            .map(|p| p.severity)
+            .max()
+            .unwrap_or(ProblemSeverity::None)
     }
 
     /// Parse a OneSix/meta version file from JSON.
@@ -104,13 +108,16 @@ impl VersionFile {
     /// `require_order` mirrors `OneSixVersionFormat::versionFileFromJson`:
     /// meta-driven files (which carry `order`) demand it, patch files do not.
     pub fn parse(value: &Value, path: &Path, require_order: bool) -> Result<VersionFile> {
-        let obj = value.as_object().ok_or_else(|| {
-            Error::json(path, "version file is not an object")
-        })?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| Error::json(path, "version file is not an object"))?;
         // formatVersion: absent ok (non-required parse), 0/1 ok, else invalid.
         if let Some(fv) = obj.get("formatVersion") {
             let n = fv.as_i64().ok_or_else(|| {
-                Error::format(path, "does not contain a recognizable version of the metadata format")
+                Error::format(
+                    path,
+                    "does not contain a recognizable version of the metadata format",
+                )
             })?;
             if n != 0 && n != 1 {
                 return Err(Error::format(
@@ -124,7 +131,9 @@ impl VersionFile {
         if require_order {
             if let Some(o) = obj.get("order") {
                 out.has_order = true;
-                out.order = o.as_i64().ok_or_else(|| Error::json(path, "'order' must be an integer"))?;
+                out.order = o
+                    .as_i64()
+                    .ok_or_else(|| Error::json(path, "'order' must be an integer"))?;
             } else {
                 out.problems.push(Problem {
                     severity: ProblemSeverity::Warning,
@@ -140,7 +149,10 @@ impl VersionFile {
         if !uid_valid(&out.uid) {
             out.problems.push(Problem {
                 severity: ProblemSeverity::Error,
-                message: format!("The component's 'uid' contains illegal characters! UID: {}", out.uid),
+                message: format!(
+                    "The component's 'uid' contains illegal characters! UID: {}",
+                    out.uid
+                ),
             });
         }
         out.version = str_of(obj, "version");
@@ -171,7 +183,9 @@ impl VersionFile {
                 let file_name = o
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::json(path, "contains a jarmod that doesn't have a 'name' field"))?
+                    .ok_or_else(|| {
+                        Error::json(path, "contains a jarmod that doesn't have a 'name' field")
+                    })?
                     .to_string();
                 let mut lib = Library::default();
                 lib.name = super::GradleSpecifier::parse(&format!(
@@ -202,23 +216,28 @@ impl VersionFile {
                 message: "Version file has both '+libraries' and 'libraries'. This is no longer supported.".into(),
             });
             for v in opt_array(obj, "libraries").into_iter().flatten() {
-                out.libraries.push(Library::from_json(v, &mut out.problems)?);
+                out.libraries
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
             for v in opt_array(obj, "+libraries").into_iter().flatten() {
-                out.libraries.push(Library::from_json(v, &mut out.problems)?);
+                out.libraries
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
         } else if has_libs {
             for v in opt_array(obj, "libraries").into_iter().flatten() {
-                out.libraries.push(Library::from_json(v, &mut out.problems)?);
+                out.libraries
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
         } else if has_plus_libs {
             for v in opt_array(obj, "+libraries").into_iter().flatten() {
-                out.libraries.push(Library::from_json(v, &mut out.problems)?);
+                out.libraries
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
         }
         if let Some(arr) = opt_array(obj, "mavenFiles") {
             for v in arr {
-                out.maven_files.push(Library::from_json(v, &mut out.problems)?);
+                out.maven_files
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
         }
         if let Some(arr) = opt_array(obj, "+agents") {
@@ -274,13 +293,21 @@ impl VersionFile {
             }
         }
         if let Some(v) = obj.get("volatile") {
-            out.volatile = v.as_bool().ok_or_else(|| Error::json(path, "'volatile' must be a boolean"))?;
+            out.volatile = v
+                .as_bool()
+                .ok_or_else(|| Error::json(path, "'volatile' must be a boolean"))?;
         }
         if let Some(arr) = opt_array(obj, "runtimes") {
             out.runtimes = arr.clone();
         }
         // Unsupported legacy elements -> Error problems.
-        for banned in ["tweakers", "-libraries", "-tweakers", "-minecraftArguments", "+minecraftArguments"] {
+        for banned in [
+            "tweakers",
+            "-libraries",
+            "-tweakers",
+            "-minecraftArguments",
+            "+minecraftArguments",
+        ] {
             if obj.contains_key(banned) {
                 out.problems.push(Problem {
                     severity: ProblemSeverity::Error,
@@ -297,10 +324,13 @@ impl VersionFile {
         out.name = "Minecraft".into();
         out.uid = "net.minecraft".into();
         out.version = out.minecraft_version.clone();
-        let obj = value.as_object().ok_or_else(|| Error::json(path, "not an object"))?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| Error::json(path, "not an object"))?;
         if let Some(arr) = opt_array(obj, "libraries") {
             for v in arr {
-                out.libraries.push(Library::from_json(v, &mut out.problems)?);
+                out.libraries
+                    .push(Library::from_json(v, &mut out.problems)?);
             }
         }
         Ok(out)
@@ -398,7 +428,10 @@ pub fn uid_valid(uid: &str) -> bool {
         if segment.is_empty() {
             return false;
         }
-        if !segment.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !segment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return false;
         }
     }
@@ -406,7 +439,10 @@ pub fn uid_valid(uid: &str) -> bool {
 }
 
 fn str_of(obj: &Map<String, Value>, key: &str) -> String {
-    obj.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn put_str(map: &mut serde_json::Map<String, Value>, key: &str, value: &str) {
@@ -417,7 +453,10 @@ fn put_str(map: &mut serde_json::Map<String, Value>, key: &str, value: &str) {
 
 fn put_str_list(map: &mut serde_json::Map<String, Value>, key: &str, list: &[String]) {
     if !list.is_empty() {
-        map.insert(key.to_string(), Value::Array(list.iter().map(|s| Value::String(s.clone())).collect()));
+        map.insert(
+            key.to_string(),
+            Value::Array(list.iter().map(|s| Value::String(s.clone())).collect()),
+        );
     }
 }
 
@@ -436,7 +475,11 @@ fn string_array(arr: &[Value], path: &Path) -> Result<Vec<String>> {
 }
 
 /// `MojangVersionFormat::readVersionProperties`.
-fn read_version_properties(obj: &Map<String, Value>, out: &mut VersionFile, path: &Path) -> Result<()> {
+fn read_version_properties(
+    obj: &Map<String, Value>,
+    out: &mut VersionFile,
+    path: &Path,
+) -> Result<()> {
     out.minecraft_version = str_of(obj, "id");
     out.main_class = str_of(obj, "mainClass");
     out.minecraft_arguments = str_of(obj, "minecraftArguments");
@@ -457,7 +500,10 @@ fn read_version_properties(obj: &Map<String, Value>, out: &mut VersionFile, path
             .and_then(|v| v.as_i64())
             .ok_or_else(|| Error::json(path, "missing 'totalSize' in assetIndex"))?;
         out.asset_index = Some(AssetIndexInfo {
-            path: o.get("path").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            path: o
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             sha1: require("sha1")?,
             size: o
                 .get("size")
@@ -474,7 +520,9 @@ fn read_version_properties(obj: &Map<String, Value>, out: &mut VersionFile, path
     out.release_time = str_of(obj, "releaseTime");
     out.update_time = str_of(obj, "time");
     if let Some(v) = obj.get("minimumLauncherVersion") {
-        out.minimum_launcher_version = v.as_i64().ok_or_else(|| Error::json(path, "'minimumLauncherVersion' must be an integer"))?;
+        out.minimum_launcher_version = v
+            .as_i64()
+            .ok_or_else(|| Error::json(path, "'minimumLauncherVersion' must be an integer"))?;
         if out.minimum_launcher_version > CURRENT_MINIMUM_LAUNCHER_VERSION {
             out.problems.push(Problem {
                 severity: ProblemSeverity::Warning,
@@ -489,14 +537,16 @@ fn read_version_properties(obj: &Map<String, Value>, out: &mut VersionFile, path
     }
     if let Some(arr) = opt_array(obj, "compatibleJavaMajors") {
         for v in arr {
-            out.compatible_java_majors
-                .push(v.as_i64().ok_or_else(|| Error::json(path, "'compatibleJavaMajors' must contain integers"))?);
+            out.compatible_java_majors.push(v.as_i64().ok_or_else(|| {
+                Error::json(path, "'compatibleJavaMajors' must contain integers")
+            })?);
         }
     }
     out.compatible_java_name = str_of(obj, "compatibleJavaName");
     if let Some(dl) = obj.get("downloads").and_then(|v| v.as_object()) {
         for (k, v) in dl {
-            out.mojang_downloads.insert(k.clone(), download_info_from_json(v)?);
+            out.mojang_downloads
+                .insert(k.clone(), download_info_from_json(v)?);
         }
     }
     Ok(())
@@ -509,13 +559,19 @@ fn write_version_properties(root: &mut serde_json::Map<String, Value>, file: &Ve
     put_str(root, "minecraftArguments", &file.minecraft_arguments);
     put_str(root, "type", &file.type_);
     if !file.release_time.is_empty() {
-        root.insert("releaseTime".into(), Value::String(file.release_time.clone()));
+        root.insert(
+            "releaseTime".into(),
+            Value::String(file.release_time.clone()),
+        );
     }
     if !file.update_time.is_empty() {
         root.insert("time".into(), Value::String(file.update_time.clone()));
     }
     if file.minimum_launcher_version != -1 {
-        root.insert("minimumLauncherVersion".into(), Value::from(file.minimum_launcher_version));
+        root.insert(
+            "minimumLauncherVersion".into(),
+            Value::from(file.minimum_launcher_version),
+        );
     }
     put_str(root, "assets", &file.assets);
     if let Some(ai) = &file.asset_index {
@@ -542,7 +598,12 @@ fn write_version_properties(root: &mut serde_json::Map<String, Value>, file: &Ve
     if !file.compatible_java_majors.is_empty() {
         root.insert(
             "compatibleJavaMajors".into(),
-            Value::Array(file.compatible_java_majors.iter().map(|m| Value::from(*m)).collect()),
+            Value::Array(
+                file.compatible_java_majors
+                    .iter()
+                    .map(|m| Value::from(*m))
+                    .collect(),
+            ),
         );
     }
     put_str(root, "compatibleJavaName", &file.compatible_java_name);
@@ -590,9 +651,15 @@ mod tests {
 
     #[test]
     fn mc_version_implies_net_minecraft_equals_requirement() {
-        let f = parse_value(json!({"uid": "net.minecraftforge", "version": "47.2.0", "mcVersion": "1.20.1"}))
+        let f = parse_value(
+            json!({"uid": "net.minecraftforge", "version": "47.2.0", "mcVersion": "1.20.1"}),
+        )
+        .unwrap();
+        let req = f
+            .requires
+            .iter()
+            .find(|r| r.uid == "net.minecraft")
             .unwrap();
-        let req = f.requires.iter().find(|r| r.uid == "net.minecraft").unwrap();
         assert_eq!(req.equals_version, "1.20.1");
     }
 
@@ -637,7 +704,10 @@ mod tests {
         .unwrap();
         let jar = f.main_jar.unwrap();
         assert_eq!(jar.name.serialize(), "com.mojang:minecraft:1.20.4:client");
-        assert_eq!(jar.mojang_downloads.unwrap().artifact.unwrap().url, "https://client");
+        assert_eq!(
+            jar.mojang_downloads.unwrap().artifact.unwrap().url,
+            "https://client"
+        );
     }
 
     #[test]
@@ -704,8 +774,10 @@ mod tests {
 
     #[test]
     fn plus_jar_mods_deprecated_style_parses() {
-        let mut f = parse_value(json!({"uid": "x", "name": "Some Patch (jar mod)", "+jarMods": [{"name": "mod.jar"}]}))
-            .unwrap();
+        let mut f = parse_value(
+            json!({"uid": "x", "name": "Some Patch (jar mod)", "+jarMods": [{"name": "mod.jar"}]}),
+        )
+        .unwrap();
         let jm = f.jar_mods.pop().unwrap();
         assert_eq!(jm.filename_override, "mod.jar");
         assert_eq!(jm.hint, "local");
@@ -715,7 +787,11 @@ mod tests {
 
     #[test]
     fn volatile_must_be_boolean() {
-        assert!(parse_value(json!({"uid": "x", "volatile": true})).unwrap().volatile);
+        assert!(
+            parse_value(json!({"uid": "x", "volatile": true}))
+                .unwrap()
+                .volatile
+        );
         assert!(parse_value(json!({"uid": "x", "volatile": "yes"})).is_err());
     }
 }

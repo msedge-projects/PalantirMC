@@ -133,9 +133,9 @@ fn sheets_vocabulary(tree: &Path) -> Option<Vocabulary> {
     // which is how `.dark-mode, .dark, :root[data-theme='dark']` is found
     // by its first part alone.
     let find = |name: &str| -> Option<&Block> {
-        blocks.iter().find(|(selector, _, _)| {
-            selector.split(',').any(|part| part.trim() == name)
-        })
+        blocks
+            .iter()
+            .find(|(selector, _, _)| selector.split(',').any(|part| part.trim() == name))
     };
     let light = find(".light-properties")?;
     let html = find("html")?;
@@ -147,9 +147,21 @@ fn sheets_vocabulary(tree: &Path) -> Option<Vocabulary> {
     // The cascade's shape, asserted rather than assumed — the same three
     // facts the generator fails on, because if upstream re-parents a block
     // both readers have to be told, not just one.
-    assert_eq!(html.1.as_deref(), Some(".light-properties"), "`html` no longer extends light");
-    assert_eq!(oled.1.as_deref(), Some(".dark-mode"), "`.oled-mode` no longer extends dark");
-    assert_eq!(retro.1.as_deref(), Some(".dark-mode"), "`.retro-mode` no longer extends dark");
+    assert_eq!(
+        html.1.as_deref(),
+        Some(".light-properties"),
+        "`html` no longer extends light"
+    );
+    assert_eq!(
+        oled.1.as_deref(),
+        Some(".dark-mode"),
+        "`.oled-mode` no longer extends dark"
+    );
+    assert_eq!(
+        retro.1.as_deref(),
+        Some(".dark-mode"),
+        "`.retro-mode` no longer extends dark"
+    );
 
     // The cascade: base, then dark, then the two modes that extend dark.
     // Later blocks win, which is what `@extend` means.
@@ -196,7 +208,10 @@ fn sheets_vocabulary(tree: &Path) -> Option<Vocabulary> {
 fn cut(raw: &str) -> String {
     let text = raw.split(';').next().unwrap_or(raw).trim();
     let text = text.split("//").next().unwrap_or(text).trim();
-    text.strip_suffix("!important").unwrap_or(text).trim().to_string()
+    text.strip_suffix("!important")
+        .unwrap_or(text)
+        .trim()
+        .to_string()
 }
 
 /// Render one row of the sheets' reading: `file|line|kind|value`.
@@ -359,16 +374,25 @@ fn parse_colour(text: &str) -> Option<(u8, u8, u8, f64)> {
         };
     }
     for (prefix, count) in [("rgba(", 4usize), ("rgb(", 3)] {
-        if let Some(inner) = text.strip_prefix(prefix).and_then(|rest| rest.strip_suffix(')')) {
+        if let Some(inner) = text
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(')'))
+        {
             let parts: Vec<&str> = inner.split(',').map(|part| part.trim()).collect();
             if parts.len() != count {
                 return None;
             }
-            let numbers: Vec<f64> = parts.iter().filter_map(|part| part.parse::<f64>().ok()).collect();
+            let numbers: Vec<f64> = parts
+                .iter()
+                .filter_map(|part| part.parse::<f64>().ok())
+                .collect();
             if numbers.len() != count {
                 return None;
             }
-            let bytes: Vec<u8> = numbers[..3].iter().map(|n| (*n / 255.0 * 255.0 + 0.5) as u8).collect();
+            let bytes: Vec<u8> = numbers[..3]
+                .iter()
+                .map(|n| (*n / 255.0 * 255.0 + 0.5) as u8)
+                .collect();
             let alpha = if count == 4 { numbers[3] } else { 1.0 };
             return Some((bytes[0], bytes[1], bytes[2], alpha));
         }
@@ -447,10 +471,19 @@ fn generated_rows() -> BTreeMap<(String, String), String> {
         for row in table {
             // Keyed without the `--`, as the sheets' walk names them — the
             // same normalization both sides can be read by.
-            let key = (mode.to_string(), row.token.trim_start_matches("--").to_string());
+            let key = (
+                mode.to_string(),
+                row.token.trim_start_matches("--").to_string(),
+            );
             out.insert(
                 key,
-                format!("{}|{}|{}|{}", row.file, row.line, kind_name(row.kind), row.value),
+                format!(
+                    "{}|{}|{}|{}",
+                    row.file,
+                    row.line,
+                    kind_name(row.kind),
+                    row.value
+                ),
             );
         }
     }
@@ -471,7 +504,10 @@ fn generated_rows() -> BTreeMap<(String, String), String> {
 const STYLE_SUFFIXES: [&str; 6] = ["scss", "css", "sass", "less", "styl", "vue"];
 
 /// The two sheets the mode tables are built from; the scoped walk skips them.
-const GLOBAL_SHEETS: [&str; 2] = ["assets/styles/variables.scss", "assets/styles/defaults.scss"];
+const GLOBAL_SHEETS: [&str; 2] = [
+    "assets/styles/variables.scss",
+    "assets/styles/defaults.scss",
+];
 
 /// Every style file under the tree, sorted, with `node_modules` left alone.
 fn style_files(root: &Path) -> Vec<PathBuf> {
@@ -489,7 +525,10 @@ fn style_files(root: &Path) -> Vec<PathBuf> {
                 }
                 continue;
             }
-            let suffix = path.extension().and_then(|extension| extension.to_str()).unwrap_or_default();
+            let suffix = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default();
             if STYLE_SUFFIXES.contains(&suffix) {
                 found.push(path);
             }
@@ -640,7 +679,9 @@ fn the_generated_vocabulary_is_the_sheets() {
     let invented: Vec<String> = generated
         .keys()
         .filter(|key| !vocabulary.contains_key(*key))
-        .map(|(mode, token)| format!("{mode}: --{token} is in the copy but the sheets do not declare it"))
+        .map(|(mode, token)| {
+            format!("{mode}: --{token} is in the copy but the sheets do not declare it")
+        })
         .collect();
 
     let mut problems = missing;
@@ -681,7 +722,10 @@ fn the_generated_vocabulary_covers_every_declared_token() {
     // that starts with `--`.
     let declared = || -> Option<std::collections::BTreeSet<String>> {
         let mut names = std::collections::BTreeSet::new();
-        for file in ["assets/styles/variables.scss", "assets/styles/defaults.scss"] {
+        for file in [
+            "assets/styles/variables.scss",
+            "assets/styles/defaults.scss",
+        ] {
             let text = std::fs::read_to_string(vendored_tree().join(file)).ok()?;
             for line in text.lines() {
                 let trimmed = line.trim();
@@ -697,7 +741,10 @@ fn the_generated_vocabulary_covers_every_declared_token() {
     let Some(declared) = declared else {
         return;
     };
-    assert!(!declared.is_empty(), "the sheets declare nothing: the scan broke");
+    assert!(
+        !declared.is_empty(),
+        "the sheets declare nothing: the scan broke"
+    );
 
     let mut problems = Vec::new();
     for (mode, table) in [
@@ -706,11 +753,15 @@ fn the_generated_vocabulary_covers_every_declared_token() {
         ("OLED", theme_tokens::OLED),
         ("RETRO", theme_tokens::RETRO),
     ] {
-        let copied: std::collections::BTreeSet<&str> =
-            table.iter().map(|row| row.token.trim_start_matches("--")).collect();
+        let copied: std::collections::BTreeSet<&str> = table
+            .iter()
+            .map(|row| row.token.trim_start_matches("--"))
+            .collect();
         for name in &declared {
             if !copied.contains(name.as_str()) {
-                problems.push(format!("{mode}: --{name} is declared in the sheets but absent from the copy"));
+                problems.push(format!(
+                    "{mode}: --{name} is declared in the sheets but absent from the copy"
+                ));
             }
         }
         for row in table {
@@ -768,8 +819,12 @@ fn the_generated_vocabulary_holds_the_tokens_the_palette_paints() {
         // `rgba(161, 161, 161, 0.35)`) is encoded `#rrggbbaa`, and the rgb
         // prefix is still the token's own.
         assert!(
-            theme_tokens::DARK.iter().any(|row| row.value.starts_with(&hex))
-                || theme_tokens::LIGHT.iter().any(|row| row.value.starts_with(&hex)),
+            theme_tokens::DARK
+                .iter()
+                .any(|row| row.value.starts_with(&hex))
+                || theme_tokens::LIGHT
+                    .iter()
+                    .any(|row| row.value.starts_with(&hex)),
             "palette.{ours} paints {hex} and the generated vocabulary holds no such value: \
              the palette has stopped being transcribed from the reference"
         );
@@ -900,10 +955,15 @@ fn the_chrome_is_the_scoped_copy() {
             .iter()
             .find(|row| row.token == token && row.file == "app-frontend/src/App.vue")
         else {
-            panic!("the copy no longer holds {token}: the chrome has nothing to be transcribed from");
+            panic!(
+                "the copy no longer holds {token}: the chrome has nothing to be transcribed from"
+            );
         };
         if row.kind != Kind::Length {
-            panic!("{token} is a {:?}, not a length: the copy changed shape", row.kind);
+            panic!(
+                "{token} is a {:?}, not a length: the copy changed shape",
+                row.kind
+            );
         }
         let px = row.value;
         let Ok(theirs) = px.parse::<f32>() else {

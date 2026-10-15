@@ -62,10 +62,10 @@ pub const ENGLISH: &str = "en-US";
 /// languages reads the way its own settings pane reads -- and it is the list the
 /// language row draws while [`locale_gen::ALL`] is the list of tables.
 pub const OFFERED: [&str; 32] = [
-    "cs-CZ", "da-DK", "de-CH", "de-DE", "en-US", "es-419", "es-ES", "fi-FI", "fil-PH",
-    "fr-FR", "he-IL", "hu-HU", "id-ID", "it-IT", "ja-JP", "ko-KR", "ms-MY", "nl-NL",
-    "no-NO", "pl-PL", "pt-BR", "pt-PT", "ro-RO", "ru-RU", "sr-CS", "sv-SE", "th-TH",
-    "tr-TR", "uk-UA", "vi-VN", "zh-CN", "zh-TW",
+    "cs-CZ", "da-DK", "de-CH", "de-DE", "en-US", "es-419", "es-ES", "fi-FI", "fil-PH", "fr-FR",
+    "he-IL", "hu-HU", "id-ID", "it-IT", "ja-JP", "ko-KR", "ms-MY", "nl-NL", "no-NO", "pl-PL",
+    "pt-BR", "pt-PT", "ro-RO", "ru-RU", "sr-CS", "sv-SE", "th-TH", "tr-TR", "uk-UA", "vi-VN",
+    "zh-CN", "zh-TW",
 ];
 
 /// Which way the interface runs.
@@ -133,7 +133,9 @@ pub fn active() -> &'static locale_gen::Locale {
     }
     // A stored index always came from `index_of`, so it is in range; the
     // fallback is for the shape of the code rather than for a case that happens.
-    locale_gen::ALL.get(chosen - 1).unwrap_or(&locale_gen::ALL[english_index()])
+    locale_gen::ALL
+        .get(chosen - 1)
+        .unwrap_or(&locale_gen::ALL[english_index()])
 }
 
 /// The tag of the locale in force.
@@ -172,7 +174,11 @@ pub fn set(tag: &str) {
 /// [`set`] is this plus a write, and a test that wants to read one language's
 /// table while another is in force has only this to call.
 fn resolve(tag: &str) -> (&'static locale_gen::Locale, usize) {
-    let wanted = if tag.trim().is_empty() { ENGLISH } else { tag.trim() };
+    let wanted = if tag.trim().is_empty() {
+        ENGLISH
+    } else {
+        tag.trim()
+    };
     let chosen = index_of(wanted).unwrap_or_else(english_index);
     (&locale_gen::ALL[chosen], chosen)
 }
@@ -342,7 +348,9 @@ pub fn coverage(tag: &str) -> Option<u32> {
     static TABLE: std::sync::OnceLock<std::sync::Mutex<BTreeMap<&'static str, u32>>> =
         std::sync::OnceLock::new();
     let table = TABLE.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()));
-    let mut table = table.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut table = table
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     // The table is keyed by the tag *it* carries rather than by the one that was
     // asked about, so the key is the reference's own `&'static str`.
     let locale = locale_gen::ALL.iter().find(|locale| locale.tag == tag)?;
@@ -679,10 +687,16 @@ mod tests {
         // *Categories*, which is what a pasted-together id would have printed.
         assert_eq!(category_header_label("categories"), "Category");
         assert_eq!(category_header_label("technical"), "Technical");
-        assert_eq!(category_header_label("performance-impact"), "Performance impact");
+        assert_eq!(
+            category_header_label("performance-impact"),
+            "Performance impact"
+        );
         assert_eq!(category_header_label("resolutions"), "Resolution");
         assert_eq!(category_header_label("features"), "Feature");
-        assert_eq!(category_header_label("minecraft_server_gameplay"), "Gameplay");
+        assert_eq!(
+            category_header_label("minecraft_server_gameplay"),
+            "Gameplay"
+        );
         assert_eq!(category_header_label("game-mechanics"), "Game-mechanics");
     }
 
@@ -692,7 +706,11 @@ mod tests {
         assert_eq!(tag(), ENGLISH);
         assert_eq!(direction(), Direction::Ltr);
         set("kl-GL");
-        assert_eq!(tag(), ENGLISH, "a language this build has never heard of is English");
+        assert_eq!(
+            tag(),
+            ENGLISH,
+            "a language this build has never heard of is English"
+        );
         set("  ");
         assert_eq!(tag(), ENGLISH);
     }
@@ -741,7 +759,11 @@ mod tests {
     #[test]
     fn the_pane_s_order_is_most_covered_first_and_keeps_the_offer_s_order_within_a_tie() {
         let offered = offered_by_coverage();
-        assert_eq!(offered.len(), OFFERED.len(), "every offered language is still offered");
+        assert_eq!(
+            offered.len(),
+            OFFERED.len(),
+            "every offered language is still offered"
+        );
         assert_eq!(
             offered[0], ENGLISH,
             "the language the interface ships in carries every key, so it sorts first \
@@ -753,14 +775,22 @@ mod tests {
         let mut descending = percentages.clone();
         descending.sort_by(|a, b| b.cmp(a));
         assert_eq!(percentages, descending);
-        assert!(offered.contains(&"he-IL"), "the RTL language is offered and sorted");
+        assert!(
+            offered.contains(&"he-IL"),
+            "the RTL language is offered and sorted"
+        );
         // `Array.prototype.sort` is stable, so two languages that measure the
         // same keep the order `LOCALES` lists them in.
         for pair in offered.windows(2) {
             if coverage(pair[0]) == coverage(pair[1]) {
                 let first = OFFERED.iter().position(|tag| *tag == pair[0]);
                 let second = OFFERED.iter().position(|tag| *tag == pair[1]);
-                assert!(first < second, "{:?} and {:?} tie and are out of order", pair[0], pair[1]);
+                assert!(
+                    first < second,
+                    "{:?} and {:?} tie and are out of order",
+                    pair[0],
+                    pair[1]
+                );
             }
         }
     }
@@ -780,7 +810,10 @@ mod tests {
             .into_iter()
             .filter(|key| lookup(*key).is_none())
             .count();
-        assert_eq!(missing, 54, "de-DE's own fallback count, from gen_locale --report");
+        assert_eq!(
+            missing, 54,
+            "de-DE's own fallback count, from gen_locale --report"
+        );
 
         // And a locale with far less coverage falls back a lot more.
         set("ar-SA");
@@ -821,7 +854,10 @@ mod tests {
         for tag in OFFERED {
             set(tag);
             assert_eq!(is_rtl(), tag == "he-IL", "{tag}");
-            assert_eq!(direction().as_str(), if tag == "he-IL" { "rtl" } else { "ltr" });
+            assert_eq!(
+                direction().as_str(),
+                if tag == "he-IL" { "rtl" } else { "ltr" }
+            );
         }
         set(ENGLISH);
     }
@@ -829,15 +865,29 @@ mod tests {
     #[test]
     fn the_plural_rule_is_each_language_s_own() {
         // Arabic has all six, and they are the numbers CLDR names them by.
-        for (value, expected) in
-            [(0u64, "zero"), (1, "one"), (2, "two"), (3, "few"), (10, "few"), (11, "many"), (99, "many"), (100, "other"), (103, "few")]
-        {
+        for (value, expected) in [
+            (0u64, "zero"),
+            (1, "one"),
+            (2, "two"),
+            (3, "few"),
+            (10, "few"),
+            (11, "many"),
+            (99, "many"),
+            (100, "other"),
+            (103, "few"),
+        ] {
             assert_eq!(category("ar", value), expected, "ar {value}");
         }
         // Russian and Polish are the same shape with a different one.
-        for (value, expected) in
-            [(1u64, "one"), (2, "few"), (5, "many"), (11, "many"), (21, "one"), (22, "few"), (25, "many")]
-        {
+        for (value, expected) in [
+            (1u64, "one"),
+            (2, "few"),
+            (5, "many"),
+            (11, "many"),
+            (21, "one"),
+            (22, "few"),
+            (25, "many"),
+        ] {
             assert_eq!(category("ru", value), expected, "ru {value}");
         }
         assert_eq!(category("pl", 1), "one");
@@ -944,10 +994,16 @@ mod tests {
     #[test]
     fn a_fractional_category_is_not_produced_for_an_integer_count() {
         let polish: Vec<&str> = (0..1000u64).map(|value| category("pl", value)).collect();
-        assert!(!polish.contains(&"other"), "Polish `other` is its fractional arm");
+        assert!(
+            !polish.contains(&"other"),
+            "Polish `other` is its fractional arm"
+        );
         assert!(polish.contains(&"one") && polish.contains(&"few") && polish.contains(&"many"));
         let czech: Vec<&str> = (0..1000u64).map(|value| category("cs", value)).collect();
-        assert!(!czech.contains(&"many"), "Czech `many` is its fractional arm");
+        assert!(
+            !czech.contains(&"many"),
+            "Czech `many` is its fractional arm"
+        );
         assert!(czech.contains(&"one") && czech.contains(&"few"));
     }
 

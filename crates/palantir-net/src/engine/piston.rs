@@ -122,7 +122,12 @@ impl Manifest {
             .to_string();
 
         let mut versions = Vec::new();
-        for item in object.get("versions").and_then(|v| v.as_array()).into_iter().flatten() {
+        for item in object
+            .get("versions")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             let Some(entry) = item.as_object() else {
                 continue;
             };
@@ -135,10 +140,17 @@ impl Manifest {
             // A digest that cannot be read is kept as `None` rather than
             // dropping the version: the file is still fetchable, and the check
             // is one this launcher wants rather than one it requires.
-            let sha1 = entry.get("sha1").and_then(|v| v.as_str()).and_then(|hex| Digest::parse(hex).ok());
+            let sha1 = entry
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .and_then(|hex| Digest::parse(hex).ok());
             versions.push(ManifestVersion {
                 id: id.to_string(),
-                type_: entry.get("type").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                type_: entry
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
                 url: url.to_string(),
                 sha1,
                 release_time: entry
@@ -149,9 +161,16 @@ impl Manifest {
             });
         }
         if versions.is_empty() {
-            return Err(Error::format("<piston manifest>", "the manifest lists no versions"));
+            return Err(Error::format(
+                "<piston manifest>",
+                "the manifest lists no versions",
+            ));
         }
-        Ok(Manifest { latest_release, latest_snapshot, versions })
+        Ok(Manifest {
+            latest_release,
+            latest_snapshot,
+            versions,
+        })
     }
 
     /// The version with this id, if the manifest lists it.
@@ -198,7 +217,12 @@ impl PistonMeta {
     /// Piston, caching under `cache`'s directory and fetching through `fetch`.
     pub fn new(cache: MetadataCache, fetch: Arc<dyn Fetch>) -> PistonMeta {
         let files = cache.clone().with_ttl(IMMUTABLE_TTL);
-        PistonMeta { cache, files, fetch, manifest_url: PISTON_MANIFEST_URL.to_string() }
+        PistonMeta {
+            cache,
+            files,
+            fetch,
+            manifest_url: PISTON_MANIFEST_URL.to_string(),
+        }
     }
 
     /// The same, with a different manifest URL: a test's own server, or a
@@ -224,7 +248,9 @@ impl PistonMeta {
     /// published is soon enough for a launcher to notice it, and until then the
     /// answer costs a header rather than the document.
     pub fn manifest(&self, cancel: &Cancel, backoff: &Backoff) -> Result<Manifest, Error> {
-        let held = self.cache.get(&self.manifest_url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .cache
+            .get(&self.manifest_url, self.fetch.as_ref(), cancel, backoff)?;
         let text = String::from_utf8_lossy(&held.body).into_owned();
         Manifest::parse(&text)
     }
@@ -273,8 +299,14 @@ impl PistonMeta {
         let mut translated = palantir_core::version::from_mojang(&value)
             .map_err(|detail| palantir_core::error::Error::json(&url, detail))?;
         if let Some(object) = translated.as_object_mut() {
-            object.insert("uid".to_string(), serde_json::Value::String(uid.to_string()));
-            object.insert("version".to_string(), serde_json::Value::String(id.to_string()));
+            object.insert(
+                "uid".to_string(),
+                serde_json::Value::String(uid.to_string()),
+            );
+            object.insert(
+                "version".to_string(),
+                serde_json::Value::String(id.to_string()),
+            );
         }
         VersionFile::parse(&translated, &PathBuf::from(&url), false)
     }
@@ -333,7 +365,11 @@ fn verify(digest: &Digest, body: &[u8], url: &str) -> Result<(), Error> {
     if digest.matches(body) {
         return Ok(());
     }
-    Err(Error::hash_mismatch(url, digest.hex(), digest.of(body).hex()))
+    Err(Error::hash_mismatch(
+        url,
+        digest.hex(),
+        digest.of(body).hex(),
+    ))
 }
 
 #[cfg(test)]
@@ -384,7 +420,9 @@ mod tests {
     /// A piston over a scratch directory, with a manifest URL no real server
     /// answers so a test that forgets to script one fails instead of dialling out.
     fn meta(name: &str, ttl: std::time::Duration) -> (PistonMeta, Arc<MapFetch>) {
-        let root = std::env::temp_dir().join("palantirmc-engine-piston").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-piston")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let cache = MetadataCache::new(root, ttl);
@@ -401,7 +439,10 @@ mod tests {
             "https://piston.invalid/version_manifest_v2.json",
             Route::text(&manifest_body(&digest)),
         );
-        fetch.set_route("https://piston.invalid/1.21.4.json", Route::text(VERSION_BODY));
+        fetch.set_route(
+            "https://piston.invalid/1.21.4.json",
+            Route::text(VERSION_BODY),
+        );
         (meta, fetch)
     }
 
@@ -421,8 +462,14 @@ mod tests {
         assert_eq!(manifest.newest_release().expect("the newest").id, "1.21.4");
         assert_eq!(manifest.newest_snapshot().expect("the newest").id, "25w02a");
         assert_eq!(manifest.releases().count(), 2);
-        assert_eq!(manifest.versions[1].sha1.as_ref().map(Digest::hex), Some(digest.as_str()));
-        assert_eq!(manifest.versions[1].sha1.as_ref().map(Digest::kind), Some("sha1"));
+        assert_eq!(
+            manifest.versions[1].sha1.as_ref().map(Digest::hex),
+            Some(digest.as_str())
+        );
+        assert_eq!(
+            manifest.versions[1].sha1.as_ref().map(Digest::kind),
+            Some("sha1")
+        );
     }
 
     #[test]
@@ -444,7 +491,9 @@ mod tests {
         let (meta, fetch) = scripted("checked");
         let cancel = Cancel::new();
         let backoff = Backoff::with_attempts(1);
-        let file = meta.version("1.21.4", &cancel, &backoff).expect("the version file");
+        let file = meta
+            .version("1.21.4", &cancel, &backoff)
+            .expect("the version file");
         assert_eq!(file.main_class, "net.minecraft.client.main.Main");
         assert!(!file.has_order, "piston's files carry no order key");
         assert_eq!(file.libraries.len(), 1);
@@ -460,14 +509,23 @@ mod tests {
         // the conditional argument's feature into the trait the launcher reads.
         let (meta, _fetch) = scripted("translated");
         let file = meta
-            .translated("1.21.4", "net.minecraft", &Cancel::new(), &Backoff::with_attempts(1))
+            .translated(
+                "1.21.4",
+                "net.minecraft",
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("the translated file");
         assert_eq!(file.uid, "net.minecraft");
         assert_eq!(file.version, "1.21.4");
         assert_eq!(file.minecraft_arguments, "--username ${auth_player_name}");
         assert_eq!(file.compatible_java_majors, vec![21]);
         assert_eq!(file.compatible_java_name, "java-runtime-delta");
-        assert!(file.traits.contains("FirstThreadOnMacOS"), "{:?}", file.traits);
+        assert!(
+            file.traits.contains("FirstThreadOnMacOS"),
+            "{:?}",
+            file.traits
+        );
         assert!(file.traits.contains("feature:is_quick_play_multiplayer"));
         let jar = file.main_jar.expect("the client jar");
         assert_eq!(jar.name.artifact(), "minecraft");
@@ -486,7 +544,9 @@ mod tests {
         // was, these are not the bytes the manifest describes, and a version file
         // decides which libraries are downloaded and which class is launched.
         let (meta, fetch) = scripted("mismatch");
-        let digest = Digest::sha1(b"the bytes Mojang published").hex().to_string();
+        let digest = Digest::sha1(b"the bytes Mojang published")
+            .hex()
+            .to_string();
         fetch.set_route(
             "https://piston.invalid/version_manifest_v2.json",
             Route::text(&manifest_body(&digest)),
@@ -498,7 +558,10 @@ mod tests {
             .expect_err("a digest that does not match");
         let message = error.to_string();
         assert!(message.contains("mismatch"), "{message}");
-        assert!(message.contains("1.21.4.json"), "it names what it checked: {message}");
+        assert!(
+            message.contains("1.21.4.json"),
+            "it names what it checked: {message}"
+        );
     }
 
     #[test]
@@ -511,12 +574,17 @@ mod tests {
             "https://piston.invalid/version_manifest_v2.json",
             Route::text(&manifest_body(&digest)),
         );
-        fetch.set_route("https://piston.invalid/1.21.4.json", Route::text(VERSION_BODY));
+        fetch.set_route(
+            "https://piston.invalid/1.21.4.json",
+            Route::text(VERSION_BODY),
+        );
         let cancel = Cancel::new();
         let backoff = Backoff::with_attempts(1);
         assert!(meta.version("1.21.4", &cancel, &backoff).is_err());
         assert!(
-            meta.files.cached("https://piston.invalid/1.21.4.json").is_none(),
+            meta.files
+                .cached("https://piston.invalid/1.21.4.json")
+                .is_none(),
             "the wrong bytes are not left where a later call would believe them"
         );
         // And once the manifest tells the truth, the same call works.
@@ -528,8 +596,11 @@ mod tests {
         // The manifest itself is cached and fresh, so the corrected one has to
         // come from a new call after forgetting it -- which is what a caller
         // who has been told the data is wrong would do.
-        meta.cache.forget("https://piston.invalid/version_manifest_v2.json");
-        let file = meta.version("1.21.4", &cancel, &backoff).expect("the version file");
+        meta.cache
+            .forget("https://piston.invalid/version_manifest_v2.json");
+        let file = meta
+            .version("1.21.4", &cancel, &backoff)
+            .expect("the version file");
         assert_eq!(file.main_class, "net.minecraft.client.main.Main");
     }
 
@@ -541,7 +612,10 @@ mod tests {
         let error = meta
             .version("1.99.9", &cancel, &backoff)
             .expect_err("a version that does not exist");
-        assert!(error.to_string().contains("does not list a version"), "{error}");
+        assert!(
+            error.to_string().contains("does not list a version"),
+            "{error}"
+        );
         assert_eq!(fetch.count(), 1, "only the manifest was asked for");
     }
 
@@ -553,16 +627,27 @@ mod tests {
         let cancel = Cancel::new();
         let backoff = Backoff::with_attempts(1);
         for _ in 0..3 {
-            meta.version("1.21.4", &cancel, &backoff).expect("the version file");
+            meta.version("1.21.4", &cancel, &backoff)
+                .expect("the version file");
         }
-        let asked: Vec<String> = fetch.requests().into_iter().map(|request| request.url).collect();
+        let asked: Vec<String> = fetch
+            .requests()
+            .into_iter()
+            .map(|request| request.url)
+            .collect();
         assert_eq!(
-            asked.iter().filter(|url| url.ends_with("/1.21.4.json")).count(),
+            asked
+                .iter()
+                .filter(|url| url.ends_with("/1.21.4.json"))
+                .count(),
             1,
             "a released version file is not fetched twice: {asked:?}"
         );
         assert_eq!(
-            asked.iter().filter(|url| url.ends_with("version_manifest_v2.json")).count(),
+            asked
+                .iter()
+                .filter(|url| url.ends_with("version_manifest_v2.json"))
+                .count(),
             1,
             "and the list is fresh for half an hour: {asked:?}"
         );

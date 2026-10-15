@@ -86,7 +86,10 @@ pub fn search_url_parts_with_facets(
     if !groups.is_empty() {
         // Every group is an array of its own: `facets` is a list of or-groups,
         // and `[["a"]]` is one group of one while `["a"]` is the group itself.
-        let quoted: Vec<String> = groups.iter().map(|group| format!("[\"{group}\"]")).collect();
+        let quoted: Vec<String> = groups
+            .iter()
+            .map(|group| format!("[\"{group}\"]"))
+            .collect();
         let facets = format!("[{}]", quoted.join(","));
         url.push_str(&format!("&facets={}", percent_encode(&facets)));
     }
@@ -222,7 +225,12 @@ impl Tags {
     pub fn loaders_for(&self, project_type: &str) -> Vec<&LoaderTag> {
         self.loaders
             .iter()
-            .filter(|loader| loader.supported_project_types.iter().any(|kind| kind == project_type))
+            .filter(|loader| {
+                loader
+                    .supported_project_types
+                    .iter()
+                    .any(|kind| kind == project_type)
+            })
             .collect()
     }
 
@@ -240,7 +248,11 @@ impl Tags {
 /// Calls `GET /v2/project/{project}/version` (all loaders/game versions;
 /// filtering happens client-side).
 pub fn version_url(project: &str) -> String {
-    format!("{}/project/{}/version", MODRINTH_BASE_URL, percent_encode_path(project))
+    format!(
+        "{}/project/{}/version",
+        MODRINTH_BASE_URL,
+        percent_encode_path(project)
+    )
 }
 
 /// Read a string field that the service is allowed to publish as `null`.
@@ -354,7 +366,11 @@ impl ModrinthSearchHit {
     /// Return the stable project identifier, preferring `project_id` and
     /// falling back to `slug` when the id is empty.
     pub fn project_ref(&self) -> &str {
-        if self.project_id.is_empty() { &self.slug } else { &self.project_id }
+        if self.project_id.is_empty() {
+            &self.slug
+        } else {
+            &self.project_id
+        }
     }
 }
 
@@ -433,7 +449,10 @@ impl ModrinthProjectVersion {
     /// Return the primary file, or the first file when none is flagged
     /// primary, or `None` when [`Self::files`] is empty.
     pub fn primary_file(&self) -> Option<&ModrinthVersionFile> {
-        self.files.iter().find(|f| f.primary).or_else(|| self.files.first())
+        self.files
+            .iter()
+            .find(|f| f.primary)
+            .or_else(|| self.files.first())
     }
 }
 
@@ -473,7 +492,11 @@ impl ModrinthVersionFile {
 ///
 /// Calls `GET /v2/project/{project}` -- the document a project page's header is.
 pub fn project_url(project: &str) -> String {
-    format!("{}/project/{}", MODRINTH_BASE_URL, percent_encode_path(project))
+    format!(
+        "{}/project/{}",
+        MODRINTH_BASE_URL,
+        percent_encode_path(project)
+    )
 }
 
 /// Build the team-members URL for a project id or slug.
@@ -482,7 +505,11 @@ pub fn project_url(project: &str) -> String {
 /// it belongs to but not the people on it, and Modrinth's own project page shows
 /// one of them by name -- so the name is a second request, against this URL.
 pub fn project_members_url(project: &str) -> String {
-    format!("{}/project/{}/members", MODRINTH_BASE_URL, percent_encode_path(project))
+    format!(
+        "{}/project/{}/members",
+        MODRINTH_BASE_URL,
+        percent_encode_path(project)
+    )
 }
 
 /// One `GET /v2/project/{id}` response (subset; unknown fields ignored).
@@ -913,7 +940,10 @@ mod tests {
 
     /// An article with just a date, which is all `date_label` reads.
     fn dated(date: &str) -> NewsArticle {
-        NewsArticle { date: date.to_string(), ..NewsArticle::default() }
+        NewsArticle {
+            date: date.to_string(),
+            ..NewsArticle::default()
+        }
     }
 
     #[test]
@@ -945,8 +975,7 @@ mod tests {
                 "ordering": 0
             }]
         }"##;
-        let project: ModrinthProject =
-            serde_json::from_str(body).expect("the project document");
+        let project: ModrinthProject = serde_json::from_str(body).expect("the project document");
         assert_eq!(project.title, "BattleArmory TACZ");
         assert_eq!(project.downloads, 3_507_037);
         assert_eq!(project.gallery.len(), 1);
@@ -1013,7 +1042,8 @@ mod tests {
             "loaders": ["forge"],
             "environment": ["client_and_server"]
         }"#;
-        let project: ModrinthUserProject = serde_json::from_str(pack).expect("the project document");
+        let project: ModrinthUserProject =
+            serde_json::from_str(pack).expect("the project document");
         assert_eq!(project.project_type, "modpack");
         assert_eq!(project.categories, ["challenging", "combat"]);
         assert_eq!(project.additional_categories, ["multiplayer"]);
@@ -1021,15 +1051,15 @@ mod tests {
         assert_eq!(project.client_side, "required");
         assert_eq!(project.server_side, "required");
         assert_eq!(project.environment, ["client_and_server"]);
-    // `icon_url: null` is the shape `null_as_empty` already reads, and it is the
-    // reason this document parses at all.
+        // `icon_url: null` is the shape `null_as_empty` already reads, and it is the
+        // reason this document parses at all.
         assert_eq!(project.icon_url, "");
 
-    // The same six fields absent, and one of them present as `null`: `default`
-    // covers the first case and not the second, which is what the deserializers
-    // above are for. `null` in a list key is not hypothetical -- the *search*
-    // route answers `additional_categories: null` and `loaders: null` on all
-    // hundred of a sampled page of hits.
+        // The same six fields absent, and one of them present as `null`: `default`
+        // covers the first case and not the second, which is what the deserializers
+        // above are for. `null` in a list key is not hypothetical -- the *search*
+        // route answers `additional_categories: null` and `loaders: null` on all
+        // hundred of a sampled page of hits.
         let bare: ModrinthUserProject =
             serde_json::from_str(r#"{"id":"a","title":"Nothing"}"#).expect("a bare project");
         assert!(bare.categories.is_empty());
@@ -1053,14 +1083,23 @@ mod tests {
     fn a_news_date_is_drawn_the_way_the_reference_draws_it() {
         // `dateStyle: 'long'` in the reference's own locale: `September 7, 2026`.
         // The day is not zero-padded, because the reference's formatter is not.
-        assert_eq!(dated("2026-09-07T19:00:00.000Z").date_label(), "September 7, 2026");
-        assert_eq!(dated("2026-01-31T00:00:00.000Z").date_label(), "January 31, 2026");
+        assert_eq!(
+            dated("2026-09-07T19:00:00.000Z").date_label(),
+            "September 7, 2026"
+        );
+        assert_eq!(
+            dated("2026-01-31T00:00:00.000Z").date_label(),
+            "January 31, 2026"
+        );
         assert_eq!(dated("2026-12-01").date_label(), "December 1, 2026");
         // A date this launcher cannot read is drawn as it was published rather
         // than as nothing: a wrong-looking date is a bug report, an empty one is
         // silence. A month of 13 is not a month.
         assert_eq!(dated("not a date").date_label(), "not a date");
-        assert_eq!(dated("2026-13-01T00:00:00Z").date_label(), "2026-13-01T00:00:00Z");
+        assert_eq!(
+            dated("2026-13-01T00:00:00Z").date_label(),
+            "2026-13-01T00:00:00Z"
+        );
         assert_eq!(dated("").date_label(), "");
     }
 
@@ -1101,7 +1140,10 @@ mod tests {
 
     #[test]
     fn search_url_empty_query() {
-        assert_eq!(search_url(""), "https://api.modrinth.com/v2/search?query=&limit=50");
+        assert_eq!(
+            search_url(""),
+            "https://api.modrinth.com/v2/search?query=&limit=50"
+        );
     }
 
     #[test]
@@ -1145,7 +1187,14 @@ mod tests {
         );
         // A group with no project type beside it is the whole of `facets`.
         assert_eq!(
-            search_url_parts_with_facets("sodium", None, None, 20, 0, &["categories = \"forge\"".into()]),
+            search_url_parts_with_facets(
+                "sodium",
+                None,
+                None,
+                20,
+                0,
+                &["categories = \"forge\"".into()]
+            ),
             "https://api.modrinth.com/v2/search?query=sodium&limit=20\
              &facets=%5B%5B%22categories%20%3D%20%22forge%22%22%5D%5D"
         );
@@ -1311,8 +1360,7 @@ mod tests {
         let versions: Vec<ModrinthProjectVersion> = serde_json::from_str(json).unwrap();
         let deps = &versions[0].dependencies;
         assert_eq!(deps.len(), 4);
-        let required: Vec<&ModrinthDependency> =
-            deps.iter().filter(|d| d.is_required()).collect();
+        let required: Vec<&ModrinthDependency> = deps.iter().filter(|d| d.is_required()).collect();
         assert_eq!(required.len(), 2);
         assert_eq!(required[0].project(), Some("fabric-api"));
         // A dependency that is not on Modrinth has no project to install.
@@ -1388,7 +1436,10 @@ mod tests {
         // `/v2/user/{id|username}` takes either, which is the whole reason the
         // projects list can be asked for by the id the first answer gives: a
         // display name can change between two requests, an id cannot.
-        assert_eq!(user_url("jellysquid3"), "https://api.modrinth.com/v2/user/jellysquid3");
+        assert_eq!(
+            user_url("jellysquid3"),
+            "https://api.modrinth.com/v2/user/jellysquid3"
+        );
         assert_eq!(
             user_projects_url("2REoufqX"),
             "https://api.modrinth.com/v2/user/2REoufqX/projects"

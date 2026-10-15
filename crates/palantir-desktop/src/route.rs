@@ -188,7 +188,10 @@ impl ProjectType {
             "minecraft_java_server" => return Some(ProjectType::Server),
             _ => {}
         }
-        ProjectType::ALL.iter().copied().find(|kind| kind.token() == token)
+        ProjectType::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.token() == token)
     }
 
     /// The token a *profile's* filter strip spells this kind with: `mods`,
@@ -219,8 +222,7 @@ impl ProjectType {
     /// `/user/jelly/collections` resolves, through [`ProfileTab::from_profile_token`],
     /// which is this function's other half for that one link.
     pub fn from_profile_token(token: &str) -> Option<ProjectType> {
-        Self::from_token(token)
-            .or_else(|| token.strip_suffix('s').and_then(Self::from_token))
+        Self::from_token(token).or_else(|| token.strip_suffix('s').and_then(Self::from_token))
     }
 }
 
@@ -449,7 +451,10 @@ impl Route {
     /// `App.vue`'s `forceSidebar`: Discover, Project and User pages are
     /// search-and-install pages, and the panel is where the install goes.
     pub fn forces_sidebar(&self) -> bool {
-        matches!(self, Route::Discover { .. } | Route::Project { .. } | Route::User { .. })
+        matches!(
+            self,
+            Route::Discover { .. } | Route::Project { .. } | Route::User { .. }
+        )
     }
 
     /// The route a path names, or `None` if the path is not one of them.
@@ -472,11 +477,12 @@ impl Route {
         match segments {
             [one] if one == "skins" => Some(Route::Skins),
             [one] if one == "screenshots" => Some(Route::Screenshots),
-            [hosting, manage] if hosting == "hosting" && manage == "manage" => {
-                Some(Route::Servers)
-            }
+            [hosting, manage] if hosting == "hosting" && manage == "manage" => Some(Route::Servers),
             [hosting, manage, id] if hosting == "hosting" && manage == "manage" => {
-                Some(Route::Server { id: id.clone(), tab: ServerTab::Overview })
+                Some(Route::Server {
+                    id: id.clone(),
+                    tab: ServerTab::Overview,
+                })
             }
             [hosting, manage, id, tab] if hosting == "hosting" && manage == "manage" => {
                 // A three-segment tail is the *id* plus a tab: `/hosting/manage/
@@ -488,14 +494,18 @@ impl Route {
                     "access" => ServerTab::Access,
                     _ => return None,
                 };
-                Some(Route::Server { id: id.clone(), tab })
+                Some(Route::Server {
+                    id: id.clone(),
+                    tab,
+                })
             }
             [browse, kind] if browse == "browse" => Some(Route::Discover {
                 project_type: ProjectType::from_token(kind)?,
             }),
-            [user, name] if user == "user" => {
-                Some(Route::User { user: name.clone(), project_type: None })
-            }
+            [user, name] if user == "user" => Some(Route::User {
+                user: name.clone(),
+                project_type: None,
+            }),
             [user, name, kind] if user == "user" => Some(Route::User {
                 user: name.clone(),
                 project_type: Some(ProfileTab::from_profile_token(kind)?),
@@ -510,10 +520,16 @@ impl Route {
                     "gallery" => ProjectTab::Gallery,
                     _ => return None,
                 };
-                Some(Route::Project { id: id.clone(), tab })
+                Some(Route::Project {
+                    id: id.clone(),
+                    tab,
+                })
             }
             [project, id, version, value] if project == "project" && version == "version" => {
-                Some(Route::Project { id: id.clone(), tab: ProjectTab::Version(value.clone()) })
+                Some(Route::Project {
+                    id: id.clone(),
+                    tab: ProjectTab::Version(value.clone()),
+                })
             }
             [instance, id] if instance == "instance" => Some(Route::Instance {
                 id: id.clone(),
@@ -528,7 +544,10 @@ impl Route {
                     "share" => InstanceTab::Share,
                     _ => return None,
                 };
-                Some(Route::Instance { id: id.clone(), tab })
+                Some(Route::Instance {
+                    id: id.clone(),
+                    tab,
+                })
             }
             [instance, id, projects, kind] if instance == "instance" && projects == "projects" => {
                 Some(Route::Instance {
@@ -615,7 +634,10 @@ pub struct Address {
 impl Address {
     /// A top-level page with no context.
     pub fn at(route: Route) -> Address {
-        Address { route, context: Context::default() }
+        Address {
+            route,
+            context: Context::default(),
+        }
     }
 
     /// Read an address out of a path, fragment and query included.
@@ -643,8 +665,15 @@ impl Address {
             .filter(|segment| !segment.is_empty())
             .map(decode)
             .collect();
-        let route = if segments.is_empty() { Route::Home } else { Route::from_segments(&segments)? };
-        Some(Address { route, context: Context::parse(query) })
+        let route = if segments.is_empty() {
+            Route::Home
+        } else {
+            Route::from_segments(&segments)?
+        };
+        Some(Address {
+            route,
+            context: Context::parse(query),
+        })
     }
 
     /// Which rail slot this address lights up, and how.
@@ -836,20 +865,50 @@ mod tests {
         vec![
             Route::Home,
             Route::Servers,
-            Route::Server { id: "srv".into(), tab: ServerTab::Overview },
-            Route::Server { id: "srv".into(), tab: ServerTab::Content },
-            Route::Server { id: "srv".into(), tab: ServerTab::Files },
-            Route::Server { id: "srv".into(), tab: ServerTab::Backups },
-            Route::Server { id: "srv".into(), tab: ServerTab::Access },
-            Route::Discover { project_type: ProjectType::Modpack },
-            Route::Discover { project_type: ProjectType::Mod },
-            Route::Discover { project_type: ProjectType::ResourcePack },
-            Route::Discover { project_type: ProjectType::Datapack },
-            Route::Discover { project_type: ProjectType::Shader },
-            Route::Discover { project_type: ProjectType::Server },
+            Route::Server {
+                id: "srv".into(),
+                tab: ServerTab::Overview,
+            },
+            Route::Server {
+                id: "srv".into(),
+                tab: ServerTab::Content,
+            },
+            Route::Server {
+                id: "srv".into(),
+                tab: ServerTab::Files,
+            },
+            Route::Server {
+                id: "srv".into(),
+                tab: ServerTab::Backups,
+            },
+            Route::Server {
+                id: "srv".into(),
+                tab: ServerTab::Access,
+            },
+            Route::Discover {
+                project_type: ProjectType::Modpack,
+            },
+            Route::Discover {
+                project_type: ProjectType::Mod,
+            },
+            Route::Discover {
+                project_type: ProjectType::ResourcePack,
+            },
+            Route::Discover {
+                project_type: ProjectType::Datapack,
+            },
+            Route::Discover {
+                project_type: ProjectType::Shader,
+            },
+            Route::Discover {
+                project_type: ProjectType::Server,
+            },
             Route::Skins,
             Route::Screenshots,
-            Route::User { user: "jelly".into(), project_type: None },
+            Route::User {
+                user: "jelly".into(),
+                project_type: None,
+            },
             Route::User {
                 user: "jelly".into(),
                 project_type: Some(ProfileTab::Projects(ProjectType::Mod)),
@@ -858,20 +917,50 @@ mod tests {
                 user: "jelly".into(),
                 project_type: Some(ProfileTab::Collections),
             },
-            Route::Project { id: "sodium".into(), tab: ProjectTab::Description },
-            Route::Project { id: "sodium".into(), tab: ProjectTab::Versions },
-            Route::Project { id: "sodium".into(), tab: ProjectTab::Version("mc1.21-0.5".into()) },
-            Route::Project { id: "sodium".into(), tab: ProjectTab::Gallery },
-            Route::Instance { id: "All the Mods 10".into(), tab: InstanceTab::Content },
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Description,
+            },
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Versions,
+            },
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Version("mc1.21-0.5".into()),
+            },
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Gallery,
+            },
+            Route::Instance {
+                id: "All the Mods 10".into(),
+                tab: InstanceTab::Content,
+            },
             Route::Instance {
                 id: "All the Mods 10".into(),
                 tab: InstanceTab::ContentFilter(ProjectType::Mod),
             },
-            Route::Instance { id: "a/b".into(), tab: InstanceTab::Files },
-            Route::Instance { id: "a/b".into(), tab: InstanceTab::Worlds },
-            Route::Instance { id: "a/b".into(), tab: InstanceTab::Screenshots },
-            Route::Instance { id: "a/b".into(), tab: InstanceTab::Logs },
-            Route::Instance { id: "a/b".into(), tab: InstanceTab::Share },
+            Route::Instance {
+                id: "a/b".into(),
+                tab: InstanceTab::Files,
+            },
+            Route::Instance {
+                id: "a/b".into(),
+                tab: InstanceTab::Worlds,
+            },
+            Route::Instance {
+                id: "a/b".into(),
+                tab: InstanceTab::Screenshots,
+            },
+            Route::Instance {
+                id: "a/b".into(),
+                tab: InstanceTab::Logs,
+            },
+            Route::Instance {
+                id: "a/b".into(),
+                tab: InstanceTab::Share,
+            },
         ]
     }
 
@@ -880,23 +969,44 @@ mod tests {
         // Straight out of `routes.js`. A rename here would make every later
         // port of a page harder to line up with upstream.
         assert_eq!(Route::Home.name(), "Home");
-        assert_eq!(Route::Discover { project_type: ProjectType::Modpack }.name(), "Discover content");
+        assert_eq!(
+            Route::Discover {
+                project_type: ProjectType::Modpack
+            }
+            .name(),
+            "Discover content"
+        );
         assert_eq!(Route::Skins.name(), "Skin selector");
         assert_eq!(Route::Servers.name(), "Servers");
         assert_eq!(
-            Route::Instance { id: "x".into(), tab: InstanceTab::ContentFilter(ProjectType::Mod) }
-                .name(),
+            Route::Instance {
+                id: "x".into(),
+                tab: InstanceTab::ContentFilter(ProjectType::Mod)
+            }
+            .name(),
             "InstanceContentFilter"
         );
         assert_eq!(
-            Route::Project { id: "x".into(), tab: ProjectTab::Version("v".into()) }.name(),
+            Route::Project {
+                id: "x".into(),
+                tab: ProjectTab::Version("v".into())
+            }
+            .name(),
             "Version"
         );
         assert_eq!(
-            Route::Server { id: "x".into(), tab: ServerTab::Backups }.name(),
+            Route::Server {
+                id: "x".into(),
+                tab: ServerTab::Backups
+            }
+            .name(),
             "ServerManageBackups"
         );
-        assert_eq!(ProjectType::ALL.len(), 7, "the alias table is keyed on these");
+        assert_eq!(
+            ProjectType::ALL.len(),
+            7,
+            "the alias table is keyed on these"
+        );
     }
 
     #[test]
@@ -911,10 +1021,13 @@ mod tests {
             );
         }
         let versions = Address::parse("/mod/sodium/versions").expect("legacy versions");
-        assert_eq!(versions.route, Route::Project {
-            id: "sodium".into(),
-            tab: ProjectTab::Versions,
-        });
+        assert_eq!(
+            versions.route,
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Versions,
+            }
+        );
         // A single segment is not the legacy form: `/mod` alone is not a
         // project id, and routes.js has no route for it either.
         assert!(Address::parse("/mod").is_none());
@@ -929,11 +1042,17 @@ mod tests {
         // one of the tabs.
         assert_eq!(
             Address::parse("/hosting/manage/content").map(|address| address.route),
-            Some(Route::Server { id: "content".into(), tab: ServerTab::Overview })
+            Some(Route::Server {
+                id: "content".into(),
+                tab: ServerTab::Overview
+            })
         );
         assert_eq!(
             Address::parse("/hosting/manage/content/content").map(|address| address.route),
-            Some(Route::Server { id: "content".into(), tab: ServerTab::Content })
+            Some(Route::Server {
+                id: "content".into(),
+                tab: ServerTab::Content
+            })
         );
     }
 
@@ -942,13 +1061,27 @@ mod tests {
         // `routes.js` declares `/hosting/manage/` with a trailing slash and
         // `App.vue` links to `/hosting/manage` without one, and its
         // `is-primary` predicate compares against both.
-        assert_eq!(Address::parse("/hosting/manage/").map(|a| a.route), Some(Route::Servers));
-        assert_eq!(Address::parse("/hosting/manage").map(|a| a.route), Some(Route::Servers));
+        assert_eq!(
+            Address::parse("/hosting/manage/").map(|a| a.route),
+            Some(Route::Servers)
+        );
+        assert_eq!(
+            Address::parse("/hosting/manage").map(|a| a.route),
+            Some(Route::Servers)
+        );
     }
 
     #[test]
     fn unknown_paths_are_refused_rather_than_guessed_at() {
-        for path in ["/mods", "/worlds", "/logs", "/settings", "/accounts", "/about", "/nonsense"] {
+        for path in [
+            "/mods",
+            "/worlds",
+            "/logs",
+            "/settings",
+            "/accounts",
+            "/about",
+            "/nonsense",
+        ] {
             assert!(Address::parse(path).is_none(), "{path} should not resolve");
         }
     }
@@ -958,10 +1091,13 @@ mod tests {
         // The legacy redirect carries `to.hash` through to the project URL, so
         // `/mod/sodium#gallery` is a real shape the reference produces.
         let address = Address::parse("/project/sodium/versions?i=x#gallery").expect("fragment");
-        assert_eq!(address.route, Route::Project {
-            id: "sodium".into(),
-            tab: ProjectTab::Versions,
-        });
+        assert_eq!(
+            address.route,
+            Route::Project {
+                id: "sodium".into(),
+                tab: ProjectTab::Versions,
+            }
+        );
         assert_eq!(address.context.instance.as_deref(), Some("x"));
     }
 
@@ -969,19 +1105,40 @@ mod tests {
     fn the_rail_marks_the_page_the_reference_marks() {
         let marks = |path: &str| Address::parse(path).expect(path).marks();
         assert_eq!(marks("/"), vec![(Rail::Home, Mark::Primary)]);
-        assert_eq!(marks("/browse/modpack"), vec![(Rail::Discover, Mark::Primary)]);
-        assert_eq!(marks("/project/sodium"), vec![(Rail::Discover, Mark::Subpage)]);
+        assert_eq!(
+            marks("/browse/modpack"),
+            vec![(Rail::Discover, Mark::Primary)]
+        );
+        assert_eq!(
+            marks("/project/sodium"),
+            vec![(Rail::Discover, Mark::Subpage)]
+        );
         assert_eq!(
             marks("/project/sodium?i=atm10"),
             vec![(Rail::Home, Mark::Subpage)],
             "a project opened inside an instance belongs to the instance"
         );
-        assert_eq!(marks("/browse/mod?i=atm10"), vec![(Rail::Home, Mark::Subpage)]);
-        assert_eq!(marks("/browse/server?sid=abc"), vec![(Rail::Servers, Mark::Subpage)]);
-        assert_eq!(marks("/hosting/manage/"), vec![(Rail::Servers, Mark::Primary)]);
-        assert_eq!(marks("/hosting/manage/srv/backups"), vec![(Rail::Servers, Mark::Subpage)]);
+        assert_eq!(
+            marks("/browse/mod?i=atm10"),
+            vec![(Rail::Home, Mark::Subpage)]
+        );
+        assert_eq!(
+            marks("/browse/server?sid=abc"),
+            vec![(Rail::Servers, Mark::Subpage)]
+        );
+        assert_eq!(
+            marks("/hosting/manage/"),
+            vec![(Rail::Servers, Mark::Primary)]
+        );
+        assert_eq!(
+            marks("/hosting/manage/srv/backups"),
+            vec![(Rail::Servers, Mark::Subpage)]
+        );
         assert_eq!(marks("/skins"), vec![(Rail::Skins, Mark::Primary)]);
-        assert_eq!(marks("/screenshots"), vec![(Rail::Screenshots, Mark::Primary)]);
+        assert_eq!(
+            marks("/screenshots"),
+            vec![(Rail::Screenshots, Mark::Primary)]
+        );
         assert!(
             marks("/user/jelly").is_empty(),
             "the profile slot is an overflow menu, so the reference never marks it"
@@ -1015,34 +1172,73 @@ mod tests {
     #[test]
     fn only_the_search_pages_force_the_right_panel_open() {
         // `App.vue`'s `forceSidebar`: `/browse`, `/project` and `/user`.
-        assert!(Route::Discover { project_type: ProjectType::Mod }.forces_sidebar());
-        assert!(Route::Project { id: "x".into(), tab: ProjectTab::Gallery }.forces_sidebar());
-        assert!(Route::User { user: "jelly".into(), project_type: None }.forces_sidebar());
+        assert!(Route::Discover {
+            project_type: ProjectType::Mod
+        }
+        .forces_sidebar());
+        assert!(Route::Project {
+            id: "x".into(),
+            tab: ProjectTab::Gallery
+        }
+        .forces_sidebar());
+        assert!(Route::User {
+            user: "jelly".into(),
+            project_type: None
+        }
+        .forces_sidebar());
         assert!(!Route::Home.forces_sidebar());
         assert!(!Route::Skins.forces_sidebar());
         assert!(!Route::Screenshots.forces_sidebar());
         assert!(!Route::Servers.forces_sidebar());
-        assert!(!Route::Instance { id: "x".into(), tab: InstanceTab::Content }.forces_sidebar());
+        assert!(!Route::Instance {
+            id: "x".into(),
+            tab: InstanceTab::Content
+        }
+        .forces_sidebar());
     }
 
     #[test]
     fn a_tab_knows_which_page_it_is_a_tab_of() {
         assert_eq!(
-            Route::Instance { id: "x".into(), tab: InstanceTab::ContentFilter(ProjectType::Mod) }
-                .parent(),
-            Some(Route::Instance { id: "x".into(), tab: InstanceTab::Content })
+            Route::Instance {
+                id: "x".into(),
+                tab: InstanceTab::ContentFilter(ProjectType::Mod)
+            }
+            .parent(),
+            Some(Route::Instance {
+                id: "x".into(),
+                tab: InstanceTab::Content
+            })
         );
         assert_eq!(
-            Route::Project { id: "x".into(), tab: ProjectTab::Gallery }.parent(),
-            Some(Route::Project { id: "x".into(), tab: ProjectTab::Description })
+            Route::Project {
+                id: "x".into(),
+                tab: ProjectTab::Gallery
+            }
+            .parent(),
+            Some(Route::Project {
+                id: "x".into(),
+                tab: ProjectTab::Description
+            })
         );
         assert_eq!(
-            Route::Server { id: "x".into(), tab: ServerTab::Access }.parent(),
-            Some(Route::Server { id: "x".into(), tab: ServerTab::Overview })
+            Route::Server {
+                id: "x".into(),
+                tab: ServerTab::Access
+            }
+            .parent(),
+            Some(Route::Server {
+                id: "x".into(),
+                tab: ServerTab::Overview
+            })
         );
         // A page is not its own child.
         assert_eq!(
-            Route::Instance { id: "x".into(), tab: InstanceTab::Content }.parent(),
+            Route::Instance {
+                id: "x".into(),
+                tab: InstanceTab::Content
+            }
+            .parent(),
             None
         );
         assert_eq!(Route::Home.parent(), None);
@@ -1054,11 +1250,15 @@ mod tests {
             assert_eq!(ProjectType::from_token(kind.token()), Some(*kind));
         }
         // `PROJECT_TYPE_ALIASES`, from `common-messages.ts`.
-        assert_eq!(ProjectType::from_token("shaderpack"), Some(ProjectType::Shader));
+        assert_eq!(
+            ProjectType::from_token("shaderpack"),
+            Some(ProjectType::Shader)
+        );
         assert_eq!(
             ProjectType::from_token("minecraft_java_server"),
             Some(ProjectType::Server)
-        );        assert_eq!(ProjectType::from_token("shaders"), None);
+        );
+        assert_eq!(ProjectType::from_token("shaders"), None);
         assert_eq!(ProjectType::from_token(""), None);
     }
 
@@ -1068,10 +1268,17 @@ mod tests {
         // tree's older spelling and still parses, because an address somebody
         // already has must not stop working.
         for kind in ProjectType::ALL {
-            assert_eq!(ProjectType::from_profile_token(&kind.profile_token()), Some(*kind));
+            assert_eq!(
+                ProjectType::from_profile_token(&kind.profile_token()),
+                Some(*kind)
+            );
             assert_eq!(ProjectType::from_profile_token(kind.token()), Some(*kind));
         }
-        assert_eq!(ProjectType::from_token("mods"), None, "the API's own spelling is singular");
+        assert_eq!(
+            ProjectType::from_token("mods"),
+            None,
+            "the API's own spelling is singular"
+        );
         // The reference's fourth link is *not* a project type, and this assertion is
         // the reason it never becomes one: the token resolves to no type at all, so
         // nothing that derives from a type -- `target_folder`, `sentence`, `TABS` --
@@ -1124,8 +1331,14 @@ mod tests {
         // the four tabs are one list and this walks all of it.
         let strip = [
             (None, "/user/FlameFire"),
-            (Some(ProfileTab::Projects(ProjectType::Datapack)), "/user/FlameFire/datapacks"),
-            (Some(ProfileTab::Projects(ProjectType::Modpack)), "/user/FlameFire/modpacks"),
+            (
+                Some(ProfileTab::Projects(ProjectType::Datapack)),
+                "/user/FlameFire/datapacks",
+            ),
+            (
+                Some(ProfileTab::Projects(ProjectType::Modpack)),
+                "/user/FlameFire/modpacks",
+            ),
             (Some(ProfileTab::Collections), "/user/FlameFire/collections"),
         ];
         for (tab, path) in strip {
@@ -1135,7 +1348,13 @@ mod tests {
             };
             assert_eq!(written, path, "{tab:?} is not spelled the reference's way");
             let parsed = Address::parse(path).unwrap_or_else(|| panic!("{path} is not a route"));
-            assert_eq!(parsed.route, Route::User { user: "FlameFire".into(), project_type: tab });
+            assert_eq!(
+                parsed.route,
+                Route::User {
+                    user: "FlameFire".into(),
+                    project_type: tab
+                }
+            );
             assert_eq!(parsed.context, Context::default());
             // And back again.
             assert_eq!(
@@ -1152,14 +1371,22 @@ mod tests {
             .collect();
         for (index, route) in routes.iter().enumerate() {
             for (other, earlier) in routes.iter().enumerate() {
-                assert_eq!(index == other, route == earlier, "two of the four are one address");
+                assert_eq!(
+                    index == other,
+                    route == earlier,
+                    "two of the four are one address"
+                );
             }
         }
         // A third segment that names nothing is still refused, and refused as a
         // whole rather than read as *All*: `Address::parse` answers `None` so the
         // shell falls back rather than landing the reader on a page that says
         // something else.
-        for path in ["/user/jelly/nonsense", "/user/jelly/collectionss", "/user/jelly/s"] {
+        for path in [
+            "/user/jelly/nonsense",
+            "/user/jelly/collectionss",
+            "/user/jelly/s",
+        ] {
             assert!(Address::parse(path).is_none(), "{path} should not resolve");
         }
         // A user called `collections` is a name, not a tab: the first segment is
@@ -1184,7 +1411,10 @@ mod tests {
             ProfileTab::from_profile_token("collections"),
             Some(ProfileTab::Collections)
         );
-        assert_eq!(ProfileTab::from_profile_token("collection"), Some(ProfileTab::Collections));
+        assert_eq!(
+            ProfileTab::from_profile_token("collection"),
+            Some(ProfileTab::Collections)
+        );
         assert_eq!(
             ProfileTab::from_profile_token("mods"),
             Some(ProfileTab::Projects(ProjectType::Mod))
@@ -1202,7 +1432,11 @@ mod tests {
         // (`ui/src/utils/project-types.ts:1-10`) purely to put the tab last, which
         // `pages::user` does by appending rather than sorting.
         assert_eq!(ProjectType::PROFILE_ORDER.len(), 7);
-        assert_eq!(ProjectType::ALL.len(), 7, "still seven: no variant was added");
+        assert_eq!(
+            ProjectType::ALL.len(),
+            7,
+            "still seven: no variant was added"
+        );
         assert_eq!(ProjectType::TABS.len(), 6, "and Discover still offers six");
         // The one address a collection has is its own, and it is the one the
         // reference's `navLinks` builds for it.
@@ -1216,8 +1450,18 @@ mod tests {
     fn discover_offers_six_tabs_in_the_order_the_reference_draws_them() {
         // `Browse.vue`'s `tabs` computed, in order.
         assert_eq!(
-            ProjectType::TABS.iter().map(|kind| kind.token()).collect::<Vec<_>>(),
-            vec!["modpack", "mod", "resourcepack", "datapack", "shader", "server"]
+            ProjectType::TABS
+                .iter()
+                .map(|kind| kind.token())
+                .collect::<Vec<_>>(),
+            vec![
+                "modpack",
+                "mod",
+                "resourcepack",
+                "datapack",
+                "shader",
+                "server"
+            ]
         );
         // Plugin exists in `routes.js`'s redirect and in the messages but is
         // not one of the tabs, so it is in `ALL` and not in `TABS`.
@@ -1229,9 +1473,8 @@ mod tests {
     /// to the folder under an instance root.
     #[test]
     fn a_kind_installs_into_the_folder_it_names() {
-        let folder = |token: &str| {
-            ProjectType::from_token(token).and_then(|kind| kind.target_folder())
-        };
+        let folder =
+            |token: &str| ProjectType::from_token(token).and_then(|kind| kind.target_folder());
         assert_eq!(folder("mod"), Some("mods"));
         assert_eq!(folder("resourcepack"), Some("resourcepacks"));
         assert_eq!(folder("datapack"), Some("datapacks"));
@@ -1261,7 +1504,16 @@ mod tests {
 
     #[test]
     fn escaping_round_trips_including_bytes_outside_ascii() {
-        for raw in ["plain", "with space", "a/b", "café", "100%", "a+b", "q?uery", "emoji 🎮"] {
+        for raw in [
+            "plain",
+            "with space",
+            "a/b",
+            "café",
+            "100%",
+            "a+b",
+            "q?uery",
+            "emoji 🎮",
+        ] {
             assert_eq!(decode(&encode(raw)), raw, "{raw} did not survive");
         }
         // `encodeURIComponent`'s safe set, spot-checked: these five are the

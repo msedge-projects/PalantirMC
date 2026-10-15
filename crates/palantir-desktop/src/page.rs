@@ -159,9 +159,12 @@ pub fn body_padded<'a, Message: 'a>(
     }
     crate::scroll::region(
         crate::scroll::PAGE,
-        container(items)
-            .width(Length::Fill)
-            .padding(Padding { top: inset, right: inset, bottom: inset, left: inset }),
+        container(items).width(Length::Fill).padding(Padding {
+            top: inset,
+            right: inset,
+            bottom: inset,
+            left: inset,
+        }),
         on_wheel,
     )
     .width(Length::Fill)
@@ -174,12 +177,19 @@ pub fn title<'a, Message: 'a>(theme: Gen, key: Key) -> Element<'a, Message> {
     text(key.message())
         .size(24.0)
         .font(heading())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into()
 }
 
 /// A section heading with the count the reference puts beside it.
-pub fn section<'a, Message: 'a>(theme: Gen, key: Key, count: Option<usize>) -> Element<'a, Message> {
+pub fn section<'a, Message: 'a>(
+    theme: Gen,
+    key: Key,
+    count: Option<usize>,
+) -> Element<'a, Message> {
     let mut row = iced::widget::row![]
         .align_items(Alignment::Center)
         .spacing(ROW_GAP)
@@ -187,15 +197,15 @@ pub fn section<'a, Message: 'a>(theme: Gen, key: Key, count: Option<usize>) -> E
             text(key.message())
                 .size(16.0)
                 .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
         );
     if let Some(count) = count {
-        row = row.push(
-            text(count.to_string())
-                .size(14.0)
-                .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        );
+        row = row.push(text(count.to_string()).size(14.0).font(medium()).style(
+            iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+        ));
     }
     row.into()
 }
@@ -239,11 +249,22 @@ pub fn notice<'a, Message: Clone + crate::ui::Hovered + 'a>(
     iced::widget::row![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Start)
-        .push(crate::ui::admonition(theme, crate::ui::Severity::Info, header.message(), body))
+        .push(crate::ui::admonition(
+            theme,
+            crate::ui::Severity::Info,
+            header.message(),
+            body,
+        ))
         .push(Space::with_width(Length::Fill))
         // One dismiss control on the page, and every page's notice names it the
         // same way: the tween it gets is the crossing this page's family routes.
-        .push(crate::ui::icon_button(theme, "page:notice:dismiss", Glyph::X, 16.0, dismiss))
+        .push(crate::ui::icon_button(
+            theme,
+            "page:notice:dismiss",
+            Glyph::X,
+            16.0,
+            dismiss,
+        ))
         .into()
 }
 
@@ -253,7 +274,10 @@ fn sentence<'a, Message: 'a>(theme: Gen, sentence: &str) -> Element<'a, Message>
         text(sentence.to_string())
             .size(14.0)
             .font(medium())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            ))),
     )
     .width(Length::Fill)
     .padding(24.0)
@@ -266,18 +290,17 @@ pub fn rule<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     container(Space::with_height(Length::Fixed(1.0)))
         .width(Length::Fill)
         .style(move |_theme: &iced::Theme| container::Appearance {
-            background: Some(iced::Background::Color(theme_gen::ink(theme, Ink::Surface5))),
+            background: Some(iced::Background::Color(theme_gen::ink(
+                theme,
+                Ink::Surface5,
+            ))),
             ..container::Appearance::default()
         })
         .into()
 }
 
 /// An icon in the quiet ink, at the size the reference's chrome uses.
-pub fn glyph<'a, Message: 'a>(
-    theme: Gen,
-    glyph: Glyph,
-    size: f32,
-) -> Element<'a, Message> {
+pub fn glyph<'a, Message: 'a>(theme: Gen, glyph: Glyph, size: f32) -> Element<'a, Message> {
     icon::icon(glyph, size, theme_gen::ink(theme, INK_DEFAULT))
 }
 

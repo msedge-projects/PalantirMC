@@ -168,13 +168,18 @@ fn parse_from(
             let number = *next_details;
             *next_details += 1;
             let (inner, after) = parse_from(lines, at + 1, Some("details"), next_details);
-            let (captions, body): (Vec<Block>, Vec<Block>) =
-                inner.into_iter().partition(|block| matches!(block, Block::Summary(_)));
+            let (captions, body): (Vec<Block>, Vec<Block>) = inner
+                .into_iter()
+                .partition(|block| matches!(block, Block::Summary(_)));
             let summary = match captions.into_iter().next() {
                 Some(Block::Summary(caption)) => caption,
                 _ => String::new(),
             };
-            blocks.push(Block::Details { number, summary, body });
+            blocks.push(Block::Details {
+                number,
+                summary,
+                body,
+            });
             at = after;
             continue;
         }
@@ -196,7 +201,10 @@ fn parse_from(
 
         if let Some((level, heading)) = heading(trimmed) {
             flush(&mut blocks, &mut paragraph);
-            blocks.push(Block::Heading { level, text: inline(heading) });
+            blocks.push(Block::Heading {
+                level,
+                text: inline(heading),
+            });
             at += 1;
             continue;
         }
@@ -268,7 +276,10 @@ fn fence(line: &str) -> Option<&'static str> {
 /// The space is what makes a heading a heading: `#hashtag` is a hashtag, and this
 /// refuses it for the same reason a renderer does.
 fn heading(line: &str) -> Option<(u8, &str)> {
-    let hashes = line.chars().take_while(|character| *character == '#').count();
+    let hashes = line
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
     if hashes == 0 || hashes > 6 {
         return None;
     }
@@ -312,9 +323,7 @@ fn list_item(line: &str) -> Option<&str> {
 
 /// Whether a line opens the named element.
 fn is_opening_tag(line: &str, name: &str) -> bool {
-    tag_at(line, name).is_some_and(|(closing, rest)| {
-        !closing && rest.starts_with(['>', ' ', '/'])
-    })
+    tag_at(line, name).is_some_and(|(closing, rest)| !closing && rest.starts_with(['>', ' ', '/']))
 }
 
 /// Whether a line closes the named element.
@@ -365,7 +374,9 @@ fn is_tag_line(line: &str) -> bool {
 fn summary_text(line: &str) -> Option<String> {
     let rest = line.strip_prefix("<summary")?;
     let rest = rest.split_once('>')?.1;
-    let rest = rest.rsplit_once("</summary>").map_or(rest, |(inner, _)| inner);
+    let rest = rest
+        .rsplit_once("</summary>")
+        .map_or(rest, |(inner, _)| inner);
     Some(inline(rest))
 }
 
@@ -397,7 +408,8 @@ pub fn inline(line: &str) -> String {
         // A `<` that opens a letter, a `/` or a `!` is a tag; anything else is a
         // character a body is allowed to contain.
         if character == '<'
-            && rest[1..].starts_with(|next: char| next.is_alphanumeric() || next == '/' || next == '!')
+            && rest[1..]
+                .starts_with(|next: char| next.is_alphanumeric() || next == '/' || next == '!')
         {
             match rest.find('>') {
                 Some(end) => {
@@ -419,9 +431,11 @@ pub fn inline(line: &str) -> String {
 
 /// A `<br>` at the head of what is left, and what follows it.
 fn line_break(line: &str) -> Option<&str> {
-    ["<br>", "<br/>", "<br />", "<br  />", "<BR>", "<BR/>", "<BR />"]
-        .iter()
-        .find_map(|tag| line.strip_prefix(tag))
+    [
+        "<br>", "<br/>", "<br />", "<br  />", "<BR>", "<BR/>", "<BR />",
+    ]
+    .iter()
+    .find_map(|tag| line.strip_prefix(tag))
 }
 
 /// A markdown image or link at the head of what is left, as its label and what
@@ -430,9 +444,7 @@ fn line_break(line: &str) -> Option<&str> {
 /// The destination is dropped rather than drawn: a picture is a picture, and a URL
 /// drawn as prose is the same defect as a tag drawn as prose.
 fn markup(line: &str) -> Option<(&str, &str)> {
-    let body = line
-        .strip_prefix("![")
-        .or_else(|| line.strip_prefix('['))?;
+    let body = line.strip_prefix("![").or_else(|| line.strip_prefix('['))?;
     let (label, after) = body.split_once("](")?;
     let (_, after) = after.split_once(')')?;
     Some((label, after))
@@ -444,7 +456,11 @@ fn markup(line: &str) -> Option<(&str, &str)> {
 /// left alone unless it is doubled, because an underscore inside a word is far
 /// more often part of a name than emphasis in a body that has no way to draw it.
 fn strip_markers(line: &str) -> String {
-    let paired = line.replace("**", "").replace("__", "").replace("~~", "").replace('`', "");
+    let paired = line
+        .replace("**", "")
+        .replace("__", "")
+        .replace("~~", "")
+        .replace('`', "");
     if paired.matches('*').count() % 2 == 0 {
         paired.replace('*', "")
     } else {
@@ -493,10 +509,17 @@ where
     F: Fn(usize) -> Message + Copy + 'a,
 {
     match block {
-        Block::Heading { level, text: heading } => {
+        Block::Heading {
+            level,
+            text: heading,
+        } => {
             // `h1, h2, h3, h4 { color: var(--color-contrast) }`, and only the
             // first two carry `padding: 10px 0 5px` with a rule under them.
-            let ink = if *level <= 4 { INK_CONTRAST } else { INK_DEFAULT };
+            let ink = if *level <= 4 {
+                INK_CONTRAST
+            } else {
+                INK_DEFAULT
+            };
             let line = text(heading.clone())
                 .size(14.0)
                 .font(semibold())
@@ -504,13 +527,23 @@ where
             if *level > 2 {
                 let margin = theme_gen::span(Span::GapMd);
                 return container(line)
-                    .padding(Padding { top: margin, right: 0.0, bottom: margin, left: 0.0 })
+                    .padding(Padding {
+                        top: margin,
+                        right: 0.0,
+                        bottom: margin,
+                        left: 0.0,
+                    })
                     .into();
             }
             column![]
                 .width(Length::Fill)
                 .spacing(5.0)
-                .push(container(line).padding(Padding { top: 10.0, right: 0.0, bottom: 0.0, left: 0.0 }))
+                .push(container(line).padding(Padding {
+                    top: 10.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                }))
                 .push(hairline(theme, 1.0, Ink::Divider))
                 .into()
         }
@@ -555,7 +588,12 @@ where
                 }),
         )
         .width(Length::Fill)
-        .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: QUOTE_RULE })
+        .padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: QUOTE_RULE,
+        })
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
             ..container::Appearance::default()
@@ -563,11 +601,9 @@ where
         .into(),
         // `pre { bg-surface-2 rounded-xl p-4 }` with a `border-surface-5` hairline,
         // and `pre code { font-size: 80% }` inside it.
-        Block::Code(source) => container(
-            text(source.clone())
-                .size(CODE_SIZE)
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-        )
+        Block::Code(source) => container(text(source.clone()).size(CODE_SIZE).style(
+            iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+        ))
         .width(Length::Fill)
         .padding(Padding::from(16.0))
         .style(move |_theme: &Theme| container::Appearance {
@@ -581,13 +617,25 @@ where
         })
         .into(),
         Block::Rule => hairline(theme, 1.0, Ink::ButtonBg),
-        Block::Details { number, summary, body } => {
+        Block::Details {
+            number,
+            summary,
+            body,
+        } => {
             let expanded = open.contains(number);
-            let marker = if expanded { Glyph::ChevronDown } else { Glyph::ChevronRight };
+            let marker = if expanded {
+                Glyph::ChevronDown
+            } else {
+                Glyph::ChevronRight
+            };
             let mut caption = row![]
                 .spacing(6.0)
                 .align_items(Alignment::Center)
-                .push(icon::icon(marker, 16.0, theme_gen::ink(theme, INK_SECONDARY)));
+                .push(icon::icon(
+                    marker,
+                    16.0,
+                    theme_gen::ink(theme, INK_SECONDARY),
+                ));
             if !summary.is_empty() {
                 // The caption is drawn as the heading its own editor usually puts
                 // inside one, and the markdown markers are not drawn.
@@ -596,7 +644,10 @@ where
                     text(caption_text.to_string())
                         .size(14.0)
                         .font(semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 );
             }
             let mut disclosure = column![]
@@ -650,10 +701,22 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                Block::Heading { level: 1, text: "One".to_string() },
-                Block::Heading { level: 2, text: "Two".to_string() },
-                Block::Heading { level: 3, text: "Three".to_string() },
-                Block::Heading { level: 4, text: "Four".to_string() },
+                Block::Heading {
+                    level: 1,
+                    text: "One".to_string()
+                },
+                Block::Heading {
+                    level: 2,
+                    text: "Two".to_string()
+                },
+                Block::Heading {
+                    level: 3,
+                    text: "Three".to_string()
+                },
+                Block::Heading {
+                    level: 4,
+                    text: "Four".to_string()
+                },
             ]
         );
     }
@@ -664,12 +727,19 @@ mod tests {
         let (number, summary, body) = blocks
             .iter()
             .find_map(|block| match block {
-                Block::Details { number, summary, body } => Some((*number, summary, body)),
+                Block::Details {
+                    number,
+                    summary,
+                    body,
+                } => Some((*number, summary, body)),
                 _ => None,
             })
             .expect("the body opens a `<details>`");
         assert_eq!(number, 0, "the first disclosure of a body is number zero");
-        assert_eq!(summary, "更新日志", "the summary is the caption, not the tag");
+        assert_eq!(
+            summary, "更新日志",
+            "the summary is the caption, not the tag"
+        );
         assert_eq!(
             body,
             &vec![
@@ -714,7 +784,11 @@ mod tests {
                 .collect(),
             other => panic!("expected a disclosure, got {other:?}"),
         };
-        assert_eq!(nested, vec![2], "a nested disclosure is numbered in the body's order");
+        assert_eq!(
+            nested,
+            vec![2],
+            "a nested disclosure is numbered in the body's order"
+        );
     }
 
     #[test]
@@ -742,8 +816,14 @@ mod tests {
         // one-font `Text` this port draws with has no way to set a run in another
         // weight, so the words stay and the punctuation goes.
         assert_eq!(inline("**bold** and *italic*"), "bold and italic");
-        assert_eq!(inline("see [the wiki](https://example.com/x) now"), "see the wiki now");
-        assert_eq!(inline("![a picture](https://example.com/a.png)"), "a picture");
+        assert_eq!(
+            inline("see [the wiki](https://example.com/x) now"),
+            "see the wiki now"
+        );
+        assert_eq!(
+            inline("![a picture](https://example.com/a.png)"),
+            "a picture"
+        );
         assert_eq!(inline("`code`"), "code");
         assert_eq!(inline("a &amp; b &lt;c&gt;"), "a & b <c>");
         assert_eq!(inline("one<br>two"), "one\ntwo");
@@ -800,6 +880,9 @@ mod tests {
             ]
         );
         // An unclosed fence runs to the end of the body rather than dropping it.
-        assert_eq!(parse("```\nunclosed"), vec![Block::Code("unclosed".to_string())]);
+        assert_eq!(
+            parse("```\nunclosed"),
+            vec![Block::Code("unclosed".to_string())]
+        );
     }
 }

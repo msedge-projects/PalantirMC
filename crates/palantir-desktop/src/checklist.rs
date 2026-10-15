@@ -51,7 +51,11 @@ pub enum Step {
 
 impl Step {
     /// All three, in the order the reference draws them.
-    pub const ALL: [Step; 3] = [Step::CreateInstance, Step::LoginMinecraft, Step::LoginModrinth];
+    pub const ALL: [Step; 3] = [
+        Step::CreateInstance,
+        Step::LoginMinecraft,
+        Step::LoginModrinth,
+    ];
 
     /// The step's own copy, out of the generated table.
     ///
@@ -90,7 +94,11 @@ impl Checklist {
         logged_into_minecraft: bool,
         logged_into_modrinth: bool,
     ) -> Checklist {
-        Checklist { created_instance, logged_into_minecraft, logged_into_modrinth }
+        Checklist {
+            created_instance,
+            logged_into_minecraft,
+            logged_into_modrinth,
+        }
     }
 
     /// Whether the panel draws the section: `isReady && showChecklist`, read as
@@ -147,15 +155,25 @@ mod tests {
         // the generated table's words come from: four ids, so a paraphrase here
         // would be a difference from the reference rather than a translation of it.
         assert_eq!(Step::ALL.len(), 3);
-        assert_eq!(Step::CreateInstance.label().message(), "Create first instance");
-        assert_eq!(Step::LoginMinecraft.label().message(), "Sign in to Minecraft");
+        assert_eq!(
+            Step::CreateInstance.label().message(),
+            "Create first instance"
+        );
+        assert_eq!(
+            Step::LoginMinecraft.label().message(),
+            "Sign in to Minecraft"
+        );
         assert_eq!(Step::LoginModrinth.label().message(), "Sign in to Modrinth");
         assert_eq!(Key::OnboardingChecklistTitle.message(), "Getting started");
         // And the order is the component's own array: a place to play, then the two
         // sign-ins.
         assert_eq!(
             Step::ALL,
-            [Step::CreateInstance, Step::LoginMinecraft, Step::LoginModrinth]
+            [
+                Step::CreateInstance,
+                Step::LoginMinecraft,
+                Step::LoginModrinth
+            ]
         );
     }
 
@@ -182,7 +200,10 @@ mod tests {
         // prompt it carries is drawn in the friends section instead.
         let local_done = Checklist::of(true, true, false);
         assert!(!local_done.show());
-        assert!(!local_done.complete(Step::LoginModrinth), "and it is still outstanding");
+        assert!(
+            !local_done.complete(Step::LoginModrinth),
+            "and it is still outstanding"
+        );
     }
 
     #[test]

@@ -70,7 +70,10 @@ fn filter() -> Vec<u16> {
 /// why the two are one function: "what did the dialog leave behind" has exactly these
 /// two answers, and no `cfg` on it means both can be tested without opening a window.
 pub fn picked_path(buffer: &[u16]) -> Option<PathBuf> {
-    let end = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(buffer.len());
     if end == 0 {
         return None;
     }
@@ -170,15 +173,27 @@ mod tests {
         let units = filter();
         assert_eq!(units[units.len() - 1], 0);
         assert_eq!(units[units.len() - 2], 0);
-        assert_eq!(units.iter().filter(|unit| **unit == 0).count(), 3, "two inner NULs and the terminator");
+        assert_eq!(
+            units.iter().filter(|unit| **unit == 0).count(),
+            3,
+            "two inner NULs and the terminator"
+        );
         // And it is the UTF-16 of the same text, not a lossy copy of it.
         assert_eq!(String::from_utf16(&units).expect("valid UTF-16"), FILTER);
     }
 
     #[test]
     fn a_cancel_is_an_empty_buffer_and_a_choice_is_read_to_its_nul() {
-        assert_eq!(picked_path(&[0u16; 8]), None, "the dialog leaves the first unit a NUL");
-        assert_eq!(picked_path(&[]), None, "and an empty buffer is the same answer");
+        assert_eq!(
+            picked_path(&[0u16; 8]),
+            None,
+            "the dialog leaves the first unit a NUL"
+        );
+        assert_eq!(
+            picked_path(&[]),
+            None,
+            "and an empty buffer is the same answer"
+        );
         let mut buffer = vec![0u16; MAX_PATH_UNITS];
         for (index, unit) in "C:\\skins\\alex.png".encode_utf16().enumerate() {
             buffer[index] = unit;
@@ -191,7 +206,10 @@ mod tests {
         // Whatever the dialog wrote, the rest of the buffer is not part of the path --
         // which is what makes the read a read rather than a whole-buffer decode.
         buffer[19] = b'X' as u16;
-        assert_eq!(picked_path(&buffer), Some(PathBuf::from("C:\\skins\\alex.png")));
+        assert_eq!(
+            picked_path(&buffer),
+            Some(PathBuf::from("C:\\skins\\alex.png"))
+        );
     }
 
     #[test]
@@ -204,15 +222,23 @@ mod tests {
         // sentence arrives without a 4 GB allocation behind it.
         let big = directory.path().join("huge.png");
         let file = std::fs::File::create(&big).expect("a file");
-        file.set_len(MAX_SKIN_BYTES + 1).expect("a size without the bytes");
+        file.set_len(MAX_SKIN_BYTES + 1)
+            .expect("a size without the bytes");
         drop(file);
         let reason = read(&big).expect_err("too big to be a skin");
-        assert_eq!(reason, "That file is 1024 kB, and a skin texture is at most 1024 kB.");
+        assert_eq!(
+            reason,
+            "That file is 1024 kB, and a skin texture is at most 1024 kB."
+        );
         // And the two ways a read fails are sentences rather than panics: a path that
         // is not there, and a directory.
         let missing = directory.path().join("not-here.png");
-        assert!(read(&missing).expect_err("no such file").starts_with("That file could not be opened:"));
-        assert!(read(directory.path()).expect_err("a directory").starts_with("That file could not be read:"));
+        assert!(read(&missing)
+            .expect_err("no such file")
+            .starts_with("That file could not be opened:"));
+        assert!(read(directory.path())
+            .expect_err("a directory")
+            .starts_with("That file could not be read:"));
     }
 
     #[test]

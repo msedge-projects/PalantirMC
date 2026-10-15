@@ -52,10 +52,11 @@ use std::sync::OnceLock;
 use iced::gradient::{self, Gradient};
 use iced::widget::{column, container, image, row, Space};
 use iced::{
-    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Radians,
-    Theme, Vector,
+    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Radians, Theme,
+    Vector,
 };
 
+use super::overlay::Stack;
 use crate::avatar;
 use crate::icon;
 use crate::icons_gen::Glyph;
@@ -64,7 +65,6 @@ use crate::store::{self, Store};
 use crate::style::{medium, regular, semibold, INK_CONTRAST, INK_DEFAULT, INK_SECONDARY};
 use crate::text_gen::{self, Key};
 use crate::theme_gen::{self, Ink, Span, Theme as Gen};
-use super::overlay::Stack;
 use crate::ui::{self, text};
 
 /// What the page can be told.
@@ -123,7 +123,7 @@ impl State {
     pub fn update(&mut self, message: Message) {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::NewServer => self.notice = Some(store::needs_account("Creating a server")),
             Message::ManageBilling => self.notice = Some(store::needs_account("Billing")),
@@ -136,7 +136,6 @@ impl State {
         }
     }
 }
-
 
 // ---- ServerListEmpty.vue, quoted ------------------------------------------
 
@@ -205,8 +204,11 @@ const MARGIN: u16 = 35;
 /// margins and that gap: `35 + 8 + 35 = 78`, and `35 + 78 + 35 = 148` is the whole
 /// of the free space, so the picture lands on the reference's own pixels at the
 /// reference's own window and keeps its shape at another.
-const MARGIN_SHARE: [u16; 3] =
-    [MARGIN, (MARGIN as f32 + ROW_GAP + MARGIN as f32) as u16, MARGIN];
+const MARGIN_SHARE: [u16; 3] = [
+    MARGIN,
+    (MARGIN as f32 + ROW_GAP + MARGIN as f32) as u16,
+    MARGIN,
+];
 
 /// The three features `ServerListEmpty.vue` lists, in its own order.
 const FEATURES: [(Glyph, Key, Key); 3] = [
@@ -381,8 +383,12 @@ fn plate_ramp(theme: Gen, t: f32) -> [f32; 3] {
 ///   saturation at the texture's luminosity, and `opacity-40` then scales that
 ///   result over the backdrop.
 fn plate_overlay(theme: Gen) -> iced::widget::image::Handle {
-    static CACHE: [OnceLock<iced::widget::image::Handle>; 4] =
-        [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
+    static CACHE: [OnceLock<iced::widget::image::Handle>; 4] = [
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+        OnceLock::new(),
+    ];
     CACHE[theme_slot(theme)]
         .get_or_init(|| {
             iced::widget::image::Handle::from_pixels(
@@ -396,7 +402,10 @@ fn plate_overlay(theme: Gen) -> iced::widget::image::Handle {
 
 /// The plate's four themes in [`Gen::ALL`] order, so a cache can be an array.
 fn theme_slot(theme: Gen) -> usize {
-    Gen::ALL.iter().position(|candidate| *candidate == theme).unwrap_or(0)
+    Gen::ALL
+        .iter()
+        .position(|candidate| *candidate == theme)
+        .unwrap_or(0)
 }
 
 /// The pixels of [`plate_overlay`]: `40 * 40` RGBA, straight (not premultiplied).
@@ -440,12 +449,17 @@ fn plate_overlay_pixels(theme: Gen) -> Vec<u8> {
             // it by `side` walks two columns to the right for every row down, so
             // by the foot of the plate it is reading past the end of the window
             // and the texture stops being drawn at all.
-            let inner = (x.checked_sub(PLATE_INSET as usize), y.checked_sub(PLATE_INSET as usize));
+            let inner = (
+                x.checked_sub(PLATE_INSET as usize),
+                y.checked_sub(PLATE_INSET as usize),
+            );
             let window_side = PADDING_BOX;
             let pixel: Option<[u8; 4]> = match inner {
                 (Some(wx), Some(wy)) if wx < window_side && wy < window_side => {
                     let index = (wy * window_side + wx) * 4;
-                    window.get(index..index + 4).map(|four| [four[0], four[1], four[2], four[3]])
+                    window
+                        .get(index..index + 4)
+                        .map(|four| [four[0], four[1], four[2], four[3]])
                 }
                 _ => None,
             };
@@ -499,8 +513,16 @@ fn inside_padding(x: usize, y: usize) -> bool {
     if py >= INSET + RADIUS && py <= side - INSET - RADIUS {
         return true;
     }
-    let corner_x = if px < INSET + RADIUS { INSET + RADIUS } else { side - INSET - RADIUS };
-    let corner_y = if py < INSET + RADIUS { INSET + RADIUS } else { side - INSET - RADIUS };
+    let corner_x = if px < INSET + RADIUS {
+        INSET + RADIUS
+    } else {
+        side - INSET - RADIUS
+    };
+    let corner_y = if py < INSET + RADIUS {
+        INSET + RADIUS
+    } else {
+        side - INSET - RADIUS
+    };
     let (dx, dy) = (px - corner_x, py - corner_y);
     dx * dx + dy * dy <= RADIUS * RADIUS
 }
@@ -545,7 +567,9 @@ fn texture_window() -> &'static [u8] {
     static WINDOW: OnceLock<Vec<u8>> = OnceLock::new();
     WINDOW.get_or_init(|| {
         let decoded = ::image::load_from_memory(TEXTURE_PNG).ok();
-        let Some(decoded) = decoded else { return Vec::new() };
+        let Some(decoded) = decoded else {
+            return Vec::new();
+        };
         let (source_width, source_height) = (decoded.width(), decoded.height());
         let (box_height, box_width) = (TEXTURE_BOX.0, TEXTURE_BOX.1);
         // `object-fit: cover`: the larger of the two ratios, and the scaled
@@ -571,7 +595,9 @@ fn texture_window() -> &'static [u8] {
         let left = (crop_x + box_width / 2.0 - half + inset).round().max(0.0) as u32;
         let top = (crop_y + box_height / 2.0 - half + inset).round().max(0.0) as u32;
         let side = FEATURE_PLATE - 2.0 * inset;
-        let side = side.min((scaled_width.saturating_sub(left)) as f32).min((scaled_height.saturating_sub(top)) as f32);
+        let side = side
+            .min((scaled_width.saturating_sub(left)) as f32)
+            .min((scaled_height.saturating_sub(top)) as f32);
         let side = side.max(0.0) as u32;
         scaled.crop(left, top, side, side).to_rgba8().into_raw()
     })
@@ -729,11 +755,46 @@ const FRIENDS: [Friend; 8] = [
         pointer: false,
         dimmed: false,
     },
-    Friend { name: "IMB11", avatar: IMB11_PNG, status: FriendStatus::Invite, presence: None, pointer: false, dimmed: false },
-    Friend { name: "Truman", avatar: TRUMAN_PNG, status: FriendStatus::Invite, presence: None, pointer: false, dimmed: false },
-    Friend { name: "Boris", avatar: BORIS_PNG, status: FriendStatus::Invite, presence: None, pointer: false, dimmed: true },
-    Friend { name: "Saya", avatar: SAYA_PNG, status: FriendStatus::Invite, presence: None, pointer: false, dimmed: true },
-    Friend { name: "Michael", avatar: MICHAEL_PNG, status: FriendStatus::Invite, presence: None, pointer: false, dimmed: true },
+    Friend {
+        name: "IMB11",
+        avatar: IMB11_PNG,
+        status: FriendStatus::Invite,
+        presence: None,
+        pointer: false,
+        dimmed: false,
+    },
+    Friend {
+        name: "Truman",
+        avatar: TRUMAN_PNG,
+        status: FriendStatus::Invite,
+        presence: None,
+        pointer: false,
+        dimmed: false,
+    },
+    Friend {
+        name: "Boris",
+        avatar: BORIS_PNG,
+        status: FriendStatus::Invite,
+        presence: None,
+        pointer: false,
+        dimmed: true,
+    },
+    Friend {
+        name: "Saya",
+        avatar: SAYA_PNG,
+        status: FriendStatus::Invite,
+        presence: None,
+        pointer: false,
+        dimmed: true,
+    },
+    Friend {
+        name: "Michael",
+        avatar: MICHAEL_PNG,
+        status: FriendStatus::Invite,
+        presence: None,
+        pointer: false,
+        dimmed: true,
+    },
 ];
 
 /// One row: who it is, what is drawn over it and what its button says.
@@ -910,7 +971,11 @@ fn frame_button<'a, Message: 'a>(
         ),
         // `button-frame--outlined`: `box-shadow: 0 0 0 1px var(--button-color,
         // var(--surface-5))` and nothing behind it.
-        _ => (None, Some(theme_gen::ink(theme, Ink::Surface5)), theme_gen::ink(theme, INK_CONTRAST)),
+        _ => (
+            None,
+            Some(theme_gen::ink(theme, Ink::Surface5)),
+            theme_gen::ink(theme, INK_CONTRAST),
+        ),
     };
     // `disabled:opacity-50`, applied to each colour the frame paints because this
     // renderer has no group opacity.
@@ -938,14 +1003,22 @@ fn frame_button<'a, Message: 'a>(
     container(face)
         .width(width)
         .height(Length::Fixed(height))
-        .padding(Padding { top: 0.0, right: MD_PAD, bottom: 0.0, left: MD_PAD })
+        .padding(Padding {
+            top: 0.0,
+            right: MD_PAD,
+            bottom: 0.0,
+            left: MD_PAD,
+        })
         .center_x()
         .center_y()
         .style(move |_theme: &Theme| container::Appearance {
             // A fill-less type is transparent at rest, so an outlined button keeps
             // the surface it sits on until something happens to it -- which for a
             // picture of a dialog is never.
-            background: Some(Background::Color(dim(fill.unwrap_or(Color::TRANSPARENT), disabled))),
+            background: Some(Background::Color(dim(
+                fill.unwrap_or(Color::TRANSPARENT),
+                disabled,
+            ))),
             border: Border {
                 color: ring.map_or(Color::TRANSPARENT, |ring| dim(ring, disabled)),
                 width: if ring.is_some() { 1.0 } else { 0.0 },
@@ -1052,7 +1125,8 @@ fn geometrically() -> Option<&'static avatar::Icon> {
 /// an `Avatar` without `circle` takes.
 fn modrinth_smp() -> Option<&'static avatar::Icon> {
     static MARK: OnceLock<Option<avatar::Icon>> = OnceLock::new();
-    MARK.get_or_init(|| avatar::Icon::of(MODRINTH_SMP_PNG, SERVER_MARK as u32)).as_ref()
+    MARK.get_or_init(|| avatar::Icon::of(MODRINTH_SMP_PNG, SERVER_MARK as u32))
+        .as_ref()
 }
 
 /// The picture's pointer badge and the hand in it.
@@ -1269,10 +1343,7 @@ fn column_text<'a>(theme: Gen) -> Element<'a, Message> {
                     // three pixels low and the heading four.
                     .line_height(iced::Pixels(24.0))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(
-                        theme,
-                        INK_DEFAULT,
-                    ))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             ),
     );
     let mut features = column![].spacing(FEATURE_GAP);
@@ -1321,29 +1392,34 @@ fn column_text<'a>(theme: Gen) -> Element<'a, Message> {
     // anything this file can state, and `ui.rs` -- which owns `advance` and the
     // builder -- is reserved. What is here is correct as written; the 1.75 pixels
     // are a note, not a defect to be papered over with a width.
-    column.push(
-        row![]
-            .spacing(ACTION_GAP)
-            .align_items(Alignment::Center)
-            // `size="lg"`: 40 pixels, which is the row `ButtonFrame.vue` calls
-            // `lg` and the height measured at y=537..576.
-            .push(ui::button_with_icon_sized(
-                theme,
-                NEW_SERVER_KEY,
-                Glyph::Plus,
-                Key::ServersListEmptyNewServerButton,
-                ui::Kind::Colored,
-                ui::Size::Lg,
-                Length::Shrink,
-                Some(Message::NewServer),
-            ))
-            // `AutoLink` with a `size-5` arrow and `gap-1`, in the label's own
-            // order: the words, then the arrow. A link this launcher cannot follow
-            // is drawn as the quiet button it behaves like, and the press says
-            // which service it would have asked.
-            .push(link_button(theme, MANAGE_BILLING_KEY, Message::ManageBilling)),
-    )
-    .into()
+    column
+        .push(
+            row![]
+                .spacing(ACTION_GAP)
+                .align_items(Alignment::Center)
+                // `size="lg"`: 40 pixels, which is the row `ButtonFrame.vue` calls
+                // `lg` and the height measured at y=537..576.
+                .push(ui::button_with_icon_sized(
+                    theme,
+                    NEW_SERVER_KEY,
+                    Glyph::Plus,
+                    Key::ServersListEmptyNewServerButton,
+                    ui::Kind::Colored,
+                    ui::Size::Lg,
+                    Length::Shrink,
+                    Some(Message::NewServer),
+                ))
+                // `AutoLink` with a `size-5` arrow and `gap-1`, in the label's own
+                // order: the words, then the arrow. A link this launcher cannot follow
+                // is drawn as the quiet button it behaves like, and the press says
+                // which service it would have asked.
+                .push(link_button(
+                    theme,
+                    MANAGE_BILLING_KEY,
+                    Message::ManageBilling,
+                )),
+        )
+        .into()
 }
 
 /// One feature: its plate and its two lines, `items-start gap-4`.
@@ -1370,10 +1446,7 @@ fn feature<'a>(theme: Gen, glyph: Glyph, title: Key, description: Key) -> Elemen
                         .size(14.0)
                         .line_height(iced::Pixels(20.0))
                         .font(medium())
-                        .style(iced::theme::Text::Color(theme_gen::ink(
-                            theme,
-                            INK_DEFAULT,
-                        ))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
                 ),
         )
         .into()
@@ -1443,21 +1516,31 @@ fn link_button<'a, Message: Clone + crate::ui::Hovered + 'a>(
 fn preview<'a>(theme: Gen) -> Element<'a, Message> {
     let mut list = column![].width(Length::Fill).push(
         container(
-            text(text_gen::sharing_invite_players_modal_friends_heading(FRIEND_COUNT))
-                .size(14.0)
-                .line_height(iced::Pixels(20.0))
-                .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
+            text(text_gen::sharing_invite_players_modal_friends_heading(
+                FRIEND_COUNT,
+            ))
+            .size(14.0)
+            .line_height(iced::Pixels(20.0))
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
         )
         .width(Length::Fill)
-        .padding(Padding { top: 0.0, right: 0.0, bottom: 8.0, left: FRIEND_PAD }),
+        .padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 8.0,
+            left: FRIEND_PAD,
+        }),
     );
     for (index, friend) in FRIENDS.iter().enumerate() {
         list = list.push(friend_row(theme, index, friend));
     }
-    let friends = container(
-        list.padding(Padding { top: 12.0, right: 0.0, bottom: 12.0, left: 0.0 }),
-    )
+    let friends = container(list.padding(Padding {
+        top: 12.0,
+        right: 0.0,
+        bottom: 12.0,
+        left: 0.0,
+    }))
     .width(Length::Fill)
     .style(move |_theme: &Theme| container::Appearance {
         // `bg-surface-1`: the picture's list sits on the sunken surface, a step
@@ -1491,13 +1574,23 @@ fn preview<'a>(theme: Gen) -> Element<'a, Message> {
     // is 61 rows down the panel rather than 60 -- the reference's own capture has
     // it at y=133 on a panel whose top border is at y=72, and `p-4` with a
     // 28-pixel line and the row's own `border-b` is 61 of those.
-    .padding(Padding { top: 1.0, right: 1.0, bottom: 1.0, left: 1.0 });
+    .padding(Padding {
+        top: 1.0,
+        right: 1.0,
+        bottom: 1.0,
+        left: 1.0,
+    });
     let layers = Stack::at(Vector::ZERO, content)
         .over(
             Vector::new(0.0, PREVIEW_HEIGHT - INVITE_LINK_HEIGHT),
             container(preview_invite_link(theme))
                 .width(Length::Fill)
-                .padding(Padding { top: 0.0, right: 1.0, bottom: 0.0, left: 1.0 }),
+                .padding(Padding {
+                    top: 0.0,
+                    right: 1.0,
+                    bottom: 0.0,
+                    left: 1.0,
+                }),
         )
         .over(
             Vector::new(0.0, PREVIEW_HEIGHT - PREVIEW_FADE),
@@ -1568,7 +1661,13 @@ fn preview_fade<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     let surface_1 = theme_gen::ink(theme, Ink::Surface1);
     let mut ramp = gradient::Linear::new(Radians(0.0));
     ramp = ramp.add_stop(0.0, surface_1);
-    ramp = ramp.add_stop(1.0, Color { a: 0.0, ..surface_1 });
+    ramp = ramp.add_stop(
+        1.0,
+        Color {
+            a: 0.0,
+            ..surface_1
+        },
+    );
     container(Space::with_width(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fixed(PREVIEW_FADE))
@@ -1596,7 +1695,10 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
                     .size(BUTTON_LABEL)
                     .line_height(iced::Pixels(BUTTON_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text(Key::SharingInvitePlayersToastInvitedYouTo.message())
@@ -1606,7 +1708,11 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             )
             .push(Space::with_width(Length::Fill))
-            .push(icon::icon(Glyph::X, GLYPH, theme_gen::ink(theme, INK_SECONDARY))),
+            .push(icon::icon(
+                Glyph::X,
+                GLYPH,
+                theme_gen::ink(theme, INK_SECONDARY),
+            )),
     );
     lines = lines.push(
         row![]
@@ -1619,7 +1725,10 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
                     .size(BUTTON_LABEL)
                     .line_height(iced::Pixels(BUTTON_LINE))
                     .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text(Key::SharingInvitePlayersToastServerSuffix.message())
@@ -1629,14 +1738,13 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
                     .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT))),
             ),
     );
-    let avatar_layers = Stack::at(
-        Vector::ZERO,
-        picture(geometrically(), TOAST_AVATAR),
-    )
-    .over(
+    let avatar_layers = Stack::at(Vector::ZERO, picture(geometrically(), TOAST_AVATAR)).over(
         // `absolute bottom-0 right-[-1px]`: the dot's bottom on the avatar's
         // bottom and its right one pixel past the avatar's right.
-        Vector::new(TOAST_AVATAR - TOAST_PRESENCE + 1.0, TOAST_AVATAR - TOAST_PRESENCE),
+        Vector::new(
+            TOAST_AVATAR - TOAST_PRESENCE + 1.0,
+            TOAST_AVATAR - TOAST_PRESENCE,
+        ),
         container(Space::with_width(Length::Fixed(TOAST_PRESENCE)))
             .width(Length::Fixed(TOAST_PRESENCE))
             .height(Length::Fixed(TOAST_PRESENCE))
@@ -1696,22 +1804,22 @@ fn toast<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
             ),
     )
     .width(Length::Fixed(TOAST_WIDTH))
-        .padding(Padding {
-            top: TOAST_INSET_Y,
-            right: TOAST_INSET_X,
-            bottom: TOAST_INSET_Y,
-            left: TOAST_INSET_X,
-        })
-        .style(move |_theme: &Theme| container::Appearance {
-            background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface2))),
-            border: Border {
-                color: theme_gen::ink(theme, Ink::Surface4),
-                width: 1.0,
-                radius: TOAST_RADIUS.into(),
-            },
-            ..container::Appearance::default()
-        })
-        .into()
+    .padding(Padding {
+        top: TOAST_INSET_Y,
+        right: TOAST_INSET_X,
+        bottom: TOAST_INSET_Y,
+        left: TOAST_INSET_X,
+    })
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface2))),
+        border: Border {
+            color: theme_gen::ink(theme, Ink::Surface4),
+            width: 1.0,
+            radius: TOAST_RADIUS.into(),
+        },
+        ..container::Appearance::default()
+    })
+    .into()
 }
 
 /// The two names the toast spells out rather than asking for.
@@ -1725,7 +1833,10 @@ const TOAST_INVITED_BY: &str = "Geometrically";
 const TOAST_SERVER_NAME: &str = "Modrinth SMP";
 
 /// One decoded picture at its own size, or the box it would have filled.
-fn picture<'a, Message: 'a>(icon: Option<&'static avatar::Icon>, side: f32) -> Element<'a, Message> {
+fn picture<'a, Message: 'a>(
+    icon: Option<&'static avatar::Icon>,
+    side: f32,
+) -> Element<'a, Message> {
     let box_size = Length::Fixed(side);
     match icon {
         Some(icon) => image(icon.handle())
@@ -1775,7 +1886,12 @@ fn preview_search<'a>(theme: Gen) -> Element<'a, Message> {
         .width(Length::Fill)
         .spacing(PLATE_GAP)
         .align_items(Alignment::Center)
-        .padding(Padding { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 })
+        .padding(Padding {
+            top: 16.0,
+            right: 16.0,
+            bottom: 16.0,
+            left: 16.0,
+        })
         .push(
             container(
                 row![]
@@ -1799,11 +1915,19 @@ fn preview_search<'a>(theme: Gen) -> Element<'a, Message> {
             )
             .width(Length::Fill)
             .height(Length::Fixed(MD_HEIGHT))
-            .padding(Padding { top: 0.0, right: 12.0, bottom: 0.0, left: 12.0 })
+            .padding(Padding {
+                top: 0.0,
+                right: 12.0,
+                bottom: 0.0,
+                left: 12.0,
+            })
             .center_y()
             .style(move |_theme: &Theme| container::Appearance {
                 background: Some(Background::Color(theme_gen::ink(theme, Ink::Surface3))),
-                border: Border { radius: MD_RADIUS.into(), ..Border::default() },
+                border: Border {
+                    radius: MD_RADIUS.into(),
+                    ..Border::default()
+                },
                 ..container::Appearance::default()
             }),
         )
@@ -1863,7 +1987,12 @@ fn friend_row<'a, Message: 'a>(
     let row = row![]
         .width(Length::Fill)
         .height(Length::Fixed(FRIEND_ROW))
-        .padding(Padding { top: 0.0, right: FRIEND_PAD, bottom: 0.0, left: FRIEND_PAD })
+        .padding(Padding {
+            top: 0.0,
+            right: FRIEND_PAD,
+            bottom: 0.0,
+            left: FRIEND_PAD,
+        })
         .align_items(Alignment::Center)
         // `flex min-w-0 items-center gap-2`: the avatar and the name are one
         // group, and `justify-between` puts that group against the left of the
@@ -2090,15 +2219,24 @@ mod tests {
         assert_eq!(FRIENDS[0].status, FriendStatus::Added);
         assert_eq!(FRIENDS[2].status, FriendStatus::Cancel);
         assert_eq!(
-            FRIENDS.iter().filter(|friend| friend.status == FriendStatus::Invite).count(),
+            FRIENDS
+                .iter()
+                .filter(|friend| friend.status == FriendStatus::Invite)
+                .count(),
             6
         );
         assert_eq!(
-            FRIENDS.iter().filter(|friend| friend.status == FriendStatus::Added).count(),
+            FRIENDS
+                .iter()
+                .filter(|friend| friend.status == FriendStatus::Added)
+                .count(),
             1
         );
         assert_eq!(
-            FRIENDS.iter().filter(|friend| friend.status == FriendStatus::Cancel).count(),
+            FRIENDS
+                .iter()
+                .filter(|friend| friend.status == FriendStatus::Cancel)
+                .count(),
             1
         );
         // `index > 4` is the reference's own rule and it dims three rows, not four:
@@ -2167,7 +2305,11 @@ mod tests {
             921.0,
             "and ends five past the pane's own 916, which the clip is for"
         );
-        assert_eq!(crate::page::INSET + TOAST_TOP, 392.0, "the box's top is window y=440");
+        assert_eq!(
+            crate::page::INSET + TOAST_TOP,
+            392.0,
+            "the box's top is window y=440"
+        );
         // A width the row's own spacers do not divide evenly at the reference's
         // window, because the offset follows the row rather than being written
         // down: iced hands each `FillPortion` its share of what is left over.
@@ -2378,13 +2520,27 @@ mod tests {
         //   (15.71, 58.74, 36.65).
         let window = texture_window();
         let pixel = &window[(5 * 38 + 16) * 4..(5 * 38 + 16) * 4 + 3];
-        assert_eq!(&[pixel[0], pixel[1], pixel[2]], &[34, 37, 52], "the texture moved");
+        assert_eq!(
+            &[pixel[0], pixel[1], pixel[2]],
+            &[34, 37, 52],
+            "the texture moved"
+        );
         assert_eq!(shade_alpha(18.0, 7.0), 0.0, "the shade reaches this pixel");
         let backdrop = [19.475f32, 62.505, 40.415];
-        let texture = [f32::from(pixel[0]), f32::from(pixel[1]), f32::from(pixel[2])];
+        let texture = [
+            f32::from(pixel[0]),
+            f32::from(pixel[1]),
+            f32::from(pixel[2]),
+        ];
         let luma_of = |c: [f32; 3]| LUMA[0] * c[0] + LUMA[1] * c[1] + LUMA[2] * c[2];
-        assert!((luma_of(texture) - 37.75).abs() < 0.01, "the texture's luma moved");
-        assert!((luma_of(backdrop) - 47.166).abs() < 0.01, "the backdrop's luma moved");
+        assert!(
+            (luma_of(texture) - 37.75).abs() < 0.01,
+            "the texture's luma moved"
+        );
+        assert!(
+            (luma_of(backdrop) - 47.166).abs() < 0.01,
+            "the backdrop's luma moved"
+        );
         let d = luma_of(texture) - luma_of(backdrop);
         let expected = [0, 1, 2].map(|channel| {
             let blended = backdrop[channel] + d;
@@ -2415,11 +2571,13 @@ mod tests {
         let row: Vec<u8> = (0..38).map(|x| window[(32 * 38 + x) * 4 + 1]).collect();
         let low = row.iter().copied().min().unwrap_or(0);
         let high = row.iter().copied().max().unwrap_or(0);
-        assert!(high > low + 8, "the window's row is flat: {low} against {high}");
+        assert!(
+            high > low + 8,
+            "the window's row is flat: {low} against {high}"
+        );
         let pixels = plate_overlay_pixels(theme);
         let green = |x: usize| i32::from(pixels[(32 * 40 + x) * 4 + 1]);
-        let span = (12..29).map(&green).max().unwrap_or(0)
-            - (12..29).map(green).min().unwrap_or(0);
+        let span = (12..29).map(&green).max().unwrap_or(0) - (12..29).map(green).min().unwrap_or(0);
         assert!(
             (6..=10).contains(&span),
             "the plate's row 32 varies by {span}, and the reference's by 10"
@@ -2435,7 +2593,10 @@ mod tests {
         // components is a different function, and reading a colour that way here
         // costs two and a half times the rms.
         assert_eq!(LUMA, [0.3, 0.59, 0.11]);
-        assert!((LUMA.iter().sum::<f32>() - 1.0).abs() < 1e-6, "the weights must sum to 1");
+        assert!(
+            (LUMA.iter().sum::<f32>() - 1.0).abs() < 1e-6,
+            "the weights must sum to 1"
+        );
         assert!((luma([0.0, 0.0, 0.0]) - 0.0).abs() < 1e-6);
         assert!((luma([1.0, 1.0, 1.0]) - 1.0).abs() < 1e-6);
         assert!((luma([1.0, 0.0, 0.0]) - 0.3).abs() < 1e-6);
@@ -2448,10 +2609,17 @@ mod tests {
         // And the linear-light reading is measurably a different function: on
         // mid grey it agrees, and on a saturated colour it does not.
         let linear_luma = |c: f32| {
-            let l = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+            let l = if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            };
             LUMA[0] * l + LUMA[1] * l + LUMA[2] * l
         };
-        assert!((linear_luma(0.5) - luma([0.5, 0.5, 0.5])).abs() > 0.1, "linear light is not sRGB");
+        assert!(
+            (linear_luma(0.5) - luma([0.5, 0.5, 0.5])).abs() > 0.1,
+            "linear light is not sRGB"
+        );
         assert!((linear_luma(0.2) - luma([0.2, 0.0, 0.0])).abs() > 0.01);
     }
 
@@ -2463,20 +2631,29 @@ mod tests {
         let rgb = [0.2f32, 0.4, 0.6];
         let at_own = set_lum(rgb, luma(rgb));
         for channel in 0..3 {
-            assert!((at_own[channel] - rgb[channel]).abs() < 1e-6, "channel {channel}");
+            assert!(
+                (at_own[channel] - rgb[channel]).abs() < 1e-6,
+                "channel {channel}"
+            );
         }
         // 0.3*0.2 + 0.59*0.4 + 0.11*0.6 = 0.362, so 0.5 is 0.138 along the grey
         // axis and every component moves by exactly that.
         let lifted = set_lum(rgb, 0.5);
         for (channel, value) in lifted.iter().enumerate() {
-            assert!((value - (rgb[channel] + 0.138)).abs() < 1e-5, "channel {channel}: {value}");
+            assert!(
+                (value - (rgb[channel] + 0.138)).abs() < 1e-5,
+                "channel {channel}: {value}"
+            );
         }
         // And the clamp is the gamut, not a wrap: one offset on three components
         // cannot reach a luma of zero unless they all have room for it, so the two
         // that would go negative stop at black and the one that can keeps the
         // offset -- which is the gamut the spec's `ClipColor` means.
         let clamped = set_lum([0.9, 0.8, 0.7], 0.0);
-        assert!((clamped[0] - 0.081).abs() < 1e-5, "the channel with room moved: {clamped:?}");
+        assert!(
+            (clamped[0] - 0.081).abs() < 1e-5,
+            "the channel with room moved: {clamped:?}"
+        );
         assert_eq!(clamped[1], 0.0);
         assert_eq!(clamped[2], 0.0);
     }
@@ -2491,10 +2668,16 @@ mod tests {
         // offset -- the source's hue and saturation never appear in it.
         let source = [0.3f32, 0.31, 0.5];
         let blended = luminosity_blend(source, backdrop);
-        assert!((luma(blended) - luma(source)).abs() < 1e-5, "the luma is not the source's");
+        assert!(
+            (luma(blended) - luma(source)).abs() < 1e-5,
+            "the luma is not the source's"
+        );
         let offset = blended[0] - backdrop[0];
         for channel in 1..3 {
-            assert!((blended[channel] - backdrop[channel] - offset).abs() < 1e-5, "channel {channel}");
+            assert!(
+                (blended[channel] - backdrop[channel] - offset).abs() < 1e-5,
+                "channel {channel}"
+            );
         }
         // The plate this actually draws, which is the check that matters: the
         // texture is navy, the backdrop is the green ramp, and the plate the
@@ -2504,7 +2687,10 @@ mod tests {
         let ramp = plate_ramp(Gen::Dark, 0.07);
         let texture = [34.0f32 / 255.0, 37.0 / 255.0, 52.0 / 255.0];
         let plate = luminosity_blend(texture, ramp);
-        assert!(plate[1] > plate[0] && plate[1] > plate[2], "the plate is not green: {plate:?}");
+        assert!(
+            plate[1] > plate[0] && plate[1] > plate[2],
+            "the plate is not green: {plate:?}"
+        );
         let wrong_way = set_lum(texture, luma(ramp));
         assert!(
             wrong_way[2] > wrong_way[1],
@@ -2517,13 +2703,26 @@ mod tests {
         // The transfer function, both ways, and its round trip: the pair is only
         // here to say what the *other* reading of `Lum()` costs, so it is worth
         // pinning that it is a round trip and not an approximation of one.
-        let to_linear = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let to_linear = |c: f32| {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
         let to_srgb = |c: f32| {
-            if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+            if c <= 0.0031308 {
+                c * 12.92
+            } else {
+                1.055 * c.powf(1.0 / 2.4) - 0.055
+            }
         };
         for step in 0..=255u8 {
             let c = f32::from(step) / 255.0;
-            assert!((to_srgb(to_linear(c)) - c).abs() < 1e-5, "byte {step} does not round trip");
+            assert!(
+                (to_srgb(to_linear(c)) - c).abs() < 1e-5,
+                "byte {step} does not round trip"
+            );
         }
         // Composited in linear light, this plate's own pixel comes out (30, 55,
         // 46) where the reference reads (15, 58, 36) -- fifteen steps of red and
@@ -2596,7 +2795,9 @@ mod tests {
             // padding box is the plate's entire interior and the plate's own
             // background is not painted behind it.
             let middle = (20 * 40 + 20) * 4;
-            let [r, g, b, a] = pixels[middle..middle + 4].try_into().unwrap_or([0, 0, 0, 0]);
+            let [r, g, b, a] = pixels[middle..middle + 4]
+                .try_into()
+                .unwrap_or([0, 0, 0, 0]);
             assert_eq!(a, 0xff, "{theme:?}: the middle is not opaque");
             assert!(
                 g > r && g > 20,
@@ -2606,13 +2807,20 @@ mod tests {
             // the border is drawn under them and `overflow: hidden` clips to it.
             for (x, y) in [(0usize, 0usize), (39, 0), (0, 39), (39, 39)] {
                 let index = (y * 40 + x) * 4;
-                assert_eq!(pixels[index + 3], 0, "{theme:?}: the corner {x},{y} must be clear");
+                assert_eq!(
+                    pixels[index + 3],
+                    0,
+                    "{theme:?}: the corner {x},{y} must be clear"
+                );
             }
             // A pixel on the straight edge of the padding box is kept: 14 - 1 = 13
             // rounds the corners and leaves the sides alone.
             for (x, y) in [(1usize, 20usize), (38, 20), (20, 1), (20, 38)] {
                 let index = (y * 40 + x) * 4;
-                assert!(pixels[index + 3] > 0, "{theme:?}: the edge {x},{y} must be kept");
+                assert!(
+                    pixels[index + 3] > 0,
+                    "{theme:?}: the edge {x},{y} must be kept"
+                );
             }
         }
     }
@@ -2631,7 +2839,10 @@ mod tests {
         assert!(modrinth_smp().is_some(), "modrinth-smp.png must decode");
         // And decoding is a cache, not a per-frame cost: the same handle comes
         // back twice.
-        assert_eq!(friend_avatar(0).map(avatar::Icon::handle), friend_avatar(0).map(avatar::Icon::handle));
+        assert_eq!(
+            friend_avatar(0).map(avatar::Icon::handle),
+            friend_avatar(0).map(avatar::Icon::handle)
+        );
     }
 
     #[test]
@@ -2640,9 +2851,17 @@ mod tests {
         // `inset 0 0 0 1px var(--surface-5)`, and `--color-button-bg` *is*
         // `var(--surface-4)`, so the fill and the ring `Kind::Standard` draws are
         // the reference's own numbers rather than an approximation of them.
-        assert_eq!(theme_gen::ink(Gen::Dark, Ink::Surface4), theme_gen::ink(Gen::Dark, Ink::ButtonBg));
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface4), [0x34, 0x36, 0x3c, 0xff]);
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::Surface5), [0x42, 0x44, 0x4a, 0xff]);
+        assert_eq!(
+            theme_gen::ink(Gen::Dark, Ink::Surface4),
+            theme_gen::ink(Gen::Dark, Ink::ButtonBg)
+        );
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Surface4),
+            [0x34, 0x36, 0x3c, 0xff]
+        );
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::Surface5),
+            [0x42, 0x44, 0x4a, 0xff]
+        );
     }
 }
-

@@ -35,9 +35,9 @@
 pub mod assets;
 pub mod error;
 pub mod ini;
-pub mod json;
 pub mod instance;
 pub mod java;
+pub mod json;
 pub mod launch;
 pub mod pack;
 pub mod paths;

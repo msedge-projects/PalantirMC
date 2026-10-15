@@ -205,9 +205,8 @@ pub struct ParsedInstaller {
 /// absent on exactly the older builds `versionInfo` covers -- the caller
 /// decides what its absence means.
 fn zip_entry(bytes: &[u8], origin: &str, name: &str) -> Result<Option<Vec<u8>>, Error> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|error| {
-        Error::format(origin, format!("{origin} is not a jar: {error}"))
-    })?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|error| Error::format(origin, format!("{origin} is not a jar: {error}")))?;
     let found = archive.by_name(name).is_ok();
     if !found {
         return Ok(None);
@@ -217,7 +216,10 @@ fn zip_entry(bytes: &[u8], origin: &str, name: &str) -> Result<Option<Vec<u8>>, 
     })?;
     let mut out = Vec::new();
     entry.read_to_end(&mut out).map_err(|error| {
-        Error::format(origin, format!("{origin}'s {name} could not be read: {error}"))
+        Error::format(
+            origin,
+            format!("{origin}'s {name} could not be read: {error}"),
+        )
     })?;
     Ok(Some(out))
 }
@@ -246,7 +248,10 @@ fn client_side(value: &serde_json::Value, origin: &str, name: &str) -> Result<Da
         .get("client")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
-            Error::format(origin, format!("{origin}'s data entry '{name}' has no client side"))
+            Error::format(
+                origin,
+                format!("{origin}'s data entry '{name}' has no client side"),
+            )
         })?;
     Ok(data_value(picked))
 }
@@ -263,13 +268,16 @@ fn string_array(
     let Some(value) = object.get(what) else {
         return Ok(Vec::new());
     };
-    let entries = value.as_array().ok_or_else(|| {
-        Error::format(origin, format!("{origin}'s {what} is not an array"))
-    })?;
+    let entries = value
+        .as_array()
+        .ok_or_else(|| Error::format(origin, format!("{origin}'s {what} is not an array")))?;
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
         let text = entry.as_str().ok_or_else(|| {
-            Error::format(origin, format!("{origin}'s {what} holds something that is not a string"))
+            Error::format(
+                origin,
+                format!("{origin}'s {what} holds something that is not a string"),
+            )
         })?;
         out.push(text.to_string());
     }
@@ -283,14 +291,16 @@ fn string_array(
 /// was supposed to be.
 pub fn parse_installer(bytes: &[u8], origin: &str) -> Result<ParsedInstaller, Error> {
     let profile_bytes = zip_entry(bytes, origin, "version.json")?;
-    let install_bytes = zip_entry(bytes, origin, "install_profile.json")?.ok_or_else(|| {
-        Error::format(origin, format!("{origin} has no install_profile.json"))
-    })?;
+    let install_bytes = zip_entry(bytes, origin, "install_profile.json")?
+        .ok_or_else(|| Error::format(origin, format!("{origin} has no install_profile.json")))?;
     let install_text = String::from_utf8_lossy(&install_bytes).into_owned();
     let install: serde_json::Value = serde_json::from_str(&install_text)
         .map_err(|error| Error::json(origin, error.to_string()))?;
     let install_object = install.as_object().ok_or_else(|| {
-        Error::format(origin, format!("{origin}'s install_profile.json is not an object"))
+        Error::format(
+            origin,
+            format!("{origin}'s install_profile.json is not an object"),
+        )
     })?;
 
     let version_json = match profile_bytes {
@@ -301,7 +311,10 @@ pub fn parse_installer(bytes: &[u8], origin: &str) -> Result<ParsedInstaller, Er
         None => install_object
             .get("versionInfo")
             .cloned()
-            .filter(|info| info.as_object().is_some_and(|obj| obj.contains_key("mainClass")))
+            .filter(|info| {
+                info.as_object()
+                    .is_some_and(|obj| obj.contains_key("mainClass"))
+            })
             .ok_or_else(|| {
                 Error::format(
                     origin,
@@ -314,16 +327,25 @@ pub fn parse_installer(bytes: &[u8], origin: &str) -> Result<ParsedInstaller, Er
     };
 
     let mut data = BTreeMap::new();
-    if let Some(entries) = install_object.get("data").and_then(serde_json::Value::as_object) {
+    if let Some(entries) = install_object
+        .get("data")
+        .and_then(serde_json::Value::as_object)
+    {
         for (name, value) in entries {
             data.insert(name.clone(), client_side(value, origin, name)?);
         }
     }
     let mut processors = Vec::new();
-    if let Some(entries) = install_object.get("processors").and_then(serde_json::Value::as_array) {
+    if let Some(entries) = install_object
+        .get("processors")
+        .and_then(serde_json::Value::as_array)
+    {
         for entry in entries {
             let object = entry.as_object().ok_or_else(|| {
-                Error::format(origin, format!("{origin} has a processor that is not an object"))
+                Error::format(
+                    origin,
+                    format!("{origin} has a processor that is not an object"),
+                )
             })?;
             let jar = object
                 .get("jar")
@@ -355,20 +377,30 @@ pub fn parse_installer(bytes: &[u8], origin: &str) -> Result<ParsedInstaller, Er
     }
 
     let mut libraries = Vec::new();
-    if let Some(entries) = install_object.get("libraries").and_then(serde_json::Value::as_array) {
+    if let Some(entries) = install_object
+        .get("libraries")
+        .and_then(serde_json::Value::as_array)
+    {
         for entry in entries {
             let coord = entry
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .ok_or_else(|| {
-                    Error::format(origin, format!("{origin} has an install library with no name"))
+                    Error::format(
+                        origin,
+                        format!("{origin} has an install library with no name"),
+                    )
                 })?;
             libraries.push(coord.to_string());
         }
     }
 
     let text_of = |key: &str| {
-        install_object.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_string()
+        install_object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
     };
     Ok(ParsedInstaller {
         version_json,
@@ -412,7 +444,11 @@ pub fn translate_profile(
             .and_then(|arguments| arguments.get("game"))
             .and_then(serde_json::Value::as_array)
             .map(|entries| {
-                entries.iter().filter_map(serde_json::Value::as_str).map(str::to_string).collect()
+                entries
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
             })
             .unwrap_or_default();
         if !game.is_empty() {
@@ -425,11 +461,20 @@ pub fn translate_profile(
     out.remove("arguments");
     if let Some(id) = obj.get("id").and_then(serde_json::Value::as_str) {
         if !out.contains_key("name") {
-            out.insert("name".to_string(), serde_json::Value::String(id.to_string()));
+            out.insert(
+                "name".to_string(),
+                serde_json::Value::String(id.to_string()),
+            );
         }
     }
-    out.insert("uid".to_string(), serde_json::Value::String(uid.to_string()));
-    out.insert("version".to_string(), serde_json::Value::String(version.to_string()));
+    out.insert(
+        "uid".to_string(),
+        serde_json::Value::String(uid.to_string()),
+    );
+    out.insert(
+        "version".to_string(),
+        serde_json::Value::String(version.to_string()),
+    );
     Ok(serde_json::Value::Object(out))
 }
 
@@ -450,7 +495,9 @@ pub struct InstallerMeta {
 /// The directory and nothing else: the fetch seam has no `Debug` of its own.
 impl std::fmt::Debug for InstallerMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InstallerMeta").field("dir", &self.documents.dir()).finish_non_exhaustive()
+        f.debug_struct("InstallerMeta")
+            .field("dir", &self.documents.dir())
+            .finish_non_exhaustive()
     }
 }
 
@@ -496,7 +543,9 @@ impl InstallerMeta {
             store.fetch_blocking(self.fetch.as_ref(), &url, &digest, cancel, backoff)?;
             return store.read(&digest);
         }
-        let cached = self.documents.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let cached = self
+            .documents
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         Ok(cached.body)
     }
 
@@ -557,8 +606,9 @@ impl InstallerMeta {
                 ),
             ));
         };
-        let (_, parsed) =
-            self.parsed(loader, game, build, store, cancel, backoff).map_err(Error::into_core)?;
+        let (_, parsed) = self
+            .parsed(loader, game, build, store, cancel, backoff)
+            .map_err(Error::into_core)?;
         let uid = component_uid(loader);
         let mut translated = translate_profile(&parsed.version_json, uid, build)
             .map_err(|detail| palantir_core::error::Error::json(&url, detail))?;
@@ -661,7 +711,10 @@ pub fn maven_sha1(
     cancel: &Cancel,
     backoff: &Backoff,
 ) -> Result<Option<Digest>, Error> {
-    match meta.documents.get(sidecar_url, meta.fetch.as_ref(), cancel, backoff) {
+    match meta
+        .documents
+        .get(sidecar_url, meta.fetch.as_ref(), cancel, backoff)
+    {
         Ok(held) => {
             let text = String::from_utf8_lossy(&held.body).into_owned();
             let hex = text.split_whitespace().next().unwrap_or_default();
@@ -673,7 +726,9 @@ pub fn maven_sha1(
                 )),
             }
         }
-        Err(Error::Http { status: Some(404), .. }) => Ok(None),
+        Err(Error::Http {
+            status: Some(404), ..
+        }) => Ok(None),
         Err(other) => Err(other),
     }
 }
@@ -699,7 +754,11 @@ pub fn artifact_path(
     cancel: &Cancel,
     backoff: &Backoff,
 ) -> Result<PathBuf, Error> {
-    let bare = coord.trim().trim_start_matches('[').trim_end_matches(']').trim();
+    let bare = coord
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim();
     let spec = GradleSpecifier::parse(bare);
     if !spec.valid() {
         return Err(Error::format(
@@ -802,14 +861,20 @@ impl Expander<'_> {
             "MINECRAFT_VERSION" => Ok(self.game.to_string()),
             _ => {
                 let value = self.data.get(name).ok_or_else(|| {
-                    self.wrap(arg, format!("'{{{name}}}' names no data entry and no known token"))
+                    self.wrap(
+                        arg,
+                        format!("'{{{name}}}' names no data entry and no known token"),
+                    )
                 })?;
                 match value {
                     DataValue::Literal(text) => Ok(text.clone()),
                     DataValue::Artifact(coord) => {
                         Ok(self.coord_path(coord, arg)?.to_string_lossy().into_owned())
                     }
-                    DataValue::Path(entry) => Ok(self.installer_file(entry, arg)?.to_string_lossy().into_owned()),
+                    DataValue::Path(entry) => Ok(self
+                        .installer_file(entry, arg)?
+                        .to_string_lossy()
+                        .into_owned()),
                 }
             }
         }
@@ -826,9 +891,7 @@ impl Expander<'_> {
         }
         let body = zip_entry(self.installer_bytes, "<installer>", name)
             .map_err(|error| self.wrap(arg, error.to_string()))?
-            .ok_or_else(|| {
-                self.wrap(arg, format!("the installer holds no '{entry}'"))
-            })?;
+            .ok_or_else(|| self.wrap(arg, format!("the installer holds no '{entry}'")))?;
         if let Some(parent) = dest.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(|error| Error::io(parent, error))?;
@@ -875,9 +938,15 @@ impl Expander<'_> {
 /// artifact rather than at the install.
 fn main_class_of_jar(path: &Path) -> Result<String, Error> {
     let bytes = std::fs::read(path).map_err(|error| Error::io(path, error))?;
-    let text = zip_entry(&bytes, &path.to_string_lossy(), "META-INF/MANIFEST.MF")?
-        .ok_or_else(|| {
-            Error::format(path, format!("{} has no manifest, so there is no Main-Class to run", path.display()))
+    let text =
+        zip_entry(&bytes, &path.to_string_lossy(), "META-INF/MANIFEST.MF")?.ok_or_else(|| {
+            Error::format(
+                path,
+                format!(
+                    "{} has no manifest, so there is no Main-Class to run",
+                    path.display()
+                ),
+            )
         })?;
     let text = String::from_utf8_lossy(&text).into_owned();
     let mut main: Option<String> = None;
@@ -896,7 +965,13 @@ fn main_class_of_jar(path: &Path) -> Result<String, Error> {
         }
     }
     main.filter(|class| !class.is_empty()).ok_or_else(|| {
-        Error::format(path, format!("{} declares no Main-Class, so there is nothing to run", path.display()))
+        Error::format(
+            path,
+            format!(
+                "{} declares no Main-Class, so there is nothing to run",
+                path.display()
+            ),
+        )
     })
 }
 
@@ -934,8 +1009,7 @@ pub fn find_java() -> Option<PathBuf> {
     if let Some(found) = find_java_in(&path_dirs) {
         return Some(found);
     }
-    let mut installs =
-        palantir_core::java::scan_installs(palantir_core::paths::System::current());
+    let mut installs = palantir_core::java::scan_installs(palantir_core::paths::System::current());
     installs.sort_by_key(|install| install.version.as_ref().map(|v| v.major()).unwrap_or(0));
     installs.into_iter().rev().find_map(|install| {
         let candidate = install.home.join("bin").join(java_exe_name());
@@ -1069,12 +1143,22 @@ pub fn install(
             && !outputs.is_empty()
             && outputs.iter().all(|(path, sha)| {
                 path.is_file()
-                    && Digest::parse(sha).map(|digest| digest.verify_file(path).is_ok()).unwrap_or(true)
+                    && Digest::parse(sha)
+                        .map(|digest| digest.verify_file(path).is_ok())
+                        .unwrap_or(true)
             });
         expanded.push(outputs);
     }
     let resolve = |coord: &str| {
-        artifact_path(ctx.meta, ctx.store, ctx.library_dir, coord, &roots, cancel, backoff)
+        artifact_path(
+            ctx.meta,
+            ctx.store,
+            ctx.library_dir,
+            coord,
+            &roots,
+            cancel,
+            backoff,
+        )
     };
     for coord in &spec.libraries {
         resolve(coord)?;
@@ -1084,9 +1168,7 @@ pub fn install(
             continue;
         }
         let label = label_of(index, &processor.jar);
-        let wrap = |error: Error| {
-            Error::format(PathBuf::from(&label), format!("{label}: {error}"))
-        };
+        let wrap = |error: Error| Error::format(PathBuf::from(&label), format!("{label}: {error}"));
         resolve(&processor.jar).map_err(wrap)?;
         for coord in &processor.classpath {
             resolve(coord).map_err(wrap)?;
@@ -1099,8 +1181,7 @@ pub fn install(
         if !running(processor) || resumed[index] {
             continue;
         }
-        let mut texts: Vec<&str> =
-            processor.args.iter().map(String::as_str).collect();
+        let mut texts: Vec<&str> = processor.args.iter().map(String::as_str).collect();
         texts.extend(processor.outputs.keys().map(String::as_str));
         texts.extend(processor.outputs.values().map(String::as_str));
         for token in brace_tokens(&texts) {
@@ -1126,7 +1207,9 @@ pub fn install(
             // the run decides, with the processor named, rather than phase
             // zero refusing an install over a file that was never meant to
             // be resolved. Any other failure is the failure.
-            Err(Error::Http { status: Some(404), .. }) => {}
+            Err(Error::Http {
+                status: Some(404), ..
+            }) => {}
             Err(error) => return Err(error),
         }
     }
@@ -1134,7 +1217,11 @@ pub fn install(
     for (index, processor) in spec.processors.iter().enumerate() {
         let label = label_of(index, &processor.jar);
         if !running(processor) || resumed[index] {
-            report.push(InstalledProcessor { index, jar: processor.jar.clone(), skipped: true });
+            report.push(InstalledProcessor {
+                index,
+                jar: processor.jar.clone(),
+                skipped: true,
+            });
             continue;
         }
         let expanding = expanding(index, &processor.jar);
@@ -1155,20 +1242,17 @@ pub fn install(
             }
         }
         // Resolved in the phase above; path math locates them now.
-        let tool = expanding.coord_path(&processor.jar, &processor.jar).map_err(|error| {
-            Error::format(PathBuf::from(&label), format!("{label}: {error}"))
-        })?;
+        let tool = expanding
+            .coord_path(&processor.jar, &processor.jar)
+            .map_err(|error| Error::format(PathBuf::from(&label), format!("{label}: {error}")))?;
         let mut classpath = vec![tool.clone()];
         for coord in &processor.classpath {
-            classpath.push(
-                expanding.coord_path(coord, coord).map_err(|error| {
-                    Error::format(PathBuf::from(&label), format!("{label}: {error}"))
-                })?,
-            );
+            classpath.push(expanding.coord_path(coord, coord).map_err(|error| {
+                Error::format(PathBuf::from(&label), format!("{label}: {error}"))
+            })?);
         }
-        let main = main_class_of_jar(&tool).map_err(|error| {
-            Error::format(PathBuf::from(&label), format!("{label}: {error}"))
-        })?;
+        let main = main_class_of_jar(&tool)
+            .map_err(|error| Error::format(PathBuf::from(&label), format!("{label}: {error}")))?;
         let separator = if cfg!(windows) { ";" } else { ":" };
         let classpath = classpath
             .iter()
@@ -1210,12 +1294,19 @@ pub fn install(
                 digest.verify_file(path).map_err(|_| {
                     Error::format(
                         PathBuf::from(&label),
-                        format!("{label} wrote {} with the wrong bytes: not the digest it declared", path.display()),
+                        format!(
+                            "{label} wrote {} with the wrong bytes: not the digest it declared",
+                            path.display()
+                        ),
                     )
                 })?;
             }
         }
-        report.push(InstalledProcessor { index, jar: processor.jar.clone(), skipped: false });
+        report.push(InstalledProcessor {
+            index,
+            jar: processor.jar.clone(),
+            skipped: false,
+        });
     }
     Ok(report)
 }
@@ -1266,12 +1357,18 @@ pub struct ClientInstallReport {
 impl ClientInstallReport {
     /// Processors that ran.
     pub fn ran(&self) -> usize {
-        self.processors.iter().filter(|processor| !processor.skipped).count()
+        self.processors
+            .iter()
+            .filter(|processor| !processor.skipped)
+            .count()
     }
 
     /// Processors that were skipped: server-only, or already done.
     pub fn skipped(&self) -> usize {
-        self.processors.iter().filter(|processor| processor.skipped).count()
+        self.processors
+            .iter()
+            .filter(|processor| processor.skipped)
+            .count()
     }
 }
 
@@ -1310,8 +1407,14 @@ pub fn install_client(
             ),
         ));
     }
-    let (bytes, parsed) =
-        setup.meta.parsed(loader, game, build, setup.store, setup.cancel, setup.backoff)?;
+    let (bytes, parsed) = setup.meta.parsed(
+        loader,
+        game,
+        build,
+        setup.store,
+        setup.cancel,
+        setup.backoff,
+    )?;
     // The client jar below is fetched for `game`, and the processors are told
     // `{MINECRAFT_VERSION}` from the installer's own file: an installer whose
     // two disagree would patch a client for another version, which is the one
@@ -1319,7 +1422,10 @@ pub fn install_client(
     if parsed.install.minecraft.trim().is_empty() {
         return Err(Error::format(
             PathBuf::from(loader.name()),
-            format!("{} {build}'s install profile names no Minecraft version", loader.name()),
+            format!(
+                "{} {build}'s install profile names no Minecraft version",
+                loader.name()
+            ),
         ));
     }
     if parsed.install.minecraft != game {
@@ -1360,9 +1466,13 @@ pub fn install_client(
             format!("{}: {error}", artifact.url),
         )
     })?;
-    setup
-        .store
-        .fetch_blocking(setup.fetch, &artifact.url, &digest, setup.cancel, setup.backoff)?;
+    setup.store.fetch_blocking(
+        setup.fetch,
+        &artifact.url,
+        &digest,
+        setup.cancel,
+        setup.backoff,
+    )?;
     let minecraft_jar = setup.store.path(&digest);
 
     // The client a launch's classpath will name. Reading the coordinate out of
@@ -1377,7 +1487,10 @@ pub fn install_client(
             } else {
                 return Err(Error::format(
                     PathBuf::from(loader.name()),
-                    format!("{} {build} names '{coord}' as its patched client", loader.name()),
+                    format!(
+                        "{} {build} names '{coord}' as its patched client",
+                        loader.name()
+                    ),
                 ));
             }
         }
@@ -1398,8 +1511,7 @@ pub fn install_client(
         .processors
         .iter()
         .filter(|processor| {
-            processor.sides.is_empty()
-                || processor.sides.iter().any(|side| side == CLIENT_SIDE)
+            processor.sides.is_empty() || processor.sides.iter().any(|side| side == CLIENT_SIDE)
         })
         .all(|processor| processor.outputs.is_empty());
     if no_outputs {
@@ -1456,7 +1568,11 @@ pub fn install_client(
             ));
         }
     }
-    Ok(ClientInstallReport { processors, minecraft_jar, patched_client })
+    Ok(ClientInstallReport {
+        processors,
+        minecraft_jar,
+        patched_client,
+    })
 }
 
 #[cfg(test)]
@@ -1530,7 +1646,10 @@ mod tests {
                 }
             ]
         });
-        write_jar(&[("version.json", &version.to_string()), ("install_profile.json", &profile.to_string())])
+        write_jar(&[
+            ("version.json", &version.to_string()),
+            ("install_profile.json", &profile.to_string()),
+        ])
     }
 
     /// An older shape: no `version.json`, the profile under `versionInfo`.
@@ -1574,8 +1693,12 @@ mod tests {
             let options = zip::write::FileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
             for (name, body) in entries {
-                writer.start_file(*name, options).expect("starting a zip entry");
-                writer.write_all(body.as_bytes()).expect("writing a zip entry");
+                writer
+                    .start_file(*name, options)
+                    .expect("starting a zip entry");
+                writer
+                    .write_all(body.as_bytes())
+                    .expect("writing a zip entry");
             }
             writer.finish().expect("finishing the jar");
         }
@@ -1588,13 +1711,20 @@ mod tests {
     fn meta(name: &str, url: &str, jar: Vec<u8>) -> (InstallerMeta, Arc<MapFetch>, ContentStore) {
         use crate::engine::content::Digest;
 
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         fetch.set_route(url, Route::body(jar.clone()));
-        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
-        let meta =
-            InstallerMeta::new(MetadataCache::new(root.join("meta"), DEFAULT_TTL), fetch.clone());
+        fetch.set_route(
+            &format!("{url}.sha1"),
+            Route::text(Digest::sha1(&jar).hex()),
+        );
+        let meta = InstallerMeta::new(
+            MetadataCache::new(root.join("meta"), DEFAULT_TTL),
+            fetch.clone(),
+        );
         let store = ContentStore::new(root.join("store"));
         (meta, fetch, store)
     }
@@ -1611,13 +1741,19 @@ mod tests {
             .expect("the profile");
         assert_eq!(file.uid, "net.minecraftforge");
         assert_eq!(file.version, "52.1.0");
-        assert_eq!(file.main_class, "net.minecraftforge.bootstrap.ForgeBootstrap");
+        assert_eq!(
+            file.main_class,
+            "net.minecraftforge.bootstrap.ForgeBootstrap"
+        );
         assert_eq!(file.minecraft_arguments, "--launchTarget forge_client");
         assert!(
             !file.has_order,
             "the publisher's file carries no `order`: that key is the mirror's addition"
         );
-        assert!(file.requires.is_empty(), "and no requirement the publisher did not state");
+        assert!(
+            file.requires.is_empty(),
+            "and no requirement the publisher did not state"
+        );
         assert_eq!(file.libraries.len(), 2);
         // The profile names the patched client as its main jar even though the
         // publisher's own file does not: without it a parse falls back to a
@@ -1638,8 +1774,13 @@ mod tests {
         );
         // Asked again, everything is already held: one sidecar and one
         // installer fetch between the two asks.
-        meta.profile(Loader::Forge, "1.21.1", "52.1.0", &store, &cancel, &backoff).expect("again");
-        assert_eq!(fetch.count(), 2, "the second ask was answered from disk and store");
+        meta.profile(Loader::Forge, "1.21.1", "52.1.0", &store, &cancel, &backoff)
+            .expect("again");
+        assert_eq!(
+            fetch.count(),
+            2,
+            "the second ask was answered from disk and store"
+        );
     }
 
     #[test]
@@ -1647,7 +1788,14 @@ mod tests {
         let url = installer_url(Loader::Forge, "1.12.2", "14.23.5.2860").expect("one");
         let (meta, _, store) = meta("version-info", &url, version_info_jar());
         let file = meta
-            .profile(Loader::Forge, "1.12.2", "14.23.5.2860", &store, &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::Forge,
+                "1.12.2",
+                "14.23.5.2860",
+                &store,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("the old profile");
         assert_eq!(file.main_class, "net.minecraft.launchwrapper.Launch");
         assert!(
@@ -1661,7 +1809,14 @@ mod tests {
         let url = installer_url(Loader::Forge, "1.6.4", "9.11.1.1345").expect("one");
         let (meta, _, store) = meta("ancient", &url, ancient_jar());
         let error = meta
-            .profile(Loader::Forge, "1.6.4", "9.11.1.1345", &store, &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::Forge,
+                "1.6.4",
+                "9.11.1.1345",
+                &store,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect_err("nothing to read");
         let message = error.to_string();
         assert!(message.contains(&url), "{message}");
@@ -1758,7 +1913,10 @@ mod tests {
         );
         fetch.set_route(PISTON_MANIFEST_URL, Route::body(manifest.into_bytes()));
         fetch.set_route(version_url, Route::body(version.into_bytes()));
-        fetch.set_route("https://piston.invalid/client.jar", Route::body(client.clone()));
+        fetch.set_route(
+            "https://piston.invalid/client.jar",
+            Route::body(client.clone()),
+        );
         client
     }
 
@@ -1768,7 +1926,9 @@ mod tests {
     /// processors report in the installer's own terms.
     #[test]
     fn an_install_fetches_the_client_it_patches_and_reports_its_processors() {
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("client-install");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("client-install");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         let fetch = MapFetch::new();
@@ -1776,7 +1936,10 @@ mod tests {
         let jar = idle_installer("1.21.1");
         let url = installer_url(Loader::Forge, "1.21.1", "52.1.0").expect("Forge publishes one");
         fetch.set_route(&url, Route::body(jar.clone()));
-        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        fetch.set_route(
+            &format!("{url}.sha1"),
+            Route::text(Digest::sha1(&jar).hex()),
+        );
         let fetch = Arc::new(fetch);
 
         let meta = InstallerMeta::new(
@@ -1837,16 +2000,21 @@ mod tests {
     /// processor's jar.
     #[test]
     fn an_install_that_declares_no_outputs_is_read_from_the_client_it_wrote() {
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("unchecked-install");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("unchecked-install");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         let fetch = MapFetch::new();
         piston_routes(&fetch, "1.21.1");
         let jar = unchecked_installer("1.21.1");
-        let url = installer_url(Loader::NeoForge, "1.21.1", "21.1.172")
-            .expect("NeoForge publishes one");
+        let url =
+            installer_url(Loader::NeoForge, "1.21.1", "21.1.172").expect("NeoForge publishes one");
         fetch.set_route(&url, Route::body(jar.clone()));
-        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        fetch.set_route(
+            &format!("{url}.sha1"),
+            Route::text(Digest::sha1(&jar).hex()),
+        );
         let fetch = Arc::new(fetch);
 
         let meta = InstallerMeta::new(
@@ -1905,7 +2073,11 @@ mod tests {
                 .iter()
                 .any(|request| request.url.contains("binarypatcher")),
             "the processor's jar was resolved even though nothing had to run: {:?}",
-            fetch.requests().iter().map(|request| &request.url).collect::<Vec<_>>()
+            fetch
+                .requests()
+                .iter()
+                .map(|request| &request.url)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1914,7 +2086,9 @@ mod tests {
     /// one its processors would patch.
     #[test]
     fn an_installer_for_another_minecraft_is_refused_rather_than_patched() {
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("client-mismatch");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("client-mismatch");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         let fetch = MapFetch::new();
@@ -1924,7 +2098,10 @@ mod tests {
         let jar = idle_installer("1.20.1");
         let url = installer_url(Loader::Forge, "1.21.1", "52.1.0").expect("Forge publishes one");
         fetch.set_route(&url, Route::body(jar.clone()));
-        fetch.set_route(&format!("{url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        fetch.set_route(
+            &format!("{url}.sha1"),
+            Route::text(Digest::sha1(&jar).hex()),
+        );
         let fetch = Arc::new(fetch);
 
         let meta = InstallerMeta::new(
@@ -1973,7 +2150,9 @@ mod tests {
         );
         assert_eq!(
             parsed.install.data.get("PATCHED"),
-            Some(&DataValue::Artifact("net.minecraftforge:forge:1.21.1-52.1.0:client".to_string()))
+            Some(&DataValue::Artifact(
+                "net.minecraftforge:forge:1.21.1-52.1.0:client".to_string()
+            ))
         );
         assert_eq!(
             parsed.install.data.get("PATCHED_SHA"),
@@ -1998,14 +2177,26 @@ mod tests {
 
     #[test]
     fn a_loader_that_publishes_no_installer_says_so_instead_of_asking() {
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("no-installer");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("no-installer");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
-        let meta = InstallerMeta::new(MetadataCache::new(root.join("meta"), DEFAULT_TTL), fetch.clone());
+        let meta = InstallerMeta::new(
+            MetadataCache::new(root.join("meta"), DEFAULT_TTL),
+            fetch.clone(),
+        );
         let store = ContentStore::new(root.join("store"));
         assert!(installer_url(Loader::Fabric, "1.21.4", "0.19.5").is_none());
         let error = meta
-            .profile(Loader::Fabric, "1.21.4", "0.19.5", &store, &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::Fabric,
+                "1.21.4",
+                "0.19.5",
+                &store,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect_err("no installer to read");
         assert!(error.to_string().contains("no installer"), "{error}");
         assert_eq!(fetch.count(), 0, "and nothing was asked for");
@@ -2016,7 +2207,14 @@ mod tests {
         let url = installer_url(Loader::NeoForge, "1.21.1", "21.1.172").expect("one");
         let (meta, _, store) = meta("broken", &url, b"not a jar".to_vec());
         let failure = meta
-            .profile(Loader::NeoForge, "1.21.1", "21.1.172", &store, &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::NeoForge,
+                "1.21.1",
+                "21.1.172",
+                &store,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect_err("a body that is not a jar");
         assert!(failure.to_string().contains(&url), "{failure}");
     }
@@ -2043,7 +2241,9 @@ mod tests {
     fn a_sidecar_states_the_digest_and_a_missing_one_moves_on() {
         use crate::engine::content::Digest;
 
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("sidecar");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("sidecar");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = InstallerMeta::new(MetadataCache::new(root, Duration::ZERO), fetch.clone());
@@ -2052,21 +2252,41 @@ mod tests {
 
         let body = b"tool bytes";
         let hex = Digest::sha1(body).hex().to_string();
-        fetch.set_route("https://maven.invalid/a/b/1/b-1.jar.sha1", Route::text(&hex));
-        let digest = maven_sha1(&meta, "https://maven.invalid/a/b/1/b-1.jar.sha1", &cancel, &backoff)
-            .expect("the sidecar")
-            .expect("a digest");
+        fetch.set_route(
+            "https://maven.invalid/a/b/1/b-1.jar.sha1",
+            Route::text(&hex),
+        );
+        let digest = maven_sha1(
+            &meta,
+            "https://maven.invalid/a/b/1/b-1.jar.sha1",
+            &cancel,
+            &backoff,
+        )
+        .expect("the sidecar")
+        .expect("a digest");
         assert_eq!(digest.hex(), hex);
 
         // A body that is not a digest is a broken mirror, not a missing file.
-        fetch.set_route("https://maven.invalid/c/d/2/d-2.jar.sha1", Route::text("nope"));
-        assert!(maven_sha1(&meta, "https://maven.invalid/c/d/2/d-2.jar.sha1", &cancel, &backoff).is_err());
-        // And a 404 is `None`: the next root's question.
-        assert!(
-            maven_sha1(&meta, "https://maven.invalid/nothing.jar.sha1", &cancel, &backoff)
-                .expect("a 404")
-                .is_none()
+        fetch.set_route(
+            "https://maven.invalid/c/d/2/d-2.jar.sha1",
+            Route::text("nope"),
         );
+        assert!(maven_sha1(
+            &meta,
+            "https://maven.invalid/c/d/2/d-2.jar.sha1",
+            &cancel,
+            &backoff
+        )
+        .is_err());
+        // And a 404 is `None`: the next root's question.
+        assert!(maven_sha1(
+            &meta,
+            "https://maven.invalid/nothing.jar.sha1",
+            &cancel,
+            &backoff
+        )
+        .expect("a 404")
+        .is_none());
     }
 
     /// An expander over scripted maven: tokens, data entries, inline
@@ -2105,7 +2325,9 @@ mod tests {
 
     impl TestDirs {
         fn new(name: &str) -> TestDirs {
-            let base = std::env::temp_dir().join("palantirmc-engine-forge").join(name);
+            let base = std::env::temp_dir()
+                .join("palantirmc-engine-forge")
+                .join(name);
             let _ = std::fs::remove_dir_all(&base);
             let dirs = TestDirs {
                 root: base.join("root"),
@@ -2167,9 +2389,15 @@ mod tests {
 
         let installer = write_jar(&[("data/blob.bin", "blob")]);
         let mut data = BTreeMap::new();
-        data.insert("TOOL".to_string(), DataValue::Artifact("test:tool:1".to_string()));
+        data.insert(
+            "TOOL".to_string(),
+            DataValue::Artifact("test:tool:1".to_string()),
+        );
         data.insert("WORD".to_string(), DataValue::Literal("hello".to_string()));
-        data.insert("BLOB".to_string(), DataValue::Path("/data/blob.bin".to_string()));
+        data.insert(
+            "BLOB".to_string(),
+            DataValue::Path("/data/blob.bin".to_string()),
+        );
         let expander = expander(&data, &dirs, &installer);
 
         // Expansion is path math: resolving is the install's phase zero, so
@@ -2181,14 +2409,20 @@ mod tests {
         let blob = expander.expand("{BLOB}").expect("an installer file");
         assert_eq!(std::fs::read(&blob).expect("the extraction"), b"blob");
         assert_eq!(
-            expander.expand("--in {MINECRAFT_JAR} --root {ROOT} --side {SIDE} --game {MINECRAFT_VERSION}").expect("tokens"),
+            expander
+                .expand(
+                    "--in {MINECRAFT_JAR} --root {ROOT} --side {SIDE} --game {MINECRAFT_VERSION}"
+                )
+                .expect("tokens"),
             format!(
                 "--in {} --root {} --side client --game 1.21.1",
                 dirs.client.display(),
                 dirs.root.display()
             )
         );
-        let inline = expander.expand("--cp [test:lib:2]").expect("an inline coordinate");
+        let inline = expander
+            .expand("--cp [test:lib:2]")
+            .expect("an inline coordinate");
         assert!(inline.ends_with("test/lib/2/lib-2.jar"), "{inline}");
 
         // The two failures a user can fix: an unknown name, and an
@@ -2197,7 +2431,10 @@ mod tests {
             let error = expander.expand(bad).expect_err(bad);
             let message = error.to_string();
             assert!(message.contains("processor 0 (test:tool:1)"), "{message}");
-            assert!(message.contains(bad.trim_end_matches("UNCLOSED")), "{message}");
+            assert!(
+                message.contains(bad.trim_end_matches("UNCLOSED")),
+                "{message}"
+            );
         }
     }
 
@@ -2212,7 +2449,9 @@ mod tests {
         use crate::engine::content::Digest;
 
         let dirs = TestDirs::new("install-flow");
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("install-flow-cache");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("install-flow-cache");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = InstallerMeta::new(MetadataCache::new(root, Duration::ZERO), fetch.clone());
@@ -2241,10 +2480,7 @@ mod tests {
                     jar: "test:already-done:1".to_string(),
                     classpath: Vec::new(),
                     args: Vec::new(),
-                    outputs: BTreeMap::from([(
-                        done_path.to_string_lossy().into_owned(),
-                        done_sha,
-                    )]),
+                    outputs: BTreeMap::from([(done_path.to_string_lossy().into_owned(), done_sha)]),
                     sides: Vec::new(),
                 },
             ],
@@ -2260,8 +2496,16 @@ mod tests {
         assert_eq!(
             report,
             vec![
-                InstalledProcessor { index: 0, jar: "test:server-only:1".to_string(), skipped: true },
-                InstalledProcessor { index: 1, jar: "test:already-done:1".to_string(), skipped: true },
+                InstalledProcessor {
+                    index: 0,
+                    jar: "test:server-only:1".to_string(),
+                    skipped: true
+                },
+                InstalledProcessor {
+                    index: 1,
+                    jar: "test:already-done:1".to_string(),
+                    skipped: true
+                },
             ]
         );
         assert_eq!(fetch.count(), 0, "a skipped processor costs no request");
@@ -2274,7 +2518,9 @@ mod tests {
     #[test]
     fn install_resolves_inputs_but_not_products_before_running() {
         let dirs = TestDirs::new("install-inputs");
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("install-inputs-cache");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("install-inputs-cache");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = InstallerMeta::new(MetadataCache::new(root, Duration::ZERO), fetch.clone());
@@ -2292,9 +2538,18 @@ mod tests {
             version: "1.21.1-forge-1".to_string(),
             libraries: Vec::new(),
             data: BTreeMap::from([
-                ("NEED".to_string(), DataValue::Artifact("test:need:1".to_string())),
-                ("MADE".to_string(), DataValue::Artifact("test:made:1".to_string())),
-                ("TOOLMADE".to_string(), DataValue::Artifact("test:toolmade:1".to_string())),
+                (
+                    "NEED".to_string(),
+                    DataValue::Artifact("test:need:1".to_string()),
+                ),
+                (
+                    "MADE".to_string(),
+                    DataValue::Artifact("test:made:1".to_string()),
+                ),
+                (
+                    "TOOLMADE".to_string(),
+                    DataValue::Artifact("test:toolmade:1".to_string()),
+                ),
             ]),
             processors: vec![Processor {
                 jar: "test:headless:1".to_string(),
@@ -2309,10 +2564,7 @@ mod tests {
                     "--toolmade".to_string(),
                     "{TOOLMADE}".to_string(),
                 ],
-                outputs: BTreeMap::from([(
-                    "{MADE}".to_string(),
-                    "'00'".to_string(),
-                )]),
+                outputs: BTreeMap::from([("{MADE}".to_string(), "'00'".to_string())]),
                 sides: Vec::new(),
             }],
         };
@@ -2329,15 +2581,24 @@ mod tests {
         // the run, not phase zero, is what judges it.
         assert!(dirs.libraries.join("test/need/1/need-1.jar").is_file());
         assert!(dirs.libraries.join("test/inline/1/inline-1.jar").is_file());
-        assert!(!product_path.exists(), "a product is written, never fetched");
-        assert_eq!(fetch.count(), 10, "tool, inputs and inline resolved; leftovers tolerated");
+        assert!(
+            !product_path.exists(),
+            "a product is written, never fetched"
+        );
+        assert_eq!(
+            fetch.count(),
+            10,
+            "tool, inputs and inline resolved; leftovers tolerated"
+        );
         assert!(error.to_string().contains("Main-Class"), "{}", error);
     }
 
     #[test]
     fn a_processor_without_a_main_class_is_refused_before_it_runs() {
         let dirs = TestDirs::new("no-main");
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("no-main-cache");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("no-main-cache");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = InstallerMeta::new(MetadataCache::new(root, Duration::ZERO), fetch.clone());
@@ -2367,7 +2628,10 @@ mod tests {
         )
         .expect_err("no Main-Class to run");
         let message = error.to_string();
-        assert!(message.contains("processor 0 (test:headless:1)"), "{message}");
+        assert!(
+            message.contains("processor 0 (test:headless:1)"),
+            "{message}"
+        );
         assert!(message.contains("Main-Class"), "{message}");
     }
 
@@ -2376,7 +2640,9 @@ mod tests {
         use crate::engine::content::Digest;
 
         let dirs = TestDirs::new("trust");
-        let root = std::env::temp_dir().join("palantirmc-engine-forge").join("trust-cache");
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("trust-cache");
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = InstallerMeta::new(MetadataCache::new(root, Duration::ZERO), fetch.clone());
@@ -2384,7 +2650,10 @@ mod tests {
 
         // No sidecar anywhere: both roots 404 it. The jar itself is served.
         let body = b"trusted bytes";
-        fetch.set_route("https://a.invalid/t/tru/3/tru-3.jar", Route::body(body.to_vec()));
+        fetch.set_route(
+            "https://a.invalid/t/tru/3/tru-3.jar",
+            Route::body(body.to_vec()),
+        );
         let path = artifact_path(
             &meta,
             &store,
@@ -2405,7 +2674,9 @@ mod tests {
 
     #[test]
     fn java_is_found_on_a_path_before_it_is_scanned_for() {
-        let base = std::env::temp_dir().join("palantirmc-engine-forge").join("find-java");
+        let base = std::env::temp_dir()
+            .join("palantirmc-engine-forge")
+            .join("find-java");
         let _ = std::fs::remove_dir_all(&base);
         let first = base.join("first");
         let second = base.join("second");
@@ -2413,6 +2684,9 @@ mod tests {
         std::fs::create_dir_all(&second).expect("second");
         assert!(find_java_in(&[first.clone(), second.clone()]).is_none());
         std::fs::write(second.join(java_exe_name()), b"").expect("a java");
-        assert_eq!(find_java_in(&[first, second.clone()]), Some(second.join(java_exe_name())));
+        assert_eq!(
+            find_java_in(&[first, second.clone()]),
+            Some(second.join(java_exe_name()))
+        );
     }
 }

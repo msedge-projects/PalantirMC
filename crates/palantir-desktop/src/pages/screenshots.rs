@@ -85,7 +85,7 @@ impl State {
     pub fn update(&mut self, message: Message) {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Search(text) => self.search = text,
             Message::Open => {
@@ -127,7 +127,11 @@ pub fn scan(store: &Store) -> Vec<Shot> {
         let folder = store.instance_dir(&card.id).join("screenshots");
         for name in store::screenshots(&store.instance_dir(&card.id)) {
             let path = folder.join(&name);
-            shots.push(Shot { instance: card.name.clone(), name, path });
+            shots.push(Shot {
+                instance: card.name.clone(),
+                name,
+                path,
+            });
         }
     }
     shots
@@ -167,7 +171,10 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             column![]
                 .spacing(4.0)
                 .push(heading_line(theme, Key::AppScreenshotsEmptyHeading))
-                .push(body_line(theme, Key::AppScreenshotsEmptyDescription.message())),
+                .push(body_line(
+                    theme,
+                    Key::AppScreenshotsEmptyDescription.message(),
+                )),
         ));
         return page::body(blocks, GAP, Message::Wheel);
     }
@@ -190,13 +197,14 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
             .push(
                 column![]
                     .spacing(2.0)
-                    .push(
-                        text(shot.name.clone())
-                            .size(14.0)
-                            .font(semibold())
-                            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-                    )
-                    .push(ui::icon_label(theme, crate::icons_gen::Glyph::Image, &shot.instance)),
+                    .push(text(shot.name.clone()).size(14.0).font(semibold()).style(
+                        iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+                    ))
+                    .push(ui::icon_label(
+                        theme,
+                        crate::icons_gen::Glyph::Image,
+                        &shot.instance,
+                    )),
             )
             .push(Space::with_width(Length::Fill))
             // The file itself, which is the one fact that needs no service.
@@ -228,7 +236,10 @@ fn heading_line<'a>(theme: Gen, key: Key) -> Element<'a, Message> {
     text(key.message())
         .size(16.0)
         .font(heading())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into()
 }
 
@@ -237,7 +248,10 @@ fn body_line<'a>(theme: Gen, sentence: &str) -> Element<'a, Message> {
     text(sentence.to_string())
         .size(14.0)
         .font(medium())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )))
         .into()
 }
 
@@ -283,7 +297,10 @@ mod tests {
         let store = Store::load(&paths);
         for theme in Gen::ALL {
             for notice in [None, Some("x".to_string())] {
-                let state = State { search: String::new(), notice };
+                let state = State {
+                    search: String::new(),
+                    notice,
+                };
                 drop(view(*theme, &state, &store));
             }
         }
@@ -293,7 +310,11 @@ mod tests {
     fn opening_a_screenshot_says_what_arrives_later() {
         let mut state = State::default();
         state.update(Message::Open);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("is not implemented yet"));
+        assert!(state
+            .notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("is not implemented yet"));
         state.update(Message::DismissNotice);
         assert!(state.notice.is_none());
     }

@@ -42,17 +42,26 @@ impl Settings {
     /// Load a settings file (`instance.cfg`, `prismlauncher.cfg`, ...).
     pub fn load(path: &Path) -> Result<Settings> {
         let map = ini::load_ini_file(path)?;
-        Ok(Settings { path: path.to_path_buf(), map })
+        Ok(Settings {
+            path: path.to_path_buf(),
+            map,
+        })
     }
 
     /// Create an empty settings object bound to a path.
     pub fn empty(path: impl Into<PathBuf>) -> Settings {
-        Settings { path: path.into(), map: IniMap::new() }
+        Settings {
+            path: path.into(),
+            map: IniMap::new(),
+        }
     }
 
     /// Create settings from an already-loaded map.
     pub fn from_map(path: impl Into<PathBuf>, map: IniMap) -> Settings {
-        Settings { path: path.into(), map }
+        Settings {
+            path: path.into(),
+            map,
+        }
     }
 
     /// The file this settings object is bound to.
@@ -161,7 +170,10 @@ mod tests {
     #[test]
     fn defaults_are_used_for_missing_keys() {
         let s = Settings::empty("x.cfg");
-        assert_eq!(s.get_str("name", defaults::INSTANCE_NAME), "Unnamed Instance");
+        assert_eq!(
+            s.get_str("name", defaults::INSTANCE_NAME),
+            "Unnamed Instance"
+        );
         assert_eq!(s.get_str("iconKey", defaults::ICON_KEY), "default");
         assert!(!s.get_bool("JoinServerOnLaunch", false));
         assert_eq!(s.get_i64("MinMemAlloc", defaults::MIN_MEM_ALLOC), 128);

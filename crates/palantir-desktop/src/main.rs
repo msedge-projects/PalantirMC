@@ -28,10 +28,6 @@ mod catalog;
 /// reference draws them by -- the flag that shows the section, and the one the
 /// friends list beside it is gated on.
 mod checklist;
-/// The metadata a launch resolves through: the loaders' own services, and
-/// Prism's mirror only where a publisher serves nothing in the shape this
-/// launcher reads.
-mod meta;
 /// The colour theme setting: the reference's own option list, its dev-mode rule
 /// for retro, and labels read from the generated string table.
 ///
@@ -62,15 +58,6 @@ mod launch;
 /// NeoForge's processors patch the client jar their own profile names, and the
 /// plan that follows has to see those files as present.
 mod loader_install;
-/// A project's description: the markdown the reference renders, and the
-/// HTML its own filter lets a body carry.
-///
-/// Its own module rather than a corner of the page that draws it, because the
-/// two rules worth getting right are the reference's rather than a page's:
-/// `details` and `summary` are elements it renders, and `.markdown-body` sets
-/// a heading's colour and its rule while setting no size at all. See the
-/// module for both, and for what iced's one-font `Text` cannot draw.
-mod markdown;
 /// The language the interface is in: the tag, the table behind it, the fallback
 /// when the table has nothing to say, and the writing direction.
 ///
@@ -90,6 +77,19 @@ mod locale;
 /// command -- `python tools/gen_locale.py --check` -- rather than a test,
 /// because what it compares is this file against the locales it came from.
 mod locale_gen;
+/// A project's description: the markdown the reference renders, and the
+/// HTML its own filter lets a body carry.
+///
+/// Its own module rather than a corner of the page that draws it, because the
+/// two rules worth getting right are the reference's rather than a page's:
+/// `details` and `summary` are elements it renders, and `.markdown-body` sets
+/// a heading's colour and its rule while setting no size at all. See the
+/// module for both, and for what iced's one-font `Text` cannot draw.
+mod markdown;
+/// The metadata a launch resolves through: the loaders' own services, and
+/// Prism's mirror only where a publisher serves nothing in the shape this
+/// launcher reads.
+mod meta;
 /// The view-model whose two readers are left: the instance list `instances.rs` is
 /// built from, and the override-gated settings `launch.rs` resolves a run with.
 ///
@@ -187,9 +187,6 @@ mod shell;
 /// launcher draws something a *service* published rather than something it drew.
 mod skin;
 mod store;
-/// The one way this launcher reaches the network: the engine's cache, its pool
-/// and its queue, as the launch path uses them.
-mod wire;
 /// The vocabulary the interface paints with: which token an ink is, and which
 /// face a piece of text is set in.
 ///
@@ -199,12 +196,6 @@ mod style;
 /// The runtime behind [`text_gen`]: the plural value, the English plural rule and
 /// the number formatting the reference's strings are filled in by.
 mod text;
-/// The widgets the pages are drawn from, each quoting the reference's own class or
-/// rule rather than inventing a look.
-///
-/// Stage 3's pages are what use it; keeping them here rather than inside a page is
-/// what makes two pages share a card instead of each drawing one.
-mod ui;
 /// The reference client's own strings, compiled from its vendored English locale
 /// by `tools/gen_text.py`.
 ///
@@ -232,6 +223,15 @@ mod theme_gen;
 /// into `theme.rs` and this row stays as the receipt.
 #[cfg(test)]
 mod theme_tokens;
+/// The widgets the pages are drawn from, each quoting the reference's own class or
+/// rule rather than inventing a look.
+///
+/// Stage 3's pages are what use it; keeping them here rather than inside a page is
+/// what makes two pages share a card instead of each drawing one.
+mod ui;
+/// The one way this launcher reaches the network: the engine's cache, its pool
+/// and its queue, as the launch path uses them.
+mod wire;
 
 use iced::{window, Application, Settings};
 
@@ -331,9 +331,7 @@ fn install_panic_hook() {
         let message = panic_message(info);
         let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
-        let report = format!(
-            "panicked at {location}\n\n{message}\n\n{backtrace}\n",
-        );
+        let report = format!("panicked at {location}\n\n{message}\n\n{backtrace}\n",);
         // Best effort by design: an unwritable log directory must not replace
         // the panic with a second one.
         if let Err(error) = write_panic_log(&report) {
@@ -386,7 +384,8 @@ fn write_panic_log(report: &str) -> Result<(), String> {
     // `write_all` reports a short write itself; `flush` is what makes the report
     // survive the abort that follows, since the buffer is not written until
     // something asks for it.
-    file.write_all(report.as_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(report.as_bytes())
+        .map_err(|error| error.to_string())?;
     file.flush().map_err(|error| error.to_string())
 }
 
@@ -482,7 +481,10 @@ mod tests {
         assert_eq!(settings.size, iced::Size::new(1280.0, 720.0));
         match settings.position {
             window::Position::Specific(point) => {
-                assert!(point.x > 0.0, "a capture parks itself past the desktop's right edge");
+                assert!(
+                    point.x > 0.0,
+                    "a capture parks itself past the desktop's right edge"
+                );
             }
             other => panic!("a capture must state its position, got {other:?}"),
         }
@@ -500,7 +502,12 @@ mod tests {
             (800.0, 600.0),
         ];
         for (width, height) in displays {
-            let work = native::WorkArea { x: 0.0, y: 0.0, width, height };
+            let work = native::WorkArea {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            };
             let (opened_width, opened_height) = native::fit_to_work_area(
                 PREFERRED_SIZE,
                 Some(work),

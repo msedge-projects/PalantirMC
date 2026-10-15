@@ -71,7 +71,11 @@ pub struct Download {
 impl Download {
     /// A file to fetch, to be taken on trust.
     pub fn new(url: impl Into<String>, dest: impl Into<PathBuf>) -> Download {
-        Download { url: url.into(), dest: dest.into(), digest: None }
+        Download {
+            url: url.into(),
+            dest: dest.into(),
+            digest: None,
+        }
     }
 
     /// The same file, with the digest it must have.
@@ -90,14 +94,20 @@ impl Download {
     ) -> Download {
         let hex = hex.into().trim().to_ascii_lowercase();
         match Digest::parse(&hex) {
-            Ok(digest) => Download { digest: Some(digest), ..Download::new(url, dest) },
+            Ok(digest) => Download {
+                digest: Some(digest),
+                ..Download::new(url, dest)
+            },
             Err(_) => Download::new(url, dest),
         }
     }
 
     /// The same file, with the digest it must have, already parsed.
     pub fn checked(url: impl Into<String>, dest: impl Into<PathBuf>, digest: Digest) -> Download {
-        Download { digest: Some(digest), ..Download::new(url, dest) }
+        Download {
+            digest: Some(digest),
+            ..Download::new(url, dest)
+        }
     }
 
     /// The digest this download was given, if it was given one.
@@ -231,7 +241,11 @@ fn attempt(fetch: &dyn Fetch, download: &Download, cancel: &Cancel) -> Result<Do
         .append(true)
         .open(&part)
         .map_err(|error| Error::io(&part, error))?;
-    match fetch.get_to(&Request::from(download.url.clone(), offset), &mut sink, cancel)? {
+    match fetch.get_to(
+        &Request::from(download.url.clone(), offset),
+        &mut sink,
+        cancel,
+    )? {
         Outcome::Resumed(fetched) => {
             sink.flush().map_err(|error| Error::io(&part, error))?;
             finish(download, Downloaded::Resumed(fetched))
@@ -243,19 +257,29 @@ fn attempt(fetch: &dyn Fetch, download: &Download, cancel: &Cancel) -> Result<Do
             // The double, or a caller, answered a whole body to a ranged
             // request, which the contract says it must not. Trusting it would
             // append a second copy of the file; refusing says so.
-            Err(Error::format(&download.url, "a body arrived whole for an offset"))
+            Err(Error::format(
+                &download.url,
+                "a body arrived whole for an offset",
+            ))
         }
     }
 }
 
 /// Fetch from zero into a fresh part file, then verify and rename.
-fn fetch_whole(fetch: &dyn Fetch, download: &Download, cancel: &Cancel) -> Result<Downloaded, Error> {
+fn fetch_whole(
+    fetch: &dyn Fetch,
+    download: &Download,
+    cancel: &Cancel,
+) -> Result<Downloaded, Error> {
     let part = download.part();
     let file = File::create(&part).map_err(|error| Error::io(&part, error))?;
     let mut sink = std::io::BufWriter::with_capacity(64 * 1024, file);
     let outcome = fetch.get_to(&Request::get(download.url.clone()), &mut sink, cancel)?;
     if outcome == Outcome::Ignored {
-        return Err(Error::format(&download.url, "a body was ignored for a whole request"));
+        return Err(Error::format(
+            &download.url,
+            "a body was ignored for a whole request",
+        ));
     }
     sink.flush().map_err(|error| Error::io(&part, error))?;
     drop(sink);
@@ -307,7 +331,9 @@ mod tests {
     const URL: &str = "https://example.invalid/a.jar";
 
     fn scratch(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join("palantirmc-engine-download").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-download")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         root
@@ -361,7 +387,11 @@ mod tests {
         assert_eq!(std::fs::read(&dest).expect("the file"), body);
         let requests = fetch.requests();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].offset, Some(300), "it asked to continue from 300");
+        assert_eq!(
+            requests[0].offset,
+            Some(300),
+            "it asked to continue from 300"
+        );
         assert_eq!(requests[0].range().as_deref(), Some("bytes=300-"));
     }
 
@@ -377,7 +407,11 @@ mod tests {
 
         let fetch = MapFetch::new().with_route(URL, Route::body(body.clone()).ignoring_range());
         let (result, _) = fetch_now(&fetch, &download, &Cancel::new());
-        assert_eq!(result.expect("fetched"), Downloaded::Fetched(400), "not 550: nothing was appended");
+        assert_eq!(
+            result.expect("fetched"),
+            Downloaded::Fetched(400),
+            "not 550: nothing was appended"
+        );
         assert_eq!(std::fs::read(&dest).expect("the file"), body);
         let offsets: Vec<Option<u64>> = fetch.requests().iter().map(|r| r.offset).collect();
         assert_eq!(offsets, vec![Some(150), None], "ranged, then from zero");
@@ -471,7 +505,16 @@ mod tests {
         let fetch = MapFetch::new();
         let (result, waits) = fetch_now(&fetch, &download, &Cancel::new());
         let error = result.expect_err("a 404");
-        assert!(matches!(error, Error::Http { status: Some(404), .. }), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::Http {
+                    status: Some(404),
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
         assert_eq!(fetch.count(), 1);
         assert!(waits.is_empty(), "a 404 does not wait");
     }
@@ -487,15 +530,22 @@ mod tests {
         let cancel = Cancel::new();
         let fetch = MapFetch::new().with_route(
             URL,
-            Route::body(vec![9u8; 1000]).chunked(100).stopping_after(3, cancel.clone()),
+            Route::body(vec![9u8; 1000])
+                .chunked(100)
+                .stopping_after(3, cancel.clone()),
         );
         let (result, waits) = fetch_now(&fetch, &download, &cancel);
         let error = result.expect_err("cancelled");
         assert!(matches!(error, Error::Cancelled), "{error:?}");
-        assert!(waits.is_empty(), "a cancellation is not retried and never waits");
+        assert!(
+            waits.is_empty(),
+            "a cancellation is not retried and never waits"
+        );
         assert_eq!(fetch.count(), 1);
         assert_eq!(
-            std::fs::metadata(download.part()).map(|meta| meta.len()).expect("a part file"),
+            std::fs::metadata(download.part())
+                .map(|meta| meta.len())
+                .expect("a part file"),
             300,
             "the three chunks that arrived were kept"
         );
@@ -513,12 +563,16 @@ mod tests {
         let cancel = Cancel::new();
         let stopping = MapFetch::new().with_route(
             URL,
-            Route::body(body.clone()).chunked(100).stopping_after(2, cancel.clone()),
+            Route::body(body.clone())
+                .chunked(100)
+                .stopping_after(2, cancel.clone()),
         );
         let (result, _) = fetch_now(&stopping, &download, &cancel);
         assert!(result.is_err());
         assert_eq!(
-            std::fs::metadata(download.part()).map(|meta| meta.len()).expect("a part file"),
+            std::fs::metadata(download.part())
+                .map(|meta| meta.len())
+                .expect("a part file"),
             200
         );
 
@@ -553,7 +607,12 @@ mod tests {
     #[test]
     fn a_missing_version_of_the_destination_is_created_rather_than_refused() {
         let dir = scratch("nested");
-        let dest = dir.join("libraries").join("org").join("ns").join("name").join("1.0.jar");
+        let dest = dir
+            .join("libraries")
+            .join("org")
+            .join("ns")
+            .join("name")
+            .join("1.0.jar");
         let download = Download::new(URL, &dest);
         let fetch = MapFetch::new().with_route(URL, Route::body(b"jar".to_vec()));
         let (result, _) = fetch_now(&fetch, &download, &Cancel::new());

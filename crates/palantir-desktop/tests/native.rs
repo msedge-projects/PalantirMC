@@ -62,8 +62,9 @@ const ENGINE_CRATES: [&str; 18] = [
 ];
 
 /// Files a browser would interpret, which this program must contain none of.
-const SCRIPT_EXTENSIONS: [&str; 9] =
-    ["js", "mjs", "cjs", "ts", "tsx", "html", "htm", "vue", "svelte"];
+const SCRIPT_EXTENSIONS: [&str; 9] = [
+    "js", "mjs", "cjs", "ts", "tsx", "html", "htm", "vue", "svelte",
+];
 
 fn root() -> PathBuf {
     // `crates/palantir-desktop` -> the workspace root.
@@ -98,7 +99,8 @@ fn walk(directory: &Path, into: &mut Vec<PathBuf>) {
 
 /// Every crate name the lock file pins.
 fn locked_crates() -> BTreeSet<String> {
-    let lock = fs::read_to_string(root().join("Cargo.lock")).expect("the workspace has a lock file");
+    let lock =
+        fs::read_to_string(root().join("Cargo.lock")).expect("the workspace has a lock file");
     lock.lines()
         .filter_map(|line| line.strip_prefix("name = "))
         .map(|value| value.trim().trim_matches('"').to_string())
@@ -111,9 +113,10 @@ fn declared_dependencies() -> BTreeSet<String> {
     walk(&root().join("crates"), &mut manifests);
     manifests.push(root().join("Cargo.toml"));
     let mut names = BTreeSet::new();
-    for manifest in manifests.into_iter().filter(|path| {
-        path.file_name().and_then(|name| name.to_str()) == Some("Cargo.toml")
-    }) {
+    for manifest in manifests
+        .into_iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("Cargo.toml"))
+    {
         let Ok(text) = fs::read_to_string(&manifest) else {
             continue;
         };
@@ -152,7 +155,14 @@ fn no_browser_or_scripting_engine_is_linked_or_declared() {
     // and `web-sys` are in the lock for the wasm target but are not in the
     // Windows tree; a manifest naming one would put them in it.
     let declared = declared_dependencies();
-    for name in ["js-sys", "web-sys", "wasm-bindgen", "tauri", "wry", "webview2"] {
+    for name in [
+        "js-sys",
+        "web-sys",
+        "wasm-bindgen",
+        "tauri",
+        "wry",
+        "webview2",
+    ] {
         assert!(
             !declared.contains(name),
             "a workspace manifest depends on {name}, which makes this not a native program"
@@ -205,13 +215,12 @@ fn the_interface_is_rust_that_draws_rather_than_files_that_are_read() {
     // half from being satisfied by an empty tree: the program's own interface is
     // in the crate, and the design system, the icon set and the strings are
     // generated Rust rather than assets loaded at runtime.
-    let generated = [
-        "text_gen.rs",
-        "theme_gen.rs",
-        "icons_gen.rs",
-    ];
+    let generated = ["text_gen.rs", "theme_gen.rs", "icons_gen.rs"];
     for name in generated {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name);
-        assert!(path.is_file(), "{name} is missing, so the interface has no source");
+        assert!(
+            path.is_file(),
+            "{name} is missing, so the interface has no source"
+        );
     }
 }

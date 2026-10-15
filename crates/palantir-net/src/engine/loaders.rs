@@ -72,7 +72,12 @@ pub enum Loader {
 impl Loader {
     /// Every loader with a build list to ask for.
     pub fn all() -> [Loader; 4] {
-        [Loader::Fabric, Loader::NeoForge, Loader::Forge, Loader::Quilt]
+        [
+            Loader::Fabric,
+            Loader::NeoForge,
+            Loader::Forge,
+            Loader::Quilt,
+        ]
     }
 
     /// The name the loader is published under, which is also the name Modrinth
@@ -93,7 +98,9 @@ impl Loader {
     /// the answer `None` for anything that is not a loader, which is how vanilla
     /// falls out without a special case at the call site.
     pub fn from_name(name: &str) -> Option<Loader> {
-        Loader::all().into_iter().find(|loader| loader.name().eq_ignore_ascii_case(name))
+        Loader::all()
+            .into_iter()
+            .find(|loader| loader.name().eq_ignore_ascii_case(name))
     }
 
     /// Where this loader's build list for `game` is.
@@ -184,14 +191,19 @@ pub struct LoaderMeta {
 /// a handle that printed it would be printing a connection pool.
 impl std::fmt::Debug for LoaderMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoaderMeta").field("dir", &self.documents.dir()).finish_non_exhaustive()
+        f.debug_struct("LoaderMeta")
+            .field("dir", &self.documents.dir())
+            .finish_non_exhaustive()
     }
 }
 
 impl LoaderMeta {
     /// A handle over `cache`, fetching through `fetch`.
     pub fn new(cache: MetadataCache, fetch: Arc<dyn Fetch>) -> LoaderMeta {
-        LoaderMeta { documents: cache, fetch }
+        LoaderMeta {
+            documents: cache,
+            fetch,
+        }
     }
 
     /// The directory bodies are cached in.
@@ -213,7 +225,9 @@ impl LoaderMeta {
         backoff: &Backoff,
     ) -> Result<Vec<Build>, Error> {
         let url = loader.list_url(game);
-        let cached = self.documents.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let cached = self
+            .documents
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         let text = String::from_utf8_lossy(&cached.body).into_owned();
         let value: serde_json::Value = serde_json::from_str(&text)
             .map_err(|error| Error::json(url.clone(), error.to_string()))?;
@@ -308,7 +322,10 @@ fn parse_with_flags(value: &serde_json::Value) -> Result<Vec<Build>, String> {
             .and_then(|loader| loader.get("stable"))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or_else(|| !is_prerelease(version));
-        builds.push(Build { version: version.to_string(), stable });
+        builds.push(Build {
+            version: version.to_string(),
+            stable,
+        });
     }
     Ok(builds)
 }
@@ -333,7 +350,10 @@ fn parse_neoforge(value: &serde_json::Value, game: &str) -> Result<Vec<Build>, S
         if !version.starts_with(&prefix) {
             continue;
         }
-        builds.push(Build { version: version.to_string(), stable: !is_prerelease(version) });
+        builds.push(Build {
+            version: version.to_string(),
+            stable: !is_prerelease(version),
+        });
     }
     Ok(builds)
 }
@@ -379,7 +399,10 @@ fn parse_forge(value: &serde_json::Value, game: &str) -> Result<Vec<Build>, Stri
         // one Forge recommends.
         match builds.iter_mut().find(|build| build.version == version) {
             Some(existing) => existing.stable |= stable,
-            None => builds.push(Build { version: version.to_string(), stable }),
+            None => builds.push(Build {
+                version: version.to_string(),
+                stable,
+            }),
         }
     }
     Ok(builds)
@@ -417,9 +440,12 @@ fn compare(left: &str, right: &str) -> std::cmp::Ordering {
         match (left_parts.next(), right_parts.next()) {
             (None, None) => break,
             (left_part, right_part) => {
-                let left_number = left_part.and_then(|part| part.parse::<u64>().ok()).unwrap_or(0);
-                let right_number =
-                    right_part.and_then(|part| part.parse::<u64>().ok()).unwrap_or(0);
+                let left_number = left_part
+                    .and_then(|part| part.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let right_number = right_part
+                    .and_then(|part| part.parse::<u64>().ok())
+                    .unwrap_or(0);
                 match left_number.cmp(&right_number) {
                     Ordering::Equal => {}
                     other => return other,
@@ -520,7 +546,9 @@ mod tests {
     /// A handle over a scratch directory whose only routes are the ones a test
     /// scripts, so a test that forgets one fails instead of dialling out.
     fn meta(name: &str, ttl: Duration) -> (LoaderMeta, Arc<MapFetch>) {
-        let root = std::env::temp_dir().join("palantirmc-engine-loaders").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-loaders")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let meta = LoaderMeta::new(MetadataCache::new(root, ttl), fetch.clone());
@@ -544,14 +572,26 @@ mod tests {
         fetch.set_route(&url, Route::text(FABRIC_PROFILE));
 
         let profile = meta
-            .profile(Loader::Fabric, "1.21.4", "0.19.5", &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::Fabric,
+                "1.21.4",
+                "0.19.5",
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("the profile");
-        assert_eq!(profile.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
+        assert_eq!(
+            profile.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
         assert!(
             !profile.has_order,
             "the loader's own file carries no `order`: that key is Prism's addition to the same document"
         );
-        assert!(profile.requires.is_empty(), "and no requirement to reach the mappings by");
+        assert!(
+            profile.requires.is_empty(),
+            "and no requirement to reach the mappings by"
+        );
         let libraries: Vec<String> = profile
             .libraries
             .iter()
@@ -565,8 +605,14 @@ mod tests {
 
         // Asked again, the document is already held: the cache is what makes a
         // second lookup free rather than a second request.
-        meta.profile(Loader::Fabric, "1.21.4", "0.19.5", &Cancel::new(), &Backoff::with_attempts(1))
-            .expect("the profile again");
+        meta.profile(
+            Loader::Fabric,
+            "1.21.4",
+            "0.19.5",
+            &Cancel::new(),
+            &Backoff::with_attempts(1),
+        )
+        .expect("the profile again");
         assert_eq!(fetch.count(), 1, "one document, one request");
     }
 
@@ -577,7 +623,13 @@ mod tests {
         let (meta, fetch) = meta("forge-profile", crate::engine::cache::DEFAULT_TTL);
         assert!(Loader::Forge.profile_url("1.21.4", "54.1.0").is_none());
         let error = meta
-            .profile(Loader::Forge, "1.21.4", "54.1.0", &Cancel::new(), &Backoff::with_attempts(1))
+            .profile(
+                Loader::Forge,
+                "1.21.4",
+                "54.1.0",
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect_err("no profile to read");
         assert!(error.to_string().contains("installer"), "{error}");
         assert_eq!(fetch.count(), 0, "and nothing was asked for");
@@ -598,7 +650,10 @@ mod tests {
         );
         // A build list is cached under its own URL, so the picker asking twice
         // costs one request.
-        assert!(meta.documents.cached(&url).is_some(), "the body was kept, with an age");
+        assert!(
+            meta.documents.cached(&url).is_some(),
+            "the body was kept, with an age"
+        );
         let _ = run(&meta, Loader::Fabric, "1.21.4").expect("the list again");
         assert_eq!(fetch.count(), 1, "the second ask was answered from disk");
     }
@@ -626,7 +681,10 @@ mod tests {
     fn neoforge_picks_the_game_s_own_line_out_of_every_build_it_ever_published() {
         let (meta, fetch) = meta("neoforge", crate::engine::cache::DEFAULT_TTL);
         let url = Loader::NeoForge.list_url("1.21.4");
-        assert_eq!(url, NEOFORGE_VERSIONS_URL, "one publication covers every game");
+        assert_eq!(
+            url, NEOFORGE_VERSIONS_URL,
+            "one publication covers every game"
+        );
         fetch.set_route(&url, Route::text(NEOFORGE_BODY));
 
         let builds = run(&meta, Loader::NeoForge, "1.21.4").expect("the list");
@@ -643,9 +701,15 @@ mod tests {
         // The game's line for a release with no patch component is its `0` line,
         // and a release NeoForge never published for is an empty list rather than
         // an error.
-        assert_eq!(versions(&run(&meta, Loader::NeoForge, "1.21").expect("1.21")), vec!["21.0.167"]);
+        assert_eq!(
+            versions(&run(&meta, Loader::NeoForge, "1.21").expect("1.21")),
+            vec!["21.0.167"]
+        );
         let empty = run(&meta, Loader::NeoForge, "1.20.1").expect("1.20.1");
-        assert!(empty.is_empty(), "NeoForge's first releases were for 1.20.2");
+        assert!(
+            empty.is_empty(),
+            "NeoForge's first releases were for 1.20.2"
+        );
         let snapshot = run(&meta, Loader::NeoForge, "25w02a").expect("a snapshot");
         assert!(snapshot.is_empty());
     }
@@ -654,7 +718,10 @@ mod tests {
     fn forge_offers_the_two_builds_it_promotes_and_calls_the_recommended_one_stable() {
         let (meta, fetch) = meta("forge", crate::engine::cache::DEFAULT_TTL);
         let url = Loader::Forge.list_url("1.21.4");
-        assert_eq!(url, FORGE_PROMOTIONS_URL, "Forge promotes every game in one document");
+        assert_eq!(
+            url, FORGE_PROMOTIONS_URL,
+            "Forge promotes every game in one document"
+        );
         fetch.set_route(&url, Route::text(FORGE_BODY));
 
         let builds = run(&meta, Loader::Forge, "1.21.4").expect("the list");
@@ -664,11 +731,17 @@ mod tests {
             vec![false, true],
             "Forge's `recommended` is the stable one, not its newest"
         );
-        assert_eq!(default_build(&builds).map(|build| build.version.as_str()), Some("54.0.0"));
+        assert_eq!(
+            default_build(&builds).map(|build| build.version.as_str()),
+            Some("54.0.0")
+        );
 
         // A game version with only a `latest` build gets one build, and one whose
         // two keys name the same build gets one build rather than two rows.
-        assert_eq!(versions(&run(&meta, Loader::Forge, "1.20.1").expect("1.20.1")), vec!["47.4.0"]);
+        assert_eq!(
+            versions(&run(&meta, Loader::Forge, "1.20.1").expect("1.20.1")),
+            vec!["47.4.0"]
+        );
         let same = run(&meta, Loader::Forge, "1.16.5").expect("1.16.5");
         assert_eq!(versions(&same), vec!["36.2.42"]);
         assert!(same[0].stable, "the one row carries both keys' meaning");
@@ -679,7 +752,9 @@ mod tests {
         // Fabric really does publish over two hundred builds for a game version,
         // and a dropdown that drew them all is a dropdown nobody scrolls.
         let many: Vec<String> = (0..(MAX_BUILDS + 40))
-            .map(|build| format!("{{\"loader\": {{\"version\": \"0.1.{build}\", \"stable\": true}}}}"))
+            .map(|build| {
+                format!("{{\"loader\": {{\"version\": \"0.1.{build}\", \"stable\": true}}}}")
+            })
             .collect();
         let body = format!("[{}]", many.join(","));
         let (meta, fetch) = meta("bound", crate::engine::cache::DEFAULT_TTL);
@@ -687,7 +762,10 @@ mod tests {
 
         let builds = run(&meta, Loader::Fabric, "1.21.4").expect("the list");
         assert_eq!(builds.len(), MAX_BUILDS);
-        assert_eq!(builds[0].version, "0.1.99", "the newest builds are the ones kept");
+        assert_eq!(
+            builds[0].version, "0.1.99",
+            "the newest builds are the ones kept"
+        );
     }
 
     #[test]
@@ -720,15 +798,30 @@ mod tests {
         // automatically newer, and a pre-release belongs below its release.
         assert_eq!(compare("0.19.5", "0.19.4"), std::cmp::Ordering::Greater);
         assert_eq!(compare("21.4.5", "21.4.100"), std::cmp::Ordering::Less);
-        assert_eq!(compare("0.20.0", "0.20.0-beta.9"), std::cmp::Ordering::Greater);
+        assert_eq!(
+            compare("0.20.0", "0.20.0-beta.9"),
+            std::cmp::Ordering::Greater
+        );
         assert_eq!(compare("1.0", "1.0.0"), std::cmp::Ordering::Equal);
 
         let mut builds = vec![
-            Build { version: "0.19.4".to_string(), stable: true },
-            Build { version: "0.20.0-beta.1".to_string(), stable: false },
-            Build { version: "0.19.10".to_string(), stable: true },
+            Build {
+                version: "0.19.4".to_string(),
+                stable: true,
+            },
+            Build {
+                version: "0.20.0-beta.1".to_string(),
+                stable: false,
+            },
+            Build {
+                version: "0.19.10".to_string(),
+                stable: true,
+            },
         ];
         sort_newest_first(&mut builds);
-        assert_eq!(versions(&builds), vec!["0.20.0-beta.1", "0.19.10", "0.19.4"]);
+        assert_eq!(
+            versions(&builds),
+            vec!["0.20.0-beta.1", "0.19.10", "0.19.4"]
+        );
     }
 }

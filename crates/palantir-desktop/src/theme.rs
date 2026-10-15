@@ -164,14 +164,26 @@ fn blend(from: button::Appearance, to: button::Appearance, t: f32) -> button::Ap
 /// The end that is missing contributes a fully transparent version of the
 /// other, so a ghost button's hover fill fades in through its own alpha rather
 /// than appearing at full strength on one frame.
-fn blend_background(from: Option<Background>, to: Option<Background>, t: f32) -> Option<Background> {
+fn blend_background(
+    from: Option<Background>,
+    to: Option<Background>,
+    t: f32,
+) -> Option<Background> {
     match (from, to) {
         (Some(Background::Color(from)), Some(Background::Color(to))) => {
             Some(Background::Color(mix(from, to, t)))
         }
         (None, Some(Background::Color(to))) => Some(Background::Color(alpha(to, to.a * t))),
-        (Some(Background::Color(from)), None) => Some(Background::Color(alpha(from, from.a * (1.0 - t)))),
-        (from, to) => if t >= 0.5 { to } else { from },
+        (Some(Background::Color(from)), None) => {
+            Some(Background::Color(alpha(from, from.a * (1.0 - t))))
+        }
+        (from, to) => {
+            if t >= 0.5 {
+                to
+            } else {
+                from
+            }
+        }
     }
 }
 
@@ -286,17 +298,17 @@ impl Palette {
     pub const fn dark() -> Palette {
         Palette {
             #[cfg(test)]
-            bg: rgb(0x16, 0x18, 0x1C),              // surface-1
+            bg: rgb(0x16, 0x18, 0x1C), // surface-1
             #[cfg(test)]
-            bg_rail: rgb(0x1D, 0x1F, 0x23),         // surface-2
-            surface: rgb(0x27, 0x29, 0x2E),         // surface-3, what a card is
-            surface_hover: rgb(0x34, 0x36, 0x3C),   // surface-4, and the hover of one
-            surface_input: rgb(0x34, 0x36, 0x3C),   // --color-button-bg
+            bg_rail: rgb(0x1D, 0x1F, 0x23), // surface-2
+            surface: rgb(0x27, 0x29, 0x2E), // surface-3, what a card is
+            surface_hover: rgb(0x34, 0x36, 0x3C), // surface-4, and the hover of one
+            surface_input: rgb(0x34, 0x36, 0x3C), // --color-button-bg
             border: alpha(rgb(0xC1, 0xBE, 0xD1), 0.12), // --color-button-border
-            border_strong: rgb(0x42, 0x44, 0x4A),   // surface-5
-            text: rgb(0xFF, 0xFF, 0xFF),            // --color-text-primary
-            text_muted: rgb(0xB0, 0xBA, 0xC5),      // --color-text-default
-            text_dim: rgb(0x96, 0xA2, 0xB0),        // --color-text-tertiary
+            border_strong: rgb(0x42, 0x44, 0x4A), // surface-5
+            text: rgb(0xFF, 0xFF, 0xFF),    // --color-text-primary
+            text_muted: rgb(0xB0, 0xBA, 0xC5), // --color-text-default
+            text_dim: rgb(0x96, 0xA2, 0xB0), // --color-text-tertiary
             // Measured, not transcribed. The stylesheet's ladder says green-500
             // (`#1bd96a`) is dark `--color-brand`, and the app as installed is
             // not painted that: `#00da75` is what the call-to-action button, the
@@ -306,14 +318,14 @@ impl Palette {
             // that is wrong in a way no gate can see, so the measurement wins.
             accent: rgb(0x00, 0xDA, 0x75),
             brand_highlight: rgb(0x1D, 0x55, 0x40),
-            on_accent: rgb(0x00, 0x00, 0x00),       // --color-accent-contrast is black in dark
-            danger: rgb(0xFF, 0x49, 0x6E),          // red-500
+            on_accent: rgb(0x00, 0x00, 0x00), // --color-accent-contrast is black in dark
+            danger: rgb(0xFF, 0x49, 0x6E),    // red-500
             #[cfg(test)]
-            hero: rgb(0x13, 0x1F, 0x17),            // --brand-gradient-strong-bg, light end
+            hero: rgb(0x13, 0x1F, 0x17), // --brand-gradient-strong-bg, light end
             #[cfg(test)]
             backdrop: alpha(rgb(0x16, 0x18, 0x1C), 0.64), // --splash-overlay
             #[cfg(test)]
-            modal: rgb(0x27, 0x29, 0x2E),           // surface-3: a modal is a card that floats
+            modal: rgb(0x27, 0x29, 0x2E), // surface-3: a modal is a card that floats
             // The right panel is not a flat raised strip in the reference --
             // `.app-sidebar` paints `--brand-gradient-bg`, which resolves to a
             // brand wash over the page colour. Measured down its own empty
@@ -355,31 +367,31 @@ impl Palette {
     pub const fn light() -> Palette {
         Palette {
             #[cfg(test)]
-            bg: rgb(0xEB, 0xEB, 0xEB),              // surface-1
+            bg: rgb(0xEB, 0xEB, 0xEB), // surface-1
             #[cfg(test)]
-            bg_rail: rgb(0xED, 0xED, 0xED),         // surface-1-5
-            surface: rgb(0xF8, 0xF8, 0xF8),         // surface-3
-            surface_hover: rgb(0xDD, 0xDD, 0xDD),   // surface-5
-            surface_input: rgb(0xFF, 0xFF, 0xFF),   // surface-4
+            bg_rail: rgb(0xED, 0xED, 0xED), // surface-1-5
+            surface: rgb(0xF8, 0xF8, 0xF8),             // surface-3
+            surface_hover: rgb(0xDD, 0xDD, 0xDD),       // surface-5
+            surface_input: rgb(0xFF, 0xFF, 0xFF),       // surface-4
             border: alpha(rgb(0xA1, 0xA1, 0xA1), 0.35), // --color-button-border
-            border_strong: rgb(0xDD, 0xDD, 0xDD),   // surface-5
-            text: rgb(0x1A, 0x20, 0x2C),            // --color-text-primary
-            text_muted: rgb(0x2C, 0x2E, 0x31),      // --color-text-default
-            text_dim: rgb(0x48, 0x4D, 0x54),        // --color-text-tertiary
-            accent: rgb(0x04, 0x91, 0x4F),          // green-700, the readable rung (see above)
+            border_strong: rgb(0xDD, 0xDD, 0xDD),       // surface-5
+            text: rgb(0x1A, 0x20, 0x2C),                // --color-text-primary
+            text_muted: rgb(0x2C, 0x2E, 0x31),          // --color-text-default
+            text_dim: rgb(0x48, 0x4D, 0x54),            // --color-text-tertiary
+            accent: rgb(0x04, 0x91, 0x4F),              // green-700, the readable rung (see above)
             // Derived by the rule the dark theme's is measured by -- 25% of the
             // accent over that theme's chrome -- because the reference's light
             // theme was not measured. 160,214,197 is that composite over
             // `#EDEDED`.
             brand_highlight: rgb(0xB3, 0xD6, 0xC5),
-            on_accent: rgb(0xFF, 0xFF, 0xFF),       // --color-accent-contrast is white in light
-            danger: rgb(0xCB, 0x22, 0x45),          // red-600, light --color-red
+            on_accent: rgb(0xFF, 0xFF, 0xFF), // --color-accent-contrast is white in light
+            danger: rgb(0xCB, 0x22, 0x45),    // red-600, light --color-red
             #[cfg(test)]
-            hero: rgb(0xE6, 0xF4, 0xEC),            // brand gradient over a light surface
+            hero: rgb(0xE6, 0xF4, 0xEC), // brand gradient over a light surface
             #[cfg(test)]
             backdrop: alpha(rgb(0xEB, 0xEB, 0xEB), 0.7),
             #[cfg(test)]
-            modal: rgb(0xF8, 0xF8, 0xF8),           // surface-3
+            modal: rgb(0xF8, 0xF8, 0xF8), // surface-3
             // The dark panel's wash, re-expressed over this theme's page: green
             // at ~6% fading to ~2%, which is what the dark stops measure as.
             // Light `--color-brand` is green-600, so the tint follows it before
@@ -410,14 +422,14 @@ impl Palette {
             // other token is inherited from dark, which is why only those
             // differ here.
             #[cfg(test)]
-            bg: rgb(0x00, 0x00, 0x00),              // surface-1
+            bg: rgb(0x00, 0x00, 0x00), // surface-1
             #[cfg(test)]
-            bg_rail: rgb(0x05, 0x05, 0x06),         // surface-1-5
-            surface: rgb(0x10, 0x10, 0x13),         // surface-3
-            surface_hover: rgb(0x1B, 0x1B, 0x20),   // surface-4
-            surface_input: rgb(0x1B, 0x1B, 0x20),   // surface-4
+            bg_rail: rgb(0x05, 0x05, 0x06), // surface-1-5
+            surface: rgb(0x10, 0x10, 0x13),       // surface-3
+            surface_hover: rgb(0x1B, 0x1B, 0x20), // surface-4
+            surface_input: rgb(0x1B, 0x1B, 0x20), // surface-4
             border: alpha(rgb(0xC1, 0xBE, 0xD1), 0.12),
-            border_strong: rgb(0x25, 0x26, 0x2B),   // surface-5
+            border_strong: rgb(0x25, 0x26, 0x2B), // surface-5
             text: rgb(0xFF, 0xFF, 0xFF),
             text_muted: rgb(0xB0, 0xBA, 0xC5),
             text_dim: rgb(0x96, 0xA2, 0xB0),
@@ -433,7 +445,7 @@ impl Palette {
             #[cfg(test)]
             backdrop: alpha(rgb(0x00, 0x00, 0x00), 0.7),
             #[cfg(test)]
-            modal: rgb(0x10, 0x10, 0x13),           // surface-3
+            modal: rgb(0x10, 0x10, 0x13), // surface-3
             // The dark panel's wash and surfaces, each moved by the same step
             // that separates this theme's `surface-3` from the dark one, so the
             // panel keeps its relationship to the cards rather than going grey.
@@ -506,7 +518,10 @@ pub fn color_theme() -> ColorTheme {
 /// Put a theme in force. The next `view()` paints with it.
 #[cfg(test)]
 pub fn set_color_theme(theme: ColorTheme) {
-    let index = ColorTheme::ALL.iter().position(|candidate| *candidate == theme).unwrap_or(0);
+    let index = ColorTheme::ALL
+        .iter()
+        .position(|candidate| *candidate == theme)
+        .unwrap_or(0);
     COLOR_THEME.store(index as u8, Ordering::Relaxed);
 }
 
@@ -653,7 +668,11 @@ pub const FAMILY: &str = "Inter";
 
 /// One of the five shipped weights, by iced's name for it.
 const fn inter(weight: iced::font::Weight) -> Font {
-    Font { family: iced::font::Family::Name(FAMILY), weight, ..Font::DEFAULT }
+    Font {
+        family: iced::font::Family::Name(FAMILY),
+        weight,
+        ..Font::DEFAULT
+    }
 }
 
 /// Regular (400).
@@ -721,7 +740,11 @@ pub fn app_theme() -> Theme {
 pub fn card(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface().into()),
-        border: Border { radius: R_CARD.into(), width: 1.0, color: border() },
+        border: Border {
+            radius: R_CARD.into(),
+            width: 1.0,
+            color: border(),
+        },
         ..Default::default()
     }
 }
@@ -731,7 +754,11 @@ pub fn card(_: &Theme) -> container::Appearance {
 pub fn inset(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface_input().into()),
-        border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
+        border: Border {
+            radius: R_BUTTON.into(),
+            width: 1.0,
+            color: border(),
+        },
         ..Default::default()
     }
 }
@@ -758,7 +785,11 @@ pub fn backdrop(_: &Theme) -> container::Appearance {
 pub fn modal(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(palette().modal.into()),
-        border: Border { radius: R_MODAL.into(), width: 1.0, color: border_strong() },
+        border: Border {
+            radius: R_MODAL.into(),
+            width: 1.0,
+            color: border_strong(),
+        },
         ..Default::default()
     }
 }
@@ -768,7 +799,10 @@ pub fn modal(_: &Theme) -> container::Appearance {
 pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
     move |_: &Theme| container::Appearance {
         background: Some(color.into()),
-        border: Border { radius: 4.0.into(), ..Default::default() },
+        border: Border {
+            radius: 4.0.into(),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -778,7 +812,11 @@ pub fn pill(color: Color) -> impl Fn(&Theme) -> container::Appearance {
 pub fn token_pill(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(text(), 0.05).into()),
-        border: Border { radius: 999.0.into(), width: 1.0, color: alpha(text(), 0.08) },
+        border: Border {
+            radius: 999.0.into(),
+            width: 1.0,
+            color: alpha(text(), 0.08),
+        },
         text_color: Some(text_muted()),
         ..Default::default()
     }
@@ -789,7 +827,11 @@ pub fn token_pill(_: &Theme) -> container::Appearance {
 pub fn card_selected(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(accent(), 0.08).into()),
-        border: Border { radius: R_CARD.into(), width: 1.0, color: alpha(accent(), 0.55) },
+        border: Border {
+            radius: R_CARD.into(),
+            width: 1.0,
+            color: alpha(accent(), 0.55),
+        },
         ..Default::default()
     }
 }
@@ -799,7 +841,11 @@ pub fn card_selected(_: &Theme) -> container::Appearance {
 pub fn chip(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(alpha(accent(), 0.14).into()),
-        border: Border { radius: R_CHIP.into(), width: 1.0, color: alpha(accent(), 0.32) },
+        border: Border {
+            radius: R_CHIP.into(),
+            width: 1.0,
+            color: alpha(accent(), 0.32),
+        },
         text_color: Some(accent()),
         ..Default::default()
     }
@@ -822,7 +868,11 @@ pub fn chip(_: &Theme) -> container::Appearance {
 pub fn keycap(_: &Theme) -> container::Appearance {
     container::Appearance {
         background: Some(surface_input().into()),
-        border: Border { radius: R_KEYCAP.into(), width: 1.0, color: border_strong() },
+        border: Border {
+            radius: R_KEYCAP.into(),
+            width: 1.0,
+            color: border_strong(),
+        },
         text_color: Some(text_muted()),
         ..Default::default()
     }
@@ -846,7 +896,11 @@ impl container::StyleSheet for Tooltip {
     fn appearance(&self, _: &Theme) -> container::Appearance {
         container::Appearance {
             background: Some(surface_hover().into()),
-            border: Border { radius: R_CHIP.into(), width: 1.0, color: border_strong() },
+            border: Border {
+                radius: R_CHIP.into(),
+                width: 1.0,
+                color: border_strong(),
+            },
             text_color: Some(text()),
             ..Default::default()
         }
@@ -916,7 +970,11 @@ pub enum Role {
     /// A tab in a page's own strip. `first`/`last` say whether it is one of the
     /// strip's outer ends: the strip's plate is the row of tabs itself (see
     /// [`tab_button_at`]), so only those two keep a corner radius.
-    Tab { active: bool, first: bool, last: bool },
+    Tab {
+        active: bool,
+        first: bool,
+        last: bool,
+    },
     /// A `size="lg"` button in the brand color: the welcome screen's "Create an
     /// instance".
     BrandLarge,
@@ -951,7 +1009,12 @@ pub struct Btn {
 
 impl Btn {
     pub fn new(role: Role) -> Btn {
-        Btn { role, clock: None, key: "", hover_factor: None }
+        Btn {
+            role,
+            clock: None,
+            key: "",
+            hover_factor: None,
+        }
     }
 
     /// Hand the button its tween clock and key.
@@ -1051,7 +1114,11 @@ pub fn chip_button(active: bool) -> Btn {
 /// nothing else called.
 #[cfg(test)]
 pub fn tab_button_at(active: bool, first: bool, last: bool) -> Btn {
-    Btn::new(Role::Tab { active, first, last })
+    Btn::new(Role::Tab {
+        active,
+        first,
+        last,
+    })
 }
 /// The clickable body of an instance card (the card itself is a container).
 #[cfg(test)]
@@ -1087,12 +1154,7 @@ impl Btn {
                 match clock.lock() {
                     Ok(clock) => (
                         clock.factor_with_hover(self.key, hovered, pressed, hover_factor),
-                        clock.hover_progress_with_hover(
-                            self.key,
-                            hovered,
-                            pressed,
-                            hover_factor,
-                        ),
+                        clock.hover_progress_with_hover(self.key, hovered, pressed, hover_factor),
                     ),
                     Err(_) => (
                         interaction_end_with_hover(hovered, pressed, hover_factor),
@@ -1128,7 +1190,10 @@ impl Btn {
             Role::Primary => button::Appearance {
                 background: Some(accent().into()),
                 text_color: on_accent(),
-                border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                border: Border {
+                    radius: R_BUTTON.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             // `ButtonFrame.vue`: `type="colored" color="brand" size="lg"` is
@@ -1190,9 +1255,16 @@ impl Btn {
                 ..Default::default()
             },
             Role::Ghost => button::Appearance {
-                background: if hovered { Some(alpha(text(), 0.08).into()) } else { None },
+                background: if hovered {
+                    Some(alpha(text(), 0.08).into())
+                } else {
+                    None
+                },
                 text_color: if hovered { text() } else { text_muted() },
-                border: Border { radius: R_BUTTON.into(), ..Default::default() },
+                border: Border {
+                    radius: R_BUTTON.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Role::Rail { active } => button::Appearance {
@@ -1212,11 +1284,24 @@ impl Btn {
                 } else {
                     None
                 },
-                text_color: if active { accent() } else if hovered { text() } else { text_dim() },
-                border: Border { radius: R_RAIL.into(), ..Default::default() },
+                text_color: if active {
+                    accent()
+                } else if hovered {
+                    text()
+                } else {
+                    text_dim()
+                },
+                border: Border {
+                    radius: R_RAIL.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            Role::Tab { active, first, last } => button::Appearance {
+            Role::Tab {
+                active,
+                first,
+                last,
+            } => button::Appearance {
                 // The fill is not a composite of the page and the accent -- see
                 // [`Palette::brand_highlight`] -- so it is the solid token, and
                 // the unselected tabs carry the raised surface so that the row
@@ -1265,13 +1350,20 @@ impl Btn {
                     None
                 },
                 text_color: text(),
-                border: Border { radius: R_CARD.into(), ..Default::default() },
+                border: Border {
+                    radius: R_CARD.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Role::Danger => button::Appearance {
                 background: Some(alpha(danger(), if hovered { 0.24 } else { 0.14 }).into()),
                 text_color: danger(),
-                border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(danger(), 0.45) },
+                border: Border {
+                    radius: R_BUTTON.into(),
+                    width: 1.0,
+                    color: alpha(danger(), 0.45),
+                },
                 ..Default::default()
             },
             Role::ThemeCard { selected } => button::Appearance {
@@ -1288,24 +1380,41 @@ impl Btn {
                 ..Default::default()
             },
             Role::Window => button::Appearance {
-                background: if hovered { Some(alpha(text(), 0.10).into()) } else { None },
+                background: if hovered {
+                    Some(alpha(text(), 0.10).into())
+                } else {
+                    None
+                },
                 text_color: if hovered { text() } else { text_dim() },
-                border: Border { radius: 6.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             // Deliberately the same look as `Role::Window`: which of the two
             // decides the hover is the only difference, and the button must
             // not change appearance depending on who noticed the pointer.
             Role::WindowExternallyHovered { hovered } => button::Appearance {
-                background: if hovered { Some(alpha(text(), 0.10).into()) } else { None },
+                background: if hovered {
+                    Some(alpha(text(), 0.10).into())
+                } else {
+                    None
+                },
                 text_color: if hovered { text() } else { text_dim() },
-                border: Border { radius: 6.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Role::WindowClose => button::Appearance {
                 background: if hovered { Some(danger().into()) } else { None },
                 text_color: if hovered { Color::WHITE } else { text_dim() },
-                border: Border { radius: 6.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Role::HeadRing => button::Appearance {
@@ -1330,8 +1439,17 @@ impl Btn {
                 } else {
                     None
                 },
-                text_color: if active { accent() } else if hovered { text() } else { text_muted() },
-                border: Border { radius: R_PANE.into(), ..Default::default() },
+                text_color: if active {
+                    accent()
+                } else if hovered {
+                    text()
+                } else {
+                    text_muted()
+                },
+                border: Border {
+                    radius: R_PANE.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         }
@@ -1394,7 +1512,11 @@ impl text_input::StyleSheet for Field {
     fn active(&self, _theme: &Theme) -> text_input::Appearance {
         text_input::Appearance {
             background: surface_input().into(),
-            border: Border { radius: R_BUTTON.into(), width: 1.0, color: border() },
+            border: Border {
+                radius: R_BUTTON.into(),
+                width: 1.0,
+                color: border(),
+            },
             icon_color: text_dim(),
         }
     }
@@ -1402,7 +1524,11 @@ impl text_input::StyleSheet for Field {
     fn focused(&self, _theme: &Theme) -> text_input::Appearance {
         text_input::Appearance {
             background: surface_input().into(),
-            border: Border { radius: R_BUTTON.into(), width: 1.0, color: accent() },
+            border: Border {
+                radius: R_BUTTON.into(),
+                width: 1.0,
+                color: accent(),
+            },
             icon_color: accent(),
         }
     }
@@ -1426,7 +1552,11 @@ impl text_input::StyleSheet for Field {
     fn disabled(&self, _theme: &Theme) -> text_input::Appearance {
         text_input::Appearance {
             background: alpha(surface_input(), 0.6).into(),
-            border: Border { radius: R_BUTTON.into(), width: 1.0, color: alpha(border(), 0.6) },
+            border: Border {
+                radius: R_BUTTON.into(),
+                width: 1.0,
+                color: alpha(border(), 0.6),
+            },
             icon_color: alpha(text_dim(), 0.5),
         }
     }
@@ -1580,10 +1710,20 @@ impl Thin {
             container: container::Appearance::default(),
             scrollbar: scrollable::Scrollbar {
                 background: None,
-                border: Border { radius: 6.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 scroller: scrollable::Scroller {
-                    color: if mouse_over { alpha(accent(), 0.62) } else { alpha(text(), 0.24) },
-                    border: Border { radius: 6.0.into(), ..Default::default() },
+                    color: if mouse_over {
+                        alpha(accent(), 0.62)
+                    } else {
+                        alpha(text(), 0.24)
+                    },
+                    border: Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
                 },
             },
             gap: None,
@@ -1622,7 +1762,12 @@ impl Dropdown {
             text_color: text(),
             placeholder_color: text_dim(),
             handle_color: if hovered { text() } else { text_muted() },
-            background: if hovered { surface_hover() } else { surface_input() }.into(),
+            background: if hovered {
+                surface_hover()
+            } else {
+                surface_input()
+            }
+            .into(),
             border: Border {
                 radius: R_BUTTON.into(),
                 width: 1.0,
@@ -1651,7 +1796,11 @@ impl menu::StyleSheet for Dropdown {
         menu::Appearance {
             text_color: text(),
             background: surface_hover().into(),
-            border: Border { radius: R_BUTTON.into(), width: 1.0, color: border_strong() },
+            border: Border {
+                radius: R_BUTTON.into(),
+                width: 1.0,
+                color: border_strong(),
+            },
             selected_text_color: accent(),
             selected_background: alpha(accent(), 0.16).into(),
         }
@@ -1674,7 +1823,11 @@ pub struct Tick;
 impl Tick {
     fn appearance(&self, checked: bool) -> checkbox::Appearance {
         checkbox::Appearance {
-            background: if checked { accent().into() } else { surface_input().into() },
+            background: if checked {
+                accent().into()
+            } else {
+                surface_input().into()
+            },
             icon_color: on_accent(),
             border: Border {
                 radius: 4.0.into(),
@@ -1722,7 +1875,9 @@ mod tests {
     /// it asserted about. That is a failure decided by the schedule rather than
     /// by the code, which is what this lock exists to remove.
     fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
-        THEME_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        THEME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// sRGB relative luminance, for the contrast checks below.
@@ -1769,10 +1924,18 @@ mod tests {
         let dark = Palette::dark();
         assert_eq!(
             (dark.bg.r, dark.bg.g, dark.bg.b),
-            (0x16 as f32 / 255.0, 0x18 as f32 / 255.0, 0x1C as f32 / 255.0)
+            (
+                0x16 as f32 / 255.0,
+                0x18 as f32 / 255.0,
+                0x1C as f32 / 255.0
+            )
         );
         let accent = rgb(0x1B, 0xD9, 0x6A);
-        assert!((accent.g - 0.851).abs() < 0.002, "accent green channel: {}", accent.g);
+        assert!(
+            (accent.g - 0.851).abs() < 0.002,
+            "accent green channel: {}",
+            accent.g
+        );
         assert_eq!(alpha(text(), 0.5).a, 0.5);
         assert_eq!(alpha(text(), 0.5).r, text().r);
     }
@@ -1790,11 +1953,18 @@ mod tests {
         // black because it still has to read as a plane beside the page, and
         // that is exactly what the design system does with it.
         assert!(luminance(light.bg) > 0.8, "light chrome should be bright");
-        assert!(luminance(dark.bg) < 0.05, "dark chrome should be near-black");
+        assert!(
+            luminance(dark.bg) < 0.05,
+            "dark chrome should be near-black"
+        );
         assert_eq!((oled.bg.r, oled.bg.g, oled.bg.b), (0.0, 0.0, 0.0));
         assert_eq!(
             (oled.bg_rail.r, oled.bg_rail.g, oled.bg_rail.b),
-            (0x05 as f32 / 255.0, 0x05 as f32 / 255.0, 0x06 as f32 / 255.0)
+            (
+                0x05 as f32 / 255.0,
+                0x05 as f32 / 255.0,
+                0x06 as f32 / 255.0
+            )
         );
         assert!(
             luminance(oled.bg_rail) < luminance(dark.bg_rail),
@@ -1806,8 +1976,14 @@ mod tests {
         );
 
         // Text has to follow its own background: dark-on-light, light-on-dark.
-        assert!(luminance(light.text) < luminance(light.bg), "light theme needs dark text");
-        assert!(luminance(dark.text) > luminance(dark.bg), "dark theme needs light text");
+        assert!(
+            luminance(light.text) < luminance(light.bg),
+            "light theme needs dark text"
+        );
+        assert!(
+            luminance(dark.text) > luminance(dark.bg),
+            "dark theme needs light text"
+        );
         for palette in [dark, light, oled] {
             assert!(
                 contrast(palette.text, palette.bg) >= 7.0,
@@ -1833,7 +2009,12 @@ mod tests {
     #[test]
     fn theme_ids_round_trip_through_the_settings_file() {
         for theme in ColorTheme::ALL {
-            assert_eq!(ColorTheme::from_id(theme.id()), theme, "{} did not round-trip", theme.id());
+            assert_eq!(
+                ColorTheme::from_id(theme.id()),
+                theme,
+                "{} did not round-trip",
+                theme.id()
+            );
         }
         // A hand-edited or future file must open, not fail.
         assert_eq!(ColorTheme::from_id("OLED"), ColorTheme::Oled);
@@ -1856,7 +2037,10 @@ mod tests {
         assert_eq!(color_theme(), ColorTheme::Light);
         assert_eq!(bg(), Palette::light().bg);
         assert_eq!(app_theme().palette().background, Palette::light().bg);
-        assert_eq!(card(&app_theme()).background, Some(Palette::light().surface.into()));
+        assert_eq!(
+            card(&app_theme()).background,
+            Some(Palette::light().surface.into())
+        );
 
         set_color_theme(ColorTheme::Oled);
         assert_eq!(bg(), Palette::oled().bg);
@@ -1982,7 +2166,11 @@ mod tests {
     fn measured_tokens_keep_their_measured_values() {
         let _guard = theme_lock();
         let palette = Palette::dark();
-        assert_eq!(palette.accent, rgb(0x00, 0xDA, 0x75), "the accent is the app's own paint");
+        assert_eq!(
+            palette.accent,
+            rgb(0x00, 0xDA, 0x75),
+            "the accent is the app's own paint"
+        );
         assert_eq!(
             palette.brand_highlight,
             rgb(0x1D, 0x55, 0x40),
@@ -2005,8 +2193,15 @@ mod tests {
             a: 1.0,
         };
         let expect = palette.brand_highlight;
-        for (got, want) in [(mixed.r, expect.r), (mixed.g, expect.g), (mixed.b, expect.b)] {
-            assert!((got - want).abs() <= 0.01, "accent@25% over chrome should be the highlight");
+        for (got, want) in [
+            (mixed.r, expect.r),
+            (mixed.g, expect.g),
+            (mixed.b, expect.b),
+        ] {
+            assert!(
+                (got - want).abs() <= 0.01,
+                "accent@25% over chrome should be the highlight"
+            );
         }
     }
 
@@ -2047,7 +2242,10 @@ mod tests {
         assert_eq!(hover_brightness(), 0.9);
         let light_rest = button::StyleSheet::active(&primary(), &theme);
         let light_hover = button::StyleSheet::hovered(&primary(), &theme);
-        assert!(luminance(fill(light_hover)) < luminance(fill(light_rest)), "light mode hovers by darkening");
+        assert!(
+            luminance(fill(light_hover)) < luminance(fill(light_rest)),
+            "light mode hovers by darkening"
+        );
 
         set_color_theme(ColorTheme::Dark);
     }
@@ -2063,7 +2261,10 @@ mod tests {
 
         let rest = button::StyleSheet::active(&head_ring(), &theme);
         let hover = button::StyleSheet::hovered(&head_ring(), &theme);
-        assert!(rest.background.is_none(), "the ring is a border and a label, not a fill");
+        assert!(
+            rest.background.is_none(),
+            "the ring is a border and a label, not a fill"
+        );
         assert!(luminance(hover.text_color) > luminance(rest.text_color));
         assert!(luminance(hover.border.color) > luminance(rest.border.color));
 
@@ -2098,7 +2299,10 @@ mod tests {
         let chosen = button::StyleSheet::active(&card_area(true), &theme);
         assert!(idle.background.is_none());
         assert!(chosen.background.is_some());
-        assert_ne!(card_selected(&theme).border.color, card(&theme).border.color);
+        assert_ne!(
+            card_selected(&theme).border.color,
+            card(&theme).border.color
+        );
         assert_eq!(pill(accent())(&theme).background, Some(accent().into()));
         assert!(token_pill(&theme).background.is_some());
     }
@@ -2134,9 +2338,18 @@ mod tests {
         assert_eq!(card(&theme).border.radius, R_CARD.into());
         assert_eq!(inset(&theme).background, Some(surface_input().into()));
         assert_eq!(chip(&theme).text_color, Some(accent()));
-        assert_eq!(text_input::StyleSheet::placeholder_color(&Field, &theme), text_dim());
-        assert_eq!(text_input::StyleSheet::focused(&Field, &theme).border.color, accent());
-        assert_eq!(text_input::StyleSheet::active(&Field, &theme).border.color, border());
+        assert_eq!(
+            text_input::StyleSheet::placeholder_color(&Field, &theme),
+            text_dim()
+        );
+        assert_eq!(
+            text_input::StyleSheet::focused(&Field, &theme).border.color,
+            accent()
+        );
+        assert_eq!(
+            text_input::StyleSheet::active(&Field, &theme).border.color,
+            border()
+        );
         let idle = scrollable::StyleSheet::active(&Thin, &theme);
         let hovering = scrollable::StyleSheet::hovered(&Thin, &theme, true);
         assert!(hovering.scrollbar.scroller.color.a > idle.scrollbar.scroller.color.a);
@@ -2147,7 +2360,10 @@ mod tests {
         let field = pick_list::StyleSheet::active(&Dropdown, &theme);
         assert_eq!(field.text_color, text());
         assert_eq!(field.background, surface_input().into());
-        assert_eq!(pick_list::StyleSheet::hovered(&Dropdown, &theme).background, surface_hover().into());
+        assert_eq!(
+            pick_list::StyleSheet::hovered(&Dropdown, &theme).background,
+            surface_hover().into()
+        );
         let open = menu::StyleSheet::appearance(&Dropdown, &theme);
         assert_eq!(open.background, surface_hover().into());
         assert_eq!(open.selected_text_color, accent());
@@ -2157,7 +2373,13 @@ mod tests {
         let on = checkbox::StyleSheet::active(&Tick, &theme, true);
         assert_eq!(on.background, accent().into());
         assert_ne!(off.background, on.background);
-        assert!(on.text_color.expect("checked boxes need a label colour").r > off.text_color.expect("unchecked boxes need a label colour").r);
+        assert!(
+            on.text_color.expect("checked boxes need a label colour").r
+                > off
+                    .text_color
+                    .expect("unchecked boxes need a label colour")
+                    .r
+        );
         // The dialog is a flat bordered surface: a blurred shadow of this size
         // is both expensive and, on tiny-skia, destructive to the card's own
         // contents (see `modal`).
@@ -2177,11 +2399,18 @@ mod tests {
         // `splash_sample` is the arithmetic the tokens describe.
         let background = splash_background_at(1.0);
         let stops: Vec<_> = background.stops.iter().flatten().collect();
-        assert_eq!(stops.len(), 3, "two tint stops and the flat bottom past 97.29%");
+        assert_eq!(
+            stops.len(),
+            3,
+            "two tint stops and the flat bottom past 97.29%"
+        );
         assert_eq!(stops[0].offset, 0.0);
         assert_eq!(stops[1].offset, SPLASH_TINT_STOP);
         assert_eq!(stops[2].offset, 1.0);
-        assert_eq!(stops[1].color, stops[2].color, "the last 2.7% does not move");
+        assert_eq!(
+            stops[1].color, stops[2].color,
+            "the last 2.7% does not move"
+        );
         for (stop, expected) in stops.iter().zip([rgb(26, 35, 34), rgb(21, 26, 31)]) {
             let got = stop.color;
             assert!(
@@ -2191,7 +2420,10 @@ mod tests {
                 "{:?} is not the resolved layer stack",
                 got
             );
-            assert_eq!(got.a, 1.0, "three layers over an opaque base leave nothing translucent");
+            assert_eq!(
+                got.a, 1.0,
+                "three layers over an opaque base leave nothing translucent"
+            );
         }
     }
 

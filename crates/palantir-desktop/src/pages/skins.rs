@@ -494,8 +494,6 @@ const WEAR_KEY: &str = "skins:wear";
 const DOLL_WIDTH: f32 = 96.0;
 const DOLL_HEIGHT: f32 = 192.0;
 
-
-
 /// The top or bottom edge of the add cell's dashed ring: [`DASHES_ACROSS`]
 /// dashes and the gaps between them, the dash one share of the six-pixel
 /// period and the gap two.
@@ -668,8 +666,6 @@ const ADD_CARD_PAD: f32 = 12.0;
 const ADD_LABEL_LINE: f32 = 24.0;
 const ADD_SUBTITLE_LINE: f32 = 20.0;
 
-
-
 /// The demo banner's own padding: `p-4 pt-0` on the block that holds it --
 /// 16 on both sides and under it, none above, because the block sits against
 /// the pane it is stuck to.
@@ -722,8 +718,6 @@ const DASHES_ACROSS: usize = 32;
 /// And down: 41 over the 247 pixels inside the cell's own 249, a 6.02 period.
 const DASHES_DOWN: usize = 41;
 
-
-
 /// Which sections are open, in [`Section::ALL`]'s order.
 ///
 /// A flag per section rather than the one-open accordion this page carried
@@ -759,7 +753,10 @@ impl Expanded {
 
     /// Toggle one section, leaving every other one where it is.
     pub fn toggle(&mut self, section: Section) {
-        if let Some(index) = Section::ALL.iter().position(|candidate| *candidate == section) {
+        if let Some(index) = Section::ALL
+            .iter()
+            .position(|candidate| *candidate == section)
+        {
             if let Some(flag) = self.0.get_mut(index) {
                 *flag = !*flag;
             }
@@ -809,7 +806,7 @@ impl State {
     pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Select(section) => self.open.toggle(section),
             Message::AddSkin => {
@@ -1097,7 +1094,10 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
             .size(BANNER_TITLE)
             .line_height(iced::Pixels(BANNER_LINE))
             .font(crate::style::semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST
+            ))),
         text(Key::AppSkinsDemoDescription.message())
             .size(BANNER_DESCRIPTION)
             .line_height(iced::Pixels(BANNER_LINE))
@@ -1148,7 +1148,10 @@ fn demo_banner<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>>
     .width(Length::Fill)
     .padding(BANNER_INSET)
     .style(move |_theme: &Theme| container::Appearance {
-        background: Some(iced::Background::Color(theme_gen::ink(theme, Ink::Surface3))),
+        background: Some(iced::Background::Color(theme_gen::ink(
+            theme,
+            Ink::Surface3,
+        ))),
         border: iced::Border {
             color: theme_gen::ink(theme, Ink::Surface5),
             width: 1.0,
@@ -1234,7 +1237,10 @@ fn preview_column<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         // (800): both headings are the reference's, and the reference's own
         // classes differ by exactly this.
         .font(crate::style::inter(iced::font::Weight::Bold))
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into();
     let body: Element<'a, Message> = match &state.appearance {
         Load::Ready(appearance) => preview_body(theme, appearance, state.wearing),
@@ -1276,7 +1282,9 @@ fn preview_box<'a>(
     model: Element<'a, Message>,
     subtitle: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let mut inner = column![model].spacing(PREVIEW_SUBTITLE_GAP).width(Length::Fill);
+    let mut inner = column![model]
+        .spacing(PREVIEW_SUBTITLE_GAP)
+        .width(Length::Fill);
     if let Some(subtitle) = subtitle {
         inner = inner.push(subtitle);
     }
@@ -1318,7 +1326,10 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
         )
         .size(13.0)
         .font(crate::style::medium())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )))
         .into(),
     };
     // The block under the model: the nametag, the sentence about what Minecraft
@@ -1353,7 +1364,11 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
         let Some(action) = wear_skin(skin, wearing) else {
             continue;
         };
-        let identity = if skin.id.is_empty() { index.to_string() } else { skin.id.clone() };
+        let identity = if skin.id.is_empty() {
+            index.to_string()
+        } else {
+            skin.id.clone()
+        };
         body = body.push(owned_row(
             theme,
             &variant_label(&skin.variant),
@@ -1368,11 +1383,21 @@ fn preview_body<'a>(theme: Gen, appearance: &'a Appearance, wearing: bool) -> El
         body = body.push(caption(theme, Key::AppSkinsModalNoneCapeOption.message()));
     }
     for cape in &appearance.capes {
-        let name = if cape.alias.is_empty() { cape.id.as_str() } else { cape.alias.as_str() };
+        let name = if cape.alias.is_empty() {
+            cape.id.as_str()
+        } else {
+            cape.alias.as_str()
+        };
         // One answer for which cape is in force rather than each row's own state:
         // asked once, the rows and the doll above cannot disagree about it.
-        let worn = appearance.equipped_cape().is_some_and(|worn| worn.id == cape.id);
-        let identity = if cape.id.is_empty() { name.to_string() } else { cape.id.clone() };
+        let worn = appearance
+            .equipped_cape()
+            .is_some_and(|worn| worn.id == cape.id);
+        let identity = if cape.id.is_empty() {
+            name.to_string()
+        } else {
+            cape.id.clone()
+        };
         body = body.push(owned_row(
             theme,
             name,
@@ -1425,7 +1450,11 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
         // reference's Tailwind calls `--color-text-default`.
         let mut head = row![
             icon::icon(
-                if open { Glyph::ChevronUp } else { Glyph::ChevronDown },
+                if open {
+                    Glyph::ChevronUp
+                } else {
+                    Glyph::ChevronDown
+                },
                 SECTION_ICON,
                 theme_gen::ink(theme, INK_DEFAULT),
             ),
@@ -1456,15 +1485,13 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
                 theme_gen::ink(theme, INK_DEFAULT),
                 amount,
             );
-            head = head
-                .push(Space::with_width(SECTION_ICON_GAP))
-                .push(
-                    container(icon::icon(Glyph::Unknown, SECTION_INFO, ink))
-                        .width(Length::Fixed(SECTION_ICON))
-                        .height(Length::Fixed(SECTION_ICON))
-                        .center_x()
-                        .center_y(),
-                );
+            head = head.push(Space::with_width(SECTION_ICON_GAP)).push(
+                container(icon::icon(Glyph::Unknown, SECTION_INFO, ink))
+                    .width(Length::Fixed(SECTION_ICON))
+                    .height(Length::Fixed(SECTION_ICON))
+                    .center_x()
+                    .center_y(),
+            );
         }
         let head = head
             .height(Length::Fixed(SECTION_HEIGHT))
@@ -1474,8 +1501,16 @@ fn section_list<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'
         if marked {
             let key = info_key(*section);
             area = area
-                .on_enter(Message::Hover { key, over: true, hover: None })
-                .on_exit(Message::Hover { key, over: false, hover: None });
+                .on_enter(Message::Hover {
+                    key,
+                    over: true,
+                    hover: None,
+                })
+                .on_exit(Message::Hover {
+                    key,
+                    over: false,
+                    hover: None,
+                });
         }
         list = list.push(area.on_release(Message::Select(*section)));
         if open {
@@ -1580,7 +1615,10 @@ fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
                 .size(16.0)
                 .line_height(iced::Pixels(ADD_LABEL_LINE))
                 .font(crate::style::semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST
+                ))),
             text(Key::AppSkinsAddButtonDragAndDrop.message())
                 .size(14.0)
                 .line_height(iced::Pixels(ADD_SUBTITLE_LINE))
@@ -1606,30 +1644,38 @@ fn add_card<'a>(theme: Gen, live: bool) -> Element<'a, Message> {
             left: ADD_CARD_PAD,
             right: ADD_CARD_PAD,
         });
-    let sides = row![dash_column(theme), body, dash_column(theme)]
-        .height(Length::Fixed(CARD_HEIGHT - 2.0));
+    let sides =
+        row![dash_column(theme), body, dash_column(theme)].height(Length::Fixed(CARD_HEIGHT - 2.0));
     let cell = container(
         column![dash_row(theme), sides, dash_row(theme)]
             .width(Length::Fill)
             .height(Length::Fill),
     )
-        .width(Length::FillPortion(1))
-        .height(Length::Fixed(CARD_HEIGHT))
-        .style(move |_theme: &Theme| container::Appearance {
-            background: Some(iced::Background::Color(background)),
-            // No border of its own: the ring above is the border, and it is the
-            // dashed one.
-            border: iced::Border {
-                color: iced::Color::TRANSPARENT,
-                width: 0.0,
-                radius: CARD_RADIUS.into(),
-            },
-            ..container::Appearance::default()
-        });
+    .width(Length::FillPortion(1))
+    .height(Length::Fixed(CARD_HEIGHT))
+    .style(move |_theme: &Theme| container::Appearance {
+        background: Some(iced::Background::Color(background)),
+        // No border of its own: the ring above is the border, and it is the
+        // dashed one.
+        border: iced::Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
+            radius: CARD_RADIUS.into(),
+        },
+        ..container::Appearance::default()
+    });
     let area = mouse_area(cell)
         .interaction(iced::mouse::Interaction::Pointer)
-        .on_enter(Message::Hover { key: ADD_KEY, over: true, hover: None })
-        .on_exit(Message::Hover { key: ADD_KEY, over: false, hover: None });
+        .on_enter(Message::Hover {
+            key: ADD_KEY,
+            over: true,
+            hover: None,
+        })
+        .on_exit(Message::Hover {
+            key: ADD_KEY,
+            over: false,
+            hover: None,
+        });
     // Unusable while a change is in flight, like every other write on this
     // page: the dialog is modal, so a second press would be a second dialog.
     if live {
@@ -1674,11 +1720,13 @@ fn saved_card<'a>(
     // renderer loads it once and keeps it; a store with no home (a test) draws
     // no picture rather than a broken one.
     let picture: Element<'a, Message> = match store.paths() {
-        Some(home) => image(image::Handle::from_path(saved_skins::texture_path(home, &row.entry)))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .content_fit(ContentFit::Contain)
-            .into(),
+        Some(home) => image(image::Handle::from_path(saved_skins::texture_path(
+            home, &row.entry,
+        )))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .content_fit(ContentFit::Contain)
+        .into(),
         None => Space::with_height(Length::Fill).into(),
     };
     // A press on the picture opens the editor, the way the reference's hover
@@ -1687,7 +1735,9 @@ fn saved_card<'a>(
     let picture: Element<'a, Message> = if live {
         mouse_area(picture)
             .interaction(iced::mouse::Interaction::Pointer)
-            .on_release(Message::Edit { key: row.entry.key.clone() })
+            .on_release(Message::Edit {
+                key: row.entry.key.clone(),
+            })
             .into()
     } else {
         picture
@@ -1734,12 +1784,24 @@ fn saved_card<'a>(
         })
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(iced::Background::Color(background)),
-            border: iced::Border { color: border, width: 1.0, radius: CARD_RADIUS.into() },
+            border: iced::Border {
+                color: border,
+                width: 1.0,
+                radius: CARD_RADIUS.into(),
+            },
             ..container::Appearance::default()
         });
     mouse_area(cell)
-        .on_enter(Message::Hover { key, over: true, hover: None })
-        .on_exit(Message::Hover { key, over: false, hover: None })
+        .on_enter(Message::Hover {
+            key,
+            over: true,
+            hover: None,
+        })
+        .on_exit(Message::Hover {
+            key,
+            over: false,
+            hover: None,
+        })
         .into()
 }
 
@@ -1833,7 +1895,11 @@ fn proceed_glyph() -> Glyph {
 /// first while a write of this page's is on its way. The spin is the part iced
 /// cannot draw: nothing redraws a frame without an event to draw it for.
 fn save_glyph(saving: bool) -> Glyph {
-    if saving { Glyph::Spinner } else { Glyph::Save }
+    if saving {
+        Glyph::Spinner
+    } else {
+        Glyph::Save
+    }
 }
 
 /// Whether the editor holds an edit worth saving.
@@ -1935,10 +2001,16 @@ pub fn edit_view<'a>(
             }
         }
         cape_list = cape_list.push(ui::chips(theme, &keys, &labels, move |index| {
-            Some(Message::Cape { id: ids.get(index).cloned().unwrap_or_default() })
+            Some(Message::Cape {
+                id: ids.get(index).cloned().unwrap_or_default(),
+            })
         }));
     }
-    body = body.push(section(theme, Key::AppSkinsModalCapeSection.message(), cape_list.into()));
+    body = body.push(section(
+        theme,
+        Key::AppSkinsModalCapeSection.message(),
+        cape_list.into(),
+    ));
     // The actions. The reference's own row is `flex gap-2 justify-end` -- Cancel
     // then Save, both at the right-hand end, 8 apart -- so the fill goes first and
     // Save, which is the last control in the reference's row too, is the last
@@ -2060,14 +2132,26 @@ fn arm_choice<'a>(
     // fill-less type, because that is the number that is 0 at rest and 1 under
     // the pointer; the clock's own second number is the hover *end* it was told.
     let travel = crate::theme::hover_brightness() - 1.0;
-    let over = if travel == 0.0 { 0.0 } else { ((factor - 1.0) / travel).clamp(0.0, 1.0) };
-    let fill = if selected { plate } else { Color { a: over, ..plate } };
+    let over = if travel == 0.0 {
+        0.0
+    } else {
+        ((factor - 1.0) / travel).clamp(0.0, 1.0)
+    };
+    let fill = if selected {
+        plate
+    } else {
+        Color { a: over, ..plate }
+    };
     let face = row![]
         .spacing(ARM_GAP)
         .align_items(Alignment::Center)
         .width(Length::Shrink)
         .push(icon::icon(
-            if selected { Glyph::RadioButtonChecked } else { Glyph::RadioButton },
+            if selected {
+                Glyph::RadioButtonChecked
+            } else {
+                Glyph::RadioButton
+            },
             ARM_RADIO,
             crate::theme::brightness(radio, factor),
         ))
@@ -2075,7 +2159,9 @@ fn arm_choice<'a>(
             text(label.to_string())
                 .size(ARM_LABEL)
                 .font(crate::style::medium())
-                .style(iced::theme::Text::Color(crate::theme::brightness(ink, factor))),
+                .style(iced::theme::Text::Color(crate::theme::brightness(
+                    ink, factor,
+                ))),
         );
     let button = container(face)
         .width(Length::Shrink)
@@ -2088,13 +2174,24 @@ fn arm_choice<'a>(
         .style(move |_theme: &Theme| container::Appearance {
             background: Some(Background::Color(crate::theme::brightness(fill, factor))),
             // `border-0` in the class list, so a radius and nothing else.
-            border: Border { radius: ARM_RADIUS.into(), ..Border::default() },
+            border: Border {
+                radius: ARM_RADIUS.into(),
+                ..Border::default()
+            },
             ..container::Appearance::default()
         });
     mouse_area(button)
         .interaction(iced::mouse::Interaction::Pointer)
-        .on_enter(Message::Hover { key, over: true, hover: None })
-        .on_exit(Message::Hover { key, over: false, hover: None })
+        .on_enter(Message::Hover {
+            key,
+            over: true,
+            hover: None,
+        })
+        .on_exit(Message::Hover {
+            key,
+            over: false,
+            hover: None,
+        })
         .on_release(on_press)
         .into()
 }
@@ -2137,12 +2234,10 @@ const EDITOR_HEADING_GAP: f32 = 8.0;
 ///
 /// The `<section>` element itself, which is a `flex-col` child of the column
 /// with nothing between it and its own contents except the heading's `mb-2`.
-fn section<'a>(
-    theme: Gen,
-    label: &str,
-    control: Element<'a, Message>,
-) -> Element<'a, Message> {
-    column![heading(theme, label), control].spacing(EDITOR_HEADING_GAP).into()
+fn section<'a>(theme: Gen, label: &str, control: Element<'a, Message>) -> Element<'a, Message> {
+    column![heading(theme, label), control]
+        .spacing(EDITOR_HEADING_GAP)
+        .into()
 }
 
 /// How many capes the reference's cape list draws to a row.
@@ -2234,12 +2329,9 @@ fn ears_notice<'a>(theme: Gen) -> Element<'a, Message> {
         .align_items(Alignment::Center)
         .push(caption(theme, before))
         .push(
-            iced::widget::mouse_area(
-                text("Ears")
-                    .size(13.0)
-                    .font(crate::style::medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, Ink::AccentContrast))),
-            )
+            iced::widget::mouse_area(text("Ears").size(13.0).font(crate::style::medium()).style(
+                iced::theme::Text::Color(theme_gen::ink(theme, Ink::AccentContrast)),
+            ))
             .interaction(iced::mouse::Interaction::Pointer)
             .on_release(Message::OpenEars),
         )
@@ -2268,7 +2360,9 @@ fn wear_cape(cape: &palantir_net::MinecraftCape, worn: bool, wearing: bool) -> O
     if worn || wearing {
         return None;
     }
-    Some(Message::Wear(SkinChange::Cape { id: cape.id.clone() }))
+    Some(Message::Wear(SkinChange::Cape {
+        id: cape.id.clone(),
+    }))
 }
 
 /// The order a move would write, or `None` when the press would change nothing.
@@ -2339,13 +2433,7 @@ fn owned_row<'a>(
     // drawn unusable rather than dropped while a change is in flight (`None`,
     // which is what `button_or` takes for that): a second press would be a second
     // write to the reader's own account.
-    let line = line.push(ui::button_or(
-        theme,
-        key,
-        label,
-        ui::Kind::Standard,
-        action,
-    ));
+    let line = line.push(ui::button_or(theme, key, label, ui::Kind::Standard, action));
     // Named rather than inferred: `ui::card` takes `impl Into<Element>`, and an
     // `into()` inside that is a conversion with two possible targets.
     let row: Element<'a, Message> = line.into();
@@ -2357,7 +2445,10 @@ fn heading<'a>(theme: Gen, label: &str) -> Element<'a, Message> {
     text(label.to_string())
         .size(16.0)
         .font(crate::style::semibold())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into()
 }
 
@@ -2366,14 +2457,20 @@ fn caption<'a>(theme: Gen, line: &str) -> Element<'a, Message> {
     text(line.to_string())
         .size(13.0)
         .font(crate::style::medium())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )))
         .into()
 }
 
 /// The one sentence about the skin in force, from the document's own vocabulary.
 fn wearing_line(appearance: &Appearance) -> String {
     match appearance.equipped() {
-        Some(skin) => format!("Wearing the {} skin", variant_label(&skin.variant).to_lowercase()),
+        Some(skin) => format!(
+            "Wearing the {} skin",
+            variant_label(&skin.variant).to_lowercase()
+        ),
         None => "Minecraft does not say which skin is in force.".to_string(),
     }
 }
@@ -2421,10 +2518,19 @@ mod tests {
         assert!(state.open.is_open(Section::SavedSkins));
         assert!(state.open.is_open(Section::TheCopperAge));
         state.update(Message::Select(Section::Modrinth));
-        assert!(!state.open.is_open(Section::Modrinth), "its own header closes it");
-        assert!(state.open.is_open(Section::SavedSkins), "and leaves the others");
+        assert!(
+            !state.open.is_open(Section::Modrinth),
+            "its own header closes it"
+        );
+        assert!(
+            state.open.is_open(Section::SavedSkins),
+            "and leaves the others"
+        );
         state.update(Message::Select(Section::Modrinth));
-        assert!(state.open.is_open(Section::Modrinth), "pressing again opens it");
+        assert!(
+            state.open.is_open(Section::Modrinth),
+            "pressing again opens it"
+        );
     }
 
     #[test]
@@ -2456,15 +2562,29 @@ mod tests {
         // the same state: the answer a read with no Microsoft session gets,
         // which is a sentence rather than a request.
         let store = Store::default();
-        assert!(demo_banner(Gen::ALL[0], &State::default()).is_none(), "not asked for yet");
-        let waiting = State { appearance: Load::Loading, ..State::default() };
-        assert!(demo_banner(Gen::ALL[0], &waiting).is_none(), "still waiting on the read");
+        assert!(
+            demo_banner(Gen::ALL[0], &State::default()).is_none(),
+            "not asked for yet"
+        );
+        let waiting = State {
+            appearance: Load::Loading,
+            ..State::default()
+        };
+        assert!(
+            demo_banner(Gen::ALL[0], &waiting).is_none(),
+            "still waiting on the read"
+        );
         let nobody = State {
-            appearance: Load::Failed("Sign in to a Microsoft account to see the skins it owns.".into()),
+            appearance: Load::Failed(
+                "Sign in to a Microsoft account to see the skins it owns.".into(),
+            ),
             ..State::default()
         };
         for theme in Gen::ALL {
-            assert!(demo_banner(*theme, &nobody).is_some(), "nobody is signed in");
+            assert!(
+                demo_banner(*theme, &nobody).is_some(),
+                "nobody is signed in"
+            );
             drop(view(*theme, &nobody, &store));
         }
         // An account's own appearance in hand is the other state, and the
@@ -2472,7 +2592,10 @@ mod tests {
         let signed_in = State {
             appearance: Load::Ready(crate::skin::Appearance::of(
                 "Steve",
-                palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+                palantir_net::MinecraftSkins {
+                    skins: vec![],
+                    capes: vec![],
+                },
                 Err("the network is down".into()),
             )),
             ..State::default()
@@ -2484,14 +2607,21 @@ mod tests {
             appearance: Load::Failed("error sending request for url (...)".into()),
             ..State::default()
         };
-        assert!(demo_banner(Gen::ALL[0], &broken).is_none(), "a failure is not a sign-out");
-        assert!(signed_out("Sign in to a Microsoft account to see the skins it owns."));
-        assert!(signed_out("Sign in to a Microsoft account to change what it wears."));
-        assert!(!signed_out("Minecraft does not say which skin is in force."));
+        assert!(
+            demo_banner(Gen::ALL[0], &broken).is_none(),
+            "a failure is not a sign-out"
+        );
+        assert!(signed_out(
+            "Sign in to a Microsoft account to see the skins it owns."
+        ));
+        assert!(signed_out(
+            "Sign in to a Microsoft account to change what it wears."
+        ));
+        assert!(!signed_out(
+            "Minecraft does not say which skin is in force."
+        ));
         assert!(!signed_out("error sending request for url (...)"));
     }
-
-    
 
     #[test]
     fn the_add_cell_s_dashed_ring_is_the_reference_s_own_pattern() {
@@ -2521,7 +2651,10 @@ mod tests {
     fn the_add_cell_s_two_lines_take_the_reference_s_own_line_heights() {
         // `leading-6` over `leading-5`, and the group's own 94: a 32-pixel plus,
         // `gap-4`, a 24-pixel line, `gap-0.5` and a 20-pixel line.
-        assert_eq!(ADD_ICON + ADD_ICON_GAP + ADD_LABEL_LINE + ADD_LINE_GAP + ADD_SUBTITLE_LINE, 94.0);
+        assert_eq!(
+            ADD_ICON + ADD_ICON_GAP + ADD_LABEL_LINE + ADD_LINE_GAP + ADD_SUBTITLE_LINE,
+            94.0
+        );
         // And which is what puts the plus where the reference puts it. The group is
         // centred in the cell, so it starts 77.5 below the cell's top, and the
         // plus's ink -- four rows of it in the reference's capture, y203..206 --
@@ -2532,7 +2665,10 @@ mod tests {
         let ink = 4.0;
         let group_top = 112.0 + (CARD_HEIGHT - 94.0) / 2.0;
         let ink_top = group_top + (ADD_ICON - ink) / 2.0;
-        assert!((ink_top - 203.0).abs() < 1.0, "{ink_top} is not the reference's 203");
+        assert!(
+            (ink_top - 203.0).abs() < 1.0,
+            "{ink_top} is not the reference's 203"
+        );
     }
 
     #[test]
@@ -2541,7 +2677,11 @@ mod tests {
         // not built, so the press says so in the page's own notice rather than
         // being swallowed.
         let mut state = State::default();
-        assert_eq!(state.update(Message::SignIn), None, "and it asks nobody for it");
+        assert_eq!(
+            state.update(Message::SignIn),
+            None,
+            "and it asks nobody for it"
+        );
         let notice = state.notice.clone().expect("the press says something");
         assert!(notice.contains("Signing in to Minecraft"), "got {notice}");
         assert!(notice.ends_with("is not implemented yet."), "got {notice}");
@@ -2557,8 +2697,17 @@ mod tests {
         assert!(state.opening().is_none(), "asked once, not once per frame");
         // An answer to a question the page has replaced is dropped rather than
         // drawn: the round travels with it, which is what makes that decidable.
-        assert!(state.update(Message::Found { round: 0, result: Err("old".into()) }).is_none());
-        assert_eq!(state.appearance, Load::Loading, "so the stale one is not drawn");
+        assert!(state
+            .update(Message::Found {
+                round: 0,
+                result: Err("old".into())
+            })
+            .is_none());
+        assert_eq!(
+            state.appearance,
+            Load::Loading,
+            "so the stale one is not drawn"
+        );
         // The answer that does answer it becomes the page's own state, and a
         // failure stays a sentence rather than becoming an empty gallery.
         let appearance = crate::skin::Appearance::of(
@@ -2569,10 +2718,19 @@ mod tests {
         // What arrives is the two halves the shell read in one turn: the account's
         // appearance, and the launcher's own stored skins. Nothing is stored in this
         // test, so the second half is empty.
-        let loaded = Loaded { appearance, saved: Vec::new() };
-        state.update(Message::Found { round: asked.round, result: Ok(Box::new(loaded)) });
+        let loaded = Loaded {
+            appearance,
+            saved: Vec::new(),
+        };
+        state.update(Message::Found {
+            round: asked.round,
+            result: Ok(Box::new(loaded)),
+        });
         assert!(matches!(state.appearance, Load::Ready(_)));
-        state.update(Message::Found { round: asked.round, result: Err("signed out".into()) });
+        state.update(Message::Found {
+            round: asked.round,
+            result: Err("signed out".into()),
+        });
         assert_eq!(state.appearance, Load::Failed("signed out".into()));
     }
 
@@ -2588,7 +2746,11 @@ mod tests {
         assert_eq!(add.round, 1);
         assert!(state.wearing, "and the page waits on it");
         assert_eq!(state.notice, None);
-        assert_eq!(state.update(Message::AddSkin), None, "and a second press is dropped");
+        assert_eq!(
+            state.update(Message::AddSkin),
+            None,
+            "and a second press is dropped"
+        );
         assert!(state.wearing);
     }
 
@@ -2602,7 +2764,10 @@ mod tests {
             panic!("the press asks the shell for a file");
         };
         assert_eq!(
-            state.update(Message::Added { round: add.round, picked: Picked::Cancelled }),
+            state.update(Message::Added {
+                round: add.round,
+                picked: Picked::Cancelled
+            }),
             None,
             "a cancel asks for nothing"
         );
@@ -2620,7 +2785,11 @@ mod tests {
             None
         );
         assert!(!state.wearing);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("not a skin"));
+        assert!(state
+            .notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not a skin"));
 
         let Some(Ask::AddSkin(add)) = state.update(Message::AddSkin) else {
             panic!("asked a third time");
@@ -2630,7 +2799,11 @@ mod tests {
             picked: Picked::NoPicker("This build has no file picker".to_string()),
         });
         assert!(!state.wearing);
-        assert!(state.notice.as_deref().unwrap_or_default().contains("no file picker"));
+        assert!(state
+            .notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no file picker"));
     }
 
     #[test]
@@ -2644,25 +2817,34 @@ mod tests {
         // An answer to a request the page has replaced is dropped: the round is what
         // makes that decidable.
         assert_eq!(
-            state.update(Message::Added { round: 0, picked: Picked::Cancelled }),
+            state.update(Message::Added {
+                round: 0,
+                picked: Picked::Cancelled
+            }),
             None
         );
         assert!(state.wearing, "so the page is still waiting");
-        let Some(Ask::Skins(asked)) = state
-            .update(Message::Added { round: add.round, picked: Picked::Done(Ok(())) })
-        else {
+        let Some(Ask::Skins(asked)) = state.update(Message::Added {
+            round: add.round,
+            picked: Picked::Done(Ok(())),
+        }) else {
             panic!("an upload that worked reloads");
         };
         assert_eq!(asked.round, add.round + 1);
         assert_eq!(state.appearance, Load::Loading);
-        assert!(!state.wearing, "the request is finished even while the read is out");
+        assert!(
+            !state.wearing,
+            "the request is finished even while the read is out"
+        );
         assert_eq!(state.notice, None, "a success is not a sentence");
     }
 
     #[test]
     fn wearing_something_is_one_request_and_the_second_press_is_not_a_second_write() {
         let mut state = State::default();
-        let change = SkinChange::Cape { id: "cape-1".to_string() };
+        let change = SkinChange::Cape {
+            id: "cape-1".to_string(),
+        };
         let Some(Ask::Wear(worn)) = state.update(Message::Wear(change.clone())) else {
             panic!("the press asks the shell");
         };
@@ -2685,7 +2867,10 @@ mod tests {
         // And an answer to a change the page has replaced is dropped rather than
         // reported: the round is what makes that decidable.
         assert_eq!(
-            state.update(Message::Applied { round: 0, result: Err("old".to_string()) }),
+            state.update(Message::Applied {
+                round: 0,
+                result: Err("old".to_string())
+            }),
             None
         );
         assert!(state.notice.as_deref().unwrap_or_default().contains("nope"));
@@ -2700,12 +2885,18 @@ mod tests {
         // The answer to the write is not the answer to the read: the page asks
         // again, and the reload is what shows the check on the row that is now in
         // force.
-        let Some(Ask::Skins(asked)) = state.update(Message::Applied { round: worn.round, result: Ok(()) }) else {
+        let Some(Ask::Skins(asked)) = state.update(Message::Applied {
+            round: worn.round,
+            result: Ok(()),
+        }) else {
             panic!("a change that worked reloads");
         };
         assert_eq!(asked.round, worn.round + 1);
         assert_eq!(state.appearance, Load::Loading);
-        assert!(!state.wearing, "the press is finished even while the read is out");
+        assert!(
+            !state.wearing,
+            "the press is finished even while the read is out"
+        );
         assert_eq!(state.notice, None, "a success is not a sentence");
     }
 
@@ -2731,7 +2922,10 @@ mod tests {
         };
         assert_eq!(variant, "CLASSIC");
         assert!(url.ends_with("aaa"));
-        assert!(wear_skin(&cold_skin, true).is_none(), "not while one is in flight");
+        assert!(
+            wear_skin(&cold_skin, true).is_none(),
+            "not while one is in flight"
+        );
         let cape = palantir_net::MinecraftCape {
             id: "cape-1".to_string(),
             state: "INACTIVE".to_string(),
@@ -2743,7 +2937,10 @@ mod tests {
             Some(Message::Wear(SkinChange::Cape { id })) if id == "cape-1"
         ));
         assert!(wear_cape(&cape, true, false).is_none(), "it is already on");
-        assert!(wear_cape(&cape, false, true).is_none(), "something is in flight");
+        assert!(
+            wear_cape(&cape, false, true).is_none(),
+            "something is in flight"
+        );
     }
 
     #[test]
@@ -2757,7 +2954,10 @@ mod tests {
             closed.open.toggle(Section::SavedSkins);
             closed.open.toggle(Section::ModrinthPride);
             drop(view(*theme, &closed, &store));
-            let state = State { notice: Some("x".into()), ..State::default() };
+            let state = State {
+                notice: Some("x".into()),
+                ..State::default()
+            };
             drop(view(*theme, &state, &store));
             // And with an account's appearance in hand, which is the shape the page
             // is drawn in after the answer arrives -- including the one where the
@@ -2801,11 +3001,21 @@ mod tests {
             },
             ears: true,
         };
-        let mut state = State { saved: vec![row], ..State::default() };
+        let mut state = State {
+            saved: vec![row],
+            ..State::default()
+        };
         // A press on a row the page does not hold asks for nothing and opens nothing.
-        assert_eq!(state.update(Message::Edit { key: "nope".to_string() }), None);
+        assert_eq!(
+            state.update(Message::Edit {
+                key: "nope".to_string()
+            }),
+            None
+        );
         assert!(state.edit.is_none());
-        state.update(Message::Edit { key: "abc".to_string() });
+        state.update(Message::Edit {
+            key: "abc".to_string(),
+        });
         let edit = state.edit.clone().expect("the editor opened on the row");
         assert_eq!(edit.key, "abc");
         assert_eq!(edit.name, "my skin");
@@ -2814,12 +3024,20 @@ mod tests {
         assert!(edit.ears, "and the marker travels with it");
         // The two choices are the modal's own state, and neither asks anybody anything.
         assert_eq!(state.update(Message::ArmStyle { variant: "CLASSIC" }), None);
-        assert_eq!(state.update(Message::Cape { id: "cape-2".to_string() }), None);
+        assert_eq!(
+            state.update(Message::Cape {
+                id: "cape-2".to_string()
+            }),
+            None
+        );
         let edit = state.edit.as_ref().expect("still open");
         assert_eq!(edit.variant, "CLASSIC");
         assert_eq!(edit.cape, "cape-2");
         assert_eq!(state.update(Message::CloseEdit), None);
-        assert!(state.edit.is_none(), "and closing it is not a request either");
+        assert!(
+            state.edit.is_none(),
+            "and closing it is not a request either"
+        );
     }
 
     #[test]
@@ -2836,7 +3054,10 @@ mod tests {
                 act: Act::Save,
                 confirm: false,
             };
-            let mut state = State { edit: Some(opened), ..State::default() };
+            let mut state = State {
+                edit: Some(opened),
+                ..State::default()
+            };
             let Some(Ask::EditSkin(edit)) = state.update(Message::Act(act)) else {
                 panic!("the press asks the shell: {act:?}");
             };
@@ -2867,9 +3088,16 @@ mod tests {
             act: Act::Save,
             confirm: false,
         };
-        let mut state = State { round: 3, edit: Some(opened), wearing: true, ..State::default() };
-        let Some(Ask::Skins(asked)) = state.update(Message::Edited { round: 3, result: Ok(()) })
-        else {
+        let mut state = State {
+            round: 3,
+            edit: Some(opened),
+            wearing: true,
+            ..State::default()
+        };
+        let Some(Ask::Skins(asked)) = state.update(Message::Edited {
+            round: 3,
+            result: Ok(()),
+        }) else {
             panic!("a write that worked reloads");
         };
         assert_eq!(asked.round, 4);
@@ -2892,7 +3120,10 @@ mod tests {
         });
         state.wearing = true;
         assert_eq!(
-            state.update(Message::Edited { round: 4, result: Err("gone".to_string()) }),
+            state.update(Message::Edited {
+                round: 4,
+                result: Err("gone".to_string())
+            }),
             None
         );
         assert!(state.edit.is_none());
@@ -2900,7 +3131,10 @@ mod tests {
         assert!(state.notice.as_deref().unwrap_or_default().contains("gone"));
         // And an answer to an edit the page has replaced is dropped rather than drawn.
         assert_eq!(
-            state.update(Message::Edited { round: 99, result: Err("old".to_string()) }),
+            state.update(Message::Edited {
+                round: 99,
+                result: Err("old".to_string())
+            }),
             None
         );
         assert!(state.notice.as_deref().unwrap_or_default().contains("gone"));
@@ -2927,12 +3161,18 @@ mod tests {
         // where it is drawn, for a texture that carries the marker.
         let appearance = crate::skin::Appearance::of(
             "Steve",
-            palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+            palantir_net::MinecraftSkins {
+                skins: vec![],
+                capes: vec![],
+            },
             Ok(ears_texture()),
         );
         assert!(appearance.ears.is_some(), "the marker is read");
         let ready = Load::Ready(appearance.clone());
-        let mut state = State { appearance: ready, ..State::default() };
+        let mut state = State {
+            appearance: ready,
+            ..State::default()
+        };
         state.saved = vec![stored("abc")];
         drop(view(Gen::ALL[0], &state, &Store::default()));
         // And an editor on that row draws the editor, with no notice in it: the
@@ -2954,7 +3194,10 @@ mod tests {
         // without one.
         let plain = crate::skin::Appearance::of(
             "Steve",
-            palantir_net::MinecraftSkins { skins: vec![], capes: vec![] },
+            palantir_net::MinecraftSkins {
+                skins: vec![],
+                capes: vec![],
+            },
             Err("no texture".into()),
         );
         assert!(plain.ears.is_none());
@@ -2986,7 +3229,10 @@ mod tests {
                     name: "my skin".to_string(),
                     variant: "SLIM".to_string(),
                     cape: String::new(),
-                    stored: Stored { variant: "CLASSIC".to_string(), cape: String::new() },
+                    stored: Stored {
+                        variant: "CLASSIC".to_string(),
+                        cape: String::new(),
+                    },
                     ears,
                     act: Act::Save,
                     confirm: false,
@@ -3025,7 +3271,10 @@ mod tests {
         // three live under the editor's own namespace. The texture section's
         // button is a fourth, and takes a fourth.
         let names = ["save", "takeoff", "forget", "replace-texture"];
-        let scoped: Vec<&str> = names.iter().map(|name| ui::scoped(EDIT_KEY, name)).collect();
+        let scoped: Vec<&str> = names
+            .iter()
+            .map(|name| ui::scoped(EDIT_KEY, name))
+            .collect();
         let mut unique = scoped.clone();
         unique.sort_unstable();
         unique.dedup();
@@ -3106,7 +3355,10 @@ mod tests {
         assert_eq!(SECTION_ICON, 24.0);
         assert_eq!(SECTION_ICON_GAP, 6.0);
         // The mark's hover is keyed per section, because the clock is per control.
-        assert_ne!(info_key(Section::ModrinthPride), info_key(Section::Modrinth));
+        assert_ne!(
+            info_key(Section::ModrinthPride),
+            info_key(Section::Modrinth)
+        );
         assert!(info_key(Section::ModrinthPride).starts_with(INFO_KEY));
         // And the page draws with the mark on screen.
         for theme in Gen::ALL {
@@ -3130,17 +3382,29 @@ mod tests {
         assert_eq!(MODAL_BUTTON.gap(), 6.0);
         assert_eq!(MODAL_BUTTON.label(), 16.0);
         assert_eq!(MODAL_BUTTON.icon(), 20.0);
-        assert!(MODAL_BUTTON.height() < ui::CONTROL, "not the legacy frame's row");
+        assert!(
+            MODAL_BUTTON.height() < ui::CONTROL,
+            "not the legacy frame's row"
+        );
         assert!(MODAL_BUTTON.label() > ui::BUTTON_LABEL_SIZE);
     }
 
     #[test]
     fn forgetting_a_skin_asks_first_and_the_answer_goes_back_to_the_editor() {
-        let mut state = State { saved: vec![stored("abc")], ..State::default() };
-        state.update(Message::Edit { key: "abc".to_string() });
+        let mut state = State {
+            saved: vec![stored("abc")],
+            ..State::default()
+        };
+        state.update(Message::Edit {
+            key: "abc".to_string(),
+        });
         // The delete button asks, and asking is not a write: nothing leaves and
         // the editor stays open.
-        assert_eq!(state.update(Message::Forget), None, "a question asks nobody");
+        assert_eq!(
+            state.update(Message::Forget),
+            None,
+            "a question asks nobody"
+        );
         let edit = state.edit.as_ref().expect("the editor is still open");
         assert!(edit.confirm, "and it is asking");
         // Changing your mind goes back to the editor rather than closing it, which
@@ -3168,9 +3432,16 @@ mod tests {
         // reader with two of the skin they were editing. So it says so, the way the
         // sign-in button does.
         let mut state = State::default();
-        assert_eq!(state.update(Message::ReplaceTexture), None, "and it asks nobody");
+        assert_eq!(
+            state.update(Message::ReplaceTexture),
+            None,
+            "and it asks nobody"
+        );
         let notice = state.notice.clone().expect("the press says something");
-        assert!(notice.contains("Replacing a skin's texture"), "got {notice}");
+        assert!(
+            notice.contains("Replacing a skin's texture"),
+            "got {notice}"
+        );
         assert!(notice.ends_with("is not implemented yet."), "got {notice}");
     }
 
@@ -3179,10 +3450,18 @@ mod tests {
         // The modal opens on the row as the store holds it, so nothing has been
         // changed and `hasEdits` is false: Save is the reference's own disabled
         // button, which it draws rather than hides.
-        let mut state = State { saved: vec![stored("abc")], ..State::default() };
-        state.update(Message::Edit { key: "abc".to_string() });
+        let mut state = State {
+            saved: vec![stored("abc")],
+            ..State::default()
+        };
+        state.update(Message::Edit {
+            key: "abc".to_string(),
+        });
         let edit = state.edit.clone().expect("the editor opened on the row");
-        assert_eq!(edit.variant, edit.stored.variant, "it opened on the row's own arm style");
+        assert_eq!(
+            edit.variant, edit.stored.variant,
+            "it opened on the row's own arm style"
+        );
         assert_eq!(edit.cape, edit.stored.cape, "and on the row's own cape");
         assert!(!has_edits(&edit), "so there is nothing to save yet");
         // The two choices the modal owns are the two that can make an edit.
@@ -3190,7 +3469,9 @@ mod tests {
         let edit = state.edit.as_ref().expect("still open");
         assert!(has_edits(edit), "a different arm style is one");
         state.update(Message::ArmStyle { variant: "CLASSIC" });
-        state.update(Message::Cape { id: "cape-9".to_string() });
+        state.update(Message::Cape {
+            id: "cape-9".to_string(),
+        });
         let edit = state.edit.as_ref().expect("still open");
         assert!(has_edits(edit), "and a different cape is the other");
         // Putting both back is not an edit, and neither is choosing the row's own
@@ -3206,7 +3487,10 @@ mod tests {
         // the section above it, which is the pairing the reference's column reads as.
         assert_eq!(EDITOR_SECTION_GAP, 16.0, "`gap-4`");
         assert_eq!(EDITOR_HEADING_GAP, 8.0, "`mb-2`");
-        assert_ne!(EDITOR_SECTION_GAP, GAP, "which is the page-wide 12 it was before");
+        assert_ne!(
+            EDITOR_SECTION_GAP, GAP,
+            "which is the page-wide 12 it was before"
+        );
         // And the two numbers are what the editor is built from: two sections and
         // the actions, each a block of its own.
         let edit = Edit {
@@ -3229,8 +3513,10 @@ mod tests {
         // compare, so it sorts ahead of every named one.
         let capes = vec![cape("z", "Zebra"), cape("m", "migrator"), cape("u", "")];
         let rows = cape_rows(&capes);
-        let names: Vec<Option<String>> =
-            rows[0].iter().map(|cell| cell.map(cape_sort_name)).collect();
+        let names: Vec<Option<String>> = rows[0]
+            .iter()
+            .map(|cell| cell.map(cape_sort_name))
+            .collect();
         assert_eq!(
             names,
             vec![
@@ -3254,13 +3540,18 @@ mod tests {
 
     #[test]
     fn the_cape_list_is_four_to_a_row_and_never_padded_with_a_second_none() {
-        let capes: Vec<palantir_net::MinecraftCape> =
-            (0..9).map(|n| cape(&format!("c{n}"), &format!("cape {n}"))).collect();
+        let capes: Vec<palantir_net::MinecraftCape> = (0..9)
+            .map(|n| cape(&format!("c{n}"), &format!("cape {n}")))
+            .collect();
         // Nine capes and the no-cape cell are ten cells, which is two rows of four
         // and one of two.
         let rows = cape_rows(&capes);
         let lengths: Vec<usize> = rows.iter().map(Vec::len).collect();
-        assert_eq!(lengths, vec![4, 4, 2], "and the last row is short rather than padded");
+        assert_eq!(
+            lengths,
+            vec![4, 4, 2],
+            "and the last row is short rather than padded"
+        );
         let cells: usize = rows.iter().map(Vec::len).sum();
         assert_eq!(cells, capes.len() + 1, "one cell per cape, and ours");
         let nones: usize = rows.iter().flatten().filter(|cell| cell.is_none()).count();
@@ -3275,7 +3566,10 @@ mod tests {
         // cell, which is the reference's own empty state.
         assert_eq!(Section::ALL[0], Section::SavedSkins);
         drop(view(Gen::ALL[0], &State::default(), &store));
-        let state = State { saved: vec![stored("abc")], ..State::default() };
+        let state = State {
+            saved: vec![stored("abc")],
+            ..State::default()
+        };
         drop(view(Gen::ALL[0], &state, &store));
     }
 
@@ -3319,7 +3613,10 @@ mod tests {
         // A second press while the first is out is dropped rather than queued: two
         // reorders would be two read-modify-writes of the same index.
         assert_eq!(
-            state.update(Message::Move { key: "c".to_string(), step: Step::Up }),
+            state.update(Message::Move {
+                key: "c".to_string(),
+                step: Step::Up
+            }),
             None
         );
         assert!(state.wearing);
@@ -3335,11 +3632,20 @@ mod tests {
         assert_eq!(moved(&rows, "a", Step::Up), None);
         assert_eq!(moved(&rows, "b", Step::Down), None);
         assert_eq!(moved(&rows, "missing", Step::Up), None);
-        assert_eq!(moved(&rows, "a", Step::Down), Some(vec!["b".into(), "a".into()]));
-
-        let mut state = State { saved: rows, ..State::default() };
         assert_eq!(
-            state.update(Message::Move { key: "a".to_string(), step: Step::Up }),
+            moved(&rows, "a", Step::Down),
+            Some(vec!["b".into(), "a".into()])
+        );
+
+        let mut state = State {
+            saved: rows,
+            ..State::default()
+        };
+        assert_eq!(
+            state.update(Message::Move {
+                key: "a".to_string(),
+                step: Step::Up
+            }),
             None
         );
         assert!(!state.wearing, "and nothing is waiting");
@@ -3347,9 +3653,15 @@ mod tests {
 
     #[test]
     fn a_reorder_that_worked_reloads_the_list_and_one_that_failed_says_so() {
-        let mut state = State { round: 9, wearing: true, ..State::default() };
-        let Some(Ask::Skins(asked)) = state.update(Message::Reordered { round: 9, result: Ok(()) })
-        else {
+        let mut state = State {
+            round: 9,
+            wearing: true,
+            ..State::default()
+        };
+        let Some(Ask::Skins(asked)) = state.update(Message::Reordered {
+            round: 9,
+            result: Ok(()),
+        }) else {
             panic!("an order that was written reloads the store");
         };
         assert_eq!(asked.round, 10);
@@ -3378,7 +3690,10 @@ mod tests {
         // An answer to a move the page has replaced is dropped rather than drawn.
         state.notice = None;
         assert_eq!(
-            state.update(Message::Reordered { round: 99, result: Err("old".to_string()) }),
+            state.update(Message::Reordered {
+                round: 99,
+                result: Err("old".to_string())
+            }),
             None
         );
         assert_eq!(state.notice, None, "the stale answer changed nothing");

@@ -93,7 +93,6 @@ impl PublisherMeta {
         )
     }
 
-
     /// The same store with the mirror's base URL and directory, and the game
     /// version, named rather than read off an instance.
     fn over(
@@ -133,12 +132,10 @@ impl PublisherMeta {
 impl MetaStore for PublisherMeta {
     fn version_file(&mut self, uid: &str, version: &str) -> Result<VersionFile, CoreError> {
         match self.source(uid) {
-            Source::Piston => self.piston.translated(
-                version,
-                MINECRAFT_UID,
-                &Cancel::new(),
-                &Backoff::default(),
-            ),
+            Source::Piston => {
+                self.piston
+                    .translated(version, MINECRAFT_UID, &Cancel::new(), &Backoff::default())
+            }
             Source::Publisher(loader) => {
                 // `source` only answers `Publisher` when the game version is
                 // known, which is the middle of the URL this asks for.
@@ -243,8 +240,12 @@ mod tests {
             let options = zip::write::FileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
             for (name, body) in entries {
-                writer.start_file(*name, options).expect("starting a zip entry");
-                writer.write_all(body.as_bytes()).expect("writing a zip entry");
+                writer
+                    .start_file(*name, options)
+                    .expect("starting a zip entry");
+                writer
+                    .write_all(body.as_bytes())
+                    .expect("writing a zip entry");
             }
             writer.finish().expect("finishing the jar");
         }
@@ -268,13 +269,25 @@ mod tests {
     fn the_publishers_answer_for_their_own_loaders_and_the_mirror_for_the_rest() {
         let store = routing(Some("1.21.4"));
         assert_eq!(store.source("net.minecraft"), Source::Piston);
-        assert_eq!(store.source("net.fabricmc.fabric-loader"), Source::Publisher(Loader::Fabric));
-        assert_eq!(store.source("org.quiltmc.quilt-loader"), Source::Publisher(Loader::Quilt));
+        assert_eq!(
+            store.source("net.fabricmc.fabric-loader"),
+            Source::Publisher(Loader::Fabric)
+        );
+        assert_eq!(
+            store.source("org.quiltmc.quilt-loader"),
+            Source::Publisher(Loader::Quilt)
+        );
         // The two Forge-shaped uids are the publishers' now, through their
         // installer jars; the mappings components an imported instance may list
         // are still the mirror's.
-        assert_eq!(store.source("net.minecraftforge"), Source::Publisher(Loader::Forge));
-        assert_eq!(store.source("net.neoforged"), Source::Publisher(Loader::NeoForge));
+        assert_eq!(
+            store.source("net.minecraftforge"),
+            Source::Publisher(Loader::Forge)
+        );
+        assert_eq!(
+            store.source("net.neoforged"),
+            Source::Publisher(Loader::NeoForge)
+        );
         assert_eq!(store.source("net.fabricmc.intermediary"), Source::Mirror);
     }
 
@@ -283,7 +296,10 @@ mod tests {
         // A loader profile is published per game version, so the question cannot
         // be asked without one. Answering from the mirror is the choice; failing
         // a launch over a URL nobody could build is the other.
-        assert_eq!(routing(None).source("net.fabricmc.fabric-loader"), Source::Mirror);
+        assert_eq!(
+            routing(None).source("net.fabricmc.fabric-loader"),
+            Source::Mirror
+        );
     }
 
     #[test]
@@ -326,8 +342,15 @@ mod tests {
         let file = store
             .version_file("net.fabricmc.fabric-loader", "0.19.5")
             .expect("the loader's own profile");
-        assert_eq!(file.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient");
-        assert_eq!(file.libraries.len(), 2, "the mappings jar is one of its libraries");
+        assert_eq!(
+            file.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(
+            file.libraries.len(),
+            2,
+            "the mappings jar is one of its libraries"
+        );
         assert!(file.requires.is_empty(), "nothing to reach the mappings by");
     }
 
@@ -418,8 +441,8 @@ mod tests {
         let wire = Wire::over(dir.path().join("cache"), fetch.clone());
         let mut store = PublisherMeta::for_instance(&wire, &paths, &created.id);
 
-        let instance = Instance::open(&paths.instances_dir().join(&created.id))
-            .expect("the instance on disk");
+        let instance =
+            Instance::open(&paths.instances_dir().join(&created.id)).expect("the instance on disk");
         let profile = PackProfile::load(&instance.mmc_pack_path()).expect("its pack profile");
         let resolution = resolve(
             &profile,
@@ -475,7 +498,11 @@ mod tests {
             fetch.count(),
             4,
             "requests: {:?}",
-            fetch.requests().iter().map(|request| &request.url).collect::<Vec<_>>()
+            fetch
+                .requests()
+                .iter()
+                .map(|request| &request.url)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -545,8 +572,8 @@ mod tests {
             dir.path().join("content"),
             Some("1.21.4".to_string()),
         );
-        let instance = Instance::open(&paths.instances_dir().join(&created.id))
-            .expect("the instance on disk");
+        let instance =
+            Instance::open(&paths.instances_dir().join(&created.id)).expect("the instance on disk");
         let profile = PackProfile::load(&instance.mmc_pack_path()).expect("its pack profile");
         let resolution = resolve(
             &profile,
@@ -562,11 +589,13 @@ mod tests {
             "problems: {:?}",
             resolution.problems
         );
-        assert_eq!(resolution.profile.main_class, "net.minecraft.client.main.Main");
+        assert_eq!(
+            resolution.profile.main_class,
+            "net.minecraft.client.main.Main"
+        );
         assert_eq!(resolution.profile.compatible_java_majors, vec![21]);
         assert_eq!(
-            resolution.profile.minecraft_arguments,
-            "--username ${auth_player_name}",
+            resolution.profile.minecraft_arguments, "--username ${auth_player_name}",
             "the pair the launcher cannot fill is not on the command line"
         );
         // LWJGL is on the classpath because the game's file names it, and the one
@@ -586,5 +615,4 @@ mod tests {
                 .collect::<Vec<_>>()
         );
     }
-
 }

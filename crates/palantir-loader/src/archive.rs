@@ -37,7 +37,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper to build an [`Error::Io`] from a path and an [`std::io::Error`].
 fn io_err(path: &Path, source: std::io::Error) -> Error {
-    Error::Io { path: path.to_path_buf(), source }
+    Error::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 /// A source of zip bytes: either in-memory bytes or a file on disk.
@@ -251,7 +254,9 @@ pub fn extract_zip_bytes(data: &[u8], dest: impl AsRef<Path>) -> Result<()> {
     let len = archive.len();
     let mut index: usize = 0;
     while index < len {
-        let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| Error::Zip(e.to_string()))?;
         let raw_name = file.name().to_owned();
         let enclosed_opt = file.enclosed_name();
         let enclosed = match enclosed_opt {
@@ -268,15 +273,13 @@ pub fn extract_zip_bytes(data: &[u8], dest: impl AsRef<Path>) -> Result<()> {
                     std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
                 }
             }
-            let mut out =
-                std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
+            let mut out = std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
             std::io::copy(&mut file, &mut out).map_err(|e| io_err(&out_path, e))?;
             #[cfg(unix)]
             {
                 if let Some(mode) = file.unix_mode() {
                     let perms = std::fs::Permissions::from_mode(mode);
-                    std::fs::set_permissions(&out_path, perms)
-                        .map_err(|e| io_err(&out_path, e))?;
+                    std::fs::set_permissions(&out_path, perms).map_err(|e| io_err(&out_path, e))?;
                 }
             }
         }
@@ -333,7 +336,9 @@ pub fn extract_zip_file_flat(
     let mut written = 0usize;
     let mut index: usize = 0;
     while index < len {
-        let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| Error::Zip(e.to_string()))?;
         index += 1;
         if file.is_dir() {
             continue;
@@ -405,15 +410,13 @@ pub fn extract_tar_gz_bytes(data: &[u8], dest: impl AsRef<Path>) -> Result<()> {
                     std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
                 }
             }
-            let mut out =
-                std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
+            let mut out = std::fs::File::create(&out_path).map_err(|e| io_err(&out_path, e))?;
             std::io::copy(&mut entry, &mut out).map_err(|e| io_err(&out_path, e))?;
             #[cfg(unix)]
             {
                 if let Ok(mode) = entry.header().mode() {
                     let perms = std::fs::Permissions::from_mode(mode);
-                    std::fs::set_permissions(&out_path, perms)
-                        .map_err(|e| io_err(&out_path, e))?;
+                    std::fs::set_permissions(&out_path, perms).map_err(|e| io_err(&out_path, e))?;
                 }
             }
         } else {
@@ -521,7 +524,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         extract_zip(bytes.as_slice(), dir.path()).unwrap();
         assert_eq!(std::fs::read(dir.path().join("a.txt")).unwrap(), b"hello");
-        assert_eq!(std::fs::read(dir.path().join("sub").join("b.txt")).unwrap(), b"world");
+        assert_eq!(
+            std::fs::read(dir.path().join("sub").join("b.txt")).unwrap(),
+            b"world"
+        );
     }
 
     #[test]
@@ -562,7 +568,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         extract_tar_gz(bytes.as_slice(), dir.path()).unwrap();
         assert_eq!(std::fs::read(dir.path().join("a.txt")).unwrap(), b"hello");
-        assert_eq!(std::fs::read(dir.path().join("sub").join("b.txt")).unwrap(), b"world");
+        assert_eq!(
+            std::fs::read(dir.path().join("sub").join("b.txt")).unwrap(),
+            b"world"
+        );
     }
 
     #[test]
@@ -612,7 +621,10 @@ mod tests {
             !natives.join("META-INF").join("MANIFEST.MF").exists(),
             "native entries must not keep their directories"
         );
-        assert_eq!(std::fs::read(natives.join("MANIFEST.MF")).unwrap(), b"manifest");
+        assert_eq!(
+            std::fs::read(natives.join("MANIFEST.MF")).unwrap(),
+            b"manifest"
+        );
         // …and the macOS suffix quirk is applied only when asked for.
         assert!(natives.join("libopenal.dylib").is_file());
         assert!(!natives.join("libopenal.jnilib").exists());
@@ -646,7 +658,10 @@ mod tests {
         // An empty prefix must not swallow the whole archive.
         let empty = vec![String::new()];
         let all = dir.path().join("all");
-        assert_eq!(extract_zip_file_flat(&zip_path, &all, false, &empty).unwrap(), 3);
+        assert_eq!(
+            extract_zip_file_flat(&zip_path, &all, false, &empty).unwrap(),
+            3
+        );
     }
 
     #[test]
@@ -685,7 +700,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let mode = std::fs::metadata(dir.path().join("run.sh")).unwrap().permissions().mode();
+            let mode = std::fs::metadata(dir.path().join("run.sh"))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o755);
         }
     }

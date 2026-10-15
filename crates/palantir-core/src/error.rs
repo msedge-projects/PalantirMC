@@ -81,7 +81,10 @@ pub enum Error {
 impl Error {
     /// Wrap an [`std::io::Error`] with path context.
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
-        Error::Io { path: path.into(), source }
+        Error::Io {
+            path: path.into(),
+            source,
+        }
     }
 
     /// Build an INI error with an optional line number.
@@ -95,12 +98,18 @@ impl Error {
 
     /// Build a JSON error from a serde message.
     pub fn json(path: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Error::Json { path: path.into(), detail: detail.into() }
+        Error::Json {
+            path: path.into(),
+            detail: detail.into(),
+        }
     }
 
     /// Build a format error.
     pub fn format(path: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Error::Format { path: path.into(), detail: detail.into() }
+        Error::Format {
+            path: path.into(),
+            detail: detail.into(),
+        }
     }
 }
 

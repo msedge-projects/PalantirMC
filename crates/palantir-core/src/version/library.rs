@@ -87,7 +87,9 @@ impl Library {
         let raw_name = obj
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| crate::error::Error::json("<version>", "library that doesn't have a 'name' field"))?
+            .ok_or_else(|| {
+                crate::error::Error::json("<version>", "library that doesn't have a 'name' field")
+            })?
             .to_string();
         let name = GradleSpecifier::parse(&raw_name);
         if !name.valid() {
@@ -98,7 +100,11 @@ impl Library {
         }
         let mut lib = Library {
             name,
-            repository_url: obj.get("url").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            repository_url: obj
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
             ..Default::default()
         };
         if let Some(extract) = obj.get("extract").and_then(|v| v.as_object()) {
@@ -130,21 +136,34 @@ impl Library {
             }
             if let Some(classifiers) = dl.get("classifiers").and_then(|v| v.as_object()) {
                 for (k, v) in classifiers {
-                    info.classifiers.insert(k.clone(), download_info_from_json(v)?);
+                    info.classifiers
+                        .insert(k.clone(), download_info_from_json(v)?);
                 }
             }
             lib.mojang_downloads = Some(info);
         }
         // MultiMC extensions
-        lib.hint = obj.get("MMC-hint").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        lib.hint = obj
+            .get("MMC-hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         lib.absolute_url = obj
             .get("MMC-absoluteUrl")
             .or_else(|| obj.get("MMC-absulute_url")) // legacy typo key
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        lib.filename_override = obj.get("MMC-filename").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        lib.displayname = obj.get("MMC-displayname").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        lib.filename_override = obj
+            .get("MMC-filename")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        lib.displayname = obj
+            .get("MMC-displayname")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         Ok(lib)
     }
 
@@ -169,13 +188,21 @@ impl Library {
                 let mut extract = serde_json::Map::new();
                 extract.insert(
                     "exclude".into(),
-                    Value::Array(self.extract_excludes.iter().map(|e| Value::String(e.clone())).collect()),
+                    Value::Array(
+                        self.extract_excludes
+                            .iter()
+                            .map(|e| Value::String(e.clone()))
+                            .collect(),
+                    ),
                 );
                 root.insert("extract".into(), Value::Object(extract));
             }
         }
         if !self.rules.is_empty() {
-            root.insert("rules".into(), Value::Array(self.rules.iter().map(Rule::to_json).collect()));
+            root.insert(
+                "rules".into(),
+                Value::Array(self.rules.iter().map(Rule::to_json).collect()),
+            );
         }
         if let Some(dl) = &self.mojang_downloads {
             let mut dl_obj = serde_json::Map::new();
@@ -183,24 +210,36 @@ impl Library {
                 dl_obj.insert("artifact".into(), download_info_to_json(artifact));
             }
             if !dl.classifiers.is_empty() {
-                let classifiers: serde_json::Map<String, Value> =
-                    dl.classifiers.iter().map(|(k, v)| (k.clone(), download_info_to_json(v))).collect();
+                let classifiers: serde_json::Map<String, Value> = dl
+                    .classifiers
+                    .iter()
+                    .map(|(k, v)| (k.clone(), download_info_to_json(v)))
+                    .collect();
                 dl_obj.insert("classifiers".into(), Value::Object(classifiers));
             }
             root.insert("downloads".into(), Value::Object(dl_obj));
         }
         // MultiMC extensions (alphabetical placement is handled by the map)
         if !self.absolute_url.is_empty() {
-            root.insert("MMC-absoluteUrl".into(), Value::String(self.absolute_url.clone()));
+            root.insert(
+                "MMC-absoluteUrl".into(),
+                Value::String(self.absolute_url.clone()),
+            );
         }
         if !self.hint.is_empty() {
             root.insert("MMC-hint".into(), Value::String(self.hint.clone()));
         }
         if !self.filename_override.is_empty() {
-            root.insert("MMC-filename".into(), Value::String(self.filename_override.clone()));
+            root.insert(
+                "MMC-filename".into(),
+                Value::String(self.filename_override.clone()),
+            );
         }
         if !self.displayname.is_empty() {
-            root.insert("MMC-displayname".into(), Value::String(self.displayname.clone()));
+            root.insert(
+                "MMC-displayname".into(),
+                Value::String(self.displayname.clone()),
+            );
         }
         Value::Object(root)
     }
@@ -302,7 +341,11 @@ impl Library {
 
     /// Resolve applicable file paths (`Library::getApplicableFiles`).
     /// `override_path` is the instance-local library dir for `local` libs.
-    pub fn applicable_files(&self, ctx: &RuntimeContext, override_path: Option<&Path>) -> ApplicableFiles {
+    pub fn applicable_files(
+        &self,
+        ctx: &RuntimeContext,
+        override_path: Option<&Path>,
+    ) -> ApplicableFiles {
         let mut out = ApplicableFiles::default();
         let actual_path = |rel: &str| -> String {
             let joined = format!("libraries/{}", rel);
@@ -320,8 +363,10 @@ impl Library {
         let raw = self.storage_suffix(ctx);
         if self.is_native() {
             if raw.contains("${arch}") {
-                out.native32.push(actual_path(&raw.replace("${arch}", "32")));
-                out.native64.push(actual_path(&raw.replace("${arch}", "64")));
+                out.native32
+                    .push(actual_path(&raw.replace("${arch}", "32")));
+                out.native64
+                    .push(actual_path(&raw.replace("${arch}", "64")));
             } else {
                 out.native.push(actual_path(&raw));
             }
@@ -342,16 +387,20 @@ pub fn download_info_from_json(value: &Value) -> crate::error::Result<DownloadIn
         obj.get(key)
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| crate::error::Error::json("<version>", format!("missing '{key}' in download info")))
+            .ok_or_else(|| {
+                crate::error::Error::json("<version>", format!("missing '{key}' in download info"))
+            })
     };
     Ok(DownloadInfo {
-        path: obj.get("path").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        path: obj
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         sha1: require_str("sha1")?,
         url: require_str("url")?,
-        size: obj
-            .get("size")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| crate::error::Error::json("<version>", "missing 'size' in download info"))?,
+        size: obj.get("size").and_then(|v| v.as_i64()).ok_or_else(|| {
+            crate::error::Error::json("<version>", "missing 'size' in download info")
+        })?,
     })
 }
 
@@ -426,14 +475,23 @@ mod tests {
             "natives": {"linux": "natives-linux", "windows": "natives-windows-${arch}", "osx": "natives-osx"}
         }));
         assert!(lib.is_native());
-        assert_eq!(lib.compatible_native(&ctx("linux", "x86_64", "64")).as_deref(), Some("natives-linux"));
         assert_eq!(
-            lib.compatible_native(&ctx("windows", "amd64", "64")).as_deref(),
+            lib.compatible_native(&ctx("linux", "x86_64", "64"))
+                .as_deref(),
+            Some("natives-linux")
+        );
+        assert_eq!(
+            lib.compatible_native(&ctx("windows", "amd64", "64"))
+                .as_deref(),
             Some("natives-windows-${arch}")
         );
         // arm mac: no precise osx-arm64, and osx bare matches only on legacy
         assert_eq!(lib.compatible_native(&ctx("osx", "aarch64", "64")), None);
-        assert_eq!(lib.compatible_native(&ctx("osx", "x86_64", "64")).as_deref(), Some("natives-osx"));
+        assert_eq!(
+            lib.compatible_native(&ctx("osx", "x86_64", "64"))
+                .as_deref(),
+            Some("natives-osx")
+        );
     }
 
     #[test]
@@ -489,7 +547,10 @@ mod tests {
         let (mut lib, _) = parse_lib(json!({"name": "custom:customjar:1"}));
         lib.hint = "local".into();
         lib.filename_override = "custom.jar".into();
-        let files = lib.applicable_files(&ctx("linux", "x86_64", "64"), Some(Path::new("/inst/libraries")));
+        let files = lib.applicable_files(
+            &ctx("linux", "x86_64", "64"),
+            Some(Path::new("/inst/libraries")),
+        );
         assert_eq!(files.jar, vec!["/inst/libraries/custom.jar"]);
     }
 
@@ -512,7 +573,11 @@ mod tests {
         assert_eq!(back, v);
         // legacy typo key also reads
         let mut problems = Vec::new();
-        let lib2 = Library::from_json(&json!({"name": "a:b:1", "MMC-absulute_url": "legacy"}), &mut problems).unwrap();
+        let lib2 = Library::from_json(
+            &json!({"name": "a:b:1", "MMC-absulute_url": "legacy"}),
+            &mut problems,
+        )
+        .unwrap();
         assert_eq!(lib2.absolute_url, "legacy");
     }
 
@@ -520,7 +585,12 @@ mod tests {
     fn download_info_requires_fields() {
         assert!(download_info_from_json(&json!({"sha1": "s", "url": "u"})).is_err());
         assert!(download_info_from_json(&json!({"sha1": "s", "url": "u", "size": 1})).is_ok());
-        let info = download_info_from_json(&json!({"sha1": "s", "url": "u", "size": 1, "path": "p"})).unwrap();
-        assert_eq!(download_info_to_json(&info), json!({"sha1": "s", "size": 1, "url": "u", "path": "p"}));
+        let info =
+            download_info_from_json(&json!({"sha1": "s", "url": "u", "size": 1, "path": "p"}))
+                .unwrap();
+        assert_eq!(
+            download_info_to_json(&info),
+            json!({"sha1": "s", "size": 1, "url": "u", "path": "p"})
+        );
     }
 }

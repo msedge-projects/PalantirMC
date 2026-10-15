@@ -128,7 +128,10 @@ impl MetadataCache {
     /// so a launcher that never fetches anything never creates the directory
     /// either.
     pub fn new(dir: impl Into<PathBuf>, ttl: Duration) -> MetadataCache {
-        MetadataCache { dir: dir.into(), ttl }
+        MetadataCache {
+            dir: dir.into(),
+            ttl,
+        }
     }
 
     /// The same cache with a different TTL.
@@ -212,13 +215,20 @@ impl MetadataCache {
         sleep: &mut dyn FnMut(Duration),
     ) -> Result<Cached, Error> {
         let Some(held) = self.cached(url) else {
-            let response = retry(backoff, |_| fetch.get_with(&Request::get(url), cancel), sleep)?;
+            let response = retry(
+                backoff,
+                |_| fetch.get_with(&Request::get(url), cancel),
+                sleep,
+            )?;
             // A service that withholds a body the caller has never seen has
             // nothing to withhold it *for*: storing the empty answer would be a
             // cache entry that is permanently wrong, so this is a failure. It
             // means a broken server or a proxy answering for one.
             if response.not_modified {
-                return Err(Error::format(url, "not modified, with nothing stored to be current"));
+                return Err(Error::format(
+                    url,
+                    "not modified, with nothing stored to be current",
+                ));
             }
             return self.put(url, &response.body, response.etag.as_deref());
         };
@@ -255,7 +265,11 @@ impl MetadataCache {
         // point of keeping the validator.
         let now = confirmed_at();
         self.write_stamp(url, held.etag.as_deref(), now)?;
-        Ok(Cached { fetched: now, from_disk: true, ..held })
+        Ok(Cached {
+            fetched: now,
+            from_disk: true,
+            ..held
+        })
     }
 
     /// Store `body` for `url`, with `etag` if the service gave one.
@@ -331,8 +345,13 @@ impl MetadataCache {
 
     /// Write the age and validator of the body beside it.
     fn write_stamp(&self, url: &str, etag: Option<&str>, fetched: SystemTime) -> Result<(), Error> {
-        let millis = u64::try_from(fetched.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis())
-            .unwrap_or(u64::MAX);
+        let millis = u64::try_from(
+            fetched
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
         // Three lines, and no escaping: a header value cannot contain a line
         // break, and the URL is the last line so a newline in it -- which no URL
         // we build has -- could only ever affect the line that is not read back.
@@ -352,9 +371,13 @@ impl MetadataCache {
 /// it equalled the value it had just been handed, and the two were 484,800 ns
 /// apart.)
 fn confirmed_at() -> SystemTime {
-    let millis =
-        u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis())
-            .unwrap_or(u64::MAX);
+    let millis = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
     UNIX_EPOCH + Duration::from_millis(millis)
 }
 
@@ -426,7 +449,9 @@ mod tests {
 
     /// A scratch directory named for the test, emptied first.
     fn dir_of(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join("palantirmc-engine-cache").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-cache")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         root
@@ -480,7 +505,9 @@ mod tests {
         let root = dir_of("fresh-hit");
         let cache = cache_in(&root, DEFAULT_TTL);
         let fetch = MapFetch::new().with_route(URL, Route::text("index"));
-        get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the first");
 
         // A second fetch with nothing configured would be a 404, so a request
         // that was made would show up as an error rather than as silence.
@@ -505,14 +532,18 @@ mod tests {
         let root = dir_of("revalidate");
         let cache = cache_in(&root, Duration::ZERO);
         let fetch = MapFetch::new().with_route(URL, Route::text("index").tagged("\"v7\""));
-        let first = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        let first = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the first");
         assert!(cache.fresh(URL).is_none(), "a zero TTL is never fresh");
         assert!(cache.cached(URL).is_some(), "but the copy is readable");
         // Long enough that the two stamps cannot be the same instant, short
         // enough not to be worth measuring.
         std::thread::sleep(Duration::from_millis(2));
 
-        let second = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the second");
+        let second = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the second");
         assert_eq!(second.body, b"index");
         assert!(second.from_disk, "the bytes were already here");
         assert_eq!(fetch.count(), 2, "the second lookup did ask");
@@ -528,7 +559,10 @@ mod tests {
         );
         // And the stamp on disk is the one that moved, not only the value in
         // hand: the next run reads this file.
-        assert_eq!(cache.cached(URL).expect("the stored copy").fetched, second.fetched);
+        assert_eq!(
+            cache.cached(URL).expect("the stored copy").fetched,
+            second.fetched
+        );
     }
 
     #[test]
@@ -538,13 +572,17 @@ mod tests {
         // revalidation path without waiting for anything.
         let cache = cache_in(&root, Duration::ZERO);
         let fetch = MapFetch::new().with_route(URL, Route::text("old").tagged("\"v1\""));
-        get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the first");
 
         // A republish is new bytes *and* a new validator; `set_body` alone would
         // leave a validator claiming the old bytes are current, which is a
         // service telling the truth about the wrong thing.
         fetch.set_route(URL, Route::text("new").tagged("\"v2\""));
-        let held = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the second");
+        let held = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the second");
         assert_eq!(held.body, b"new");
         assert!(!held.from_disk, "it was downloaded again");
         let stored = cache.cached(URL).expect("the stored copy");
@@ -559,15 +597,23 @@ mod tests {
         let root = dir_of("no-validator");
         let cache = cache_in(&root, Duration::ZERO);
         let fetch = MapFetch::new().with_route(URL, Route::text("list"));
-        let first = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        let first = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the first");
         assert_eq!(first.etag, None);
 
-        let second = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the second");
+        let second = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the second");
         assert_eq!(second.body, b"list");
         assert!(!second.from_disk);
         let asked = fetch.requests();
         assert_eq!(asked.len(), 2);
-        assert_eq!(asked[1].header_value("If-None-Match"), None, "nothing to ask with");
+        assert_eq!(
+            asked[1].header_value("If-None-Match"),
+            None,
+            "nothing to ask with"
+        );
     }
 
     #[test]
@@ -575,14 +621,28 @@ mod tests {
         let root = dir_of("failure");
         let cache = cache_in(&root, Duration::ZERO);
         let fetch = MapFetch::new().with_route(URL, Route::text("yesterday").tagged("\"v1\""));
-        get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the first");
+        get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the first");
         let stamped = cache.cached(URL).expect("the first copy").fetched;
 
         // The service is down for the one attempt the policy allows.
-        fetch.set_route(URL, Route::text("yesterday").tagged("\"v1\"").failing(1, 500));
+        fetch.set_route(
+            URL,
+            Route::text("yesterday").tagged("\"v1\"").failing(1, 500),
+        );
         let (got, waits) = get(&cache, URL, &fetch, &Backoff::with_attempts(1));
         let error = got.expect_err("a 500 is a failure, not a stale answer");
-        assert!(matches!(error, Error::Http { status: Some(500), .. }), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::Http {
+                    status: Some(500),
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
         assert!(waits.is_empty(), "one attempt means no wait");
 
         let kept = cache.cached(URL).expect("the copy is untouched");
@@ -670,24 +730,53 @@ mod tests {
         let fetch = MapFetch::new()
             .with_route("https://a.invalid/one.json", Route::text("one"))
             .with_route("https://b.invalid/two.json", Route::text("two"));
-        get(&cache, "https://a.invalid/one.json", &fetch, &Backoff::with_attempts(1))
-            .0
-            .expect("the first");
-        get(&cache, "https://b.invalid/two.json", &fetch, &Backoff::with_attempts(1))
-            .0
-            .expect("the second");
+        get(
+            &cache,
+            "https://a.invalid/one.json",
+            &fetch,
+            &Backoff::with_attempts(1),
+        )
+        .0
+        .expect("the first");
+        get(
+            &cache,
+            "https://b.invalid/two.json",
+            &fetch,
+            &Backoff::with_attempts(1),
+        )
+        .0
+        .expect("the second");
 
         assert_eq!(cache.len(), 2);
         assert!(!cache.is_empty());
-        assert_eq!(cache.cached("https://a.invalid/one.json").expect("one").body, b"one");
-        assert_eq!(cache.entries()[0].0, "https://a.invalid/one.json", "sorted by url");
+        assert_eq!(
+            cache
+                .cached("https://a.invalid/one.json")
+                .expect("one")
+                .body,
+            b"one"
+        );
+        assert_eq!(
+            cache.entries()[0].0,
+            "https://a.invalid/one.json",
+            "sorted by url"
+        );
 
         assert!(cache.forget("https://a.invalid/one.json"));
-        assert!(!cache.forget("https://a.invalid/one.json"), "it was already gone");
+        assert!(
+            !cache.forget("https://a.invalid/one.json"),
+            "it was already gone"
+        );
         assert_eq!(cache.len(), 1);
         assert!(cache.cached("https://a.invalid/one.json").is_none());
         assert!(cache.fresh("https://a.invalid/one.json").is_none());
-        assert_eq!(cache.cached("https://b.invalid/two.json").expect("two").body, b"two");
+        assert_eq!(
+            cache
+                .cached("https://b.invalid/two.json")
+                .expect("two")
+                .body,
+            b"two"
+        );
     }
 
     #[test]
@@ -705,10 +794,19 @@ mod tests {
             held.fresh_at(now, IMMUTABLE_TTL),
             "a released version file does not change, so a 300-day-old one is current"
         );
-        assert!(!held.fresh_at(now, DEFAULT_TTL), "a list of them does change");
-        assert!(!held.fresh_at(now, Duration::ZERO), "which is what always-ask means");
+        assert!(
+            !held.fresh_at(now, DEFAULT_TTL),
+            "a list of them does change"
+        );
+        assert!(
+            !held.fresh_at(now, Duration::ZERO),
+            "which is what always-ask means"
+        );
         // A stamp from the future is a copy just confirmed, not a negative age.
-        let ahead = Cached { fetched: now + Duration::from_secs(60), ..held };
+        let ahead = Cached {
+            fetched: now + Duration::from_secs(60),
+            ..held
+        };
         assert_eq!(ahead.age(now), Duration::ZERO);
         assert!(ahead.fresh_at(now, DEFAULT_TTL));
     }
@@ -729,7 +827,9 @@ mod tests {
 
         // And the next lookup overwrites it rather than failing over it.
         let fetch = MapFetch::new().with_route(URL, Route::text("whole"));
-        let held = get(&cache, URL, &fetch, &Backoff::with_attempts(1)).0.expect("the body");
+        let held = get(&cache, URL, &fetch, &Backoff::with_attempts(1))
+            .0
+            .expect("the body");
         assert_eq!(held.body, b"whole");
         assert_eq!(cache.cached(URL).expect("now an entry").body, b"whole");
     }
@@ -746,12 +846,18 @@ mod tests {
         let path = cache.body_path(URL);
         assert_eq!(std::fs::read(&path).expect("the body file"), body);
         assert_eq!(
-            std::fs::read_to_string(cache.stamp_path(URL)).expect("the stamp").lines().count(),
+            std::fs::read_to_string(cache.stamp_path(URL))
+                .expect("the stamp")
+                .lines()
+                .count(),
             3
         );
         // And the file name is a digest, whatever punctuation the URL carried.
         assert!(!path.to_string_lossy().contains("index.json"));
-        assert_eq!(cache.put(URL, b"again", None).expect("stored again").etag, None);
+        assert_eq!(
+            cache.put(URL, b"again", None).expect("stored again").etag,
+            None
+        );
         assert_eq!(cache.len(), 1, "the same url is one entry, rewritten");
         assert_eq!(cache.cached(URL).expect("the newest").body, b"again");
     }

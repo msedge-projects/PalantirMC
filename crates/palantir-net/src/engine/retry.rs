@@ -76,7 +76,10 @@ impl Backoff {
     /// be answered once, such as a cached metadata read where a failure that
     /// clear is a failure the caller wants to see.
     pub fn with_attempts(attempts: u32) -> Backoff {
-        Backoff { attempts: attempts.max(1), ..Backoff::standard() }
+        Backoff {
+            attempts: attempts.max(1),
+            ..Backoff::standard()
+        }
     }
 
     /// A policy with every number given.
@@ -84,7 +87,12 @@ impl Backoff {
     /// `factor` below 1 is clamped: a policy that waits *less* on each retry is
     /// not a backoff, and a caller that meant it can write the sequence by hand.
     pub fn new(attempts: u32, base: Duration, factor: f32, cap: Duration) -> Backoff {
-        Backoff { attempts: attempts.max(1), base, factor: factor.max(1.0), cap }
+        Backoff {
+            attempts: attempts.max(1),
+            base,
+            factor: factor.max(1.0),
+            cap,
+        }
     }
 
     /// How many attempts a call under this policy makes, the first one included.
@@ -183,9 +191,10 @@ fn spread(seed: u64, attempt: u32, bound: Duration) -> Duration {
 ///   tenth of a second, and retrying it is a spinner in front of a real error.
 pub fn is_retryable(error: &Error) -> bool {
     match error {
-        Error::Http { status: Some(status), .. } => {
-            matches!(*status, 408 | 425 | 429) || (500..600).contains(status)
-        }
+        Error::Http {
+            status: Some(status),
+            ..
+        } => matches!(*status, 408 | 425 | 429) || (500..600).contains(status),
         Error::Http { status: None, .. } | Error::HashMismatch { .. } => true,
         Error::Cancelled | Error::Io { .. } | Error::Json { .. } | Error::Format { .. } => false,
     }
@@ -243,16 +252,32 @@ mod tests {
     fn the_default_waits_double_and_are_waits_before_an_attempt() {
         let backoff = Backoff::standard();
         assert_eq!(backoff.attempts(), 3);
-        assert_eq!(backoff.delay(1), Some(Duration::ZERO), "the first try is not a retry");
-        assert_eq!(backoff.delay(2), Some(Duration::from_millis(250)), "before the first retry");
-        assert_eq!(backoff.delay(3), Some(Duration::from_millis(500)), "before the second");
+        assert_eq!(
+            backoff.delay(1),
+            Some(Duration::ZERO),
+            "the first try is not a retry"
+        );
+        assert_eq!(
+            backoff.delay(2),
+            Some(Duration::from_millis(250)),
+            "before the first retry"
+        );
+        assert_eq!(
+            backoff.delay(3),
+            Some(Duration::from_millis(500)),
+            "before the second"
+        );
         // Three attempts is two retries, and a fourth attempt is out of policy
         // rather than a fourth wait.
         assert_eq!(backoff.delay(4), None);
         let waits: Vec<Duration> = (1..=5).filter_map(|n| backoff.delay(n)).collect();
         assert_eq!(
             waits,
-            vec![Duration::ZERO, Duration::from_millis(250), Duration::from_millis(500)]
+            vec![
+                Duration::ZERO,
+                Duration::from_millis(250),
+                Duration::from_millis(500)
+            ]
         );
     }
 
@@ -264,8 +289,16 @@ mod tests {
         assert_eq!(backoff.delay(4), Some(Duration::from_millis(400)));
         assert_eq!(backoff.delay(5), Some(Duration::from_millis(800)));
         assert_eq!(backoff.delay(6), Some(Duration::from_secs(1)), "capped");
-        assert_eq!(backoff.delay(7), Some(Duration::from_secs(1)), "still capped");
-        assert_eq!(backoff.delay(8), Some(Duration::from_secs(1)), "the last attempt, still capped");
+        assert_eq!(
+            backoff.delay(7),
+            Some(Duration::from_secs(1)),
+            "still capped"
+        );
+        assert_eq!(
+            backoff.delay(8),
+            Some(Duration::from_secs(1)),
+            "the last attempt, still capped"
+        );
         assert_eq!(backoff.delay(9), None, "there is no ninth attempt");
     }
 
@@ -283,7 +316,11 @@ mod tests {
     fn a_factor_below_one_is_not_a_backoff() {
         let backoff = Backoff::new(4, Duration::from_millis(100), 0.5, Duration::from_secs(1));
         assert_eq!(backoff.delay(2), Some(Duration::from_millis(100)));
-        assert_eq!(backoff.delay(3), Some(Duration::from_millis(100)), "flat, not shrinking");
+        assert_eq!(
+            backoff.delay(3),
+            Some(Duration::from_millis(100)),
+            "flat, not shrinking"
+        );
     }
 
     #[test]
@@ -294,7 +331,10 @@ mod tests {
         for seed in 0..64u64 {
             let spread = backoff.delay_for(3, seed).expect("a wait");
             assert!(spread <= full, "{spread:?} is longer than {full:?}");
-            assert!(spread >= full / 2, "{spread:?} is less than half of {full:?}");
+            assert!(
+                spread >= full / 2,
+                "{spread:?} is less than half of {full:?}"
+            );
             seen.insert(spread.as_nanos());
         }
         // Not a distribution check -- a spread check. Sixteen parallel
@@ -310,16 +350,26 @@ mod tests {
     fn the_retryable_line_is_the_status_code() {
         // A server saying the client is wrong.
         for status in [400, 401, 403, 404, 410, 418] {
-            assert!(!is_retryable(&http(Some(status))), "{status} is not worth a retry");
+            assert!(
+                !is_retryable(&http(Some(status))),
+                "{status} is not worth a retry"
+            );
         }
         // The three 4xx that mean "later", and the 5xx that mean "not now".
         for status in [408, 425, 429, 500, 502, 503, 504, 599] {
-            assert!(is_retryable(&http(Some(status))), "{status} is worth a retry");
+            assert!(
+                is_retryable(&http(Some(status))),
+                "{status} is worth a retry"
+            );
         }
         // No status at all is a connection that failed, not an answer.
         assert!(is_retryable(&http(None)));
         // Bytes that arrived wrong.
-        assert!(is_retryable(&Error::hash_mismatch("/tmp/a.jar", "aa", "bb")));
+        assert!(is_retryable(&Error::hash_mismatch(
+            "/tmp/a.jar",
+            "aa",
+            "bb"
+        )));
         // A cancellation is the caller's own decision.
         assert!(!is_retryable(&Error::Cancelled));
         // A local file will still be a local file in a tenth of a second.
@@ -371,7 +421,16 @@ mod tests {
         .expect_err("every attempt failed");
         assert_eq!(attempts, 3);
         // Not a summary: the caller sees the failure that actually happened.
-        assert!(matches!(error, Error::Http { status: Some(500), .. }), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::Http {
+                    status: Some(500),
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -387,7 +446,13 @@ mod tests {
         )
         .expect_err("a 404");
         assert_eq!(attempts, 1);
-        assert!(matches!(error, Error::Http { status: Some(404), .. }));
+        assert!(matches!(
+            error,
+            Error::Http {
+                status: Some(404),
+                ..
+            }
+        ));
 
         let mut attempts = 0;
         let error = retry::<()>(
@@ -413,6 +478,12 @@ mod tests {
         )
         .expect_err("one attempt");
         assert_eq!(waits, 0);
-        assert!(matches!(error, Error::Http { status: Some(503), .. }));
+        assert!(matches!(
+            error,
+            Error::Http {
+                status: Some(503),
+                ..
+            }
+        ));
     }
 }

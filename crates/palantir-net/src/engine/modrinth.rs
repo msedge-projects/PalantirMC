@@ -51,10 +51,10 @@ use crate::engine::request::Fetch;
 use crate::engine::retry::Backoff;
 use crate::modrinth::{
     project_members_url, project_url, search_url_parts_with_facets, tag_categories_url,
-    tag_game_versions_url, tag_loaders_url, user_projects_url, user_url, version_url,
-    CategoryTag, GameVersionTag, LoaderTag, ModrinthMember, ModrinthProject, ModrinthProjectVersion,
-    ModrinthSearchResponse, ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed, NEWS_URL,
-    MODRINTH_BASE_URL,
+    tag_game_versions_url, tag_loaders_url, user_projects_url, user_url, version_url, CategoryTag,
+    GameVersionTag, LoaderTag, ModrinthMember, ModrinthProject, ModrinthProjectVersion,
+    ModrinthSearchResponse, ModrinthUser, ModrinthUserProject, NewsArticle, NewsFeed,
+    MODRINTH_BASE_URL, NEWS_URL,
 };
 use crate::Error;
 
@@ -96,8 +96,7 @@ pub fn user_projects_v3_url(user: &str) -> String {
 /// `user_url` is the one function that owns it, and one account spelled two ways
 /// would be two cache entries for one profile.
 pub fn user_collections_v3_url(user: &str) -> String {
-    format!("{}/collections", user_url(user))
-        .replacen(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL, 1)
+    format!("{}/collections", user_url(user)).replacen(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL, 1)
 }
 
 /// Read an absent-or-`null` list as an empty one.
@@ -380,7 +379,11 @@ impl ModrinthApi {
     /// Modrinth over `cache`'s directory, fetching through `fetch`.
     pub fn new(cache: MetadataCache, fetch: Arc<dyn Fetch>) -> ModrinthApi {
         let searches = cache.clone().with_ttl(SEARCH_TTL);
-        ModrinthApi { searches, projects: cache, fetch }
+        ModrinthApi {
+            searches,
+            projects: cache,
+            fetch,
+        }
     }
 
     /// The same API with a different search TTL.
@@ -408,7 +411,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<ModrinthSearchResponse, Error> {
         let url = search.url();
-        let held = self.searches.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .searches
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -426,7 +431,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<ModrinthProject, Error> {
         let url = project_url(project);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -443,7 +450,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthMember>, Error> {
         let url = project_members_url(project);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -459,7 +468,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthProjectVersion>, Error> {
         let url = version_url(project);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -476,7 +487,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<ModrinthUser, Error> {
         let url = user_url(user);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -491,7 +504,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthUserProject>, Error> {
         let url = user_projects_url(user);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -523,7 +538,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthV3Project>, Error> {
         let url = user_projects_v3_url(user);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -546,7 +563,9 @@ impl ModrinthApi {
         backoff: &Backoff,
     ) -> Result<Vec<ModrinthCollection>, Error> {
         let url = user_collections_v3_url(user);
-        let held = self.projects.get(&url, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(&url, self.fetch.as_ref(), cancel, backoff)?;
         serde_json::from_slice(&held.body).map_err(|error| Error::json(url, error.to_string()))
     }
 
@@ -565,7 +584,13 @@ impl ModrinthApi {
         cancel: &Cancel,
         backoff: &Backoff,
     ) -> Result<Vec<CategoryTag>, Error> {
-        read_tag_list(tag_categories_url(), &self.projects, self.fetch.as_ref(), cancel, backoff)
+        read_tag_list(
+            tag_categories_url(),
+            &self.projects,
+            self.fetch.as_ref(),
+            cancel,
+            backoff,
+        )
     }
 
     /// Every game version Modrinth knows, newest first as the API lists them.
@@ -574,16 +599,24 @@ impl ModrinthApi {
         cancel: &Cancel,
         backoff: &Backoff,
     ) -> Result<Vec<GameVersionTag>, Error> {
-        read_tag_list(tag_game_versions_url(), &self.projects, self.fetch.as_ref(), cancel, backoff)
+        read_tag_list(
+            tag_game_versions_url(),
+            &self.projects,
+            self.fetch.as_ref(),
+            cancel,
+            backoff,
+        )
     }
 
     /// Every loader Modrinth knows.
-    pub fn tag_loaders(
-        &self,
-        cancel: &Cancel,
-        backoff: &Backoff,
-    ) -> Result<Vec<LoaderTag>, Error> {
-        read_tag_list(tag_loaders_url(), &self.projects, self.fetch.as_ref(), cancel, backoff)
+    pub fn tag_loaders(&self, cancel: &Cancel, backoff: &Backoff) -> Result<Vec<LoaderTag>, Error> {
+        read_tag_list(
+            tag_loaders_url(),
+            &self.projects,
+            self.fetch.as_ref(),
+            cancel,
+            backoff,
+        )
     }
 
     /// Modrinth's news feed, newest first.
@@ -599,7 +632,9 @@ impl ModrinthApi {
     /// which is the reference's own split: its fetch slices four for the sidebar
     /// and its news page reads the rest of the same response.
     pub fn news(&self, cancel: &Cancel, backoff: &Backoff) -> Result<Vec<NewsArticle>, Error> {
-        let held = self.projects.get(NEWS_URL, self.fetch.as_ref(), cancel, backoff)?;
+        let held = self
+            .projects
+            .get(NEWS_URL, self.fetch.as_ref(), cancel, backoff)?;
         let feed: NewsFeed = serde_json::from_slice(&held.body)
             .map_err(|error| Error::json(NEWS_URL, error.to_string()))?;
         Ok(feed.articles)
@@ -677,7 +712,9 @@ mod tests {
     /// An API over a scratch directory whose only routes are the ones a test
     /// scripts, so a test that forgets one fails instead of dialling out.
     fn api(name: &str, ttl: Duration) -> (ModrinthApi, Arc<MapFetch>) {
-        let root = std::env::temp_dir().join("palantirmc-engine-modrinth").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-modrinth")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         let fetch = Arc::new(MapFetch::new());
         let api = ModrinthApi::new(MetadataCache::new(root, ttl), fetch.clone());
@@ -693,19 +730,32 @@ mod tests {
         let (api, fetch) = api("news", DEFAULT_TTL);
         fetch.set_route(NEWS_URL, Route::text(NEWS_BODY));
 
-        let news = api.news(&Cancel::new(), &Backoff::with_attempts(1)).expect("the feed");
-        assert_eq!(news.len(), 2, "the whole feed, in the order it was published");
+        let news = api
+            .news(&Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the feed");
+        assert_eq!(
+            news.len(),
+            2,
+            "the whole feed, in the order it was published"
+        );
         assert_eq!(news[0].title, "Sync settings across instances");
-        assert_eq!(news[0].summary, "Keep game options the same across your instances.");
+        assert_eq!(
+            news[0].summary,
+            "Keep game options the same across your instances."
+        );
         assert!(news[0].date.ends_with('Z'), "the date travels as published");
-        assert_eq!(news[0].link, "https://modrinth.com/news/article/sync-settings");
+        assert_eq!(
+            news[0].link,
+            "https://modrinth.com/news/article/sync-settings"
+        );
         assert!(news[0].thumbnail.ends_with("thumbnail.webp"));
         // An article that publishes no summary is a card with one paragraph fewer,
         // not a feed that fails to parse.
         assert_eq!(news[1].summary, "");
         assert_eq!(news[1].thumbnail, "");
 
-        api.news(&Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.news(&Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
         assert_eq!(fetch.count(), 1, "a feed inside its belief costs nothing");
         assert_eq!(fetch.requests()[0].url, NEWS_URL);
     }
@@ -754,11 +804,20 @@ mod tests {
     fn a_profile_and_its_projects_are_two_cached_documents() {
         let (api, fetch) = api("user", DEFAULT_TTL);
         fetch.set_route(&user_url("2REoufqX"), Route::text(USER_BODY));
-        fetch.set_route(&user_projects_url("2REoufqX"), Route::text(USER_PROJECTS_BODY));
+        fetch.set_route(
+            &user_projects_url("2REoufqX"),
+            Route::text(USER_PROJECTS_BODY),
+        );
 
-        let user = api.user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("the profile");
+        let user = api
+            .user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("the profile");
         assert_eq!(user.username, "Modrinth");
-        assert_eq!(user.display_name(), "Modrinth", "no display name means the username");
+        assert_eq!(
+            user.display_name(),
+            "Modrinth",
+            "no display name means the username"
+        );
         assert!(user.avatar_url.ends_with("abc_96.webp"));
         assert_eq!(user.joined_label(), "November 13, 2023");
         let projects = api
@@ -770,8 +829,10 @@ mod tests {
 
         // Two URLs, so a page that only draws the header never pays for the list.
         // Asked twice, both come from the cache.
-        api.user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
-        api.user_projects("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.user("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
+        api.user_projects("2REoufqX", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
         assert_eq!(fetch.count(), 2, "one request each, and neither twice");
         let urls: Vec<String> = fetch.requests().iter().map(|r| r.url.clone()).collect();
         assert!(urls.contains(&user_url("2REoufqX")));
@@ -794,7 +855,10 @@ mod tests {
     #[test]
     fn the_v3_projects_route_is_a_third_document_and_reads_the_head_of_the_type_array() {
         let (api, fetch) = api("user-v3", DEFAULT_TTL);
-        fetch.set_route(&user_projects_v3_url("P3U9o13d"), Route::text(USER_PROJECTS_V3_BODY));
+        fetch.set_route(
+            &user_projects_v3_url("P3U9o13d"),
+            Route::text(USER_PROJECTS_V3_BODY),
+        );
 
         let projects = api
             .user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
@@ -818,7 +882,8 @@ mod tests {
         assert_ne!(url, user_projects_url("P3U9o13d"));
         assert_eq!(fetch.requests()[0].url, url);
 
-        api.user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
         assert_eq!(fetch.count(), 1, "a fresh list is not asked for again");
     }
 
@@ -837,8 +902,16 @@ mod tests {
         let projects = api
             .user_projects_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
             .expect("the list");
-        assert_eq!(projects[0].primary_type(), None, "a null array names no type");
-        assert_eq!(projects[1].primary_type(), None, "and an absent one does not either");
+        assert_eq!(
+            projects[0].primary_type(),
+            None,
+            "a null array names no type"
+        );
+        assert_eq!(
+            projects[1].primary_type(),
+            None,
+            "and an absent one does not either"
+        );
         assert_eq!(projects[2].primary_type(), Some("mod"));
     }
 
@@ -917,7 +990,10 @@ mod tests {
             user_collections_v3_url("P3U9o13d"),
             "https://api.modrinth.com/v3/user/P3U9o13d/collections"
         );
-        assert_ne!(user_collections_v3_url("P3U9o13d"), user_projects_v3_url("P3U9o13d"));
+        assert_ne!(
+            user_collections_v3_url("P3U9o13d"),
+            user_projects_v3_url("P3U9o13d")
+        );
         assert_eq!(fetch.requests()[0].url, user_collections_v3_url("P3U9o13d"));
 
         api.user_collections_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
@@ -943,7 +1019,11 @@ mod tests {
         let collections = api
             .user_collections_v3("P3U9o13d", &Cancel::new(), &Backoff::with_attempts(1))
             .expect("the list");
-        assert_eq!(collections[0].project_count(), 0, "a null array counts as none");
+        assert_eq!(
+            collections[0].project_count(),
+            0,
+            "a null array counts as none"
+        );
         assert_eq!(collections[0].description, "");
         assert_eq!(collections[1].project_count(), 0);
         // No dates at all: the sort key is two empty strings, which sort last rather
@@ -966,7 +1046,8 @@ mod tests {
             {"id":"tie-early","name":"Tie early","created":"2024-01-01T00:00:00.000000Z",
              "updated":"2025-01-01T00:00:00.000000Z","projects":[]}
         ]"#;
-        let mut collections: Vec<ModrinthCollection> = serde_json::from_str(body).expect("the list");
+        let mut collections: Vec<ModrinthCollection> =
+            serde_json::from_str(body).expect("the list");
         // `Array::sort_by` is stable, so a tie in both halves would keep the order it
         // arrived in; the comparator is what decides it, and it is the reverse of the
         // key. *Old* is the case that shows `created` is only a tie-break: its
@@ -987,7 +1068,8 @@ mod tests {
         );
         assert_eq!(
             user_collections_v3_url("a b"),
-            format!("{}/collections", user_url("a b")).replace(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL)
+            format!("{}/collections", user_url("a b"))
+                .replace(MODRINTH_BASE_URL, MODRINTH_V3_BASE_URL)
         );
     }
 
@@ -995,14 +1077,21 @@ mod tests {
     fn the_three_tag_routes_are_asked_separately_and_the_filter_lists_are_queries_on_them() {
         let (api, fetch) = api("tags", DEFAULT_TTL);
         fetch.set_route(&tag_categories_url(), Route::text(TAGS_CATEGORY_BODY));
-        fetch.set_route(&tag_game_versions_url(), Route::text(TAGS_GAME_VERSION_BODY));
+        fetch.set_route(
+            &tag_game_versions_url(),
+            Route::text(TAGS_GAME_VERSION_BODY),
+        );
         fetch.set_route(&tag_loaders_url(), Route::text(TAGS_LOADER_BODY));
 
         let cancel = Cancel::new();
         let backoff = Backoff::with_attempts(1);
         let tags = crate::Tags {
-            categories: api.tag_categories(&cancel, &backoff).expect("the categories"),
-            game_versions: api.tag_game_versions(&cancel, &backoff).expect("the versions"),
+            categories: api
+                .tag_categories(&cancel, &backoff)
+                .expect("the categories"),
+            game_versions: api
+                .tag_game_versions(&cancel, &backoff)
+                .expect("the versions"),
             loaders: api.tag_loaders(&cancel, &backoff).expect("the loaders"),
         };
         assert_eq!(tags.categories.len(), 4);
@@ -1023,11 +1112,17 @@ mod tests {
 
         // And the loaders are filtered by the project types they are offered for,
         // because `fabric` and the modpack loaders are rows of different lists.
-        let modpack: Vec<&str> =
-            tags.loaders_for("modpack").iter().map(|loader| loader.name.as_str()).collect();
+        let modpack: Vec<&str> = tags
+            .loaders_for("modpack")
+            .iter()
+            .map(|loader| loader.name.as_str())
+            .collect();
         assert_eq!(modpack, vec!["fabric"]);
-        let mods: Vec<&str> =
-            tags.loaders_for("mod").iter().map(|loader| loader.name.as_str()).collect();
+        let mods: Vec<&str> = tags
+            .loaders_for("mod")
+            .iter()
+            .map(|loader| loader.name.as_str())
+            .collect();
         assert_eq!(mods, vec!["fabric", "forge"]);
 
         // A version's type is what puts it under *Show all versions*, so it has to
@@ -1043,7 +1138,11 @@ mod tests {
         api.tag_categories(&cancel, &backoff).expect("again");
         api.tag_game_versions(&cancel, &backoff).expect("again");
         api.tag_loaders(&cancel, &backoff).expect("again");
-        assert_eq!(fetch.count(), 3, "one request each, and not a second for the second read");
+        assert_eq!(
+            fetch.count(),
+            3,
+            "one request each, and not a second for the second read"
+        );
     }
 
     #[test]
@@ -1062,15 +1161,28 @@ mod tests {
         // them) come back with the search.
         assert_eq!(response.hits[0].versions, vec!["1.21.4", "1.21.3"]);
         assert_eq!(response.hits[0].categories, vec!["fabric", "optimization"]);
-        assert!(api.searches.cached(&search.url()).is_some(), "the response was kept, with an age");
+        assert!(
+            api.searches.cached(&search.url()).is_some(),
+            "the response was kept, with an age"
+        );
         assert!(api.cache_dir().exists());
 
         // The key is the URL, so the request that was made is the one the search
         // describes -- facets and sort included, percent-encoded.
         let asked = fetch.requests();
         assert_eq!(asked.len(), 1);
-        assert!(asked[0].url.contains("facets=%5B%5B%22project_type%3Amod%22%5D%5D"), "{}", asked[0].url);
-        assert!(asked[0].url.ends_with("&index=downloads"), "{}", asked[0].url);
+        assert!(
+            asked[0]
+                .url
+                .contains("facets=%5B%5B%22project_type%3Amod%22%5D%5D"),
+            "{}",
+            asked[0].url
+        );
+        assert!(
+            asked[0].url.ends_with("&index=downloads"),
+            "{}",
+            asked[0].url
+        );
     }
 
     #[test]
@@ -1095,7 +1207,11 @@ mod tests {
         assert_eq!(fetch.count(), 3);
         assert!(fetch.requests()[2].url.contains("&index=newest"));
         run(&api, &newest).expect("sorted again, from the cache");
-        assert_eq!(fetch.count(), 3, "and the sorted answer is cached separately");
+        assert_eq!(
+            fetch.count(),
+            3,
+            "and the sorted answer is cached separately"
+        );
     }
 
     #[test]
@@ -1112,9 +1228,18 @@ mod tests {
         run(&api, &search).expect("the first");
         run(&api, &search).expect("the second");
         assert_eq!(fetch.count(), 2, "a zero TTL means always ask");
-        assert_eq!(api.projects.ttl(), DEFAULT_TTL, "the other handle is unchanged");
+        assert_eq!(
+            api.projects.ttl(),
+            DEFAULT_TTL,
+            "the other handle is unchanged"
+        );
         assert_eq!(api.searches.ttl(), Duration::ZERO);
-        assert_eq!(ModrinthApi::new(MetadataCache::new(".", DEFAULT_TTL), fetch).searches.ttl(), SEARCH_TTL);
+        assert_eq!(
+            ModrinthApi::new(MetadataCache::new(".", DEFAULT_TTL), fetch)
+                .searches
+                .ttl(),
+            SEARCH_TTL
+        );
     }
 
     #[test]
@@ -1136,10 +1261,16 @@ mod tests {
 
         // Believed: the second call reads the cache, and the URL is one a slug
         // can be used in as well as an id.
-        api.versions("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.versions("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
         assert_eq!(fetch.count(), 1);
-        api.versions("sodium", &Cancel::new(), &Backoff::with_attempts(1)).expect_err("no route");
-        assert_eq!(fetch.count(), 2, "a slug is a different URL and so a different cache entry");
+        api.versions("sodium", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect_err("no route");
+        assert_eq!(
+            fetch.count(),
+            2,
+            "a slug is a different URL and so a different cache entry"
+        );
     }
 
     #[test]
@@ -1170,11 +1301,16 @@ mod tests {
 
         // Both are cached under their own URL: asked again, no request at all,
         // and the two handles are separate entries rather than one document.
-        api.project("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
-        api.members("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1)).expect("again");
+        api.project("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
+        api.members("AANobbMI", &Cancel::new(), &Backoff::with_attempts(1))
+            .expect("again");
         assert_eq!(fetch.count(), 2, "a second read of each is free");
         assert!(api.projects.cached(&project_url("AANobbMI")).is_some());
-        assert!(api.projects.cached(&project_members_url("AANobbMI")).is_some());
+        assert!(api
+            .projects
+            .cached(&project_members_url("AANobbMI"))
+            .is_some());
     }
 
     #[test]
@@ -1184,9 +1320,21 @@ mod tests {
         fetch.set_route(&search.url(), Route::text(SEARCH_BODY).failing(1, 503));
 
         let error = run(&api, &search).expect_err("a 503");
-        assert!(matches!(error, Error::Http { status: Some(503), .. }), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::Http {
+                    status: Some(503),
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
         assert_eq!(fetch.count(), 1);
-        assert!(api.searches.cached(&search.url()).is_none(), "nothing was stored");
+        assert!(
+            api.searches.cached(&search.url()).is_none(),
+            "nothing was stored"
+        );
 
         // And the API answers once the service does.
         let response = run(&api, &search).expect("the second attempt");
@@ -1202,7 +1350,10 @@ mod tests {
         let error = run(&api, &search).expect_err("an HTML error page");
         assert!(matches!(error, Error::Json { .. }), "{error:?}");
         let message = format!("{error}");
-        assert!(message.contains("api.modrinth.com"), "it names the URL: {message}");
+        assert!(
+            message.contains("api.modrinth.com"),
+            "it names the URL: {message}"
+        );
     }
 
     #[test]
@@ -1211,7 +1362,10 @@ mod tests {
         let search = Search::new("sodium");
         // Chunked, so the cancellation lands between chunks rather than before
         // the request: the case a progress line has to handle.
-        fetch.set_route(&search.url(), Route::body(SEARCH_BODY.as_bytes()).chunked(8));
+        fetch.set_route(
+            &search.url(),
+            Route::body(SEARCH_BODY.as_bytes()).chunked(8),
+        );
         let cancel = Cancel::new();
         cancel.cancel();
 

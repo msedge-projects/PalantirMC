@@ -256,7 +256,11 @@ pub enum Message {
 crate::hovered!(Message);
 
 /// One stable name per tab, in `State::TABS`' order.
-const TAB_KEYS: [&str; 3] = ["project:tab:description", "project:tab:gallery", "project:tab:versions"];
+const TAB_KEYS: [&str; 3] = [
+    "project:tab:description",
+    "project:tab:gallery",
+    "project:tab:versions",
+];
 
 /// The page's two actions.
 const INSTALL_KEY: &str = "project:install";
@@ -303,7 +307,7 @@ impl State {
     pub fn update(&mut self, message: Message) -> Option<Ask> {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Tab(tab) => self.tab = tab,
             // The button asks again rather than standing in for an answer: what
@@ -381,7 +385,10 @@ impl State {
     fn ask(&mut self) -> Asked {
         self.round += 1;
         self.project = Load::Loading;
-        Asked { round: self.round, id: self.id.clone() }
+        Asked {
+            round: self.round,
+            id: self.id.clone(),
+        }
     }
 
     /// The tabs the page offers, in the reference's order.
@@ -389,8 +396,11 @@ impl State {
     /// `ProjectTab::ALL` is the reference's own list; the two entries it leaves
     /// out (a single version, the changelog) are reachable by address rather than
     /// by tab, which is what `routes.js` does with them.
-    pub const TABS: [ProjectTab; 3] =
-        [ProjectTab::Description, ProjectTab::Gallery, ProjectTab::Versions];
+    pub const TABS: [ProjectTab; 3] = [
+        ProjectTab::Description,
+        ProjectTab::Gallery,
+        ProjectTab::Versions,
+    ];
 
     /// The key for a tab's label.
     ///
@@ -421,9 +431,16 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     if let Some(notice) = &state.notice {
         blocks.push(ui::admonition(theme, ui::Severity::Info, &state.id, notice));
     }
-    blocks.push(page::draw(theme, project, "this project", |project| header(theme, project)));
+    blocks.push(page::draw(theme, project, "this project", |project| {
+        header(theme, project)
+    }));
     blocks.push(ui::tabs(theme, &TAB_KEYS, &state.labels(), |index| {
-        Message::Tab(State::TABS.get(index).cloned().unwrap_or(ProjectTab::Description))
+        Message::Tab(
+            State::TABS
+                .get(index)
+                .cloned()
+                .unwrap_or(ProjectTab::Description),
+        )
     }));
     blocks.push(match project {
         Load::Ready(project) => body(theme, state.tab.clone(), project, &state.details),
@@ -462,13 +479,19 @@ fn header<'a>(theme: Gen, project: &'a Project) -> Element<'a, Message> {
                 text(project.title.clone())
                     .size(24.0)
                     .font(crate::style::heading())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(
                 text(project.author.clone())
                     .size(13.0)
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_SECONDARY,
+                    ))),
             )
             .push(ui::paragraph(theme, &project.summary))
             .push(facts)
@@ -573,7 +596,10 @@ fn version_card<'a>(theme: Gen, version: &'a Version) -> Element<'a, Message> {
                 text(format!("{} · {}", version.number, version.name))
                     .size(16.0)
                     .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                    .style(iced::theme::Text::Color(theme_gen::ink(
+                        theme,
+                        INK_CONTRAST,
+                    ))),
             )
             .push(tags)
             .push(ui::icon_label(
@@ -615,7 +641,10 @@ mod tests {
     #[test]
     fn the_tabs_are_the_reference_s_and_its_labels_are_its_own() {
         assert_eq!(State::TABS.len(), 3);
-        assert_eq!(State::key_for(&ProjectTab::Description).message(), "Description");
+        assert_eq!(
+            State::key_for(&ProjectTab::Description).message(),
+            "Description"
+        );
         assert_eq!(State::key_for(&ProjectTab::Gallery).message(), "Gallery");
         assert_eq!(State::key_for(&ProjectTab::Versions).message(), "Versions");
         // A single version is addressed under `versions`, so its key is that
@@ -641,10 +670,17 @@ mod tests {
         let asked = state.opening().expect("the first request");
         assert_eq!(asked.id, "sodium");
         assert_eq!(asked.round, 1);
-        assert_eq!(state.project, Load::Loading, "the page waits once it has asked");
+        assert_eq!(
+            state.project,
+            Load::Loading,
+            "the page waits once it has asked"
+        );
         assert!(state.opening().is_none(), "and does not ask twice");
         // The answer, or the reason there is none -- never an empty project.
-        state.update(Message::Found { round: 1, result: Err("no such project".to_string()) });
+        state.update(Message::Found {
+            round: 1,
+            result: Err("no such project".to_string()),
+        });
         // The failure arm is the one a page is drawn from before a project is,
         // so it is the arm this test needs; the ready arm is the line below.
         assert_eq!(state.project.failure(), Some("no such project"));
@@ -661,10 +697,19 @@ mod tests {
         assert_eq!(second.round, first.round + 1);
         // The first answer arrives late: it is dropped rather than drawn under
         // the request that replaced it, and it is not an error either.
-        state.update(Message::Found { round: first.round, result: Ok(Box::new(project())) });
+        state.update(Message::Found {
+            round: first.round,
+            result: Ok(Box::new(project())),
+        });
         assert_eq!(state.project, Load::Loading, "the stale answer was dropped");
-        state.update(Message::Found { round: second.round, result: Ok(Box::new(project())) });
-        assert!(state.project.ready().is_some(), "the answer in force was taken");
+        state.update(Message::Found {
+            round: second.round,
+            result: Ok(Box::new(project())),
+        });
+        assert!(
+            state.project.ready().is_some(),
+            "the answer in force was taken"
+        );
     }
 
     #[test]
@@ -745,7 +790,10 @@ mod tests {
         assert_eq!(page.summary, "Modern rendering engine");
         assert_eq!(page.downloads, 41_000_000);
         assert_eq!(page.follows, 9_000);
-        assert_eq!(page.gallery, vec!["In the nether", "https://cdn.modrinth.com/uncaptioned.png"]);
+        assert_eq!(
+            page.gallery,
+            vec!["In the nether", "https://cdn.modrinth.com/uncaptioned.png"]
+        );
         assert_eq!(page.versions.len(), 1);
         assert_eq!(page.versions[0].number, "mc1.21.4-0.6.5");
         assert_eq!(page.versions[0].name, "Sodium 0.6.5");
@@ -822,9 +870,16 @@ mod tests {
         }
         // What comes back is a sentence in the slot everything the page could not
         // do is drawn in, and a failure replaces the success that preceded it.
-        state.update(Message::Noted("Installed Sodium 0.6.5 into atm10".to_string()));
-        assert_eq!(state.notice.as_deref(), Some("Installed Sodium 0.6.5 into atm10"));
-        state.update(Message::Noted("no version of Sodium is for Fabric 1.21.4".to_string()));
+        state.update(Message::Noted(
+            "Installed Sodium 0.6.5 into atm10".to_string(),
+        ));
+        assert_eq!(
+            state.notice.as_deref(),
+            Some("Installed Sodium 0.6.5 into atm10")
+        );
+        state.update(Message::Noted(
+            "no version of Sodium is for Fabric 1.21.4".to_string(),
+        ));
         assert_eq!(
             state.notice.as_deref(),
             Some("no version of Sodium is for Fabric 1.21.4"),

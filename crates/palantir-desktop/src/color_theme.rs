@@ -83,7 +83,9 @@ impl ColorTheme {
     pub fn options(dev_mode: bool, current: ColorTheme) -> Vec<ColorTheme> {
         ColorTheme::ALL
             .into_iter()
-            .filter(|option| *option != ColorTheme::Retro || dev_mode || current == ColorTheme::Retro)
+            .filter(|option| {
+                *option != ColorTheme::Retro || dev_mode || current == ColorTheme::Retro
+            })
             .collect()
     }
 
@@ -94,7 +96,10 @@ impl ColorTheme {
     /// rather than of a palette; the settings modal asks it for the same reason,
     /// to mark the card of the theme it would return to.
     pub const fn is_dark(self) -> bool {
-        matches!(self, ColorTheme::Dark | ColorTheme::Oled | ColorTheme::Retro)
+        matches!(
+            self,
+            ColorTheme::Dark | ColorTheme::Oled | ColorTheme::Retro
+        )
     }
 
     /// The generated key holding this theme's own label.
@@ -254,7 +259,10 @@ mod tests {
         assert_eq!(ColorTheme::System.label(), "Sync with system");
         // Every label key is the reference's key, spelled out, rather than a
         // second table of strings kept beside the generated one.
-        assert_eq!(ColorTheme::Retro.label_key().name(), "settings.display.theme.retro");
+        assert_eq!(
+            ColorTheme::Retro.label_key().name(),
+            "settings.display.theme.retro"
+        );
     }
 
     #[test]

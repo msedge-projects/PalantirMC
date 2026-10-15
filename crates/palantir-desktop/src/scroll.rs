@@ -246,7 +246,11 @@ impl ScrollAnim {
             // must not start a timer for a gesture that moves nothing.
             return;
         }
-        self.glide = Some(Glide { from: self.offset, began: now, duration: DURATION });
+        self.glide = Some(Glide {
+            from: self.offset,
+            began: now,
+            duration: DURATION,
+        });
     }
 
     /// Advance to `now` and report whether there is more to animate.
@@ -274,7 +278,11 @@ impl ScrollAnim {
 
         let elapsed = now.saturating_duration_since(glide.began).as_secs_f32();
         let deadline = glide.duration.as_secs_f32();
-        let progress = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
+        let progress = if deadline > 0.0 {
+            (elapsed / deadline).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         self.offset = glide.from + (self.target - glide.from) * ease_out(progress);
 
         if progress >= 1.0 {
@@ -410,7 +418,10 @@ struct Swept {
 impl Swept {
     /// A region nobody has commanded is at the top, which is where it starts.
     fn at(offset: f32) -> Self {
-        Swept { lo: offset, hi: offset }
+        Swept {
+            lo: offset,
+            hi: offset,
+        }
     }
 
     /// Add an offset a command has put the region at.
@@ -521,7 +532,10 @@ impl Glides {
     /// ever needs the commands; this is how the tests ask a region what it did.
     #[cfg(test)]
     pub fn anim(&self, name: &'static str) -> ScrollAnim {
-        self.regions.get(name).map(|region| region.anim).unwrap_or_default()
+        self.regions
+            .get(name)
+            .map(|region| region.anim)
+            .unwrap_or_default()
     }
 
     /// The offset this policy last put `name` at, or zero for a name nothing has
@@ -543,7 +557,9 @@ impl Glides {
     /// page has been scrolled or it stays where it was while everything around it
     /// moves. See [`crate::shell::Shell::page_overlay`].
     pub(crate) fn offset(&self, name: &'static str) -> f32 {
-        self.regions.get(name).map_or(0.0, |region| region.anim.offset)
+        self.regions
+            .get(name)
+            .map_or(0.0, |region| region.anim.offset)
     }
 }
 
@@ -630,7 +646,11 @@ pub fn window(len: usize, row_height: f32, at: Geometry) -> std::ops::Range<usiz
     if len == 0 || row_height <= 0.0 {
         return 0..len;
     }
-    let view = if at.view_height > 0.0 { at.view_height } else { INITIAL_VIEW };
+    let view = if at.view_height > 0.0 {
+        at.view_height
+    } else {
+        INITIAL_VIEW
+    };
     let visible = (view / row_height).ceil() as usize;
     let size = (visible + OVERSCAN * 2).max(INITIAL_ROWS);
     // `saturating_sub` for the list shorter than one window: there is no offset
@@ -775,7 +795,8 @@ where
     Theme: iced::widget::scrollable::StyleSheet + 'a,
     Renderer: iced::advanced::Renderer + 'a,
 {
-    iced::widget::scrollable(WheelGuard::new(content, move |wheel| on_wheel(name, wheel))).id(id(name))
+    iced::widget::scrollable(WheelGuard::new(content, move |wheel| on_wheel(name, wheel)))
+        .id(id(name))
 }
 
 /// A region's content, guarded, before the scrollable is built around it.
@@ -804,7 +825,10 @@ where
         content: impl Into<Element<'a, Message, Theme, Renderer>>,
         on_wheel: impl Fn(Wheel) -> Message + 'a,
     ) -> Self {
-        WheelGuard { content: content.into(), on_wheel: Box::new(on_wheel) }
+        WheelGuard {
+            content: content.into(),
+            on_wheel: Box::new(on_wheel),
+        }
     }
 
     /// What this guard would report for an event, if it claims it.
@@ -888,7 +912,9 @@ where
         renderer: &Renderer,
         operation: &mut dyn iced::advanced::widget::Operation<Message>,
     ) {
-        self.content.as_widget().operate(tree, layout, renderer, operation);
+        self.content
+            .as_widget()
+            .operate(tree, layout, renderer, operation);
     }
 
     fn on_event(
@@ -993,7 +1019,12 @@ mod tests {
     /// A wheel of `notches` on a region `content` tall showing `view` of itself,
     /// with the region currently at `offset` -- what a guard reports.
     fn wheel_at(notches: f32, content: f32, view: f32, offset: f32) -> Wheel {
-        Wheel { notches, content_height: content, view_height: view, offset }
+        Wheel {
+            notches,
+            content_height: content,
+            view_height: view,
+            offset,
+        }
     }
 
     /// Run a gesture to completion on a clock the test owns, and report how many
@@ -1013,7 +1044,14 @@ mod tests {
     /// A scroll region holding `len` rows of `row_height`, scrolled to `offset`
     /// in a `view_height` window.
     fn at(len: usize, row_height: f32, offset: f32, view_height: f32) -> std::ops::Range<usize> {
-        window(len, row_height, Geometry { offset, view_height })
+        window(
+            len,
+            row_height,
+            Geometry {
+                offset,
+                view_height,
+            },
+        )
     }
 
     #[test]
@@ -1051,7 +1089,10 @@ mod tests {
         let first = at(5_000, 66.0, 0.0, 0.0);
         assert!(first.len() > INITIAL_ROWS, "{}", first.len());
         assert!(first.len() < 100, "and it is still a window, not the list");
-        assert_eq!(first.start, 0, "nothing has been scrolled, so it starts at the top");
+        assert_eq!(
+            first.start, 0,
+            "nothing has been scrolled, so it starts at the top"
+        );
         // And a list shorter than that draws all of itself.
         assert_eq!(at(7, 66.0, 0.0, 0.0), 0..7);
         // A row taller than the assumed window still owes a screenful: the floor
@@ -1083,7 +1124,10 @@ mod tests {
         // rows that are drawn are always at the offset they claim to be at.
         for offset in [0.0, 1.0, 6_599.0, 6_600.0, 329_999.0, 400_000.0] {
             let range = at(5_000, 66.0, offset, 600.0);
-            assert!(range.end <= 5_000 && range.start <= range.end, "{offset}: {range:?}");
+            assert!(
+                range.end <= 5_000 && range.start <= range.end,
+                "{offset}: {range:?}"
+            );
             assert_eq!(range.len(), 10 + OVERSCAN * 2, "{offset}: {range:?}");
         }
         // A negative offset is the top: a region cannot report one, and a rule
@@ -1129,7 +1173,10 @@ mod tests {
         sampled.tick(began + DURATION / 2);
         anim.wheel(wheel_at(-1.0, 2000.0, 500.0, 0.0), began + DURATION / 2);
         assert_eq!(anim.offset, sampled.offset);
-        assert!(anim.offset > 0.0, "input between ticks must not freeze motion");
+        assert!(
+            anim.offset > 0.0,
+            "input between ticks must not freeze motion"
+        );
         assert_eq!(anim.target, 2.0 * WHEEL_PIXELS_PER_NOTCH);
         anim.tick(began + DURATION + DURATION / 2);
         assert_eq!(anim.offset, anim.target);
@@ -1153,9 +1200,15 @@ mod tests {
         let mut anim = page(1000.0, 400.0);
         assert_eq!(anim.max_offset(), 600.0);
         anim.scroll_notches(-50.0);
-        assert_eq!(anim.target, 600.0, "scrolling past the end would show blank space");
+        assert_eq!(
+            anim.target, 600.0,
+            "scrolling past the end would show blank space"
+        );
         anim.scroll_notches(50.0);
-        assert_eq!(anim.target, 0.0, "scrolling above the start is not allowed either");
+        assert_eq!(
+            anim.target, 0.0,
+            "scrolling above the start is not allowed either"
+        );
     }
 
     #[test]
@@ -1163,7 +1216,10 @@ mod tests {
         let mut anim = page(4000.0, 600.0);
         anim.scroll_notches(-5.0);
         let frames = frames_to_settle(&mut anim);
-        assert_eq!(anim.offset, anim.target, "it must land exactly on the target");
+        assert_eq!(
+            anim.offset, anim.target,
+            "it must land exactly on the target"
+        );
         assert!(!anim.animating());
         // About ten frames at 60fps: a fifth of a second, which reads as one
         // movement. The window is wide on purpose -- the property that matters
@@ -1191,7 +1247,10 @@ mod tests {
             frames(-20.0),
             "a 10x flick must not cost ten times the frames"
         );
-        assert!(frames(-20.0) <= 20, "a gesture is a fifth of a second at 60fps");
+        assert!(
+            frames(-20.0) <= 20,
+            "a gesture is a fifth of a second at 60fps"
+        );
     }
 
     #[test]
@@ -1205,12 +1264,21 @@ mod tests {
         // What this asserts is that the number is not taken at all.
         let mut anim = page(4000.0, 600.0);
         anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
-        assert!(anim.animating(), "the first gesture of a session must glide");
+        assert!(
+            anim.animating(),
+            "the first gesture of a session must glide"
+        );
         let first = frames_to_settle(&mut anim);
-        assert!(first > 1, "it glided rather than teleporting: {first} frames");
+        assert!(
+            first > 1,
+            "it glided rather than teleporting: {first} frames"
+        );
         // A minute of reading later, the same wheel on the same page.
         anim.wheel(wheel_at(-1.0, 4000.0, 600.0, anim.target), Instant::now());
-        assert!(anim.animating(), "the gap between two gestures is not a measurement");
+        assert!(
+            anim.animating(),
+            "the gap between two gestures is not a measurement"
+        );
         assert_eq!(
             frames_to_settle(&mut anim),
             first,
@@ -1235,7 +1303,10 @@ mod tests {
             frames += 1;
             now += Duration::from_millis(69);
         }
-        assert!((2..=4).contains(&frames), "it moved in steps: {frames} of them");
+        assert!(
+            (2..=4).contains(&frames),
+            "it moved in steps: {frames} of them"
+        );
         assert_eq!(anim.offset, anim.target, "and still landed on the target");
         assert!(!anim.animating());
     }
@@ -1248,7 +1319,10 @@ mod tests {
         let mut anim = page(4000.0, 600.0);
         let began = Instant::now();
         anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), began);
-        assert!(anim.tick(began), "the first frame has the whole glide ahead of it");
+        assert!(
+            anim.tick(began),
+            "the first frame has the whole glide ahead of it"
+        );
         assert!(
             !anim.tick(began + Duration::from_secs(2)),
             "two seconds later the gesture is over"
@@ -1269,13 +1343,19 @@ mod tests {
         // ...and glides like every other one. Nothing about the machine is
         // carried across a navigation, because nothing about it is measured.
         anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
-        assert!(frames_to_settle(&mut anim) > 1, "a fresh page must glide too");
+        assert!(
+            frames_to_settle(&mut anim) > 1,
+            "a fresh page must glide too"
+        );
     }
 
     #[test]
     fn an_idle_page_asks_for_no_frames() {
         let anim = page(4000.0, 600.0);
-        assert!(!anim.animating(), "nothing moves until a wheel event says so");
+        assert!(
+            !anim.animating(),
+            "nothing moves until a wheel event says so"
+        );
     }
 
     #[test]
@@ -1289,7 +1369,10 @@ mod tests {
         anim.resync(1200.0);
         assert_eq!(anim.offset, 1200.0);
         assert_eq!(anim.target, 1200.0);
-        assert!(!anim.animating(), "a drag ends the glide rather than fighting it");
+        assert!(
+            !anim.animating(),
+            "a drag ends the glide rather than fighting it"
+        );
     }
 
     #[test]
@@ -1299,7 +1382,10 @@ mod tests {
         assert_eq!(anim.target, 3400.0);
         // The list got shorter while the page was scrolled to the bottom.
         anim.observe(900.0, 600.0);
-        assert_eq!(anim.target, 300.0, "the target must be re-clamped, not left in space");
+        assert_eq!(
+            anim.target, 300.0,
+            "the target must be re-clamped, not left in space"
+        );
     }
 
     #[test]
@@ -1308,7 +1394,10 @@ mod tests {
         // arrive as the same unit or a touchpad would fly and a mouse would
         // crawl.
         let line = iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 };
-        let pixel = iced::mouse::ScrollDelta::Pixels { x: 0.0, y: -WHEEL_PIXELS_PER_NOTCH };
+        let pixel = iced::mouse::ScrollDelta::Pixels {
+            x: 0.0,
+            y: -WHEEL_PIXELS_PER_NOTCH,
+        };
         assert_eq!(wheel_notches(&line), -1.0);
         assert_eq!(wheel_notches(&pixel), -1.0);
         let fractional = iced::mouse::ScrollDelta::Lines { x: 0.0, y: 0.5 };
@@ -1317,18 +1406,27 @@ mod tests {
 
     #[test]
     fn only_a_wheel_over_the_content_is_claimed() {
-        let bounds = Rectangle { x: 0.0, y: 0.0, width: 100.0, height: 1200.0 };
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 1200.0,
+        };
         // The visible slice: the scrollable's own height, at this offset.
-        let viewport = Rectangle { x: 0.0, y: 0.0, width: 100.0, height: 400.0 };
+        let viewport = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 400.0,
+        };
         let inside = mouse::Cursor::Available(iced::Point::new(50.0, 50.0));
         let outside = mouse::Cursor::Available(iced::Point::new(150.0, 50.0));
         let wheel = Event::Mouse(mouse::Event::WheelScrolled {
             delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         });
 
-        let claimed = WheelGuard::<(), Theme, iced::Renderer>::claimed(
-            &wheel, inside, bounds, &viewport,
-        );
+        let claimed =
+            WheelGuard::<(), Theme, iced::Renderer>::claimed(&wheel, inside, bounds, &viewport);
         assert_eq!(
             claimed,
             Some(wheel_at(-1.0, 1200.0, 400.0, 0.0)),
@@ -1350,15 +1448,26 @@ mod tests {
 
     #[test]
     fn horizontal_and_empty_wheel_events_do_not_restart_vertical_glides() {
-        let bounds = Rectangle { x: 0.0, y: 0.0, width: 100.0, height: 1200.0 };
-        let viewport = Rectangle { height: 400.0, ..bounds };
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 1200.0,
+        };
+        let viewport = Rectangle {
+            height: 400.0,
+            ..bounds
+        };
         let cursor = mouse::Cursor::Available(iced::Point::new(50.0, 50.0));
-        for delta in [mouse::ScrollDelta::Pixels { x: 20.0, y: 0.0 },
-                      mouse::ScrollDelta::Lines { x: 0.0, y: 0.0 }] {
+        for delta in [
+            mouse::ScrollDelta::Pixels { x: 20.0, y: 0.0 },
+            mouse::ScrollDelta::Lines { x: 0.0, y: 0.0 },
+        ] {
             let event = Event::Mouse(mouse::Event::WheelScrolled { delta });
             assert!(WheelGuard::<(), Theme, iced::Renderer>::claimed(
                 &event, cursor, bounds, &viewport,
-            ).is_none());
+            )
+            .is_none());
         }
     }
 
@@ -1367,16 +1476,25 @@ mod tests {
         // At the bottom of the page only part of the last screen is left, and a
         // guard that reported the whole content as visible would let the page
         // scroll its own end past the top of the window.
-        let bounds = Rectangle { x: 0.0, y: -800.0, width: 100.0, height: 1200.0 };
-        let viewport = Rectangle { x: 0.0, y: -800.0, width: 100.0, height: 400.0 };
+        let bounds = Rectangle {
+            x: 0.0,
+            y: -800.0,
+            width: 100.0,
+            height: 1200.0,
+        };
+        let viewport = Rectangle {
+            x: 0.0,
+            y: -800.0,
+            width: 100.0,
+            height: 400.0,
+        };
         let inside = mouse::Cursor::Available(iced::Point::new(50.0, 10.0));
         let wheel = Event::Mouse(mouse::Event::WheelScrolled {
             delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         });
-        let claimed = WheelGuard::<(), Theme, iced::Renderer>::claimed(
-            &wheel, inside, bounds, &viewport,
-        )
-        .expect("a wheel over the visible part is claimed");
+        let claimed =
+            WheelGuard::<(), Theme, iced::Renderer>::claimed(&wheel, inside, bounds, &viewport)
+                .expect("a wheel over the visible part is claimed");
         assert_eq!(claimed.view_height, 400.0);
     }
 
@@ -1386,16 +1504,25 @@ mod tests {
         // slice is translated by the scroll; the gap between the two tops is the
         // offset, read off the event rather than remembered. Scrolled 300px: the
         // slice starts that much below the content.
-        let bounds = Rectangle { x: 12.0, y: 40.0, width: 100.0, height: 1200.0 };
-        let viewport = Rectangle { x: 12.0, y: 340.0, width: 100.0, height: 400.0 };
+        let bounds = Rectangle {
+            x: 12.0,
+            y: 40.0,
+            width: 100.0,
+            height: 1200.0,
+        };
+        let viewport = Rectangle {
+            x: 12.0,
+            y: 340.0,
+            width: 100.0,
+            height: 400.0,
+        };
         let inside = mouse::Cursor::Available(iced::Point::new(50.0, 100.0));
         let wheel = Event::Mouse(mouse::Event::WheelScrolled {
             delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         });
-        let claimed = WheelGuard::<(), Theme, iced::Renderer>::claimed(
-            &wheel, inside, bounds, &viewport,
-        )
-        .expect("a wheel over the visible part is claimed");
+        let claimed =
+            WheelGuard::<(), Theme, iced::Renderer>::claimed(&wheel, inside, bounds, &viewport)
+                .expect("a wheel over the visible part is claimed");
         assert_eq!(claimed.offset, 300.0);
     }
 
@@ -1412,7 +1539,11 @@ mod tests {
         let mut glides = Glides::default();
         glide(&mut glides, PAGE, 0.0, now);
         assert_eq!(glides.anim(PAGE).target, WHEEL_PIXELS_PER_NOTCH);
-        assert_eq!(glides.anim(PANEL).target, 0.0, "a region nobody wheeled is still at the top");
+        assert_eq!(
+            glides.anim(PANEL).target,
+            0.0,
+            "a region nobody wheeled is still at the top"
+        );
     }
 
     #[test]
@@ -1426,7 +1557,10 @@ mod tests {
         glide(&mut glides, PAGE, 0.0, began);
         let _ = glides.tick::<()>(began + FRAME);
         let sent = glides.anim(PAGE).offset;
-        assert!(sent > 0.0 && sent < WHEEL_PIXELS_PER_NOTCH, "one frame of a glide: {sent}");
+        assert!(
+            sent > 0.0 && sent < WHEEL_PIXELS_PER_NOTCH,
+            "one frame of a glide: {sent}"
+        );
         // The second notch arrives with the region still reporting the position
         // the first frame asked for, because that is what it is at.
         glide(&mut glides, PAGE, sent, began + FRAME);
@@ -1447,7 +1581,11 @@ mod tests {
         glide(&mut glides, PAGE, 0.0, now);
         assert_eq!(glides.anim(PAGE).offset, 0.0);
         glide(&mut glides, PAGE, 900.0, now);
-        assert_eq!(glides.anim(PAGE).offset, 900.0, "the drag is where the glide starts");
+        assert_eq!(
+            glides.anim(PAGE).offset,
+            900.0,
+            "the drag is where the glide starts"
+        );
         assert_eq!(
             glides.anim(PAGE).target,
             900.0 + WHEEL_PIXELS_PER_NOTCH,
@@ -1498,7 +1636,10 @@ mod tests {
         // One click's worth of wheel events, all reporting the same layout.
         glide(&mut glides, PAGE, 0.0, began);
         glide(&mut glides, PAGE, 0.0, began);
-        assert_eq!(glides.anim(PAGE).target, NOTCHES_PER_CLICK * WHEEL_PIXELS_PER_NOTCH);
+        assert_eq!(
+            glides.anim(PAGE).target,
+            NOTCHES_PER_CLICK * WHEEL_PIXELS_PER_NOTCH
+        );
 
         // A frame passes: the tick commands X1 and the region is on its way there.
         let _ = glides.tick::<()>(began + FRAME);
@@ -1578,7 +1719,11 @@ mod tests {
         let _ = glides.tick::<()>(began + FRAME);
         let once = glides.offset(PAGE);
         let _ = glides.tick::<()>(began + FRAME);
-        assert_eq!(glides.offset(PAGE), once, "the same frame commands the same offset");
+        assert_eq!(
+            glides.offset(PAGE),
+            once,
+            "the same frame commands the same offset"
+        );
         // And the position a wheel reports from before both is still ours.
         glide(&mut glides, PAGE, 0.0, began + FRAME);
         assert_eq!(
@@ -1599,7 +1744,11 @@ mod tests {
         glide(&mut glides, PAGE, 0.0, now);
         let _ = glides.tick::<()>(now + FRAME);
         glide(&mut glides, PAGE, 1200.0, now + FRAME);
-        assert_eq!(glides.anim(PAGE).offset, 1200.0, "the drag is where the glide starts");
+        assert_eq!(
+            glides.anim(PAGE).offset,
+            1200.0,
+            "the drag is where the glide starts"
+        );
         assert_eq!(
             glides.anim(PAGE).target,
             1200.0 + WHEEL_PIXELS_PER_NOTCH,
@@ -1614,7 +1763,10 @@ mod tests {
         let began = Instant::now();
         let mut glides = Glides::default();
         glide(&mut glides, PAGE, 0.0, began);
-        assert!(glides.animating(), "a wheel that can move a region starts the frame timer");
+        assert!(
+            glides.animating(),
+            "a wheel that can move a region starts the frame timer"
+        );
         let (mut frames, mut now) = (0, began);
         while glides.animating() {
             let _ = glides.tick::<()>(now);
@@ -1622,8 +1774,15 @@ mod tests {
             frames += 1;
             assert!(frames < 60, "the gesture must terminate");
         }
-        assert!(frames > 1, "it glided rather than arriving in one step: {frames}");
-        assert_eq!(glides.anim(PAGE).offset, WHEEL_PIXELS_PER_NOTCH, "exactly on the target");
+        assert!(
+            frames > 1,
+            "it glided rather than arriving in one step: {frames}"
+        );
+        assert_eq!(
+            glides.anim(PAGE).offset,
+            WHEEL_PIXELS_PER_NOTCH,
+            "exactly on the target"
+        );
     }
 
     #[test]
@@ -1644,9 +1803,17 @@ mod tests {
         // the glide and then jump.
         let began = Instant::now();
         let mut glides = Glides::default();
-        assert_eq!(glides.offset(PAGE), 0.0, "a region nobody has moved is at the top");
+        assert_eq!(
+            glides.offset(PAGE),
+            0.0,
+            "a region nobody has moved is at the top"
+        );
         glide(&mut glides, PAGE, 0.0, began);
-        assert_eq!(glides.offset(PAGE), 0.0, "and the frame the wheel lands in has not moved it");
+        assert_eq!(
+            glides.offset(PAGE),
+            0.0,
+            "and the frame the wheel lands in has not moved it"
+        );
         let mut seen = Vec::new();
         let mut now = began;
         while glides.animating() {
@@ -1658,6 +1825,10 @@ mod tests {
             seen.windows(2).all(|pair| pair[1] > pair[0]),
             "every frame of a glide moves the overlay with it: {seen:?}"
         );
-        assert_eq!(glides.offset(PAGE), WHEEL_PIXELS_PER_NOTCH, "and it lands on the target");
+        assert_eq!(
+            glides.offset(PAGE),
+            WHEEL_PIXELS_PER_NOTCH,
+            "and it lands on the target"
+        );
     }
 }

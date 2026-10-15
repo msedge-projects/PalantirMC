@@ -42,7 +42,11 @@ impl Section {
     /// without overflow).
     fn compare(&self, other: &Section) -> Ordering {
         if self.kind == Kind::Numeric && other.kind == Kind::Numeric {
-            return self.value.len().cmp(&other.value.len()).then_with(|| self.value.cmp(&other.value));
+            return self
+                .value
+                .len()
+                .cmp(&other.value.len())
+                .then_with(|| self.value.cmp(&other.value));
         }
         // Textual comparison (differing kinds, or both textual/pre-release).
         // Note: a fully-zero numeric section keeps its empty value here
@@ -90,7 +94,10 @@ impl PalantirVersion {
         let len = chars.len();
         let mut i = 0usize;
         while i < len {
-            let mut cur = Section { kind: Kind::Textual, value: String::new() };
+            let mut cur = Section {
+                kind: Kind::Textual,
+                value: String::new(),
+            };
             let c = chars[i];
             if c == '+' {
                 break; // appendix ignored
@@ -125,7 +132,10 @@ impl PalantirVersion {
                 sections.push(cur);
             }
         }
-        PalantirVersion { raw: s.to_string(), sections }
+        PalantirVersion {
+            raw: s.to_string(),
+            sections,
+        }
     }
 
     /// The original string.

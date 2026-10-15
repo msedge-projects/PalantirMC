@@ -82,7 +82,11 @@ pub fn forge_shaped(profile: &PackProfile) -> Option<LoaderJob> {
         .get("net.minecraft")
         .map(|component| component.version.trim().to_string())
         .filter(|version| !version.is_empty())?;
-    Some(LoaderJob { loader, game, build })
+    Some(LoaderJob {
+        loader,
+        game,
+        build,
+    })
 }
 
 /// The Forge-shaped loader `profile` names, whether or not the pack names a game
@@ -143,10 +147,12 @@ pub fn install(
     let installers = wire.installers();
     let piston = wire.piston();
     let store = ContentStore::new(paths.cache_dir().join("content"));
-    let scratch = paths
-        .cache_dir()
-        .join("loader")
-        .join(format!("{}-{}-{}", job.loader.name(), job.game, job.build));
+    let scratch = paths.cache_dir().join("loader").join(format!(
+        "{}-{}-{}",
+        job.loader.name(),
+        job.game,
+        job.build
+    ));
     let cancel = Cancel::new();
     let backoff = Backoff::default();
     let report = install_client(
@@ -182,8 +188,13 @@ pub fn install(
         report.skipped()
     ));
     if let Some(patched) = &report.patched_client {
-        let bytes = std::fs::metadata(patched).map(|meta| meta.len()).unwrap_or_default();
-        log(format!("patched client: {} ({bytes} bytes)", patched.display()));
+        let bytes = std::fs::metadata(patched)
+            .map(|meta| meta.len())
+            .unwrap_or_default();
+        log(format!(
+            "patched client: {} ({bytes} bytes)",
+            patched.display()
+        ));
     }
     Ok(())
 }
@@ -204,7 +215,10 @@ mod tests {
             .iter()
             .map(|(uid, version)| format!(r#"{{"uid":"{uid}","version":"{version}"}}"#))
             .collect();
-        let text = format!(r#"{{"formatVersion":1,"components":[{}]}}"#, entries.join(","));
+        let text = format!(
+            r#"{{"formatVersion":1,"components":[{}]}}"#,
+            entries.join(",")
+        );
         PackProfile::from_text(&text, &PathBuf::from("mmc-pack.json")).expect("a pack profile")
     }
 
@@ -216,8 +230,12 @@ mod tests {
             let options = zip::write::FileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
             for (name, body) in entries {
-                writer.start_file(*name, options).expect("starting a zip entry");
-                writer.write_all(body.as_bytes()).expect("writing a zip entry");
+                writer
+                    .start_file(*name, options)
+                    .expect("starting a zip entry");
+                writer
+                    .write_all(body.as_bytes())
+                    .expect("writing a zip entry");
             }
             writer.finish().expect("finishing the jar");
         }
@@ -251,8 +269,11 @@ mod tests {
     #[test]
     fn a_pack_names_its_forge_shaped_loader() {
         // The create flow's spelling: the promotions' build alone.
-        let job = forge_shaped(&pack(&[("net.minecraft", "1.21.1"), ("net.minecraftforge", "52.1.0")]))
-            .expect("a Forge job");
+        let job = forge_shaped(&pack(&[
+            ("net.minecraft", "1.21.1"),
+            ("net.minecraftforge", "52.1.0"),
+        ]))
+        .expect("a Forge job");
         assert_eq!(job.loader, Loader::Forge);
         assert_eq!(job.game, "1.21.1");
         assert_eq!(job.build, "52.1.0");
@@ -268,17 +289,17 @@ mod tests {
         .expect("a Forge job");
         assert_eq!(job.build, "1.21.1-52.1.0");
 
-        let job = forge_shaped(&pack(&[("net.minecraft", "1.21.1"), ("net.neoforged", "21.1.172")]))
-            .expect("a NeoForge job");
+        let job = forge_shaped(&pack(&[
+            ("net.minecraft", "1.21.1"),
+            ("net.neoforged", "21.1.172"),
+        ]))
+        .expect("a NeoForge job");
         assert_eq!(job.loader, Loader::NeoForge);
         assert_eq!(job.build, "21.1.172");
 
         // Vanilla, and the two loaders whose profile is a document, need no
         // install step at all.
-        assert_eq!(
-            forge_shaped(&pack(&[("net.minecraft", "1.21.1")])),
-            None
-        );
+        assert_eq!(forge_shaped(&pack(&[("net.minecraft", "1.21.1")])), None);
         assert_eq!(
             forge_shaped(&pack(&[
                 ("net.minecraft", "1.21.1"),
@@ -299,8 +320,8 @@ mod tests {
             {"uid":"net.minecraft","version":"1.21.1"},
             {"uid":"net.minecraftforge","version":"52.1.0","disabled":true}
         ]}"#;
-        let profile = PackProfile::from_text(text, &PathBuf::from("mmc-pack.json"))
-            .expect("a pack profile");
+        let profile =
+            PackProfile::from_text(text, &PathBuf::from("mmc-pack.json")).expect("a pack profile");
         assert_eq!(forge_shaped(&profile), None);
     }
 
@@ -333,8 +354,8 @@ mod tests {
             {"uid":"net.minecraft","version":"1.21.1"},
             {"uid":"net.minecraftforge","version":"52.1.0","disabled":true}
         ]}"#;
-        let disabled = PackProfile::from_text(text, &PathBuf::from("mmc-pack.json"))
-            .expect("a pack profile");
+        let disabled =
+            PackProfile::from_text(text, &PathBuf::from("mmc-pack.json")).expect("a pack profile");
         assert_eq!(named_shaped(&disabled), None);
         assert_eq!(forge_shaped(&disabled), None);
     }
@@ -386,9 +407,15 @@ mod tests {
             ),
         );
         fetch.set_route(version_url, Route::body(version.into_bytes()));
-        fetch.set_route("https://piston.invalid/client.jar", Route::body(client.clone()));
+        fetch.set_route(
+            "https://piston.invalid/client.jar",
+            Route::body(client.clone()),
+        );
         fetch.set_route(&installer_url, Route::body(jar.clone()));
-        fetch.set_route(&format!("{installer_url}.sha1"), Route::text(Digest::sha1(&jar).hex()));
+        fetch.set_route(
+            &format!("{installer_url}.sha1"),
+            Route::text(Digest::sha1(&jar).hex()),
+        );
         let fetch = Arc::new(fetch);
         let wire = Wire::over(paths.meta_dir(), fetch.clone());
 
@@ -397,13 +424,21 @@ mod tests {
         let java = dir.path().join("java.exe");
         std::fs::write(&java, b"").expect("a stand-in for a java binary");
 
-        let job = LoaderJob { loader: Loader::Forge, game: "1.21.1".to_string(), build: "52.1.0".to_string() };
+        let job = LoaderJob {
+            loader: Loader::Forge,
+            game: "1.21.1".to_string(),
+            build: "52.1.0".to_string(),
+        };
         let mut lines = Vec::new();
-        install(&paths, &instance_root, &job, &wire, &java, &mut |line| lines.push(line))
-            .expect("the install");
+        install(&paths, &instance_root, &job, &wire, &java, &mut |line| {
+            lines.push(line)
+        })
+        .expect("the install");
 
         assert!(
-            lines.iter().any(|line| line.contains("Forge 52.1.0: 0 processor(s) ran, 0 skipped")),
+            lines
+                .iter()
+                .any(|line| line.contains("Forge 52.1.0: 0 processor(s) ran, 0 skipped")),
             "{lines:?}"
         );
         // The client jar is filed under the launcher's cache, by digest (two
@@ -432,7 +467,11 @@ mod tests {
         let java = dir.path().join("java.exe");
         std::fs::write(&java, b"").expect("a stand-in for a java binary");
 
-        let job = LoaderJob { loader: Loader::Forge, game: "1.21.1".to_string(), build: "52.1.0".to_string() };
+        let job = LoaderJob {
+            loader: Loader::Forge,
+            game: "1.21.1".to_string(),
+            build: "52.1.0".to_string(),
+        };
         let error = install(
             &paths,
             &dir.path().join("instances").join("Forged"),
@@ -442,6 +481,9 @@ mod tests {
             &mut |_| {},
         )
         .expect_err("nothing is served");
-        assert!(error.contains("Forge 52.1.0 for Minecraft 1.21.1"), "{error}");
+        assert!(
+            error.contains("Forge 52.1.0 for Minecraft 1.21.1"),
+            "{error}"
+        );
     }
 }

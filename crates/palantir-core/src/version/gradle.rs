@@ -26,7 +26,11 @@ impl GradleSpecifier {
     pub fn parse(value: &str) -> GradleSpecifier {
         let mut parts: Vec<&str> = value.split(':').collect();
         if parts.len() < 3 || parts.len() > 4 {
-            return GradleSpecifier { invalid_value: value.to_string(), valid: false, ..Default::default() };
+            return GradleSpecifier {
+                invalid_value: value.to_string(),
+                valid: false,
+                ..Default::default()
+            };
         }
         // The `@extension` suffix may hang off the last colon-component (the
         // classifier when present, otherwise the version), per the anchored
@@ -37,10 +41,16 @@ impl GradleSpecifier {
             None => (parts[last_index], None),
         };
         parts[last_index] = core;
-        let bad_ext = extension.as_ref().is_some_and(|e| e.is_empty() || e.contains('@'));
+        let bad_ext = extension
+            .as_ref()
+            .is_some_and(|e| e.is_empty() || e.contains('@'));
         let bad_core = parts.iter().any(|p| p.is_empty() || p.contains('@'));
         if bad_ext || bad_core {
-            return GradleSpecifier { invalid_value: value.to_string(), valid: false, ..Default::default() };
+            return GradleSpecifier {
+                invalid_value: value.to_string(),
+                valid: false,
+                ..Default::default()
+            };
         }
         GradleSpecifier {
             group: parts[0].to_string(),
@@ -130,14 +140,26 @@ impl GradleSpecifier {
         if !self.valid {
             return String::new();
         }
-        let file = if filename_override.is_empty() { self.file_name() } else { filename_override.to_string() };
-        format!("{}/{}/{}/{}", self.group.replace('.', "/"), self.artifact, self.version, file)
+        let file = if filename_override.is_empty() {
+            self.file_name()
+        } else {
+            filename_override.to_string()
+        };
+        format!(
+            "{}/{}/{}/{}",
+            self.group.replace('.', "/"),
+            self.artifact,
+            self.version,
+            file
+        )
     }
 
     /// Identity match ignoring version (`matchName`): group + artifact +
     /// classifier.
     pub fn match_name(&self, other: &GradleSpecifier) -> bool {
-        self.group == other.group && self.artifact == other.artifact && self.classifier == other.classifier
+        self.group == other.group
+            && self.artifact == other.artifact
+            && self.classifier == other.classifier
     }
 }
 
@@ -154,7 +176,10 @@ mod tests {
         assert_eq!(g.version(), "1.0");
         assert_eq!(g.classifier(), "jdk15");
         assert_eq!(g.extension(), Some("jar"));
-        assert_eq!(g.serialize(), "org.gradle.test.classifiers:service:1.0:jdk15@jar");
+        assert_eq!(
+            g.serialize(),
+            "org.gradle.test.classifiers:service:1.0:jdk15@jar"
+        );
     }
 
     #[test]
@@ -175,12 +200,25 @@ mod tests {
             g.to_path(""),
             "net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-universal.jar"
         );
-        assert_eq!(g.to_path("my.jar"), "net/minecraftforge/forge/1.20.1-47.2.0/my.jar");
+        assert_eq!(
+            g.to_path("my.jar"),
+            "net/minecraftforge/forge/1.20.1-47.2.0/my.jar"
+        );
     }
 
     #[test]
     fn invalid_coordinates_stay_invalid() {
-        for bad in ["", "a:b", "a:b:c:d:e", "onlyone", "a::c", "a:b:c:", "a:b:c:@", "a@x:b:c", "a:b:c:d@e@f"] {
+        for bad in [
+            "",
+            "a:b",
+            "a:b:c:d:e",
+            "onlyone",
+            "a::c",
+            "a:b:c:",
+            "a:b:c:@",
+            "a@x:b:c",
+            "a:b:c:d@e@f",
+        ] {
             let g = GradleSpecifier::parse(bad);
             assert!(!g.valid(), "{bad} should be invalid");
             assert_eq!(g.serialize(), bad);
@@ -206,6 +244,8 @@ mod tests {
         assert!(a.match_name(&b));
         let nat = GradleSpecifier::parse("org.lwjgl3:lwjgl:3.3.1:natives-linux");
         assert!(!a.match_name(&nat)); // classifier differs
-        assert!(nat.match_name(&GradleSpecifier::parse("org.lwjgl3:lwjgl:9.9.9:natives-linux")));
+        assert!(nat.match_name(&GradleSpecifier::parse(
+            "org.lwjgl3:lwjgl:9.9.9:natives-linux"
+        )));
     }
 }

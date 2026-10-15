@@ -43,25 +43,42 @@ impl AssetIndex {
             let hash = obj
                 .get("hash")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| Error::json("<asset index>", format!("missing 'hash' for '{name}'")))?
+                .ok_or_else(|| {
+                    Error::json("<asset index>", format!("missing 'hash' for '{name}'"))
+                })?
                 .to_ascii_lowercase();
             // Both fields become filesystem paths during legacy reconstruction.
             // Refuse malformed indexes instead of skipping missing objects or
             // writing an asset outside its designated directory.
             if hash.len() != 40 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(Error::json("<asset index>", format!("invalid SHA-1 for '{name}'")));
+                return Err(Error::json(
+                    "<asset index>",
+                    format!("invalid SHA-1 for '{name}'"),
+                ));
             }
-            if name.is_empty() || name.starts_with('/') || name.contains(['\u{005c}', ':'])
-                || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            if name.is_empty()
+                || name.starts_with('/')
+                || name.contains(['\u{005c}', ':'])
+                || name
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == "..")
                 || name.chars().any(char::is_control)
             {
-                return Err(Error::json("<asset index>", format!("unsafe asset name '{name}'")));
+                return Err(Error::json(
+                    "<asset index>",
+                    format!("unsafe asset name '{name}'"),
+                ));
             }
             let size = obj.get("size").and_then(|v| v.as_i64()).unwrap_or(0);
             if size < 0 {
-                return Err(Error::json("<asset index>", format!("negative size for '{name}'")));
+                return Err(Error::json(
+                    "<asset index>",
+                    format!("negative size for '{name}'"),
+                ));
             }
-            index.objects.insert(name.clone(), AssetObject { hash, size });
+            index
+                .objects
+                .insert(name.clone(), AssetObject { hash, size });
         }
         Ok(index)
     }
@@ -136,16 +153,41 @@ mod tests {
     #[test]
     fn malformed_indexes_cannot_escape_asset_directories() {
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        for name in ["../outside", "/absolute", "nested/../outside", "C:\\outside", "a\\b", "", "a//b"] {
+        for name in [
+            "../outside",
+            "/absolute",
+            "nested/../outside",
+            "C:\\outside",
+            "a\\b",
+            "",
+            "a//b",
+        ] {
             let mut objects = serde_json::Map::new();
             objects.insert(name.into(), json!({ "hash": hash, "size": 1 }));
-            assert!(AssetIndex::from_value(&json!({ "objects": objects })).is_err(), "{name}");
+            assert!(
+                AssetIndex::from_value(&json!({ "objects": objects })).is_err(),
+                "{name}"
+            );
         }
-        for bad_hash in ["", "a", "../outside", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"] {
-            assert!(AssetIndex::from_value(&json!({ "objects": { "safe": { "hash": bad_hash } } })).is_err());
+        for bad_hash in [
+            "",
+            "a",
+            "../outside",
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        ] {
+            assert!(AssetIndex::from_value(
+                &json!({ "objects": { "safe": { "hash": bad_hash } } })
+            )
+            .is_err());
         }
-        assert!(AssetIndex::from_value(&json!({ "objects": { "safe": { "hash": hash, "size": -1 } } })).is_err());
-        let index = AssetIndex::from_value(&json!({ "objects": { "safe": { "hash": hash.to_uppercase() } } })).unwrap();
+        assert!(AssetIndex::from_value(
+            &json!({ "objects": { "safe": { "hash": hash, "size": -1 } } })
+        )
+        .is_err());
+        let index = AssetIndex::from_value(
+            &json!({ "objects": { "safe": { "hash": hash.to_uppercase() } } }),
+        )
+        .unwrap();
         assert_eq!(index.objects["safe"].hash, hash);
     }
 
@@ -166,7 +208,10 @@ mod tests {
     #[test]
     fn the_cdn_path_has_no_objects_segment() {
         let hash = "9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5";
-        assert_eq!(object_cdn_path(hash), "9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5");
+        assert_eq!(
+            object_cdn_path(hash),
+            "9e/9ea1b80ddb116f0355d5f9107ba8c6c4d20b44f5"
+        );
         assert_eq!(object_cdn_path("a"), "/a"); // degenerate hash tolerated
         assert_eq!(
             object_relative_path(hash).strip_prefix("objects/").unwrap(),
@@ -180,8 +225,14 @@ mod tests {
     fn legacy_indexes_map_to_resources_dir() {
         let assets = Path::new("/root/assets");
         let resources = Path::new("/inst/minecraft/resources");
-        assert_eq!(game_assets_dir(assets, "legacy", resources), resources.to_path_buf());
-        assert_eq!(game_assets_dir(assets, "pre-1.6", resources), resources.to_path_buf());
+        assert_eq!(
+            game_assets_dir(assets, "legacy", resources),
+            resources.to_path_buf()
+        );
+        assert_eq!(
+            game_assets_dir(assets, "pre-1.6", resources),
+            resources.to_path_buf()
+        );
         assert_eq!(game_assets_dir(assets, "17", resources), assets.join("17"));
     }
 }

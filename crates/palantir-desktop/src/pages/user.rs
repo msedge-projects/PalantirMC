@@ -558,7 +558,15 @@ impl Profile {
             },
             Err(reason) => (None, Some(reason)),
         };
-        Profile { user, projects, projects_v3, collections, avatar, note, icons }
+        Profile {
+            user,
+            projects,
+            projects_v3,
+            collections,
+            avatar,
+            note,
+            icons,
+        }
     }
 
     /// Whether the strip ends in a *Collections* tab.
@@ -644,7 +652,11 @@ impl Profile {
         ProjectType::PROFILE_ORDER
             .iter()
             .copied()
-            .filter(|kind| self.projects.iter().any(|project| self.type_of(project) == Some(*kind)))
+            .filter(|kind| {
+                self.projects
+                    .iter()
+                    .any(|project| self.type_of(project) == Some(*kind))
+            })
             .collect()
     }
 
@@ -672,7 +684,6 @@ impl Profile {
             .and_then(ProjectType::from_token)
             .or_else(|| ProjectType::from_token(&project.project_type))
     }
-
 
     /// One project's icon, when it arrived.
     ///
@@ -936,7 +947,7 @@ impl State {
     pub fn update(&mut self, message: Message) -> Option<Asked> {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Found { round, result } => {
                 if round == self.round {
@@ -1011,7 +1022,10 @@ impl State {
     fn ask(&mut self) -> Asked {
         self.round += 1;
         self.profile = Load::Loading;
-        Asked { user: self.user.clone(), round: self.round }
+        Asked {
+            user: self.user.clone(),
+            round: self.round,
+        }
     }
 
     /// The sentence to draw for a user with no projects.
@@ -1074,7 +1088,11 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     // it -- `Avatar.vue` falls back to its own placeholder, quietly -- so the
     // sentence goes where this launcher's other failures go rather than under the
     // name it belongs to.
-    if let Some(note) = state.profile.ready().and_then(|profile| profile.note.as_deref()) {
+    if let Some(note) = state
+        .profile
+        .ready()
+        .and_then(|profile| profile.note.as_deref())
+    {
         blocks.push(ui::admonition(
             theme,
             ui::Severity::Info,
@@ -1085,9 +1103,12 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     // The header and the list arrive together -- one request, one answer -- so they
     // are one block: a page that drew a header from one answer and a list from
     // another could show a name over somebody else's projects.
-    blocks.push(page::draw(theme, &state.profile, "this profile", |profile| {
-        loaded(theme, state, profile)
-    }));
+    blocks.push(page::draw(
+        theme,
+        &state.profile,
+        "this profile",
+        |profile| loaded(theme, state, profile),
+    ));
     page::body(blocks, GAP, Message::Wheel)
 }
 
@@ -1131,7 +1152,10 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
                         // real heading: `EmptyState.vue:7` is
                         // `<span class="text-2xl font-semibold text-contrast">`.
                         .font(semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 ));
             }
         } else {
@@ -1155,7 +1179,10 @@ fn loaded<'a>(theme: Gen, state: &'a State, profile: &'a Profile) -> Element<'a,
                 // The same `font-semibold` as the sentence above, for the same
                 // `EmptyState.vue:7`.
                 .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
         ));
     } else if let Some(grid) = collections {
         blocks.push(grid);
@@ -1283,13 +1310,15 @@ fn header<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
     let rule = container(Space::with_width(Length::Fill).height(Length::Fixed(1.0)))
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
-        .style(move |_theme: &iced::Theme| iced::widget::container::Appearance {
-            background: Some(iced::Background::Color(theme_gen::ink(
-                theme,
-                theme_gen::Ink::Divider,
-            ))),
-            ..iced::widget::container::Appearance::default()
-        });
+        .style(
+            move |_theme: &iced::Theme| iced::widget::container::Appearance {
+                background: Some(iced::Background::Color(theme_gen::ink(
+                    theme,
+                    theme_gen::Ink::Divider,
+                ))),
+                ..iced::widget::container::Appearance::default()
+            },
+        );
     column![]
         .width(Length::Fill)
         .push(block)
@@ -1326,7 +1355,14 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
                 text_gen::profile_label_download_count(profile.downloads())
             ),
         ),
-        (Glyph::Calendar, format!("{} {}", Key::ProfileLabelJoined.message(), how_ago(&profile.user.created, now))),
+        (
+            Glyph::Calendar,
+            format!(
+                "{} {}",
+                Key::ProfileLabelJoined.message(),
+                how_ago(&profile.user.created, now)
+            ),
+        ),
     ];
     // The 26 pixels are the divider's *slot*, not a gap the divider also sits in:
     // `page-header-metadata-item.vue` puts the divider in an `absolute right-full
@@ -1346,7 +1382,11 @@ fn metadata_row<'a>(theme: Gen, profile: &'a Profile) -> Element<'a, Message> {
             row![]
                 .spacing(METADATA_TEXT_GAP)
                 .align_items(Alignment::Center)
-                .push(icon::icon(glyph, METADATA_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+                .push(icon::icon(
+                    glyph,
+                    METADATA_ICON,
+                    theme_gen::ink(theme, INK_SECONDARY),
+                ))
                 .push(
                     text(label)
                         .size(HEADER_TEXT)
@@ -1384,20 +1424,21 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
     container(Space::with_width(Length::Fixed(METADATA_DOT)).height(Length::Fixed(METADATA_DOT)))
         .width(Length::Fixed(METADATA_DOT))
         .height(Length::Fixed(METADATA_DOT))
-        .style(move |_theme: &iced::Theme| iced::widget::container::Appearance {
-            background: Some(iced::Background::Color(theme_gen::ink(
-                theme,
-                theme_gen::Ink::Surface5,
-            ))),
-            border: Border { radius: (METADATA_DOT / 2.0).into(), ..Default::default() },
-            ..iced::widget::container::Appearance::default()
-        })
+        .style(
+            move |_theme: &iced::Theme| iced::widget::container::Appearance {
+                background: Some(iced::Background::Color(theme_gen::ink(
+                    theme,
+                    theme_gen::Ink::Surface5,
+                ))),
+                border: Border {
+                    radius: (METADATA_DOT / 2.0).into(),
+                    ..Default::default()
+                },
+                ..iced::widget::container::Appearance::default()
+            },
+        )
         .into()
 }
-
-
-
-
 
 /// The strip of filters, or nothing when there is only one thing to filter by.
 ///
@@ -1419,11 +1460,7 @@ fn bullet<'a, Message: 'a>(theme: Gen) -> Element<'a, Message> {
 /// the exception and not `getProjectTypeTitleMessage`'s: `layout.vue:777` gives
 /// `'collection'` `messages.collectionsLabel`, which is `project-type.collection.
 /// plural` -- *Collections*, and not *Collection*.
-fn filter_strip<'a>(
-    theme: Gen,
-    state: &State,
-    profile: &Profile,
-) -> Option<Element<'a, Message>> {
+fn filter_strip<'a>(theme: Gen, state: &State, profile: &Profile) -> Option<Element<'a, Message>> {
     let filter = state.selected();
     let types = profile.types();
     let collections = profile.has_collections();
@@ -1440,7 +1477,10 @@ fn filter_strip<'a>(
         // `PROFILE_ORDER` is the index of its name here -- and a type the order does
         // not know never reaches the strip at all, because `Profile::types` is built
         // from that same list.
-        if let Some(index) = ProjectType::PROFILE_ORDER.iter().position(|known| known == kind) {
+        if let Some(index) = ProjectType::PROFILE_ORDER
+            .iter()
+            .position(|known| known == kind)
+        {
             keys.push(TYPE_TAB_KEYS[index]);
             labels.push((kind.label().to_string(), filter == Filter::Type(*kind)));
         }
@@ -1508,9 +1548,7 @@ fn tab_at(types: &[ProjectType], index: usize) -> Option<ProfileTab> {
 /// `shown` is passed rather than read so the predicate can be gated without a
 /// profile; the caller only asks when it is empty.
 fn shows_projects_empty_state(filter: Filter, has_collections: bool, shown: usize) -> bool {
-    filter.shows_projects()
-        && shown == 0
-        && (filter.project_type().is_some() || !has_collections)
+    filter.shows_projects() && shown == 0 && (filter.project_type().is_some() || !has_collections)
 }
 
 /// The grid of collection cards, or nothing when there is nothing to put in it.
@@ -1608,7 +1646,10 @@ fn collection_card<'a>(
                         .size(COLLECTION_NAME)
                         .line_height(iced::Pixels(COLLECTION_NAME_LINE))
                         .font(semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 )
                 .push(
                     row![]
@@ -1662,24 +1703,36 @@ fn collection_card<'a>(
             .size(COLLECTION_LABEL)
             .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
             .font(crate::style::regular())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_SECONDARY,
+            ))),
         );
     if let Some((glyph, key)) = collection_status(false, &collection.status) {
         foot = foot.push(
             row![]
                 .spacing(ui::METADATA_GAP / 2.0)
                 .align_items(Alignment::Center)
-                .push(icon::icon(glyph, COLLECTION_ICON, theme_gen::ink(theme, INK_SECONDARY)))
+                .push(icon::icon(
+                    glyph,
+                    COLLECTION_ICON,
+                    theme_gen::ink(theme, INK_SECONDARY),
+                ))
                 .push(
                     text(key.message())
                         .size(COLLECTION_LABEL)
                         .line_height(iced::Pixels(COLLECTION_LABEL_LINE))
                         .font(crate::style::regular())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_SECONDARY,
+                        ))),
                 ),
         );
     }
-    card = card.push(Space::new(Length::Fill, Length::Shrink)).push(foot);
+    card = card
+        .push(Space::new(Length::Fill, Length::Shrink))
+        .push(foot);
     ui::card(theme, card)
 }
 
@@ -1695,10 +1748,7 @@ fn collection_card<'a>(
 /// `None` for a status the reference names no line for, which is the reference's own
 /// outcome: its four `v-else-if`s cover `listed` / `unlisted` / `private` /
 /// `rejected` and a fifth value prints nothing.
-fn collection_status(
-    can_see: bool,
-    status: &str,
-) -> Option<(Glyph, Key)> {
+fn collection_status(can_see: bool, status: &str) -> Option<(Glyph, Key)> {
     if !can_see {
         return None;
     }
@@ -1771,7 +1821,10 @@ fn project_row<'a>(
                 .size(CARD_TITLE)
                 .line_height(iced::Pixels(CARD_TITLE))
                 .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
         )
         .push(
             // `ProjectCard.vue:120`'s `project-card-summary m-0 font-normal
@@ -1809,7 +1862,11 @@ fn project_row<'a>(
             row![]
                 .spacing(CARD_STATS_GAP)
                 .align_items(Alignment::Center)
-                .push(stat(theme, Glyph::Download, &compact_stat(project.downloads)))
+                .push(stat(
+                    theme,
+                    Glyph::Download,
+                    &compact_stat(project.downloads),
+                ))
                 .push(stat(theme, Glyph::Heart, &compact_stat(project.followers))),
         );
     // `ProjectCardDate` with `autoDisplayDate`, which is `'updated'` whenever the
@@ -1886,7 +1943,11 @@ fn project_row<'a>(
         .align_items(Alignment::End)
         // `User.vue`'s `#project-actions` slot: an outlined brand button, a
         // download icon for a pack and a plus for anything else.
-        .push(install_button(theme, ui::scoped(INSTALL_KEY, &project.id), project))
+        .push(install_button(
+            theme,
+            ui::scoped(INSTALL_KEY, &project.id),
+            project,
+        ))
         .push(stats);
     let head = row![]
         .width(Length::Fill)
@@ -1933,7 +1994,9 @@ fn project_row<'a>(
 
     let body = Stack::at(
         Vector::ZERO,
-        container(head).width(Length::Fill).height(Length::Fixed(CARD_CONTENT)),
+        container(head)
+            .width(Length::Fill)
+            .height(Length::Fixed(CARD_CONTENT)),
     )
     // The tags row, `mt-auto` to the bottom of the content box, 26 pixels tall --
     // the reference's own row, which its `h-4` tag icon makes 26 -- so the row's
@@ -2065,7 +2128,11 @@ impl Tags {
     pub fn pills(&self) -> Vec<Pill> {
         let mut pills: Vec<Pill> = Vec::with_capacity(self.tags.len() + 2);
         if let Some((glyph, label)) = &self.environment {
-            pills.push(Pill { label: label.clone(), icon: Some(*glyph), id: None });
+            pills.push(Pill {
+                label: label.clone(),
+                icon: Some(*glyph),
+                id: None,
+            });
         }
         pills.extend(self.tags.iter().map(|tag| Pill {
             label: tag.label.clone(),
@@ -2073,7 +2140,11 @@ impl Tags {
             id: Some(tag.id.clone()),
         }));
         if self.overflow > 0 {
-            pills.push(Pill { label: format!("+{}", self.overflow), icon: None, id: None });
+            pills.push(Pill {
+                label: format!("+{}", self.overflow),
+                icon: None,
+                id: None,
+            });
         }
         pills
     }
@@ -2163,7 +2234,11 @@ pub fn card_tags(project: &ModrinthUserProject) -> Tags {
                 // `TagTagItem.vue:28`: the loader table first, and nothing at all
                 // for a category, because `ProjectCardTags` passes
                 // `hide-non-loader-icon`.
-                icon: if is_loader(id) { ui::tag_icon(id) } else { None },
+                icon: if is_loader(id) {
+                    ui::tag_icon(id)
+                } else {
+                    None
+                },
                 id: id.clone(),
             })
             .collect(),
@@ -2273,8 +2348,7 @@ fn is_loader(tag: &str) -> bool {
 /// API is measured to answer -- the two part company on interior capitals, which
 /// no tag carries.
 fn sort_tags_for_display(tags: &[String]) -> Vec<String> {
-    let mut categories: Vec<String> =
-        tags.iter().filter(|tag| !is_loader(tag)).cloned().collect();
+    let mut categories: Vec<String> = tags.iter().filter(|tag| !is_loader(tag)).cloned().collect();
     let mut loaders: Vec<String> = tags.iter().filter(|tag| is_loader(tag)).cloned().collect();
     categories.sort();
     // `aDefault !== bDefault ? aDefault ? -1 : 1 : a.localeCompare(b)`: a stable
@@ -2493,7 +2567,10 @@ fn platform_tag<'a, Message: 'a>(
         })
         .center_y()
         .style(move |_theme: &iced::Theme| container::Appearance {
-            background: Some(iced::Background::Color(theme_gen::ink(theme, Ink::ButtonBg))),
+            background: Some(iced::Background::Color(theme_gen::ink(
+                theme,
+                Ink::ButtonBg,
+            ))),
             border: Border {
                 color: theme_gen::ink(theme, Ink::Surface5),
                 width: 1.0,
@@ -2526,7 +2603,11 @@ fn stat<'a, Message: 'a>(theme: Gen, glyph: Glyph, value: &str) -> Element<'a, M
     row![]
         .spacing(METADATA_TEXT_GAP)
         .align_items(Alignment::Center)
-        .push(icon::icon(glyph, CARD_STAT_ICON, theme_gen::ink(theme, INK_DEFAULT)))
+        .push(icon::icon(
+            glyph,
+            CARD_STAT_ICON,
+            theme_gen::ink(theme, INK_DEFAULT),
+        ))
         .push(
             text(value.to_string())
                 .size(HEADER_TEXT)
@@ -2564,7 +2645,11 @@ fn install_button<'a>(
     // for anything else: the reference's own ternary over `project.project_types`,
     // which is why a pack's button reads *Install* and a mod's reads *Install to
     // instance*.
-    let label = if pack { Key::ButtonInstall } else { Key::AppUserProjectInstallToInstance };
+    let label = if pack {
+        Key::ButtonInstall
+    } else {
+        Key::AppUserProjectInstallToInstance
+    };
     let size = ui::Size::Md;
     // One ink for the ring, the label and the icon in front of it, which is what
     // `!text-brand [&>svg]:!text-brand` says and what a CSS `filter` on the element
@@ -2608,7 +2693,11 @@ fn install_button<'a>(
     .style(move |_theme: &iced::Theme| container::Appearance {
         // `bg-transparent`: the card's own surface shows through, as the reference's
         // 199 interior pixels of `#27292E` between the ring's arms do.
-        border: Border { color: ink, width: 1.0, radius: size.radius().into() },
+        border: Border {
+            color: ink,
+            width: 1.0,
+            radius: size.radius().into(),
+        },
         ..container::Appearance::default()
     });
     mouse_area(face)
@@ -2618,7 +2707,11 @@ fn install_button<'a>(
         // this button's brightness filter exactly as it carries every other's.
         .on_enter(Message::hover(key, true))
         .on_exit(Message::hover(key, false))
-        .on_release(Message::Install(project.id.clone(), project.title.clone(), pack))
+        .on_release(Message::Install(
+            project.id.clone(),
+            project.title.clone(),
+            pack,
+        ))
         .into()
 }
 
@@ -2655,8 +2748,12 @@ fn now_millis() -> i64 {
 /// notation is the plain number, and past a trillion CLDR has no suffix, so the
 /// number is written out.
 fn compact(value: u64, fraction: u32) -> String {
-    const SUFFIXES: [(u64, &str); 4] =
-        [(1_000, "K"), (1_000_000, "M"), (1_000_000_000, "B"), (1_000_000_000_000, "T")];
+    const SUFFIXES: [(u64, &str); 4] = [
+        (1_000, "K"),
+        (1_000_000, "M"),
+        (1_000_000_000, "B"),
+        (1_000_000_000_000, "T"),
+    ];
     // The suffix is chosen *after* the rounding, because that is what `Intl` does:
     // 999,999,999 is `1B`, not `1000M`, because a million-scale rendering of it
     // rounds to a thousand and a thousand is the next scale's one.
@@ -2665,7 +2762,11 @@ fn compact(value: u64, fraction: u32) -> String {
         let (scale, suffix) = SUFFIXES[at];
         let (whole, decimals) = scaled_parts(value, scale, fraction);
         if whole < 1_000 {
-            let point = if decimals.is_empty() { String::new() } else { format!(".{decimals}") };
+            let point = if decimals.is_empty() {
+                String::new()
+            } else {
+                format!(".{decimals}")
+            };
             return format!("{whole}{point}{suffix}");
         }
         index = (at + 1 < SUFFIXES.len()).then_some(at + 1);
@@ -2894,7 +2995,10 @@ mod tests {
         let square = ::image::RgbaImage::from_pixel(side, side, ::image::Rgba([10, 20, 30, 255]));
         let mut bytes = Vec::new();
         ::image::DynamicImage::ImageRgba8(square)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                ::image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -2907,7 +3011,10 @@ mod tests {
         // `false`, because this launcher has no Modrinth account to compare ids
         // with.
         assert_eq!(State::empty_sentence(false), "This user has no projects!");
-        assert_eq!(State::empty_sentence(true), "You don't have any projects yet.");
+        assert_eq!(
+            State::empty_sentence(true),
+            "You don't have any projects yet."
+        );
         assert_ne!(State::empty_sentence(true), State::empty_sentence(false));
     }
 
@@ -2944,8 +3051,14 @@ mod tests {
         // match, so one of them cannot be stale beside the other.
         let user: ModrinthUser =
             serde_json::from_str(r#"{"username":"jelly"}"#).expect("the user document");
-        let arrived =
-            Profile::of(user, Vec::new(), Vec::new(), Vec::new(), Ok(picture(32)), Vec::new());
+        let arrived = Profile::of(
+            user,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Ok(picture(32)),
+            Vec::new(),
+        );
         assert!(arrived.avatar.is_some());
         assert!(arrived.note.is_none());
     }
@@ -2994,10 +3107,20 @@ mod tests {
         // first even though the modpack's own `loaders` lists it after.
         assert_eq!(tags.ids(), ["challenging", "combat", "forge", "mrpack"]);
         assert_eq!(tags.overflow, 1);
-        assert_eq!(environment_label(&tags), Some("Client and server".to_string()));
+        assert_eq!(
+            environment_label(&tags),
+            Some("Client and server".to_string())
+        );
         assert_eq!(
             tags.labels(),
-            ["Client and server", "Challenging", "Combat", "Forge", "Modpack", "+1"]
+            [
+                "Client and server",
+                "Challenging",
+                "Combat",
+                "Forge",
+                "Modpack",
+                "+1"
+            ]
         );
 
         // *Random Island*: seven tags, an environment of its own, and nothing
@@ -3014,7 +3137,17 @@ mod tests {
         let tags = card_tags(&island);
         assert_eq!(tags.ids(), ["minigame", "worldgen", "fabric", "forge"]);
         assert_eq!(tags.overflow, 3);
-        assert_eq!(tags.labels(), ["Server", "Minigame", "World Generation", "Fabric", "Forge", "+3"]);
+        assert_eq!(
+            tags.labels(),
+            [
+                "Server",
+                "Minigame",
+                "World Generation",
+                "Fabric",
+                "Forge",
+                "+3"
+            ]
+        );
 
         // *Zombie Invade Nether End*: the one project of the six whose
         // `environment` is empty, so there is no environment pill *and* the
@@ -3120,7 +3253,11 @@ mod tests {
                 );
                 assert_eq!(
                     tag.icon,
-                    if ui::is_loader_tag(&tag.id) { ui::tag_icon(&tag.id) } else { None },
+                    if ui::is_loader_tag(&tag.id) {
+                        ui::tag_icon(&tag.id)
+                    } else {
+                        None
+                    },
                     "{}",
                     tag.id
                 );
@@ -3136,19 +3273,43 @@ mod tests {
         let of = |environment: &str| {
             card_tags(&flamefire("mod", "", "", "", &format!("\"{environment}\"")))
         };
-        assert_eq!(environment_label(&of("client_or_server")), Some("Client or server".to_string()));
+        assert_eq!(
+            environment_label(&of("client_or_server")),
+            Some("Client or server".to_string())
+        );
         // Both `*_prefers_*` values are the pair they prefer.
         assert_eq!(
             environment_label(&of("client_or_server_prefers_both")),
             Some("Client or server".to_string())
         );
-        assert_eq!(environment_label(&of("client_and_server")), Some("Client and server".to_string()));
-        assert_eq!(environment_label(&of("client_only")), Some("Client".to_string()));
-        assert_eq!(environment_label(&of("client_only_server_optional")), Some("Client".to_string()));
-        assert_eq!(environment_label(&of("server_only")), Some("Server".to_string()));
-        assert_eq!(environment_label(&of("server_only_client_optional")), Some("Server".to_string()));
-        assert_eq!(environment_label(&of("singleplayer_only")), Some("Singleplayer".to_string()));
-        assert_eq!(environment_label(&of("dedicated_server_only")), Some("Dedicated server".to_string()));
+        assert_eq!(
+            environment_label(&of("client_and_server")),
+            Some("Client and server".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("client_only")),
+            Some("Client".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("client_only_server_optional")),
+            Some("Client".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("server_only")),
+            Some("Server".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("server_only_client_optional")),
+            Some("Server".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("singleplayer_only")),
+            Some("Singleplayer".to_string())
+        );
+        assert_eq!(
+            environment_label(&of("dedicated_server_only")),
+            Some("Dedicated server".to_string())
+        );
         // A value this port does not name draws nothing, which is what the
         // reference's `empty:hidden` does with an environment it cannot map.
         assert_eq!(environment_label(&of("bedrock_only")), None);
@@ -3183,10 +3344,16 @@ mod tests {
         assert!(!is_loader("multiplayer"));
         assert_eq!(crate::locale::loader_label("mrpack"), "Modpack");
         assert_eq!(crate::locale::loader_label("datapack"), "Data Pack");
-        assert_eq!(crate::locale::category_label("worldgen"), "World Generation");
+        assert_eq!(
+            crate::locale::category_label("worldgen"),
+            "World Generation"
+        );
         // And a tag neither table has is capitalised rather than dropped, which
         // is `formatTag`'s own fallback.
-        assert_eq!(crate::locale::category_label("not-a-tag-yet"), "Not-a-tag-yet");
+        assert_eq!(
+            crate::locale::category_label("not-a-tag-yet"),
+            "Not-a-tag-yet"
+        );
         assert_eq!(
             sort_tags_for_display(&[
                 "quilt".to_string(),
@@ -3200,7 +3367,10 @@ mod tests {
             ["minigame", "worldgen", "fabric", "forge", "neoforge", "datapack", "quilt"]
         );
         // `uniqueSorted` is a `Set`, so a tag listed twice is one pill.
-        assert_eq!(unique(&["a".to_string(), "b".to_string(), "a".to_string()]), ["a", "b"]);
+        assert_eq!(
+            unique(&["a".to_string(), "b".to_string(), "a".to_string()]),
+            ["a", "b"]
+        );
     }
 
     #[test]
@@ -3215,27 +3385,61 @@ mod tests {
             theme_gen::ink_rgba(Gen::Dark, Ink::PlatformFabric),
             [0xdb, 0xb6, 0x9b, 0xff]
         );
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, Ink::PlatformForge), [0x95, 0x9e, 0xef, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, Ink::PlatformForge),
+            [0x95, 0x9e, 0xef, 0xff]
+        );
         // The light look carries its own pair, from the same file's `:169` and
         // `:171`, so what is read is a token and not two transcribed hexes.
         assert_eq!(
             theme_gen::ink_rgba(Gen::Light, Ink::PlatformFabric),
             [0x8a, 0x7b, 0x71, 0xff]
         );
-        assert_eq!(theme_gen::ink_rgba(Gen::Light, Ink::PlatformForge), [0x5b, 0x61, 0x97, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Light, Ink::PlatformForge),
+            [0x5b, 0x61, 0x97, 0xff]
+        );
         // And the ink the other pills keep, which the audit measured as correct
         // on both sides: the categories, *Modpack* and `+1`.
-        assert_eq!(theme_gen::ink_rgba(Gen::Dark, INK_SECONDARY), [0x96, 0xa2, 0xb0, 0xff]);
+        assert_eq!(
+            theme_gen::ink_rgba(Gen::Dark, INK_SECONDARY),
+            [0x96, 0xa2, 0xb0, 0xff]
+        );
     }
 
     #[test]
     fn seventeen_platform_colours_sixteen_of_them_reachable_through_is_loader_tag() {
         // The reference's own loader table, `tag-messages.ts:5`, has thirty tags.
         let loaders = [
-            "babric", "bta-fabric", "bukkit", "bungeecord", "canvas", "datapack", "fabric",
-            "folia", "forge", "geyser", "iris", "java-agent", "legacy-fabric", "liteloader",
-            "minecraft", "modloader", "mrpack", "neoforge", "nilloader", "optifine", "ornithe",
-            "paper", "purpur", "quilt", "rift", "spigot", "sponge", "vanilla", "velocity",
+            "babric",
+            "bta-fabric",
+            "bukkit",
+            "bungeecord",
+            "canvas",
+            "datapack",
+            "fabric",
+            "folia",
+            "forge",
+            "geyser",
+            "iris",
+            "java-agent",
+            "legacy-fabric",
+            "liteloader",
+            "minecraft",
+            "modloader",
+            "mrpack",
+            "neoforge",
+            "nilloader",
+            "optifine",
+            "ornithe",
+            "paper",
+            "purpur",
+            "quilt",
+            "rift",
+            "spigot",
+            "sponge",
+            "vanilla",
+            "velocity",
             "waterfall",
         ];
         assert_eq!(loaders.len(), 30);
@@ -3244,7 +3448,11 @@ mod tests {
             .copied()
             .filter(|tag| platform_ink(tag).is_some())
             .collect();
-        assert_eq!(coloured.len(), 17, "the platform tokens moved: {coloured:?}");
+        assert_eq!(
+            coloured.len(),
+            17,
+            "the platform tokens moved: {coloured:?}"
+        );
         // `ui::is_loader_tag` is `TagTagItem`'s `isLoader`, and it answers true
         // for all thirty. The one that needed care is `bta-fabric`: this port asks
         // the *message id* `tag.loader.<tag>`, and upstream spells that one
@@ -3253,14 +3461,21 @@ mod tests {
         // that tag its glyph, its `BTA (Babric)` label and its platform ink all
         // at once. The exception is named in `ui::is_loader_tag`; this is the test
         // that says it is still there.
-        assert!(ui::is_loader_tag("bta-fabric"), "the upstream id is spelled bta-babric");
+        assert!(
+            ui::is_loader_tag("bta-fabric"),
+            "the upstream id is spelled bta-babric"
+        );
         assert_eq!(platform_ink("bta-fabric"), Some(Ink::PlatformBtaBabric));
         let reachable: Vec<&str> = coloured
             .iter()
             .copied()
             .filter(|tag| ui::is_loader_tag(tag))
             .collect();
-        assert_eq!(reachable.len(), 17, "the reachable platform colours moved: {reachable:?}");
+        assert_eq!(
+            reachable.len(),
+            17,
+            "the reachable platform colours moved: {reachable:?}"
+        );
         for tag in loaders {
             if tag != "bta-fabric" {
                 assert!(ui::is_loader_tag(tag), "{tag} stopped being a loader tag");
@@ -3278,8 +3493,16 @@ mod tests {
         // their pills are 24 rows and are still painted in the platform colour.
         assert_eq!(platform_ink("purpur"), Some(Ink::PlatformPurpur));
         assert_eq!(platform_ink("quilt"), Some(Ink::PlatformQuilt));
-        assert_eq!(ui::tag_icon("purpur"), None, "purpur's glyph is still refused");
-        assert_eq!(ui::tag_icon("quilt"), None, "quilt's glyph is still refused");
+        assert_eq!(
+            ui::tag_icon("purpur"),
+            None,
+            "purpur's glyph is still refused"
+        );
+        assert_eq!(
+            ui::tag_icon("quilt"),
+            None,
+            "quilt's glyph is still refused"
+        );
     }
 
     #[test]
@@ -3289,21 +3512,37 @@ mod tests {
         // two pills that are not tags at all take the fallback because there is
         // nothing to name a token after.
         let of = |id: Option<&str>, label: &str, icon: Option<Glyph>| {
-            let pill = Pill { label: label.to_string(), icon, id: id.map(str::to_string) };
+            let pill = Pill {
+                label: label.to_string(),
+                icon,
+                id: id.map(str::to_string),
+            };
             platform_colour(&pill)
         };
         assert_eq!(of(Some("forge"), "Forge", None), Some(Ink::PlatformForge));
-        assert_eq!(of(Some("fabric"), "Fabric", None), Some(Ink::PlatformFabric));
+        assert_eq!(
+            of(Some("fabric"), "Fabric", None),
+            Some(Ink::PlatformFabric)
+        );
         // A loader with a token but no glyph in it still gets the colour, and
         // still a 24-row pill: *Purpur* and *Quilt* are the two that are both.
-        assert_eq!(of(Some("quilt"), "Quilt", ui::tag_icon("quilt")), Some(Ink::PlatformQuilt));
-        assert_eq!(ui::tag_height(ui::tag_icon("quilt").is_some()), ui::TAG_HEIGHT);
+        assert_eq!(
+            of(Some("quilt"), "Quilt", ui::tag_icon("quilt")),
+            Some(Ink::PlatformQuilt)
+        );
+        assert_eq!(
+            ui::tag_height(ui::tag_icon("quilt").is_some()),
+            ui::TAG_HEIGHT
+        );
         // A category, a loader with no token, and the two pills that are not
         // tags: all four are `None`, which the row draws as `INK_SECONDARY`.
         assert_eq!(of(Some("mobs"), "Mobs", None), None);
         assert_eq!(of(Some("multiplayer"), "Multiplayer", None), None);
         assert_eq!(of(Some("mrpack"), "Modpack", ui::tag_icon("mrpack")), None);
-        assert_eq!(of(Some("datapack"), "Data Pack", ui::tag_icon("datapack")), None);
+        assert_eq!(
+            of(Some("datapack"), "Data Pack", ui::tag_icon("datapack")),
+            None
+        );
         assert_eq!(of(None, "Client and server", Some(Glyph::Globe)), None);
         assert_eq!(of(None, "+1", None), None);
     }
@@ -3318,7 +3557,10 @@ mod tests {
                 .pills()
                 .iter()
                 .map(|pill| {
-                    (pill.label.clone(), platform_colour(pill).unwrap_or(INK_SECONDARY))
+                    (
+                        pill.label.clone(),
+                        platform_colour(pill).unwrap_or(INK_SECONDARY),
+                    )
                 })
                 .collect()
         };
@@ -3361,7 +3603,13 @@ mod tests {
         // Card 3: *Data Pack* is a loader with no token, so the two pills beside
         // *Mobs* are the fallback and the row's only coloured one is absent.
         assert_eq!(
-            inks(&flamefire("mod", r#""mobs""#, r#""datapack""#, r#""minigame""#, "")),
+            inks(&flamefire(
+                "mod",
+                r#""mobs""#,
+                r#""datapack""#,
+                r#""minigame""#,
+                ""
+            )),
             vec![
                 ("Mobs".to_string(), INK_SECONDARY),
                 ("Data Pack".to_string(), INK_SECONDARY),
@@ -3395,7 +3643,10 @@ mod tests {
         let profile = sample();
         // Two mods and a pack, in `PROJECT_TYPE_ORDER`' own order: mods before
         // modpacks, which is *not* Discover's tab order.
-        assert_eq!(profile.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
+        assert_eq!(
+            profile.types(),
+            vec![ProjectType::Mod, ProjectType::Modpack]
+        );
         // And a user with nothing has no filters at all.
         assert!(Profile::default().types().is_empty());
     }
@@ -3460,13 +3711,20 @@ mod tests {
         );
         // And *not* the v2 answer, which is the pair this replaced.
         let v2_only = flamefire_profile(false);
-        assert_eq!(v2_only.types(), vec![ProjectType::Mod, ProjectType::Modpack]);
+        assert_eq!(
+            v2_only.types(),
+            vec![ProjectType::Mod, ProjectType::Modpack]
+        );
 
         // A project contributes the type it *leads* with and not every type it is:
         // *Random Island* is `["datapack", "mod"]` and is counted once, under
         // `datapack`. That is the reading their reference strip proves -- a set would
         // have put *Mods* on it.
-        let random = profile.projects.iter().find(|p| p.id == "zXGThYpi").expect("the project");
+        let random = profile
+            .projects
+            .iter()
+            .find(|p| p.id == "zXGThYpi")
+            .expect("the project");
         assert_eq!(profile.type_of(random), Some(ProjectType::Datapack));
         assert_eq!(random.project_type, "mod", "and v2 still calls it a mod");
     }
@@ -3478,11 +3736,18 @@ mod tests {
         // holds at least one project.
         let profile = flamefire_profile(true);
         for kind in profile.types() {
-            assert!(!profile.shown(Some(kind)).is_empty(), "{kind:?} is a tab with nothing under it");
+            assert!(
+                !profile.shown(Some(kind)).is_empty(),
+                "{kind:?} is a tab with nothing under it"
+            );
         }
         assert_eq!(profile.shown(Some(ProjectType::Datapack)).len(), 4);
         assert_eq!(profile.shown(Some(ProjectType::Modpack)).len(), 2);
-        assert_eq!(profile.shown(Some(ProjectType::Mod)).len(), 0, "nothing leads with `mod` here");
+        assert_eq!(
+            profile.shown(Some(ProjectType::Mod)).len(),
+            0,
+            "nothing leads with `mod` here"
+        );
         assert_eq!(profile.shown(None).len(), 6, "*All* is still every project");
 
         // And the fallback is the degradation rather than a hole: a profile whose v3
@@ -3497,7 +3762,10 @@ mod tests {
         // claims nothing: the ids are the only key either document carries.
         let mut extra = flamefire_profile(true);
         extra.projects_v3.push(v3("not-in-v2", &["shader"]));
-        assert_eq!(extra.types(), vec![ProjectType::Datapack, ProjectType::Modpack]);
+        assert_eq!(
+            extra.types(),
+            vec![ProjectType::Datapack, ProjectType::Modpack]
+        );
     }
 
     #[test]
@@ -3517,7 +3785,11 @@ mod tests {
             (ProjectType::Plugin, "Plugins"),
             (ProjectType::Server, "Servers"),
         ];
-        assert_eq!(expected.len(), ProjectType::PROFILE_ORDER.len(), "one row per ordered type");
+        assert_eq!(
+            expected.len(),
+            ProjectType::PROFILE_ORDER.len(),
+            "one row per ordered type"
+        );
         for (kind, label) in expected {
             assert_eq!(kind.label(), label, "{kind:?}");
         }
@@ -3529,11 +3801,17 @@ mod tests {
         // because `PROJECT_TYPE_ORDER` ends with `collection`.
         assert_eq!(Key::ProjectTypeAll.message(), "All");
         assert_eq!(Key::ProjectTypeCollectionPlural.message(), "Collections");
-        let order: Vec<&str> = ProjectType::PROFILE_ORDER.iter().map(|kind| kind.token()).collect();
-        assert_eq!(order.last(), Some(&"server"), "seven types, none of them a collection");
+        let order: Vec<&str> = ProjectType::PROFILE_ORDER
+            .iter()
+            .map(|kind| kind.token())
+            .collect();
         assert_eq!(
-            PROFILE_TYPE_ORDER_LAST_IN_REFERENCE,
-            "collection",
+            order.last(),
+            Some(&"server"),
+            "seven types, none of them a collection"
+        );
+        assert_eq!(
+            PROFILE_TYPE_ORDER_LAST_IN_REFERENCE, "collection",
             "PROJECT_TYPE_ORDER's eighth entry, after `server`"
         );
     }
@@ -3568,7 +3846,10 @@ mod tests {
             }
             labels
         };
-        assert_eq!(labels(&with), vec!["All", "Mods", "Modpacks", "Collections"]);
+        assert_eq!(
+            labels(&with),
+            vec!["All", "Mods", "Modpacks", "Collections"]
+        );
         assert_eq!(
             labels(&without),
             vec!["All", "Mods", "Modpacks"],
@@ -3585,7 +3866,11 @@ mod tests {
         // counts *links* and *All* is one of them.
         let profile = with_collections();
         let types = profile.types();
-        assert_eq!(strip_links(&profile), 4, "*All*, two types and the collections");
+        assert_eq!(
+            strip_links(&profile),
+            4,
+            "*All*, two types and the collections"
+        );
         // The fixture's own two types. FlameFire's capture reads *Data Packs* in the
         // second slot because that is the type its v3 array names, and the strip is
         // counted off that array -- `layout.vue:762` and [`Profile::type_of`].
@@ -3618,7 +3903,11 @@ mod tests {
                 }
                 other => panic!("{path} is not a profile page: {other:?}"),
             }
-            assert_eq!(state.selected(), Filter::of(tab_at(&types, index)), "{path}");
+            assert_eq!(
+                state.selected(),
+                Filter::of(tab_at(&types, index)),
+                "{path}"
+            );
         }
         // And the way back: every tab is reachable from every other tab, which is
         // what the address is for. *All* was the arm that could not be left while
@@ -3640,7 +3929,9 @@ mod tests {
         // *Collections* -- three, which the reference draws. This is the case that
         // used to draw no strip at all, because the count was over types alone.
         let mut profile = sample();
-        profile.projects.retain(|project| project.project_type == "mod");
+        profile
+            .projects
+            .retain(|project| project.project_type == "mod");
         profile.projects_v3.retain(|entry| entry.id == "AANobbMI");
         assert_eq!(profile.types(), vec![ProjectType::Mod]);
         assert_eq!(strip_links(&profile), 2, "no strip: *All* and *Mods*");
@@ -3668,14 +3959,20 @@ mod tests {
         // were drawn it would be empty.
         assert_eq!(Filter::Collections.project_type(), None);
         assert_eq!(Filter::All.project_type(), None);
-        assert_eq!(Filter::Type(ProjectType::Datapack).project_type(), Some(ProjectType::Datapack));
+        assert_eq!(
+            Filter::Type(ProjectType::Datapack).project_type(),
+            Some(ProjectType::Datapack)
+        );
 
         // And the tab's press is reported like the other three, because
         // `/user/{name}/collections` is an address now: `Route::User` carries a
         // `ProfileTab`, which is what the strip's fourth link is.
         let mut state = State::new("FlameFire".to_string(), None);
         assert_eq!(state.selected(), Filter::All);
-        assert_eq!(state.update(Message::Filter(Some(ProfileTab::Collections))), None);
+        assert_eq!(
+            state.update(Message::Filter(Some(ProfileTab::Collections))),
+            None
+        );
         assert_eq!(
             state.selected(),
             Filter::All,
@@ -3700,7 +3997,11 @@ mod tests {
         state.filter(Some(ProfileTab::Collections));
         assert_eq!(state.selected(), Filter::Collections);
         state.filter(None);
-        assert_eq!(state.selected(), Filter::All, "and the reader is not trapped");
+        assert_eq!(
+            state.selected(),
+            Filter::All,
+            "and the reader is not trapped"
+        );
         assert!(!state.collections);
         state.filter(Some(ProfileTab::Collections));
         state.filter(Some(ProfileTab::Projects(ProjectType::Shader)));
@@ -3715,8 +4016,11 @@ mod tests {
         // before it (2025), which is also the order they arrive in -- so this test
         // is that the sort is not inverted, and the tie-break is the net crate's.
         let profile = with_collections();
-        let drawn: Vec<&str> =
-            profile.sorted_collections().iter().map(|c| c.name.as_str()).collect();
+        let drawn: Vec<&str> = profile
+            .sorted_collections()
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
         assert_eq!(drawn, vec!["Plugin", "Carpet"]);
         assert_eq!(profile.collections[0].project_count(), 1);
         assert_eq!(profile.collections[1].project_count(), 3);
@@ -3729,8 +4033,14 @@ mod tests {
         // arm is kept because the condition is the reader's, not the document's, and
         // each of the four is checked against the reference's own `v-else-if` order.
         for status in ["listed", "unlisted", "private", "rejected"] {
-            assert!(collection_status(false, status).is_none(), "{status} is not drawn");
-            assert!(collection_status(true, status).is_some(), "{status} when the viewer may");
+            assert!(
+                collection_status(false, status).is_none(),
+                "{status} is not drawn"
+            );
+            assert!(
+                collection_status(true, status).is_some(),
+                "{status} when the viewer may"
+            );
         }
         assert_eq!(
             collection_status(true, "listed").map(|(_, key)| key.message()),
@@ -3758,20 +4068,31 @@ mod tests {
         // -- all four of FlameFire's -- and `Avatar :src="null"` is its placeholder.
         let profile = with_collections();
         for collection in &profile.collections {
-            assert!(profile.collection_icon(collection).is_none(), "{}", collection.id);
+            assert!(
+                profile.collection_icon(collection).is_none(),
+                "{}",
+                collection.id
+            );
         }
         // A collection that names one is keyed by that URL, the same way a project's
         // icon is, so two collections never share a picture by position.
         let mut profile = profile;
         profile.collections[0].icon_url = "https://cdn.modrinth.com/a.png".to_string();
-        assert!(profile.collection_icon(&profile.collections[0]).is_none(), "nothing fetched");
+        assert!(
+            profile.collection_icon(&profile.collections[0]).is_none(),
+            "nothing fetched"
+        );
     }
 
     #[test]
     fn the_collection_grid_counts_its_columns_the_way_auto_fill_does() {
         // `repeat(auto-fill, minmax(350px, 1fr))` over `gap-3`, at the content
         // width the reference lays that grid out in.
-        assert_eq!(collection_columns(COLLECTION_CONTENT), 2, "868 fits two tracks of 350");
+        assert_eq!(
+            collection_columns(COLLECTION_CONTENT),
+            2,
+            "868 fits two tracks of 350"
+        );
         // Three tracks would need 3 x 350 + 2 x 12 = 1074.
         assert_eq!(collection_columns(1074.0), 3);
         assert_eq!(collection_columns(1073.0), 2);
@@ -3791,10 +4112,20 @@ mod tests {
         // for a profile whose collections read failed after the tab was drawn.
         let empty = sample();
         assert!(!empty.has_collections());
-        assert_eq!(strip_links(&empty), 3, "*All*, *Mods* and *Modpacks*, and nothing else");
-        assert_eq!(State::no_collections_sentence(false), "This user has no collections!");
+        assert_eq!(
+            strip_links(&empty),
+            3,
+            "*All*, *Mods* and *Modpacks*, and nothing else"
+        );
+        assert_eq!(
+            State::no_collections_sentence(false),
+            "This user has no collections!"
+        );
         // The reader's-own arm, kept beside it for `empty_sentence`'s reason.
-        assert_eq!(State::no_collections_sentence(true), "You don't have any collections yet.");
+        assert_eq!(
+            State::no_collections_sentence(true),
+            "You don't have any collections yet."
+        );
     }
 
     #[test]
@@ -3803,12 +4134,23 @@ mod tests {
         // is the one a port drops: `selectedProjectType !== null ||
         // collections.value.length === 0`. This is the case it exists for.
         assert!(!shows_projects_empty_state(Filter::All, true, 0));
-        assert!(shows_projects_empty_state(Filter::All, false, 0), "no collections: it is shown");
+        assert!(
+            shows_projects_empty_state(Filter::All, false, 0),
+            "no collections: it is shown"
+        );
         assert!(!shows_projects_empty_state(Filter::All, false, 1));
         // A named type is the other way out: with a type selected the address is what
         // the reader asked for, so an empty list is the answer.
-        assert!(shows_projects_empty_state(Filter::Type(ProjectType::Shader), true, 0));
-        assert!(shows_projects_empty_state(Filter::Type(ProjectType::Shader), false, 0));
+        assert!(shows_projects_empty_state(
+            Filter::Type(ProjectType::Shader),
+            true,
+            0
+        ));
+        assert!(shows_projects_empty_state(
+            Filter::Type(ProjectType::Shader),
+            false,
+            0
+        ));
         // And the collections tab is never it: that is `showCollectionsEmptyState`.
         assert!(!shows_projects_empty_state(Filter::Collections, true, 0));
         assert!(!shows_projects_empty_state(Filter::Collections, false, 0));
@@ -3827,11 +4169,17 @@ mod tests {
         // Fabulously Optimized, and Phosphor has the fewest downloads of the two
         // mods). Measured against the reference on FlameFire, whose API answer was
         // ordered by id and whose reference list led with its 14.8M-download pack.
-        let titles: Vec<&str> =
-            profile.shown(None).iter().map(|project| project.title.as_str()).collect();
+        let titles: Vec<&str> = profile
+            .shown(None)
+            .iter()
+            .map(|project| project.title.as_str())
+            .collect();
         assert_eq!(titles, vec!["Sodium", "Phosphor", "Fabulously Optimized"]);
-        let mods: Vec<&str> =
-            profile.shown(Some(ProjectType::Mod)).iter().map(|project| project.title.as_str()).collect();
+        let mods: Vec<&str> = profile
+            .shown(Some(ProjectType::Mod))
+            .iter()
+            .map(|project| project.title.as_str())
+            .collect();
         assert_eq!(mods, vec!["Sodium", "Phosphor"]);
     }
 
@@ -3844,7 +4192,11 @@ mod tests {
         assert_eq!(first.user, "jellysquid3");
         assert_eq!(first.round, 1);
         assert_eq!(state.profile, Load::Loading);
-        assert_eq!(state.opening(), None, "asked once, and nothing else on the page asks again");
+        assert_eq!(
+            state.opening(),
+            None,
+            "asked once, and nothing else on the page asks again"
+        );
         // The reference's header carries no refresh, so neither does this one: the
         // only control beside the avatar is the overflow, and its press says what
         // is behind it rather than issuing a request.
@@ -3909,15 +4261,22 @@ mod tests {
         assert_eq!(iso_millis("1970-01-01T00:00:01Z"), Some(1_000));
         // A leap day, which is the case a hand-rolled day count gets wrong.
         assert_eq!(
-            iso_millis("2024-03-01T00:00:00Z").unwrap_or(0) - iso_millis("2024-02-29T00:00:00Z").unwrap_or(0),
+            iso_millis("2024-03-01T00:00:00Z").unwrap_or(0)
+                - iso_millis("2024-02-29T00:00:00Z").unwrap_or(0),
             86_400_000
         );
         // The reference's own fixtures: jellysquid3 joined on 2023-11-13 and Sodium
         // published on 2020-06-15.
-        assert_eq!(iso_millis("2023-11-13T23:22:36.604990Z"), Some(1_699_917_756_000));
+        assert_eq!(
+            iso_millis("2023-11-13T23:22:36.604990Z"),
+            Some(1_699_917_756_000)
+        );
         assert_eq!(iso_millis("2020-06-15T00:00:00Z"), Some(1_592_179_200_000));
         // A fractional part and a missing `Z` are both the same instant.
-        assert_eq!(iso_millis("2020-06-15T00:00:00"), iso_millis("2020-06-15T00:00:00Z"));
+        assert_eq!(
+            iso_millis("2020-06-15T00:00:00"),
+            iso_millis("2020-06-15T00:00:00Z")
+        );
     }
 
     /// An instant `millis` after the epoch, in the shape Modrinth's API publishes.
@@ -3935,7 +4294,11 @@ mod tests {
         let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
         let shifted = (5 * day_of_year + 2) / 153;
         let day = day_of_year - (153 * shifted + 2) / 5 + 1;
-        let month = if shifted < 10 { shifted + 3 } else { shifted - 9 };
+        let month = if shifted < 10 {
+            shifted + 3
+        } else {
+            shifted - 9
+        };
         let year = if month <= 2 { year + 1 } else { year };
         format!(
             "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
@@ -3956,13 +4319,20 @@ mod tests {
             result: Ok(Box::new(Profile::default())),
         };
         assert_eq!(state.update(stale), None);
-        assert_eq!(state.profile, Load::Loading, "the answer to a replaced question is not drawn");
+        assert_eq!(
+            state.profile,
+            Load::Loading,
+            "the answer to a replaced question is not drawn"
+        );
         let answer = Message::Found {
             round: 1,
             result: Ok(Box::new(sample())),
         };
         state.update(answer);
-        assert_eq!(state.profile.ready().map(|profile| profile.projects.len()), Some(3));
+        assert_eq!(
+            state.profile.ready().map(|profile| profile.projects.len()),
+            Some(3)
+        );
     }
 
     #[test]
@@ -3985,15 +4355,28 @@ mod tests {
     fn a_filter_moves_with_the_address_and_does_not_ask_again() {
         let mut state = State::new("jellysquid3".to_string(), None);
         let _ = state.opening();
-        state.update(Message::Found { round: 1, result: Ok(Box::new(sample())) });
+        state.update(Message::Found {
+            round: 1,
+            result: Ok(Box::new(sample())),
+        });
         // The strip's own press is reported to the shell rather than applied here;
         // what the page does is follow the address it comes back on.
         let pack = Some(ProfileTab::Projects(ProjectType::Modpack));
         assert_eq!(state.update(Message::Filter(pack)), None);
         state.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
         assert_eq!(state.project_type, Some(ProjectType::Modpack));
-        assert_eq!(state.profile.ready().map(|profile| profile.shown(state.project_type).len()), Some(1));
-        assert_eq!(state.opening(), None, "another filter is not another document");
+        assert_eq!(
+            state
+                .profile
+                .ready()
+                .map(|profile| profile.shown(state.project_type).len()),
+            Some(1)
+        );
+        assert_eq!(
+            state.opening(),
+            None,
+            "another filter is not another document"
+        );
     }
 
     #[test]
@@ -4007,7 +4390,10 @@ mod tests {
         let _ = waiting.opening();
         let mut loaded = idle.clone();
         let _ = loaded.opening();
-        loaded.update(Message::Found { round: 1, result: Ok(Box::new(sample())) });
+        loaded.update(Message::Found {
+            round: 1,
+            result: Ok(Box::new(sample())),
+        });
         let mut filtered = loaded.clone();
         filtered.filter(Some(ProfileTab::Projects(ProjectType::Modpack)));
         let mut collections = loaded.clone();
@@ -4019,16 +4405,27 @@ mod tests {
         }
         let mut failed = idle.clone();
         let _ = failed.opening();
-        failed.update(Message::Found { round: 1, result: Err("no such user".to_string()) });
+        failed.update(Message::Found {
+            round: 1,
+            result: Err("no such user".to_string()),
+        });
         let mut noticed = loaded.clone();
         noticed.notice = Some("something the page could not do".to_string());
         let mut empty = loaded.clone();
         if let Load::Ready(profile) = &mut empty.profile {
             profile.projects.clear();
         }
-        let states =
-            [&idle, &waiting, &loaded, &filtered, &collections, &with_avatar, &failed, &noticed,
-             &empty];
+        let states = [
+            &idle,
+            &waiting,
+            &loaded,
+            &filtered,
+            &collections,
+            &with_avatar,
+            &failed,
+            &noticed,
+            &empty,
+        ];
         for state in states {
             for theme in Gen::ALL {
                 drop(view(*theme, state, &store));
@@ -4043,15 +4440,23 @@ mod tests {
         // built from an empty list would draw *All* alone.
         let profile = Profile::default();
         assert!(profile.types().is_empty());
-        assert!(filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &profile).is_none());
+        assert!(
+            filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &profile).is_none()
+        );
         // And a single type is not enough for a strip either: *All* beside it would
         // be two links, and the reference draws three at the least.
         let mut one_type = sample();
-        one_type.projects.retain(|project| project.project_type == "mod");
+        one_type
+            .projects
+            .retain(|project| project.project_type == "mod");
         assert_eq!(one_type.types(), vec![ProjectType::Mod]);
-        assert!(filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &one_type).is_none());
+        assert!(
+            filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &one_type).is_none()
+        );
         // Two, and the strip is there.
-        assert!(filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &sample()).is_some());
+        assert!(
+            filter_strip(Gen::Dark, &State::new("jelly".to_string(), None), &sample()).is_some()
+        );
     }
 
     #[test]
@@ -4078,7 +4483,11 @@ mod tests {
         // column needs no offset of its own: the button lands at the content box's
         // top and the date at its bottom.
         assert_eq!(
-            ui::Size::Md.height() + CARD_STATS_LEAD + CARD_STAT_ICON + CARD_STATS_GAP + CARD_STAT_ICON,
+            ui::Size::Md.height()
+                + CARD_STATS_LEAD
+                + CARD_STAT_ICON
+                + CARD_STATS_GAP
+                + CARD_STAT_ICON,
             CARD_CONTENT - 1.0
         );
         // The tags row is the reference's own 26 and it ends one row above the
@@ -4087,7 +4496,11 @@ mod tests {
         // its three 26-row pills are y=358..383 and its three 24-row pills are
         // y=359..382, so the row's first row is 358 = the box's top (276) + this.
         assert_eq!(277.0 + CARD_TAGS_TOP, 358.0, "the tags row starts at y=358");
-        assert_eq!(ui::tag_height(true), 26.0, "the row is as tall as its tallest pill");
+        assert_eq!(
+            ui::tag_height(true),
+            26.0,
+            "the row is as tall as its tallest pill"
+        );
         // And `items-center` is what puts the shorter pills one row lower inside
         // it: a row laid out from the top would draw *Challenging* at y=358
         // against the reference's y=359.
@@ -4097,7 +4510,10 @@ mod tests {
             "a 24-row pill centred in a 26-row row ends one row before its bottom"
         );
         // And the kit's own 24-pixel pill still sits inside that 26-pixel row.
-        assert!(CARD_TAGS_TOP + ui::TAG_HEIGHT <= CARD_CONTENT, "the tags row is inside the box");
+        assert!(
+            CARD_TAGS_TOP + ui::TAG_HEIGHT <= CARD_CONTENT,
+            "the tags row is inside the box"
+        );
         // And the icon column is the indent the tags row starts at, with the
         // grid's own `gap-x-3` after it -- which together put the first pill at the
         // card's left + 129, the reference's x=217. Indenting by the sum *and*
@@ -4170,7 +4586,10 @@ mod tests {
         // matched to a project a second time would be a second set of rules.
         let mut profile = sample();
         let url = profile.projects[0].icon_url.clone();
-        assert!(profile.icon(&profile.projects[0]).is_none(), "no icon has arrived yet");
+        assert!(
+            profile.icon(&profile.projects[0]).is_none(),
+            "no icon has arrived yet"
+        );
         profile.icons.push(crate::avatar::Fetched {
             url: url.clone(),
             icon: crate::avatar::Icon::of(&picture(64), crate::avatar::ICON_SIDE)
@@ -4205,4 +4624,3 @@ mod tests {
         }
     }
 }
-

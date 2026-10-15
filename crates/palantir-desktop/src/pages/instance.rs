@@ -36,8 +36,8 @@
 //! the folder.
 
 use iced::widget::{column, container, row, Space};
-use iced::{Background, Theme};
 use iced::{Alignment, Element, Font, Length, Padding};
+use iced::{Background, Theme};
 
 use crate::icons_gen::Glyph;
 use crate::page::{self, Load, GAP, INSET, ROW_GAP};
@@ -276,7 +276,11 @@ impl State {
     fn ask(&mut self) -> Asked {
         self.round += 1;
         self.listed = Load::Loading;
-        Asked { round: self.round, id: self.id.clone(), tab: self.tab.clone() }
+        Asked {
+            round: self.round,
+            id: self.id.clone(),
+            tab: self.tab.clone(),
+        }
     }
 
     /// The key for a tab's label.
@@ -354,7 +358,7 @@ impl State {
     pub fn update(&mut self, message: Message, store: &Store) -> Option<Ask> {
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             Message::Tab(tab) => {
                 // A tab is a different read, and the listing in hand belongs to
@@ -398,11 +402,7 @@ impl State {
                     Ok(listing) if listing.is_empty() => Load::Empty,
                     Ok(listing) => Load::Ready(listing),
                 };
-                self.keys = self
-                    .listed
-                    .ready()
-                    .map(content_keys)
-                    .unwrap_or_default();
+                self.keys = self.listed.ready().map(content_keys).unwrap_or_default();
             }
             Message::Hover { key, over, hover } => crate::ui::pointer_with(
                 key,
@@ -435,7 +435,12 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
     let mut above = column![].spacing(GAP).width(Length::Fill);
     above = above.push(header(theme, state, store));
     if let Some(notice) = &state.notice {
-        above = above.push(ui::admonition(theme, ui::Severity::Warning, &state.id, notice));
+        above = above.push(ui::admonition(
+            theme,
+            ui::Severity::Warning,
+            &state.id,
+            notice,
+        ));
     }
     above = above.push(ui::tabs_with_glyphs(
         theme,
@@ -469,12 +474,14 @@ pub fn view<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, M
 fn scrolling<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     crate::scroll::region(
         crate::scroll::CONTENT,
-        container(body(theme, state)).width(Length::Fill).padding(Padding {
-            top: GAP,
-            right: INSET,
-            bottom: INSET,
-            left: INSET,
-        }),
+        container(body(theme, state))
+            .width(Length::Fill)
+            .padding(Padding {
+                top: GAP,
+                right: INSET,
+                bottom: INSET,
+                left: INSET,
+            }),
         Message::Wheel,
     )
     .width(Length::Fill)
@@ -503,15 +510,16 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
         page::Load::Ready(card) => card.name.clone(),
         _ => state.id.clone(),
     };
-    let mut details = column![]
-        .spacing(ROW_GAP)
-        .push(
-            text(title)
-                .size(TITLE)
-                .font(semibold())
-                .line_height(iced::Pixels(TITLE))
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-        );
+    let mut details = column![].spacing(ROW_GAP).push(
+        text(title)
+            .size(TITLE)
+            .font(semibold())
+            .line_height(iced::Pixels(TITLE))
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            ))),
+    );
     if let Some(card) = card.ready() {
         // The instance header's own metadata slot, in its own order and in its own
         // four arms (`pages/instance/components/page-header/index.vue`): the loader
@@ -548,7 +556,10 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             text(line.to_string())
                 .size(12.0)
                 .font(crate::style::medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
         );
     }
     // `PageHeaderActions`'s own `flex flex-wrap items-center gap-2`: the launch
@@ -567,13 +578,20 @@ fn header<'a>(theme: Gen, state: &'a State, store: &'a Store) -> Element<'a, Mes
             ui::Size::Xl,
             Message::Settings,
         ));
-    let root = container(row![]
-        .spacing(page::GRID_GAP)
-        .align_items(Alignment::Start)
-        .push(details.width(Length::Fill))
-        .push(actions))
+    let root = container(
+        row![]
+            .spacing(page::GRID_GAP)
+            .align_items(Alignment::Start)
+            .push(details.width(Length::Fill))
+            .push(actions),
+    )
     .width(Length::Fill)
-    .padding(Padding { top: 0.0, right: 0.0, bottom: HEADER_PAD, left: 0.0 });
+    .padding(Padding {
+        top: 0.0,
+        right: 0.0,
+        bottom: HEADER_PAD,
+        left: 0.0,
+    });
     // The hairline is the root's *bottom* border, which iced draws around all four
     // sides -- so it is a separate one-pixel line under the block rather than a
     // border on it. `border-b` is the only edge this header has.
@@ -684,9 +702,15 @@ fn body<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
                     text(Key::AppInstanceShareLockedSignedOutHeading.message())
                         .size(16.0)
                         .font(semibold())
-                        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                        .style(iced::theme::Text::Color(theme_gen::ink(
+                            theme,
+                            INK_CONTRAST,
+                        ))),
                 )
-                .push(ui::paragraph(theme, &store::needs_account("Sharing an instance"))),
+                .push(ui::paragraph(
+                    theme,
+                    &store::needs_account("Sharing an instance"),
+                )),
         );
     }
     match &state.listed {
@@ -738,15 +762,18 @@ fn listing_body<'a>(
                     enabled: !entry.enabled,
                 },
             );
-            slot(ui::card(
-                theme,
-                row![]
-                    .spacing(ROW_GAP)
-                    .align_items(Alignment::Center)
-                    .push(toggle)
-                    .push(ui::icon_label(theme, Glyph::Package, &entry.display_name))
-                    .push(Space::with_width(Length::Fill)),
-            ), CONTENT_ROW)
+            slot(
+                ui::card(
+                    theme,
+                    row![]
+                        .spacing(ROW_GAP)
+                        .align_items(Alignment::Center)
+                        .push(toggle)
+                        .push(ui::icon_label(theme, Glyph::Package, &entry.display_name))
+                        .push(Space::with_width(Length::Fill)),
+                ),
+                CONTENT_ROW,
+            )
         }),
         store::Listing::Files(entries) => {
             ui::card(theme, files_rows(theme, entries, state.geometry))
@@ -755,7 +782,11 @@ fn listing_body<'a>(
             theme,
             rows(worlds.len(), PLAIN_ROW, state.geometry, |index| {
                 let world = &worlds[index];
-                let state_label = if world.played { "played" } else { "never opened" };
+                let state_label = if world.played {
+                    "played"
+                } else {
+                    "never opened"
+                };
                 slot(
                     ui::icon_label(
                         theme,
@@ -769,16 +800,20 @@ fn listing_body<'a>(
         store::Listing::Screenshots(shots) => ui::card(
             theme,
             rows(shots.len(), PLAIN_ROW, state.geometry, |index| {
-                slot(ui::icon_label(theme, Glyph::Image, &shots[index]), PLAIN_ROW)
+                slot(
+                    ui::icon_label(theme, Glyph::Image, &shots[index]),
+                    PLAIN_ROW,
+                )
             }),
         ),
-        store::Listing::Log(tail) => ui::card(
-            theme,
-            text(tail.as_str())
-                .size(12.0)
-                .font(Font::MONOSPACE)
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-        ),
+        store::Listing::Log(tail) => {
+            ui::card(
+                theme,
+                text(tail.as_str()).size(12.0).font(Font::MONOSPACE).style(
+                    iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+                ),
+            )
+        }
     }
 }
 
@@ -788,14 +823,14 @@ fn listing_body<'a>(
 /// enough that inlining it makes the match unreadable, and because the two things
 /// that are the same in every windowed listing -- the slot and the window -- are
 /// then visible next to each other.
-fn files_rows<'a>(
-    theme: Gen,
-    entries: &'a [store::Entry],
-    at: Geometry,
-) -> Element<'a, Message> {
+fn files_rows<'a>(theme: Gen, entries: &'a [store::Entry], at: Geometry) -> Element<'a, Message> {
     rows(entries.len(), PLAIN_ROW, at, |index| {
         let entry = &entries[index];
-        let glyph = if entry.directory { Glyph::Folder } else { Glyph::File };
+        let glyph = if entry.directory {
+            Glyph::Folder
+        } else {
+            Glyph::File
+        };
         let label = if entry.directory {
             entry.name.clone()
         } else {
@@ -853,8 +888,6 @@ fn space<'a>(count: usize, row_height: f32) -> Element<'a, Message> {
     Space::with_height(Length::Fixed(count as f32 * row_height)).into()
 }
 
-
-
 /// What a tab draws when its listing came back with nothing in it.
 ///
 /// Three of the five have the reference's own copy for this -- a heading and the
@@ -889,12 +922,9 @@ fn titled<'a>(theme: Gen, heading: Key, body: &str) -> Element<'a, Message> {
         theme,
         column![]
             .spacing(4.0)
-            .push(
-                text(heading.message())
-                    .size(16.0)
-                    .font(semibold())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-            )
+            .push(text(heading.message()).size(16.0).font(semibold()).style(
+                iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+            ))
             .push(ui::paragraph(theme, body)),
     )
 }
@@ -921,7 +951,9 @@ mod tests {
     use palantir_core::paths::PalantirPaths;
 
     fn store_at(name: &str) -> Store {
-        let root = std::env::temp_dir().join("palantirmc-instance-page").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-instance-page")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a scratch directory");
         Store::load(&PalantirPaths::at(root))
@@ -933,8 +965,10 @@ mod tests {
         // `layout.vue`'s own order, Screenshots before Worlds -- the order its
         // `tabs` computed pushes them in, not the order the enum declares.
         let expected = ["Content", "Files", "Screenshots", "Worlds", "Logs", "Share"];
-        let labels: Vec<&str> =
-            State::TABS.iter().map(|tab| State::key_for(tab.clone()).message()).collect();
+        let labels: Vec<&str> = State::TABS
+            .iter()
+            .map(|tab| State::key_for(tab.clone()).message())
+            .collect();
         assert_eq!(labels, expected);
         // A content filter keeps the Content tab selected, which is what the
         // reference's own predicate on that tab does.
@@ -975,7 +1009,10 @@ mod tests {
         let store = store_at("toggle-missing");
         let mut state = State::new("no-such-instance".to_string(), InstanceTab::Content);
         state.update(
-            Message::ToggleContent { file_name: "sodium.jar".to_string(), enabled: false },
+            Message::ToggleContent {
+                file_name: "sodium.jar".to_string(),
+                enabled: false,
+            },
             &store,
         );
         assert!(state.notice.is_some(), "a failed toggle must be reported");
@@ -1006,7 +1043,13 @@ mod tests {
         let asked = state.opening()?;
         let directory = store.instance_dir(&asked.id);
         let listing = store::listing(&directory, &asked.tab);
-        state.update(Message::Listed { round: asked.round, listing }, store);
+        state.update(
+            Message::Listed {
+                round: asked.round,
+                listing,
+            },
+            store,
+        );
         Some(asked)
     }
 
@@ -1062,8 +1105,18 @@ mod tests {
         assert_ne!(second.round, first.round, "a tab change is a new read");
 
         let stale = Ok(store::Listing::Content(vec![mod_entry("sodium.jar")]));
-        state.update(Message::Listed { round: first.round, listing: stale }, &store);
-        assert_eq!(state.listed, Load::Loading, "the stale answer changed nothing");
+        state.update(
+            Message::Listed {
+                round: first.round,
+                listing: stale,
+            },
+            &store,
+        );
+        assert_eq!(
+            state.listed,
+            Load::Loading,
+            "the stale answer changed nothing"
+        );
         assert!(state.keys().is_empty(), "and brought no row names with it");
 
         // The answer that *was* asked for lands, and it lands as the tab's own
@@ -1075,8 +1128,17 @@ mod tests {
             created: None,
             modified: None,
         }]));
-        state.update(Message::Listed { round: second.round, listing: fresh }, &store);
-        assert!(matches!(state.listed, Load::Ready(store::Listing::Files(_))));
+        state.update(
+            Message::Listed {
+                round: second.round,
+                listing: fresh,
+            },
+            &store,
+        );
+        assert!(matches!(
+            state.listed,
+            Load::Ready(store::Listing::Files(_))
+        ));
     }
 
     #[test]
@@ -1092,10 +1154,15 @@ mod tests {
         assert!(state.opening().is_none(), "settled before the toggle");
 
         state.update(
-            Message::ToggleContent { file_name: "sodium.jar".to_string(), enabled: false },
+            Message::ToggleContent {
+                file_name: "sodium.jar".to_string(),
+                enabled: false,
+            },
             &store,
         );
-        let asked = state.opening().expect("the listing is stale, so it is asked for again");
+        let asked = state
+            .opening()
+            .expect("the listing is stale, so it is asked for again");
         assert_eq!(asked.tab, InstanceTab::Content);
         assert_eq!(asked.round, 2);
     }
@@ -1108,7 +1175,10 @@ mod tests {
         let store = store_at("empty-listing");
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
         state.update(
-            Message::Listed { round: 0, listing: Ok(store::Listing::Content(Vec::new())) },
+            Message::Listed {
+                round: 0,
+                listing: Ok(store::Listing::Content(Vec::new())),
+            },
             &store,
         );
         assert_eq!(state.listed, Load::Empty);
@@ -1117,7 +1187,10 @@ mod tests {
         // owed the reason.
         let reason = store::needs_account("Sharing an instance");
         state.update(
-            Message::Listed { round: 0, listing: Err(reason.clone()) },
+            Message::Listed {
+                round: 0,
+                listing: Err(reason.clone()),
+            },
             &store,
         );
         assert_eq!(state.listed, Load::Failed(reason));
@@ -1137,7 +1210,10 @@ mod tests {
             "nothing has reported yet"
         );
         state.update(
-            Message::Scrolled(Geometry { offset: 858.0, view_height: 600.0 }),
+            Message::Scrolled(Geometry {
+                offset: 858.0,
+                view_height: 600.0,
+            }),
             &store,
         );
         assert_eq!(state.geometry().offset, 858.0);
@@ -1150,7 +1226,10 @@ mod tests {
         let window = scroll::window(5_000, CONTENT_ROW, state.geometry());
         assert_eq!(window.start, 9 - scroll::OVERSCAN);
         let slots = (600.0_f32 / CONTENT_ROW).ceil() as usize;
-        assert_eq!(window.len(), (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS));
+        assert_eq!(
+            window.len(),
+            (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS)
+        );
         assert!(window.end < 100, "{}", window.end);
     }
 
@@ -1164,7 +1243,10 @@ mod tests {
         let store = store_at("tab-keeps-scroll");
         let mut state = State::new("atm".to_string(), InstanceTab::Files);
         state.update(
-            Message::Scrolled(Geometry { offset: 1_200.0, view_height: 600.0 }),
+            Message::Scrolled(Geometry {
+                offset: 1_200.0,
+                view_height: 600.0,
+            }),
             &store,
         );
         state.update(Message::Tab(InstanceTab::Content), &store);
@@ -1198,11 +1280,23 @@ mod tests {
                 (InstanceTab::Files, store::Listing::Files(files.clone())),
             ] {
                 let mut state = State::new("atm".to_string(), tab);
-                state.update(Message::Listed { round: 0, listing: Ok(listing) }, &store);
+                state.update(
+                    Message::Listed {
+                        round: 0,
+                        listing: Ok(listing),
+                    },
+                    &store,
+                );
                 for at in [
                     Geometry::default(),
-                    Geometry { offset: 0.0, view_height: 600.0 },
-                    Geometry { offset: 200_000.0, view_height: 600.0 },
+                    Geometry {
+                        offset: 0.0,
+                        view_height: 600.0,
+                    },
+                    Geometry {
+                        offset: 200_000.0,
+                        view_height: 600.0,
+                    },
                 ] {
                     state.update(Message::Scrolled(at), &store);
                     drop(view(*theme, &state, &store));
@@ -1221,7 +1315,10 @@ mod tests {
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
         let rows = vec![mod_entry("sodium.jar"), mod_entry("lithium.jar")];
         state.update(
-            Message::Listed { round: 0, listing: Ok(store::Listing::Content(rows.clone())) },
+            Message::Listed {
+                round: 0,
+                listing: Ok(store::Listing::Content(rows.clone())),
+            },
             &store,
         );
         let first: Vec<&'static str> = state.keys().to_vec();
@@ -1233,14 +1330,20 @@ mod tests {
         // The same listing read again: the same names, so a hover in flight does
         // not move to another row.
         state.update(
-            Message::Listed { round: 0, listing: Ok(store::Listing::Content(rows)) },
+            Message::Listed {
+                round: 0,
+                listing: Ok(store::Listing::Content(rows)),
+            },
             &store,
         );
         assert_eq!(state.keys().to_vec(), first);
 
         // A tab that has no rows has no names either, rather than the last tab's.
         state.update(
-            Message::Listed { round: 0, listing: Ok(store::Listing::Files(Vec::new())) },
+            Message::Listed {
+                round: 0,
+                listing: Ok(store::Listing::Files(Vec::new())),
+            },
             &store,
         );
         assert!(state.keys().is_empty());
@@ -1279,8 +1382,14 @@ mod tests {
         // its, and the shell is the one that has them.
         let store = store_at("play");
         let mut state = State::new("atm".to_string(), InstanceTab::Content);
-        assert_eq!(state.update(Message::Play, &store), Some(Ask::Play("atm".to_string())));
-        assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
+        assert_eq!(
+            state.update(Message::Play, &store),
+            Some(Ask::Play("atm".to_string()))
+        );
+        assert_eq!(
+            state.update(Message::Stop, &store),
+            Some(Ask::Stop("atm".to_string()))
+        );
         assert_eq!(state.update(Message::Tab(InstanceTab::Logs), &store), None);
         assert_eq!(state.tab, InstanceTab::Logs);
     }
@@ -1321,7 +1430,10 @@ mod tests {
             },
         );
         assert_eq!(store.launch_state("atm"), LaunchState::Running);
-        assert_eq!(state.update(Message::Stop, &store), Some(Ask::Stop("atm".to_string())));
+        assert_eq!(
+            state.update(Message::Stop, &store),
+            Some(Ask::Stop("atm".to_string()))
+        );
         // And every state draws in every theme: the control is one of four
         // shapes in a card, and a shape the page cannot draw is a panic in front
         // of a user rather than a gate.
@@ -1331,7 +1443,13 @@ mod tests {
             LaunchState::Running,
             LaunchState::Stopping,
         ] {
-            store.set_launch("atm", store::Launch { state: state_of_run, line: None });
+            store.set_launch(
+                "atm",
+                store::Launch {
+                    state: state_of_run,
+                    line: None,
+                },
+            );
             for theme in Gen::ALL {
                 drop(view(*theme, &state, &store));
             }

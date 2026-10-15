@@ -35,7 +35,10 @@ impl JavaVersion {
     /// `1.8.0_412` reports major 8, minor 0, security/update 412.
     /// A `-suffix` (e.g. `21-ea`) is a prerelease and still yields major 21.
     pub fn parse(s: &str) -> JavaVersion {
-        let mut v = JavaVersion { raw: s.to_string(), ..Default::default() };
+        let mut v = JavaVersion {
+            raw: s.to_string(),
+            ..Default::default()
+        };
         // Split off `-prerelease` first (Prism only recognizes `-`, but also
         // tolerate `+` build metadata by ignoring it for the numeric parts).
         let (no_dash, dash_pre) = match s.split_once('-') {
@@ -43,7 +46,10 @@ impl JavaVersion {
             None => (s, ""),
         };
         // Prerelease is the leading alphanumeric run after `-`.
-        let pre: String = dash_pre.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+        let pre: String = dash_pre
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
         v.prerelease = pre;
         // Ignore `+build` metadata for the numeric parse.
         let no_build = no_dash.split('+').next().unwrap_or(no_dash);
@@ -105,8 +111,12 @@ impl JavaVersion {
     /// versions fall back to raw string comparison.
     pub fn compare(&self, other: &JavaVersion) -> std::cmp::Ordering {
         if self.parseable && other.parseable {
-            let ord = (self.major(), self.minor, self.security, self.update)
-                .cmp(&(other.major(), other.minor, other.security, other.update));
+            let ord = (self.major(), self.minor, self.security, self.update).cmp(&(
+                other.major(),
+                other.minor,
+                other.security,
+                other.update,
+            ));
             if ord != std::cmp::Ordering::Equal {
                 return ord;
             }
@@ -176,7 +186,9 @@ pub fn parse_release_file(bytes: &[u8]) -> BTreeMap<String, String> {
     };
     let mut map = BTreeMap::new();
     for line in text.lines() {
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         let value = value.trim();
         let value = value.strip_prefix('"').unwrap_or(value);
         let value = value.strip_suffix('"').unwrap_or(value);
@@ -188,11 +200,18 @@ pub fn parse_release_file(bytes: &[u8]) -> BTreeMap<String, String> {
 /// Probe a candidate JAVA_HOME directory: requires an executable in
 /// `bin/` and best-effort parses the `release` file.
 pub fn probe_home(dir: &Path) -> Option<JavaInstall> {
-    let exe = if cfg!(windows) { "bin/java.exe" } else { "bin/java" };
+    let exe = if cfg!(windows) {
+        "bin/java.exe"
+    } else {
+        "bin/java"
+    };
     if !dir.join(exe).exists() {
         return None;
     }
-    let mut install = JavaInstall { home: dir.to_path_buf(), ..Default::default() };
+    let mut install = JavaInstall {
+        home: dir.to_path_buf(),
+        ..Default::default()
+    };
     if let Ok(bytes) = std::fs::read(dir.join("release")) {
         let map = parse_release_file(&bytes);
         if let Some(v) = map.get("JAVA_VERSION") {
@@ -241,7 +260,9 @@ pub fn scan_roots(system: crate::paths::System) -> Vec<PathBuf> {
 }
 
 fn dirs_home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// Scan the standard roots for Java homes (directory-level probe only).
@@ -293,10 +314,22 @@ mod tests {
 
     #[test]
     fn version_ordering() {
-        assert_eq!(JavaVersion::parse("17.0.2").compare(&JavaVersion::parse("17.0.1")), Ordering::Greater);
-        assert_eq!(JavaVersion::parse("1.8.0_412").compare(&JavaVersion::parse("1.8.0_282")), Ordering::Greater);
-        assert_eq!(JavaVersion::parse("8").compare(&JavaVersion::parse("1.8.0")), Ordering::Equal);
-        assert_eq!(JavaVersion::parse("21").compare(&JavaVersion::parse("17.0.9")), Ordering::Greater);
+        assert_eq!(
+            JavaVersion::parse("17.0.2").compare(&JavaVersion::parse("17.0.1")),
+            Ordering::Greater
+        );
+        assert_eq!(
+            JavaVersion::parse("1.8.0_412").compare(&JavaVersion::parse("1.8.0_282")),
+            Ordering::Greater
+        );
+        assert_eq!(
+            JavaVersion::parse("8").compare(&JavaVersion::parse("1.8.0")),
+            Ordering::Equal
+        );
+        assert_eq!(
+            JavaVersion::parse("21").compare(&JavaVersion::parse("17.0.9")),
+            Ordering::Greater
+        );
     }
 
     #[test]
@@ -310,7 +343,8 @@ mod tests {
 
     #[test]
     fn release_file_parsing_utf8_and_utf16() {
-        let utf8 = b"JAVA_VERSION=\"17.0.2\"\nJAVA_VENDOR=\"Eclipse Adoptium\"\nOS_ARCH=\"x86_64\"\n";
+        let utf8 =
+            b"JAVA_VERSION=\"17.0.2\"\nJAVA_VENDOR=\"Eclipse Adoptium\"\nOS_ARCH=\"x86_64\"\n";
         let map = parse_release_file(utf8);
         assert_eq!(map["JAVA_VERSION"], "17.0.2");
         assert_eq!(map["OS_ARCH"], "x86_64");
@@ -333,7 +367,11 @@ mod tests {
         #[cfg(not(windows))]
         let exe = home.join("bin/java");
         std::fs::write(&exe, b"").unwrap();
-        std::fs::write(home.join("release"), b"JAVA_VERSION=\"17.0.2\"\nOS_ARCH=\"aarch64\"\n").unwrap();
+        std::fs::write(
+            home.join("release"),
+            b"JAVA_VERSION=\"17.0.2\"\nOS_ARCH=\"aarch64\"\n",
+        )
+        .unwrap();
         let install = probe_home(&home).unwrap();
         assert_eq!(install.version.as_ref().unwrap().major(), 17);
         assert_eq!(install.real_architecture().as_deref(), Some("arm64"));

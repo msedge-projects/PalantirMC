@@ -19,7 +19,7 @@
 
 use super::library::{ApplicableFiles, Library};
 use super::rules::RuntimeContext;
-use super::{Agent, AssetIndexInfo, ProblemSeverity, PalantirVersion, VersionFile};
+use super::{Agent, AssetIndexInfo, PalantirVersion, ProblemSeverity, VersionFile};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -119,12 +119,14 @@ impl LaunchProfile {
         apply_string(&file.main_class, &mut self.main_class);
         apply_string(&file.applet_class, &mut self.applet_class);
         apply_string(&file.minecraft_arguments, &mut self.minecraft_arguments);
-        self.addn_jvm_arguments.extend(file.addn_jvm_arguments.iter().cloned());
+        self.addn_jvm_arguments
+            .extend(file.addn_jvm_arguments.iter().cloned());
         self.apply_tweakers(&file.add_tweakers);
         self.jar_mods.extend(file.jar_mods.iter().cloned());
         self.apply_mods(&file.mods);
         self.traits.extend(file.traits.iter().cloned());
-        self.compatible_java_majors.extend(file.compatible_java_majors.iter().copied());
+        self.compatible_java_majors
+            .extend(file.compatible_java_majors.iter().copied());
         apply_string(&file.compatible_java_name, &mut self.compatible_java_name);
         for library in &file.libraries {
             self.apply_library(library, ctx);
@@ -172,7 +174,11 @@ impl LaunchProfile {
         if !library.is_active(ctx) {
             return;
         }
-        let list = if library.is_native() { &mut self.native_libraries } else { &mut self.libraries };
+        let list = if library.is_native() {
+            &mut self.native_libraries
+        } else {
+            &mut self.libraries
+        };
         match find_library_index(list, &library.name) {
             Match::Found(i) => {
                 if PalantirVersion::parse(library.name.version())
@@ -210,7 +216,9 @@ impl LaunchProfile {
 
     /// Asset index with the `legacy` fallback (`getMinecraftAssets`).
     pub fn assets_or_default(&self) -> AssetIndexInfo {
-        self.minecraft_assets.clone().unwrap_or_else(|| AssetIndexInfo::bare("legacy"))
+        self.minecraft_assets
+            .clone()
+            .unwrap_or_else(|| AssetIndexInfo::bare("legacy"))
     }
 
     /// Whether a trait is present (`hasTrait`).
@@ -245,7 +253,12 @@ impl LaunchProfile {
         // NOTE: order is important here — main jar last on the classpath.
         if let Some(main) = &self.main_jar {
             if !self.jar_mods.is_empty() && add_jar_mods {
-                files.jar.push(temp_path.join("minecraft.jar").to_string_lossy().into_owned());
+                files.jar.push(
+                    temp_path
+                        .join("minecraft.jar")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
             } else {
                 let f = main.applicable_files(ctx, override_path);
                 files.jar.extend(f.jar);
@@ -315,8 +328,14 @@ mod tests {
     fn main_class_and_arguments_replaced_by_last_non_empty() {
         let mut p = LaunchProfile::default();
         let c = ctx();
-        p.apply_version_file(&vf(json!({"uid": "a", "mainClass": "first.Main", "minecraftArguments": "one"})), &c);
-        p.apply_version_file(&vf(json!({"uid": "b", "mainClass": "second.Main", "minecraftArguments": "two"})), &c);
+        p.apply_version_file(
+            &vf(json!({"uid": "a", "mainClass": "first.Main", "minecraftArguments": "one"})),
+            &c,
+        );
+        p.apply_version_file(
+            &vf(json!({"uid": "b", "mainClass": "second.Main", "minecraftArguments": "two"})),
+            &c,
+        );
         p.apply_version_file(&vf(json!({"uid": "c", "minecraftArguments": ""})), &c);
         assert_eq!(p.main_class, "second.Main");
         assert_eq!(p.minecraft_arguments, "two");
@@ -394,9 +413,15 @@ mod tests {
         let files = p.get_library_files(&c, None, &PathBuf::from("/tmp/bin"), true);
         assert_eq!(
             files.jar,
-            vec!["libraries/a/b/1/b-1.jar", "libraries/com/mojang/minecraft/1.20.4/minecraft-1.20.4-client.jar"]
+            vec![
+                "libraries/a/b/1/b-1.jar",
+                "libraries/com/mojang/minecraft/1.20.4/minecraft-1.20.4-client.jar"
+            ]
         );
-        assert_eq!(files.native, vec!["libraries/nat/lib/1/lib-1-natives-linux.jar"]);
+        assert_eq!(
+            files.native,
+            vec!["libraries/nat/lib/1/lib-1-natives-linux.jar"]
+        );
     }
 
     #[test]
@@ -407,13 +432,19 @@ mod tests {
             &vf(json!({"uid": "mc", "mainJar": {"name": "com.mojang:minecraft:1.7.10:client"}})),
             &c,
         );
-        p.apply_version_file(&vf(json!({"uid": "jm", "jarMods": [{"name": "mod.jar"}]})), &c);
+        p.apply_version_file(
+            &vf(json!({"uid": "jm", "jarMods": [{"name": "mod.jar"}]})),
+            &c,
+        );
         // Platform-independent: build the expectation with the same
         // `Path::join` the impl uses instead of hard-coding `/` separators
         // (Windows yields `...\minecraft.jar` via `to_string_lossy`).
         let tmp = PathBuf::from("/tmp/bin");
         let files = p.get_library_files(&c, None, &tmp, true);
-        assert_eq!(files.jar, vec![tmp.join("minecraft.jar").to_string_lossy().into_owned()]);
+        assert_eq!(
+            files.jar,
+            vec![tmp.join("minecraft.jar").to_string_lossy().into_owned()]
+        );
         // without add_jar_mods the real main jar is used
         let files = p.get_library_files(&c, None, &PathBuf::from("/tmp/bin"), false);
         assert!(files.jar[0].contains("minecraft-1.7.10-client.jar"));
@@ -438,7 +469,10 @@ mod tests {
             &win,
         );
         let files = p.get_library_files(&win, None, &PathBuf::from("/b"), false);
-        assert_eq!(files.native, vec!["libraries/nat/lib/1/lib-1-natives-windows-64.jar"]);
+        assert_eq!(
+            files.native,
+            vec!["libraries/nat/lib/1/lib-1-natives-windows-64.jar"]
+        );
         // 32-bit Java picks the 32 variant.
         let win32 = RuntimeContext {
             java_architecture: "32".into(),
@@ -446,7 +480,10 @@ mod tests {
             system: "windows".into(),
         };
         let files32 = p.get_library_files(&win32, None, &PathBuf::from("/b"), false);
-        assert_eq!(files32.native, vec!["libraries/nat/lib/1/lib-1-natives-windows-32.jar"]);
+        assert_eq!(
+            files32.native,
+            vec!["libraries/nat/lib/1/lib-1-natives-windows-32.jar"]
+        );
     }
 
     #[test]
@@ -459,9 +496,15 @@ mod tests {
     fn traits_union_and_legacy_detection() {
         let mut p = LaunchProfile::default();
         let c = ctx();
-        p.apply_version_file(&vf(json!({"uid": "f", "+traits": ["legacyLaunch", "first"] })), &c);
+        p.apply_version_file(
+            &vf(json!({"uid": "f", "+traits": ["legacyLaunch", "first"] })),
+            &c,
+        );
         p.apply_version_file(&vf(json!({"uid": "g", "+traits": ["first", "second"]})), &c);
-        assert_eq!(p.traits, BTreeSet::from(["legacyLaunch".to_string(), "first".into(), "second".into()]));
+        assert_eq!(
+            p.traits,
+            BTreeSet::from(["legacyLaunch".to_string(), "first".into(), "second".into()])
+        );
         assert!(p.is_legacy());
         assert!(p.has_trait("first"));
         assert!(!p.has_trait("nope"));

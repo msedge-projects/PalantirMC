@@ -60,12 +60,20 @@ pub struct Request {
 impl Request {
     /// A request for the whole of `url`.
     pub fn get(url: impl Into<String>) -> Request {
-        Request { url: url.into(), offset: None, headers: Vec::new() }
+        Request {
+            url: url.into(),
+            offset: None,
+            headers: Vec::new(),
+        }
     }
 
     /// The same request, continuing from `offset`.
     pub fn from(url: impl Into<String>, offset: u64) -> Request {
-        Request { url: url.into(), offset: Some(offset), headers: Vec::new() }
+        Request {
+            url: url.into(),
+            offset: Some(offset),
+            headers: Vec::new(),
+        }
     }
 
     /// The same request with a header added.
@@ -146,7 +154,11 @@ pub struct Response {
 impl Response {
     /// A body with no validator and nothing withheld.
     pub fn whole(body: impl Into<Vec<u8>>) -> Response {
-        Response { body: body.into(), etag: None, not_modified: false }
+        Response {
+            body: body.into(),
+            etag: None,
+            not_modified: false,
+        }
     }
 }
 
@@ -247,7 +259,10 @@ impl Default for Route {
 impl Route {
     /// A route that always serves `body` and honours an offset.
     pub fn body(body: impl Into<Vec<u8>>) -> Route {
-        Route { body: body.into(), ..Route::default() }
+        Route {
+            body: body.into(),
+            ..Route::default()
+        }
     }
 
     /// The same route from a `&str`, for JSON fixtures.
@@ -328,7 +343,10 @@ impl MapFetch {
     /// Replace a route's body, which is how a test models a server that answers
     /// differently on a later attempt.
     pub fn set_body(&self, url: &str, body: impl Into<Vec<u8>>) {
-        let mut inner = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(route) = inner.routes.get_mut(url) {
             route.body = body.into();
         }
@@ -352,12 +370,20 @@ impl MapFetch {
     /// test that only counted successes could not tell a retry from a single
     /// successful request.
     pub fn requests(&self) -> Vec<Request> {
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).calls.clone()
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .calls
+            .clone()
     }
 
     /// How many requests were made.
     pub fn count(&self) -> usize {
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).calls.len()
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .calls
+            .len()
     }
 
     /// Serve one request: record it, fail it if it is still scripted to fail,
@@ -382,7 +408,10 @@ impl MapFetch {
     /// server that holds a map's mutex while it writes a body is a server that
     /// cannot serve two things at once.
     fn scripted(&self, request: &Request) -> Result<Route, Error> {
-        let mut inner = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         inner.calls.push(request.clone());
         let Some(route) = inner.routes.get_mut(&request.url) else {
             return Err(Error::status(&request.url, 404));
@@ -467,7 +496,10 @@ impl Fetch for MapFetch {
     /// cache in front of one has to re-download.
     fn get_with(&self, request: &Request, cancel: &Cancel) -> Result<Response, Error> {
         if request.offset.is_some() {
-            return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
+            return Err(Error::format(
+                &request.url,
+                "a whole body cannot carry an offset",
+            ));
         }
         let route = self.scripted(request)?;
         if let Some(etag) = &route.etag {
@@ -481,7 +513,11 @@ impl Fetch for MapFetch {
         }
         let mut body = Vec::new();
         write_route(request, &route, &mut body, cancel)?;
-        Ok(Response { body, etag: route.etag.clone(), not_modified: false })
+        Ok(Response {
+            body,
+            etag: route.etag.clone(),
+            not_modified: false,
+        })
     }
 }
 
@@ -498,7 +534,10 @@ mod tests {
         assert_eq!(whole.range(), None);
         let resumed = Request::from(URL, 1024).header("Accept", "application/octet-stream");
         assert_eq!(resumed.range().as_deref(), Some("bytes=1024-"));
-        assert_eq!(resumed.headers, vec![("Accept".to_string(), "application/octet-stream".to_string())]);
+        assert_eq!(
+            resumed.headers,
+            vec![("Accept".to_string(), "application/octet-stream".to_string())]
+        );
         // The offset is part of what was asked, so two requests that differ only
         // in it are not the same request.
         assert_ne!(Request::get(URL), Request::from(URL, 0));
@@ -524,7 +563,12 @@ mod tests {
         assert_eq!(body, b"hello");
         assert_eq!(fetch.count(), 1);
         assert_eq!(fetch.requests()[0].url, URL);
-        assert_eq!(fetch.get(&Request::get(URL), &Cancel::new()).expect("bytes"), b"hello");
+        assert_eq!(
+            fetch
+                .get(&Request::get(URL), &Cancel::new())
+                .expect("bytes"),
+            b"hello"
+        );
         assert_eq!(fetch.count(), 2);
     }
 
@@ -561,17 +605,29 @@ mod tests {
         let cancel = Cancel::new();
         assert!(matches!(
             fetch.get(&Request::get(URL), &cancel),
-            Err(Error::Http { status: Some(503), .. })
+            Err(Error::Http {
+                status: Some(503),
+                ..
+            })
         ));
         assert!(matches!(
             fetch.get(&Request::get(URL), &cancel),
-            Err(Error::Http { status: Some(503), .. })
+            Err(Error::Http {
+                status: Some(503),
+                ..
+            })
         ));
-        assert_eq!(fetch.get(&Request::get(URL), &cancel).expect("the third"), b"body");
+        assert_eq!(
+            fetch.get(&Request::get(URL), &cancel).expect("the third"),
+            b"body"
+        );
         // A missing route is a 404, not a panic.
         assert!(matches!(
             fetch.get(&Request::get("https://example.invalid/nothing"), &cancel),
-            Err(Error::Http { status: Some(404), .. })
+            Err(Error::Http {
+                status: Some(404),
+                ..
+            })
         ));
     }
 
@@ -580,7 +636,9 @@ mod tests {
         let stop = Cancel::new();
         let fetch = MapFetch::new().with_route(
             URL,
-            Route::body(vec![b'x'; 100]).chunked(10).stopping_after(3, stop.clone()),
+            Route::body(vec![b'x'; 100])
+                .chunked(10)
+                .stopping_after(3, stop.clone()),
         );
         let mut body = Vec::new();
         let error = fetch
@@ -619,7 +677,9 @@ mod tests {
     fn a_validator_the_route_announced_comes_back_as_not_modified() {
         let fetch = MapFetch::new().with_route(URL, Route::text("the body").tagged("\"v1\""));
         let cancel = Cancel::new();
-        let first = fetch.get_with(&Request::get(URL), &cancel).expect("an answer");
+        let first = fetch
+            .get_with(&Request::get(URL), &cancel)
+            .expect("an answer");
         assert_eq!(first.body, b"the body");
         assert_eq!(first.etag.as_deref(), Some("\"v1\""));
         assert!(!first.not_modified);
@@ -628,7 +688,10 @@ mod tests {
         // the request still counted, because "still current" is an answer and
         // not an absence of one.
         let again = fetch
-            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &cancel)
+            .get_with(
+                &Request::get(URL).header("If-None-Match", "\"v1\""),
+                &cancel,
+            )
             .expect("an answer");
         assert!(again.not_modified);
         assert!(again.body.is_empty());
@@ -640,11 +703,18 @@ mod tests {
     fn a_validator_that_does_not_match_is_answered_with_the_body() {
         let fetch = MapFetch::new().with_route(URL, Route::text("changed").tagged("\"v2\""));
         let answer = fetch
-            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .get_with(
+                &Request::get(URL).header("If-None-Match", "\"v1\""),
+                &Cancel::new(),
+            )
             .expect("an answer");
         assert!(!answer.not_modified);
         assert_eq!(answer.body, b"changed");
-        assert_eq!(answer.etag.as_deref(), Some("\"v2\""), "the new validator is kept");
+        assert_eq!(
+            answer.etag.as_deref(),
+            Some("\"v2\""),
+            "the new validator is kept"
+        );
     }
 
     #[test]
@@ -653,7 +723,10 @@ mod tests {
         // cache in front of one has to re-download rather than ask.
         let fetch = MapFetch::new().with_route(URL, Route::text("body"));
         let answer = fetch
-            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .get_with(
+                &Request::get(URL).header("If-None-Match", "\"v1\""),
+                &Cancel::new(),
+            )
             .expect("an answer");
         assert!(!answer.not_modified);
         assert_eq!(answer.body, b"body");
@@ -662,15 +735,21 @@ mod tests {
 
     #[test]
     fn the_scripted_failures_apply_to_a_conditional_read_too() {
-        let fetch = MapFetch::new().with_route(URL, Route::text("late").tagged("\"v1\"").failing(2, 503));
+        let fetch =
+            MapFetch::new().with_route(URL, Route::text("late").tagged("\"v1\"").failing(2, 503));
         let cancel = Cancel::new();
         for _ in 0..2 {
             assert!(matches!(
                 fetch.get_with(&Request::get(URL), &cancel),
-                Err(Error::Http { status: Some(503), .. })
+                Err(Error::Http {
+                    status: Some(503),
+                    ..
+                })
             ));
         }
-        let answer = fetch.get_with(&Request::get(URL), &cancel).expect("the third");
+        let answer = fetch
+            .get_with(&Request::get(URL), &cancel)
+            .expect("the third");
         assert_eq!(answer.body, b"late");
     }
 
@@ -700,11 +779,21 @@ mod tests {
         // re-fetch rather than being promised a `304` that can never come.
         let plain = Plain(MapFetch::new().with_route(URL, Route::text("body").tagged("\"v1\"")));
         let answer = plain
-            .get_with(&Request::get(URL).header("If-None-Match", "\"v1\""), &Cancel::new())
+            .get_with(
+                &Request::get(URL).header("If-None-Match", "\"v1\""),
+                &Cancel::new(),
+            )
             .expect("an answer");
         assert_eq!(answer.body, b"body");
         assert_eq!(answer.etag, None);
         assert!(!answer.not_modified);
-        assert_eq!(Response::whole("x"), Response { body: b"x".to_vec(), etag: None, not_modified: false });
+        assert_eq!(
+            Response::whole("x"),
+            Response {
+                body: b"x".to_vec(),
+                etag: None,
+                not_modified: false
+            }
+        );
     }
 }

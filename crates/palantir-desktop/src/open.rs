@@ -98,7 +98,10 @@ mod tests {
     fn only_the_two_web_schemes_are_links() {
         assert!(is_openable("https://modrinth.com/news"));
         assert!(is_openable("http://localhost:8080/x"));
-        assert!(is_openable("HTTPS://MODRINTH.COM/news"), "a scheme is case-insensitive");
+        assert!(
+            is_openable("HTTPS://MODRINTH.COM/news"),
+            "a scheme is case-insensitive"
+        );
         // The feed is a stranger's JSON: a local file, a Windows command handler
         // and a `javascript:` URL all arrive as strings and none of them is a link.
         assert!(!is_openable("file:///C:/Windows/System32/cmd.exe"));
@@ -106,7 +109,10 @@ mod tests {
         assert!(!is_openable("javascript://alert(1)"));
         assert!(!is_openable("ms-settings://privacy"));
         // And neither is something that only looks like one.
-        assert!(!is_openable("https:modrinth.com/news"), "a link names a host");
+        assert!(
+            !is_openable("https:modrinth.com/news"),
+            "a link names a host"
+        );
         assert!(!is_openable("modrinth.com/news"));
         assert!(!is_openable(""));
     }
@@ -118,7 +124,15 @@ mod tests {
         // a URL with a space in it is read as a window title.
         let (program, args) = command_for("windows", url).expect("a windows command");
         assert_eq!(program, "cmd");
-        assert_eq!(args, vec!["/C".to_string(), "start".to_string(), String::new(), url.to_string()]);
+        assert_eq!(
+            args,
+            vec![
+                "/C".to_string(),
+                "start".to_string(),
+                String::new(),
+                url.to_string()
+            ]
+        );
         // macOS and Linux: the opaque opener, with the URL as the only argument.
         let (program, args) = command_for("macos", url).expect("a macos command");
         assert_eq!((program, args), ("open", vec![url.to_string()]));
@@ -139,7 +153,13 @@ mod tests {
         // every run of the suite popped Windows' "cannot find 'not-a-url'" dialog
         // over whatever else the machine was doing.
         let error = url("file:///etc/passwd").expect_err("a local file is not a link");
-        assert!(error.contains("is not a link this launcher will open"), "{error}");
-        assert!(error.contains("file:///etc/passwd"), "the refusal quotes it: {error}");
+        assert!(
+            error.contains("is not a link this launcher will open"),
+            "{error}"
+        );
+        assert!(
+            error.contains("file:///etc/passwd"),
+            "the refusal quotes it: {error}"
+        );
     }
 }

@@ -87,11 +87,14 @@ impl<'a, Message, Theme, Renderer> Stack<'a, Message, Theme, Renderer> {
     ///
     /// It takes input, because the reference's `position: relative` box takes
     /// input wherever nothing above it does.
-    pub fn at(
-        offset: Vector,
-        element: impl Into<Element<'a, Message, Theme, Renderer>>,
-    ) -> Self {
-        Stack { layers: vec![Layer { at: offset, element: element.into(), input: true }] }
+    pub fn at(offset: Vector, element: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        Stack {
+            layers: vec![Layer {
+                at: offset,
+                element: element.into(),
+                input: true,
+            }],
+        }
     }
 
     /// One more layer, over everything laid down so far, drawn and not asked.
@@ -106,7 +109,11 @@ impl<'a, Message, Theme, Renderer> Stack<'a, Message, Theme, Renderer> {
         offset: Vector,
         element: impl Into<Element<'a, Message, Theme, Renderer>>,
     ) -> Self {
-        self.layers.push(Layer { at: offset, element: element.into(), input: false });
+        self.layers.push(Layer {
+            at: offset,
+            element: element.into(),
+            input: false,
+        });
         self
     }
 
@@ -124,7 +131,11 @@ impl<'a, Message, Theme, Renderer> Stack<'a, Message, Theme, Renderer> {
         offset: Vector,
         element: impl Into<Element<'a, Message, Theme, Renderer>>,
     ) -> Self {
-        self.layers.push(Layer { at: offset, element: element.into(), input: true });
+        self.layers.push(Layer {
+            at: offset,
+            element: element.into(),
+            input: true,
+        });
         self
     }
 }
@@ -152,18 +163,23 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Stack<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Stack<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Theme: 'a,
     Renderer: iced::advanced::Renderer + 'a,
 {
     fn tag(&self) -> tree::Tag {
-        self.layers.first().map_or(tree::Tag::stateless(), |base| base.element.as_widget().tag())
+        self.layers.first().map_or(tree::Tag::stateless(), |base| {
+            base.element.as_widget().tag()
+        })
     }
 
     fn state(&self) -> tree::State {
-        self.layers.first().map_or(tree::State::None, |base| base.element.as_widget().state())
+        self.layers
+            .first()
+            .map_or(tree::State::None, |base| base.element.as_widget().state())
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -184,15 +200,20 @@ where
         // than in a number -- a control that lights up under the pointer and
         // never goes out again, because the second half of a crossing needs the
         // first half's memory to still be there when the pointer leaves.
-        let layers: Vec<&dyn Widget<Message, Theme, Renderer>> =
-            self.layers.iter().map(|layer| layer.element.as_widget()).collect();
+        let layers: Vec<&dyn Widget<Message, Theme, Renderer>> = self
+            .layers
+            .iter()
+            .map(|layer| layer.element.as_widget())
+            .collect();
         tree.diff_children(&layers);
     }
 
     fn size(&self) -> iced::Size<Length> {
-        self.layers.first().map_or(iced::Size::new(Length::Shrink, Length::Shrink), |base| {
-            base.element.as_widget().size()
-        })
+        self.layers
+            .first()
+            .map_or(iced::Size::new(Length::Shrink, Length::Shrink), |base| {
+                base.element.as_widget().size()
+            })
     }
 
     fn layout(
@@ -206,8 +227,16 @@ where
             // `diff` keeps `tree.children` as long as `layers`, so the two only
             // fall out of step if this runs before it -- and then there is nothing
             // to draw anyway.
-            let Some(child) = tree.children.get_mut(index) else { break };
-            nodes.push(layer.element.as_widget().layout(child, renderer, limits).translate(layer.at));
+            let Some(child) = tree.children.get_mut(index) else {
+                break;
+            };
+            nodes.push(
+                layer
+                    .element
+                    .as_widget()
+                    .layout(child, renderer, limits)
+                    .translate(layer.at),
+            );
         }
         let size = nodes.first().map_or(iced::Size::ZERO, layout::Node::size);
         layout::Node::with_children(size, nodes)
@@ -228,7 +257,10 @@ where
             let (Some(child), Some(node)) = (children.next(), tree.children.get(index)) else {
                 continue;
             };
-            layer.element.as_widget().draw(node, renderer, theme, style, child, cursor, viewport);
+            layer
+                .element
+                .as_widget()
+                .draw(node, renderer, theme, style, child, cursor, viewport);
         }
     }
 
@@ -265,7 +297,10 @@ where
                 else {
                     break;
                 };
-                layer.element.as_widget().operate(child, child_layout, renderer, operation);
+                layer
+                    .element
+                    .as_widget()
+                    .operate(child, child_layout, renderer, operation);
             }
         });
     }
@@ -436,7 +471,10 @@ mod tests {
     /// tree, then lay the widget out against it. Doing both in one function is
     /// also what keeps the `Layout` alive -- it borrows the node, so it cannot be
     /// returned beside it.
-    fn with_layout<T>(mut stack: Test, ask: impl FnOnce(&mut Test, &mut Tree, Layout<'_>) -> T) -> T {
+    fn with_layout<T>(
+        mut stack: Test,
+        ask: impl FnOnce(&mut Test, &mut Tree, Layout<'_>) -> T,
+    ) -> T {
         let widget: &dyn Widget<&'static str, iced::Theme, Null> = &stack;
         let mut tree = Tree::new(widget);
         stack.diff(&mut tree);
@@ -518,7 +556,11 @@ mod tests {
             Stack::at(at(0.0, 0.0), pressable("base"))
                 .over_control(at(0.0, 0.0), pressable("over")),
         );
-        assert_eq!(messages, vec!["over"], "the topmost control takes the press");
+        assert_eq!(
+            messages,
+            vec!["over"],
+            "the topmost control takes the press"
+        );
         assert_eq!(status, event::Status::Captured);
     }
 
@@ -532,7 +574,11 @@ mod tests {
                 .over(at(0.0, 0.0), pressable("picture"))
                 .over(at(0.0, 0.0), pressable("rule")),
         );
-        assert_eq!(messages, vec!["base"], "the content under a picture is what is pressed");
+        assert_eq!(
+            messages,
+            vec!["base"],
+            "the content under a picture is what is pressed"
+        );
         assert_eq!(status, event::Status::Captured);
     }
 
@@ -545,7 +591,10 @@ mod tests {
             Stack::<&'static str, iced::Theme, Null>::at(at(0.0, 0.0), blank())
                 .over(at(0.0, 0.0), pressable("picture")),
         );
-        assert!(messages.is_empty(), "a picture is not a control: {messages:?}");
+        assert!(
+            messages.is_empty(),
+            "a picture is not a control: {messages:?}"
+        );
         assert_eq!(status, event::Status::Ignored);
     }
 
@@ -569,13 +618,7 @@ mod tests {
         let (interaction, (status, messages)) = with_layout(
             Stack::at(at(0.0, 0.0), blank()).over_control(at(0.0, 0.0), pressable("over")),
             |stack, tree, layout| {
-                let cursor = stack.mouse_interaction(
-                    tree,
-                    layout,
-                    pointer(),
-                    &viewport(),
-                    &Null,
-                );
+                let cursor = stack.mouse_interaction(tree, layout, pointer(), &viewport(), &Null);
                 let mut published: Vec<&'static str> = Vec::new();
                 let mut shell = Shell::new(&mut published);
                 // The click's two halves, for the reason [`press`] gives.
@@ -610,13 +653,7 @@ mod tests {
         let (interaction, (status, messages)) = with_layout(
             Stack::at(at(0.0, 0.0), blank()).over(at(0.0, 0.0), pressable("over")),
             |stack, tree, layout| {
-                let cursor = stack.mouse_interaction(
-                    tree,
-                    layout,
-                    pointer(),
-                    &viewport(),
-                    &Null,
-                );
+                let cursor = stack.mouse_interaction(tree, layout, pointer(), &viewport(), &Null);
                 let mut published: Vec<&'static str> = Vec::new();
                 let mut shell = Shell::new(&mut published);
                 // The click's two halves, for the reason [`press`] gives.
@@ -643,7 +680,11 @@ mod tests {
                 (cursor, (status, published))
             },
         );
-        assert_eq!(interaction, mouse::Interaction::Idle, "a picture offers no cursor");
+        assert_eq!(
+            interaction,
+            mouse::Interaction::Idle,
+            "a picture offers no cursor"
+        );
         assert!(messages.is_empty(), "{messages:?}");
         assert_eq!(status, event::Status::Ignored);
     }
@@ -654,8 +695,7 @@ mod tests {
         // says nothing about the pointer here hands the question to the one below
         // it rather than answering for it.
         let interaction = with_layout(
-            Stack::at(at(0.0, 0.0), pressable("base"))
-                .over(at(0.0, 0.0), blank()),
+            Stack::at(at(0.0, 0.0), pressable("base")).over(at(0.0, 0.0), blank()),
             |stack, tree, layout| {
                 stack.mouse_interaction(tree, layout, pointer(), &viewport(), &Null)
             },
@@ -679,10 +719,14 @@ mod tests {
         let limits = || layout::Limits::new(iced::Size::ZERO, iced::Size::new(400.0, 300.0));
         let on = || mouse::Cursor::Available(iced::Point::new(100.0, 50.0));
         let off = || mouse::Cursor::Available(iced::Point::new(-50.0, -50.0));
-        let moved = |cursor: mouse::Cursor| Event::Mouse(mouse::Event::CursorMoved { position: match cursor {
-            mouse::Cursor::Available(point) => point,
-            mouse::Cursor::Unavailable => iced::Point::ORIGIN,
-        } });
+        let moved = |cursor: mouse::Cursor| {
+            Event::Mouse(mouse::Event::CursorMoved {
+                position: match cursor {
+                    mouse::Cursor::Available(point) => point,
+                    mouse::Cursor::Unavailable => iced::Point::ORIGIN,
+                },
+            })
+        };
         let mut messages: Vec<&'static str> = Vec::new();
 
         let mut stack = Stack::at(at(0.0, 0.0), crossed("base"));

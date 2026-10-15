@@ -151,8 +151,10 @@ impl Timing {
     /// `cubic-bezier(0.16, 1, 0.3, 1)`. The row is one of the ones
     /// `tools/gen_theme.py` keeps verbatim rather than splitting -- see
     /// `theme_gen::MOTION_VERBATIM`, which holds this exact string.
-    pub const NAV_PLATE: Timing =
-        Timing { millis: 250, control: [0.16, 1.0, 0.3, 1.0] };
+    pub const NAV_PLATE: Timing = Timing {
+        millis: 250,
+        control: [0.16, 1.0, 0.3, 1.0],
+    };
 
     /// The circle the plate grows *from*: `scale: 0.4` in the same rule, which
     /// is why pressing a rail button reads as a pop rather than a fade.
@@ -171,7 +173,10 @@ impl Timing {
     /// fades up. Reproducing a cross-fade here would be inventing a rule the
     /// reference does not have, and would make a page change look like a slower
     /// app rather than a faster-looking one.
-    pub const PAGE_FADE: Timing = Timing { millis: 250, control: [0.42, 0.0, 0.58, 1.0] };
+    pub const PAGE_FADE: Timing = Timing {
+        millis: 250,
+        control: [0.42, 0.0, 0.58, 1.0],
+    };
 
     /// A dialog's own arrival: `scale` and `opacity` together.
     ///
@@ -192,7 +197,10 @@ impl Timing {
     /// it scales the box and its contents together. What is drawn is the
     /// opacity half, which is the part a reader notices and the half the
     /// capture can measure. See [`crate::shell::Shell::modal_opacity`].
-    pub const MODAL_DIALOG: Timing = Timing { millis: 200, control: [0.42, 0.0, 0.58, 1.0] };
+    pub const MODAL_DIALOG: Timing = Timing {
+        millis: 200,
+        control: [0.42, 0.0, 0.58, 1.0],
+    };
 
     /// The bed behind a dialog, which is the other half of its arrival.
     ///
@@ -208,7 +216,10 @@ impl Timing {
     /// than a guess: [`Timing::declared`] for `("all", 200)` can answer in any of
     /// three curves, because three files each declare `all 200ms` on a different
     /// one.
-    pub const MODAL_SCRIM: Timing = Timing { millis: 200, control: [0.0, 0.0, 0.58, 1.0] };
+    pub const MODAL_SCRIM: Timing = Timing {
+        millis: 200,
+        control: [0.0, 0.0, 0.58, 1.0],
+    };
 
     /// How long the reference waits before it takes the modal out of the tree.
     ///
@@ -236,7 +247,10 @@ impl Timing {
     /// and `CollapsibleAdmonition.vue` each spell out
     /// `transition-transform duration-150` where they mean this and
     /// `duration-300` where they mean something longer.
-    pub const PANEL_ARROW: Timing = Timing { millis: 150, control: [0.4, 0.0, 0.2, 1.0] };
+    pub const PANEL_ARROW: Timing = Timing {
+        millis: 150,
+        control: [0.4, 0.0, 0.2, 1.0],
+    };
 
     /// A settings dialog's own tab column, which changes colour and plate
     /// together.
@@ -255,7 +269,10 @@ impl Timing {
     /// one shared, because they are two declarations in two files and a future
     /// regeneration of either should be visible as a test failing on one name
     /// rather than silently moving both.
-    pub const TAB_COLUMN: Timing = Timing { millis: 150, control: [0.4, 0.0, 0.2, 1.0] };
+    pub const TAB_COLUMN: Timing = Timing {
+        millis: 150,
+        control: [0.4, 0.0, 0.2, 1.0],
+    };
 
     /// A tab strip's label and icon, which change colour when the tab changes.
     ///
@@ -273,7 +290,10 @@ impl Timing {
     /// (`animateSliderTo`'s `STAGGER_DELAY`). So the reference slides its plate in
     /// 80ms and cross-fades its labels in 100ms, and they are not the same
     /// number. See [`Timing::TAB_PLATE`].
-    pub const TAB_COLOR: Timing = Timing { millis: 100, control: [0.4, 0.0, 0.2, 1.0] };
+    pub const TAB_COLOR: Timing = Timing {
+        millis: 100,
+        control: [0.4, 0.0, 0.2, 1.0],
+    };
 
     /// The pill that slides under a tab strip's selected tab.
     ///
@@ -293,7 +313,10 @@ impl Timing {
     /// label cross-fade in [`Timing::TAB_COLOR`] *is* drawn, because it needs no
     /// geometry: it is a colour, and a colour can be mixed from the two inks the
     /// strip already knows.
-    pub const TAB_PLATE: Timing = Timing { millis: 80, control: [0.4, 0.0, 0.2, 1.0] };
+    pub const TAB_PLATE: Timing = Timing {
+        millis: 80,
+        control: [0.4, 0.0, 0.2, 1.0],
+    };
 
     /// The stagger the plate waits on its trailing edges: `NavTabs.vue`'s own
     /// `const STAGGER_DELAY = '175ms'`.
@@ -314,7 +337,9 @@ impl Timing {
     #[cfg(test)]
     pub fn declared(property: &str, millis: u32) -> Option<Timing> {
         let index = theme_gen::MOTION
-            .binary_search_by_key(&(property, millis), |motion| (motion.property, motion.millis))
+            .binary_search_by_key(&(property, millis), |motion| {
+                (motion.property, motion.millis)
+            })
             .ok()?;
         // The table is sorted by property, millis *and* curve, and rows share
         // the first two while differing in the third: the reference declares
@@ -323,8 +348,13 @@ impl Timing {
         // rules. So a lookup by property and duration alone takes the first row
         // in table order, and `declared_rows` is there for a caller that needs
         // to see every row that pair owns.
-        let curve = theme_gen::MOTION.get(index).map_or(Curve::EaseInOut, |motion| motion.curve);
-        Some(Timing { millis, control: theme_gen::curve(curve) })
+        let curve = theme_gen::MOTION
+            .get(index)
+            .map_or(Curve::EaseInOut, |motion| motion.curve);
+        Some(Timing {
+            millis,
+            control: theme_gen::curve(curve),
+        })
     }
 
     /// Every row the reference declares for a property, as `(millis, curve,
@@ -346,7 +376,10 @@ impl Timing {
     /// is the example.
     #[cfg(test)]
     pub fn cited(millis: u32, curve: Curve) -> Timing {
-        Timing { millis, control: theme_gen::curve(curve) }
+        Timing {
+            millis,
+            control: theme_gen::curve(curve),
+        }
     }
 
     /// The curve's four control-point coordinates.
@@ -397,13 +430,23 @@ impl Tween {
     /// rather than like a wrong duration. There is no sensible default, because
     /// the reference's durations are per-property.
     pub fn at(value: f32, timing: Timing) -> Tween {
-        Tween { from: value, to: value, timing, elapsed: timing.duration() }
+        Tween {
+            from: value,
+            to: value,
+            timing,
+            elapsed: timing.duration(),
+        }
     }
 
     /// A value starting at `from` and heading for `to`.
     #[cfg(test)]
     pub fn new(from: f32, to: f32, timing: Timing) -> Tween {
-        Tween { from, to, timing, elapsed: Duration::ZERO }
+        Tween {
+            from,
+            to,
+            timing,
+            elapsed: Duration::ZERO,
+        }
     }
 
     /// Whether this still has somewhere to go.
@@ -524,29 +567,48 @@ mod tests {
     /// agreed to 1.3e-6, which is why the tolerance below is where it is: an
     /// f32 evaluation of the same polynomial, not a licence to be sloppy.
     const BROWSER_SAMPLES: &[(Curve, [f32; 9])] = &[
-        (
-            Curve::Linear,
-            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        ),
+        (Curve::Linear, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
         (
             Curve::Ease,
-            [0.094_796_3, 0.295_244, 0.513_315, 0.682_54, 0.802_403,
-             0.885_229, 0.940_765, 0.975_625, 0.994_316],
+            [
+                0.094_796_3,
+                0.295_244,
+                0.513_315,
+                0.682_54,
+                0.802_403,
+                0.885_229,
+                0.940_765,
+                0.975_625,
+                0.994_316,
+            ],
         ),
         (
             Curve::EaseOut,
-            [0.160_572, 0.308_366, 0.445_186, 0.570_88, 0.684_643,
-             0.785_139, 0.870_423, 0.937_718, 0.982_973],
+            [
+                0.160_572, 0.308_366, 0.445_186, 0.570_88, 0.684_643, 0.785_139, 0.870_423,
+                0.937_718, 0.982_973,
+            ],
         ),
         (
             Curve::EaseInOut,
-            [0.019_722_5, 0.081_659_9, 0.187_396, 0.331_884, 0.5,
-             0.668_116, 0.812_604, 0.918_34, 0.980_278],
+            [
+                0.019_722_5,
+                0.081_659_9,
+                0.187_396,
+                0.331_884,
+                0.5,
+                0.668_116,
+                0.812_604,
+                0.918_34,
+                0.980_278,
+            ],
         ),
         (
             Curve::EaseOutExpo,
-            [0.494_391, 0.752_126, 0.877_174, 0.939_756, 0.971_779,
-             0.987_965, 0.995_678, 0.998_891, 0.999_878],
+            [
+                0.494_391, 0.752_126, 0.877_174, 0.939_756, 0.971_779, 0.987_965, 0.995_678,
+                0.998_891, 0.999_878,
+            ],
         ),
     ];
 
@@ -625,7 +687,9 @@ mod tests {
                 .filter(|(millis, _, _)| *millis == motion.millis)
                 .map(|(_, curve, _)| curve)
                 .collect();
-            let resolved = timing.curve().expect("a declared row is one of the named curves");
+            let resolved = timing
+                .curve()
+                .expect("a declared row is one of the named curves");
             assert!(
                 curves.contains(&resolved),
                 "{} at {}ms resolved to {resolved:?}, which no row declares",
@@ -662,7 +726,9 @@ mod tests {
         // is where a porter goes to read the rule.
         let rows = Timing::declared_rows("transform");
         assert!(!rows.is_empty());
-        assert!(rows.iter().all(|(_, _, source)| source.ends_with(".scss") || source.ends_with(".vue")));
+        assert!(rows
+            .iter()
+            .all(|(_, _, source)| source.ends_with(".scss") || source.ends_with(".vue")));
         assert!(Timing::declared("filter", 100).is_some());
         // A pair the reference does not declare is not invented.
         assert!(Timing::declared("filter", 1234).is_none());
@@ -700,7 +766,10 @@ mod tests {
         // `ease-out` and `ease-in-out` are both cubic-bezier shorthands.
         assert_eq!(Timing::MODAL_SCRIM.millis, 200);
         assert_eq!(Timing::MODAL_DIALOG.millis, 200);
-        assert_ne!(Timing::MODAL_SCRIM.control(), Timing::MODAL_DIALOG.control());
+        assert_ne!(
+            Timing::MODAL_SCRIM.control(),
+            Timing::MODAL_DIALOG.control()
+        );
         assert_eq!(
             Timing::MODAL_DIALOG.control(),
             theme_gen::curve(Curve::EaseInOut),
@@ -744,11 +813,19 @@ mod tests {
         assert_eq!(Timing::PANEL_ARROW.control(), tailwind);
         assert_eq!(Timing::TAB_COLOR.control(), tailwind);
         assert_eq!(Timing::TAB_PLATE.control(), tailwind);
-        assert_eq!(Timing::PANEL_ARROW.curve(), None, "not one of the five names");
+        assert_eq!(
+            Timing::PANEL_ARROW.curve(),
+            None,
+            "not one of the five names"
+        );
         assert_eq!(Timing::TAB_COLOR.curve(), None);
         // The three are separate numbers read off three separate declarations, so
         // none of them may borrow another's duration.
-        assert_eq!(Timing::PANEL_ARROW.millis, 150, "`transition-transform`'s own");
+        assert_eq!(
+            Timing::PANEL_ARROW.millis,
+            150,
+            "`transition-transform`'s own"
+        );
         assert_eq!(Timing::TAB_COLOR.millis, 100, "`.tab-color`'s own");
         assert_eq!(Timing::TAB_PLATE.millis, 80, "`.navtabs-transition`'s own");
         assert_eq!(Timing::TAB_PLATE_STAGGER, Duration::from_millis(175));
@@ -775,7 +852,10 @@ mod tests {
         assert!(navtabs("left 80ms cubic-bezier(0.4, 0, 0.2, 1)"));
         // The plate's four edges each carry their own v-bind delay, which is the
         // stagger -- a single edge with no delay would be a different component.
-        assert!(navtabs("v-bind(rightDelay)"), "the trailing edge is delayed, not the leading one");
+        assert!(
+            navtabs("v-bind(rightDelay)"),
+            "the trailing edge is delayed, not the leading one"
+        );
         // `App.vue`'s panel arrow, whose rule is a Tailwind utility rather than a
         // stylesheet declaration, so it is not in the generated table at all --
         // which is exactly why it is a named constant here and not a lookup.
@@ -794,10 +874,24 @@ mod tests {
         assert!(tween.is_running());
         // Half a duration is not the halfway value on a curve like this one:
         // `ease-out-expo` is most of the way there at 50%.
-        assert!(tween.advance(Duration::from_millis(125)), "half way is still running");
-        assert!(tween.value() > 0.9, "ease-out-expo at half way: {}", tween.value());
-        assert!(!tween.advance(Duration::from_millis(200)), "past the end it has stopped");
-        assert_eq!(tween.value(), 1.0, "a finished tween is exactly at its target");
+        assert!(
+            tween.advance(Duration::from_millis(125)),
+            "half way is still running"
+        );
+        assert!(
+            tween.value() > 0.9,
+            "ease-out-expo at half way: {}",
+            tween.value()
+        );
+        assert!(
+            !tween.advance(Duration::from_millis(200)),
+            "past the end it has stopped"
+        );
+        assert_eq!(
+            tween.value(),
+            1.0,
+            "a finished tween is exactly at its target"
+        );
         assert_eq!(tween.progress(), 1.0);
         assert!(!tween.advance(Duration::from_millis(16)));
     }
@@ -813,7 +907,11 @@ mod tests {
         let partial = tween.value();
         assert!(partial > Timing::NAV_PLATE_FROM_SCALE && partial < 1.0);
         tween.retarget(Timing::NAV_PLATE_FROM_SCALE);
-        assert_eq!(tween.origin(), partial, "the new leg starts at the value on screen");
+        assert_eq!(
+            tween.origin(),
+            partial,
+            "the new leg starts at the value on screen"
+        );
         assert_eq!(tween.progress(), 0.0);
         // Leaving at 0.25s per leg is what makes the two directions symmetric.
         tween.advance(Duration::from_millis(250));

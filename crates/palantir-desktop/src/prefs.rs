@@ -321,7 +321,10 @@ impl Prefs {
     /// The file for a given choice.
     #[cfg(test)]
     pub fn with_theme(theme: ColorTheme) -> Prefs {
-        Prefs { color_theme: theme.id().to_string(), ..Prefs::default() }
+        Prefs {
+            color_theme: theme.id().to_string(),
+            ..Prefs::default()
+        }
     }
 
     /// The heap floor a launch uses: what was set here, else what was adopted
@@ -350,7 +353,10 @@ impl Prefs {
     /// is why it is not a test's helper any more -- a blank path reads as no
     /// choice, which is the empty box the pane draws.
     pub fn java_path(&self, major: &str) -> Option<&str> {
-        self.java_paths.get(major).map(String::as_str).filter(|path| !path.is_empty())
+        self.java_paths
+            .get(major)
+            .map(String::as_str)
+            .filter(|path| !path.is_empty())
     }
 
     /// How many recent instances the rail may show: what was set here, else the
@@ -359,7 +365,8 @@ impl Prefs {
     /// Two names for one number, which is the reference's own split: it stores a
     /// *limit* and draws a *count* (`FeaturesSettings.vue:147`).
     pub fn quick_instance_count(&self) -> u32 {
-        self.quick_instance_limit.unwrap_or(QUICK_INSTANCE_LIMIT_MAX)
+        self.quick_instance_limit
+            .unwrap_or(QUICK_INSTANCE_LIMIT_MAX)
     }
 
     /// The OAuth client id the sign-in flow should use.
@@ -482,7 +489,12 @@ mod tests {
         let (_dir, paths) = root();
         for theme in ColorTheme::ALL {
             save(&paths, &Prefs::with_theme(theme)).unwrap();
-            assert_eq!(load(&paths).theme(), theme, "{} did not survive", theme.id());
+            assert_eq!(
+                load(&paths).theme(),
+                theme,
+                "{} did not survive",
+                theme.id()
+            );
         }
     }
 
@@ -503,7 +515,13 @@ mod tests {
     #[test]
     fn a_damaged_or_strange_file_never_breaks_startup() {
         let (_dir, paths) = root();
-        for text in [&b"{ not json"[..], b"", b"[]", b"null", b"{\"color_theme\": 7}"] {
+        for text in [
+            &b"{ not json"[..],
+            b"",
+            b"[]",
+            b"null",
+            b"{\"color_theme\": 7}",
+        ] {
             std::fs::write(path(&paths), text).unwrap();
             assert_eq!(load(&paths).theme(), ColorTheme::Dark, "text: {text:?}");
         }
@@ -516,12 +534,24 @@ mod tests {
     #[test]
     fn the_client_id_falls_back_to_prisms_public_app() {
         let prefs = Prefs::default();
-        assert_eq!(prefs.microsoft_client_id(), palantir_net::DEFAULT_MICROSOFT_CLIENT_ID);
-        let configured = Prefs { microsoft_client_id: "my-app-id".into(), ..Prefs::default() };
+        assert_eq!(
+            prefs.microsoft_client_id(),
+            palantir_net::DEFAULT_MICROSOFT_CLIENT_ID
+        );
+        let configured = Prefs {
+            microsoft_client_id: "my-app-id".into(),
+            ..Prefs::default()
+        };
         assert_eq!(configured.microsoft_client_id(), "my-app-id");
         // Whitespace is not a client id.
-        let blank = Prefs { microsoft_client_id: "   ".into(), ..Prefs::default() };
-        assert_eq!(blank.microsoft_client_id(), palantir_net::DEFAULT_MICROSOFT_CLIENT_ID);
+        let blank = Prefs {
+            microsoft_client_id: "   ".into(),
+            ..Prefs::default()
+        };
+        assert_eq!(
+            blank.microsoft_client_id(),
+            palantir_net::DEFAULT_MICROSOFT_CLIENT_ID
+        );
     }
 
     #[test]
@@ -587,8 +617,14 @@ mod tests {
         // nobody, here as everywhere else.
         save(&paths, &prefs).unwrap();
         let written = std::fs::read_to_string(path(&paths)).unwrap();
-        assert!(!written.contains("mem_mib"), "the adopted numbers were copied: {written}");
-        assert_eq!(std::fs::read_to_string(paths.global_config()).unwrap(), prism);
+        assert!(
+            !written.contains("mem_mib"),
+            "the adopted numbers were copied: {written}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.global_config()).unwrap(),
+            prism
+        );
     }
 
     #[test]
@@ -601,12 +637,23 @@ mod tests {
         .unwrap();
         save(
             &paths,
-            &Prefs { default_max_mem_mib: Some(2048), ..Prefs::default() },
+            &Prefs {
+                default_max_mem_mib: Some(2048),
+                ..Prefs::default()
+            },
         )
         .unwrap();
         let prefs = load(&paths);
-        assert_eq!(prefs.max_mem_mib(), 2048, "the number typed here is the one a launch uses");
-        assert_eq!(prefs.min_mem_mib(), 1024, "the one not set here still comes from Prism");
+        assert_eq!(
+            prefs.max_mem_mib(),
+            2048,
+            "the number typed here is the one a launch uses"
+        );
+        assert_eq!(
+            prefs.min_mem_mib(),
+            1024,
+            "the one not set here still comes from Prism"
+        );
     }
 
     #[test]
@@ -630,9 +677,15 @@ mod tests {
         // A derived `Default` would answer `false` to all of these, and three of
         // them would then describe a different launcher.
         let prefs = Prefs::default();
-        assert!(prefs.advanced_rendering, "a GPU is there until proven otherwise");
+        assert!(
+            prefs.advanced_rendering,
+            "a GPU is there until proven otherwise"
+        );
         assert!(prefs.show_worlds_tab && prefs.show_files_tab && prefs.show_screenshots_tab);
-        assert!(!prefs.minimize_on_launch, "launching must not hide the window");
+        assert!(
+            !prefs.minimize_on_launch,
+            "launching must not hide the window"
+        );
         assert!(prefs.warn_unknown_modpacks);
         assert!(!prefs.native_decorations, "the shell draws its own frame");
         assert!(!prefs.hide_right_sidebar);
@@ -645,7 +698,10 @@ mod tests {
         // defaults, so it stays readable and a new field does not appear in it
         // just because this build added it.
         let (_dir, paths) = root();
-        let untouched = Prefs { color_theme: "dark".into(), ..Prefs::default() };
+        let untouched = Prefs {
+            color_theme: "dark".into(),
+            ..Prefs::default()
+        };
         save(&paths, &untouched).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path(&paths)).unwrap()).unwrap();
@@ -668,7 +724,11 @@ mod tests {
         assert_eq!(parsed["advanced_rendering"], serde_json::json!(false));
         assert_eq!(parsed["show_worlds_tab"], serde_json::json!(false));
         assert_eq!(parsed["minimize_on_launch"], serde_json::json!(true));
-        assert_eq!(load(&paths), changed, "a written file must read back identical");
+        assert_eq!(
+            load(&paths),
+            changed,
+            "a written file must read back identical"
+        );
     }
 
     #[test]
@@ -735,7 +795,10 @@ mod tests {
         // The pointer itself is read back verbatim on every host -- the file is
         // the record, and `D:/minecraft` is what a Windows install writes into
         // it -- so this leg keeps the Windows-shaped literal on purpose.
-        let prefs = Prefs { app_directory: Some("D:/minecraft".into()), ..Prefs::default() };
+        let prefs = Prefs {
+            app_directory: Some("D:/minecraft".into()),
+            ..Prefs::default()
+        };
         save(&paths, &prefs).unwrap();
         assert_eq!(
             palantir_core::paths::recorded_data_root(&paths).as_deref(),
@@ -747,7 +810,11 @@ mod tests {
         // Windows. The core crate picks its own absolute literal the same way
         // (`an_absolute_data_root_is_taken_even_before_it_exists`), so the two
         // crates read one rule rather than two.
-        let absolute = if cfg!(windows) { "D:/minecraft" } else { "/minecraft" };
+        let absolute = if cfg!(windows) {
+            "D:/minecraft"
+        } else {
+            "/minecraft"
+        };
         assert_eq!(
             palantir_core::paths::resolve_data_root(&paths, Some(absolute)),
             std::path::PathBuf::from(absolute)
@@ -766,8 +833,14 @@ mod tests {
         // closed *without* answering leaves it unasked, so the next start asks
         // again rather than silently deciding.
         let (_dir, paths) = root();
-        assert!(!load(&paths).data_root_asked, "a fresh install has not been asked");
-        let answered = Prefs { data_root_asked: true, ..Prefs::default() };
+        assert!(
+            !load(&paths).data_root_asked,
+            "a fresh install has not been asked"
+        );
+        let answered = Prefs {
+            data_root_asked: true,
+            ..Prefs::default()
+        };
         save(&paths, &answered).unwrap();
         assert!(load(&paths).data_root_asked);
         let text = std::fs::read_to_string(path(&paths)).unwrap();
@@ -780,12 +853,18 @@ mod tests {
         // and an absent pointer has to mean the default rather than an empty
         // path that `resolve_data_root` would then have to guess about.
         let (_dir, paths) = root();
-        let declined = Prefs { data_root_asked: true, ..Prefs::default() };
+        let declined = Prefs {
+            data_root_asked: true,
+            ..Prefs::default()
+        };
         save(&paths, &declined).unwrap();
         let back = load(&paths);
         assert_eq!(back.app_directory, None);
         assert_eq!(palantir_core::paths::recorded_data_root(&paths), None);
-        assert_eq!(palantir_core::paths::resolve_data_root(&paths, None), paths.root);
+        assert_eq!(
+            palantir_core::paths::resolve_data_root(&paths, None),
+            paths.root
+        );
     }
 
     #[test]

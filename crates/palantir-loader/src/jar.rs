@@ -50,8 +50,7 @@ pub struct JarInfo {
 pub fn scan_jar(jar_bytes: impl AsRef<[u8]>) -> Result<JarInfo> {
     let data = jar_bytes.as_ref();
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| Error::Zip(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| Error::Zip(e.to_string()))?;
     let mut info = JarInfo::default();
     let mut manifest_text: Option<String> = None;
     let mut fabric_text: Option<String> = None;
@@ -60,7 +59,9 @@ pub fn scan_jar(jar_bytes: impl AsRef<[u8]>) -> Result<JarInfo> {
     let len = archive.len();
     let mut index: usize = 0;
     while index < len {
-        let mut file = archive.by_index(index).map_err(|e| Error::Zip(e.to_string()))?;
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| Error::Zip(e.to_string()))?;
         let name = file.name().to_owned();
         if name.ends_with(".class") && !file.is_dir() {
             info.class_count += 1;
@@ -289,8 +290,7 @@ mod tests {
 
     #[test]
     fn detects_loader_installer() {
-        let manifest =
-            b"Manifest-Version: 1.0\nMain-Class: net.fabricmc.installer.Main\n";
+        let manifest = b"Manifest-Version: 1.0\nMain-Class: net.fabricmc.installer.Main\n";
         let bytes = build_jar(&[("META-INF/MANIFEST.MF", manifest)]);
         let info = scan_jar(bytes.as_slice()).unwrap();
         assert_eq!(

@@ -88,8 +88,7 @@ pub const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minec
 /// owns*, and a `multipart/form-data` body with a `file` part uploads one it does
 /// not -- the second is [`MicrosoftAuth::upload_skin`], and it is the only write
 /// in this module whose payload is a file rather than a document.
-pub const MINECRAFT_SKINS_URL: &str =
-    "https://api.minecraftservices.com/minecraft/profile/skins";
+pub const MINECRAFT_SKINS_URL: &str = "https://api.minecraftservices.com/minecraft/profile/skins";
 
 /// The account's active skin, which a DELETE clears.
 ///
@@ -128,7 +127,10 @@ pub struct OfflineSession {
 impl OfflineSession {
     /// Create an offline session for `username`/`uuid`.
     pub fn new(username: impl Into<String>, uuid: impl Into<String>) -> Self {
-        OfflineSession { username: username.into(), uuid: uuid.into() }
+        OfflineSession {
+            username: username.into(),
+            uuid: uuid.into(),
+        }
     }
 
     /// Convert into the [`palantir_core::launch::AuthSession`] launch seam.
@@ -173,12 +175,18 @@ pub struct MicrosoftOAuth {
 impl MicrosoftOAuth {
     /// Create an OAuth config with an explicit `client_id` and `scope`.
     pub fn new(client_id: impl Into<String>, scope: impl Into<String>) -> Self {
-        MicrosoftOAuth { client_id: client_id.into(), scope: scope.into() }
+        MicrosoftOAuth {
+            client_id: client_id.into(),
+            scope: scope.into(),
+        }
     }
 
     /// Create an OAuth config with [`DEFAULT_MICROSOFT_SCOPE`].
     pub fn with_default_scope(client_id: impl Into<String>) -> Self {
-        MicrosoftOAuth { client_id: client_id.into(), scope: DEFAULT_MICROSOFT_SCOPE.to_string() }
+        MicrosoftOAuth {
+            client_id: client_id.into(),
+            scope: DEFAULT_MICROSOFT_SCOPE.to_string(),
+        }
     }
 
     /// The client id Prism Launcher itself ships, used unless a setting says
@@ -319,7 +327,13 @@ pub fn skin_upload_body(variant: &str, file_name: &str, texture: &[u8]) -> Multi
     let boundary = upload_boundary(texture);
     let mut body = Vec::new();
     field(&mut body, &boundary, VARIANT_PART, service_variant(variant));
-    file(&mut body, &boundary, FILE_PART, &file_part_name(file_name), texture);
+    file(
+        &mut body,
+        &boundary,
+        FILE_PART,
+        &file_part_name(file_name),
+        texture,
+    );
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     MultipartBody { boundary, body }
 }
@@ -364,7 +378,9 @@ fn upload_boundary(texture: &[u8]) -> String {
     loop {
         let candidate = boundary_candidate(attempt);
         let occurs = texture.len() >= candidate.len()
-            && texture.windows(candidate.len()).any(|window| window == candidate.as_bytes());
+            && texture
+                .windows(candidate.len())
+                .any(|window| window == candidate.as_bytes());
         if !occurs {
             return candidate;
         }
@@ -388,8 +404,10 @@ fn boundary_candidate(attempt: u32) -> String {
 /// One plain field of a multipart body.
 fn field(body: &mut Vec<u8>, boundary: &str, name: &str, value: &str) {
     body.extend_from_slice(
-        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
-            .as_bytes(),
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        )
+        .as_bytes(),
     );
 }
 
@@ -498,7 +516,10 @@ pub struct BlockingHttpTransport {
 impl BlockingHttpTransport {
     /// Create a transport with the given per-request `timeout`.
     pub fn new(timeout: Duration) -> Self {
-        BlockingHttpTransport { client: reqwest::blocking::Client::new(), timeout }
+        BlockingHttpTransport {
+            client: reqwest::blocking::Client::new(),
+            timeout,
+        }
     }
 
     /// Create a transport with [`DEFAULT_AUTH_TIMEOUT_SECS`].
@@ -517,7 +538,9 @@ impl BlockingHttpTransport {
         response: reqwest::blocking::Response,
     ) -> crate::Result<HttpResponse> {
         let status = response.status().as_u16();
-        let body = response.text().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let body = response
+            .text()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         Ok(HttpResponse { status, body })
     }
 }
@@ -550,7 +573,9 @@ impl HttpTransport for BlockingHttpTransport {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let response = request
+            .send()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         self.finish(url, response)
     }
 
@@ -569,7 +594,9 @@ impl HttpTransport for BlockingHttpTransport {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let response = request
+            .send()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         self.finish(url, response)
     }
 
@@ -578,7 +605,9 @@ impl HttpTransport for BlockingHttpTransport {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let response = request
+            .send()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         self.finish(url, response)
     }
 
@@ -587,7 +616,9 @@ impl HttpTransport for BlockingHttpTransport {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let response = request
+            .send()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         self.finish(url, response)
     }
 
@@ -610,7 +641,9 @@ impl HttpTransport for BlockingHttpTransport {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = request.send().map_err(|e| crate::Error::http(url, e.to_string()))?;
+        let response = request
+            .send()
+            .map_err(|e| crate::Error::http(url, e.to_string()))?;
         self.finish(url, response)
     }
 }
@@ -669,7 +702,10 @@ impl MapTransport {
     pub fn insert_form(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Form, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -677,7 +713,10 @@ impl MapTransport {
     pub fn insert_json(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Json, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -685,7 +724,10 @@ impl MapTransport {
     pub fn insert_put(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Put, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -693,7 +735,10 @@ impl MapTransport {
     pub fn insert_delete(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Delete, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -701,7 +746,10 @@ impl MapTransport {
     pub fn insert_get(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Get, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -709,7 +757,10 @@ impl MapTransport {
     pub fn insert_multipart(&mut self, url: &str, status: u16, body: &str) {
         self.map.insert(
             (Method::Multipart, url.to_string()),
-            HttpResponse { status, body: body.to_string() },
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
         );
     }
 
@@ -735,7 +786,10 @@ impl MapTransport {
     /// which verb carried them is asserted by the request being answered at all -- a
     /// POST canned for the cape URL would not answer the PUT that asks for it.
     pub fn bodies(&self) -> Vec<(String, String)> {
-        self.sent.lock().map(|sent| sent.clone()).unwrap_or_default()
+        self.sent
+            .lock()
+            .map(|sent| sent.clone())
+            .unwrap_or_default()
     }
 
     /// The multipart bodies sent so far, with the URL each went to, in order.
@@ -746,7 +800,10 @@ impl MapTransport {
     /// it means to check. Keeping them apart also keeps a JSON write and an upload
     /// from being one list a test has to filter.
     pub fn uploads(&self) -> Vec<(String, Vec<u8>)> {
-        self.posted.lock().map(|posted| posted.clone()).unwrap_or_default()
+        self.posted
+            .lock()
+            .map(|posted| posted.clone())
+            .unwrap_or_default()
     }
 
     /// Find the canned response for `method` + `url`.
@@ -1159,16 +1216,24 @@ impl MicrosoftAuth {
         let url = self.config.device_flow_url();
         let response = self
             .transport
-            .post_form(&url, &[("client_id", &self.config.client_id), ("scope", DEVICE_CODE_SCOPE)])
+            .post_form(
+                &url,
+                &[
+                    ("client_id", &self.config.client_id),
+                    ("scope", DEVICE_CODE_SCOPE),
+                ],
+            )
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         let value = parse_object(&url, &response)?;
         if let Some((error, description)) = protocol_error(&value) {
             return Err(AuthError::Account(description.unwrap_or(error)));
         }
-        let device_code = string_field(&value, "device_code")
-            .ok_or_else(|| AuthError::Protocol("the device-code reply had no 'device_code'".into()))?;
-        let user_code = string_field(&value, "user_code")
-            .ok_or_else(|| AuthError::Protocol("the device-code reply had no 'user_code'".into()))?;
+        let device_code = string_field(&value, "device_code").ok_or_else(|| {
+            AuthError::Protocol("the device-code reply had no 'device_code'".into())
+        })?;
+        let user_code = string_field(&value, "user_code").ok_or_else(|| {
+            AuthError::Protocol("the device-code reply had no 'user_code'".into())
+        })?;
         let verification_uri = string_field(&value, "verification_uri").ok_or_else(|| {
             AuthError::Protocol("the device-code reply had no 'verification_uri'".into())
         })?;
@@ -1208,14 +1273,15 @@ impl MicrosoftAuth {
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         let value = parse_object(&url, &response)?;
         if value.get("error").is_some() || !response.is_success() {
-            let (error, description) = protocol_error(&value).unwrap_or_else(|| {
-                (format!("http {}", response.status), None)
-            });
+            let (error, description) = protocol_error(&value)
+                .unwrap_or_else(|| (format!("http {}", response.status), None));
             return Ok(match error.as_str() {
                 "authorization_pending" => PollOutcome::Retry { interval },
                 // RFC 8628 §3.5: the interval grows by five seconds for this and
                 // every later request.
-                "slow_down" => PollOutcome::Retry { interval: interval + 5 },
+                "slow_down" => PollOutcome::Retry {
+                    interval: interval + 5,
+                },
                 _ => PollOutcome::Failed(
                     description.unwrap_or_else(|| format!("sign-in failed ({error})")),
                 ),
@@ -1247,9 +1313,9 @@ impl MicrosoftAuth {
         if let Some((error, description)) = protocol_error(&value) {
             // A dead refresh token is an account problem, not a protocol one:
             // the fix is to sign in again, and the message says so.
-            return Err(AuthError::Account(
-                description.unwrap_or_else(|| format!("the refresh token was refused ({error})")),
-            ));
+            return Err(AuthError::Account(description.unwrap_or_else(|| {
+                format!("the refresh token was refused ({error})")
+            })));
         }
         if !response.is_success() {
             return Err(AuthError::Protocol(format!(
@@ -1300,7 +1366,10 @@ impl MicrosoftAuth {
             .post_json(
                 XBOX_USER_AUTH_URL,
                 &body,
-                &[("Accept", "application/json"), ("x-xbl-contract-version", "1")],
+                &[
+                    ("Accept", "application/json"),
+                    ("x-xbl-contract-version", "1"),
+                ],
             )
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         if !response.is_success() {
@@ -1333,7 +1402,10 @@ impl MicrosoftAuth {
             .post_json(
                 XBOX_XSTS_AUTH_URL,
                 &body,
-                &[("Accept", "application/json"), ("x-xbl-contract-version", "1")],
+                &[
+                    ("Accept", "application/json"),
+                    ("x-xbl-contract-version", "1"),
+                ],
             )
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         if !response.is_success() {
@@ -1373,20 +1445,29 @@ impl MicrosoftAuth {
         .to_string();
         let response = self
             .transport
-            .post_json(MINECRAFT_LAUNCHER_LOGIN_URL, &body, &[("Accept", "application/json")])
+            .post_json(
+                MINECRAFT_LAUNCHER_LOGIN_URL,
+                &body,
+                &[("Accept", "application/json")],
+            )
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         let value = parse_object(MINECRAFT_LAUNCHER_LOGIN_URL, &response)?;
         if !response.is_success() {
             let detail = string_field(&value, "errorMessage")
                 .or_else(|| string_field(&value, "error"))
                 .unwrap_or_else(|| format!("HTTP {}", response.status));
-            return Err(AuthError::Account(format!("Minecraft refused the sign-in: {detail}")));
+            return Err(AuthError::Account(format!(
+                "Minecraft refused the sign-in: {detail}"
+            )));
         }
         let access_token = string_field(&value, "access_token").ok_or_else(|| {
             AuthError::Protocol("the game-token reply had no 'access_token'".into())
         })?;
         let expires_in = number_field(&value, "expires_in").unwrap_or(86_400);
-        Ok(GameToken { access_token, expires_in })
+        Ok(GameToken {
+            access_token,
+            expires_in,
+        })
     }
 
     /// Whether the account owns the game (`EntitlementsStep`).
@@ -1395,11 +1476,17 @@ impl MicrosoftAuth {
     /// account with a profile but no entitlement is a state the launcher can
     /// describe, not a failure of the request.
     pub fn entitled(&self, game_access_token: &str) -> Result<bool, AuthError> {
-        let url = format!("{MINECRAFT_ENTITLEMENTS_URL}?requestId={}", uuid::Uuid::new_v4());
+        let url = format!(
+            "{MINECRAFT_ENTITLEMENTS_URL}?requestId={}",
+            uuid::Uuid::new_v4()
+        );
         let bearer = format!("Bearer {game_access_token}");
         let response = self
             .transport
-            .get(&url, &[("Accept", "application/json"), ("Authorization", &bearer)])
+            .get(
+                &url,
+                &[("Accept", "application/json"), ("Authorization", &bearer)],
+            )
             .map_err(|e| AuthError::Transport(e.to_string()))?;
         if !response.is_success() {
             return Ok(false);
@@ -1436,7 +1523,10 @@ impl MicrosoftAuth {
     /// account that cannot play has nothing to wear either.
     pub fn skins(&self, game_access_token: &str) -> Result<MinecraftSkins, AuthError> {
         let value = self.profile_document(game_access_token)?;
-        Ok(MinecraftSkins { skins: skin_list(&value), capes: cape_list(&value) })
+        Ok(MinecraftSkins {
+            skins: skin_list(&value),
+            capes: cape_list(&value),
+        })
     }
 
     /// Change what the account is wearing, through Minecraft's own skin service.
@@ -1455,9 +1545,11 @@ impl MicrosoftAuth {
     pub fn wear(&self, game_access_token: &str, change: SkinChange) -> Result<(), AuthError> {
         match change {
             SkinChange::Skin { variant, url } => self.wear_skin(game_access_token, &variant, &url),
-            SkinChange::Upload { variant, file_name, texture } => {
-                self.upload_skin(game_access_token, &variant, &file_name, &texture)
-            }
+            SkinChange::Upload {
+                variant,
+                file_name,
+                texture,
+            } => self.upload_skin(game_access_token, &variant, &file_name, &texture),
             SkinChange::NoSkin => self.bare_skin(game_access_token),
             SkinChange::Cape { id } => self.wear_cape(game_access_token, &id),
             SkinChange::NoCape => self.hide_cape(game_access_token),
@@ -1532,7 +1624,11 @@ impl MicrosoftAuth {
             ));
         }
         let body = serde_json::json!({ "capeId": cape_id }).to_string();
-        self.change(MINECRAFT_ACTIVE_CAPE_URL, Verb::Put(&body), game_access_token)
+        self.change(
+            MINECRAFT_ACTIVE_CAPE_URL,
+            Verb::Put(&body),
+            game_access_token,
+        )
     }
 
     /// Hide the cape that is on, without giving up owning it.
@@ -1547,12 +1643,7 @@ impl MicrosoftAuth {
     /// change, and anything else carries the service's own `errorMessage` -- which
     /// is what the user is shown, because "Minecraft refused this: <its reason>"
     /// is the answer and a status number is not.
-    fn change(
-        &self,
-        url: &str,
-        verb: Verb<'_>,
-        game_access_token: &str,
-    ) -> Result<(), AuthError> {
+    fn change(&self, url: &str, verb: Verb<'_>, game_access_token: &str) -> Result<(), AuthError> {
         let bearer = format!("Bearer {game_access_token}");
         let headers: [(&str, &str); 2] =
             [("Accept", "application/json"), ("Authorization", &bearer)];
@@ -1576,7 +1667,9 @@ impl MicrosoftAuth {
             .ok()
             .and_then(|value| string_field(&value, "errorMessage"))
             .unwrap_or_else(|| format!("HTTP {}", response.status));
-        Err(AuthError::Account(format!("Minecraft refused the change: {reason}")))
+        Err(AuthError::Account(format!(
+            "Minecraft refused the change: {reason}"
+        )))
     }
 
     /// The profile document itself, which both readers above share.
@@ -1688,7 +1781,11 @@ fn parse_msa_token(value: &serde_json::Value) -> Result<MsaToken, AuthError> {
         .ok_or_else(|| AuthError::Protocol("the token reply had no 'access_token'".into()))?;
     let refresh_token = string_field(value, "refresh_token").unwrap_or_default();
     let expires_in = number_field(value, "expires_in").unwrap_or(3600);
-    Ok(MsaToken { access_token, refresh_token, expires_in })
+    Ok(MsaToken {
+        access_token,
+        refresh_token,
+        expires_in,
+    })
 }
 
 /// `Token` plus the first `DisplayClaims.xui[].uhs` of an Xbox reply.
@@ -1856,7 +1953,10 @@ mod tests {
         assert_eq!(code.verification_uri, "https://microsoft.com/link");
         assert_eq!(code.expires_in, 60);
         assert_eq!(code.interval, MIN_POLL_INTERVAL_SECS);
-        assert_eq!(transport.requested(), vec![MICROSOFT_DEVICE_FLOW_URL.to_string()]);
+        assert_eq!(
+            transport.requested(),
+            vec![MICROSOFT_DEVICE_FLOW_URL.to_string()]
+        );
     }
 
     #[test]
@@ -1889,13 +1989,19 @@ mod tests {
             r#"{"error":"authorization_pending","error_description":"still waiting"}"#,
         );
         let auth = flow(&transport);
-        assert_eq!(auth.poll("dev-1", 5).unwrap(), PollOutcome::Retry { interval: 5 });
+        assert_eq!(
+            auth.poll("dev-1", 5).unwrap(),
+            PollOutcome::Retry { interval: 5 }
+        );
 
         let mut transport = device_code_transport();
         transport.insert_form(MICROSOFT_TOKEN_URL, 400, r#"{"error":"slow_down"}"#);
         let auth = flow(&transport);
         // RFC 8628 §3.5: five seconds on top of the interval in use.
-        assert_eq!(auth.poll("dev-1", 10).unwrap(), PollOutcome::Retry { interval: 15 });
+        assert_eq!(
+            auth.poll("dev-1", 10).unwrap(),
+            PollOutcome::Retry { interval: 15 }
+        );
     }
 
     #[test]
@@ -1969,7 +2075,10 @@ mod tests {
 
         let launch = msa_auth_session(&session.name, &session.uuid, &session.access_token);
         assert_eq!(launch.user_type, "msa");
-        assert_eq!(launch.session, "token:game-token:1a2b3c4d5e6f708192a3b4c5d6e7f809");
+        assert_eq!(
+            launch.session,
+            "token:game-token:1a2b3c4d5e6f708192a3b4c5d6e7f809"
+        );
 
         // …and the hops are the documented ones, in order. The comparison is on
         // the endpoint rather than the whole URL, because the entitlements
@@ -2024,11 +2133,18 @@ mod tests {
     #[test]
     fn the_xsts_hop_turns_a_401_into_the_reason() {
         let mut transport = full_chain_transport();
-        transport.insert_json(XBOX_XSTS_AUTH_URL, 401, r#"{"XErr":2148916233,"Message":""}"#);
+        transport.insert_json(
+            XBOX_XSTS_AUTH_URL,
+            401,
+            r#"{"XErr":2148916233,"Message":""}"#,
+        );
         let auth = flow(&transport);
         let err = auth.finish(&authorized_msa(&auth)).unwrap_err();
         assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
-        assert!(err.to_string().contains("no Xbox Live profile"), "got {err}");
+        assert!(
+            err.to_string().contains("no Xbox Live profile"),
+            "got {err}"
+        );
         assert!(!err.retryable(), "another attempt cannot create a profile");
     }
 
@@ -2060,10 +2176,16 @@ mod tests {
     #[test]
     fn a_profileless_account_is_reported_as_such() {
         let mut transport = full_chain_transport();
-        transport.insert_get(MINECRAFT_PROFILE_URL, 404, r#"{"path":"/minecraft/profile"}"#);
+        transport.insert_get(
+            MINECRAFT_PROFILE_URL,
+            404,
+            r#"{"path":"/minecraft/profile"}"#,
+        );
         let err = flow(&transport).profile("game-token").unwrap_err();
         assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
-        assert!(err.to_string().contains("no Minecraft: Java Edition profile"));
+        assert!(err
+            .to_string()
+            .contains("no Minecraft: Java Edition profile"));
     }
 
     #[test]
@@ -2103,9 +2225,15 @@ mod tests {
         assert_eq!(skins.skins[0].id, "skin-1");
         assert_eq!(skins.skins[0].variant, "CLASSIC");
         assert_eq!(skins.skins[1].variant, "SLIM");
-        assert_eq!(skins.equipped().map(|skin| skin.id.as_str()), Some("skin-1"));
+        assert_eq!(
+            skins.equipped().map(|skin| skin.id.as_str()),
+            Some("skin-1")
+        );
         assert_eq!(skins.capes.len(), 2);
-        assert_eq!(skins.equipped_cape().map(|cape| cape.alias.as_str()), Some("MineCon2015"));
+        assert_eq!(
+            skins.equipped_cape().map(|cape| cape.alias.as_str()),
+            Some("MineCon2015")
+        );
         assert!(!skins.is_empty());
         // The same document still answers what a launch asks -- it is the same
         // request -- so two readers cannot disagree about which account is in.
@@ -2118,23 +2246,37 @@ mod tests {
     fn an_account_with_nothing_to_wear_says_so_rather_than_the_first_skin() {
         // The fixture the chain already carries: an empty `skins` array and no
         // `capes` key at all.
-        let skins = flow(&full_chain_transport()).skins("game-token").expect("the appearance");
+        let skins = flow(&full_chain_transport())
+            .skins("game-token")
+            .expect("the appearance");
         assert!(skins.is_empty());
-        assert!(skins.equipped().is_none(), "nothing active means nothing drawn");
+        assert!(
+            skins.equipped().is_none(),
+            "nothing active means nothing drawn"
+        );
         assert!(skins.equipped_cape().is_none());
         // A document that names neither key is the same answer, not a refusal.
         let mut transport = full_chain_transport();
         transport.insert_get(MINECRAFT_PROFILE_URL, 200, r#"{"id":"abc","name":"Steve"}"#);
-        assert!(flow(&transport).skins("game-token").expect("the appearance").is_empty());
+        assert!(flow(&transport)
+            .skins("game-token")
+            .expect("the appearance")
+            .is_empty());
     }
 
     #[test]
     fn a_profileless_account_has_nothing_to_wear_either() {
         let mut transport = full_chain_transport();
-        transport.insert_get(MINECRAFT_PROFILE_URL, 404, r#"{"path":"/minecraft/profile"}"#);
+        transport.insert_get(
+            MINECRAFT_PROFILE_URL,
+            404,
+            r#"{"path":"/minecraft/profile"}"#,
+        );
         let err = flow(&transport).skins("game-token").unwrap_err();
         assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
-        assert!(err.to_string().contains("no Minecraft: Java Edition profile"));
+        assert!(err
+            .to_string()
+            .contains("no Minecraft: Java Edition profile"));
     }
 
     /// The four writes against one transport, with the service answering each
@@ -2159,7 +2301,11 @@ mod tests {
             },
         )
         .expect("the skin is worn");
-        assert_eq!(transport.bodies().len(), 1, "one write, and it is the skin's");
+        assert_eq!(
+            transport.bodies().len(),
+            1,
+            "one write, and it is the skin's"
+        );
         let (url, body) = transport.bodies().remove(0);
         assert_eq!(url, MINECRAFT_SKINS_URL);
         assert!(body.contains("\"variant\":\"slim\""), "got {body}");
@@ -2188,12 +2334,21 @@ mod tests {
         let transport = full_chain_transport();
         let err = change(
             &transport,
-            SkinChange::Skin { variant: "CLASSIC".to_string(), url: String::new() },
+            SkinChange::Skin {
+                variant: "CLASSIC".to_string(),
+                url: String::new(),
+            },
         )
         .unwrap_err();
         assert!(matches!(err, AuthError::Protocol(_)), "got {err:?}");
         assert!(transport.requested().is_empty(), "nothing was sent");
-        let err = change(&transport, SkinChange::Cape { id: "  ".to_string() }).unwrap_err();
+        let err = change(
+            &transport,
+            SkinChange::Cape {
+                id: "  ".to_string(),
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, AuthError::Protocol(_)), "got {err:?}");
         assert!(transport.requested().is_empty());
     }
@@ -2207,7 +2362,10 @@ mod tests {
         change(&transport, SkinChange::NoCape).expect("the cape is hidden");
         assert_eq!(
             transport.requested(),
-            vec![MINECRAFT_ACTIVE_SKIN_URL.to_string(), MINECRAFT_ACTIVE_CAPE_URL.to_string()]
+            vec![
+                MINECRAFT_ACTIVE_SKIN_URL.to_string(),
+                MINECRAFT_ACTIVE_CAPE_URL.to_string()
+            ]
         );
         assert!(transport.bodies().is_empty(), "a clear sends no body");
     }
@@ -2224,8 +2382,15 @@ mod tests {
         let boundary = body.boundary();
         // RFC 2046 caps the boundary at 70 characters; a long one is what an
         // untrimmed digest or a whole path would have produced.
-        assert!(boundary.len() <= 70, "boundary of {} chars: {boundary}", boundary.len());
-        assert_eq!(body.content_type(), format!("multipart/form-data; boundary={boundary}"));
+        assert!(
+            boundary.len() <= 70,
+            "boundary of {} chars: {boundary}",
+            boundary.len()
+        );
+        assert_eq!(
+            body.content_type(),
+            format!("multipart/form-data; boundary={boundary}")
+        );
         let expected = format!(
             "--{boundary}\r\n\
              Content-Disposition: form-data; name=\"variant\"\r\n\r\n\
@@ -2239,10 +2404,18 @@ mod tests {
         );
         assert_eq!(String::from_utf8_lossy(body.body()), expected);
         // Two part delimiters and one closing one, and no fourth.
-        assert_eq!(String::from_utf8_lossy(body.body()).matches(boundary).count(), 3);
+        assert_eq!(
+            String::from_utf8_lossy(body.body())
+                .matches(boundary)
+                .count(),
+            3
+        );
         // The file's bytes are in the body verbatim: not re-encoded, not base64, and
         // not escaped into text.
-        assert!(body.body().windows(texture.len()).any(|window| window == texture));
+        assert!(body
+            .body()
+            .windows(texture.len())
+            .any(|window| window == texture));
         assert_eq!(boundary, BOUNDARY, "an ordinary texture gets the constant");
         // A texture that contains the delimiter is given a different one. This is the
         // one property RFC 2046 actually asks for: without it the body parses into
@@ -2258,12 +2431,18 @@ mod tests {
         );
         // Twice over, so the walk is a walk rather than one fallback.
         let twice = format!("{BOUNDARY} and {BOUNDARY}1 both in here").into_bytes();
-        assert_eq!(skin_upload_body("CLASSIC", "a.png", &twice).boundary(), format!("{BOUNDARY}2"));
+        assert_eq!(
+            skin_upload_body("CLASSIC", "a.png", &twice).boundary(),
+            format!("{BOUNDARY}2")
+        );
         // The variant is lower-cased, and a word the service does not know is
         // classic -- the same rule the JSON write follows, from the same function.
-        for (given, sent) in
-            [("CLASSIC", "classic"), ("slim", "slim"), ("", "classic"), ("WIDE", "classic")]
-        {
+        for (given, sent) in [
+            ("CLASSIC", "classic"),
+            ("slim", "slim"),
+            ("", "classic"),
+            ("WIDE", "classic"),
+        ] {
             let body = skin_upload_body(given, "a.png", b"x");
             let text = String::from_utf8_lossy(body.body()).to_string();
             assert!(
@@ -2281,8 +2460,16 @@ mod tests {
         assert_eq!(file_part_name(r"C:\Users\me\Pictures\alex.png"), "alex.png");
         assert_eq!(file_part_name("/home/me/alex.png"), "alex.png");
         assert_eq!(file_part_name("sk\"in\r\n.png"), "sk_in__.png");
-        assert_eq!(file_part_name(""), "skin.png", "a part with no name at all is refused");
-        assert_eq!(file_part_name("folder/"), "skin.png", "and a path with no name in it is one");
+        assert_eq!(
+            file_part_name(""),
+            "skin.png",
+            "a part with no name at all is refused"
+        );
+        assert_eq!(
+            file_part_name("folder/"),
+            "skin.png",
+            "and a path with no name in it is one"
+        );
         // And it is the name the body carries: the reduction is not a helper that
         // the builder forgot to call.
         let body = skin_upload_body("CLASSIC", r"C:\skins\alex.png", b"x");
@@ -2309,13 +2496,22 @@ mod tests {
         let (url, body) = &uploads[0];
         assert_eq!(url, MINECRAFT_SKINS_URL);
         let text = String::from_utf8_lossy(body).to_string();
-        assert!(text.contains("name=\"variant\"\r\n\r\nclassic\r\n"), "got {text}");
+        assert!(
+            text.contains("name=\"variant\"\r\n\r\nclassic\r\n"),
+            "got {text}"
+        );
         assert!(text.contains("filename=\"mine.png\""), "got {text}");
-        assert!(text.contains("png-bytes"), "the file's bytes travel verbatim: {text}");
+        assert!(
+            text.contains("png-bytes"),
+            "the file's bytes travel verbatim: {text}"
+        );
         // The multipart log is its own, both ways round: an upload is not a JSON
         // body, and a fixture that could not tell the two apart could not answer
         // them at the same URL independently.
-        assert!(transport.bodies().is_empty(), "an upload is not a JSON write");
+        assert!(
+            transport.bodies().is_empty(),
+            "an upload is not a JSON write"
+        );
         assert_eq!(transport.requested(), vec![MINECRAFT_SKINS_URL.to_string()]);
     }
 
@@ -2345,7 +2541,13 @@ mod tests {
         // would be a request the service cannot read at all.
         let mut transport = full_chain_transport();
         transport.insert_put(MINECRAFT_ACTIVE_CAPE_URL, 200, DRESSED_PROFILE);
-        change(&transport, SkinChange::Cape { id: "cape-1".to_string() }).expect("the cape is on");
+        change(
+            &transport,
+            SkinChange::Cape {
+                id: "cape-1".to_string(),
+            },
+        )
+        .expect("the cape is on");
         let (url, body) = transport.bodies().remove(0);
         assert_eq!(url, MINECRAFT_ACTIVE_CAPE_URL);
         assert_eq!(body, r#"{"capeId":"cape-1"}"#);
@@ -2359,7 +2561,10 @@ mod tests {
         transport.insert_json(MINECRAFT_SKINS_URL, 401, "");
         let err = change(
             &transport,
-            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+            SkinChange::Skin {
+                variant: "CLASSIC".to_string(),
+                url: "http://x/a".to_string(),
+            },
         )
         .unwrap_err();
         assert!(matches!(err, AuthError::Account(_)), "got {err:?}");
@@ -2375,7 +2580,10 @@ mod tests {
         );
         let err = change(
             &transport,
-            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+            SkinChange::Skin {
+                variant: "CLASSIC".to_string(),
+                url: "http://x/a".to_string(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("not a valid skin"), "got {err}");
@@ -2385,7 +2593,10 @@ mod tests {
         transport.insert_json(MINECRAFT_SKINS_URL, 500, "not json");
         let err = change(
             &transport,
-            SkinChange::Skin { variant: "CLASSIC".to_string(), url: "http://x/a".to_string() },
+            SkinChange::Skin {
+                variant: "CLASSIC".to_string(),
+                url: "http://x/a".to_string(),
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("HTTP 500"), "got {err}");
@@ -2404,8 +2615,14 @@ mod tests {
             2148916229,
         ] {
             let message = xsts_message(code);
-            assert!(!message.contains(&code.to_string()), "code {code} leaked into '{message}'");
-            assert!(message.ends_with('.'), "message should read as a sentence: {message}");
+            assert!(
+                !message.contains(&code.to_string()),
+                "code {code} leaked into '{message}'"
+            );
+            assert!(
+                message.ends_with('.'),
+                "message should read as a sentence: {message}"
+            );
         }
         // Anything unknown still names the number rather than saying nothing —
         // an unrecognised refusal is still a refusal worth reporting.
@@ -2420,7 +2637,12 @@ mod tests {
             401,
             r#"{"error":"UNAUTHORIZED","errorMessage":"Invalid app registration"}"#,
         );
-        let err = flow(&transport).launcher_login("uhs-1", "xsts-token").unwrap_err();
-        assert!(err.to_string().contains("Invalid app registration"), "got {err}");
+        let err = flow(&transport)
+            .launcher_login("uhs-1", "xsts-token")
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid app registration"),
+            "got {err}"
+        );
     }
 }

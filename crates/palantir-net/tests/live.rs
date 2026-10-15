@@ -24,9 +24,7 @@ use palantir_core::instance::Instance;
 use palantir_core::pack::{Component, PackProfile};
 use palantir_core::resolve::{resolve, MetaStore};
 use palantir_core::version::{ProblemSeverity, RuntimeContext};
-use palantir_net::{
-    verify_sha256, Fetcher, MicrosoftAuth, OnlineMetaStore, DEFAULT_META_BASE_URL,
-};
+use palantir_net::{verify_sha256, Fetcher, MicrosoftAuth, OnlineMetaStore, DEFAULT_META_BASE_URL};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -161,7 +159,10 @@ fn a_created_instance_resolves_against_the_live_service() {
         resolution.problems
     );
     assert_eq!(resolution.profile.minecraft_version, GAME);
-    assert_eq!(resolution.profile.main_class, "net.minecraft.client.main.Main");
+    assert_eq!(
+        resolution.profile.main_class,
+        "net.minecraft.client.main.Main"
+    );
 
     let assets = resolution
         .profile
@@ -269,8 +270,7 @@ fn a_fabric_instance_gets_its_loader_and_mappings_from_the_live_service() {
         resolution.problems
     );
     assert_eq!(
-        resolution.profile.main_class,
-        "net.fabricmc.loader.impl.launch.knot.KnotClient",
+        resolution.profile.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient",
         "Fabric {build} did not supply the loader's entry point"
     );
 
@@ -307,7 +307,9 @@ fn version_lists_are_read_from_the_layout_the_service_serves() {
     let mut store = live_store(&tmp.path().join("meta"));
 
     for uid in ["net.minecraft", FABRIC_UID, "org.lwjgl3"] {
-        let list = store.version_list(uid).unwrap_or_else(|e| panic!("{uid} list: {e}"));
+        let list = store
+            .version_list(uid)
+            .unwrap_or_else(|e| panic!("{uid} list: {e}"));
         assert!(!list.is_empty(), "{uid} listed no versions");
         assert!(
             list.iter().any(|e| !e.version.is_empty()),
@@ -358,8 +360,7 @@ fn a_fetched_version_file_is_cached_and_matches_its_published_digest() {
 
     // And the second read is a cache hit, not a fetch: an offline store sees
     // the same file through the same layout.
-    let mut offline =
-        palantir_core::resolve::OfflineMetaStore::new(meta.clone());
+    let mut offline = palantir_core::resolve::OfflineMetaStore::new(meta.clone());
     let again = offline
         .version_file("net.minecraft", GAME)
         .expect("the offline store could not read what the online store wrote");
@@ -454,7 +455,10 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
         assert!(
             majors.iter().any(|entry| entry.version == wanted),
             "{JAVA_RUNTIMES_UID} no longer lists {wanted}: {:?}",
-            majors.iter().map(|e| e.version.as_str()).collect::<Vec<_>>()
+            majors
+                .iter()
+                .map(|e| e.version.as_str())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -474,13 +478,19 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
     );
     for major in &game.compatible_java_majors {
         assert!(
-            majors.iter().any(|entry| entry.version == runtime_version(*major)),
+            majors
+                .iter()
+                .any(|entry| entry.version == runtime_version(*major)),
             "{GAME} wants Java {major}, which {JAVA_RUNTIMES_UID} does not publish"
         );
     }
 
     // The major's version file, for the newest major the game accepts.
-    let major = *game.compatible_java_majors.iter().max().expect("a compatible major");
+    let major = *game
+        .compatible_java_majors
+        .iter()
+        .max()
+        .expect("a compatible major");
     let url = runtime_file_url(DEFAULT_META_BASE_URL, &runtime_version(major));
     let fetcher = palantir_net::BlockingHttpFetcher::new(Duration::from_secs(60));
     let bytes = fetcher.fetch(&url).unwrap_or_else(|e| panic!("{url}: {e}"));
@@ -502,8 +512,7 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
     let entry = pick_runtime(&entries, &host, &game.compatible_java_name).unwrap_or_else(|| {
         panic!(
             "{GAME} names '{}' and wants Java {major}, but {} has no such runtime",
-            game.compatible_java_name,
-            url
+            game.compatible_java_name, url
         )
     });
     assert!(
@@ -512,15 +521,26 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
          launcher does not unpack",
         entry.kind
     );
-    assert_eq!(entry.sha1.len(), 40, "the runtime entry stopped publishing a sha1");
-    assert!(entry.url.starts_with("https://"), "runtime url: {}", entry.url);
+    assert_eq!(
+        entry.sha1.len(),
+        40,
+        "the runtime entry stopped publishing a sha1"
+    );
+    assert!(
+        entry.url.starts_with("https://"),
+        "runtime url: {}",
+        entry.url
+    );
 
     // And the manifest behind it, which is what the installer reads.
     let manifest_bytes = fetcher
         .fetch(&entry.url)
         .unwrap_or_else(|e| panic!("{}: {e}", entry.url));
     let digest = Sha1::digest(&manifest_bytes);
-    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let digest = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     assert_eq!(
         digest,
         entry.sha1.to_ascii_lowercase(),
@@ -528,14 +548,18 @@ fn the_java_runtime_the_service_publishes_can_be_walked_to_a_java_binary() {
          points at, so no runtime would ever be installed"
     );
 
-    let files = parse_manifest(&manifest_bytes, Path::new(&entry.url))
-        .expect("parsing the JRE manifest");
+    let files =
+        parse_manifest(&manifest_bytes, Path::new(&entry.url)).expect("parsing the JRE manifest");
     assert!(
         files.len() > 50,
         "a JRE manifest with {} file(s) is not a runtime",
         files.len()
     );
-    let exe = if cfg!(windows) { "bin/java.exe" } else { "bin/java" };
+    let exe = if cfg!(windows) {
+        "bin/java.exe"
+    } else {
+        "bin/java"
+    };
     let binary = files
         .iter()
         .find(|file| file.path == exe)
@@ -613,7 +637,10 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
         )
     });
     let digest = Sha1::digest(&bytes);
-    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let digest = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     assert_eq!(
         digest, object.hash,
         "{url} served bytes that are not the object the index names"
@@ -628,7 +655,10 @@ fn an_asset_object_is_served_at_the_cdn_layout_the_launcher_builds() {
 
     // And the layout this used to build: the storage path is not a URL the CDN
     // serves, which is the whole reason the two helpers have different names.
-    let storage = format!("{ASSET_OBJECT_BASE_URL}/{}", object_relative_path(&object.hash));
+    let storage = format!(
+        "{ASSET_OBJECT_BASE_URL}/{}",
+        object_relative_path(&object.hash)
+    );
     assert_ne!(storage, url);
     assert!(
         fetcher.fetch(&storage).is_err(),
@@ -666,7 +696,10 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
     // pool's own `requests` are not visible from here, so the assertion the
     // second time is the *bytes*: the same response object, from the cache.
     let pool = std::sync::Arc::new(HttpPool::default());
-    let api = ModrinthApi::new(MetadataCache::new(tmp.path().join("modrinth"), palantir_net::DEFAULT_TTL), pool);
+    let api = ModrinthApi::new(
+        MetadataCache::new(tmp.path().join("modrinth"), palantir_net::DEFAULT_TTL),
+        pool,
+    );
     let cancel = Cancel::new();
     let backoff = Backoff::with_attempts(2);
 
@@ -680,9 +713,16 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
         !response.hits.is_empty(),
         "a search for 'sodium' among mods returned nothing"
     );
-    assert!(response.total_hits > 0, "total_hits is {}", response.total_hits);
+    assert!(
+        response.total_hits > 0,
+        "total_hits is {}",
+        response.total_hits
+    );
     let first = &response.hits[0];
-    assert!(!first.title.is_empty() && !first.project_ref().is_empty(), "{first:?}");
+    assert!(
+        !first.title.is_empty() && !first.project_ref().is_empty(),
+        "{first:?}"
+    );
 
     // The cache: the same question, answered without a request. (The answer is
     // compared field for field, so a response that came back different would be
@@ -698,13 +738,19 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
     let project = api
         .project(first.project_ref(), &cancel, &backoff)
         .unwrap_or_else(|e| panic!("{}: {e}", first.project_ref()));
-    assert!(!project.id.is_empty() && !project.title.is_empty(), "{project:?}");
+    assert!(
+        !project.id.is_empty() && !project.title.is_empty(),
+        "{project:?}"
+    );
     assert!(
         !project.body.trim().is_empty(),
         "{} opens with no description at all",
         project.title
     );
-    assert_eq!(project.title, first.title, "the search and the project disagree about the title");
+    assert_eq!(
+        project.title, first.title,
+        "the search and the project disagree about the title"
+    );
 
     // The team is a second request, and it is where a page's byline comes from:
     // Modrinth's project document names a team id and no person. What the team
@@ -719,7 +765,9 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
         .unwrap_or_else(|e| panic!("{}'s team: {e}", first.project_ref()));
     assert!(!members.is_empty(), "{} has no team at all", project.title);
     assert!(
-        members.iter().all(|member| !member.user.username.is_empty()),
+        members
+            .iter()
+            .all(|member| !member.user.username.is_empty()),
         "a member with no name on {}: {members:?}",
         project.title
     );
@@ -733,7 +781,11 @@ fn the_live_modrinth_api_answers_a_typed_search_and_a_version_list() {
     let versions = api
         .versions(first.project_ref(), &cancel, &backoff)
         .unwrap_or_else(|e| panic!("{}: {e}", first.project_ref()));
-    assert!(!versions.is_empty(), "{} has no versions", first.project_ref());
+    assert!(
+        !versions.is_empty(),
+        "{} has no versions",
+        first.project_ref()
+    );
     let version = &versions[0];
     assert!(!version.version_number.is_empty(), "{version:?}");
     let file = version
@@ -778,7 +830,10 @@ fn the_live_news_feed_parses_into_articles_the_panel_can_draw() {
     // The first four are what the panel draws, so those are the four this is
     // about: every field the card uses has to be there for the live feed.
     for article in news.iter().take(4) {
-        assert!(!article.title.is_empty(), "an article with no title: {article:?}");
+        assert!(
+            !article.title.is_empty(),
+            "an article with no title: {article:?}"
+        );
         assert!(
             article.link.starts_with("https://"),
             "an article whose link is not absolute: {}",
@@ -802,7 +857,11 @@ fn the_live_news_feed_parses_into_articles_the_panel_can_draw() {
     // Newest first is the order the panel's four come out in, and it is the
     // service's order rather than this launcher's: a feed that reversed would put
     // the oldest announcement at the top of the sidebar.
-    let dates: Vec<&str> = news.iter().take(4).map(|article| article.date.as_str()).collect();
+    let dates: Vec<&str> = news
+        .iter()
+        .take(4)
+        .map(|article| article.date.as_str())
+        .collect();
     let mut sorted = dates.clone();
     sorted.sort_unstable_by(|a, b| b.cmp(a));
     assert_eq!(dates, sorted, "the feed is not newest first");
@@ -830,11 +889,16 @@ fn the_live_piston_manifest_names_a_release_whose_version_file_parses() {
 
     let tmp = tempfile::tempdir().expect("temp dir");
     let pool = std::sync::Arc::new(HttpPool::default());
-    let meta = PistonMeta::new(MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL), pool);
+    let meta = PistonMeta::new(
+        MetadataCache::new(tmp.path().join("piston"), DEFAULT_TTL),
+        pool,
+    );
     let cancel = Cancel::new();
     let backoff = Backoff::with_attempts(2);
 
-    let manifest = meta.manifest(&cancel, &backoff).expect("Mojang's version manifest");
+    let manifest = meta
+        .manifest(&cancel, &backoff)
+        .expect("Mojang's version manifest");
     assert!(
         manifest.versions.len() > 500,
         "a manifest of {} version(s) is not Minecraft's",
@@ -885,7 +949,11 @@ fn the_live_piston_manifest_names_a_release_whose_version_file_parses() {
         .as_ref()
         .filter(|index| index.known)
         .unwrap_or_else(|| panic!("{id} publishes no downloadable asset index"));
-    assert!(index.url.starts_with("https://"), "the asset index is at {}", index.url);
+    assert!(
+        index.url.starts_with("https://"),
+        "the asset index is at {}",
+        index.url
+    );
     assert!(
         !index.sha1.is_empty(),
         "{id}'s asset index comes with no digest to check it against"
@@ -971,7 +1039,9 @@ fn the_translation_agrees_with_the_mirror_the_shell_read() {
             index.sha1
         );
         assert!(
-            index.url.ends_with(&format!("/{}/{}.json", index.sha1, index.id)),
+            index
+                .url
+                .ends_with(&format!("/{}/{}.json", index.sha1, index.id)),
             "{who} asset index url does not name its own digest and id: {}",
             index.url
         );
@@ -1007,7 +1077,10 @@ fn the_translation_agrees_with_the_mirror_the_shell_read() {
         .filter(|trait_| trait_.as_str() != "XR:Initial")
         .cloned()
         .collect();
-    assert_eq!(ours.traits, expected, "the derived traits are not the mirror's");
+    assert_eq!(
+        ours.traits, expected,
+        "the derived traits are not the mirror's"
+    );
 
     // The libraries. The mirror's list is a subset of Mojang's -- every name it
     // serves is in the file -- and the difference is LWJGL, which the mirror keeps
@@ -1026,7 +1099,10 @@ fn the_translation_agrees_with_the_mirror_the_shell_read() {
         "{GAME} resolved with no LWJGL libraries at all"
     );
     assert!(
-        !theirs.libraries.iter().any(|l| l.name.group() == "org.lwjgl"),
+        !theirs
+            .libraries
+            .iter()
+            .any(|l| l.name.group() == "org.lwjgl"),
         "the mirror now serves LWJGL among the game's libraries, so the second \
          component this launcher used to resolve is a duplicate"
     );
@@ -1072,9 +1148,16 @@ fn an_asset_object_is_fetched_once_and_then_answered_from_the_store() {
 
     // The published name, read the way the launcher reads it: by its shape.
     let digest = Digest::parse(&object.hash).unwrap_or_else(|e| {
-        panic!("the asset index names '{name}' as '{}', which is not a digest: {e}", object.hash)
+        panic!(
+            "the asset index names '{name}' as '{}', which is not a digest: {e}",
+            object.hash
+        )
     });
-    assert_eq!(digest.kind(), "sha1", "Mojang names asset objects with a sha1");
+    assert_eq!(
+        digest.kind(),
+        "sha1",
+        "Mojang names asset objects with a sha1"
+    );
     let url = format!("{ASSET_OBJECT_BASE_URL}/{}", object_cdn_path(&object.hash));
 
     let pool = HttpPool::default();
@@ -1087,16 +1170,27 @@ fn an_asset_object_is_fetched_once_and_then_answered_from_the_store() {
         Stored::Fetched(bytes) => assert!(bytes > 0, "{url} served nothing"),
         Stored::AlreadyThere => panic!("nothing was stored yet"),
     }
-    assert!(store.verified(&digest), "the bytes in the store are the object the index names");
+    assert!(
+        store.verified(&digest),
+        "the bytes in the store are the object the index names"
+    );
 
     let second = store
         .fetch_blocking(&pool, &url, &digest, &cancel, &Backoff::with_attempts(2))
         .expect("the second look");
     assert_eq!(second, Stored::AlreadyThere, "{url} was fetched twice");
-    assert!(!store.staging_path(&digest).exists(), "a staging file was left behind");
+    assert!(
+        !store.staging_path(&digest).exists(),
+        "a staging file was left behind"
+    );
     let (files, bytes) = store.stats();
     assert_eq!(files, 1);
-    assert_eq!(bytes, std::fs::metadata(store.path(&digest)).map(|m| m.len()).unwrap_or(0));
+    assert_eq!(
+        bytes,
+        std::fs::metadata(store.path(&digest))
+            .map(|m| m.len())
+            .unwrap_or(0)
+    );
 }
 
 /// The one assumption in the engine that a double cannot hold.
@@ -1200,7 +1294,10 @@ fn the_metadata_cache_revalidates_but_answers_the_same_document() {
         "a version list of {} bytes is not one",
         first.body.len()
     );
-    assert!(!first.from_disk, "the first lookup had nowhere to read from");
+    assert!(
+        !first.from_disk,
+        "the first lookup had nowhere to read from"
+    );
     assert_eq!(cache.len(), 1, "the entry was written to disk");
     assert!(cache.cached(&url).is_some(), "and it has an age on it");
 
@@ -1269,7 +1366,10 @@ fn every_loader_publishes_its_builds_where_this_code_says_it_does() {
             chosen.version
         );
     }
-    assert!(meta.cache_dir().exists(), "the bodies were written where a second run reads them");
+    assert!(
+        meta.cache_dir().exists(),
+        "the bodies were written where a second run reads them"
+    );
 }
 
 /// The two Forge-shaped loaders' own installers, against the files they replace.
@@ -1291,14 +1391,28 @@ fn every_loader_publishes_its_builds_where_this_code_says_it_does() {
 #[test]
 #[ignore = "live: reaches maven.minecraftforge.net, maven.neoforged.net and meta.prismlauncher.org"]
 fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
-    use palantir_net::engine::{Backoff, Cancel, HttpPool, InstallerMeta, MetadataCache, DEFAULT_TTL};
+    use palantir_net::engine::{
+        Backoff, Cancel, HttpPool, InstallerMeta, MetadataCache, DEFAULT_TTL,
+    };
 
     /// One pinned build per loader: the build the mirror also serves, so the
     /// comparison is of the same component and version on both sides.
     const BUILDS: &[(&str, &str, &str, &str, &str)] = &[
         // loader name, game, build, mirror uid, the loader's own main class.
-        ("forge", "1.21.1", "52.1.0", "net.minecraftforge", "net.minecraftforge.bootstrap.ForgeBootstrap"),
-        ("neoforge", "1.21.1", "21.1.172", "net.neoforged", "cpw.mods.bootstraplauncher.BootstrapLauncher"),
+        (
+            "forge",
+            "1.21.1",
+            "52.1.0",
+            "net.minecraftforge",
+            "net.minecraftforge.bootstrap.ForgeBootstrap",
+        ),
+        (
+            "neoforge",
+            "1.21.1",
+            "21.1.172",
+            "net.neoforged",
+            "cpw.mods.bootstraplauncher.BootstrapLauncher",
+        ),
     ];
 
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -1324,10 +1438,18 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
         // The version file's own identity: the installer names the game build
         // in `id` and no component, so the uid and version are the caller's.
         assert_eq!(ours.uid, *uid);
-        assert_eq!(ours.version, *build, "{name}: the version is the build that was asked for");
-        assert_eq!(ours.main_class, *main, "{name} {build} launches through {}", ours.main_class);
         assert_eq!(
-            theirs.main_class, "io.github.zekerzhayard.forgewrapper.installer.Main",
+            ours.version, *build,
+            "{name}: the version is the build that was asked for"
+        );
+        assert_eq!(
+            ours.main_class, *main,
+            "{name} {build} launches through {}",
+            ours.main_class
+        );
+        assert_eq!(
+            theirs.main_class,
+            "io.github.zekerzhayard.forgewrapper.installer.Main",
             "{uid} {build} is no longer rewritten around ForgeWrapper: {main}",
             main = theirs.main_class
         );
@@ -1346,15 +1468,19 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
                 "{uid} {build}: the mirror serves {name}, which the installer lost"
             );
         }
-        let mut only_ours: Vec<String> =
-            ours.libraries.iter().map(|l| l.name.serialize()).filter(|name| {
-                !theirs.libraries.iter().any(|l| l.name.serialize() == *name)
-            }).collect();
+        let mut only_ours: Vec<String> = ours
+            .libraries
+            .iter()
+            .map(|l| l.name.serialize())
+            .filter(|name| !theirs.libraries.iter().any(|l| l.name.serialize() == *name))
+            .collect();
         only_ours.sort();
         let groups: Vec<String> = only_ours
             .iter()
             .map(|name| {
-                palantir_core::version::GradleSpecifier::parse(name).group().to_string()
+                palantir_core::version::GradleSpecifier::parse(name)
+                    .group()
+                    .to_string()
             })
             .collect();
         if *name == "forge" {
@@ -1370,7 +1496,9 @@ fn the_installers_profile_agrees_with_the_mirror_except_for_the_wrapper() {
                 "{uid} {build}: the difference is not just the logging stack: {only_ours:?}"
             );
             assert!(
-                groups.iter().all(|group| group == "org.apache.logging.log4j"),
+                groups
+                    .iter()
+                    .all(|group| group == "org.apache.logging.log4j"),
                 "{uid} {build}: unexpected libraries only the installer names: {only_ours:?}"
             );
         }
@@ -1466,8 +1594,7 @@ fn forge_and_neoforge_processors_install_a_client() {
             pool.clone(),
         );
         let store = ContentStore::new(tmp.path().join("content"));
-        let loader =
-            Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
+        let loader = Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
 
         // The installer jar, and the install it declares.
         let (bytes, parsed) = installers
@@ -1531,9 +1658,11 @@ fn forge_and_neoforge_processors_install_a_client() {
 
         // The patched client the whole chain exists to produce: present,
         // with the digest the last processor declared.
-        let patched = parsed.install.data.get("PATCHED").unwrap_or_else(|| {
-            panic!("{name} {build} names no PATCHED data entry")
-        });
+        let patched = parsed
+            .install
+            .data
+            .get("PATCHED")
+            .unwrap_or_else(|| panic!("{name} {build} names no PATCHED data entry"));
         let patched_coord = match patched {
             palantir_net::DataValue::Artifact(coord) => coord.clone(),
             other => panic!("{name} {build} PATCHED is not an artifact: {other:?}"),
@@ -1546,18 +1675,21 @@ fn forge_and_neoforge_processors_install_a_client() {
             patched_path.display()
         );
         let declared = parsed.install.processors.iter().find_map(|p| {
-            p.outputs.iter().find_map(|(path, sha)| {
-                (path.contains("PATCHED")).then(|| sha.clone())
-            })
+            p.outputs
+                .iter()
+                .find_map(|(path, sha)| (path.contains("PATCHED")).then(|| sha.clone()))
         });
         if let Some(sha) = declared {
             // The value may itself be a `{DATA}` token for the sha literal.
-            let sha = parsed.install.data.get(
-                sha.trim().trim_start_matches('{').trim_end_matches('}'),
-            ).and_then(|v| match v {
-                palantir_net::DataValue::Literal(hex) => Some(hex.clone()),
-                _ => None,
-            }).unwrap_or(sha);
+            let sha = parsed
+                .install
+                .data
+                .get(sha.trim().trim_start_matches('{').trim_end_matches('}'))
+                .and_then(|v| match v {
+                    palantir_net::DataValue::Literal(hex) => Some(hex.clone()),
+                    _ => None,
+                })
+                .unwrap_or(sha);
             if let Ok(expected) = Digest::parse(&sha) {
                 expected.verify_file(&patched_path).unwrap_or_else(|e| {
                     panic!("{name} {build} patched client fails its declared digest: {e}")
@@ -1632,8 +1764,22 @@ fn a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer() {
     /// Loader name, game, build, the loader's own main class, and the processor
     /// counts G100 measured for a client install of this build.
     const BUILDS: &[(&str, &str, &str, &str, usize, usize)] = &[
-        ("forge", "1.21.1", "52.1.0", "net.minecraftforge.bootstrap.ForgeBootstrap", 3, 4),
-        ("neoforge", "1.21.1", "21.1.172", "cpw.mods.bootstraplauncher.BootstrapLauncher", 6, 4),
+        (
+            "forge",
+            "1.21.1",
+            "52.1.0",
+            "net.minecraftforge.bootstrap.ForgeBootstrap",
+            3,
+            4,
+        ),
+        (
+            "neoforge",
+            "1.21.1",
+            "21.1.172",
+            "cpw.mods.bootstraplauncher.BootstrapLauncher",
+            6,
+            4,
+        ),
     ];
 
     let java = find_java().expect("this machine has no Java to run the processors with");
@@ -1654,8 +1800,7 @@ fn a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer() {
             pool.clone(),
         );
         let store = ContentStore::new(tmp.path().join("content"));
-        let loader =
-            Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
+        let loader = Loader::from_name(name).unwrap_or_else(|| panic!("{name} is not a loader"));
         let root = tmp.path().join("instance");
         let library_dir = root.join("libraries");
 
@@ -1716,7 +1861,11 @@ fn a_forge_shaped_loader_installs_and_then_resolves_out_of_its_own_installer() {
             "{name} {build}: the translated profile carries errors: {:?}",
             profile.problems
         );
-        assert_eq!(profile.main_class, *main, "{name} {build} resolves through {}", profile.main_class);
+        assert_eq!(
+            profile.main_class, *main,
+            "{name} {build} resolves through {}",
+            profile.main_class
+        );
         assert_ne!(
             profile.main_class, "io.github.zekerzhayard.forgewrapper.installer.Main",
             "{name} {build} resolved the mirror's rewrite instead of the publisher's file"
@@ -1822,21 +1971,31 @@ fn a_real_refusal_carries_its_status_and_whatever_sentence_the_service_sent() {
     let pool = HttpPool::default();
 
     // One: Labrinth's JSON sentence. A loader name no build uses.
-    let json = Request::get(format!("{MODRINTH_BASE_URL}/tag/palantirmc-live-no-such-loader"));
+    let json = Request::get(format!(
+        "{MODRINTH_BASE_URL}/tag/palantirmc-live-no-such-loader"
+    ));
     let (error, rendered) = refusal(&pool, &json);
     refused_with(&error, 404, "json");
     let sentence = rendered
         .split_once("http status 404: ")
         .map(|(_, sentence)| sentence.trim().to_string())
         .unwrap_or_else(|| panic!("json: the status arrived with no sentence: {rendered}"));
-    assert!(!sentence.is_empty(), "json: an empty sentence is not one: {rendered}");
-    assert!(!sentence.contains('<'), "json: a page was pasted into a notice: {rendered}");
+    assert!(
+        !sentence.is_empty(),
+        "json: an empty sentence is not one: {rendered}"
+    );
+    assert!(
+        !sentence.contains('<'),
+        "json: a page was pasted into a notice: {rendered}"
+    );
     println!("json: {rendered}");
 
     // Two: the same service, a matched route, a body of zero bytes. There is no
     // sentence to keep here, and inventing one would be worse than saying the
     // code -- so the string must be exactly what it was before this change.
-    let empty = Request::get(format!("{MODRINTH_BASE_URL}/project/sodium/version/999999999"));
+    let empty = Request::get(format!(
+        "{MODRINTH_BASE_URL}/project/sodium/version/999999999"
+    ));
     let (error, rendered) = refusal(&pool, &empty);
     refused_with(&error, 404, "empty body");
     assert!(
@@ -1847,13 +2006,17 @@ fn a_real_refusal_carries_its_status_and_whatever_sentence_the_service_sent() {
 
     // Three: Archon, whose 404 is words rather than a document, and whose every
     // request has to carry the version header first (G110, G111).
-    let archon = Request::get("https://archon.modrinth.com/v0/servers").header("X-Panel-Version", "1");
+    let archon =
+        Request::get("https://archon.modrinth.com/v0/servers").header("X-Panel-Version", "1");
     let (error, rendered) = refusal(&pool, &archon);
     refused_with(&error, 404, "archon");
     let sentence = rendered
         .split_once("http status 404: ")
         .map(|(_, sentence)| sentence.trim().to_string())
         .unwrap_or_else(|| panic!("archon: the status arrived with no sentence: {rendered}"));
-    assert!(!sentence.is_empty(), "archon: an empty sentence is not one: {rendered}");
+    assert!(
+        !sentence.is_empty(),
+        "archon: an empty sentence is not one: {rendered}"
+    );
     println!("archon: {rendered}");
 }

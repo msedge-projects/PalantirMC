@@ -331,7 +331,7 @@ pub enum Message {
         /// The three lists, or the reason there are none.
         result: Result<palantir_net::Tags, String>,
     },
-/// The icons of the results on screen, from the shell.
+    /// The icons of the results on screen, from the shell.
     ///
     /// No round, unlike [`Message::Found`], and that is the type of the answer
     /// rather than an omission: an icon is keyed by the URL it was fetched from, so
@@ -585,14 +585,18 @@ impl State {
         }
         match message {
             // A wheel is not this page's to apply: see `crate::scroll`.
-            Message::Wheel(..) => {},
+            Message::Wheel(..) => {}
 
             // The panel is shut by the rule above when anything else is pressed,
             // so this is only the trigger's own two answers: open, or shut the
             // one that is open. Pressing the same trigger twice is how a reader
             // changes their mind without choosing anything.
             Message::Toggle(menu) => {
-                self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+                self.menu = if self.menu == Some(menu) {
+                    None
+                } else {
+                    Some(menu)
+                };
             }
 
             // Nothing to do with it here: where the region is *is* the page's
@@ -785,8 +789,8 @@ impl State {
             // that is never drawn and is dropped when the next results land.
             Message::Icons { arrived } => {
                 if let Load::Ready(hits) = &self.results {
-                    let named: std::collections::HashSet<&str> = hits.iter()
-                        .map(|hit| hit.icon_url.as_str()).collect();
+                    let named: std::collections::HashSet<&str> =
+                        hits.iter().map(|hit| hit.icon_url.as_str()).collect();
                     for fetched in arrived {
                         // Old requests may finish after a newer search. Keep
                         // only pictures the current result set actually names.
@@ -936,7 +940,11 @@ impl State {
         // `game_versions`, so they are a second group of their own -- a different
         // field from `categories`, so `newFilters` starts a second entry in
         // `orGroups` rather than joining the versions into the categories list.
-        let chosen_versions: Vec<&str> = self.versions.iter().map(|version| version.as_str()).collect();
+        let chosen_versions: Vec<&str> = self
+            .versions
+            .iter()
+            .map(|version| version.as_str())
+            .collect();
         if let Some(part) = any_of("game_versions", &chosen_versions) {
             parts.push(part);
         }
@@ -955,7 +963,10 @@ impl State {
         if let Some(part) = none_of("categories", &none) {
             parts.push(part);
         }
-        if self.excluded.contains(&(LICENSE.to_string(), OPEN_SOURCE.to_string())) {
+        if self
+            .excluded
+            .contains(&(LICENSE.to_string(), OPEN_SOURCE.to_string()))
+        {
             parts.push("open_source NOT IN [true]".to_string());
         }
         // A disclosure's option is `method: 'or'` over `disclosure_types`, and
@@ -986,7 +997,9 @@ impl State {
     /// Whether the option `option` of the section `filter` is excluded, which is
     /// what `isExcluded` is in `SearchSidebarFilter.vue`'s visibility test.
     pub fn is_excluded(&self, filter: &str, option: &str) -> bool {
-        self.excluded.iter().any(|(f, o)| f == filter && o == option)
+        self.excluded
+            .iter()
+            .any(|(f, o)| f == filter && o == option)
     }
 
     /// The chosen options of the section `filter`, in the order the set keeps
@@ -1067,17 +1080,17 @@ impl State {
     }
 
     /// Whether the sidebar section `id` is open.
-///
-/// `sidebar.vue`'s `getFilterOpenByDefault` answers it for a section nobody has
-/// pressed -- the app variant opens every category section, plus `environment`
-/// and `license`, and nothing else -- and a press has it the other way. Both are
-/// one comparison, which is what a press is, and which is why the state is the
-/// sections that have been touched rather than the ones that are shut.
-pub fn is_open(&self, id: &str, default_open: bool) -> bool {
-    default_open != self.touched.contains(id)
-}
+    ///
+    /// `sidebar.vue`'s `getFilterOpenByDefault` answers it for a section nobody has
+    /// pressed -- the app variant opens every category section, plus `environment`
+    /// and `license`, and nothing else -- and a press has it the other way. Both are
+    /// one comparison, which is what a press is, and which is why the state is the
+    /// sections that have been touched rather than the ones that are shut.
+    pub fn is_open(&self, id: &str, default_open: bool) -> bool {
+        default_open != self.touched.contains(id)
+    }
 
-/// The placeholder the search field shows.
+    /// The placeholder the search field shows.
     ///
     /// The reference's own message for it: *"Search {projectType}..."*, with the
     /// tab's name in the singular -- `sentence(1)`, which is the arm its
@@ -1105,49 +1118,52 @@ pub fn view<'a>(theme: Gen, state: &'a State, _store: &'a Store) -> Element<'a, 
     // scrolling region below is `pages::instance`'s, kept here for the reason it
     // is kept there: a page that scrolled as a whole could not report where its
     // list starts.
-    column![pinned_tabs(theme, state), body(vec![
-        // The search field and the controls row are one group, and the gap
-        // between them is the page's own rather than the body column's.
-        //
-        // `browse-tab/layout.vue` is a fragment: the `<Input size="large">` at
-        // `:147` and the `flex flex-wrap items-center gap-2` div at `:178` are
-        // siblings, and whatever spaces them belongs to a wrapper this port does
-        // not draw. The capture settles it. The reference's field ends on y=173
-        // and its sort trigger starts on y=182 -- eight rows -- while the trigger
-        // ends on y=217 and the results surface begins on y=230 -- twelve. So
-        // there are two gaps, not one, and they differ by exactly the `mt-1` on
-        // the results block (`layout.vue:258`, `class="search mt-1
-        // [overflow-anchor:none]"`) sitting on top of the wrapper's eight.
-        {
-            let mut group = column![
-                // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
-                // the one search field in the tree that does: 48 pixels, `px-4`, a
-                // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
-                // hairline. A capture of both clients at 1280x720 agrees on every
-                // number -- the reference's field runs y 126..173 and so does this
-                // one, forty-eight rows of `h-12` where `ui::CONTROL`'s forty would
-                // not have been.
-                ui::input_sized(
-                    theme,
-                    ui::InputSize::Large,
-                    &state.placeholder(),
-                    &state.query,
-                    Message::Query,
-                ),
-                controls(theme, state),
-            ]
-            .spacing(SEARCH_TO_CONTROLS)
-            .width(Length::Fill);
-            // The panel, when one of the two comboboxes has it open. Pushed only
-            // then: an empty child would still cost the column's own spacing and
-            // move the results down, and a closed page has no panel to show.
-            if let Some(panel) = menu(theme, state) {
-                group = group.push(panel);
-            }
-            group.into()
-        },
-        results(theme, state),
-    ])]
+    column![
+        pinned_tabs(theme, state),
+        body(vec![
+            // The search field and the controls row are one group, and the gap
+            // between them is the page's own rather than the body column's.
+            //
+            // `browse-tab/layout.vue` is a fragment: the `<Input size="large">` at
+            // `:147` and the `flex flex-wrap items-center gap-2` div at `:178` are
+            // siblings, and whatever spaces them belongs to a wrapper this port does
+            // not draw. The capture settles it. The reference's field ends on y=173
+            // and its sort trigger starts on y=182 -- eight rows -- while the trigger
+            // ends on y=217 and the results surface begins on y=230 -- twelve. So
+            // there are two gaps, not one, and they differ by exactly the `mt-1` on
+            // the results block (`layout.vue:258`, `class="search mt-1
+            // [overflow-anchor:none]"`) sitting on top of the wrapper's eight.
+            {
+                let mut group = column![
+                    // `browse-tab/layout.vue`'s `<Input>` carries `size="large"`, and this is
+                    // the one search field in the tree that does: 48 pixels, `px-4`, a
+                    // `rounded-[14px]` frame, `bg-surface-4` inside a `border-surface-5`
+                    // hairline. A capture of both clients at 1280x720 agrees on every
+                    // number -- the reference's field runs y 126..173 and so does this
+                    // one, forty-eight rows of `h-12` where `ui::CONTROL`'s forty would
+                    // not have been.
+                    ui::input_sized(
+                        theme,
+                        ui::InputSize::Large,
+                        &state.placeholder(),
+                        &state.query,
+                        Message::Query,
+                    ),
+                    controls(theme, state),
+                ]
+                .spacing(SEARCH_TO_CONTROLS)
+                .width(Length::Fill);
+                // The panel, when one of the two comboboxes has it open. Pushed only
+                // then: an empty child would still cost the column's own spacing and
+                // move the results down, and a closed page has no panel to show.
+                if let Some(panel) = menu(theme, state) {
+                    group = group.push(panel);
+                }
+                group.into()
+            },
+            results(theme, state),
+        ])
+    ]
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
@@ -1290,12 +1306,17 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     // none -- see [`rule_under`].
     let mut blocks: Vec<Element<'a, Message>> = Vec::new();
     if state.project_type == ProjectType::Modpack {
-        let label = text(locale::lookup(Key::AppBrowseHideInstalledModpacks)
-            .unwrap_or_else(|| Key::AppBrowseHideInstalledModpacks.message())
-            .to_string())
+        let label = text(
+            locale::lookup(Key::AppBrowseHideInstalledModpacks)
+                .unwrap_or_else(|| Key::AppBrowseHideInstalledModpacks.message())
+                .to_string(),
+        )
         .size(16.0)
         .font(medium())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )));
         let line = row![]
             .spacing(12.0)
             .align_items(Alignment::Center)
@@ -1305,12 +1326,17 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
             .push(ui::switch(
                 theme,
                 state.hide_installed,
-                Message::HideInstalled(!state.hide_installed)
+                Message::HideInstalled(!state.hide_installed),
             ));
         blocks.push(
             container(line)
                 .width(Length::Fill)
-                .padding(Padding { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 })
+                .padding(Padding {
+                    top: 16.0,
+                    right: 16.0,
+                    bottom: 16.0,
+                    left: 16.0,
+                })
                 .into(),
         );
     }
@@ -1350,9 +1376,17 @@ pub fn sidebar<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
                 .then_some((filter.id, state.expanded.contains(filter.id)));
             // And a `scrollable` section brings its own content: the search
             // field, the toggle group's box and the panel that scrolls.
-            let panel = (filter.display == Display::Scrollable)
-                .then(|| versions(theme, state, tags));
-            blocks.push(section(theme, filter.id, message(filter.label), &rows, open, more, panel));
+            let panel =
+                (filter.display == Display::Scrollable).then(|| versions(theme, state, tags));
+            blocks.push(section(
+                theme,
+                filter.id,
+                message(filter.label),
+                &rows,
+                open,
+                more,
+                panel,
+            ));
         }
     }
     let count = blocks.len();
@@ -1446,7 +1480,10 @@ fn section<'a>(
                 // section's options where the capture has them.
                 .line_height(iced::Pixels(24.0))
                 .font(semibold())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_CONTRAST,
+                ))),
         )
         .push(Space::with_width(Length::Fill))
         .push(icon::icon(
@@ -1479,17 +1516,19 @@ fn section<'a>(
         // `mt-2 mb-3` on the content and `ml-2 mr-3` on the panel inside it -- eight on
         // the left and twelve on the right, which is what puts an option's own
         // `px-2` at the reference's measured x 1010 and its label at 1018.
-        body = body.push(
-            container(inner)
-                .width(Length::Fill)
-                .padding(Padding { top: 8.0, right: 12.0, bottom: 12.0, left: 8.0 }),
-        );
+        body = body.push(container(inner).width(Length::Fill).padding(Padding {
+            top: 8.0,
+            right: 12.0,
+            bottom: 12.0,
+            left: 8.0,
+        }));
     }
-    mouse_area(
-        container(body)
-            .width(Length::Fill)
-            .padding(Padding { top: 12.0, right: 12.0, bottom: 12.0, left: 12.0 }),
-    )
+    mouse_area(container(body).width(Length::Fill).padding(Padding {
+        top: 12.0,
+        right: 12.0,
+        bottom: 12.0,
+        left: 12.0,
+    }))
     .on_release(Message::Section(id.to_string()))
     .into()
 }
@@ -1509,14 +1548,26 @@ fn show_more<'a>(theme: Gen, filter: &str, expanded: bool) -> Element<'a, Messag
     } else {
         Key::SearchFilterOptionShowMore
     };
-    let ink = if hover > 0.0 { INK_CONTRAST } else { INK_SECONDARY };
+    let ink = if hover > 0.0 {
+        INK_CONTRAST
+    } else {
+        INK_SECONDARY
+    };
     let line = row![]
         .align_items(Alignment::Center)
         .width(Length::Fill)
-        .push(icon::icon(chevron(expanded), OPTION_CHECK, theme_gen::ink(theme, ink)))
-        .push(text(message(label)).size(14.0).line_height(iced::Pixels(20.0)).font(semibold()).style(
-            iced::theme::Text::Color(theme_gen::ink(theme, ink)),
-        ));
+        .push(icon::icon(
+            chevron(expanded),
+            OPTION_CHECK,
+            theme_gen::ink(theme, ink),
+        ))
+        .push(
+            text(message(label))
+                .size(14.0)
+                .line_height(iced::Pixels(20.0))
+                .font(semibold())
+                .style(iced::theme::Text::Color(theme_gen::ink(theme, ink))),
+        );
     mouse_area(container(line).width(Length::Fill).padding(Padding {
         top: 4.0,
         right: 8.0,
@@ -1591,14 +1642,22 @@ fn versions<'a>(
                 .size(14.0)
                 .line_height(iced::Pixels(20.0))
                 .font(medium())
-                .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
+                .style(iced::theme::Text::Color(theme_gen::ink(
+                    theme,
+                    INK_SECONDARY,
+                ))),
         );
     crate::scroll::region(
         "discover:versions",
         column![]
             .spacing(8.0)
             .width(Length::Fill)
-            .push(container(box_row).padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 }))
+            .push(container(box_row).padding(Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 0.0,
+                left: 8.0,
+            }))
             .push(ui::input_sized(
                 theme,
                 ui::InputSize::Small,
@@ -1612,7 +1671,12 @@ fn versions<'a>(
                     .height(Length::Fixed(VERSIONS_PANEL))
                     // `mr-3` on every option in a scrollable section: the room
                     // the panel's own scrollbar takes.
-                    .padding(Padding { top: 0.0, right: 12.0, bottom: 0.0, left: 0.0 }),
+                    .padding(Padding {
+                        top: 0.0,
+                        right: 12.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                    }),
             ),
         Message::Wheel,
     )
@@ -1684,7 +1748,9 @@ fn category_rows(state: &State, header: &str, options: &[&palantir_net::Category
             id: category.name.clone(),
             label: locale::category_label(&category.name),
             chosen: state.categories.contains(&category.name),
-            excluded: state.excluded.contains(&(filter.clone(), category.name.clone())),
+            excluded: state
+                .excluded
+                .contains(&(filter.clone(), category.name.clone())),
             excludes: true,
             press: Message::Category(category.name.clone()),
             exclude: Message::Exclude {
@@ -1861,25 +1927,53 @@ const OPEN_SOURCE: &str = "open_source";
 /// the same `disclosure_types` field, and the row's third press is a disclosure
 /// chevron that has no place in a row this port draws with two presses at most.
 const DISCLOSURES: &[(&str, Key, &[ProjectType])] = &[
-    ("ai_content", Key::SearchFilterTypeAdvancedDisclosureAiContent, ALL_TABS),
-    ("ai_functionality", Key::SearchFilterTypeAdvancedDisclosureAiFunctionality, ALL_TABS),
-    ("advertisements", Key::SearchFilterTypeAdvancedDisclosureAdvertisements, ALL_TABS),
-    ("epilepsy_triggers", Key::SearchFilterTypeAdvancedDisclosureEpilepsyTriggers, ALL_TABS),
+    (
+        "ai_content",
+        Key::SearchFilterTypeAdvancedDisclosureAiContent,
+        ALL_TABS,
+    ),
+    (
+        "ai_functionality",
+        Key::SearchFilterTypeAdvancedDisclosureAiFunctionality,
+        ALL_TABS,
+    ),
+    (
+        "advertisements",
+        Key::SearchFilterTypeAdvancedDisclosureAdvertisements,
+        ALL_TABS,
+    ),
+    (
+        "epilepsy_triggers",
+        Key::SearchFilterTypeAdvancedDisclosureEpilepsyTriggers,
+        ALL_TABS,
+    ),
     // `['mod', 'plugin', 'modpack']`.
-    ("system_interactions", Key::SearchFilterTypeAdvancedDisclosureSystemInteractions, &[
-        ProjectType::Mod,
-        ProjectType::Plugin,
-        ProjectType::Modpack,
-    ]),
+    (
+        "system_interactions",
+        Key::SearchFilterTypeAdvancedDisclosureSystemInteractions,
+        &[ProjectType::Mod, ProjectType::Plugin, ProjectType::Modpack],
+    ),
     // `['mod', 'plugin', 'modpack', 'server']`.
-    ("telemetry", Key::SearchFilterTypeAdvancedDisclosureTelemetry, &[
-        ProjectType::Mod,
-        ProjectType::Plugin,
-        ProjectType::Modpack,
-        ProjectType::Server,
-    ]),
-    ("paid_features", Key::SearchFilterTypeAdvancedDisclosurePaidFeatures, ALL_TABS),
-    ("archived", Key::SearchFilterTypeAdvancedDisclosureArchived, ALL_TABS),
+    (
+        "telemetry",
+        Key::SearchFilterTypeAdvancedDisclosureTelemetry,
+        &[
+            ProjectType::Mod,
+            ProjectType::Plugin,
+            ProjectType::Modpack,
+            ProjectType::Server,
+        ],
+    ),
+    (
+        "paid_features",
+        Key::SearchFilterTypeAdvancedDisclosurePaidFeatures,
+        ALL_TABS,
+    ),
+    (
+        "archived",
+        Key::SearchFilterTypeAdvancedDisclosureArchived,
+        ALL_TABS,
+    ),
 ];
 
 /// `ALL_CONTENT_PROJECT_TYPES`, which is what seven of the nine disclosures
@@ -1961,8 +2055,10 @@ impl Filter {
 /// order, so sorting by the negated key keeps it where the numbers tie -- which
 /// is a stable sort, and what the reference's is as well.
 fn filters_for(kind: ProjectType) -> Vec<&'static Filter> {
-    let mut filters: Vec<&Filter> =
-        SIDEBAR_FILTERS.iter().filter(|filter| filter.kinds.contains(&kind)).collect();
+    let mut filters: Vec<&Filter> = SIDEBAR_FILTERS
+        .iter()
+        .filter(|filter| filter.kinds.contains(&kind))
+        .collect();
     filters.sort_by_key(|filter| -filter.ordering(kind));
     filters
 }
@@ -1989,7 +2085,10 @@ fn filter_rows(
                 // for this filter, so its rows have no second press at all.
                 excludes: false,
                 press: press("client"),
-                exclude: Message::Filter { filter: ENVIRONMENT.to_string(), option: "client".to_string() },
+                exclude: Message::Filter {
+                    filter: ENVIRONMENT.to_string(),
+                    option: "client".to_string(),
+                },
             },
             Row {
                 id: "server".to_string(),
@@ -1998,7 +2097,10 @@ fn filter_rows(
                 excluded: state.is_excluded(ENVIRONMENT, "server"),
                 excludes: false,
                 press: press("server"),
-                exclude: Message::Filter { filter: ENVIRONMENT.to_string(), option: "server".to_string() },
+                exclude: Message::Filter {
+                    filter: ENVIRONMENT.to_string(),
+                    option: "server".to_string(),
+                },
             },
         ],
         LICENSE => vec![Row {
@@ -2008,7 +2110,10 @@ fn filter_rows(
             excluded: state.is_excluded(LICENSE, OPEN_SOURCE),
             excludes: true,
             press: press(OPEN_SOURCE),
-            exclude: Message::Exclude { filter: LICENSE.to_string(), option: OPEN_SOURCE.to_string() },
+            exclude: Message::Exclude {
+                filter: LICENSE.to_string(),
+                option: OPEN_SOURCE.to_string(),
+            },
         }],
         // `game_version` has no rows here: its options go in the panel, which
         // draws them itself because it is the only section with a search field,
@@ -2080,11 +2185,7 @@ fn filter_rows(
 /// offered on the mod tab by the plain narrowing and not by the reference's.
 /// The extra two clauses are here rather than in `palantir-net` because they are
 /// this filter's arithmetic and not the tag document's.
-fn loaders_of(
-    filter: &str,
-    kind: ProjectType,
-    tags: &palantir_net::Tags,
-) -> Vec<String> {
+fn loaders_of(filter: &str, kind: ProjectType, tags: &palantir_net::Tags) -> Vec<String> {
     tags.loaders_for(kind.token())
         .into_iter()
         .filter(|loader| {
@@ -2122,15 +2223,18 @@ fn visible_rows(filter: &Filter, state: &State, rows: Vec<Row>) -> Vec<Row> {
             .cloned()
             .collect()
     };
-    let (mut defaults, mut rest): (Vec<Row>, Vec<Row>) =
-        shown.into_iter().partition(|row| filter.defaults.contains(&row.id.as_str()));
+    let (mut defaults, mut rest): (Vec<Row>, Vec<Row>) = shown
+        .into_iter()
+        .partition(|row| filter.defaults.contains(&row.id.as_str()));
     defaults.append(&mut rest);
     defaults
 }
 
 /// The reference's own message for `key`, as the panel shows it.
 fn message(key: Key) -> String {
-    locale::lookup(key).unwrap_or_else(|| key.message()).to_string()
+    locale::lookup(key)
+        .unwrap_or_else(|| key.message())
+        .to_string()
 }
 
 /// One option row: `SearchFilterOption`'s own button.
@@ -2196,7 +2300,11 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     // -- the fill it also names (`hover:bg-button-bg`) is a background and this
     // row has none to tint, which the section's own comment says.
     let lifted = hover > 0.0;
-    let ink = if row.chosen || lifted { INK_CONTRAST } else { INK_SECONDARY };
+    let ink = if row.chosen || lifted {
+        INK_CONTRAST
+    } else {
+        INK_SECONDARY
+    };
     let label = text(row.label.clone())
         .size(14.0)
         // `text-sm`'s own line, `1.25rem`: twenty pixels, and the reason the
@@ -2209,14 +2317,26 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
         // `<BanIcon v-if="excluded || primaryAction === 'exclude'">`, and it
         // takes the button's own ink, which on the excluded arm is `text-contrast`
         // over `bg-highlight-red`.
-        Some(icon::icon(Glyph::Ban, OPTION_CHECK, theme_gen::ink(theme, INK_CONTRAST)))
+        Some(icon::icon(
+            Glyph::Ban,
+            OPTION_CHECK,
+            theme_gen::ink(theme, INK_CONTRAST),
+        ))
     } else if row.chosen {
         // The chosen arm is `bg-brand-highlight text-contrast`, so the check
         // inherits that ink -- not the section ink it was drawn in before.
-        Some(icon::icon(Glyph::Check, OPTION_CHECK, theme_gen::ink(theme, INK_CONTRAST)))
+        Some(icon::icon(
+            Glyph::Check,
+            OPTION_CHECK,
+            theme_gen::ink(theme, INK_CONTRAST),
+        ))
     } else {
         lifted.then(|| {
-            icon::icon(Glyph::Check, OPTION_CHECK, theme_gen::ink(theme, INK_SECONDARY))
+            icon::icon(
+                Glyph::Check,
+                OPTION_CHECK,
+                theme_gen::ink(theme, INK_SECONDARY),
+            )
         })
     };
     let mut line = row![]
@@ -2246,12 +2366,20 @@ fn option_row<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
         line = line.push(exclude_button(theme, row));
     }
     let background = row_fill(row.chosen, row.excluded, hover).map(|(ink, alpha)| {
-        Background::Color(Color { a: alpha, ..theme_gen::ink(theme, ink) })
+        Background::Color(Color {
+            a: alpha,
+            ..theme_gen::ink(theme, ink)
+        })
     });
     mouse_area(
         container(line)
             .width(Length::Fill)
-            .padding(Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 0.0 })
+            .padding(Padding {
+                top: 4.0,
+                right: 8.0,
+                bottom: 4.0,
+                left: 0.0,
+            })
             .style(move |_t: &iced::Theme| container::Appearance {
                 background,
                 border: Border {
@@ -2291,8 +2419,12 @@ fn exclude_button<'a>(theme: Gen, row: &Row) -> Element<'a, Message> {
     let ink = if hover > 0.0 { Ink::Red } else { INK_SECONDARY };
     let ban = icon::icon(Glyph::Ban, OPTION_CHECK, theme_gen::ink(theme, ink));
     mouse_area(
-        container(row![].align_items(Alignment::Center).push(ban))
-            .padding(Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 8.0 }),
+        container(row![].align_items(Alignment::Center).push(ban)).padding(Padding {
+            top: 4.0,
+            right: 8.0,
+            bottom: 4.0,
+            left: 8.0,
+        }),
     )
     .on_enter(Message::hover_with(key, true, 1.0))
     .on_exit(Message::hover_with(key, false, 1.0))
@@ -2349,7 +2481,11 @@ fn none_of(field: &str, values: &[&str]) -> Option<String> {
 /// The difference is a character in a string Modrinth reads, not a different
 /// question.
 fn quoted(values: &[&str]) -> String {
-    values.iter().map(|value| format!("\"{value}\"")).collect::<Vec<String>>().join(", ")
+    values
+        .iter()
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 /// The environment values that satisfy the chosen pair, as `search.ts`'s
@@ -2429,7 +2565,12 @@ fn tabs<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         .map(|kind| (kind.label().to_string(), *kind == state.project_type))
         .collect();
     ui::tabs(theme, &TAB_KEYS, &labels, move |index| {
-        Message::ProjectType(ProjectType::TABS.get(index).copied().unwrap_or(ProjectType::Modpack))
+        Message::ProjectType(
+            ProjectType::TABS
+                .get(index)
+                .copied()
+                .unwrap_or(ProjectType::Modpack),
+        )
     })
 }
 
@@ -2515,10 +2656,13 @@ fn menu<'a>(theme: Gen, state: &'a State) -> Option<Element<'a, Message>> {
         ),
     };
     Some(
-        row![Space::with_width(offset), ui::select_menu(theme, namespace, width, &options, &chosen)]
-            .align_items(Alignment::Start)
-            .width(Length::Fill)
-            .into(),
+        row![
+            Space::with_width(offset),
+            ui::select_menu(theme, namespace, width, &options, &chosen)
+        ]
+        .align_items(Alignment::Start)
+        .width(Length::Fill)
+        .into(),
     )
 }
 
@@ -2594,8 +2738,14 @@ fn loading<'a>(theme: Gen) -> Element<'a, Message> {
         .size(16.0)
         // `font-bold` is weight 700, which is `Weight::Bold`; the kit's
         // `semibold` is 600.
-        .font(Font { weight: iced::font::Weight::Bold, ..semibold() })
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+        .font(Font {
+            weight: iced::font::Weight::Bold,
+            ..semibold()
+        })
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )));
     let mut blocks = column![]
         .spacing(ROW_GAP)
         .align_items(Alignment::Center)
@@ -2805,14 +2955,21 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
     // reference's 16px root) and `ProjectCardAuthor` (`text-secondary font-normal`,
     // which is the *tertiary* token -- see `crate::style`), eight pixels apart
     // (`gap-2`).
-    let title = text(hit.title.clone())
-        .size(20.0)
-        .font(semibold())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)));
+    let title =
+        text(hit.title.clone())
+            .size(20.0)
+            .font(semibold())
+            .style(iced::theme::Text::Color(theme_gen::ink(
+                theme,
+                INK_CONTRAST,
+            )));
     let author = text(format!("by {}", hit.author))
         .size(16.0)
         .font(regular())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)));
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_SECONDARY,
+        )));
     // `project-card-summary m-0 font-normal`: the reference's root 16, normal
     // weight, the default ink, and clamped to two lines in CSS. The clamp is not
     // drawn: iced wraps a paragraph and has no line limit, so a very long summary
@@ -2823,9 +2980,12 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_DEFAULT)));
     // `ProjectCardStats`: the two counts side by side, twelve pixels apart
     // (`gap-3`), right-aligned because the grid's stats column is `items-end`.
-    let stats = row![stat(theme, Glyph::Download, hit.downloads), stat(theme, Glyph::Heart, hit.follows)]
-        .spacing(CARD_COLUMN_GAP)
-        .align_items(Alignment::Center);
+    let stats = row![
+        stat(theme, Glyph::Download, hit.downloads),
+        stat(theme, Glyph::Heart, hit.follows)
+    ]
+    .spacing(CARD_COLUMN_GAP)
+    .align_items(Alignment::Center);
 
     // `ProjectCardTags`: `flex items-center gap-2` inside a `gap-3` row. The
     // reference lists a hit's own `display_categories` then its loaders, of which
@@ -2848,7 +3008,11 @@ pub fn hit_card<'a>(theme: Gen, hit: &Hit, picture: Option<&Icon>) -> Element<'a
         .spacing(CARD_ROW_GAP)
         .width(Length::Fill)
         .height(Length::Fixed(CARD_INNER))
-        .push(row![title, author].spacing(ROW_GAP).align_items(Alignment::Center))
+        .push(
+            row![title, author]
+                .spacing(ROW_GAP)
+                .align_items(Alignment::Center),
+        )
         .push(summary)
         .push(Space::with_height(Length::Fill))
         .push(tags);
@@ -2907,7 +3071,11 @@ mod tests {
     /// results; a test that only wants the second has to walk the first out of
     /// the way, and this is that walk.
     fn opening_search(state: &mut State) -> Asked {
-        assert_eq!(state.opening(), Some(Ask::Tags), "the tag list is asked for first");
+        assert_eq!(
+            state.opening(),
+            Some(Ask::Tags),
+            "the tag list is asked for first"
+        );
         let Some(Ask::Search(asked)) = state.opening() else {
             panic!("and then the search");
         };
@@ -2932,11 +3100,13 @@ mod tests {
 
     /// A PNG of one colour, in memory, the way `avatar.rs`'s tests make one.
     fn picture(side: u32) -> Vec<u8> {
-        let square =
-            ::image::RgbaImage::from_pixel(side, side, ::image::Rgba([10, 20, 30, 255]));
+        let square = ::image::RgbaImage::from_pixel(side, side, ::image::Rgba([10, 20, 30, 255]));
         let mut bytes = Vec::new();
         ::image::DynamicImage::ImageRgba8(square)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                ::image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -2959,10 +3129,19 @@ mod tests {
         let labels: Vec<&str> = Sort::ALL.iter().map(|sort| sort.label()).collect();
         assert_eq!(
             labels,
-            vec!["Relevance", "Downloads", "Followers", "Date published", "Date updated"]
+            vec![
+                "Relevance",
+                "Downloads",
+                "Followers",
+                "Date published",
+                "Date updated"
+            ]
         );
         let tokens: Vec<&str> = Sort::ALL.iter().map(|sort| sort.token()).collect();
-        assert_eq!(tokens, vec!["relevance", "downloads", "follows", "newest", "updated"]);
+        assert_eq!(
+            tokens,
+            vec!["relevance", "downloads", "follows", "newest", "updated"]
+        );
     }
 
     #[test]
@@ -2972,13 +3151,23 @@ mod tests {
         // panel is one element, so two triggers never have one open each.
         let mut state = state_of(ProjectType::Mod);
         assert_eq!(state.menu, None, "a fresh page draws no panel");
-        assert!(state.update(Message::Toggle(Menu::Sort)).is_none(), "opening asks for nothing");
+        assert!(
+            state.update(Message::Toggle(Menu::Sort)).is_none(),
+            "opening asks for nothing"
+        );
         assert_eq!(state.menu, Some(Menu::Sort));
         assert!(state.update(Message::Toggle(Menu::Sort)).is_none());
-        assert_eq!(state.menu, None, "the second press is how a reader backs out");
+        assert_eq!(
+            state.menu, None,
+            "the second press is how a reader backs out"
+        );
         state.update(Message::Toggle(Menu::Sort));
         state.update(Message::Toggle(Menu::View));
-        assert_eq!(state.menu, Some(Menu::View), "the other trigger swaps rather than stacks");
+        assert_eq!(
+            state.menu,
+            Some(Menu::View),
+            "the other trigger swaps rather than stacks"
+        );
         // The panel's chosen row is the control's own current value, so the
         // label the trigger reads and the row the panel paints green are the
         // same string.
@@ -2987,7 +3176,10 @@ mod tests {
         // Choosing is a press outside the panel's own two answers, so it shuts
         // the panel as well as changing the control -- which is what
         // `onClickOutside` did for a click that landed on an option.
-        assert!(state.update(Message::Sort(Sort::Downloads)).is_some(), "and it re-asks");
+        assert!(
+            state.update(Message::Sort(Sort::Downloads)).is_some(),
+            "and it re-asks"
+        );
         assert_eq!(state.menu, None);
         assert_eq!(state.sort.label(), "Downloads");
         state.update(Message::Toggle(Menu::View));
@@ -3014,10 +3206,17 @@ mod tests {
         // is never the page's own), so it is dropped as well as leaving the
         // panel open.
         for message in [
-            Message::Hover { key: "discover:sort", over: true, hover: None },
+            Message::Hover {
+                key: "discover:sort",
+                over: true,
+                hover: None,
+            },
             Message::Scrolled(crate::scroll::Geometry::default()),
             Message::VersionsScrolled(crate::scroll::Geometry::default()),
-            Message::Found { round: 0, result: Ok(Vec::new()) },
+            Message::Found {
+                round: 0,
+                result: Ok(Vec::new()),
+            },
         ] {
             state.menu = Some(Menu::Sort);
             state.update(message);
@@ -3120,7 +3319,11 @@ mod tests {
         // Two requests, in the order the page can draw something in.
         assert_eq!(state.opening(), Some(Ask::Tags));
         assert_eq!(state.tags, Load::Loading);
-        assert_eq!(state.results, Load::Idle, "and nothing has been searched for yet");
+        assert_eq!(
+            state.results,
+            Load::Idle,
+            "and nothing has been searched for yet"
+        );
 
         let tags = palantir_net::Tags {
             categories: vec![palantir_net::CategoryTag {
@@ -3130,7 +3333,9 @@ mod tests {
             }],
             ..palantir_net::Tags::default()
         };
-        state.update(Message::Tags { result: Ok(tags.clone()) });
+        state.update(Message::Tags {
+            result: Ok(tags.clone()),
+        });
         assert_eq!(state.tags, Load::Ready(tags));
         let Some(Ask::Search(first)) = state.opening() else {
             panic!("and then the search");
@@ -3140,22 +3345,36 @@ mod tests {
         // A second search does not ask for it again: the document changes when
         // Modrinth ships a release, not when the reader types.
         state.update(Message::Query("sodium".to_string()));
-        assert_eq!(state.tags, Load::Ready(state.tags.ready().expect("kept").clone()));
+        assert_eq!(
+            state.tags,
+            Load::Ready(state.tags.ready().expect("kept").clone())
+        );
 
         // A store with no engine answers with a reason, which is a section that
         // knows it has nothing rather than one that drew itself empty.
         let mut bare = State::new(ProjectType::Modpack);
-        bare.update(Message::Tags { result: Err("no engine".to_string()) });
+        bare.update(Message::Tags {
+            result: Err("no engine".to_string()),
+        });
         assert_eq!(bare.tags, Load::Failed("no engine".to_string()));
         let mut empty = State::new(ProjectType::Modpack);
-        empty.update(Message::Tags { result: Ok(palantir_net::Tags::default()) });
-        assert_eq!(empty.tags, Load::Empty, "a tag list with nothing in it is Empty");
+        empty.update(Message::Tags {
+            result: Ok(palantir_net::Tags::default()),
+        });
+        assert_eq!(
+            empty.tags,
+            Load::Empty,
+            "a tag list with nothing in it is Empty"
+        );
     }
 
     #[test]
     fn a_chosen_category_is_one_and_ed_part_of_the_request() {
         let mut state = State::new(ProjectType::Modpack);
-        assert!(state.category_parts().is_empty(), "nothing chosen is no facet");
+        assert!(
+            state.category_parts().is_empty(),
+            "nothing chosen is no facet"
+        );
 
         let Some(Ask::Search(first)) = state.update(Message::Category("technology".to_string()))
         else {
@@ -3170,8 +3389,7 @@ mod tests {
         // Two chosen categories *both* hold, so they are joined into the one
         // facet string -- two groups would be an "or", which is a different
         // question.
-        let Some(Ask::Search(second)) =
-            state.update(Message::Category("adventure".to_string()))
+        let Some(Ask::Search(second)) = state.update(Message::Category("adventure".to_string()))
         else {
             panic!("the second choice asks");
         };
@@ -3181,14 +3399,20 @@ mod tests {
             "and the parts are joined with AND: {}",
             second.query.facets[0]
         );
-        assert_eq!(state.page, 1, "a different set of results starts at the first page");
+        assert_eq!(
+            state.page, 1,
+            "a different set of results starts at the first page"
+        );
 
         // Unchoosing asks too, and the facet goes with it.
         let Some(Ask::Search(third)) = state.update(Message::Category("adventure".to_string()))
         else {
             panic!("unchoosing asks");
         };
-        assert_eq!(third.query.facets, vec![r#"categories = "technology""#.to_string()]);
+        assert_eq!(
+            third.query.facets,
+            vec![r#"categories = "technology""#.to_string()]
+        );
 
         // The order the rows were pressed in cannot change the request, or the
         // engine's cache would hold two entries for one question.
@@ -3202,9 +3426,15 @@ mod tests {
         );
 
         // And opening a section is not a change to the request at all.
-        assert_eq!(state.update(Message::Section("technical".to_string())), None);
+        assert_eq!(
+            state.update(Message::Section("technical".to_string())),
+            None
+        );
         assert!(state.touched.contains("technical"));
-        assert_eq!(state.request().facets, vec![r#"categories = "technology""#.to_string()]);
+        assert_eq!(
+            state.request().facets,
+            vec![r#"categories = "technology""#.to_string()]
+        );
     }
 
     #[test]
@@ -3232,7 +3462,10 @@ mod tests {
                 ..palantir_net::Tags::default()
             }),
         });
-        assert!(state.touched.is_empty(), "every category section starts open");
+        assert!(
+            state.touched.is_empty(),
+            "every category section starts open"
+        );
         for theme in Gen::ALL {
             drop(sidebar(*theme, &state));
         }
@@ -3250,13 +3483,22 @@ mod tests {
         // *flag*, because which projects are hidden is the shell's to read (they
         // are the instances it holds).
         let mut state = State::new(ProjectType::Modpack);
-        assert!(!state.hide_installed, "the reference opens on the flag's default");
+        assert!(
+            !state.hide_installed,
+            "the reference opens on the flag's default"
+        );
         let Some(Ask::Search(asked)) = state.update(Message::HideInstalled(true)) else {
             panic!("the switch asks");
         };
         assert!(asked.hide_installed);
-        assert!(asked.query.facets.is_empty(), "the page does not name the projects");
-        assert_eq!(state.page, 1, "a different set of results starts at the first page");
+        assert!(
+            asked.query.facets.is_empty(),
+            "the page does not name the projects"
+        );
+        assert_eq!(
+            state.page, 1,
+            "a different set of results starts at the first page"
+        );
 
         // Pressing it again is not a change.
         assert_eq!(state.update(Message::HideInstalled(true)), None);
@@ -3278,7 +3520,10 @@ mod tests {
         // follows, so a panel of one block has no rule at all and a panel of
         // three has two -- not three, which is what drawing a rule after each
         // block leaves on screen.
-        assert!(!rule_under(0, 1), "the only block in the panel has nothing under it");
+        assert!(
+            !rule_under(0, 1),
+            "the only block in the panel has nothing under it"
+        );
         assert!(rule_under(0, 3), "the first of three does");
         assert!(rule_under(1, 3), "and the second");
         assert!(!rule_under(2, 3), "and not the last");
@@ -3307,7 +3552,10 @@ mod tests {
         assert!(alternatives(RESOLUTIONS_HEADER));
         assert!(!alternatives("technical"));
         assert!(!alternatives("gameplay"));
-        assert!(!alternatives(""), "and a header nobody knows is the default");
+        assert!(
+            !alternatives(""),
+            "and a header nobody knows is the default"
+        );
 
         let mut state = State::new(ProjectType::ResourcePack);
         state.update(Message::Tags {
@@ -3336,7 +3584,10 @@ mod tests {
         let Some(Ask::Search(one)) = state.update(Message::Category("1080p".to_string())) else {
             panic!("choosing asks");
         };
-        assert_eq!(one.query.facets, vec![r#"categories = "1080p""#.to_string()]);
+        assert_eq!(
+            one.query.facets,
+            vec![r#"categories = "1080p""#.to_string()]
+        );
 
         // A second resolution is one more way to answer the same question, so it
         // joins the first into a single `IN` part -- asking for a pack that is
@@ -3391,7 +3642,10 @@ mod tests {
             } else {
                 vec![ENVIRONMENT, LICENSE]
             };
-            assert_eq!(opens, expected, "environment and license open, and only those ({kind:?})");
+            assert_eq!(
+                opens, expected,
+                "environment and license open, and only those ({kind:?})"
+            );
             // The first section is `search.ts`'s first for the tab, except on the
             // mod tab, where `mod_loader`'s `ordering: 1` puts it above the rest --
             // which is what the one non-zero ordering in the table is for.
@@ -3414,12 +3668,21 @@ mod tests {
         // way, and a second press is back where it started.
         let mut state = State::new(ProjectType::Modpack);
         assert!(state.is_open(LICENSE, true), "license starts open");
-        assert!(!state.is_open(MODPACK_LOADER, false), "the loaders start shut");
-        assert_eq!(state.update(Message::Section(MODPACK_LOADER.to_string())), None,
-            "and opening one is not a request");
+        assert!(
+            !state.is_open(MODPACK_LOADER, false),
+            "the loaders start shut"
+        );
+        assert_eq!(
+            state.update(Message::Section(MODPACK_LOADER.to_string())),
+            None,
+            "and opening one is not a request"
+        );
         assert!(state.is_open(MODPACK_LOADER, false));
         state.update(Message::Section(MODPACK_LOADER.to_string()));
-        assert!(!state.is_open(MODPACK_LOADER, false), "and a second press shuts it");
+        assert!(
+            !state.is_open(MODPACK_LOADER, false),
+            "and a second press shuts it"
+        );
 
         // The tag document's own loaders are the rows of the modpack tab's
         // section, and the ones it does not offer are not.
@@ -3454,7 +3717,9 @@ mod tests {
             .expect("the section is in the table");
         let rows = filter_rows(&state, loaders, ProjectType::Modpack, tags);
         assert_eq!(
-            rows.iter().map(|row| row.id.as_str()).collect::<Vec<&str>>(),
+            rows.iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<&str>>(),
             vec!["fabric", "quilt"],
             "and the API's own order, with no loader the tab does not offer"
         );
@@ -3519,8 +3784,10 @@ mod tests {
         });
         assert_eq!(
             mixed.request().facets,
-            vec!["categories = \"technology\" AND open_source = true AND categories = \"quilt\""
-            .to_string()],
+            vec![
+                "categories = \"technology\" AND open_source = true AND categories = \"quilt\""
+                    .to_string()
+            ],
             "and the parts are in `newFilters`' own order"
         );
 
@@ -3583,7 +3850,10 @@ mod tests {
         assert_eq!(state.results, Load::Loading);
         // Asking is once: a page that has asked does not ask again on every
         // message the shell handles.
-        assert!(state.opening().is_none(), "asked once, and the refresh button is what asks again");
+        assert!(
+            state.opening().is_none(),
+            "asked once, and the refresh button is what asks again"
+        );
     }
 
     #[test]
@@ -3603,7 +3873,10 @@ mod tests {
         // has a 636-pixel pill -- and put the pill's own height wrong twice over,
         // since the band and the rule under it were not the pill's border at all.
         assert_eq!(INSET, 24.0, "the page's own inset, left of the pill");
-        assert_eq!(STRIP_ABOVE, 24.0, "page background above the pill, hairline row included");
+        assert_eq!(
+            STRIP_ABOVE, 24.0,
+            "page background above the pill, hairline row included"
+        );
         assert_eq!(STRIP_UNDER, 8.0, "and the gap its shadow fades into");
         // The pill keeps its own frame and its own shadow, which are what the
         // reference draws around the tabs: `card-shadow border border-solid
@@ -3628,7 +3901,11 @@ mod tests {
         // And the row that is *not* the large one, so the distinction is a
         // distinction rather than a single number asserted twice.
         assert_eq!(ui::InputSize::Standard.height(), 36.0);
-        assert_eq!(ui::CONTROL, 40.0, "what this drew before the size was read off");
+        assert_eq!(
+            ui::CONTROL,
+            40.0,
+            "what this drew before the size was read off"
+        );
     }
 
     #[test]
@@ -3641,7 +3918,10 @@ mod tests {
         // came out at y=238 instead of y=230, so both were low by four and the
         // eight was invisible until the numbers were written down.
         assert_eq!(SEARCH_TO_CONTROLS, 8.0, "field to trigger, on the capture");
-        assert_eq!(GAP, 12.0, "trigger to results, which is this plus the `mt-1`");
+        assert_eq!(
+            GAP, 12.0,
+            "trigger to results, which is this plus the `mt-1`"
+        );
         assert_ne!(
             SEARCH_TO_CONTROLS, GAP,
             "one gap for the whole column is what put the trigger four rows low"
@@ -3660,11 +3940,20 @@ mod tests {
         let trigger_top = field_bottom + 1.0 + SEARCH_TO_CONTROLS;
         let trigger_bottom = trigger_top + ui::TRIGGER_HEIGHT - 1.0;
         let results_top = trigger_bottom + 1.0 + GAP;
-        assert_eq!(field_top, 126.0, "the capture puts the field's border on y=126");
+        assert_eq!(
+            field_top, 126.0,
+            "the capture puts the field's border on y=126"
+        );
         assert_eq!(field_bottom, 173.0, "and its last row on y=173");
-        assert_eq!(trigger_top, 182.0, "the capture puts the trigger's border on y=182");
+        assert_eq!(
+            trigger_top, 182.0,
+            "the capture puts the trigger's border on y=182"
+        );
         assert_eq!(trigger_bottom, 217.0, "and its last row on y=217");
-        assert_eq!(results_top, 230.0, "the capture puts the results' rule on y=230");
+        assert_eq!(
+            results_top, 230.0,
+            "the capture puts the results' rule on y=230"
+        );
     }
 
     #[test]
@@ -3681,23 +3970,35 @@ mod tests {
         assert_eq!(request.project_type.as_deref(), Some("shader"));
         assert_eq!(request.index.as_deref(), Some("updated"));
         assert_eq!(request.limit, 50);
-        assert_eq!(request.offset, 100, "the third page of fifty is a hundred rows in");
+        assert_eq!(
+            request.offset, 100,
+            "the third page of fifty is a hundred rows in"
+        );
     }
 
     #[test]
     fn an_answer_lands_on_the_question_it_was_asked() {
         let mut state = State::new(ProjectType::Modpack);
         let first = opening_search(&mut state);
-        state.update(Message::Found { round: first.round, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::Found {
+            round: first.round,
+            result: Ok(vec![hit("Sodium")]),
+        });
         assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
 
         // An empty answer is `Empty` -- the reference's own "no results" -- and
         // not an empty list.
-        state.update(Message::Found { round: first.round, result: Ok(Vec::new()) });
+        state.update(Message::Found {
+            round: first.round,
+            result: Ok(Vec::new()),
+        });
         assert_eq!(state.results, Load::Empty);
 
         // A failure carries the reason it failed.
-        state.update(Message::Found { round: first.round, result: Err("404 for the search".into()) });
+        state.update(Message::Found {
+            round: first.round,
+            result: Err("404 for the search".into()),
+        });
         assert_eq!(state.results, Load::Failed("404 for the search".into()));
 
         // A slow answer to a question the page has replaced is dropped rather than
@@ -3707,9 +4008,19 @@ mod tests {
             panic!("the message asks again");
         };
         assert!(second.round > first.round);
-        state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) });
-        assert_eq!(state.results, Load::Loading, "the stale answer changed nothing");
-        state.update(Message::Found { round: second.round, result: Ok(vec![hit("Fresh")]) });
+        state.update(Message::Found {
+            round: first.round,
+            result: Ok(vec![hit("Stale")]),
+        });
+        assert_eq!(
+            state.results,
+            Load::Loading,
+            "the stale answer changed nothing"
+        );
+        state.update(Message::Found {
+            round: second.round,
+            result: Ok(vec![hit("Fresh")]),
+        });
         assert_eq!(state.results, Load::Ready(vec![hit("Fresh")]));
     }
 
@@ -3719,7 +4030,10 @@ mod tests {
         // the shell asks for the new tab on the way out of the message.
         let mut state = State::new(ProjectType::Modpack);
         opening_search(&mut state);
-        state.update(Message::Found { round: 1, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::Found {
+            round: 1,
+            result: Ok(vec![hit("Sodium")]),
+        });
         // A page change is a request of its own now -- the reference's watcher
         // refreshes on it -- so that is round 2, and the tab change below is 3.
         state.update(Message::Page(4));
@@ -3732,7 +4046,10 @@ mod tests {
         assert_eq!(asked.round, 3);
         assert_eq!(asked.query.project_type.as_deref(), Some("mod"));
         // And the tab already on screen is not a change, so nothing is thrown away.
-        state.update(Message::Found { round: asked.round, result: Ok(vec![hit("Sodium")]) });
+        state.update(Message::Found {
+            round: asked.round,
+            result: Ok(vec![hit("Sodium")]),
+        });
         state.update(Message::ProjectType(ProjectType::Mod));
         assert_eq!(state.results, Load::Ready(vec![hit("Sodium")]));
     }
@@ -3745,19 +4062,34 @@ mod tests {
         state.results = Load::Ready(vec![current]);
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            2, 2, image::Rgba([10, 20, 30, 255]),
-        )).write_to(&mut png, image::ImageOutputFormat::Png).unwrap();
+            2,
+            2,
+            image::Rgba([10, 20, 30, 255]),
+        ))
+        .write_to(&mut png, image::ImageOutputFormat::Png)
+        .unwrap();
         let icon = Icon::of(png.get_ref(), avatar::ICON_SIDE).unwrap();
-        state.update(Message::Icons { arrived: vec![
-            Fetched { url: "https://icons/old.png".into(), icon: icon.clone() },
-            Fetched { url: "https://icons/current.png".into(), icon: icon.clone() },
-        ] });
+        state.update(Message::Icons {
+            arrived: vec![
+                Fetched {
+                    url: "https://icons/old.png".into(),
+                    icon: icon.clone(),
+                },
+                Fetched {
+                    url: "https://icons/current.png".into(),
+                    icon: icon.clone(),
+                },
+            ],
+        });
         assert_eq!(state.icons.len(), 1);
         assert!(state.icons.contains_key("https://icons/current.png"));
         state.results = Load::Loading;
-        state.update(Message::Icons { arrived: vec![
-            Fetched { url: "https://icons/old.png".into(), icon },
-        ] });
+        state.update(Message::Icons {
+            arrived: vec![Fetched {
+                url: "https://icons/old.png".into(),
+                icon,
+            }],
+        });
         assert!(!state.icons.contains_key("https://icons/old.png"));
     }
 
@@ -3786,7 +4118,10 @@ mod tests {
         assert_eq!(card.icon_url, "https://cdn.modrinth.com/icon.png");
         // A hit with no id falls back to the slug, which is the other thing the
         // route accepts.
-        let slug_only = ModrinthSearchHit { project_id: String::new(), ..api };
+        let slug_only = ModrinthSearchHit {
+            project_id: String::new(),
+            ..api
+        };
         assert_eq!(Hit::from_api(&slug_only).id, "sodium");
     }
 
@@ -3814,8 +4149,15 @@ mod tests {
         // that kept no report would draw the same cards however far the reader
         // had scrolled -- which is the failure that looks like a stuck list.
         let mut state = State::new(ProjectType::Modpack);
-        assert_eq!(state.geometry, Geometry::default(), "nothing has reported yet");
-        state.update(Message::Scrolled(Geometry { offset: 10_000.0, view_height: 600.0 }));
+        assert_eq!(
+            state.geometry,
+            Geometry::default(),
+            "nothing has reported yet"
+        );
+        state.update(Message::Scrolled(Geometry {
+            offset: 10_000.0,
+            view_height: 600.0,
+        }));
         assert_eq!(state.geometry.offset, 10_000.0);
 
         // The list begins below the page's head, so its own offset is the
@@ -3834,7 +4176,10 @@ mod tests {
             ((10_000.0 - LIST_TOP) / CARD_ROW).floor() as usize - scroll::OVERSCAN
         );
         let slots = (600.0_f32 / CARD_ROW).ceil() as usize;
-        assert_eq!(window.len(), (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS));
+        assert_eq!(
+            window.len(),
+            (slots + scroll::OVERSCAN * 2).max(scroll::INITIAL_ROWS)
+        );
         assert!(window.end < 100, "{}", window.end);
     }
 
@@ -3844,11 +4189,17 @@ mod tests {
         // scrolled past is the head, not the list, and a window computed from
         // the raw offset would already be a row into a list nobody has reached.
         for offset in [0.0, 90.0, LIST_TOP] {
-            let at = list_at(Geometry { offset, view_height: 600.0 });
+            let at = list_at(Geometry {
+                offset,
+                view_height: 600.0,
+            });
             assert_eq!(at.offset, 0.0, "offset {offset} is still the head");
             assert_eq!(at.view_height, 600.0);
         }
-        let past = list_at(Geometry { offset: LIST_TOP + 500.0, view_height: 600.0 });
+        let past = list_at(Geometry {
+            offset: LIST_TOP + 500.0,
+            view_height: 600.0,
+        });
         assert_eq!(past.offset, 500.0);
     }
 
@@ -3927,8 +4278,14 @@ mod tests {
             state.results = Load::Ready(hits.clone());
             for at in [
                 Geometry::default(),
-                Geometry { offset: 0.0, view_height: 600.0 },
-                Geometry { offset: 200_000.0, view_height: 600.0 },
+                Geometry {
+                    offset: 0.0,
+                    view_height: 600.0,
+                },
+                Geometry {
+                    offset: 200_000.0,
+                    view_height: 600.0,
+                },
             ] {
                 state.update(Message::Scrolled(at));
                 drop(view(*theme, &state, &store));
@@ -3943,11 +4300,22 @@ mod tests {
         // it draws and this kit does not. (`crate::locale`'s own test has the rule's
         // cases; this is the card asking for that rule rather than for a sentence.)
         assert_eq!(locale::compact("en", 12_345), "12.3K");
-        drop(hit_card(Gen::Dark, &Hit { downloads: 0, follows: 0, ..hit("Empty") }, None));
+        drop(hit_card(
+            Gen::Dark,
+            &Hit {
+                downloads: 0,
+                follows: 0,
+                ..hit("Empty")
+            },
+            None,
+        ));
         // And a card with an icon draws it: the handle travels with the hit, and the
         // box is the same size either way.
         let icon = an_icon(SODIUM_ICON);
-        let with_icon = Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium") };
+        let with_icon = Hit {
+            icon_url: SODIUM_ICON.to_string(),
+            ..hit("Sodium")
+        };
         drop(hit_card(Gen::Dark, &with_icon, Some(&icon.icon)));
     }
 
@@ -3956,16 +4324,28 @@ mod tests {
         let mut state = State::new(ProjectType::Modpack);
         let first = opening_search(&mut state);
         let hits = vec![
-            Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium") },
-            Hit { icon_url: LITHIUM_ICON.to_string(), ..hit("Lithium") },
+            Hit {
+                icon_url: SODIUM_ICON.to_string(),
+                ..hit("Sodium")
+            },
+            Hit {
+                icon_url: LITHIUM_ICON.to_string(),
+                ..hit("Lithium")
+            },
             // A project with no icon is not asked for: there is nothing to fetch,
             // and its card draws the empty box the reference's placeholder sits on.
             hit("Phosphor"),
             // The same icon twice in one page is one fetch: a URL names a file.
-            Hit { icon_url: SODIUM_ICON.to_string(), ..hit("Sodium Extra") },
+            Hit {
+                icon_url: SODIUM_ICON.to_string(),
+                ..hit("Sodium Extra")
+            },
         ];
         assert_eq!(
-            state.update(Message::Found { round: first.round, result: Ok(hits.clone()) }),
+            state.update(Message::Found {
+                round: first.round,
+                result: Ok(hits.clone())
+            }),
             Some(Ask::Icons(Icons {
                 urls: vec![SODIUM_ICON.to_string(), LITHIUM_ICON.to_string()],
             }))
@@ -3985,27 +4365,49 @@ mod tests {
         let Some(Ask::Search(again)) = state.update(Message::Search) else {
             panic!("the search is asked again");
         };
-        assert_eq!(state.update(Message::Found { round: again.round, result: Ok(hits) }), None);
-        assert_eq!(state.icons.len(), 2, "an icon already held is not fetched twice");
+        assert_eq!(
+            state.update(Message::Found {
+                round: again.round,
+                result: Ok(hits)
+            }),
+            None
+        );
+        assert_eq!(
+            state.icons.len(),
+            2,
+            "an icon already held is not fetched twice"
+        );
 
         // A different page of results keeps its own icons and drops the rest: what
         // the map holds is what the cards on screen can look up.
         let Some(Ask::Search(third)) = state.update(Message::Search) else {
             panic!("a third search");
         };
-        let fresh = Hit { icon_url: "https://cdn.modrinth.com/new.png".to_string(), ..hit("New") };
+        let fresh = Hit {
+            icon_url: "https://cdn.modrinth.com/new.png".to_string(),
+            ..hit("New")
+        };
         assert_eq!(
-            state.update(Message::Found { round: third.round, result: Ok(vec![fresh]) }),
+            state.update(Message::Found {
+                round: third.round,
+                result: Ok(vec![fresh])
+            }),
             Some(Ask::Icons(Icons {
                 urls: vec!["https://cdn.modrinth.com/new.png".to_string()],
             }))
         );
-        assert!(state.icons.is_empty(), "the icons of the results that are gone went with them");
+        assert!(
+            state.icons.is_empty(),
+            "the icons of the results that are gone went with them"
+        );
 
         // And an answer to a search the page has replaced is dropped whole: it is
         // not asked for icons for results it does not hold.
         assert_eq!(
-            state.update(Message::Found { round: first.round, result: Ok(vec![hit("Stale")]) }),
+            state.update(Message::Found {
+                round: first.round,
+                result: Ok(vec![hit("Stale")])
+            }),
             None
         );
     }
@@ -4018,8 +4420,16 @@ mod tests {
         // `chevron` stands in for -- and what would be lost by drawing one
         // chevron for both states is the reference's own cue for which way the
         // section opens.
-        assert_eq!(chevron(false), Glyph::Dropdown, "shut, the path as it is in the set");
-        assert_eq!(chevron(true), Glyph::ChevronUp, "open, the set's own upward chevron");
+        assert_eq!(
+            chevron(false),
+            Glyph::Dropdown,
+            "shut, the path as it is in the set"
+        );
+        assert_eq!(
+            chevron(true),
+            Glyph::ChevronUp,
+            "open, the set's own upward chevron"
+        );
 
         // The press that turns it over is the section's, and one press is
         // enough: the state is the sections whose open state the reader has
@@ -4042,7 +4452,11 @@ mod tests {
             None,
             "opening a section is not a change to the request"
         );
-        assert_ne!(state.is_open("technical", true), open, "and the press turned it over");
+        assert_ne!(
+            state.is_open("technical", true),
+            open,
+            "and the press turned it over"
+        );
     }
 
     #[test]
@@ -4051,33 +4465,60 @@ mod tests {
         // three loaders the reference offers without being asked, and a press
         // that shows the rest of the tag document's list.
         let mut state = state_of(ProjectType::Mod);
-        let tags = tags_with(&[("fabric", &["mod"]), ("forge", &["mod"]), ("quilt", &["mod"]), (
-            "neoforge",
-            &["mod"],
-        )]);
+        let tags = tags_with(&[
+            ("fabric", &["mod"]),
+            ("forge", &["mod"]),
+            ("quilt", &["mod"]),
+            ("neoforge", &["mod"]),
+        ]);
         state.update(Message::Tags { result: Ok(tags) });
 
-        let loader = SIDEBAR_FILTERS.iter().find(|f| f.id == MOD_LOADER).expect("the mod tab has a loader filter");
+        let loader = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == MOD_LOADER)
+            .expect("the mod tab has a loader filter");
         assert_eq!(loader.display, Display::Expandable);
         assert_eq!(loader.defaults, DEFAULT_MOD_LOADERS);
         assert_eq!(
-            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
-                .iter()
-                .map(|row| row.id.clone())
-                .collect::<Vec<String>>(),
-            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string()],
+            filter_rows(
+                &state,
+                loader,
+                ProjectType::Mod,
+                state.tags.ready().expect("tags")
+            )
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<String>>(),
+            vec![
+                "fabric".to_string(),
+                "forge".to_string(),
+                "neoforge".to_string()
+            ],
             "three rows, the defaults, in the tag document's own order"
         );
 
         // A chosen loader that is not a default stays a row: `isVisible(option) ||
         // isIncluded(option)` keeps it on screen so it can be unchosen.
-        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
+        state.update(Message::Filter {
+            filter: MOD_LOADER.to_string(),
+            option: "quilt".to_string(),
+        });
         assert_eq!(
-            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
-                .iter()
-                .map(|row| row.id.clone())
-                .collect::<Vec<String>>(),
-            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string(), "quilt".to_string()],
+            filter_rows(
+                &state,
+                loader,
+                ProjectType::Mod,
+                state.tags.ready().expect("tags")
+            )
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<String>>(),
+            vec![
+                "fabric".to_string(),
+                "forge".to_string(),
+                "neoforge".to_string(),
+                "quilt".to_string()
+            ],
             "and the chosen one after them"
         );
 
@@ -4085,27 +4526,48 @@ mod tests {
         // reader could have chosen from the start.
         assert_eq!(state.update(Message::Expand(MOD_LOADER.to_string())), None);
         assert_eq!(
-            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
-                .iter()
-                .map(|row| row.id.clone())
-                .collect::<Vec<String>>(),
-            vec!["fabric".to_string(), "forge".to_string(), "neoforge".to_string(), "quilt".to_string()],
+            filter_rows(
+                &state,
+                loader,
+                ProjectType::Mod,
+                state.tags.ready().expect("tags")
+            )
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<String>>(),
+            vec![
+                "fabric".to_string(),
+                "forge".to_string(),
+                "neoforge".to_string(),
+                "quilt".to_string()
+            ],
             "which for this list is every row the tag document has"
         );
 
         // The shader tab has its own filter with its own defaults, and a loader
         // that serves mods and plugins is not on the mod tab's list.
-        let shader = SIDEBAR_FILTERS.iter().find(|f| f.id == SHADER_LOADER).expect("the shader tab has a loader filter");
+        let shader = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == SHADER_LOADER)
+            .expect("the shader tab has a loader filter");
         assert_eq!(shader.defaults, DEFAULT_SHADER_LOADERS);
         let mut plugin = state_of(ProjectType::Mod);
         plugin.update(Message::Tags {
-            result: Ok(tags_with(&[("fabric", &["mod"]), ("paper", &["mod", "plugin"])])),
+            result: Ok(tags_with(&[
+                ("fabric", &["mod"]),
+                ("paper", &["mod", "plugin"]),
+            ])),
         });
         assert_eq!(
-            filter_rows(&plugin, loader, ProjectType::Mod, plugin.tags.ready().expect("tags"))
-                .iter()
-                .map(|row| row.id.clone())
-                .collect::<Vec<String>>(),
+            filter_rows(
+                &plugin,
+                loader,
+                ProjectType::Mod,
+                plugin.tags.ready().expect("tags")
+            )
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<String>>(),
             vec!["fabric".to_string()],
             "`mod_loader` drops a loader that is also a plugin"
         );
@@ -4138,7 +4600,10 @@ mod tests {
             }),
         });
         state.update(Message::Category("16x".to_string()));
-        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "fabric".to_string() });
+        state.update(Message::Filter {
+            filter: MOD_LOADER.to_string(),
+            option: "fabric".to_string(),
+        });
         state.update(Message::Category("technology".to_string()));
         let Some(Ask::Search(asked)) = state.update(Message::Search) else {
             panic!("the ask");
@@ -4169,26 +4634,33 @@ mod tests {
                     project_type: "mod".to_string(),
                     header: "technical".to_string(),
                 }],
-                ..tags_with(&[("fabric", &["mod"]), ("forge", &["mod"]), ("quilt", &["mod"]), (
-                    "neoforge",
-                    &["mod"],
-                )])
+                ..tags_with(&[
+                    ("fabric", &["mod"]),
+                    ("forge", &["mod"]),
+                    ("quilt", &["mod"]),
+                    ("neoforge", &["mod"]),
+                ])
             }),
         });
 
         let category = category_filter_id(ProjectType::Mod, "technical");
-        let Some(Ask::Search(first)) =
-            state.update(Message::Exclude { filter: category.clone(), option: "technology".to_string() })
-        else {
+        let Some(Ask::Search(first)) = state.update(Message::Exclude {
+            filter: category.clone(),
+            option: "technology".to_string(),
+        }) else {
             panic!("excluding asks");
         };
-        assert_eq!(first.query.facets, vec![r#"categories NOT IN ["technology"]"#.to_string()]);
+        assert_eq!(
+            first.query.facets,
+            vec![r#"categories NOT IN ["technology"]"#.to_string()]
+        );
 
         // A loader excludes under the same field, and the two go into one group:
         // `newFilters` keys by field, so the list is one `NOT IN`, not two.
-        let Some(Ask::Search(second)) =
-            state.update(Message::Exclude { filter: MOD_LOADER.to_string(), option: "quilt".to_string() })
-        else {
+        let Some(Ask::Search(second)) = state.update(Message::Exclude {
+            filter: MOD_LOADER.to_string(),
+            option: "quilt".to_string(),
+        }) else {
             panic!("excluding a loader asks");
         };
         assert_eq!(
@@ -4200,15 +4672,25 @@ mod tests {
         // Choosing what is excluded is the same as not excluding it: the
         // reference's row carries one mark, and the press that includes drops the
         // exclusion.
-        state.update(Message::Filter { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
-        assert!(!state.is_excluded(MOD_LOADER, "quilt"), "choosing it unexcluded it");
-        assert!(state.chosen(MOD_LOADER, "quilt"), "and it is chosen instead");
+        state.update(Message::Filter {
+            filter: MOD_LOADER.to_string(),
+            option: "quilt".to_string(),
+        });
+        assert!(
+            !state.is_excluded(MOD_LOADER, "quilt"),
+            "choosing it unexcluded it"
+        );
+        assert!(
+            state.chosen(MOD_LOADER, "quilt"),
+            "and it is chosen instead"
+        );
 
         // And the license's own field, with the boolean left unquoted as
         // `formatSearchFilterValue` leaves it.
-        let Some(Ask::Search(third)) =
-            state.update(Message::Exclude { filter: LICENSE.to_string(), option: OPEN_SOURCE.to_string() })
-        else {
+        let Some(Ask::Search(third)) = state.update(Message::Exclude {
+            filter: LICENSE.to_string(),
+            option: OPEN_SOURCE.to_string(),
+        }) else {
             panic!("excluding the license asks");
         };
         assert_eq!(
@@ -4224,14 +4706,27 @@ mod tests {
 
         // An excluded option stays a row even in a section that shows only its
         // defaults, so it can be unexcluded: `isVisible(option) || isExcluded(option)`.
-        state.update(Message::Exclude { filter: MOD_LOADER.to_string(), option: "quilt".to_string() });
-        let loader = SIDEBAR_FILTERS.iter().find(|f| f.id == MOD_LOADER).expect("the mod tab has a loader filter");
-        let ids: Vec<String> =
-            filter_rows(&state, loader, ProjectType::Mod, state.tags.ready().expect("tags"))
-                .iter()
-                .map(|row| row.id.clone())
-                .collect();
-        assert!(ids.contains(&"quilt".to_string()), "the excluded loader is still a row: {ids:?}");
+        state.update(Message::Exclude {
+            filter: MOD_LOADER.to_string(),
+            option: "quilt".to_string(),
+        });
+        let loader = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == MOD_LOADER)
+            .expect("the mod tab has a loader filter");
+        let ids: Vec<String> = filter_rows(
+            &state,
+            loader,
+            ProjectType::Mod,
+            state.tags.ready().expect("tags"),
+        )
+        .iter()
+        .map(|row| row.id.clone())
+        .collect();
+        assert!(
+            ids.contains(&"quilt".to_string()),
+            "the excluded loader is still a row: {ids:?}"
+        );
         drop(sidebar(Gen::Dark, &state));
     }
 
@@ -4241,18 +4736,44 @@ mod tests {
         // in the table that is: its two rows carry no exclude button at all, which
         // is what the reference draws beside them -- nothing.
         let mut state = state_of(ProjectType::Modpack);
-        state.update(Message::Tags { result: Ok(tags_with(&[])) });
-        let environment = SIDEBAR_FILTERS.iter().find(|f| f.id == ENVIRONMENT).expect("the filter exists");
-        for row in filter_rows(&state, environment, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+        state.update(Message::Tags {
+            result: Ok(tags_with(&[])),
+        });
+        let environment = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == ENVIRONMENT)
+            .expect("the filter exists");
+        for row in filter_rows(
+            &state,
+            environment,
+            ProjectType::Modpack,
+            state.tags.ready().expect("tags"),
+        ) {
             assert!(!row.excludes, "{} has no second press", row.id);
         }
         // And the loaders and the license do have one.
-        let loaders = SIDEBAR_FILTERS.iter().find(|f| f.id == MODPACK_LOADER).expect("the filter exists");
-        for row in filter_rows(&state, loaders, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+        let loaders = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == MODPACK_LOADER)
+            .expect("the filter exists");
+        for row in filter_rows(
+            &state,
+            loaders,
+            ProjectType::Modpack,
+            state.tags.ready().expect("tags"),
+        ) {
             assert!(row.excludes, "{} has one", row.id);
         }
-        let license = SIDEBAR_FILTERS.iter().find(|f| f.id == LICENSE).expect("the filter exists");
-        for row in filter_rows(&state, license, ProjectType::Modpack, state.tags.ready().expect("tags")) {
+        let license = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == LICENSE)
+            .expect("the filter exists");
+        for row in filter_rows(
+            &state,
+            license,
+            ProjectType::Modpack,
+            state.tags.ready().expect("tags"),
+        ) {
             assert!(row.excludes, "{} has one", row.id);
         }
     }
@@ -4268,9 +4789,18 @@ mod tests {
         state.update(Message::Tags {
             result: Ok(palantir_net::Tags {
                 game_versions: vec![
-                    palantir_net::GameVersionTag { version: "1.21.4".to_string(), version_type: "release".to_string() },
-                    palantir_net::GameVersionTag { version: "24w14a".to_string(), version_type: "snapshot".to_string() },
-                    palantir_net::GameVersionTag { version: "1.5.2".to_string(), version_type: "release".to_string() },
+                    palantir_net::GameVersionTag {
+                        version: "1.21.4".to_string(),
+                        version_type: "release".to_string(),
+                    },
+                    palantir_net::GameVersionTag {
+                        version: "24w14a".to_string(),
+                        version_type: "snapshot".to_string(),
+                    },
+                    palantir_net::GameVersionTag {
+                        version: "1.5.2".to_string(),
+                        version_type: "release".to_string(),
+                    },
                 ],
                 ..tags_with(&[])
             }),
@@ -4278,17 +4808,44 @@ mod tests {
         let tags = state.tags.ready().expect("tags").clone();
         let listed = |state: &State| version_ids(state, &tags);
 
-        assert_eq!(listed(&state), vec!["1.21.4".to_string(), "1.5.2".to_string()], "the releases, in the document's own order");
-        assert_eq!(state.update(Message::AllVersions(true)), None, "ticking the box asks for nothing");
-        assert_eq!(listed(&state), vec!["1.21.4".to_string(), "24w14a".to_string(), "1.5.2".to_string()], "and the snapshot joins them, in place");
+        assert_eq!(
+            listed(&state),
+            vec!["1.21.4".to_string(), "1.5.2".to_string()],
+            "the releases, in the document's own order"
+        );
+        assert_eq!(
+            state.update(Message::AllVersions(true)),
+            None,
+            "ticking the box asks for nothing"
+        );
+        assert_eq!(
+            listed(&state),
+            vec![
+                "1.21.4".to_string(),
+                "24w14a".to_string(),
+                "1.5.2".to_string()
+            ],
+            "and the snapshot joins them, in place"
+        );
 
         // The field filters the rows and nothing else: the chosen versions stay
         // chosen, because they are not on screen to be unchosen from.
         state.update(Message::Version("1.21.4".to_string()));
         state.update(Message::VersionQuery("24".to_string()));
-        assert_eq!(listed(&state), vec!["24w14a".to_string()], "one row matches the query");
-        assert!(state.versions.contains("1.21.4"), "and the choice is still there");
-        assert_eq!(state.update(Message::VersionQuery(String::new())), None, "clearing the field asks for nothing");
+        assert_eq!(
+            listed(&state),
+            vec!["24w14a".to_string()],
+            "one row matches the query"
+        );
+        assert!(
+            state.versions.contains("1.21.4"),
+            "and the choice is still there"
+        );
+        assert_eq!(
+            state.update(Message::VersionQuery(String::new())),
+            None,
+            "clearing the field asks for nothing"
+        );
 
         // A chosen version asks, as one `or` group over its own field -- not
         // joined into `categories`, which is the field a category and a loader
@@ -4306,8 +4863,14 @@ mod tests {
         // eight rows, and the window is drawn from the panel's own geometry, not
         // the page's.
         assert_eq!(VERSIONS_PANEL, 256.0);
-        let at = Geometry { offset: 0.0, view_height: VERSIONS_PANEL };
-        assert!(crate::scroll::window(40, VERSION_ROW, at).len() >= 8, "eight rows fit in the panel");
+        let at = Geometry {
+            offset: 0.0,
+            view_height: VERSIONS_PANEL,
+        };
+        assert!(
+            crate::scroll::window(40, VERSION_ROW, at).len() >= 8,
+            "eight rows fit in the panel"
+        );
         assert!(crate::scroll::window(40, VERSION_ROW, list_at(at)).start <= 40);
         drop(versions(Gen::Dark, &state, &tags));
     }
@@ -4318,15 +4881,27 @@ mod tests {
         // `['include', 'exclude']`, so `primaryAction` is `'exclude'` from the
         // first frame: the row has no second button, and pressing it once asks.
         let mut state = state_of(ProjectType::Mod);
-        state.update(Message::Tags { result: Ok(tags_with(&[])) });
+        state.update(Message::Tags {
+            result: Ok(tags_with(&[])),
+        });
 
-        let rows = filter_rows(&state, filters_for(ProjectType::Mod).iter().find(|f| f.id == ADVANCED).expect("the advanced section"), ProjectType::Mod, &tags_with(&[]));
+        let rows = filter_rows(
+            &state,
+            filters_for(ProjectType::Mod)
+                .iter()
+                .find(|f| f.id == ADVANCED)
+                .expect("the advanced section"),
+            ProjectType::Mod,
+            &tags_with(&[]),
+        );
         assert!(
             rows.iter().all(|row| !row.chosen && !row.excludes),
             "no row can be chosen, and none of them offers a second press"
         );
         assert_eq!(
-            rows.iter().map(|row| row.id.as_str()).collect::<Vec<&str>>(),
+            rows.iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<&str>>(),
             vec![
                 "ai_content",
                 "ai_functionality",
@@ -4341,9 +4916,10 @@ mod tests {
              `createDisclosureFilterOptions` drops"
         );
 
-        let Some(Ask::Search(first)) =
-            state.update(Message::Exclude { filter: ADVANCED.to_string(), option: "telemetry".to_string() })
-        else {
+        let Some(Ask::Search(first)) = state.update(Message::Exclude {
+            filter: ADVANCED.to_string(),
+            option: "telemetry".to_string(),
+        }) else {
             panic!("excluding a disclosure asks");
         };
         assert_eq!(
@@ -4355,9 +4931,10 @@ mod tests {
         // A category excluded beside it stays its own `categories` part: the two
         // are different fields, so `negativeByType` holds two entries.
         let category = category_filter_id(ProjectType::Mod, "technology");
-        let Some(Ask::Search(second)) =
-            state.update(Message::Exclude { filter: category, option: "technology".to_string() })
-        else {
+        let Some(Ask::Search(second)) = state.update(Message::Exclude {
+            filter: category,
+            option: "technology".to_string(),
+        }) else {
             panic!("excluding a category asks");
         };
         assert_eq!(
@@ -4381,7 +4958,12 @@ mod tests {
         // `advanced`'s `ordering: -1000` puts it last on every tab that has one,
         // which is why it trails the license rather than leading the table it is
         // written in.
-        let order = |kind| filters_for(kind).iter().map(|f| f.id).collect::<Vec<&str>>();
+        let order = |kind| {
+            filters_for(kind)
+                .iter()
+                .map(|f| f.id)
+                .collect::<Vec<&str>>()
+        };
         assert_eq!(
             order(ProjectType::Mod),
             vec![GAME_VERSION, MOD_LOADER, ENVIRONMENT, LICENSE, ADVANCED]
@@ -4405,7 +4987,11 @@ mod tests {
         // `hover:bg-button-bg`, so the fill is the pointer's own fraction of
         // `--color-button-bg` -- the same arithmetic `ui::switch` uses on the same
         // token.
-        assert_eq!(row_fill(false, false, 0.0), None, "an unchosen row with no pointer on it");
+        assert_eq!(
+            row_fill(false, false, 0.0),
+            None,
+            "an unchosen row with no pointer on it"
+        );
         assert_eq!(
             row_fill(false, false, 0.4),
             Some((Ink::ButtonBg, 0.4)),
@@ -4413,8 +4999,15 @@ mod tests {
         );
         // The chosen and excluded arms are opaque and are not the pointer's to
         // fade: one is `bg-brand-highlight`, the other `bg-highlight-red`.
-        assert_eq!(row_fill(true, false, 0.3), Some((Ink::ColorBrandHighlight, 1.0)));
-        assert_eq!(row_fill(true, true, 0.0), Some((Ink::ColorBrandHighlight, 1.0)), "and never both at once");
+        assert_eq!(
+            row_fill(true, false, 0.3),
+            Some((Ink::ColorBrandHighlight, 1.0))
+        );
+        assert_eq!(
+            row_fill(true, true, 0.0),
+            Some((Ink::ColorBrandHighlight, 1.0)),
+            "and never both at once"
+        );
         assert_eq!(row_fill(false, true, 0.0), Some((Ink::RedHighlight, 1.0)));
     }
 
@@ -4436,23 +5029,41 @@ mod tests {
         // had no game version section at all. A capture is what found it: the
         // panel's own diagnostic said the section was built and never reached
         // the screen.
-        let version = SIDEBAR_FILTERS.iter().find(|f| f.id == GAME_VERSION).expect("the filter exists");
+        let version = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == GAME_VERSION)
+            .expect("the filter exists");
         assert_eq!(version.display, Display::Scrollable);
-        assert!(draws(version, &[]), "a scrollable filter is drawn on its panel");
-        let shut = SIDEBAR_FILTERS.iter().find(|f| f.id == MODPACK_LOADER).expect("the filter exists");
-        assert!(!draws(shut, &[]), "and a list filter with no options is not");
-        assert!(draws(shut, &[Row {
-            id: "mrpack".to_string(),
-            label: "MrPack".to_string(),
-            chosen: false,
-            excluded: false,
-            excludes: true,
-            press: Message::Filter { filter: MODPACK_LOADER.to_string(), option: "mrpack".to_string() },
-            exclude: Message::Exclude {
-                filter: MODPACK_LOADER.to_string(),
-                option: "mrpack".to_string(),
-            },
-        }]));
+        assert!(
+            draws(version, &[]),
+            "a scrollable filter is drawn on its panel"
+        );
+        let shut = SIDEBAR_FILTERS
+            .iter()
+            .find(|f| f.id == MODPACK_LOADER)
+            .expect("the filter exists");
+        assert!(
+            !draws(shut, &[]),
+            "and a list filter with no options is not"
+        );
+        assert!(draws(
+            shut,
+            &[Row {
+                id: "mrpack".to_string(),
+                label: "MrPack".to_string(),
+                chosen: false,
+                excluded: false,
+                excludes: true,
+                press: Message::Filter {
+                    filter: MODPACK_LOADER.to_string(),
+                    option: "mrpack".to_string()
+                },
+                exclude: Message::Exclude {
+                    filter: MODPACK_LOADER.to_string(),
+                    option: "mrpack".to_string(),
+                },
+            }]
+        ));
     }
 
     fn tags_with(loaders: &[(&str, &[&str])]) -> palantir_net::Tags {

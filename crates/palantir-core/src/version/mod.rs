@@ -71,7 +71,11 @@ impl AssetIndexInfo {
     /// A bare, not-downloaded index id (used for `assets: "x"` without an
     /// `assetIndex` object, and for the `legacy` fallback).
     pub fn bare(id: &str) -> AssetIndexInfo {
-        AssetIndexInfo { id: id.to_string(), known: false, ..Default::default() }
+        AssetIndexInfo {
+            id: id.to_string(),
+            known: false,
+            ..Default::default()
+        }
     }
 }
 

@@ -132,13 +132,18 @@ impl PalantirPaths {
     /// product can call its own — the other launcher's folder is never used for
     /// our files.
     pub fn home() -> PalantirPaths {
-        if let Some(dir) = std::env::var_os(HOME_ENV).map(PathBuf::from).filter(|p| p.is_absolute()) {
+        if let Some(dir) = std::env::var_os(HOME_ENV)
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+        {
             return PalantirPaths { root: dir };
         }
         if let Some(dir) = portable_dir() {
             return PalantirPaths { root: dir };
         }
-        PalantirPaths { root: platform_data_root(System::current()) }
+        PalantirPaths {
+            root: platform_data_root(System::current()),
+        }
     }
 
     /// The data root a real run should use.
@@ -337,7 +342,9 @@ pub fn platform_legacy_root(system: System) -> PathBuf {
 
 /// The executable's own directory, when it holds a [`PORTABLE_MARKER`].
 fn portable_dir() -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))?;
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))?;
     exe_dir.join(PORTABLE_MARKER).exists().then_some(exe_dir)
 }
 
@@ -381,7 +388,10 @@ pub fn legacy_install_at(root: &Path) -> Option<LegacyInstall> {
         return None;
     }
     let instances = count_instances(root);
-    (instances > 0).then(|| LegacyInstall { root: root.to_path_buf(), instances })
+    (instances > 0).then(|| LegacyInstall {
+        root: root.to_path_buf(),
+        instances,
+    })
 }
 
 /// How many instance folders a root holds, by that root's own configuration.
@@ -459,7 +469,9 @@ struct DataRootPointer {
 pub fn recorded_data_root(home: &PalantirPaths) -> Option<String> {
     let text = std::fs::read_to_string(home.root.join(PREFS_FILE)).ok()?;
     let parsed: DataRootPointer = serde_json::from_str(&text).ok()?;
-    parsed.app_directory.filter(|value| !value.trim().is_empty())
+    parsed
+        .app_directory
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -480,7 +492,10 @@ mod tests {
         assert_eq!(p.global_config(), PathBuf::from("/data/prismlauncher.cfg"));
         assert_eq!(p.accounts_file(), PathBuf::from("/data/accounts.json"));
         assert_eq!(p.groups_file(), PathBuf::from("/data/instgroups.json"));
-        assert_eq!(p.legacy_groups_file(), PathBuf::from("/data/instances/instgroups.json"));
+        assert_eq!(
+            p.legacy_groups_file(),
+            PathBuf::from("/data/instances/instgroups.json")
+        );
         assert_eq!(p.meta_dir(), PathBuf::from("/data/cache/meta"));
     }
 
@@ -489,7 +504,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = PalantirPaths::at(tmp.path());
         p.ensure_layout().unwrap();
-        for dir in [p.instances_dir(), p.assets_dir(), p.icons_dir(), p.libraries_dir(), p.versions_dir(), p.cache_dir(), p.meta_dir(), p.logs_dir()] {
+        for dir in [
+            p.instances_dir(),
+            p.assets_dir(),
+            p.icons_dir(),
+            p.libraries_dir(),
+            p.versions_dir(),
+            p.cache_dir(),
+            p.meta_dir(),
+            p.logs_dir(),
+        ] {
             assert!(dir.is_dir(), "missing {:?}", dir);
         }
     }
@@ -513,11 +537,15 @@ mod tests {
         assert_eq!(platform_data_root(System::Windows), windows);
         assert_eq!(
             platform_data_root(System::MacOS),
-            home_dir().unwrap_or_default().join("Library/Application Support/PalantirMC")
+            home_dir()
+                .unwrap_or_default()
+                .join("Library/Application Support/PalantirMC")
         );
         let expected = match std::env::var_os("XDG_DATA_HOME") {
             Some(v) => PathBuf::from(v).join("PalantirMC"),
-            None => home_dir().unwrap_or_default().join(".local/share/PalantirMC"),
+            None => home_dir()
+                .unwrap_or_default()
+                .join(".local/share/PalantirMC"),
         };
         assert_eq!(platform_data_root(System::Linux), expected);
     }
@@ -551,7 +579,10 @@ mod tests {
         std::fs::write(root.join("instances/README.txt"), "not an instance").unwrap();
         assert_eq!(
             legacy_install_at(root),
-            Some(LegacyInstall { root: root.to_path_buf(), instances: 2 }),
+            Some(LegacyInstall {
+                root: root.to_path_buf(),
+                instances: 2
+            }),
             "only directories count as instances"
         );
     }
@@ -570,7 +601,13 @@ mod tests {
     #[test]
     fn the_install_label_is_singular_only_for_one() {
         let root = PathBuf::from("/p");
-        let label = |instances| LegacyInstall { root: root.clone(), instances }.instances_label();
+        let label = |instances| {
+            LegacyInstall {
+                root: root.clone(),
+                instances,
+            }
+            .instances_label()
+        };
         assert_eq!(label(1), "1 instance");
         assert_eq!(label(2), "2 instances");
         assert_eq!(label(0), "0 instances");
@@ -619,12 +656,25 @@ mod tests {
         // then" on a transient failure would point the launcher at an empty
         // folder and look, from the outside, like the instances were deleted.
         let home = PalantirPaths::at("/home/u/.local/share/PalantirMC");
-        let absolute = if cfg!(windows) { "D:\\games\\mc" } else { "/mnt/games/mc" };
-        assert_eq!(resolve_data_root(&home, Some(absolute)), PathBuf::from(absolute));
+        let absolute = if cfg!(windows) {
+            "D:\\games\\mc"
+        } else {
+            "/mnt/games/mc"
+        };
+        assert_eq!(
+            resolve_data_root(&home, Some(absolute)),
+            PathBuf::from(absolute)
+        );
         // Surrounding whitespace is not part of a path.
         let padded = format!("  {absolute}  ");
-        assert_eq!(resolve_data_root(&home, Some(&padded)), PathBuf::from(absolute));
-        assert!(!PathBuf::from(absolute).exists(), "the point is that it need not exist");
+        assert_eq!(
+            resolve_data_root(&home, Some(&padded)),
+            PathBuf::from(absolute)
+        );
+        assert!(
+            !PathBuf::from(absolute).exists(),
+            "the point is that it need not exist"
+        );
     }
 
     #[test]
@@ -655,7 +705,10 @@ mod tests {
         let elsewhere = tmp.path().join("legacy");
         std::fs::write(
             tmp.path().join(PREFS_FILE),
-            format!("{{\"app_directory\":{:?}}}", elsewhere.display().to_string()),
+            format!(
+                "{{\"app_directory\":{:?}}}",
+                elsewhere.display().to_string()
+            ),
         )
         .unwrap();
         let recorded = recorded_data_root(&home).expect("the file names a root");
@@ -701,11 +754,19 @@ mod tests {
     fn configured_instances_dir_ignores_empty_and_garbage() {
         let tmp = tempfile::tempdir().unwrap();
         let fallback = tmp.path().join("instances");
-        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), "InstanceDir=\nConfigVersion=1.3\n").unwrap();
+        std::fs::write(
+            tmp.path().join(GLOBAL_CONFIG_FILE),
+            "InstanceDir=\nConfigVersion=1.3\n",
+        )
+        .unwrap();
         let p = PalantirPaths::at(tmp.path());
         assert_eq!(p.configured_instances_dir(), fallback);
 
-        std::fs::write(tmp.path().join(GLOBAL_CONFIG_FILE), "garbage without equals\n").unwrap();
+        std::fs::write(
+            tmp.path().join(GLOBAL_CONFIG_FILE),
+            "garbage without equals\n",
+        )
+        .unwrap();
         let p = PalantirPaths::at(tmp.path());
         assert_eq!(p.configured_instances_dir(), fallback);
         assert!(p.selected_instance_id().is_none());

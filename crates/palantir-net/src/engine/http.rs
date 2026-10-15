@@ -71,7 +71,11 @@ impl HttpPool {
             .user_agent(USER_AGENT)
             .build()
             .unwrap_or_else(|_| reqwest::blocking::Client::new());
-        HttpPool { client, limit: Limit::new(limit), timeout }
+        HttpPool {
+            client,
+            limit: Limit::new(limit),
+            timeout,
+        }
     }
 
     /// The process-wide ceiling this pool draws from.
@@ -123,7 +127,11 @@ impl HttpPool {
 
     /// Send `request`, having taken a slot in the ceiling, and treat a non-2xx
     /// answer as the failure it is.
-    fn send(&self, request: &Request, cancel: &Cancel) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
+    fn send(
+        &self,
+        request: &Request,
+        cancel: &Cancel,
+    ) -> Result<(reqwest::blocking::Response, Permit<'_>), Error> {
         let (response, permit) = self.send_any(request, cancel)?;
         let status = response.status();
         if !status.is_success() {
@@ -132,7 +140,11 @@ impl HttpPool {
             // 401 are then told apart by what the service said rather than by
             // the code alone.
             let sentence = failure_sentence(&failure_body(response));
-            return Err(Error::status_with(&request.url, status.as_u16(), sentence.as_deref()));
+            return Err(Error::status_with(
+                &request.url,
+                status.as_u16(),
+                sentence.as_deref(),
+            ));
         }
         Ok((response, permit))
     }
@@ -175,7 +187,10 @@ impl Fetch for HttpPool {
             // document, and a partial document is not a smaller answer, it is a
             // parse error. Refusing is better than sending a `Range` header for
             // a body that will be read whole.
-            return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
+            return Err(Error::format(
+                &request.url,
+                "a whole body cannot carry an offset",
+            ));
         }
         cancel.check()?;
         let (response, _permit) = self.send(request, cancel)?;
@@ -198,15 +213,23 @@ impl Fetch for HttpPool {
         // its hash would catch.
         let resumed = match request.offset {
             Some(offset) if response.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
-                let range = response.headers().get(reqwest::header::CONTENT_RANGE)
+                let range = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
                     .and_then(|header| header.to_str().ok());
                 if !range_starts_at(range, offset) {
-                    return Err(Error::format(&request.url, "partial response has an invalid Content-Range"));
+                    return Err(Error::format(
+                        &request.url,
+                        "partial response has an invalid Content-Range",
+                    ));
                 }
                 true
             }
             None if response.status() == reqwest::StatusCode::PARTIAL_CONTENT => {
-                return Err(Error::format(&request.url, "unexpected partial response to a whole-file request"));
+                return Err(Error::format(
+                    &request.url,
+                    "unexpected partial response to a whole-file request",
+                ));
             }
             _ => false,
         };
@@ -214,7 +237,11 @@ impl Fetch for HttpPool {
             return Ok(Outcome::Ignored);
         }
         let written = self.drain(request, response, sink, cancel)?;
-        Ok(if resumed { Outcome::Resumed(written) } else { Outcome::Whole(written) })
+        Ok(if resumed {
+            Outcome::Resumed(written)
+        } else {
+            Outcome::Whole(written)
+        })
     }
 
     /// The conditional `GET`: keep the validator, and accept `304` as an answer.
@@ -228,7 +255,10 @@ impl Fetch for HttpPool {
         if request.offset.is_some() {
             // Same refusal as `get`: a conditional request is about a document
             // the caller holds whole.
-            return Err(Error::format(&request.url, "a whole body cannot carry an offset"));
+            return Err(Error::format(
+                &request.url,
+                "a whole body cannot carry an offset",
+            ));
         }
         cancel.check()?;
         let (response, _permit) = self.send_any(request, cancel)?;
@@ -239,15 +269,27 @@ impl Fetch for HttpPool {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
         if status == reqwest::StatusCode::NOT_MODIFIED {
-            return Ok(Response { body: Vec::new(), etag, not_modified: true });
+            return Ok(Response {
+                body: Vec::new(),
+                etag,
+                not_modified: true,
+            });
         }
         if !status.is_success() {
             let sentence = failure_sentence(&failure_body(response));
-            return Err(Error::status_with(&request.url, status.as_u16(), sentence.as_deref()));
+            return Err(Error::status_with(
+                &request.url,
+                status.as_u16(),
+                sentence.as_deref(),
+            ));
         }
         let mut body = Vec::new();
         self.drain(request, response, &mut body, cancel)?;
-        Ok(Response { body, etag, not_modified: false })
+        Ok(Response {
+            body,
+            etag,
+            not_modified: false,
+        })
     }
 }
 
@@ -257,11 +299,22 @@ fn range_starts_at(header: Option<&str>, offset: u64) -> bool {
     let Some(range) = header.and_then(|header| header.strip_prefix("bytes ")) else {
         return false;
     };
-    let Some((bounds, total)) = range.split_once('/') else { return false; };
-    let Some((start, end)) = bounds.split_once('-') else { return false; };
-    let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>()) else { return false; };
-    start == offset && end >= start
-        && (total == "*" || total.parse::<u64>().map(|total| end < total).unwrap_or(false))
+    let Some((bounds, total)) = range.split_once('/') else {
+        return false;
+    };
+    let Some((start, end)) = bounds.split_once('-') else {
+        return false;
+    };
+    let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>()) else {
+        return false;
+    };
+    start == offset
+        && end >= start
+        && (total == "*"
+            || total
+                .parse::<u64>()
+                .map(|total| end < total)
+                .unwrap_or(false))
 }
 
 /// How much of a refusal's body is read to find its sentence.
@@ -334,7 +387,10 @@ fn bounded(text: &str) -> Option<String> {
         // better thing to show a reader than the first line of an error page.
         return None;
     }
-    if text.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+    if text
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+    {
         return None;
     }
     if text.chars().count() <= MAX_SENTENCE {
@@ -354,8 +410,14 @@ mod tests {
     fn resumed_responses_must_name_the_requested_range() {
         assert!(range_starts_at(Some("bytes 10-19/20"), 10));
         assert!(range_starts_at(Some("bytes 10-19/*"), 10));
-        for range in [None, Some("bytes 0-19/20"), Some("bytes 10-9/20"),
-                      Some("bytes 10-20/20"), Some("bytes */20"), Some("garbage")] {
+        for range in [
+            None,
+            Some("bytes 0-19/20"),
+            Some("bytes 10-9/20"),
+            Some("bytes 10-20/20"),
+            Some("bytes */20"),
+            Some("garbage"),
+        ] {
             assert!(!range_starts_at(range, 10), "{range:?}");
         }
     }
@@ -367,14 +429,19 @@ mod tests {
         let url = format!("http://{}/file", server.local_addr().unwrap());
         let thread = std::thread::spawn(move || {
             let (mut socket, _) = server.accept().unwrap();
-            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             let mut request = [0u8; 4096];
             let read = socket.read(&mut request).unwrap();
             assert!(read > 0, "the client sent a request");
             socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-2/10\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc").unwrap();
         });
         let pool = HttpPool {
-            client: reqwest::blocking::Client::builder().no_proxy().build().unwrap(),
+            client: reqwest::blocking::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap(),
             limit: Limit::new(1),
             timeout: Duration::from_secs(2),
         };
@@ -392,13 +459,14 @@ mod tests {
         let held = pool.limit().acquire();
         let cancel = Cancel::new();
         std::thread::scope(|scope| {
-            let queued = scope.spawn(|| pool.get(
-                &Request::get("http://192.0.2.1/never-sent"), &cancel,
-            ));
+            let queued =
+                scope.spawn(|| pool.get(&Request::get("http://192.0.2.1/never-sent"), &cancel));
             std::thread::sleep(Duration::from_millis(20));
             cancel.cancel();
             let (tx, rx) = std::sync::mpsc::channel();
-            scope.spawn(move || { tx.send(queued.join()).ok(); });
+            scope.spawn(move || {
+                tx.send(queued.join()).ok();
+            });
             let result = rx.recv_timeout(Duration::from_secs(2));
             // Release before asserting so a broken implementation cannot hang
             // the scoped threads while the test unwinds.
@@ -410,7 +478,10 @@ mod tests {
     #[test]
     fn the_user_agent_names_this_build() {
         assert!(USER_AGENT.starts_with("PalantirMC/"), "{USER_AGENT}");
-        assert!(USER_AGENT.contains(env!("CARGO_PKG_VERSION")), "{USER_AGENT}");
+        assert!(
+            USER_AGENT.contains(env!("CARGO_PKG_VERSION")),
+            "{USER_AGENT}"
+        );
         // Modrinth's guidelines: a client that names itself is answered.
         assert!(!USER_AGENT.contains(' '), "{USER_AGENT}");
     }
@@ -419,14 +490,18 @@ mod tests {
     fn a_refusal_keeps_the_service_s_own_sentence() {
         // The four shapes measured against the live services (G110, G111), which
         // is the whole reason this exists: the status is the same 401 for each.
-        let labrinth = br#"{"error":"invalid_client","description":"The provided client id was invalid"}"#;
+        let labrinth =
+            br#"{"error":"invalid_client","description":"The provided client id was invalid"}"#;
         assert_eq!(
             failure_sentence(labrinth).as_deref(),
             Some("The provided client id was invalid")
         );
 
         let minecraft = br#"{"errorMessage":"The access token is invalid"}"#;
-        assert_eq!(failure_sentence(minecraft).as_deref(), Some("The access token is invalid"));
+        assert_eq!(
+            failure_sentence(minecraft).as_deref(),
+            Some("The access token is invalid")
+        );
 
         // Archon refuses a request version by name and sends no description.
         let archon = br#"{"error":"unsupported archon request version"}"#;
@@ -446,7 +521,10 @@ mod tests {
         // Labrinth's own code to rank them, and this test is the record of that
         // choice rather than a claim that the summary is a good sentence.
         let body = br#"{"error":"auth_error","description":"flattening v2 not-found response","details":["authenticating API request","Authentication method was not valid"]}"#;
-        assert_eq!(failure_sentence(body).as_deref(), Some("flattening v2 not-found response"));
+        assert_eq!(
+            failure_sentence(body).as_deref(),
+            Some("flattening v2 not-found response")
+        );
         // A description that is present but empty falls through to the next key.
         let empty = br#"{"error":"invalid_client","description":"   ","errorMessage":"say this"}"#;
         assert_eq!(failure_sentence(empty).as_deref(), Some("say this"));
@@ -456,7 +534,10 @@ mod tests {
     fn a_body_that_is_not_a_sentence_is_left_out_rather_than_pasted_in() {
         assert_eq!(failure_sentence(b""), None);
         assert_eq!(failure_sentence(b"   \n"), None);
-        assert_eq!(failure_sentence(b"<html><body>502 Bad Gateway</body></html>"), None);
+        assert_eq!(
+            failure_sentence(b"<html><body>502 Bad Gateway</body></html>"),
+            None
+        );
         // Bytes that are not text at all, which a proxy can answer with.
         assert_eq!(failure_sentence(&[0x00, 0xff, 0x10]), None);
         // JSON with no string a reader can use.
@@ -466,10 +547,17 @@ mod tests {
         // Two hundred characters are kept; the next one is truncated, so a
         // paragraph-long internal description cannot fill a notice.
         let long = "a".repeat(MAX_SENTENCE);
-        assert_eq!(failure_sentence(long.as_bytes()).map(|s| s.chars().count()), Some(MAX_SENTENCE));
+        assert_eq!(
+            failure_sentence(long.as_bytes()).map(|s| s.chars().count()),
+            Some(MAX_SENTENCE)
+        );
         let longer = "a".repeat(MAX_SENTENCE + 1);
         let got = failure_sentence(longer.as_bytes()).expect("still a sentence");
-        assert_eq!(got.chars().count(), MAX_SENTENCE + 1, "the ellipsis is the extra one");
+        assert_eq!(
+            got.chars().count(),
+            MAX_SENTENCE + 1,
+            "the ellipsis is the extra one"
+        );
         assert!(got.ends_with('…'), "{got}");
     }
 
@@ -486,10 +574,17 @@ mod tests {
             Some("you are not authorized to view this resource"),
         )
         .to_string();
-        assert!(said.contains("http status 401: you are not authorized to view this resource"), "{said}");
+        assert!(
+            said.contains("http status 401: you are not authorized to view this resource"),
+            "{said}"
+        );
 
         // And the field a retry policy reads is untouched by the sentence.
-        match Error::status_with("https://example.invalid/x", 503, Some("down for maintenance")) {
+        match Error::status_with(
+            "https://example.invalid/x",
+            503,
+            Some("down for maintenance"),
+        ) {
             Error::Http { status, .. } => assert_eq!(status, Some(503)),
             other => panic!("a 503 is an HTTP failure: {other:?}"),
         }
@@ -506,7 +601,10 @@ mod tests {
         drop(held);
         assert_eq!(clone.limit().available(), 3, "and gives the slots back");
         // And a zero setting is clamped rather than deadlocking a download.
-        assert_eq!(HttpPool::new(0, Duration::from_secs(1)).limit().capacity(), 1);
+        assert_eq!(
+            HttpPool::new(0, Duration::from_secs(1)).limit().capacity(),
+            1
+        );
         assert_eq!(HttpPool::default().limit().capacity(), DEFAULT_LIMIT);
     }
 
@@ -517,7 +615,10 @@ mod tests {
         // unroutable, so a request that was actually sent would hang.
         let pool = HttpPool::new(1, Duration::from_millis(50));
         let error = pool
-            .get_with(&Request::from("http://192.0.2.1/x.json", 10), &Cancel::new())
+            .get_with(
+                &Request::from("http://192.0.2.1/x.json", 10),
+                &Cancel::new(),
+            )
             .expect_err("an offset on a conditional read");
         assert!(matches!(error, Error::Format { .. }), "{error:?}");
         assert_eq!(pool.limit().available(), 1, "no slot was taken");
@@ -558,7 +659,9 @@ mod tests {
         let fetch = MapFetch::new().with_route("u", crate::engine::request::Route::text("abc"));
         let mut whole = Vec::new();
         assert_eq!(
-            fetch.get_to(&Request::get("u"), &mut whole, &Cancel::new()).expect("whole"),
+            fetch
+                .get_to(&Request::get("u"), &mut whole, &Cancel::new())
+                .expect("whole"),
             Outcome::Whole(3)
         );
         let mut resumed = Vec::new();

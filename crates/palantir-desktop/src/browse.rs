@@ -81,7 +81,13 @@ impl ContentType {
 
     /// All supported tabs, in the order the reference draws them.
     pub const fn all() -> [Self; 5] {
-        [Self::Modpacks, Self::Mods, Self::ResourcePacks, Self::DataPacks, Self::Shaders]
+        [
+            Self::Modpacks,
+            Self::Mods,
+            Self::ResourcePacks,
+            Self::DataPacks,
+            Self::Shaders,
+        ]
     }
 
     /// Whether the target folder is a loader-specific mod folder.
@@ -168,8 +174,8 @@ struct SearchEnvelope {
 /// Parse a `GET /v2/search` body (pure; used by the tests).
 #[cfg(test)]
 pub fn parse_search(body: &str) -> Result<Vec<Hit>, String> {
-    let envelope: SearchEnvelope =
-        serde_json::from_str(body).map_err(|error| format!("unexpected search response: {error}"))?;
+    let envelope: SearchEnvelope = serde_json::from_str(body)
+        .map_err(|error| format!("unexpected search response: {error}"))?;
     Ok(envelope.hits)
 }
 
@@ -196,7 +202,13 @@ mod tests {
         let labels: Vec<&str> = ContentType::all().iter().map(|k| k.label()).collect();
         assert_eq!(
             labels,
-            ["Modpacks", "Mods", "Resource Packs", "Data Packs", "Shaders"]
+            [
+                "Modpacks",
+                "Mods",
+                "Resource Packs",
+                "Data Packs",
+                "Shaders"
+            ]
         );
         // Every tab still maps to a project type the search API answers for;
         // the reference's sixth tab (Servers) is deliberately absent, because
@@ -244,5 +256,4 @@ mod tests {
         hit.project_id.clear();
         assert_eq!(hit.project_ref(), "s");
     }
-
 }

@@ -60,7 +60,11 @@ impl Formatter for QJsonFormatter {
         w.write_all(b"}")
     }
 
-    fn begin_object_key<W: ?Sized + Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
+    fn begin_object_key<W: ?Sized + Write>(
+        &mut self,
+        w: &mut W,
+        first: bool,
+    ) -> std::io::Result<()> {
         if let Some(slot) = self.has_value.last_mut() {
             *slot = true;
         }
@@ -92,7 +96,11 @@ impl Formatter for QJsonFormatter {
         w.write_all(b"]")
     }
 
-    fn begin_array_value<W: ?Sized + Write>(&mut self, w: &mut W, first: bool) -> std::io::Result<()> {
+    fn begin_array_value<W: ?Sized + Write>(
+        &mut self,
+        w: &mut W,
+        first: bool,
+    ) -> std::io::Result<()> {
         if let Some(slot) = self.has_value.last_mut() {
             *slot = true;
         }

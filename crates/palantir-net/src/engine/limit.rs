@@ -150,7 +150,9 @@ impl Drop for Permit<'_> {
 /// crate anyway, and `unwrap_or_else(into_inner)` is the honest spelling of
 /// "carry on".
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -248,8 +250,14 @@ mod tests {
         let started = Instant::now();
         assert!(limit.acquire_timeout(Duration::from_millis(30)).is_none());
         let waited = started.elapsed();
-        assert!(waited >= Duration::from_millis(25), "gave up after {waited:?}");
-        assert!(waited < Duration::from_secs(5), "waited {waited:?} to give up");
+        assert!(
+            waited >= Duration::from_millis(25),
+            "gave up after {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(5),
+            "waited {waited:?} to give up"
+        );
     }
 
     #[test]

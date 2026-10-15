@@ -42,11 +42,11 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::wire::{FileJob, Wire};
 use palantir_core::assets::{object_cdn_path, object_relative_path, AssetIndex};
 use palantir_core::instance::Instance;
 use palantir_core::paths::PalantirPaths;
 use palantir_core::version::{LaunchProfile, Library, RuntimeContext};
-use crate::wire::{FileJob, Wire};
 
 /// Where Mojang serves asset objects from (hash-addressed, first two hex
 /// characters as the directory).
@@ -251,7 +251,10 @@ impl InstallReport {
             out.push_str(&format!(", {} asset object(s)", self.objects_downloaded));
         }
         if self.natives_extracted > 0 {
-            out.push_str(&format!(", {} native file(s) extracted", self.natives_extracted));
+            out.push_str(&format!(
+                ", {} native file(s) extracted",
+                self.natives_extracted
+            ));
         }
         if !self.failed.is_empty() {
             out.push_str(&format!(", {} failure(s)", self.failed.len()));
@@ -284,7 +287,11 @@ pub fn plan(
         ..InstallPlan::default()
     };
     let local_libraries = instance_root.join("libraries");
-    let local_libraries = if local_libraries.is_dir() { Some(local_libraries) } else { None };
+    let local_libraries = if local_libraries.is_dir() {
+        Some(local_libraries)
+    } else {
+        None
+    };
 
     for library in profile
         .libraries
@@ -409,7 +416,9 @@ fn plan_assets(
         return (None, Vec::new(), 0);
     }
     let assets_dir = paths.assets_dir();
-    let index_path = assets_dir.join("indexes").join(format!("{}.json", index.id));
+    let index_path = assets_dir
+        .join("indexes")
+        .join(format!("{}.json", index.id));
     // A legacy index predates the hash-addressed layout, so it is also
     // reconstructed by logical name. `palantir-core::assets::game_assets_dir` is
     // the authority on where `${game_assets}` points; the same two ids decide
@@ -428,11 +437,7 @@ fn plan_assets(
     // A bare id (`"assets": "17"` with no `assetIndex` object) carries no URL:
     // the index has to come from somewhere else, and saying so beats guessing.
     if index.url.trim().is_empty() {
-        return (
-            Some(plan),
-            Vec::new(),
-            usize::from(index_path.is_file()),
-        );
+        return (Some(plan), Vec::new(), usize::from(index_path.is_file()));
     }
     let job = DownloadJob {
         url: index.url.clone(),
@@ -462,7 +467,9 @@ fn file_facts(library: &Library, rel: &str, arch: &str) -> Option<(String, Strin
             // (`org.lwjgl:lwjgl:3.3.3:natives-windows`) names it as that entry's
             // artifact, which is why the path is compared rather than assumed.
             let is_this_file = !library.is_native()
-                || artifact.path.as_deref()
+                || artifact
+                    .path
+                    .as_deref()
                     .map(|path| format!("libraries/{path}") == rel)
                     .unwrap_or(false);
             if is_this_file && !artifact.url.is_empty() {
@@ -540,7 +547,13 @@ pub struct Progress {
 impl Progress {
     /// A report for a phase that has finished `done` of `total` files.
     pub fn new(label: impl Into<String>, done: usize, total: usize, bytes: u64) -> Progress {
-        Progress { label: label.into(), done, total, bytes, starting: false }
+        Progress {
+            label: label.into(),
+            done,
+            total,
+            bytes,
+            starting: false,
+        }
     }
 
     /// A report for work whose length is not known yet.
@@ -552,7 +565,13 @@ impl Progress {
     /// [`Progress::is_indeterminate`] with a segment sliding along the bar
     /// instead of a fill, which says "working" without saying "this much".
     pub fn starting(label: impl Into<String>) -> Progress {
-        Progress { label: label.into(), done: 0, total: 0, bytes: 0, starting: true }
+        Progress {
+            label: label.into(),
+            done: 0,
+            total: 0,
+            bytes: 0,
+            starting: true,
+        }
     }
 
     /// Whether this level is a report of *activity* rather than of progress.
@@ -593,7 +612,13 @@ impl Progress {
         if self.is_indeterminate() {
             return format!("{}…", self.label);
         }
-        format!("{} {}/{} ({}%)", self.label, self.done, self.total, self.percent())
+        format!(
+            "{} {}/{} ({}%)",
+            self.label,
+            self.done,
+            self.total,
+            self.percent()
+        )
     }
 }
 
@@ -622,7 +647,10 @@ impl<'a> Reporter<'a> {
         line: &'a mut dyn FnMut(String),
         progress: &'a mut dyn FnMut(Progress),
     ) -> Reporter<'a> {
-        Reporter { line, progress: Some(progress) }
+        Reporter {
+            line,
+            progress: Some(progress),
+        }
     }
 
     /// A reporter for a caller with nowhere to draw: lines still go somewhere,
@@ -632,7 +660,10 @@ impl<'a> Reporter<'a> {
     /// tests that collect lines need a reporter with no progress channel.
     #[cfg(test)]
     pub fn lines_only(line: &'a mut dyn FnMut(String)) -> Reporter<'a> {
-        Reporter { line, progress: None }
+        Reporter {
+            line,
+            progress: None,
+        }
     }
 
     /// Report a line.
@@ -682,7 +713,12 @@ impl<'a> Reporter<'a> {
 /// says nothing between starting and finishing otherwise, and a silent screen
 /// is indistinguishable from a hang — which is how a resumable install gets
 /// killed by the person waiting for it.
-pub fn run(plan: &InstallPlan, wire: &Wire, threads: usize, reporter: &mut Reporter) -> InstallReport {
+pub fn run(
+    plan: &InstallPlan,
+    wire: &Wire,
+    threads: usize,
+    reporter: &mut Reporter,
+) -> InstallReport {
     let mut report = InstallReport {
         present: plan.present,
         problems: plan.problems.clone(),
@@ -845,7 +881,9 @@ fn run_assets(
     let index = match AssetIndex::parse(&text) {
         Ok(index) => index,
         Err(error) => {
-            report.problems.push(format!("asset index {} is unreadable: {error}", assets.id));
+            report
+                .problems
+                .push(format!("asset index {} is unreadable: {error}", assets.id));
             return;
         }
     };
@@ -956,7 +994,11 @@ fn reconstruct(assets: &AssetPlan, index: &AssetIndex, reporter: &mut Reporter) 
                 copied += 1;
             }
         }
-        reporter.log(format!("reconstructed {} asset(s) into {}", copied, target.display()));
+        reporter.log(format!(
+            "reconstructed {} asset(s) into {}",
+            copied,
+            target.display()
+        ));
     }
 }
 
@@ -1035,11 +1077,19 @@ pub fn safe_file_name(name: &str) -> Result<String, String> {
         return Err("the project published a file without a name".to_string());
     }
     if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
-        return Err(format!("refusing to write suspicious file name '{trimmed}'"));
+        return Err(format!(
+            "refusing to write suspicious file name '{trimmed}'"
+        ));
     }
     let cleaned: String = trimmed
         .chars()
-        .map(|c| if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0') { '_' } else { c })
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     Ok(cleaned)
 }
@@ -1113,7 +1163,11 @@ pub fn install_file(
     palantir_core::util::ensure_dir(target_dir)
         .map_err(|error| format!("creating {} failed: {error}", target_dir.display()))?;
     let path = target_dir.join(&filename);
-    let jobs = [FileJob::new(&file.url, &path, file.sha1().unwrap_or_default())];
+    let jobs = [FileJob::new(
+        &file.url,
+        &path,
+        file.sha1().unwrap_or_default(),
+    )];
     wire.files(&jobs, 1, &mut |_, _| {})
         .remove(0)
         .map_err(|reason| format!("downloading {filename} failed: {reason}"))?;
@@ -1164,7 +1218,9 @@ pub fn newest_pack_version(
             return Some(found);
         }
     }
-    versions.iter().find(|candidate| candidate.primary_file().is_some())
+    versions
+        .iter()
+        .find(|candidate| candidate.primary_file().is_some())
 }
 
 /// What fetching a pack's listed files came to.
@@ -1222,8 +1278,11 @@ pub fn fetch_pack_files(
         // Reapplying a pack is a repair too: size alone cannot distinguish a
         // corrupt jar or an older version published under the same filename.
         let correct_size = file.size == 0
-            || std::fs::metadata(&dest).map(|meta| meta.len() == file.size).unwrap_or(false);
-        if file.satisfied_at(&dest) && correct_size
+            || std::fs::metadata(&dest)
+                .map(|meta| meta.len() == file.size)
+                .unwrap_or(false);
+        if file.satisfied_at(&dest)
+            && correct_size
             && verify_download(&dest, file.sha1.as_deref().unwrap_or_default()).is_ok()
         {
             fetch.present += 1;
@@ -1238,7 +1297,11 @@ pub fn fetch_pack_files(
     let jobs: Vec<FileJob> = planned
         .iter()
         .map(|(file, dest)| {
-            FileJob::new(&file.downloads[0], dest, file.sha1.clone().unwrap_or_default())
+            FileJob::new(
+                &file.downloads[0],
+                dest,
+                file.sha1.clone().unwrap_or_default(),
+            )
         })
         .collect();
     let results = wire.files(&jobs, workers.max(1), &mut |done, bytes| {
@@ -1254,9 +1317,16 @@ pub fn fetch_pack_files(
             Err(mut last) => {
                 let mut recovered = None;
                 for mirror in file.downloads.iter().skip(1) {
-                    let jobs = [FileJob::new(mirror, dest, file.sha1.clone().unwrap_or_default())];
+                    let jobs = [FileJob::new(
+                        mirror,
+                        dest,
+                        file.sha1.clone().unwrap_or_default(),
+                    )];
                     let mut one = wire.files(&jobs, 1, &mut |_, _| {});
-                    match one.remove(0).and_then(|bytes| check_pack_file_size(file, dest, bytes)) {
+                    match one
+                        .remove(0)
+                        .and_then(|bytes| check_pack_file_size(file, dest, bytes))
+                    {
                         Ok(bytes) => {
                             recovered = Some(bytes);
                             break;
@@ -1296,7 +1366,10 @@ fn check_pack_file_size(
         // A mirror must not mistake this bad file for a completed download.
         std::fs::remove_file(dest)
             .map_err(|error| format!("removing incomplete {}: {error}", dest.display()))?;
-        return Err(format!("size mismatch: expected {} bytes, got {actual}", file.size));
+        return Err(format!(
+            "size mismatch: expected {} bytes, got {actual}",
+            file.size
+        ));
     }
     Ok(transferred)
 }
@@ -1324,10 +1397,16 @@ impl InstalledPack {
         let noun = if files == 1 { "file" } else { "files" };
         let mut line = format!("Installed {project} as {}, {files} {noun}", self.id);
         if !self.fetch.failed.is_empty() {
-            line.push_str(&format!(", {} could not be fetched", self.fetch.failed.len()));
+            line.push_str(&format!(
+                ", {} could not be fetched",
+                self.fetch.failed.len()
+            ));
         }
         if !self.skipped.is_empty() {
-            line.push_str(&format!(", {} entries are not installable", self.skipped.len()));
+            line.push_str(&format!(
+                ", {} entries are not installable",
+                self.skipped.len()
+            ));
         }
         line
     }
@@ -1363,7 +1442,10 @@ impl PackReapply {
             ));
         }
         if !self.skipped.is_empty() {
-            line.push_str(&format!(", {} entries are not installable", self.skipped.len()));
+            line.push_str(&format!(
+                ", {} entries are not installable",
+                self.skipped.len()
+            ));
         }
         line
     }
@@ -1398,8 +1480,17 @@ pub fn reapply_pack(
         .map_err(|error| format!("reading '{}' failed: {error}", archive.display()))?;
     let plan = palantir_loader::apply_mrpack(bytes.as_slice(), instance)
         .map_err(|error| format!("that archive is not a readable pack: {error}"))?;
-    let fetch = fetch_pack_files(wire, instance.root(), &plan.files, DEFAULT_THREADS, progress);
-    Ok(PackReapply { fetch, skipped: plan.skipped })
+    let fetch = fetch_pack_files(
+        wire,
+        instance.root(),
+        &plan.files,
+        DEFAULT_THREADS,
+        progress,
+    );
+    Ok(PackReapply {
+        fetch,
+        skipped: plan.skipped,
+    })
 }
 
 /// The versions of a pack that fit the instance they would be laid over.
@@ -1495,15 +1586,19 @@ fn import_and_fetch(
     // The launcher's one wire, so a pack's files draw the same ceiling as
     // everything else it is fetching at that moment.
     let fetch = fetch_pack_files(wire, &root, &plan.files, DEFAULT_THREADS, progress);
-    Ok(InstalledPack { id, fetch, skipped: plan.skipped })
+    Ok(InstalledPack {
+        id,
+        fetch,
+        skipped: plan.skipped,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::Script;
     use palantir_core::version::{LaunchProfile, Library};
     use palantir_net::modrinth::{ModrinthProjectVersion, ModrinthVersionFile};
-    use crate::wire::Script;
     use serde_json::json;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -1557,11 +1652,15 @@ mod tests {
             published("no-file", &["1.21.4"], &["fabric"], false),
         ];
         assert_eq!(
-            preferred_version(&versions, "mod", "1.21.4", "fabric").unwrap().name,
+            preferred_version(&versions, "mod", "1.21.4", "fabric")
+                .unwrap()
+                .name,
             "beta-new"
         );
         assert_eq!(
-            preferred_version(&versions, "mod", "1.21.4", "forge").unwrap().name,
+            preferred_version(&versions, "mod", "1.21.4", "forge")
+                .unwrap()
+                .name,
             "forge-only"
         );
         assert!(preferred_version(&versions, "mod", "1.21.4", "quilt").is_none());
@@ -1583,20 +1682,31 @@ mod tests {
             published("fabric-second", &["1.21.4"], &["fabric"], true),
         ];
         assert_eq!(
-            preferred_version(&versions, "mod", "1.21.4", "fabric").unwrap().name,
+            preferred_version(&versions, "mod", "1.21.4", "fabric")
+                .unwrap()
+                .name,
             "fabric-second",
             "the loader the instance runs wins over the fallback"
         );
-        let only_pack = vec![published("datapack-first", &["1.21.4"], &["datapack"], true)];
+        let only_pack = vec![published(
+            "datapack-first",
+            &["1.21.4"],
+            &["datapack"],
+            true,
+        )];
         assert_eq!(
-            preferred_version(&only_pack, "mod", "1.21.4", "fabric").unwrap().name,
+            preferred_version(&only_pack, "mod", "1.21.4", "fabric")
+                .unwrap()
+                .name,
             "datapack-first",
             "`isVersionCompatible`'s datapack allowance"
         );
         // Anything that is not a mod is matched on the game version alone: a
         // resource pack has no loader to be wrong about.
         assert_eq!(
-            preferred_version(&only_pack, "resourcepack", "1.21.4", "vanilla").unwrap().name,
+            preferred_version(&only_pack, "resourcepack", "1.21.4", "vanilla")
+                .unwrap()
+                .name,
             "datapack-first"
         );
         assert!(preferred_version(&only_pack, "resourcepack", "1.0", "vanilla").is_none());
@@ -1625,7 +1735,9 @@ mod tests {
         let mods = dir.path().join("mods");
         let body = b"a mod jar";
         let mut candidate = published("sodium", &["26.2"], &["fabric"], true);
-        candidate.files[0].hashes.insert("sha1".to_string(), sha1_hex(body));
+        candidate.files[0]
+            .hashes
+            .insert("sha1".to_string(), sha1_hex(body));
         candidate.files[0].size = body.len() as u64;
         let mut script = Script::new();
         script.insert(&candidate.files[0].url, body.to_vec());
@@ -1641,7 +1753,11 @@ mod tests {
 
         let again = install_file(&wire, &mods, &candidate).unwrap();
         assert_eq!(again.bytes, body.len() as u64);
-        assert_eq!(fetch.count(), 1, "a file that is already here is not asked for twice");
+        assert_eq!(
+            fetch.count(),
+            1,
+            "a file that is already here is not asked for twice"
+        );
     }
 
     #[test]
@@ -1670,17 +1786,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mods = dir.path().join("mods");
         let mut candidate = published("sodium", &["26.2"], &["fabric"], true);
-        candidate.files[0].hashes.insert("sha1".to_string(), sha1_hex(b"jar bytes"));
+        candidate.files[0]
+            .hashes
+            .insert("sha1".to_string(), sha1_hex(b"jar bytes"));
         candidate.files[0].size = 9;
         let script = Script::new();
         let wire = script.wire();
 
         // No files at all: refused before any request.
-        let empty = ModrinthProjectVersion { files: Vec::new(), ..candidate.clone() };
+        let empty = ModrinthProjectVersion {
+            files: Vec::new(),
+            ..candidate.clone()
+        };
         assert!(install_file(&wire, &mods, &empty).is_err());
         // No direct URL: also refused before any request.
         let no_url = ModrinthProjectVersion {
-            files: vec![ModrinthVersionFile { url: String::new(), ..candidate.files[0].clone() }],
+            files: vec![ModrinthVersionFile {
+                url: String::new(),
+                ..candidate.files[0].clone()
+            }],
             ..candidate.clone()
         };
         let error = install_file(&wire, &mods, &no_url).unwrap_err();
@@ -1723,8 +1847,7 @@ mod tests {
         let wire = Script::new().wire();
         let bogus = dir.path().join("not-a-pack.zip");
         std::fs::write(&bogus, b"definitely not a zip archive").unwrap();
-        let error =
-            install_pack_archive(&wire, &paths, &bogus, "Bogus", &mut |_| {}).unwrap_err();
+        let error = install_pack_archive(&wire, &paths, &bogus, "Bogus", &mut |_| {}).unwrap_err();
         assert!(error.contains("readable pack"), "error: {error}");
         assert!(install_pack_archive(
             &wire,
@@ -1772,11 +1895,22 @@ mod tests {
         let mut reports = 0usize;
         let fetch = fetch_pack_files(&wire, dir.path(), &files, 2, &mut |_| reports += 1);
         assert_eq!(fetch.fetched, 1);
-        assert_eq!(fetch.present, 1, "a file that is already there is left alone");
+        assert_eq!(
+            fetch.present, 1,
+            "a file that is already there is left alone"
+        );
         assert_eq!(fetch.bytes, good.len() as u64);
         assert_eq!(fetch.failed.len(), 1);
-        assert!(fetch.failed[0].contains("mods/bad.jar"), "{:?}", fetch.failed);
-        assert!(fetch.failed[0].contains("hash mismatch"), "{:?}", fetch.failed);
+        assert!(
+            fetch.failed[0].contains("mods/bad.jar"),
+            "{:?}",
+            fetch.failed
+        );
+        assert!(
+            fetch.failed[0].contains("hash mismatch"),
+            "{:?}",
+            fetch.failed
+        );
         assert!(dir.path().join("mods").join("good.jar").is_file());
         assert!(
             !dir.path().join("mods").join("bad.jar").exists(),
@@ -1812,8 +1946,10 @@ mod tests {
         let good = b"complete jar";
         let files = [palantir_loader::PackFile {
             path: "mods/test.jar".into(),
-            downloads: vec!["https://cdn.example.invalid/short.jar".into(),
-                            "https://cdn.example.invalid/good.jar".into()],
+            downloads: vec![
+                "https://cdn.example.invalid/short.jar".into(),
+                "https://cdn.example.invalid/good.jar".into(),
+            ],
             sha1: None,
             size: good.len() as u64,
         }];
@@ -1822,7 +1958,10 @@ mod tests {
         script.insert(&files[0].downloads[1], good.to_vec());
         let result = fetch_pack_files(&script.wire(), dir.path(), &files, 1, &mut |_| {});
         assert!(result.failed.is_empty(), "{result:?}");
-        assert_eq!(std::fs::read(dir.path().join(&files[0].path)).unwrap(), good);
+        assert_eq!(
+            std::fs::read(dir.path().join(&files[0].path)).unwrap(),
+            good
+        );
 
         let missing = tempfile::tempdir().unwrap();
         let mut no_mirror = files[0].clone();
@@ -1857,11 +1996,19 @@ mod tests {
         // all: the loader strips that prefix when it writes the tree, which is
         // why the assertion below is not looking under `overrides/`.
         let mut script = Script::new();
-        script.insert("https://cdn.example.invalid/cobblemon.jar", mod_bytes.to_vec());
+        script.insert(
+            "https://cdn.example.invalid/cobblemon.jar",
+            mod_bytes.to_vec(),
+        );
         let wire = script.wire();
-        let installed =
-            install_pack_archive(&wire, &paths, &write_archive(&dir, &archive), "Cobblemon", &mut |_| {})
-                .expect("the pack installs");
+        let installed = install_pack_archive(
+            &wire,
+            &paths,
+            &write_archive(&dir, &archive),
+            "Cobblemon",
+            &mut |_| {},
+        )
+        .expect("the pack installs");
         assert_eq!(installed.id, "Cobblemon");
         assert_eq!(installed.fetch.fetched, 1);
         assert!(installed.skipped.is_empty());
@@ -1872,8 +2019,7 @@ mod tests {
         let root = paths.instances_dir().join("Cobblemon");
         assert!(root.join("mods").join("cobblemon.jar").is_file());
         assert_eq!(
-            std::fs::read_to_string(root.join("config").join("cobblemon.json"))
-                .unwrap_or_default(),
+            std::fs::read_to_string(root.join("config").join("cobblemon.json")).unwrap_or_default(),
             "{}",
             "the pack's overrides land in the instance root, with `overrides/` stripped"
         );
@@ -1912,19 +2058,29 @@ mod tests {
         std::fs::create_dir_all(root.join("saves").join("world")).unwrap();
         std::fs::create_dir_all(root.join("config")).unwrap();
         std::fs::write(root.join("mods").join("manual.jar"), b"my mod").unwrap();
-        std::fs::write(root.join("saves").join("world").join("level.dat"), b"my world")
-            .unwrap();
+        std::fs::write(
+            root.join("saves").join("world").join("level.dat"),
+            b"my world",
+        )
+        .unwrap();
         std::fs::write(root.join("config").join("left-behind.cfg"), b"mine").unwrap();
         // What the pack's previous version wrote under the same name.
         std::fs::write(root.join("config").join("cobblemon.json"), b"old").unwrap();
 
         let mut script = Script::new();
-        script.insert("https://cdn.example.invalid/cobblemon.jar", mod_bytes.to_vec());
+        script.insert(
+            "https://cdn.example.invalid/cobblemon.jar",
+            mod_bytes.to_vec(),
+        );
         let wire = script.wire();
         let mut reports = 0usize;
-        let reapply =
-            reapply_pack(&wire, &instance, &write_archive(&dir, &archive), &mut |_| reports += 1)
-                .expect("the pack is laid over the instance");
+        let reapply = reapply_pack(
+            &wire,
+            &instance,
+            &write_archive(&dir, &archive),
+            &mut |_| reports += 1,
+        )
+        .expect("the pack is laid over the instance");
         assert_eq!(reapply.fetch.fetched, 1);
         assert_eq!(reapply.fetch.failed.len(), 0);
         assert!(reapply.skipped.is_empty(), "{:?}", reapply.skipped);
@@ -1950,8 +2106,13 @@ mod tests {
 
         // A second press: the file is where it belongs and the right size, so
         // nothing is transferred and the sentence says so.
-        let again =
-            reapply_pack(&wire, &instance, &write_archive(&dir, &archive), &mut |_| {}).unwrap();
+        let again = reapply_pack(
+            &wire,
+            &instance,
+            &write_archive(&dir, &archive),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(again.fetch.fetched, 0);
         assert_eq!(again.fetch.present, 1);
         assert_eq!(
@@ -2102,7 +2263,13 @@ mod tests {
     fn planning_lists_missing_files_with_their_urls_and_digests() {
         let (_dir, paths) = test_paths();
         let ctx = RuntimeContext::current_host();
-        let plan = plan(&paths, &paths.root.join("instances").join("Test"), &profile(), &ctx, Existing::Trust);
+        let plan = plan(
+            &paths,
+            &paths.root.join("instances").join("Test"),
+            &profile(),
+            &ctx,
+            Existing::Trust,
+        );
         assert_eq!(plan.jobs.len(), 2, "jobs: {:?}", plan.jobs);
         assert_eq!(plan.present, 0);
 
@@ -2120,7 +2287,9 @@ mod tests {
         );
         assert_eq!(brigadier.size, 77);
         assert_eq!(brigadier.sha1, "abc");
-        assert!(brigadier.url.starts_with("https://libraries.minecraft.net/"));
+        assert!(brigadier
+            .url
+            .starts_with("https://libraries.minecraft.net/"));
 
         let fabric = plan
             .jobs
@@ -2203,7 +2372,10 @@ mod tests {
         let repaired = plan(&paths, &paths.root, &profile(), &ctx, Existing::Verify);
         assert_eq!(repaired.present, 1, "the file with no digest is kept");
         assert_eq!(repaired.jobs.len(), 1, "jobs: {:?}", repaired.jobs);
-        assert_eq!(repaired.jobs[0].dest, dest, "and the wrong one is planned again");
+        assert_eq!(
+            repaired.jobs[0].dest, dest,
+            "and the wrong one is planned again"
+        );
     }
 
     #[test]
@@ -2215,14 +2387,21 @@ mod tests {
         // and its value is the classifier, so only this host's jar is planned.
         let classifier = format!("natives-{}", ctx.system);
         let native_path = format!("org/lwjgl/lwjgl/3.3.1/lwjgl-3.3.1-{classifier}.jar");
-        profile
-            .libraries
-            .push(library_from(native_library(&ctx, &classifier, &native_path, "def", 5)));
+        profile.libraries.push(library_from(native_library(
+            &ctx,
+            &classifier,
+            &native_path,
+            "def",
+            5,
+        )));
         let instance_root = paths.root.join("instances").join("Natives");
         let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         assert_eq!(plan.jobs.len(), 1, "jobs: {:?}", plan.jobs);
         assert_eq!(plan.natives.len(), 1);
-        assert_eq!(plan.natives[0].path, paths.root.join("libraries").join(&native_path));
+        assert_eq!(
+            plan.natives[0].path,
+            paths.root.join("libraries").join(&native_path)
+        );
         assert_eq!(plan.natives_dir, instance_root.join("natives"));
         assert_eq!(plan.jobs[0].sha1, "def");
         // The library's own `extract.exclude` travels with the jar, because
@@ -2280,16 +2459,27 @@ mod tests {
         );
         assert_eq!(sixty_four.jobs.len(), 1, "jobs: {:?}", sixty_four.jobs);
         assert!(
-            sixty_four.natives[0].path.to_string_lossy().ends_with("-64.jar"),
+            sixty_four.natives[0]
+                .path
+                .to_string_lossy()
+                .ends_with("-64.jar"),
             "a 64-bit JVM gets the 64-bit jar: {:?}",
             sixty_four.natives[0]
         );
 
         ctx.java_architecture = "32".into();
         let thirty_two = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
-        assert_eq!(thirty_two.natives.len(), 1, "natives: {:?}", thirty_two.natives);
+        assert_eq!(
+            thirty_two.natives.len(),
+            1,
+            "natives: {:?}",
+            thirty_two.natives
+        );
         assert!(
-            thirty_two.natives[0].path.to_string_lossy().ends_with("-32.jar"),
+            thirty_two.natives[0]
+                .path
+                .to_string_lossy()
+                .ends_with("-32.jar"),
             "a 32-bit JVM gets the 32-bit jar: {:?}",
             thirty_two.natives[0]
         );
@@ -2383,7 +2573,9 @@ mod tests {
         assert_eq!(report.natives_extracted, 1);
         assert!(plan.jobs[0].dest.is_file());
         assert!(instance_root.join("natives").join("lwjgl.dll").is_file());
-        assert!(lines.iter().any(|line| line.contains("downloading 1 file(s)")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("downloading 1 file(s)")));
     }
 
     #[test]
@@ -2412,7 +2604,11 @@ mod tests {
         // The words are the engine's now, and they are the better sentence: the
         // transfer that wrote the part file names it, the digest it expected and
         // the one it got.
-        assert!(report.failed[0].contains("hash mismatch"), "{:?}", report.failed);
+        assert!(
+            report.failed[0].contains("hash mismatch"),
+            "{:?}",
+            report.failed
+        );
         assert!(
             report.failed[0].contains(&sha1_hex(b"the real file")),
             "and names the digest it expected: {:?}",
@@ -2436,9 +2632,16 @@ mod tests {
         let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty());
         assert_eq!(plan.problems.len(), 1);
-        assert!(plan.problems[0].contains("no download source"), "{:?}", plan.problems);
+        assert!(
+            plan.problems[0].contains("no download source"),
+            "{:?}",
+            plan.problems
+        );
         let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
-        assert!(!report.is_complete(), "a missing library source blocks completion");
+        assert!(
+            !report.is_complete(),
+            "a missing library source blocks completion"
+        );
     }
 
     #[test]
@@ -2534,7 +2737,10 @@ mod tests {
         });
         let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         let mut fetcher = Script::new();
-        fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
+        fetcher.insert(
+            "https://piston-meta.mojang.com/17.json",
+            index_body.into_bytes(),
+        );
         // Same length, different bytes: the case a size check cannot see.
         fetcher.insert(cdn_url(&hash), b"wxyz".to_vec());
         let (report, _) = run_lines(&plan, &fetcher.wire(), 1);
@@ -2542,11 +2748,17 @@ mod tests {
         assert!(!report.is_complete());
         assert_eq!(report.objects_downloaded, 0);
         assert!(
-            report.failed.iter().any(|line| line.contains("hash mismatch")),
+            report
+                .failed
+                .iter()
+                .any(|line| line.contains("hash mismatch")),
             "failures: {:?}",
             report.failed
         );
-        assert!(!paths.assets_dir().join(object_relative_path(&hash)).exists());
+        assert!(!paths
+            .assets_dir()
+            .join(object_relative_path(&hash))
+            .exists());
     }
 
     #[test]
@@ -2568,7 +2780,10 @@ mod tests {
             known: true,
         });
         let mut fetcher = Script::new();
-        fetcher.insert("https://piston-meta.mojang.com/17.json", index_body.into_bytes());
+        fetcher.insert(
+            "https://piston-meta.mojang.com/17.json",
+            index_body.into_bytes(),
+        );
         fetcher.insert(cdn_url(&hash), body.to_vec());
 
         let first = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
@@ -2592,8 +2807,14 @@ mod tests {
         let plan = plan(&paths, &paths.root, &profile, &ctx, Existing::Trust);
         assert!(plan.jobs.is_empty());
         let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
-        assert!(report.problems.iter().any(|p| p.contains("no download URL")));
-        assert!(!report.is_complete(), "a missing asset index blocks completion");
+        assert!(report
+            .problems
+            .iter()
+            .any(|p| p.contains("no download URL")));
+        assert!(
+            !report.is_complete(),
+            "a missing asset index blocks completion"
+        );
     }
 
     #[test]
@@ -2604,7 +2825,13 @@ mod tests {
         let index_path = paths.assets_dir().join("indexes/17.json");
         std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
         std::fs::write(&index_path, b"not JSON").unwrap();
-        let plan = plan(&paths, &paths.root, &profile, &RuntimeContext::current_host(), Existing::Trust);
+        let plan = plan(
+            &paths,
+            &paths.root,
+            &profile,
+            &RuntimeContext::current_host(),
+            Existing::Trust,
+        );
         let (report, _) = run_lines(&plan, &Script::new().wire(), 1);
         assert!(!report.is_complete());
         assert!(report.problems.iter().any(|p| p.contains("unreadable")));
@@ -2617,12 +2844,17 @@ mod tests {
         let hash = sha1_hex(body);
         let index_path = paths.assets_dir().join("indexes/legacy.json");
         std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
-        std::fs::write(&index_path, json!({
-            "objects": {
-                "first.txt": { "hash": hash, "size": body.len() },
-                "second.txt": { "hash": hash, "size": body.len() }
-            }
-        }).to_string()).unwrap();
+        std::fs::write(
+            &index_path,
+            json!({
+                "objects": {
+                    "first.txt": { "hash": hash, "size": body.len() },
+                    "second.txt": { "hash": hash, "size": body.len() }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
         let target = paths.root.join("resources");
         let plan = InstallPlan {
             assets: Some(AssetPlan {
@@ -2674,13 +2906,22 @@ mod tests {
 
         let plan = plan(&paths, &instance_root, &profile, &ctx, Existing::Trust);
         let mut fetcher = Script::new();
-        fetcher.insert("https://piston-meta.mojang.com/legacy.json", index_body.into_bytes());
+        fetcher.insert(
+            "https://piston-meta.mojang.com/legacy.json",
+            index_body.into_bytes(),
+        );
         fetcher.insert(cdn_url(&hash), body.to_vec());
         let (report, lines) = run_lines(&plan, &fetcher.wire(), 1);
 
         assert!(report.is_complete(), "failures: {:?}", report.failed);
-        let reconstructed = instance_root.join("minecraft").join("resources").join("lang/en_US.lang");
-        assert!(reconstructed.is_file(), "legacy assets land under resources/");
+        let reconstructed = instance_root
+            .join("minecraft")
+            .join("resources")
+            .join("lang/en_US.lang");
+        assert!(
+            reconstructed.is_file(),
+            "legacy assets land under resources/"
+        );
         assert_eq!(std::fs::read(&reconstructed).unwrap(), b"hi");
         assert!(lines.iter().any(|line| line.contains("reconstructed")));
     }
@@ -2790,7 +3031,11 @@ mod tests {
         for index in 0..FILES {
             let url = format!("https://cdn.invalid/object-{index:04}");
             fetcher.insert(&url, vec![b'x'; EACH]);
-            jobs.push(FileJob::new(url, dir.path().join(format!("object-{index:04}")), ""));
+            jobs.push(FileJob::new(
+                url,
+                dir.path().join(format!("object-{index:04}")),
+                "",
+            ));
         }
 
         let mut lines: Vec<String> = Vec::new();
@@ -2810,12 +3055,20 @@ mod tests {
              finishing — the count is a level, not a line: {lines:?}"
         );
         let first = levels.first().expect("the phase reports its first file");
-        assert_eq!((first.done, first.total), (1, FILES), "the phase is alive at once");
+        assert_eq!(
+            (first.done, first.total),
+            (1, FILES),
+            "the phase is alive at once"
+        );
         let last = levels.last().unwrap();
         assert_eq!(last.done, FILES, "and says when it is over");
         assert_eq!(last.percent(), 100);
         assert_eq!(last.fraction(), 1.0);
-        assert_eq!(last.bytes, (FILES * EACH) as u64, "with the bytes it carried");
+        assert_eq!(
+            last.bytes,
+            (FILES * EACH) as u64,
+            "with the bytes it carried"
+        );
         assert!(
             levels.len() <= PROGRESS_REPORTS + 2,
             "a report per file would be {FILES} redraws, got {}: {levels:?}",
@@ -2834,10 +3087,18 @@ mod tests {
         assert_eq!(empty.status_line(), "files 0/0 (100%)");
 
         let half = Progress::new("asset objects", 715, 5057, 65_000_000);
-        assert!((half.fraction() - 0.141_39).abs() < 0.0001, "got {}", half.fraction());
+        assert!(
+            (half.fraction() - 0.141_39).abs() < 0.0001,
+            "got {}",
+            half.fraction()
+        );
         assert_eq!(half.percent(), 14);
         assert_eq!(half.status_line(), "asset objects 715/5057 (14%)");
-        assert!((half.megabytes() - 61.99).abs() < 0.02, "got {}", half.megabytes());
+        assert!(
+            (half.megabytes() - 61.99).abs() < 0.02,
+            "got {}",
+            half.megabytes()
+        );
 
         // A report that outran its total (a phase whose size changed under it)
         // still has to stay inside the bar.
@@ -2848,14 +3109,27 @@ mod tests {
 
     #[test]
     fn the_progress_cadence_is_a_step_not_a_report_per_file() {
-        assert_eq!(progress_step(0), 1, "an empty phase still finishes in one step");
+        assert_eq!(
+            progress_step(0),
+            1,
+            "an empty phase still finishes in one step"
+        );
         assert_eq!(progress_step(1), 1);
         assert_eq!(progress_step(PROGRESS_REPORTS), 1);
         assert_eq!(progress_step(5057), 102, "a report every ~2% of 5057 files");
-        assert_eq!(progress_step(120), 3, "rounded up, so 120 files get ~40 reports");
+        assert_eq!(
+            progress_step(120),
+            3,
+            "rounded up, so 120 files get ~40 reports"
+        );
         // What a phase leaves on disk when the levels it drew are gone.
         assert_eq!(
-            phase_done_line("asset objects", 5057, 480 * 1024 * 1024, Duration::from_secs(91)),
+            phase_done_line(
+                "asset objects",
+                5057,
+                480 * 1024 * 1024,
+                Duration::from_secs(91)
+            ),
             "asset objects: done — 5057 file(s), 480.0 MB in 91.0 s"
         );
         assert_eq!(

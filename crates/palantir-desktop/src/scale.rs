@@ -161,7 +161,10 @@ fn row(surface: &str, n: usize, ms: f64) {
 /// one. The page is handed the same thing either way
 /// ([`crate::scroll::Geometry::of`] is the only conversion).
 fn scroll_geometry(offset: f32) -> crate::scroll::Geometry {
-    crate::scroll::Geometry { offset, view_height: VIEW }
+    crate::scroll::Geometry {
+        offset,
+        view_height: VIEW,
+    }
 }
 
 #[test]
@@ -275,7 +278,8 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
         // with no report yet it is the fallback window, bounded by a height
         // ([`crate::scroll::INITIAL_VIEW`]) rather than by the listing -- and the
         // Files tab is where that shows, because its rows are the short ones.
-        let drawn = crate::scroll::window(n, crate::pages::instance::CONTENT_ROW, scroll_geometry(0.0));
+        let drawn =
+            crate::scroll::window(n, crate::pages::instance::CONTENT_ROW, scroll_geometry(0.0));
         println!(
             "{:<34} n={:<6} {:>9} rows of {n}",
             "  of which: rows drawn, reported",
@@ -349,7 +353,11 @@ fn the_instance_pages_tabs_cost_this_much_a_frame() {
             }
         }
 
-        worst = worst.max(content).max(files).max(content_open).max(files_open);
+        worst = worst
+            .max(content)
+            .max(files)
+            .max(content_open)
+            .max(files_open);
         opened = opened.max(content_open).max(files_open);
     }
     println!();

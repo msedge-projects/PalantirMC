@@ -112,7 +112,9 @@ impl ResizeEdge {
         match self {
             ResizeEdge::North | ResizeEdge::South => mouse::Interaction::ResizingVertically,
             ResizeEdge::East | ResizeEdge::West => mouse::Interaction::ResizingHorizontally,
-            ResizeEdge::NorthEast | ResizeEdge::SouthWest => mouse::Interaction::ResizingHorizontally,
+            ResizeEdge::NorthEast | ResizeEdge::SouthWest => {
+                mouse::Interaction::ResizingHorizontally
+            }
             ResizeEdge::NorthWest | ResizeEdge::SouthEast => mouse::Interaction::ResizingVertically,
         }
     }
@@ -194,7 +196,12 @@ pub fn primary_work_area() -> Option<WorkArea> {
 
     // windows-sys structs carry no `Default`, so the outgoing struct is built
     // field by field. `cbSize` is what the call validates first.
-    let empty = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let empty = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
     let mut info = MONITORINFO {
         cbSize: core::mem::size_of::<MONITORINFO>() as u32,
         rcMonitor: empty,
@@ -621,8 +628,16 @@ fn hit_test_answer(hwnd: isize, lparam: isize) -> Option<u32> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, IsZoomed};
 
     let (screen_x, screen_y) = screen_point(lparam);
-    let mut point = POINT { x: screen_x, y: screen_y };
-    let empty = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut point = POINT {
+        x: screen_x,
+        y: screen_y,
+    };
+    let empty = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
     let mut client = empty;
 
     // SAFETY: read-only queries against our own window handle.
@@ -904,7 +919,10 @@ fn registry_string(root: isize, subkey: &str, value: &str) -> Option<String> {
     if status != ERROR_SUCCESS {
         return None;
     }
-    let end = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(buffer.len());
     Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
@@ -945,11 +963,23 @@ pub fn windows_version() -> Option<String> {
 
     // Major/minor are DWORDs that only exist from Windows 10 on; the build
     // number is a string and is present on every release this launcher runs on.
-    let build = registry_string(HKEY_LOCAL_MACHINE, CURRENT_VERSION_KEY, "CurrentBuildNumber")?;
-    let major = registry_dword(HKEY_LOCAL_MACHINE, CURRENT_VERSION_KEY, "CurrentMajorVersionNumber")
-        .unwrap_or(10);
-    let minor = registry_dword(HKEY_LOCAL_MACHINE, CURRENT_VERSION_KEY, "CurrentMinorVersionNumber")
-        .unwrap_or(0);
+    let build = registry_string(
+        HKEY_LOCAL_MACHINE,
+        CURRENT_VERSION_KEY,
+        "CurrentBuildNumber",
+    )?;
+    let major = registry_dword(
+        HKEY_LOCAL_MACHINE,
+        CURRENT_VERSION_KEY,
+        "CurrentMajorVersionNumber",
+    )
+    .unwrap_or(10);
+    let minor = registry_dword(
+        HKEY_LOCAL_MACHINE,
+        CURRENT_VERSION_KEY,
+        "CurrentMinorVersionNumber",
+    )
+    .unwrap_or(0);
     Some(version_label(major, minor, build.trim()))
 }
 
@@ -964,7 +994,12 @@ mod tests {
     use super::*;
 
     fn screen(width: f32, height: f32) -> Option<WorkArea> {
-        Some(WorkArea { x: 0.0, y: 0.0, width, height })
+        Some(WorkArea {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        })
     }
 
     #[test]
@@ -1017,7 +1052,10 @@ mod tests {
         // one direction only loses what it must.
         let work = screen(1366.0, 2000.0);
         let (width, height) = fit_to_work_area((1280.0, 820.0), work, (980.0, 640.0), 0.92);
-        assert!(width < 1280.0, "width should be clamped by the narrow screen");
+        assert!(
+            width < 1280.0,
+            "width should be clamped by the narrow screen"
+        );
         assert_eq!(height, 820.0, "a height that fits is left exactly alone");
     }
 
@@ -1025,7 +1063,8 @@ mod tests {
     fn a_tiny_screen_falls_back_to_the_minimum_size() {
         // 800x600 cannot hold a 980x640 window; the floor wins so the app stays
         // usable instead of collapsing.
-        let (width, height) = fit_to_work_area((1280.0, 820.0), screen(800.0, 600.0), (980.0, 640.0), 0.92);
+        let (width, height) =
+            fit_to_work_area((1280.0, 820.0), screen(800.0, 600.0), (980.0, 640.0), 0.92);
         assert_eq!((width, height), (980.0, 640.0));
     }
 
@@ -1062,12 +1101,20 @@ mod tests {
         let mut codes: Vec<u32> = ResizeEdge::ALL.iter().map(|edge| edge.hit_code()).collect();
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes.len(), ResizeEdge::ALL.len(), "two edges share a hit code");
+        assert_eq!(
+            codes.len(),
+            ResizeEdge::ALL.len(),
+            "two edges share a hit code"
+        );
 
         let mut labels: Vec<&str> = ResizeEdge::ALL.iter().map(|edge| edge.label()).collect();
         labels.sort_unstable();
         labels.dedup();
-        assert_eq!(labels.len(), ResizeEdge::ALL.len(), "two edges share a label");
+        assert_eq!(
+            labels.len(),
+            ResizeEdge::ALL.len(),
+            "two edges share a label"
+        );
     }
 
     #[test]
@@ -1077,7 +1124,8 @@ mod tests {
             assert!(
                 matches!(
                     cursor,
-                    mouse::Interaction::ResizingHorizontally | mouse::Interaction::ResizingVertically
+                    mouse::Interaction::ResizingHorizontally
+                        | mouse::Interaction::ResizingVertically
                 ),
                 "{} should show a resize cursor, got {cursor:?}",
                 edge.label()
@@ -1089,7 +1137,10 @@ mod tests {
     fn the_grab_band_is_thick_enough_to_hit() {
         // Windows' own frame is 4px; anything thinner than that is a regression
         // in usability, anything much thicker starts eating content clicks.
-        assert!((4.0..=8.0).contains(&RESIZE_BAND), "RESIZE_BAND is {RESIZE_BAND}");
+        assert!(
+            (4.0..=8.0).contains(&RESIZE_BAND),
+            "RESIZE_BAND is {RESIZE_BAND}"
+        );
     }
 
     // ---- the hit test ----------------------------------------------------
@@ -1105,7 +1156,12 @@ mod tests {
         (
             1257.0,
             707.0,
-            CaptionTarget { right_inset: 54.0, width: 32.0, top: 17.0, bottom: 41.0 },
+            CaptionTarget {
+                right_inset: 54.0,
+                width: 32.0,
+                top: 17.0,
+                bottom: 41.0,
+            },
         )
     }
 
@@ -1130,10 +1186,19 @@ mod tests {
         let (w, h, target) = measured_window();
         // Where the brand cluster is: it must stay client area, because that is
         // what lets iced keep dragging the window from it.
-        assert_eq!(hit_code(112.0, 23.0, w, h, Some(target), false), Some(HTCLIENT));
+        assert_eq!(
+            hit_code(112.0, 23.0, w, h, Some(target), false),
+            Some(HTCLIENT)
+        );
         // And the middle of the window, and the middle of the content pane.
-        assert_eq!(hit_code(600.0, 23.0, w, h, Some(target), false), Some(HTCLIENT));
-        assert_eq!(hit_code(600.0, 400.0, w, h, Some(target), false), Some(HTCLIENT));
+        assert_eq!(
+            hit_code(600.0, 23.0, w, h, Some(target), false),
+            Some(HTCLIENT)
+        );
+        assert_eq!(
+            hit_code(600.0, 400.0, w, h, Some(target), false),
+            Some(HTCLIENT)
+        );
     }
 
     #[test]
@@ -1154,15 +1219,28 @@ mod tests {
             assert_eq!(
                 hit_code(x, y, w, h, Some(target), false),
                 Some(edge.hit_code()),
-                "the {} corner/edge" , edge.label()
+                "the {} corner/edge",
+                edge.label()
             );
         }
 
         // Just inside the band is content; just outside is the edge.
-        assert_eq!(hit_code(band - 0.5, 300.0, w, h, Some(target), false), Some(ResizeEdge::West.hit_code()));
-        assert_eq!(hit_code(band, 300.0, w, h, Some(target), false), Some(HTCLIENT));
-        assert_eq!(hit_code(w - band, 300.0, w, h, Some(target), false), Some(ResizeEdge::East.hit_code()));
-        assert_eq!(hit_code(w - band - 0.5, 300.0, w, h, Some(target), false), Some(HTCLIENT));
+        assert_eq!(
+            hit_code(band - 0.5, 300.0, w, h, Some(target), false),
+            Some(ResizeEdge::West.hit_code())
+        );
+        assert_eq!(
+            hit_code(band, 300.0, w, h, Some(target), false),
+            Some(HTCLIENT)
+        );
+        assert_eq!(
+            hit_code(w - band, 300.0, w, h, Some(target), false),
+            Some(ResizeEdge::East.hit_code())
+        );
+        assert_eq!(
+            hit_code(w - band - 0.5, 300.0, w, h, Some(target), false),
+            Some(HTCLIENT)
+        );
     }
 
     #[test]
@@ -1170,7 +1248,13 @@ mod tests {
         // Its edges are the screen's, and Windows would otherwise put the
         // resize cursor on them and refuse the drag.
         let (w, h, target) = measured_window();
-        for (x, y) in [(1.0, 300.0), (w - 1.0, 300.0), (600.0, 1.0), (600.0, h - 1.0), (1.0, 1.0)] {
+        for (x, y) in [
+            (1.0, 300.0),
+            (w - 1.0, 300.0),
+            (600.0, 1.0),
+            (600.0, h - 1.0),
+            (1.0, 1.0),
+        ] {
             assert_eq!(
                 hit_code(x, y, w, h, Some(target), true),
                 Some(HTCLIENT),
@@ -1210,7 +1294,11 @@ mod tests {
                     Some(HTCLIENT),
                     "({x},{y}) zoomed={zoomed}: a non-client answer here is the restore bug"
                 );
-                assert_ne!(code, Some(HTMAXBUTTON), "({x},{y}) must not be a system button");
+                assert_ne!(
+                    code,
+                    Some(HTMAXBUTTON),
+                    "({x},{y}) must not be a system button"
+                );
             }
         }
     }
@@ -1254,7 +1342,13 @@ mod tests {
         // A maximized window's frame sits outside its client rect; the shim
         // must not claim those pixels.
         let (w, h, target) = measured_window();
-        for (x, y) in [(-1.0, 23.0), (w, 23.0), (600.0, -1.0), (600.0, h), (-40.0, -40.0)] {
+        for (x, y) in [
+            (-1.0, 23.0),
+            (w, 23.0),
+            (600.0, -1.0),
+            (600.0, h),
+            (-40.0, -40.0),
+        ] {
             assert_eq!(hit_code(x, y, w, h, Some(target), false), None, "({x},{y})");
         }
         // And a client area with no size at all has no opinion either.
@@ -1266,14 +1360,23 @@ mod tests {
     #[test]
     fn screen_coordinates_are_read_as_signed_words() {
         // The packing `WM_NCHITTEST` uses: x in the low word, y in the high one.
-        assert_eq!(screen_point(((600u32) | (400u32 << 16)) as isize), (600, 400));
+        assert_eq!(
+            screen_point(((600u32) | (400u32 << 16)) as isize),
+            (600, 400)
+        );
         // Negative coordinates are normal on a monitor left of the primary one,
         // and must not read as 65000-odd.
-        assert_eq!(screen_point(((-64i32 as u32) & 0xffff | (((-20i32 as u32) & 0xffff) << 16)) as isize), (-64, -20));
+        assert_eq!(
+            screen_point(((-64i32 as u32) & 0xffff | (((-20i32 as u32) & 0xffff) << 16)) as isize),
+            (-64, -20)
+        );
         assert_eq!(screen_point(0), (0, 0));
         // Only the low 32 bits are coordinates; whatever sits above them in the
         // pointer-sized `lParam` must not leak in.
-        assert_eq!(screen_point(((600u32 | (400u32 << 16)) as isize) | (1isize << 40)), (600, 400));
+        assert_eq!(
+            screen_point(((600u32 | (400u32 << 16)) as isize) | (1isize << 40)),
+            (600, 400)
+        );
     }
 
     #[test]
@@ -1297,7 +1400,10 @@ mod tests {
 
         let (sender, mut receiver) = futures::channel::mpsc::unbounded();
         watch_window_state(sender);
-        assert!(receiver.next().now_or_never().is_none(), "nothing is reported before a change");
+        assert!(
+            receiver.next().now_or_never().is_none(),
+            "nothing is reported before a change"
+        );
 
         window_state_changed();
         assert_eq!(receiver.next().now_or_never(), Some(Some(())));
@@ -1331,6 +1437,9 @@ mod tests {
         // The slot still round-trips into the hit test, and the answer is client
         // area: publishing a caption target no longer buys a system button (see
         // `the_restore_control_is_never_answered_as_a_system_caption_button`).
-        assert_eq!(hit_code(w - 64.0, 23.0, w, 707.0, caption_target(), false), Some(HTCLIENT));
+        assert_eq!(
+            hit_code(w - 64.0, 23.0, w, 707.0, caption_target(), false),
+            Some(HTCLIENT)
+        );
     }
 }

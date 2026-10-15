@@ -256,8 +256,14 @@ impl Message {
     /// between the engine and a page is this one function wide, so moving a search
     /// to another page is a change here rather than everywhere the shell runs a
     /// request.
-    pub fn search_result(asked: &discover::Asked, result: Result<Vec<discover::Hit>, String>) -> Message {
-        Message::Discover(discover::Message::Found { round: asked.round, result })
+    pub fn search_result(
+        asked: &discover::Asked,
+        result: Result<Vec<discover::Hit>, String>,
+    ) -> Message {
+        Message::Discover(discover::Message::Found {
+            round: asked.round,
+            result,
+        })
     }
 
     /// The message that carries a page of icons back to Discover.
@@ -293,7 +299,10 @@ impl Message {
         asked: &instance::Asked,
         listing: Result<crate::store::Listing, String>,
     ) -> Message {
-        Message::Instance(instance::Message::Listed { round: asked.round, listing })
+        Message::Instance(instance::Message::Listed {
+            round: asked.round,
+            listing,
+        })
     }
 
     /// The message that carries a project answer back to the page that asked.
@@ -301,7 +310,10 @@ impl Message {
     /// The same seam as [`Message::search_result`], and the reason it is a
     /// function rather than a variant the shell names: the answer's own type is
     /// the page's, and the shell has never seen one.
-    pub fn project_result(asked: &project::Asked, result: Result<project::Project, String>) -> Message {
+    pub fn project_result(
+        asked: &project::Asked,
+        result: Result<project::Project, String>,
+    ) -> Message {
         // Boxed here, at the one crossing between the store's answer and a page's
         // message, so the page's own arms never box anything (see
         // `project::Message::Found`).
@@ -345,7 +357,10 @@ impl Message {
     /// because what changed is the document the page reloads rather than a value
     /// this carries.
     pub fn skin_worn(worn: &skins::Wear, result: Result<(), String>) -> Message {
-        Message::Skins(skins::Message::Applied { round: worn.round, result })
+        Message::Skins(skins::Message::Applied {
+            round: worn.round,
+            result,
+        })
     }
 
     /// The message that carries the file picker's outcome back to the Skins page.
@@ -354,7 +369,10 @@ impl Message {
     /// `Result`: a reader who closed the dialog chose nothing rather than failed at
     /// something, and `skins::Picked` is the type that says so.
     pub fn skin_added(add: &skins::Add, picked: skins::Picked) -> Message {
-        Message::Skins(skins::Message::Added { round: add.round, picked })
+        Message::Skins(skins::Message::Added {
+            round: add.round,
+            picked,
+        })
     }
 
     /// The message that carries the edit modal's outcome back to the Skins page.
@@ -363,7 +381,10 @@ impl Message {
     /// row's write changed is the row or the account, and the page reloads one
     /// and redraws the other rather than being told about it.
     pub fn skin_saved(edit: &skins::Edit, result: Result<(), String>) -> Message {
-        Message::Skins(skins::Message::Edited { round: edit.round, result })
+        Message::Skins(skins::Message::Edited {
+            round: edit.round,
+            result,
+        })
     }
 
     /// The message that carries a reorder's outcome back to the Skins page.
@@ -372,7 +393,10 @@ impl Message {
     /// order change rewrites is the store the page reads, so a success reloads it
     /// and the reader sees the order they asked for rather than a sentence about it.
     pub fn skin_reordered(order: &skins::Reorder, result: Result<(), String>) -> Message {
-        Message::Skins(skins::Message::Reordered { round: order.round, result })
+        Message::Skins(skins::Message::Reordered {
+            round: order.round,
+            result,
+        })
     }
 
     /// The message that carries an install's outcome back to the page whose button
@@ -396,8 +420,12 @@ impl Screen {
     pub fn at(address: &Address) -> Screen {
         match &address.route {
             Route::Home => Screen::Home(home::State::default()),
-            Route::Discover { project_type } => Screen::Discover(discover::State::new(*project_type)),
-            Route::Project { id, tab } => Screen::Project(project::State::new(id.clone(), tab.clone())),
+            Route::Discover { project_type } => {
+                Screen::Discover(discover::State::new(*project_type))
+            }
+            Route::Project { id, tab } => {
+                Screen::Project(project::State::new(id.clone(), tab.clone()))
+            }
             Route::Instance { id, tab } => {
                 Screen::Instance(instance::State::new(id.clone(), tab.clone()))
             }
@@ -709,7 +737,6 @@ mod tests {
     use crate::page::Load;
     use crate::route::{InstanceTab, ProfileTab, ProjectTab, ProjectType, ServerTab};
 
-
     /// Every address the route table has a shape for.
     fn sample_addresses() -> Vec<&'static str> {
         vec![
@@ -815,13 +842,22 @@ mod tests {
             other => format!("{other:?}"),
         };
         let before = read(&screen);
-        assert_eq!(screen.update(Message::Home(home::Message::Search("x".to_string())), &store), None);
+        assert_eq!(
+            screen.update(
+                Message::Home(home::Message::Search("x".to_string())),
+                &store
+            ),
+            None
+        );
         let after = read(&screen);
         assert_eq!(before, after);
         // And the page's own message does land: its header closed the section it
         // named, which every section starts open (the reference's own first pass).
         assert_eq!(
-            screen.update(Message::Skins(skins::Message::Select(skins::Section::Modrinth)), &store),
+            screen.update(
+                Message::Skins(skins::Message::Select(skins::Section::Modrinth)),
+                &store
+            ),
             None
         );
         match &screen {
@@ -837,10 +873,16 @@ mod tests {
         let store = Store::default();
         let mut home = Screen::at(&Address::parse("/").expect("home"));
         assert_eq!(
-            home.update(Message::Home(home::Message::Open("atm10".to_string())), &store),
+            home.update(
+                Message::Home(home::Message::Open("atm10".to_string())),
+                &store
+            ),
             Some(Ask::Open(Open::Instance("atm10".to_string())))
         );
-        assert!(matches!(home, Screen::Home(_)), "the page is still the library");
+        assert!(
+            matches!(home, Screen::Home(_)),
+            "the page is still the library"
+        );
         let mut discover = Screen::at(&Address::parse("/browse/modpack").expect("browse"));
         assert_eq!(
             discover.update(
@@ -852,7 +894,10 @@ mod tests {
         // And on the wrong page the same message is not a navigation.
         let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
         assert_eq!(
-            skins.update(Message::Home(home::Message::Open("atm10".to_string())), &store),
+            skins.update(
+                Message::Home(home::Message::Open("atm10".to_string())),
+                &store
+            ),
             None
         );
     }
@@ -869,7 +914,11 @@ mod tests {
         };
         assert_eq!(first.id, "sodium");
         assert_eq!(first.round, 1);
-        assert_eq!(screen.opening(), None, "asked once, and the refresh button is what asks again");
+        assert_eq!(
+            screen.opening(),
+            None,
+            "asked once, and the refresh button is what asks again"
+        );
         // The answer comes back as a message of the page's own, built by the shell
         // and never named here.
         let message = Message::project_result(&first, Err("no such project".to_string()));
@@ -891,7 +940,11 @@ mod tests {
         // pressed -- and the first is the tag list, because the sidebar's
         // filter sections are made of it and the shell hands back one ask at
         // a time.
-        assert_eq!(screen.opening(), Some(Ask::Tags), "the tag list comes first");
+        assert_eq!(
+            screen.opening(),
+            Some(Ask::Tags),
+            "the tag list comes first"
+        );
         let Some(Ask::Search(first)) = screen.opening() else {
             panic!("and then the search");
         };
@@ -944,7 +997,9 @@ mod tests {
         // message built here rather than named by the shell.
         let store = Store::default();
         let mut skins = Screen::at(&Address::parse("/skins").expect("skins"));
-        let change = palantir_net::SkinChange::Cape { id: "cape-1".to_string() };
+        let change = palantir_net::SkinChange::Cape {
+            id: "cape-1".to_string(),
+        };
         let Some(Ask::Wear(worn)) =
             skins.update(Message::Skins(skins::Message::Wear(change.clone())), &store)
         else {
@@ -953,7 +1008,10 @@ mod tests {
         assert_eq!(worn.change, change);
         // A refusal lands on the page that asked, as a sentence, and the page is
         // ready to press again.
-        assert_eq!(skins.update(Message::skin_worn(&worn, Err("no".to_string())), &store), None);
+        assert_eq!(
+            skins.update(Message::skin_worn(&worn, Err("no".to_string())), &store),
+            None
+        );
         let Screen::Skins(state) = &skins else {
             panic!("still the skins page");
         };
@@ -967,14 +1025,17 @@ mod tests {
         // question is about somebody else: `/user/jelly` is a name this page has
         // nothing of until it asks.
         let store = Store::default();
-        let mut screen =
-            Screen::at(&Address::parse("/user/jelly").expect("a profile page"));
+        let mut screen = Screen::at(&Address::parse("/user/jelly").expect("a profile page"));
         let Some(Ask::User(first)) = screen.opening() else {
             panic!("a freshly drawn profile page owes a request");
         };
         assert_eq!(first.user, "jelly");
         assert_eq!(first.round, 1);
-        assert_eq!(screen.opening(), None, "asked once, and the refresh button is what asks again");
+        assert_eq!(
+            screen.opening(),
+            None,
+            "asked once, and the refresh button is what asks again"
+        );
         // The answer comes back as a message of the page's own, built here and
         // never named by the shell.
         let message = Message::user_result(&first, Err("no such user".to_string()));
@@ -1027,7 +1088,10 @@ mod tests {
         // The whole strip, back to everything.
         assert_eq!(
             screen.update(Message::User(user::Message::Filter(None)), &store),
-            Some(Ask::Open(Open::User { user: "jelly".to_string(), project_type: None }))
+            Some(Ask::Open(Open::User {
+                user: "jelly".to_string(),
+                project_type: None
+            }))
         );
         // And the page still believes the address it was built for, because
         // following the move is `retarget`'s job rather than `update`'s.
@@ -1067,9 +1131,18 @@ mod tests {
     fn the_two_routes_with_a_context_still_land_on_their_own_page() {
         // `/hosting/manage/:id/:tab` is the same page as the listing, and a project
         // with no tab is Description rather than nothing.
-        let server = Address::at(Route::Server { id: "srv".to_string(), tab: ServerTab::Access });
+        let server = Address::at(Route::Server {
+            id: "srv".to_string(),
+            tab: ServerTab::Access,
+        });
         assert!(matches!(Screen::at(&server), Screen::Servers(_)));
-        let project = Address::at(Route::Project { id: "sodium".to_string(), tab: ProjectTab::Description });
-        assert_eq!(Screen::at(&project).project_tab(), Some(ProjectTab::Description));
+        let project = Address::at(Route::Project {
+            id: "sodium".to_string(),
+            tab: ProjectTab::Description,
+        });
+        assert_eq!(
+            Screen::at(&project).project_tab(),
+            Some(ProjectTab::Description)
+        );
     }
 }

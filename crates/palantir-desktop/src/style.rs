@@ -45,7 +45,11 @@ pub const FAMILY: &str = "Inter";
 
 /// A face of the interface's one family.
 pub const fn inter(weight: iced::font::Weight) -> Font {
-    Font { family: iced::font::Family::Name(FAMILY), weight, ..Font::DEFAULT }
+    Font {
+        family: iced::font::Family::Name(FAMILY),
+        weight,
+        ..Font::DEFAULT
+    }
 }
 
 /// `--font-weight-text: 500`, which is what every label in the reference
@@ -104,5 +108,8 @@ pub fn faded(color: Color) -> Color {
 /// onboarding checklist's finished step is `opacity-50` over its fill, its
 /// hairline and its label at once.
 pub fn at_opacity(color: Color, factor: f32) -> Color {
-    Color { a: color.a * factor, ..color }
+    Color {
+        a: color.a * factor,
+        ..color
+    }
 }

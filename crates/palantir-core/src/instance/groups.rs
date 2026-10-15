@@ -61,7 +61,9 @@ impl Groups {
         let Ok(root) = serde_json::from_str::<serde_json::Value>(text) else {
             return out;
         };
-        let Some(obj) = root.as_object() else { return out };
+        let Some(obj) = root.as_object() else {
+            return out;
+        };
         // formatVersion: string "1" or number 1 (toVariant().toInt()).
         let version_ok = match obj.get("formatVersion") {
             Some(serde_json::Value::String(s)) => s == "1",
@@ -76,11 +78,17 @@ impl Groups {
                 if name.is_empty() {
                     continue; // "Redundant empty group found"
                 }
-                let Some(gobj) = value.as_object() else { continue };
+                let Some(gobj) = value.as_object() else {
+                    continue;
+                };
                 if !gobj.get("instances").is_some_and(|i| i.is_array()) {
                     continue;
                 }
-                if gobj.get("hidden").and_then(|h| h.as_bool()).unwrap_or(false) {
+                if gobj
+                    .get("hidden")
+                    .and_then(|h| h.as_bool())
+                    .unwrap_or(false)
+                {
                     out.collapsed.insert(name.clone());
                 }
                 if let Some(items) = gobj.get("instances").and_then(|i| i.as_array()) {
@@ -121,7 +129,11 @@ impl Groups {
         }
         let mut groups = serde_json::Map::new();
         for (name, ids) in &reverse {
-            let instances = serde_json::Value::Array(ids.iter().map(|i| serde_json::Value::String((*i).to_string())).collect());
+            let instances = serde_json::Value::Array(
+                ids.iter()
+                    .map(|i| serde_json::Value::String((*i).to_string()))
+                    .collect(),
+            );
             let hidden = serde_json::Value::Bool(self.collapsed.contains(*name));
             let mut gobj = serde_json::Map::new();
             gobj.insert("hidden".to_string(), hidden);
@@ -129,14 +141,21 @@ impl Groups {
             groups.insert((*name).to_string(), serde_json::Value::Object(gobj));
         }
         let mut root = serde_json::Map::new();
-        root.insert("formatVersion".to_string(), serde_json::Value::String("1".to_string()));
+        root.insert(
+            "formatVersion".to_string(),
+            serde_json::Value::String("1".to_string()),
+        );
         root.insert("groups".to_string(), serde_json::Value::Object(groups));
         if self.collapsed.contains("") {
             let mut ungrouped = serde_json::Map::new();
             ungrouped.insert("hidden".to_string(), serde_json::Value::Bool(true));
-            root.insert("ungrouped".to_string(), serde_json::Value::Object(ungrouped));
+            root.insert(
+                "ungrouped".to_string(),
+                serde_json::Value::Object(ungrouped),
+            );
         }
-        json::to_document_string(&serde_json::Value::Object(root)).unwrap_or_else(|_| "{}\n".to_string())
+        json::to_document_string(&serde_json::Value::Object(root))
+            .unwrap_or_else(|_| "{}\n".to_string())
     }
 
     /// Save to the data root.
@@ -251,7 +270,11 @@ mod tests {
     #[test]
     fn corrupt_or_wrong_version_yields_empty() {
         assert!(Groups::from_text("{not json").index.is_empty());
-        assert!(Groups::from_text("{\"formatVersion\": \"2\", \"groups\": {}}").index.is_empty());
+        assert!(
+            Groups::from_text("{\"formatVersion\": \"2\", \"groups\": {}}")
+                .index
+                .is_empty()
+        );
         assert!(Groups::from_text("[]").index.is_empty());
     }
 

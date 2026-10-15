@@ -210,8 +210,12 @@ pub fn save(home: &PalantirPaths, index: &Index) -> Result<(), String> {
 
 /// Read one row's texture back.
 pub fn texture(home: &PalantirPaths, entry: &Entry) -> Result<Vec<u8>, String> {
-    std::fs::read(texture_path(home, entry))
-        .map_err(|error| format!("could not read the stored texture for {}: {error}", entry.name))
+    std::fs::read(texture_path(home, entry)).map_err(|error| {
+        format!(
+            "could not read the stored texture for {}: {error}",
+            entry.name
+        )
+    })
 }
 
 /// Keep a texture, and remember it.
@@ -280,7 +284,10 @@ pub fn forget(home: &PalantirPaths, key: &str) -> Result<bool, String> {
     let path = texture_path(home, &entry);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|error| {
-            format!("could not remove the stored texture for {}: {error}", entry.name)
+            format!(
+                "could not remove the stored texture for {}: {error}",
+                entry.name
+            )
         })?;
     }
     save(home, &index)?;
@@ -357,7 +364,10 @@ mod tests {
 
         assert!(load(&home).ordered().is_empty());
         // The file that would not parse is still there, and still the reader's.
-        assert_eq!(std::fs::read(index_path(&home)).unwrap(), b"{ this is not json");
+        assert_eq!(
+            std::fs::read(index_path(&home)).unwrap(),
+            b"{ this is not json"
+        );
     }
 
     #[test]
@@ -378,9 +388,33 @@ mod tests {
     #[test]
     fn adding_the_same_pixels_twice_is_one_row_and_brings_it_to_the_front() {
         let (_dir, home) = home();
-        add(&home, &pixels(1), "first.png", "CLASSIC", "", Source::Custom).unwrap();
-        add(&home, &pixels(2), "second.png", "CLASSIC", "", Source::Custom).unwrap();
-        add(&home, &pixels(1), "first-again.png", "SLIM", "", Source::Custom).unwrap();
+        add(
+            &home,
+            &pixels(1),
+            "first.png",
+            "CLASSIC",
+            "",
+            Source::Custom,
+        )
+        .unwrap();
+        add(
+            &home,
+            &pixels(2),
+            "second.png",
+            "CLASSIC",
+            "",
+            Source::Custom,
+        )
+        .unwrap();
+        add(
+            &home,
+            &pixels(1),
+            "first-again.png",
+            "SLIM",
+            "",
+            Source::Custom,
+        )
+        .unwrap();
 
         let index = load(&home);
         assert_eq!(index.ordered().len(), 2);
@@ -398,7 +432,11 @@ mod tests {
         assert_eq!(forget(&home, &entry.key), Ok(true));
         assert!(load(&home).ordered().is_empty());
         assert!(!path.exists(), "the pixels went with the row");
-        assert_eq!(forget(&home, &entry.key), Ok(false), "twice is not a failure");
+        assert_eq!(
+            forget(&home, &entry.key),
+            Ok(false),
+            "twice is not a failure"
+        );
     }
 
     #[test]
@@ -406,11 +444,27 @@ mod tests {
         let (_dir, home) = home();
         let one = add(&home, &pixels(1), "one.png", "CLASSIC", "", Source::Custom).unwrap();
         let two = add(&home, &pixels(2), "two.png", "CLASSIC", "", Source::Custom).unwrap();
-        let three = add(&home, &pixels(3), "three.png", "CLASSIC", "", Source::Custom).unwrap();
+        let three = add(
+            &home,
+            &pixels(3),
+            "three.png",
+            "CLASSIC",
+            "",
+            Source::Custom,
+        )
+        .unwrap();
 
         // A list that names two rows, in the other order, and a key nobody has.
-        reorder(&home, &[two.key.clone(), "not-ours".to_string(), one.key.clone()]).unwrap();
-        let names: Vec<String> = load(&home).ordered().iter().map(|row| row.name.clone()).collect();
+        reorder(
+            &home,
+            &[two.key.clone(), "not-ours".to_string(), one.key.clone()],
+        )
+        .unwrap();
+        let names: Vec<String> = load(&home)
+            .ordered()
+            .iter()
+            .map(|row| row.name.clone())
+            .collect();
         assert_eq!(names, vec!["two.png", "one.png", "three.png"]);
         assert_eq!(load(&home).ordered()[2].key, three.key);
     }
@@ -418,7 +472,15 @@ mod tests {
     #[test]
     fn what_the_modal_writes_is_what_the_next_read_draws() {
         let (_dir, home) = home();
-        let entry = add(&home, &pixels(9), "edit.png", "CLASSIC", "", Source::CustomExternal).unwrap();
+        let entry = add(
+            &home,
+            &pixels(9),
+            "edit.png",
+            "CLASSIC",
+            "",
+            Source::CustomExternal,
+        )
+        .unwrap();
 
         assert_eq!(update(&home, &entry.key, "SLIM", "cape-id"), Ok(true));
         let index = load(&home);
@@ -433,12 +495,30 @@ mod tests {
     #[test]
     fn a_row_with_no_cape_writes_no_cape_and_a_row_that_asks_for_one_names_it() {
         let (_dir, home) = home();
-        add(&home, &pixels(4), "plain.png", "CLASSIC", "", Source::Custom).unwrap();
+        add(
+            &home,
+            &pixels(4),
+            "plain.png",
+            "CLASSIC",
+            "",
+            Source::Custom,
+        )
+        .unwrap();
         let text = std::fs::read_to_string(index_path(&home)).unwrap();
         assert!(!text.contains("cape"), "{text}");
 
-        let entry = add(&home, &pixels(5), "wants.png", "CLASSIC", "Migrator", Source::Custom).unwrap();
+        let entry = add(
+            &home,
+            &pixels(5),
+            "wants.png",
+            "CLASSIC",
+            "Migrator",
+            Source::Custom,
+        )
+        .unwrap();
         assert_eq!(entry.cape, "Migrator");
-        assert!(std::fs::read_to_string(index_path(&home)).unwrap().contains("Migrator"));
+        assert!(std::fs::read_to_string(index_path(&home))
+            .unwrap()
+            .contains("Migrator"));
     }
 }

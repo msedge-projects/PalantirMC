@@ -28,9 +28,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::wire::Wire;
 use palantir_core::pack::Require;
 use palantir_core::resolve::VersionEntry;
-use crate::wire::Wire;
 use serde_json::Value;
 
 /// uid of the Minecraft component.
@@ -107,7 +107,9 @@ impl LoaderKind {
     /// Reverse of [`LoaderKind::label`], for instance summaries.
     #[cfg(test)]
     pub fn from_label(label: &str) -> Option<LoaderKind> {
-        Self::all().into_iter().find(|kind| kind.label().eq_ignore_ascii_case(label))
+        Self::all()
+            .into_iter()
+            .find(|kind| kind.label().eq_ignore_ascii_case(label))
     }
 
     /// Reverse of [`LoaderKind::uid`].
@@ -120,7 +122,6 @@ impl LoaderKind {
         self.uid().is_some()
     }
 }
-
 
 // ---- Pure list helpers -------------------------------------------------
 
@@ -153,10 +154,11 @@ pub fn sorted_newest_first(entries: &[VersionEntry]) -> Vec<VersionEntry> {
 /// Whether `entry` pins `uid` to `version` through a `requires` clause.
 #[cfg(test)]
 pub fn pins_version(entry: &VersionEntry, uid: &str, version: &str) -> bool {
-    entry
-        .requires
-        .iter()
-        .any(|require| require.uid == uid && !require.equals_version.is_empty() && require.equals_version == version)
+    entry.requires.iter().any(|require| {
+        require.uid == uid
+            && !require.equals_version.is_empty()
+            && require.equals_version == version
+    })
 }
 
 /// The set of game versions an entry pins itself to (usually zero or one).
@@ -204,7 +206,10 @@ pub fn list_url(base_url: &str, uid: &str) -> String {
 /// Cache paths to try for `uid`, in preference order: Prism's current layout
 /// first, then the flat layout older builds (and `palantir-net`) wrote.
 pub fn cache_paths(meta_dir: &Path, uid: &str) -> [PathBuf; 2] {
-    [meta_dir.join(uid).join("index.json"), meta_dir.join(format!("{uid}.json"))]
+    [
+        meta_dir.join(uid).join("index.json"),
+        meta_dir.join(format!("{uid}.json")),
+    ]
 }
 
 /// Fetch a version list for `uid`: the wire first, the cache on disk second.
@@ -265,13 +270,20 @@ pub fn read_cached_list(meta_dir: &Path, uid: &str) -> Result<Vec<VersionEntry>,
 
 /// Parse a `formatVersion` 1 version list (same rules as the metadata store:
 /// the root must be an object, `versions` an array, `formatVersion` 0 or 1).
-pub fn parse_version_list(bytes: &[u8], path: &Path, uid: &str) -> Result<Vec<VersionEntry>, String> {
-    let value: Value = serde_json::from_slice(bytes)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+pub fn parse_version_list(
+    bytes: &[u8],
+    path: &Path,
+    uid: &str,
+) -> Result<Vec<VersionEntry>, String> {
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|error| format!("{}: {error}", path.display()))?;
     let object = value
         .as_object()
         .ok_or_else(|| format!("{}: version list root must be an object", path.display()))?;
-    let format_version = object.get("formatVersion").and_then(Value::as_i64).unwrap_or(0);
+    let format_version = object
+        .get("formatVersion")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     if format_version != 0 && format_version != 1 {
         return Err(format!(
             "{}: unknown metadata format version {format_version}",
@@ -279,14 +291,35 @@ pub fn parse_version_list(bytes: &[u8], path: &Path, uid: &str) -> Result<Vec<Ve
         ));
     }
     let mut out = Vec::new();
-    for item in object.get("versions").and_then(Value::as_array).into_iter().flatten() {
-        let Some(entry) = item.as_object() else { continue };
+    for item in object
+        .get("versions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(entry) = item.as_object() else {
+            continue;
+        };
         out.push(VersionEntry {
             uid: uid.to_string(),
-            version: entry.get("version").and_then(Value::as_str).unwrap_or_default().to_string(),
-            type_: entry.get("type").and_then(Value::as_str).unwrap_or_default().to_string(),
-            recommended: entry.get("recommended").and_then(Value::as_bool).unwrap_or(false),
-            volatile: entry.get("volatile").and_then(Value::as_bool).unwrap_or(false),
+            version: entry
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            type_: entry
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            recommended: entry
+                .get("recommended")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            volatile: entry
+                .get("volatile")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             release_time: entry
                 .get("releaseTime")
                 .and_then(Value::as_str)
@@ -302,7 +335,11 @@ pub fn parse_version_list(bytes: &[u8], path: &Path, uid: &str) -> Result<Vec<Ve
                 .and_then(Value::as_array)
                 .map(|items| items.iter().filter_map(Require::from_json).collect())
                 .unwrap_or_default(),
-            sha256: entry.get("sha256").and_then(Value::as_str).unwrap_or_default().to_string(),
+            sha256: entry
+                .get("sha256")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
         });
     }
     Ok(out)
@@ -312,7 +349,13 @@ pub fn parse_version_list(bytes: &[u8], path: &Path, uid: &str) -> Result<Vec<Ve
 mod tests {
     use super::*;
 
-    fn entry(version: &str, type_: &str, time: &str, recommended: bool, game: Option<&str>) -> VersionEntry {
+    fn entry(
+        version: &str,
+        type_: &str,
+        time: &str,
+        recommended: bool,
+        game: Option<&str>,
+    ) -> VersionEntry {
         VersionEntry {
             uid: "test".to_string(),
             version: version.to_string(),
@@ -334,9 +377,27 @@ mod tests {
     #[test]
     fn forge_style_lists_filter_by_game_version() {
         let builds = vec![
-            entry("65.1.3", "", "2026-08-27T04:52:23+00:00", false, Some("26.2")),
-            entry("65.1.2", "", "2026-08-20T04:52:23+00:00", false, Some("26.2")),
-            entry("52.1.16", "", "2026-08-27T04:52:23+00:00", true, Some("1.21.1")),
+            entry(
+                "65.1.3",
+                "",
+                "2026-08-27T04:52:23+00:00",
+                false,
+                Some("26.2"),
+            ),
+            entry(
+                "65.1.2",
+                "",
+                "2026-08-20T04:52:23+00:00",
+                false,
+                Some("26.2"),
+            ),
+            entry(
+                "52.1.16",
+                "",
+                "2026-08-27T04:52:23+00:00",
+                true,
+                Some("1.21.1"),
+            ),
         ];
         let filtered = filter_loader_versions(&builds, "26.2");
         assert_eq!(filtered.len(), 2);
@@ -384,7 +445,11 @@ mod tests {
         assert!(parse_version_list(b"{oops", Path::new("i"), "x").is_err());
         assert!(parse_version_list(b"[]", Path::new("i"), "x").is_err());
         assert!(parse_version_list(br#"{"formatVersion":9}"#, Path::new("i"), "x").is_err());
-        assert!(parse_version_list(br#"{"formatVersion":1}"#, Path::new("i"), "x").unwrap().is_empty());
+        assert!(
+            parse_version_list(br#"{"formatVersion":1}"#, Path::new("i"), "x")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -401,5 +466,4 @@ mod tests {
         assert_eq!(entries[0].version, "0.31.0");
         assert!(read_cached_list(&meta, "missing.uid").is_err());
     }
-
 }

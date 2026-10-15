@@ -65,7 +65,11 @@ impl Rule {
                 Some(Value::String(s)) => s.clone(),
                 _ => return None, // non-string name -> no OS spec (toString() -> null)
             };
-            let version = os.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let version = os
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             Some(OsSpec { name, version })
         });
         Rule { action, os }
@@ -125,7 +129,11 @@ impl RuntimeContext {
     /// use on the current host.
     pub fn current_host() -> RuntimeContext {
         RuntimeContext {
-            java_architecture: if cfg!(target_pointer_width = "64") { "64".into() } else { "32".into() },
+            java_architecture: if cfg!(target_pointer_width = "64") {
+                "64".into()
+            } else {
+                "32".into()
+            },
             java_real_architecture: std::env::consts::ARCH.to_string(),
             system: match crate::paths::System::current() {
                 crate::paths::System::Windows => "windows".into(),
@@ -186,10 +194,18 @@ mod tests {
         let r = Rule::from_json(&json!({"action": "allow", "os": {"name": "osx"}}));
         assert_eq!(r.action, Some(Action::Allow));
         assert_eq!(r.os.as_ref().unwrap().name, "osx");
-        assert_eq!(r.to_json(), json!({"action": "allow", "os": {"name": "osx"}}));
+        assert_eq!(
+            r.to_json(),
+            json!({"action": "allow", "os": {"name": "osx"}})
+        );
 
-        let r = Rule::from_json(&json!({"action": "disallow", "os": {"name": "windows", "version": "10"}}));
-        assert_eq!(r.to_json(), json!({"action": "disallow", "os": {"name": "windows", "version": "10"}}));
+        let r = Rule::from_json(
+            &json!({"action": "disallow", "os": {"name": "windows", "version": "10"}}),
+        );
+        assert_eq!(
+            r.to_json(),
+            json!({"action": "disallow", "os": {"name": "windows", "version": "10"}})
+        );
     }
 
     #[test]

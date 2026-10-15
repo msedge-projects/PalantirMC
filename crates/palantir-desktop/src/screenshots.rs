@@ -200,7 +200,9 @@ pub fn thumbnail(path: &Path, side: u32) -> Option<Thumbnail> {
 pub fn thumbnails(entries: &[Entry], side: u32) -> Vec<(Entry, Thumbnail)> {
     entries
         .iter()
-        .filter_map(|entry| thumbnail(&entry.path, side).map(|thumbnail| (entry.clone(), thumbnail)))
+        .filter_map(|entry| {
+            thumbnail(&entry.path, side).map(|thumbnail| (entry.clone(), thumbnail))
+        })
         .collect()
 }
 
@@ -227,7 +229,10 @@ mod tests {
     #[test]
     fn only_image_extensions_are_screenshots() {
         assert!(is_image(Path::new("a/b/2026-09-12_20.11.03.png")));
-        assert!(is_image(Path::new("SHOT.JPG")), "copied files are often upper-case");
+        assert!(
+            is_image(Path::new("SHOT.JPG")),
+            "copied files are often upper-case"
+        );
         assert!(is_image(Path::new("x.jpeg")));
         assert!(!is_image(Path::new("options.txt")));
         assert!(!is_image(Path::new("screenshot")));
@@ -279,7 +284,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let instance = instance_dir(root.path(), "survival");
         for index in 0..(MAX_SHOWN + 12) {
-            write_png(&instance.1.join(format!("screenshots/{index:03}.png")), 8, 8);
+            write_png(
+                &instance.1.join(format!("screenshots/{index:03}.png")),
+                8,
+                8,
+            );
         }
         let found = scan(&[instance]);
         assert_eq!(
@@ -322,7 +331,10 @@ mod tests {
             thumb.width,
             thumb.height
         );
-        assert_eq!(thumb.width, side, "the longest side should reach the budget");
+        assert_eq!(
+            thumb.width, side,
+            "the longest side should reach the budget"
+        );
         // 800x450 into a 268px longest side is 268x151; a pixel either way is
         // the resizer's rounding, a changed ratio is not.
         assert!(
@@ -349,7 +361,11 @@ mod tests {
         // A nonsense or absent scale factor falls back to the floor rather than
         // shrinking the picture below the size it is painted at.
         assert_eq!(thumbnail_side(268.0, 0.0), 268);
-        assert_eq!(thumbnail_side(268.0, f32::NAN), 268, "NaN ignores, keeping the floor");
+        assert_eq!(
+            thumbnail_side(268.0, f32::NAN),
+            268,
+            "NaN ignores, keeping the floor"
+        );
         // Past 200% the memory is not worth the sharpness, so it is clamped.
         assert_eq!(thumbnail_side(268.0, 2.0), THUMBNAIL_SIDE_MAX);
         assert_eq!(thumbnail_side(268.0, 4.0), THUMBNAIL_SIDE_MAX);

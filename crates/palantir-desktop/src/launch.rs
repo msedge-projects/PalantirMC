@@ -45,11 +45,11 @@ use palantir_core::{
 };
 // Only the tests need to read a metadata tree from disk: a launch resolves
 // against whatever the caller handed it.
-#[cfg(test)]
-use palantir_core::resolve::OfflineMetaStore;
 use crate::meta::PublisherMeta;
 use crate::model::SettingsModel;
 use crate::wire::Wire;
+#[cfg(test)]
+use palantir_core::resolve::OfflineMetaStore;
 use palantir_net::{msa_auth_session, MicrosoftAuth, OfflineSession};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -59,8 +59,8 @@ use std::time::{Duration, Instant};
 
 use crate::accounts::{needs_refresh, AccountKind};
 use crate::install;
-use crate::loader_install;
 use crate::java_runtime::{self, JavaPrefs};
+use crate::loader_install;
 
 /// Shared handle for the running game process (for the Kill button).
 pub type ChildSlot = Arc<Mutex<Option<Child>>>;
@@ -421,7 +421,10 @@ pub fn xrandr_available() -> bool {
 /// Best-effort LWJGL2 detection: any active library from the legacy
 /// `org.lwjgl.lwjgl` group (LWJGL3 lives under `org.lwjgl`).
 pub fn has_legacy_lwjgl(profile: &palantir_core::version::LaunchProfile) -> bool {
-    profile.libraries.iter().any(|lib| lib.name.group() == "org.lwjgl.lwjgl")
+    profile
+        .libraries
+        .iter()
+        .any(|lib| lib.name.group() == "org.lwjgl.lwjgl")
 }
 
 /// Spawn `command` with no console window of its own on Windows.
@@ -473,7 +476,11 @@ pub fn prepare_auth(
     }
     let name = account.username.clone();
     if !account.needs_refresh(palantir_core::util::now_millis()) {
-        if let Some(token) = account.access_token.as_deref().filter(|token| !token.is_empty()) {
+        if let Some(token) = account
+            .access_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+        {
             log(format!("using the stored Microsoft session for '{name}'"));
             return Ok(PreparedAuth {
                 session: msa_auth_session(&name, &account.uuid, token),
@@ -486,9 +493,7 @@ pub fn prepare_auth(
         .as_deref()
         .filter(|token| !token.is_empty())
         .ok_or_else(|| {
-            format!(
-                "'{name}' has to sign in to Microsoft again: no refresh token is stored"
-            )
+            format!("'{name}' has to sign in to Microsoft again: no refresh token is stored")
         })?;
     log(format!("renewing the Microsoft session for '{name}'…"));
     let msa = auth.refresh(refresh).map_err(|error| error.to_string())?;
@@ -564,15 +569,30 @@ pub fn prepare_launch(
         log("files are missing and could not be downloaded — not launching".to_string());
         return LaunchReadiness::Blocked;
     }
-    let Prepared { instance, model, resolution, ctx, java, .. } = prepared;
+    let Prepared {
+        instance,
+        model,
+        resolution,
+        ctx,
+        java,
+        ..
+    } = prepared;
     let name = instance.name();
     let id = instance.id();
 
     let target = join_target(instance.settings(), log);
 
     let window = launch::WindowParams {
-        width: model.get_i64("MinecraftWinWidth", Some("OverrideWindow"), defaults::MC_WIN_WIDTH),
-        height: model.get_i64("MinecraftWinHeight", Some("OverrideWindow"), defaults::MC_WIN_HEIGHT),
+        width: model.get_i64(
+            "MinecraftWinWidth",
+            Some("OverrideWindow"),
+            defaults::MC_WIN_WIDTH,
+        ),
+        height: model.get_i64(
+            "MinecraftWinHeight",
+            Some("OverrideWindow"),
+            defaults::MC_WIN_HEIGHT,
+        ),
         maximized: model.get_bool("LaunchMaximized", Some("OverrideWindow"), false),
     };
     let game_root = instance.game_root();
@@ -581,8 +601,12 @@ pub fn prepare_launch(
     // `${library_directory}` out of: the assets are shared by every instance and
     // live at the root, not inside the instance folder.
     let mut vars = launch::instance_var_map(paths, &instance, &resolution.profile);
-    vars.insert("version_name".to_string(), resolution.profile.minecraft_version.clone());
-    let mut mc_args = launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
+    vars.insert(
+        "version_name".to_string(),
+        resolution.profile.minecraft_version.clone(),
+    );
+    let mut mc_args =
+        launch::process_minecraft_args(&resolution.profile, Some(session), target.as_ref(), &vars);
     let script = launch::create_launch_script(
         &resolution.profile,
         Some(session),
@@ -625,8 +649,15 @@ pub fn prepare_launch(
     // (G131).
     let java_bin = match java {
         Some(java) => java,
-        None => match choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress)
-        {
+        None => match choose_java(
+            paths,
+            &model,
+            defaults,
+            &resolution.profile,
+            wire,
+            log,
+            progress,
+        ) {
             Some(found) => found,
             None => {
                 log(NO_JAVA_FOUND.to_string());
@@ -683,12 +714,20 @@ pub fn prepare_launch(
     let (min_mem, max_mem) = heap_for_launch(&model, instance.settings(), defaults);
     log(format!(
         "heap: {min_mem} MiB to {max_mem} MiB ({})",
-        if overrides_memory { "this instance's own numbers" } else { "this launcher's defaults" }
+        if overrides_memory {
+            "this instance's own numbers"
+        } else {
+            "this launcher's defaults"
+        }
     ));
     let full_jars: Vec<String> = files
         .jar
         .iter()
-        .map(|rel| resolve_library_path(&paths.root, rel).to_string_lossy().into_owned())
+        .map(|rel| {
+            resolve_library_path(&paths.root, rel)
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     let agents = agent_args(&resolution.profile, &ctx, &paths.root, &instance);
     let opts = launch::JavaArgsOptions {
@@ -727,7 +766,10 @@ pub fn prepare_launch(
     argv.extend(mc_args);
 
     if std::fs::create_dir_all(&game_root).is_err() {
-        log(format!("cannot create game directory {} — not launching", game_root.display()));
+        log(format!(
+            "cannot create game directory {} — not launching",
+            game_root.display()
+        ));
         return LaunchReadiness::Blocked;
     }
     let env_map = launch::instance_env_vars(
@@ -743,7 +785,13 @@ pub fn prepare_launch(
         envs.push((key.clone(), value.clone()));
     }
     log(format!("command: {java_bin} {}", argv.join(" ")));
-    let plan = LaunchPlan { java_bin, argv, cwd: game_root, main_jar, envs };
+    let plan = LaunchPlan {
+        java_bin,
+        argv,
+        cwd: game_root,
+        main_jar,
+        envs,
+    };
     LaunchReadiness::Ready(plan)
 }
 
@@ -857,7 +905,10 @@ fn prepare_files(
         Err(e) => return Err(format!("resolution error: {e}")),
     };
     for problem in &resolution.problems {
-        reporter.log(format!("resolve {:?}: {}", problem.severity, problem.message));
+        reporter.log(format!(
+            "resolve {:?}: {}",
+            problem.severity, problem.message
+        ));
     }
     for component in &resolution.components {
         for problem in &component.problems {
@@ -901,7 +952,15 @@ fn prepare_files(
             // a runtime fetched from the metadata service, and that fetch belongs
             // on the bar like every other transfer in here.
             let chosen = reporter.with_taps(|log, progress| {
-                choose_java(paths, &model, defaults, &resolution.profile, wire, log, progress)
+                choose_java(
+                    paths,
+                    &model,
+                    defaults,
+                    &resolution.profile,
+                    wire,
+                    log,
+                    progress,
+                )
             });
             match chosen {
                 Some(java) => Some(java),
@@ -948,7 +1007,14 @@ fn prepare_files(
         reporter.log(format!("install: {problem}"));
     }
 
-    Ok(Prepared { instance, model, resolution, ctx, java: install_java, report })
+    Ok(Prepared {
+        instance,
+        model,
+        resolution,
+        ctx,
+        java: install_java,
+        report,
+    })
 }
 
 /// Re-install one instance's files, hashing what is already there.
@@ -1064,7 +1130,11 @@ fn join_target(settings: &Settings, log: &mut dyn FnMut(String)) -> Option<launc
     match parse_server_address(&raw) {
         Some((address, port)) => {
             log(format!("will join server {address}:{port}"));
-            Some(launch::LaunchTarget { address, port, world: String::new() })
+            Some(launch::LaunchTarget {
+                address,
+                port,
+                world: String::new(),
+            })
         }
         None => {
             log(format!("ignoring malformed join-server address '{raw}'"));
@@ -1193,7 +1263,11 @@ pub fn java_candidates(paths: &PalantirPaths) -> Vec<JavaCandidate> {
     out.extend(installed);
 
     if let Some(found) = find_java_on_path() {
-        out.push(JavaCandidate { bin: found, major: None, origin: JavaOrigin::Path });
+        out.push(JavaCandidate {
+            bin: found,
+            major: None,
+            origin: JavaOrigin::Path,
+        });
     }
     out
 }
@@ -1239,7 +1313,8 @@ pub fn major_from_version_output(text: &str) -> Option<i64> {
 /// machine with six JDKs should not pay six processes to say which is which.
 fn java_major_of(bin: &str) -> Option<i64> {
     let home = Path::new(bin).parent().and_then(Path::parent);
-    home.and_then(home_version).or_else(|| probe_java_major(bin))
+    home.and_then(home_version)
+        .or_else(|| probe_java_major(bin))
 }
 
 /// Why the Java at `bin` may not be used for a version that accepts `majors`.
@@ -1297,7 +1372,10 @@ pub fn best_java(candidates: &[JavaCandidate], want_majors: &[i64]) -> Option<Ja
     candidates
         .iter()
         .find(|candidate| {
-            candidate.major.map(|major| want_majors.contains(&major)).unwrap_or(false)
+            candidate
+                .major
+                .map(|major| want_majors.contains(&major))
+                .unwrap_or(false)
         })
         .or_else(|| {
             candidates
@@ -1401,7 +1479,9 @@ fn pick_java(
             log(format!("using the default Java from the settings: {path}"));
             return Some(path.to_string());
         }
-        log(format!("the default Java in the settings is not there: {path}"));
+        log(format!(
+            "the default Java in the settings is not there: {path}"
+        ));
     }
 
     // 3: what the machine has. A candidate that never told us its version is
@@ -1495,7 +1575,10 @@ fn probe_java(java_bin: &str) -> Result<String, String> {
     match command.output() {
         Ok(output) => {
             if !output.status.success() {
-                return Err(format!("java probe failed for '{java_bin}' (exit {})", output.status));
+                return Err(format!(
+                    "java probe failed for '{java_bin}' (exit {})",
+                    output.status
+                ));
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1535,12 +1618,16 @@ fn agent_args(
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for agent in &profile.agents {
-        let files = agent.library.applicable_files(ctx, Some(&instance.local_libraries_dir()));
+        let files = agent
+            .library
+            .applicable_files(ctx, Some(&instance.local_libraries_dir()));
         let first = match files.jar.first() {
             Some(first) => first.clone(),
             None => continue,
         };
-        let full = resolve_library_path(data_root, &first).to_string_lossy().into_owned();
+        let full = resolve_library_path(data_root, &first)
+            .to_string_lossy()
+            .into_owned();
         out.push((full, agent.argument.clone()));
     }
     out
@@ -1675,7 +1762,10 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<L
                 None
             }
         };
-        if let Some(refreshed) = prepared.as_ref().and_then(|prepared| prepared.refreshed.clone()) {
+        if let Some(refreshed) = prepared
+            .as_ref()
+            .and_then(|prepared| prepared.refreshed.clone())
+        {
             tokens_message = Some(LaunchEvent::Tokens(refreshed));
         }
         match prepared {
@@ -1703,7 +1793,11 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<L
     let plan = match readiness {
         LaunchReadiness::Blocked => {
             // The console already explains why; this is the terminal line.
-            send_done(&mut sender, run_id, "launch blocked (see console)".to_string());
+            send_done(
+                &mut sender,
+                run_id,
+                "launch blocked (see console)".to_string(),
+            );
             return;
         }
         LaunchReadiness::Ready(plan) => plan,
@@ -1750,7 +1844,10 @@ pub fn run_launch_worker(params: LaunchParams, slot: ChildSlot, sender: Sender<L
             send_batch(
                 &mut sender,
                 run_id,
-                vec![format!("failed to start '{}': {e} — not launching", plan.java_bin)],
+                vec![format!(
+                    "failed to start '{}': {e} — not launching",
+                    plan.java_bin
+                )],
                 &journal,
             );
             send_done(&mut sender, run_id, "failed to start".to_string());
@@ -1892,8 +1989,7 @@ fn append_window_args(
     // Asked for only when it will be used: the query is a Win32 call, and an
     // instance that does not override its window must not pay for one.
     let work_area = if maximized {
-        crate::native::primary_work_area()
-            .map(|area| (area.width as i64, area.height as i64))
+        crate::native::primary_work_area().map(|area| (area.width as i64, area.height as i64))
     } else {
         None
     };
@@ -2053,7 +2149,11 @@ pub fn redact(line: &str) -> String {
     while cursor < line.len() {
         let found = SECRET_FLAGS
             .iter()
-            .filter_map(|flag| line[cursor..].find(flag).map(|at| (cursor + at, flag.len())))
+            .filter_map(|flag| {
+                line[cursor..]
+                    .find(flag)
+                    .map(|at| (cursor + at, flag.len()))
+            })
             .min_by_key(|(at, _)| *at);
         let Some((start, flag_len)) = found else {
             out.push_str(&line[cursor..]);
@@ -2139,7 +2239,10 @@ impl LaunchLogFile {
         if std::fs::create_dir_all(parent).is_err() {
             return;
         }
-        let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
         else {
             return;
         };
@@ -2147,7 +2250,6 @@ impl LaunchLogFile {
             let _ = writeln!(file, "{line}");
         }
     }
-
 }
 
 /// Forward one progress report; the GUI keeps only the latest.
@@ -2185,7 +2287,10 @@ fn send_batch(
             Some(batch) => batch,
             None => return true,
         };
-        match sender.try_send(LaunchEvent::Log { run_id, lines: batch }) {
+        match sender.try_send(LaunchEvent::Log {
+            run_id,
+            lines: batch,
+        }) {
             Ok(()) => return true,
             Err(e) => {
                 if e.is_full() {
@@ -2246,15 +2351,24 @@ mod tests {
     }
 
     use super::*;
-    use palantir_core::pack::Component;
     use crate::wire::Script;
+    use palantir_core::pack::Component;
     use palantir_net::{MapTransport, MicrosoftOAuth};
 
     #[test]
     fn server_addresses_parse_with_default_port() {
-        assert_eq!(parse_server_address("mc.example.com"), Some(("mc.example.com".to_string(), 25565)));
-        assert_eq!(parse_server_address("mc.example.com:25570"), Some(("mc.example.com".to_string(), 25570)));
-        assert_eq!(parse_server_address("  mc.example.com : 1234 "), Some(("mc.example.com".to_string(), 1234)));
+        assert_eq!(
+            parse_server_address("mc.example.com"),
+            Some(("mc.example.com".to_string(), 25565))
+        );
+        assert_eq!(
+            parse_server_address("mc.example.com:25570"),
+            Some(("mc.example.com".to_string(), 25570))
+        );
+        assert_eq!(
+            parse_server_address("  mc.example.com : 1234 "),
+            Some(("mc.example.com".to_string(), 1234))
+        );
         assert_eq!(parse_server_address(""), None);
         assert_eq!(parse_server_address("   "), None);
         assert_eq!(parse_server_address("host:notaport"), None);
@@ -2292,7 +2406,11 @@ mod tests {
         let exe = if cfg!(windows) { "java.exe" } else { "java" };
         let bin = home.join("bin").join(exe);
         std::fs::write(&bin, b"").unwrap();
-        std::fs::write(home.join("release"), format!("JAVA_VERSION=\"{version}\"\n")).unwrap();
+        std::fs::write(
+            home.join("release"),
+            format!("JAVA_VERSION=\"{version}\"\n"),
+        )
+        .unwrap();
         bin.to_string_lossy().into_owned()
     }
 
@@ -2326,7 +2444,10 @@ mod tests {
         // A binary whose version cannot be read is not refused — it may be a
         // wrapper, and refusing a Java the user named by hand would be this
         // launcher overruling them on a question it could not answer.
-        let bare = dir.path().join("wrapper").join(if cfg!(windows) { "java.exe" } else { "java" });
+        let bare = dir
+            .path()
+            .join("wrapper")
+            .join(if cfg!(windows) { "java.exe" } else { "java" });
         std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
         std::fs::write(&bare, b"not a JVM").unwrap();
         assert_eq!(java_major_of(&bare.to_string_lossy()), None);
@@ -2382,7 +2503,10 @@ mod tests {
         prefs.default_java_path = Some("C:/jdk21/bin/javaw.exe".to_string());
         let defaults = LaunchDefaults::from_prefs(&prefs);
         assert_eq!((defaults.min_mem_mib, defaults.max_mem_mib), (1024, 8192));
-        assert_eq!(defaults.java.default_binary(), Some("C:/jdk21/bin/javaw.exe"));
+        assert_eq!(
+            defaults.java.default_binary(),
+            Some("C:/jdk21/bin/javaw.exe")
+        );
 
         // Nothing set anywhere: the shipped numbers, because a heap of zero
         // megabytes is a launch that dies in the JVM rather than a default.
@@ -2446,9 +2570,18 @@ mod tests {
     fn the_version_a_java_reports_is_read_from_the_quoted_token() {
         // `java -version` prints the version in quotes, and for some vendors
         // the first digits on the line are a build date.
-        assert_eq!(major_from_version_output("openjdk version \"21.0.6\" 2025-01-21"), Some(21));
-        assert_eq!(major_from_version_output("java version \"1.8.0_402\""), Some(8));
-        assert_eq!(major_from_version_output("openjdk 2025-01-21 version 21"), None);
+        assert_eq!(
+            major_from_version_output("openjdk version \"21.0.6\" 2025-01-21"),
+            Some(21)
+        );
+        assert_eq!(
+            major_from_version_output("java version \"1.8.0_402\""),
+            Some(8)
+        );
+        assert_eq!(
+            major_from_version_output("openjdk 2025-01-21 version 21"),
+            None
+        );
         assert_eq!(major_from_version_output(""), None);
         assert_eq!(major_from_version_output("\"\""), None);
     }
@@ -2527,7 +2660,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(found, named);
-        assert!(lines.iter().any(|line| line.contains("from the Java settings")), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("from the Java settings")),
+            "{lines:?}"
+        );
 
         // A version whose majors nothing was named for falls to the default
         // rather than to the scan.
@@ -2544,7 +2682,9 @@ mod tests {
         .unwrap();
         assert_eq!(found, fallback);
         assert!(
-            lines.iter().any(|line| line.contains("the default Java from the settings")),
+            lines
+                .iter()
+                .any(|line| line.contains("the default Java from the settings")),
             "{lines:?}"
         );
 
@@ -2552,9 +2692,19 @@ mod tests {
         // than used: the runtime was uninstalled, and the user did not ask for
         // the launcher to stop working because of it.
         let mut stale = java.clone();
-        let gone = paths.root.join("gone").join(exe).to_string_lossy().into_owned();
+        let gone = paths
+            .root
+            .join("gone")
+            .join(exe)
+            .to_string_lossy()
+            .into_owned();
         stale.by_major.insert(21, gone.clone());
-        stale.default_path = paths.root.join("gone-too").join(exe).to_string_lossy().into_owned();
+        stale.default_path = paths
+            .root
+            .join("gone-too")
+            .join(exe)
+            .to_string_lossy()
+            .into_owned();
         let mut lines = Vec::new();
         let found = pick_java(
             &paths,
@@ -2567,7 +2717,11 @@ mod tests {
         );
         let text = lines.join("\n");
         assert!(text.contains("not there"), "{text}");
-        assert_ne!(found.as_deref(), Some(gone.as_str()), "a path that is gone is not a Java");
+        assert_ne!(
+            found.as_deref(),
+            Some(gone.as_str()),
+            "a path that is gone is not a Java"
+        );
     }
 
     #[test]
@@ -2575,14 +2729,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("java"), b"x").unwrap();
         let dirs = vec![dir.path().join("missing"), dir.path().to_path_buf()];
-        assert_eq!(find_executable_in_dirs("java", &dirs), Some(dir.path().join("java")));
+        assert_eq!(
+            find_executable_in_dirs("java", &dirs),
+            Some(dir.path().join("java"))
+        );
         assert_eq!(find_executable_in_dirs("nope", &dirs), None);
         assert_eq!(find_executable_in_dirs("", &dirs), None);
         assert_eq!(find_executable_in_dirs("a/b", &dirs), None);
         // Directories do not count.
         let sub = dir.path().join("sub");
         std::fs::create_dir_all(&sub).unwrap();
-        assert_eq!(find_executable_in_dirs("sub", &[dir.path().to_path_buf()]), None);
+        assert_eq!(
+            find_executable_in_dirs("sub", &[dir.path().to_path_buf()]),
+            None
+        );
     }
 
     #[test]
@@ -2597,7 +2757,10 @@ mod tests {
             assert_eq!(joined, "a.jar:main.jar");
         }
         let root = Path::new("/data");
-        assert_eq!(resolve_library_path(root, "libraries/x/y.jar"), PathBuf::from("/data/libraries/x/y.jar"));
+        assert_eq!(
+            resolve_library_path(root, "libraries/x/y.jar"),
+            PathBuf::from("/data/libraries/x/y.jar")
+        );
     }
 
     #[test]
@@ -2649,9 +2812,12 @@ mod tests {
         let account = AccountRef::offline("Steve", "abc");
         assert!(!account.needs_refresh(0));
         let mut log = Vec::new();
-        let prepared =
-            prepare_auth(&account, &MicrosoftAuth::with_public_client_id(), &mut |line| log.push(line))
-                .unwrap();
+        let prepared = prepare_auth(
+            &account,
+            &MicrosoftAuth::with_public_client_id(),
+            &mut |line| log.push(line),
+        )
+        .unwrap();
         assert_eq!(prepared.session.user_type, "legacy");
         assert_eq!(prepared.session.access_token, "0");
         assert_eq!(prepared.session.session, "token:0:abc");
@@ -2683,7 +2849,9 @@ mod tests {
         assert_eq!(prepared.session.access_token, "stored-token");
         assert_eq!(prepared.session.session, "token:stored-token:aabb");
         assert!(prepared.refreshed.is_none(), "nothing was renewed");
-        assert!(log.iter().any(|line| line.contains("stored Microsoft session")));
+        assert!(log
+            .iter()
+            .any(|line| line.contains("stored Microsoft session")));
     }
 
     #[test]
@@ -2726,10 +2894,8 @@ mod tests {
             200,
             r#"{"id":"aabbccdd","name":"Steve"}"#,
         );
-        let auth = MicrosoftAuth::with_transport(
-            MicrosoftOAuth::public_client_id(),
-            Box::new(transport),
-        );
+        let auth =
+            MicrosoftAuth::with_transport(MicrosoftOAuth::public_client_id(), Box::new(transport));
         let mut log = Vec::new();
         let prepared = prepare_auth(&account, &auth, &mut |line| log.push(line)).unwrap();
         assert_eq!(prepared.session.access_token, "game-token-2");
@@ -2740,7 +2906,9 @@ mod tests {
         assert_eq!(refreshed.name, "Steve");
         assert_eq!(refreshed.uuid, "aabbccdd");
         assert!(refreshed.expires_at_ms > now);
-        assert!(log.iter().any(|line| line.contains("renewing the Microsoft session")));
+        assert!(log
+            .iter()
+            .any(|line| line.contains("renewing the Microsoft session")));
     }
 
     #[test]
@@ -2778,10 +2946,8 @@ mod tests {
             400,
             r#"{"error":"invalid_grant","error_description":"The refresh token has expired."}"#,
         );
-        let auth = MicrosoftAuth::with_transport(
-            MicrosoftOAuth::public_client_id(),
-            Box::new(transport),
-        );
+        let auth =
+            MicrosoftAuth::with_transport(MicrosoftOAuth::public_client_id(), Box::new(transport));
         let error = prepare_auth(&account, &auth, &mut |_| {}).unwrap_err();
         assert!(error.contains("refresh token has expired"), "got {error}");
     }
@@ -2807,7 +2973,11 @@ mod tests {
     /// it travelling behind a game that is already running.
     #[test]
     fn the_instance_s_window_size_reaches_the_game() {
-        let window = launch::WindowParams { width: 1920, height: 1080, maximized: false };
+        let window = launch::WindowParams {
+            width: 1920,
+            height: 1080,
+            maximized: false,
+        };
         // No override: nothing is passed, so the game keeps whatever it
         // remembers. Passing the defaults would override that silently.
         assert_eq!(window_flags(&[], &window, false, None), None);
@@ -2816,13 +2986,25 @@ mod tests {
         let existing = vec!["--width".to_string(), "800".to_string()];
         assert_eq!(window_flags(&existing, &window, true, None), None);
         // A size the game cannot use is not passed at all.
-        let zero = launch::WindowParams { width: 0, height: 0, maximized: false };
+        let zero = launch::WindowParams {
+            width: 0,
+            height: 0,
+            maximized: false,
+        };
         assert_eq!(window_flags(&[], &zero, true, None), None);
-        let negative = launch::WindowParams { width: 1920, height: -1, maximized: false };
+        let negative = launch::WindowParams {
+            width: 1920,
+            height: -1,
+            maximized: false,
+        };
         assert_eq!(window_flags(&[], &negative, true, None), None);
         // Maximized is the monitor's work area, and the configured size is the
         // fallback when the monitor cannot be read.
-        let maximized = launch::WindowParams { width: 854, height: 480, maximized: true };
+        let maximized = launch::WindowParams {
+            width: 854,
+            height: 480,
+            maximized: true,
+        };
         assert_eq!(
             window_flags(&[], &maximized, true, Some((1920, 1040))),
             Some((1920, 1040))
@@ -2856,7 +3038,10 @@ mod tests {
             "[10:00:00] [main/INFO]: Setting user: Player",
         ];
         for line in still_starting {
-            assert!(!startup_line(line), "this is not the window coming up: {line}");
+            assert!(
+                !startup_line(line),
+                "this is not the window coming up: {line}"
+            );
         }
     }
 
@@ -2903,8 +3088,14 @@ mod tests {
         );
         assert!(matches!(readiness, LaunchReadiness::Blocked));
         let text = lines.join("\n");
-        assert!(text.contains("cannot resolve component 'net.minecraft'"), "got: {text}");
-        assert!(text.contains("resolution failed with errors"), "got: {text}");
+        assert!(
+            text.contains("cannot resolve component 'net.minecraft'"),
+            "got: {text}"
+        );
+        assert!(
+            text.contains("resolution failed with errors"),
+            "got: {text}"
+        );
     }
 
     #[test]
@@ -2926,7 +3117,12 @@ mod tests {
                 .join("libraries")
                 .join("test/lib/lib/1.0/lib-1.0.jar"),
         );
-        seed_library(paths.root.join("libraries").join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar"),
+        );
 
         let mut store = OfflineMetaStore::new(paths.meta_dir());
         let fetcher = Script::new();
@@ -2963,12 +3159,17 @@ mod tests {
         // installed on every machine, or a real plan if one is.
         match readiness {
             LaunchReadiness::Blocked => {
-                assert!(text.contains("java"), "blocked for a reason that is not java: {text}");
+                assert!(
+                    text.contains("java"),
+                    "blocked for a reason that is not java: {text}"
+                );
             }
             LaunchReadiness::Ready(plan) => {
                 assert!(plan.main_jar.is_file());
                 assert!(
-                    plan.argv.iter().any(|arg| arg.starts_with("-Djava.library.path=")),
+                    plan.argv
+                        .iter()
+                        .any(|arg| arg.starts_with("-Djava.library.path=")),
                     "the natives directory must be on the library path"
                 );
                 assert!(plan.argv.iter().any(|arg| arg == "-cp"));
@@ -2988,7 +3189,12 @@ mod tests {
         // 1.12.2 runs on Java 8, and the instance is about to be pinned to 21 —
         // the shape a machine whose default Java is 21 leaves behind.
         seed_meta(&paths, &instance, "1.12.2", &[8]);
-        seed_library(paths.root.join("libraries").join("test/lib/lib/1.0/lib-1.0.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("test/lib/lib/1.0/lib-1.0.jar"),
+        );
         seed_library(
             paths
                 .root
@@ -3000,12 +3206,17 @@ mod tests {
         let pinned = fake_java_home(jdks.path(), "jdk21", "21.0.6");
         let wanted = fake_java_home(jdks.path(), "jdk8", "1.8.0_402");
         let mut instance = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
-        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance
+            .settings_mut()
+            .set_bool("OverrideJavaLocation", true);
         instance.settings_mut().set_str("JavaPath", &pinned);
         instance.save().unwrap();
 
         let defaults = LaunchDefaults {
-            java: JavaPrefs { default_path: wanted.clone(), ..JavaPrefs::default() },
+            java: JavaPrefs {
+                default_path: wanted.clone(),
+                ..JavaPrefs::default()
+            },
             ..LaunchDefaults::default()
         };
 
@@ -3084,7 +3295,11 @@ mod tests {
             b"jar",
             "the wrong file is the file the metadata names again"
         );
-        assert_eq!(std::fs::read(&client).unwrap(), b"jar", "and the right one is untouched");
+        assert_eq!(
+            std::fs::read(&client).unwrap(),
+            b"jar",
+            "and the right one is untouched"
+        );
         assert!(line.contains("Repaired 'Broken'"), "got: {line}");
         assert!(line.contains("1 fetched again"), "got: {line}");
         // The check is what the reader pressed for, and it is named even when
@@ -3116,7 +3331,12 @@ mod tests {
         // shape a machine whose default Java is 21 leaves behind -- and it
         // matters more here than at the spawn, because the processors run first.
         seed_forge_meta(&paths, &instance, "1.21.1", &[8]);
-        seed_library(paths.root.join("libraries").join("test/lib/lib/1.0/lib-1.0.jar"));
+        seed_library(
+            paths
+                .root
+                .join("libraries")
+                .join("test/lib/lib/1.0/lib-1.0.jar"),
+        );
         seed_library(
             paths
                 .root
@@ -3128,12 +3348,17 @@ mod tests {
         let pinned = fake_java_home(jdks.path(), "jdk21", "21.0.6");
         let wanted = fake_java_home(jdks.path(), "jdk8", "1.8.0_402");
         let mut instance = Instance::open(&paths.instances_dir().join(instance.id())).unwrap();
-        instance.settings_mut().set_bool("OverrideJavaLocation", true);
+        instance
+            .settings_mut()
+            .set_bool("OverrideJavaLocation", true);
         instance.settings_mut().set_str("JavaPath", &pinned);
         instance.save().unwrap();
 
         let defaults = LaunchDefaults {
-            java: JavaPrefs { default_path: wanted.clone(), ..JavaPrefs::default() },
+            java: JavaPrefs {
+                default_path: wanted.clone(),
+                ..JavaPrefs::default()
+            },
             ..LaunchDefaults::default()
         };
 
@@ -3161,7 +3386,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("'{needle}' is missing from: {text}"))
         };
         let refused = at("is Java 21, but this version wants Java 8");
-        let chosen = at(&format!("using the default Java from the settings: {wanted}"));
+        let chosen = at(&format!(
+            "using the default Java from the settings: {wanted}"
+        ));
         let installing = at("installing Forge");
         assert!(
             refused < chosen,
@@ -3217,7 +3444,10 @@ mod tests {
         let jdks = tempfile::tempdir().unwrap();
         let default_java = fake_java_home(jdks.path(), "jdk21", "21.0.6");
         let defaults = LaunchDefaults {
-            java: JavaPrefs { default_path: default_java, ..JavaPrefs::default() },
+            java: JavaPrefs {
+                default_path: default_java,
+                ..JavaPrefs::default()
+            },
             ..LaunchDefaults::default()
         };
 
@@ -3252,7 +3482,9 @@ mod tests {
         // itself with never arrives, because this launch has no game to match an
         // installer against.
         assert!(
-            levels.iter().all(|level| !level.label.starts_with("installing")),
+            levels
+                .iter()
+                .all(|level| !level.label.starts_with("installing")),
             "this launch must not have installed anything: {levels:?}"
         );
         assert!(matches!(readiness, LaunchReadiness::Blocked));
@@ -3407,7 +3639,12 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("played for 125s")));
 
         // A zero-length session adds nothing but is not an error.
-        record_play_time(&paths, &instance.id(), Duration::from_millis(10), &mut |_| {});
+        record_play_time(
+            &paths,
+            &instance.id(),
+            Duration::from_millis(10),
+            &mut |_| {},
+        );
         assert_eq!(
             Instance::open(&paths.instances_dir().join(instance.id()))
                 .unwrap()
@@ -3417,7 +3654,9 @@ mod tests {
         // A missing instance is reported, not fatal.
         let mut lines = Vec::new();
         record_launch_start(&paths, "gone", &mut |line| lines.push(line));
-        record_play_time(&paths, "gone", Duration::from_secs(3), &mut |line| lines.push(line));
+        record_play_time(&paths, "gone", Duration::from_secs(3), &mut |line| {
+            lines.push(line)
+        });
         assert!(lines.iter().any(|line| line.contains("could not")));
     }
 
@@ -3461,10 +3700,15 @@ mod tests {
         let instance = Instance::create(&paths.instances_dir(), "Logged", "1.21.1").unwrap();
 
         let first = LaunchLogFile::open(&paths, &instance.id());
-        assert!(first.path().ends_with(Path::new("logs").join("launcher.log")));
+        assert!(first
+            .path()
+            .ends_with(Path::new("logs").join("launcher.log")));
         first.append(&["first run".to_string()]);
         let text = std::fs::read_to_string(first.path()).unwrap();
-        assert!(text.contains("Logged"), "the header names the instance: {text}");
+        assert!(
+            text.contains("Logged"),
+            "the header names the instance: {text}"
+        );
         assert!(text.contains("first run"), "{text}");
 
         // A second launch moves the first aside instead of appending to it:
@@ -3509,7 +3753,10 @@ mod tests {
         );
 
         let text = std::fs::read_to_string(journal.path()).unwrap();
-        assert!(!text.contains("eyJhbG"), "the token reached the disk: {text}");
+        assert!(
+            !text.contains("eyJhbG"),
+            "the token reached the disk: {text}"
+        );
         assert!(text.contains("--accessToken <redacted>"), "{text}");
     }
 
@@ -3565,5 +3812,4 @@ mod tests {
             "a level is not a line in the run log: {logged}"
         );
     }
-
 }

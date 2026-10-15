@@ -76,7 +76,6 @@ impl Adapter {
     pub fn qualifies(&self) -> bool {
         self.hardware && ACCELERATED_BACKENDS.contains(&self.backend_key.as_str())
     }
-
 }
 
 /// Everything the probe learned, kept whole so the About page can print it.
@@ -93,7 +92,6 @@ impl Report {
     pub fn accelerated_available(&self) -> bool {
         self.accelerated.is_some()
     }
-
 }
 
 /// wgpu's backend name, spelled the way the rest of the shell writes it.
@@ -170,7 +168,10 @@ pub fn enumerate() -> Vec<Adapter> {
 pub fn probe() -> Report {
     let adapters = enumerate();
     let accelerated = best_qualifying(&adapters);
-    Report { adapters, accelerated }
+    Report {
+        adapters,
+        accelerated,
+    }
 }
 
 /// The `ICED_BACKEND` value to force, or `None` to leave iced's order in place.
@@ -219,7 +220,10 @@ mod tests {
 
     fn report(adapters: Vec<Adapter>) -> Report {
         let accelerated = best_qualifying(&adapters);
-        Report { adapters, accelerated }
+        Report {
+            adapters,
+            accelerated,
+        }
     }
 
     /// The adapter set measured on the machine this shell was reported against.
@@ -234,7 +238,10 @@ mod tests {
 
     #[test]
     fn only_a_software_adapter_is_not_hardware() {
-        assert!(!is_hardware(wgpu::DeviceType::Cpu), "a CPU rasteriser is not a GPU");
+        assert!(
+            !is_hardware(wgpu::DeviceType::Cpu),
+            "a CPU rasteriser is not a GPU"
+        );
         for real in [
             wgpu::DeviceType::DiscreteGpu,
             wgpu::DeviceType::IntegratedGpu,
@@ -326,5 +333,4 @@ mod tests {
         // Anything wgpu grows later passes through instead of failing to build.
         assert_eq!(backend_name("something-new"), "something-new");
     }
-
 }

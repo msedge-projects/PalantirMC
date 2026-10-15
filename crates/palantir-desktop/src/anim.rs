@@ -56,7 +56,13 @@ impl SwitchAnim {
     pub fn progress(&self, id: &str, on: bool) -> f32 {
         match self.knobs.get(id) {
             Some(knob) => knob.progress,
-            None => if on { 1.0 } else { 0.0 },
+            None => {
+                if on {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
         }
     }
 
@@ -68,7 +74,6 @@ impl SwitchAnim {
     pub fn animating(&self) -> bool {
         self.knobs.values().any(|knob| knob.began.is_some())
     }
-
 }
 
 /// CSS `ease`, near enough to be indistinguishable at 24 pixels.
@@ -197,7 +202,11 @@ struct Pointed {
 impl Pointed {
     /// Nothing on this control.
     fn rest() -> Pointed {
-        Pointed { hovered: false, pressed: false, hover: crate::theme::hover_brightness() }
+        Pointed {
+            hovered: false,
+            pressed: false,
+            hover: crate::theme::hover_brightness(),
+        }
     }
 }
 
@@ -269,7 +278,13 @@ struct Selection {
 
 impl Selection {
     fn settled(fraction: f32, timing: crate::motion::Timing) -> Selection {
-        Selection { from: fraction, to: fraction, progress: fraction, began: None, timing }
+        Selection {
+            from: fraction,
+            to: fraction,
+            progress: fraction,
+            began: None,
+            timing,
+        }
     }
 }
 
@@ -337,14 +352,15 @@ impl Interactions {
         hover_factor: f32,
     ) {
         let target = Self::target(hovered, pressed, hover_factor);
-        let tween = self
-            .tweens
-            .entry(id)
-            .or_insert_with(|| Tween::settled(1.0));
+        let tween = self.tweens.entry(id).or_insert_with(|| Tween::settled(1.0));
         // The remembered state is the pointer's report, which is new even when
         // the factor it implies is the one already drawn: a control the pointer
         // is on and one it has just left both sit at `1.0` in a light theme.
-        tween.pointed = Pointed { hovered, pressed, hover: hover_factor };
+        tween.pointed = Pointed {
+            hovered,
+            pressed,
+            hover: hover_factor,
+        };
         if tween.to == target {
             // Repeated pointer reports are not new transitions. Restarting an
             // in-flight tween here makes it lag or never finish during input.
@@ -353,11 +369,19 @@ impl Interactions {
         // From where the control is drawn: a press inside a hover starts
         // from the hover brightness, and a fast hover-press-release reverses
         // from the pixel it is on.
-        tween.from = if tween.began.is_none() { tween.to } else { tween.progress };
+        tween.from = if tween.began.is_none() {
+            tween.to
+        } else {
+            tween.progress
+        };
         // A tween whose ends are equal is already there.
         tween.to = target;
         tween.progress = tween.from;
-        tween.began = if (target - tween.from).abs() < 0.001 { None } else { Some(now) };
+        tween.began = if (target - tween.from).abs() < 0.001 {
+            None
+        } else {
+            Some(now)
+        };
     }
 
     /// How far along a hover is, `0.0..=1.0`.
@@ -382,7 +406,11 @@ impl Interactions {
     ) -> f32 {
         hover_fraction(
             self.factor_with_hover(id, hovered, pressed, hover_factor),
-            Pointed { hovered, pressed, hover: hover_factor },
+            Pointed {
+                hovered,
+                pressed,
+                hover: hover_factor,
+            },
         )
     }
 
@@ -400,14 +428,20 @@ impl Interactions {
             return (1.0, 0.0);
         };
         if tween.began.is_some() {
-            return (tween.progress, hover_fraction(tween.progress, tween.pointed));
+            return (
+                tween.progress,
+                hover_fraction(tween.progress, tween.pointed),
+            );
         }
         // Settled: what to draw is the state the pointer last reported, not the
         // factor the tween happened to end on. A control drawn from a stale
         // report is the failure this avoids, and it is why a page can be
         // rebuilt every frame without carrying a map of its own.
-        let factor =
-            Self::target(tween.pointed.hovered, tween.pointed.pressed, tween.pointed.hover);
+        let factor = Self::target(
+            tween.pointed.hovered,
+            tween.pointed.pressed,
+            tween.pointed.hover,
+        );
         (factor, hover_fraction(factor, tween.pointed))
     }
 
@@ -462,8 +496,10 @@ impl Interactions {
         now: Instant,
     ) -> f32 {
         let target = if selected { 1.0 } else { 0.0 };
-        let selection =
-            self.selections.entry(id).or_insert_with(|| Selection::settled(target, timing));
+        let selection = self
+            .selections
+            .entry(id)
+            .or_insert_with(|| Selection::settled(target, timing));
         selection.timing = timing;
         if selection.to == target {
             // A rebuild every frame asks this every frame, and restarting a leg
@@ -482,7 +518,10 @@ impl Interactions {
     /// Whether any control is mid-tween, hovered or selected.
     pub fn animating(&self) -> bool {
         self.tweens.values().any(|tween| tween.began.is_some())
-            || self.selections.values().any(|selection| selection.began.is_some())
+            || self
+                .selections
+                .values()
+                .any(|selection| selection.began.is_some())
     }
 
     /// Advance every tween to `now`, returning whether any still moves.
@@ -494,7 +533,11 @@ impl Interactions {
                 continue;
             };
             let elapsed = now.saturating_duration_since(began).as_secs_f32();
-            let progress = if deadline > 0.0 { (elapsed / deadline).clamp(0.0, 1.0) } else { 1.0 };
+            let progress = if deadline > 0.0 {
+                (elapsed / deadline).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
             tween.progress = tween.from + (tween.to - tween.from) * ease(progress);
             if progress >= 1.0 {
                 tween.progress = tween.to;
@@ -516,7 +559,11 @@ impl Interactions {
             let timing = selection.timing;
             let span = timing.millis as f32 / 1000.0;
             let elapsed = now.saturating_duration_since(began).as_secs_f32();
-            let progress = if span > 0.0 { (elapsed / span).clamp(0.0, 1.0) } else { 1.0 };
+            let progress = if span > 0.0 {
+                (elapsed / span).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
             let eased = crate::motion::ease(timing.control(), progress);
             selection.progress = selection.from + (selection.to - selection.from) * eased;
             if progress >= 1.0 {
@@ -577,8 +624,14 @@ mod tests {
         // strip in the app on every page change.
         let mut clock = Interactions::default();
         let now = Instant::now();
-        assert_eq!(clock.selection("a", true, crate::motion::Timing::TAB_COLOR, now), 1.0);
-        assert_eq!(clock.selection("b", false, crate::motion::Timing::TAB_COLOR, now), 0.0);
+        assert_eq!(
+            clock.selection("a", true, crate::motion::Timing::TAB_COLOR, now),
+            1.0
+        );
+        assert_eq!(
+            clock.selection("b", false, crate::motion::Timing::TAB_COLOR, now),
+            0.0
+        );
         assert!(!clock.animating(), "so nothing is moving");
     }
 
@@ -598,7 +651,11 @@ mod tests {
 
         // Now the reader presses another tab, and this one gives its ink up.
         let pressing = start + rule.duration();
-        assert_eq!(clock.selection("tab", false, rule, pressing), 1.0, "a change starts where it is");
+        assert_eq!(
+            clock.selection("tab", false, rule, pressing),
+            1.0,
+            "a change starts where it is"
+        );
         assert!(clock.animating(), "so the shell is asked for frames");
         clock.tick(pressing + rule.duration() / 2);
         let half = clock.selection("tab", false, rule, pressing + rule.duration() / 2);
@@ -606,7 +663,11 @@ mod tests {
         // Tailwind's curve is front-loaded, so half the time is most of the way.
         assert!(half < 0.5, "cubic-bezier(0.4, 0, 0.2, 1) leads: {half}");
         clock.tick(pressing + rule.duration());
-        assert_eq!(clock.selection("tab", false, rule, pressing), 0.0, "and it lands exactly");
+        assert_eq!(
+            clock.selection("tab", false, rule, pressing),
+            0.0,
+            "and it lands exactly"
+        );
         assert!(!clock.animating());
     }
 
@@ -633,7 +694,11 @@ mod tests {
         // whole reason the timing travels with the control rather than being
         // looked up once: one shared duration would have finished both at 100
         // or left both running at 150.
-        assert_eq!(clock.selection("strip", false, strip, start), 0.0, "the strip is done");
+        assert_eq!(
+            clock.selection("strip", false, strip, start),
+            0.0,
+            "the strip is done"
+        );
         assert!(
             clock.selection("column", false, column, start) > 0.0,
             "the column is still on its own 150ms"
@@ -677,14 +742,20 @@ mod tests {
         clock.set("repeat", true, false, began + INTERACTION_DURATION / 2);
         clock.tick(began + INTERACTION_DURATION);
         assert!(!clock.animating());
-        assert_eq!(clock.factor("repeat", true, false), crate::theme::hover_brightness());
+        assert_eq!(
+            clock.factor("repeat", true, false),
+            crate::theme::hover_brightness()
+        );
     }
 
     #[test]
     fn an_untouched_control_is_at_rest() {
         let clock = Interactions::default();
         assert_eq!(clock.factor("a", false, false), 1.0);
-        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+        assert_eq!(
+            clock.factor("a", true, false),
+            crate::theme::hover_brightness()
+        );
         assert!(!clock.animating(), "nothing has been told anything");
     }
 
@@ -707,18 +778,28 @@ mod tests {
         let start = Instant::now();
         clock.set("a", true, false, start);
         assert!(clock.animating());
-        assert_eq!(clock.factor("a", true, false), 1.0, "the tween begins at rest");
+        assert_eq!(
+            clock.factor("a", true, false),
+            1.0,
+            "the tween begins at rest"
+        );
 
         // Halfway is strictly between rest and the hover factor.
         clock.tick(start + INTERACTION_DURATION / 2);
         let middle = clock.factor("a", true, false);
         let end = crate::theme::hover_brightness();
-        assert!(middle > 1.0 && middle < end, "got {middle}, rest 1.0, hover {end}");
+        assert!(
+            middle > 1.0 && middle < end,
+            "got {middle}, rest 1.0, hover {end}"
+        );
 
         // And the deadline ends it, exactly on the factor.
         assert!(!clock.tick(start + INTERACTION_DURATION));
         assert_eq!(clock.factor("a", true, false), end);
-        assert!(!clock.animating(), "a settled tween must not hold frames open");
+        assert!(
+            !clock.animating(),
+            "a settled tween must not hold frames open"
+        );
     }
 
     #[test]
@@ -732,9 +813,16 @@ mod tests {
         let hovered = clock.factor("a", true, false);
 
         clock.set("a", true, true, start);
-        assert_eq!(clock.factor("a", true, true), hovered, "the press starts from the hover");
+        assert_eq!(
+            clock.factor("a", true, true),
+            hovered,
+            "the press starts from the hover"
+        );
         clock.tick(start + INTERACTION_DURATION);
-        assert_eq!(clock.factor("a", true, true), crate::theme::PRESS_BRIGHTNESS);
+        assert_eq!(
+            clock.factor("a", true, true),
+            crate::theme::PRESS_BRIGHTNESS
+        );
     }
 
     #[test]
@@ -762,8 +850,15 @@ mod tests {
         clock.set("a", true, false, start);
         clock.tick(start + INTERACTION_DURATION);
         clock.set("b", true, false, start);
-        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
-        assert_eq!(clock.factor("b", true, false), 1.0, "b's tween has just begun");
+        assert_eq!(
+            clock.factor("a", true, false),
+            crate::theme::hover_brightness()
+        );
+        assert_eq!(
+            clock.factor("b", true, false),
+            1.0,
+            "b's tween has just begun"
+        );
     }
 
     #[test]
@@ -776,7 +871,11 @@ mod tests {
         let start = at(0);
         assert_eq!(clock.hover_progress("a", false, false), 0.0, "at rest");
         clock.set("a", true, false, start);
-        assert_eq!(clock.hover_progress("a", true, false), 0.0, "the tween starts at rest");
+        assert_eq!(
+            clock.hover_progress("a", true, false),
+            0.0,
+            "the tween starts at rest"
+        );
         clock.tick(start + INTERACTION_DURATION / 2);
         let middle = clock.hover_progress("a", true, false);
         assert!(middle > 0.0 && middle < 1.0, "got {middle}");
@@ -809,7 +908,11 @@ mod tests {
         let start = Instant::now();
         let hover = crate::theme::hover_brightness();
         clock.set("page:save", true, false, start);
-        assert_eq!(clock.drawn("page:save"), (1.0, 0.0), "the tween begins at rest");
+        assert_eq!(
+            clock.drawn("page:save"),
+            (1.0, 0.0),
+            "the tween begins at rest"
+        );
 
         clock.tick(start + INTERACTION_DURATION / 2);
         let (factor, progress) = clock.drawn("page:save");
@@ -817,7 +920,11 @@ mod tests {
         assert!(progress > 0.0 && progress < 1.0, "got {progress}");
 
         assert!(!clock.tick(start + INTERACTION_DURATION));
-        assert_eq!(clock.drawn("page:save"), (hover, 1.0), "arrived, and hovered");
+        assert_eq!(
+            clock.drawn("page:save"),
+            (hover, 1.0),
+            "arrived, and hovered"
+        );
         // The pointer leaves: the return trip, and it lands at rest.
         clock.set("page:save", false, false, start + INTERACTION_DURATION);
         clock.tick(start + 2 * INTERACTION_DURATION);
@@ -845,7 +952,10 @@ mod tests {
         clock.set("a", true, false, start);
         clock.clear();
         assert!(!clock.animating());
-        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
+        assert_eq!(
+            clock.factor("a", true, false),
+            crate::theme::hover_brightness()
+        );
     }
 
     #[test]
@@ -883,10 +993,22 @@ mod tests {
         let start = Instant::now();
         clock.set("a", true, false, start);
         clock.tick(start + INTERACTION_DURATION);
-        assert_eq!(clock.factor("a", true, false), crate::theme::hover_brightness());
-        assert_eq!(clock.factor("a", false, false), 1.0, "left behind, drawn at rest");
-        assert_eq!(clock.factor("a", false, true), crate::theme::PRESS_BRIGHTNESS);
-        assert_eq!(clock.factor("nobody", true, false), crate::theme::hover_brightness());
+        assert_eq!(
+            clock.factor("a", true, false),
+            crate::theme::hover_brightness()
+        );
+        assert_eq!(
+            clock.factor("a", false, false),
+            1.0,
+            "left behind, drawn at rest"
+        );
+        assert_eq!(
+            clock.factor("a", false, true),
+            crate::theme::PRESS_BRIGHTNESS
+        );
+        assert_eq!(
+            clock.factor("nobody", true, false),
+            crate::theme::hover_brightness()
+        );
     }
-
 }

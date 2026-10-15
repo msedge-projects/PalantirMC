@@ -151,7 +151,10 @@ impl Sheet {
             }
         }
 
-        Some(Sheet { path: path.display().to_string(), declarations })
+        Some(Sheet {
+            path: path.display().to_string(),
+            declarations,
+        })
     }
 
     /// A token's value, following `var(--x)` chains inside this block.
@@ -175,7 +178,9 @@ impl Sheet {
             }
             return Ok((parse_value(raw), *line));
         }
-        Err(format!("`--{token}` follows more than eight `var()` hops: that is a cycle"))
+        Err(format!(
+            "`--{token}` follows more than eight `var()` hops: that is a cycle"
+        ))
     }
 }
 
@@ -313,7 +318,9 @@ fn parse_color(text: &str) -> Option<Color> {
     if let Some(hex_value) = text.strip_prefix('#') {
         let digits = hex_value.trim();
         let channel = |range: std::ops::Range<usize>| {
-            u8::from_str_radix(&digits[range], 16).ok().map(|byte| byte as f32 / 255.0)
+            u8::from_str_radix(&digits[range], 16)
+                .ok()
+                .map(|byte| byte as f32 / 255.0)
         };
         return match digits.len() {
             3 => {
@@ -330,24 +337,42 @@ fn parse_color(text: &str) -> Option<Color> {
                     1.0,
                 ))
             }
-            6 => Some(Color::from_rgba(channel(0..2)?, channel(2..4)?, channel(4..6)?, 1.0)),
-            8 => Some(Color::from_rgba(channel(0..2)?, channel(2..4)?, channel(4..6)?, channel(6..8)?)),
+            6 => Some(Color::from_rgba(
+                channel(0..2)?,
+                channel(2..4)?,
+                channel(4..6)?,
+                1.0,
+            )),
+            8 => Some(Color::from_rgba(
+                channel(0..2)?,
+                channel(2..4)?,
+                channel(4..6)?,
+                channel(6..8)?,
+            )),
             _ => None,
         };
     }
-    if let Some(inner) = text.strip_prefix("rgb(").and_then(|rest| rest.strip_suffix(')')) {
+    if let Some(inner) = text
+        .strip_prefix("rgb(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
         let numbers = component_list(inner);
         if numbers.len() != 3 {
             return None;
         }
         return Some(Color::from_rgba(numbers[0], numbers[1], numbers[2], 1.0));
     }
-    if let Some(inner) = text.strip_prefix("rgba(").and_then(|rest| rest.strip_suffix(')')) {
+    if let Some(inner) = text
+        .strip_prefix("rgba(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
         let numbers = component_list(inner);
         if numbers.len() != 4 {
             return None;
         }
-        return Some(Color::from_rgba(numbers[0], numbers[1], numbers[2], numbers[3]));
+        return Some(Color::from_rgba(
+            numbers[0], numbers[1], numbers[2], numbers[3],
+        ));
     }
     match text {
         "white" => Some(Color::WHITE),
@@ -383,7 +408,12 @@ fn hex(color: Color) -> String {
     fn channel(value: f32) -> u8 {
         (value.clamp(0.0, 1.0) * 255.0).round() as u8
     }
-    let base = format!("#{:02x}{:02x}{:02x}", channel(color.r), channel(color.g), channel(color.b));
+    let base = format!(
+        "#{:02x}{:02x}{:02x}",
+        channel(color.r),
+        channel(color.g),
+        channel(color.b)
+    );
     if color.a >= 0.999 {
         base
     } else {
@@ -453,16 +483,11 @@ impl Sheets {
         // declared token is exactly how a porting pass misses one. Names only,
         // which is why this can be merged here without a line number having to
         // say which sheet it came from.
-        let declared: BTreeSet<String> = [
-            &light,
-            &dark,
-            &oled,
-            &body.declarations,
-            &scopes("html")?,
-        ]
-        .into_iter()
-        .flat_map(|block| block.keys().cloned())
-        .collect();
+        let declared: BTreeSet<String> =
+            [&light, &dark, &oled, &body.declarations, &scopes("html")?]
+                .into_iter()
+                .flat_map(|block| block.keys().cloned())
+                .collect();
 
         Some(Sheets {
             variables: path.display().to_string(),
@@ -506,9 +531,10 @@ impl Sheets {
             }
             return Ok((parse_value(raw), *line));
         }
-        Err(format!("`--{token}` follows more than eight `var()` hops: that is a cycle"))
+        Err(format!(
+            "`--{token}` follows more than eight `var()` hops: that is a cycle"
+        ))
     }
-
 }
 
 /// Whether a list of sizes holds one. `f32` is not `Ord`, so a size list is a
@@ -632,13 +658,43 @@ fn dark_claims(palette: &Palette) -> Vec<Claim> {
         colour("palette.bg", "bg", palette.bg, "surface-1"),
         colour("palette.bg_rail", "bg_rail", palette.bg_rail, "surface-2"),
         colour("palette.surface", "surface", palette.surface, "surface-3"),
-        colour("palette.surface_hover", "surface_hover", palette.surface_hover, "surface-4"),
-        colour("palette.surface_input", "surface_input", palette.surface_input, "color-button-bg"),
-        colour("palette.border", "border", palette.border, "color-button-border"),
-        colour("palette.border_strong", "border_strong", palette.border_strong, "surface-5"),
+        colour(
+            "palette.surface_hover",
+            "surface_hover",
+            palette.surface_hover,
+            "surface-4",
+        ),
+        colour(
+            "palette.surface_input",
+            "surface_input",
+            palette.surface_input,
+            "color-button-bg",
+        ),
+        colour(
+            "palette.border",
+            "border",
+            palette.border,
+            "color-button-border",
+        ),
+        colour(
+            "palette.border_strong",
+            "border_strong",
+            palette.border_strong,
+            "surface-5",
+        ),
         colour("palette.text", "text", palette.text, "color-text-primary"),
-        colour("palette.text_muted", "text_muted", palette.text_muted, "color-text-default"),
-        colour("palette.text_dim", "text_dim", palette.text_dim, "color-text-tertiary"),
+        colour(
+            "palette.text_muted",
+            "text_muted",
+            palette.text_muted,
+            "color-text-default",
+        ),
+        colour(
+            "palette.text_dim",
+            "text_dim",
+            palette.text_dim,
+            "color-text-tertiary",
+        ),
         deviating(
             "palette.accent",
             "accent",
@@ -657,7 +713,12 @@ fn dark_claims(palette: &Palette) -> Vec<Claim> {
              measured #1d5540 in the tab strip and #1d563f under the rail's entry, and stored \
              as the solid those two agree on",
         ),
-        colour("palette.on_accent", "on_accent", palette.on_accent, "color-accent-contrast"),
+        colour(
+            "palette.on_accent",
+            "on_accent",
+            palette.on_accent,
+            "color-accent-contrast",
+        ),
         colour("palette.danger", "danger", palette.danger, "color-red"),
         Claim {
             ours: "palette.hero",
@@ -665,9 +726,20 @@ fn dark_claims(palette: &Palette) -> Vec<Claim> {
             value: Value::Color(palette.hero),
             against: Against::Stop("brand-gradient-strong-bg", 100.0),
         },
-        colour("palette.backdrop", "backdrop", palette.backdrop, "splash-overlay"),
+        colour(
+            "palette.backdrop",
+            "backdrop",
+            palette.backdrop,
+            "splash-overlay",
+        ),
         colour("palette.modal", "modal", palette.modal, "surface-3"),
-        deviating("palette.sidebar_top", "sidebar_top", palette.sidebar_top, "brand-gradient-bg", PANEL),
+        deviating(
+            "palette.sidebar_top",
+            "sidebar_top",
+            palette.sidebar_top,
+            "brand-gradient-bg",
+            PANEL,
+        ),
         deviating(
             "palette.sidebar_bottom",
             "sidebar_bottom",
@@ -706,13 +778,43 @@ fn light_claims(palette: &Palette) -> Vec<Claim> {
         colour("palette.bg", "bg", palette.bg, "surface-1"),
         colour("palette.bg_rail", "bg_rail", palette.bg_rail, "surface-1-5"),
         colour("palette.surface", "surface", palette.surface, "surface-3"),
-        colour("palette.surface_hover", "surface_hover", palette.surface_hover, "surface-5"),
-        colour("palette.surface_input", "surface_input", palette.surface_input, "surface-4"),
-        colour("palette.border", "border", palette.border, "color-button-border"),
-        colour("palette.border_strong", "border_strong", palette.border_strong, "surface-5"),
+        colour(
+            "palette.surface_hover",
+            "surface_hover",
+            palette.surface_hover,
+            "surface-5",
+        ),
+        colour(
+            "palette.surface_input",
+            "surface_input",
+            palette.surface_input,
+            "surface-4",
+        ),
+        colour(
+            "palette.border",
+            "border",
+            palette.border,
+            "color-button-border",
+        ),
+        colour(
+            "palette.border_strong",
+            "border_strong",
+            palette.border_strong,
+            "surface-5",
+        ),
         colour("palette.text", "text", palette.text, "color-text-primary"),
-        colour("palette.text_muted", "text_muted", palette.text_muted, "color-text-default"),
-        colour("palette.text_dim", "text_dim", palette.text_dim, "color-text-tertiary"),
+        colour(
+            "palette.text_muted",
+            "text_muted",
+            palette.text_muted,
+            "color-text-default",
+        ),
+        colour(
+            "palette.text_dim",
+            "text_dim",
+            palette.text_dim,
+            "color-text-tertiary",
+        ),
         deviating(
             "palette.accent",
             "accent",
@@ -731,7 +833,12 @@ fn light_claims(palette: &Palette) -> Vec<Claim> {
              the same rule over the light chrome, the one place in this palette that is derived \
              rather than measured because the light theme has not been captured",
         ),
-        colour("palette.on_accent", "on_accent", palette.on_accent, "color-accent-contrast"),
+        colour(
+            "palette.on_accent",
+            "on_accent",
+            palette.on_accent,
+            "color-accent-contrast",
+        ),
         colour("palette.danger", "danger", palette.danger, "color-red"),
         deviating(
             "palette.hero",
@@ -750,7 +857,13 @@ fn light_claims(palette: &Palette) -> Vec<Claim> {
              rather than as a colour",
         ),
         colour("palette.modal", "modal", palette.modal, "surface-3"),
-        deviating("palette.sidebar_top", "sidebar_top", palette.sidebar_top, "brand-gradient-bg", PANEL),
+        deviating(
+            "palette.sidebar_top",
+            "sidebar_top",
+            palette.sidebar_top,
+            "brand-gradient-bg",
+            PANEL,
+        ),
         deviating(
             "palette.sidebar_bottom",
             "sidebar_bottom",
@@ -765,7 +878,13 @@ fn light_claims(palette: &Palette) -> Vec<Claim> {
             "brand-gradient-button",
             PANEL,
         ),
-        deviating("palette.sidebar_row", "sidebar_row", palette.sidebar_row, "brand-gradient-button", PANEL),
+        deviating(
+            "palette.sidebar_row",
+            "sidebar_row",
+            palette.sidebar_row,
+            "brand-gradient-button",
+            PANEL,
+        ),
         deviating(
             "palette.sidebar_border",
             "sidebar_border",
@@ -783,13 +902,43 @@ fn oled_claims(palette: &Palette) -> Vec<Claim> {
         colour("palette.bg", "bg", palette.bg, "surface-1"),
         colour("palette.bg_rail", "bg_rail", palette.bg_rail, "surface-1-5"),
         colour("palette.surface", "surface", palette.surface, "surface-3"),
-        colour("palette.surface_hover", "surface_hover", palette.surface_hover, "surface-4"),
-        colour("palette.surface_input", "surface_input", palette.surface_input, "surface-4"),
-        colour("palette.border", "border", palette.border, "color-button-border"),
-        colour("palette.border_strong", "border_strong", palette.border_strong, "surface-5"),
+        colour(
+            "palette.surface_hover",
+            "surface_hover",
+            palette.surface_hover,
+            "surface-4",
+        ),
+        colour(
+            "palette.surface_input",
+            "surface_input",
+            palette.surface_input,
+            "surface-4",
+        ),
+        colour(
+            "palette.border",
+            "border",
+            palette.border,
+            "color-button-border",
+        ),
+        colour(
+            "palette.border_strong",
+            "border_strong",
+            palette.border_strong,
+            "surface-5",
+        ),
         colour("palette.text", "text", palette.text, "color-text-primary"),
-        colour("palette.text_muted", "text_muted", palette.text_muted, "color-text-default"),
-        colour("palette.text_dim", "text_dim", palette.text_dim, "color-text-tertiary"),
+        colour(
+            "palette.text_muted",
+            "text_muted",
+            palette.text_muted,
+            "color-text-default",
+        ),
+        colour(
+            "palette.text_dim",
+            "text_dim",
+            palette.text_dim,
+            "color-text-tertiary",
+        ),
         deviating(
             "palette.accent",
             "accent",
@@ -806,7 +955,12 @@ fn oled_claims(palette: &Palette) -> Vec<Claim> {
             "the accent at 25% over this theme's own chrome, by the rule the dark value was \
              measured by",
         ),
-        colour("palette.on_accent", "on_accent", palette.on_accent, "color-accent-contrast"),
+        colour(
+            "palette.on_accent",
+            "on_accent",
+            palette.on_accent,
+            "color-accent-contrast",
+        ),
         colour("palette.danger", "danger", palette.danger, "color-red"),
         Claim {
             ours: "palette.hero",
@@ -823,7 +977,13 @@ fn oled_claims(palette: &Palette) -> Vec<Claim> {
              backdrop should switch pixels off too",
         ),
         colour("palette.modal", "modal", palette.modal, "surface-3"),
-        deviating("palette.sidebar_top", "sidebar_top", palette.sidebar_top, "brand-gradient-bg", PANEL),
+        deviating(
+            "palette.sidebar_top",
+            "sidebar_top",
+            palette.sidebar_top,
+            "brand-gradient-bg",
+            PANEL,
+        ),
         deviating(
             "palette.sidebar_bottom",
             "sidebar_bottom",
@@ -838,7 +998,13 @@ fn oled_claims(palette: &Palette) -> Vec<Claim> {
             "brand-gradient-button",
             PANEL,
         ),
-        deviating("palette.sidebar_row", "sidebar_row", palette.sidebar_row, "brand-gradient-button", PANEL),
+        deviating(
+            "palette.sidebar_row",
+            "sidebar_row",
+            palette.sidebar_row,
+            "brand-gradient-button",
+            PANEL,
+        ),
         deviating(
             "palette.sidebar_border",
             "sidebar_border",
@@ -856,7 +1022,12 @@ fn oled_claims(palette: &Palette) -> Vec<Claim> {
 /// (`--color-contrast` really is `--color-text-primary`) and so the report does
 /// not list a token as unheld when it is in fact what the shell paints.
 fn alias(ours: &'static str, value: Color, token: &'static str) -> Claim {
-    Claim { ours, field: None, value: Value::Color(value), against: Against::Token(token) }
+    Claim {
+        ours,
+        field: None,
+        value: Value::Color(value),
+        against: Against::Token(token),
+    }
 }
 
 /// The eight names every mode shares, from the sheet's own ladder: a surface or
@@ -865,7 +1036,11 @@ fn aliases(palette: &Palette) -> Vec<Claim> {
     vec![
         alias("--color-bg", palette.bg, "color-bg"),
         alias("--color-raised-bg", palette.surface, "color-raised-bg"),
-        alias("--color-super-raised-bg", palette.surface_input, "color-super-raised-bg"),
+        alias(
+            "--color-super-raised-bg",
+            palette.surface_input,
+            "color-super-raised-bg",
+        ),
         alias("--color-contrast", palette.text, "color-contrast"),
         alias("--color-base", palette.text_muted, "color-base"),
         alias("--color-secondary", palette.text_dim, "color-secondary"),
@@ -920,7 +1095,10 @@ fn colour_difference(ours: Color, theirs: Color, with_alpha: bool) -> Option<Str
     if with_alpha {
         channels.push((ours.a, theirs.a));
     }
-    if channels.iter().all(|(ours, theirs)| (ours - theirs).abs() <= CHANNEL_SLACK) {
+    if channels
+        .iter()
+        .all(|(ours, theirs)| (ours - theirs).abs() <= CHANNEL_SLACK)
+    {
         return None;
     }
     Some(format!("ours {}, reference {}", hex(ours), hex(theirs)))
@@ -941,7 +1119,10 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
                 ));
             }
             if why.trim().is_empty() {
-                return Some(format!("{}: a deviation with no reason written down", claim.ours));
+                return Some(format!(
+                    "{}: a deviation with no reason written down",
+                    claim.ours
+                ));
             }
             return None;
         }
@@ -964,9 +1145,20 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
         // different claim, and this is not that yet.
         let from_light = theme_tokens::LIGHT.iter().find(|row| row.token == bare);
         let row = match from_light {
-            Some(row) => RowRef { line: row.line, kind: row.kind, value: row.value },
-            None => match crate::theme_tokens::SCOPED.iter().find(|row| row.token == bare) {
-                Some(row) => RowRef { line: row.line, kind: row.kind, value: row.value },
+            Some(row) => RowRef {
+                line: row.line,
+                kind: row.kind,
+                value: row.value,
+            },
+            None => match crate::theme_tokens::SCOPED
+                .iter()
+                .find(|row| row.token == bare)
+            {
+                Some(row) => RowRef {
+                    line: row.line,
+                    kind: row.kind,
+                    value: row.value,
+                },
                 None => {
                     return Some(format!(
                         "{}: --{token} is not in the copy; run `python tools/gen_tokens.py`",
@@ -976,15 +1168,19 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
             },
         };
         match row {
-            RowRef { kind: crate::theme_tokens::Kind::Length, value, line, .. } => {
-                (Value::Length(value.parse().unwrap_or(f32::NAN)), line as usize)
-            }
+            RowRef {
+                kind: crate::theme_tokens::Kind::Length,
+                value,
+                line,
+                ..
+            } => (
+                Value::Length(value.parse().unwrap_or(f32::NAN)),
+                line as usize,
+            ),
             RowRef { value, kind, .. } => {
                 return Some(format!(
                     "{}: --{token} is held as {} ({:?}), not a length",
-                    claim.ours,
-                    value,
-                    kind
+                    claim.ours, value, kind
                 ));
             }
         }
@@ -1011,7 +1207,10 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
                     )),
                 }
             }
-            _ => Some(format!("ours is a colour and the reference's is {}", theirs.describe())),
+            _ => Some(format!(
+                "ours is a colour and the reference's is {}",
+                theirs.describe()
+            )),
         },
         (Value::Length(ours), Value::Length(theirs)) => {
             if (ours - theirs).abs() < 0.01 {
@@ -1027,7 +1226,11 @@ fn check(sheets: &Sheets, theme: ColorTheme, claim: &Claim) -> Option<String> {
                 Some(format!("ours {ours}, reference {theirs}"))
             }
         }
-        _ => Some(format!("ours is {}, the reference's is {}", claim.value.describe(), theirs.describe())),
+        _ => Some(format!(
+            "ours is {}, the reference's is {}",
+            claim.value.describe(),
+            theirs.describe()
+        )),
     }?;
 
     Some(format!(
@@ -1080,7 +1283,11 @@ fn palette_fields() -> BTreeSet<String> {
 /// only a literal list of digits counts as a type size.
 fn drawn_text_sizes() -> Vec<(String, f32)> {
     let mut sizes = Vec::new();
-    for entry in std::fs::read_dir(our_source()).into_iter().flatten().flatten() {
+    for entry in std::fs::read_dir(our_source())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let path = entry.path();
         if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
             continue;
@@ -1088,12 +1295,17 @@ fn drawn_text_sizes() -> Vec<(String, f32)> {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let file = path.file_name().and_then(|name| name.to_str()).unwrap_or("").to_string();
+        let file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
         for (index, _) in source.match_indices(".size(") {
             let rest = &source[index + ".size(".len()..];
-            let digits: String =
-                rest.chars().take_while(|character| character.is_ascii_digit() || *character == '.')
-                    .collect();
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit() || *character == '.')
+                .collect();
             if let Ok(size) = digits.parse::<f32>() {
                 let line = source[..index].lines().count() + 1;
                 sizes.push((format!("{file}:{line}"), size));
@@ -1115,7 +1327,10 @@ fn arbitrary_reference_sizes_in(tree: &Path) -> Vec<f32> {
         let mut rest = contents.as_str();
         while let Some(index) = rest.find("text-[") {
             rest = &rest[index + "text-[".len()..];
-            let digits: String = rest.chars().take_while(|character| character.is_ascii_digit()).collect();
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
             let closing = format!("{digits}px]");
             if let (Ok(size), true) = (digits.parse::<f32>(), rest.starts_with(&closing)) {
                 if !has_size(&sizes, size) {
@@ -1179,7 +1394,10 @@ fn sources_in(tree: &Path) -> Vec<(PathBuf, String)> {
                 walk(&path, out);
                 continue;
             }
-            let extension = path.extension().and_then(|extension| extension.to_str()).unwrap_or("");
+            let extension = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("");
             if !matches!(extension, "vue" | "css" | "scss" | "ts" | "js" | "html") {
                 continue;
             }
@@ -1253,7 +1471,9 @@ const MEASURED_SIZES: [(f32, &str); 1] = [(
 /// Test-suite lock, shared with `theme`'s own tests: the palette is a
 /// process-wide choice and a test that switches it has to restore it.
 fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
-    theme::THEME_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    theme::THEME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The skip path, checked rather than promised.
@@ -1265,9 +1485,15 @@ fn theme_lock() -> std::sync::MutexGuard<'static, ()> {
 #[test]
 fn a_tree_that_is_not_checked_out_skips_rather_than_fails() {
     let missing = std::env::temp_dir().join("palantir-no-such-reference-tree");
-    assert!(!missing.exists(), "this test needs a path that is not there: {missing:?}");
+    assert!(
+        !missing.exists(),
+        "this test needs a path that is not there: {missing:?}"
+    );
 
-    assert!(Sheets::from_root(&missing).is_none(), "no sheet to compare against");
+    assert!(
+        Sheets::from_root(&missing).is_none(),
+        "no sheet to compare against"
+    );
     assert!(Sheet::parse(&missing.join("assets/styles/variables.scss"), "body").is_none());
     assert!(sources_in(&missing).is_empty(), "no sources to scan");
     assert!(arbitrary_reference_sizes_in(&missing).is_empty());
@@ -1315,8 +1541,14 @@ fn every_transcribed_token_is_the_references() {
         failures.join("\n\n")
     );
 
-    assert!(transcriptions > 40, "the table shrank to {transcriptions} transcriptions");
-    assert!(deviations >= 12, "the deviations are part of the record: found {deviations}");
+    assert!(
+        transcriptions > 40,
+        "the table shrank to {transcriptions} transcriptions"
+    );
+    assert!(
+        deviations >= 12,
+        "the deviations are part of the record: found {deviations}"
+    );
 }
 
 /// What the table cannot fail on: the tokens the reference declares that this
@@ -1329,7 +1561,10 @@ fn report(sheets: &Sheets, mapped: &BTreeSet<String>, transcriptions: usize, dev
     // The sheets' own count, not the maps': a token declared in `html` or
     // `body` is a token a page will have to port, and the maps never held it.
     let all = &sheets.declared;
-    let unheld: Vec<&String> = all.iter().filter(|token| !mapped.contains(*token)).collect();
+    let unheld: Vec<&String> = all
+        .iter()
+        .filter(|token| !mapped.contains(*token))
+        .collect();
     println!(
         "reference tokens: {}; held by this shell: {}; not held: {}",
         all.len(),
@@ -1338,16 +1573,27 @@ fn report(sheets: &Sheets, mapped: &BTreeSet<String>, transcriptions: usize, dev
     );
     println!(
         "  not held (a page that ports one of these has to add it to the table): {}",
-        unheld.iter().take(24).map(|token| format!("--{token}")).collect::<Vec<_>>().join(", ")
+        unheld
+            .iter()
+            .take(24)
+            .map(|token| format!("--{token}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-    let colours = unheld.iter().filter(|token| token.starts_with("color-")).count();
+    let colours = unheld
+        .iter()
+        .filter(|token| token.starts_with("color-"))
+        .count();
     println!("  of those, colours: {colours}");
 }
 
 #[test]
 fn every_palette_field_is_accounted_for() {
     let fields = palette_fields();
-    assert!(fields.len() >= 20, "the palette has fewer fields than this gate expects: {fields:?}");
+    assert!(
+        fields.len() >= 20,
+        "the palette has fewer fields than this gate expects: {fields:?}"
+    );
 
     let mut claimed = BTreeSet::new();
     for theme in CLAIMED_THEMES {
@@ -1367,7 +1613,10 @@ fn every_palette_field_is_accounted_for() {
     );
 
     let invented: Vec<&String> = claimed.difference(&fields).collect();
-    assert!(invented.is_empty(), "the table claims fields that do not exist: {invented:?}");
+    assert!(
+        invented.is_empty(),
+        "the table claims fields that do not exist: {invented:?}"
+    );
 }
 
 #[test]
@@ -1409,7 +1658,8 @@ fn the_interaction_values_are_the_references() {
     // reference that moves takes the reason with it.
     let frame = std::fs::read_to_string(vendored("ui/src/components/base/buttons/ButtonFrame.vue"))
         .unwrap_or_default();
-    let classes = std::fs::read_to_string(vendored("assets/styles/classes.scss")).unwrap_or_default();
+    let classes =
+        std::fs::read_to_string(vendored("assets/styles/classes.scss")).unwrap_or_default();
 
     if frame.contains("disabled:opacity-50") {
         assert_eq!(
@@ -1496,7 +1746,10 @@ fn every_text_size_is_the_reference_or_a_measured_one() {
         .copied()
         .filter(|size| !has_size(&drawn_measured, *size))
         .collect();
-    assert!(stale.is_empty(), "`MEASURED_SIZES` lists sizes this shell no longer draws: {stale:?}");
+    assert!(
+        stale.is_empty(),
+        "`MEASURED_SIZES` lists sizes this shell no longer draws: {stale:?}"
+    );
 
     println!(
         "type: {} sizes drawn, {} of them on the reference's ladder or in its own `text-[Npx]` \
@@ -1531,7 +1784,8 @@ fn every_font_weight_is_the_references() {
     // The two the reference states as tokens, because they are the two the port
     // claims to follow: `--font-weight-text` is what body text is set in and
     // `--font-weight-heading` is what a title is.
-    let sheet = std::fs::read_to_string(vendored("assets/styles/defaults.scss")).unwrap_or_default();
+    let sheet =
+        std::fs::read_to_string(vendored("assets/styles/defaults.scss")).unwrap_or_default();
     if sheet.contains("--font-weight-text") {
         assert_eq!(
             weight_number(theme::medium().weight),
@@ -1584,7 +1838,10 @@ fn every_button_size_is_the_frames_own() {
             let Some(close) = rest[open + 1..].find('\'') else {
                 continue;
             };
-            let classes = rest[open + 1..open + 1 + close].split_whitespace().map(str::to_string).collect();
+            let classes = rest[open + 1..open + 1 + close]
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
             out.push((name.trim().to_string(), classes));
         }
         out
@@ -1592,7 +1849,11 @@ fn every_button_size_is_the_frames_own() {
 
     let sizes = rows(&text, "const sizeClasses");
     let icon_only = rows(&text, "const iconOnlySizeClasses");
-    assert_eq!(sizes.len(), 5, "the frame's size table should have five rows: {sizes:?}");
+    assert_eq!(
+        sizes.len(),
+        5,
+        "the frame's size table should have five rows: {sizes:?}"
+    );
     assert_eq!(
         icon_only.len(),
         5,

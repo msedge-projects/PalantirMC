@@ -22,13 +22,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::install;
+use crate::wire::{FileJob, Wire};
 use palantir_core::paths::PalantirPaths;
 use palantir_net::java::{
     parse_manifest, parse_runtimes, pick_runtime, runtime_file_url, runtime_list_url,
-    runtime_version, RuntimeFile, MANAGED_DIR, JAVA_RUNTIMES_UID,
+    runtime_version, RuntimeFile, JAVA_RUNTIMES_UID, MANAGED_DIR,
 };
-use crate::install;
-use crate::wire::{FileJob, Wire};
 
 /// The host's runtime tag, re-exported so a caller choosing a Java does not have
 /// to know which crate the metadata shapes live in.
@@ -239,7 +239,12 @@ pub fn install_runtime(
         }
     }
     if !failed.is_empty() {
-        let shown = failed.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+        let shown = failed
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
         return Err(format!(
             "{} of {} file(s) of Java '{name}' could not be installed ({shown})",
             failed.len(),
@@ -292,7 +297,10 @@ pub fn ensure_runtime(
     let binary = java_binary(paths, name);
     if binary.is_file() {
         let runnable = launcher_binary(paths, name);
-        reporter.log(format!("'{name}' is already unpacked at {}", runnable.display()));
+        reporter.log(format!(
+            "'{name}' is already unpacked at {}",
+            runnable.display()
+        ));
         return Ok(runnable.to_string_lossy().into_owned());
     }
     if request.majors.is_empty() {
@@ -333,7 +341,9 @@ pub fn ensure_runtime(
                 // Copied into the metadata layout as well, so the next launch —
                 // or Prism — reads what this one wrote even if the engine's own
                 // cache has since been swept.
-                let cache = meta_dir.join(JAVA_RUNTIMES_UID).join(format!("{version}.json"));
+                let cache = meta_dir
+                    .join(JAVA_RUNTIMES_UID)
+                    .join(format!("{version}.json"));
                 if let Some(parent) = cache.parent() {
                     let _ = palantir_core::util::ensure_dir(parent);
                 }
@@ -341,7 +351,9 @@ pub fn ensure_runtime(
                 text
             }
             Err(remote_error) => {
-                let cache = meta_dir.join(JAVA_RUNTIMES_UID).join(format!("{version}.json"));
+                let cache = meta_dir
+                    .join(JAVA_RUNTIMES_UID)
+                    .join(format!("{version}.json"));
                 match std::fs::read_to_string(&cache) {
                     Ok(text) => {
                         reporter.log(format!("{version}: {remote_error} — using the cached copy"));
@@ -432,15 +444,25 @@ mod tests {
     fn the_java_tab_reaches_the_launch_path() {
         let mut prefs = crate::prefs::Prefs::default();
         prefs.default_java_path = Some("  C:/jdk/bin/javaw.exe ".to_string());
-        prefs.java_paths.insert("8".to_string(), "C:/jdk8/bin/java.exe".to_string());
-        prefs.java_paths.insert("21".to_string(), "C:/jdk21/bin/java.exe".to_string());
+        prefs
+            .java_paths
+            .insert("8".to_string(), "C:/jdk8/bin/java.exe".to_string());
+        prefs
+            .java_paths
+            .insert("21".to_string(), "C:/jdk21/bin/java.exe".to_string());
         // Neither of these is a Java to run with.
-        prefs.java_paths.insert("not-a-major".to_string(), "C:/nope/java.exe".to_string());
+        prefs
+            .java_paths
+            .insert("not-a-major".to_string(), "C:/nope/java.exe".to_string());
         prefs.java_paths.insert("17".to_string(), "   ".to_string());
 
         let java = JavaPrefs::from_prefs(&prefs);
         assert_eq!(java.default_binary(), Some("C:/jdk/bin/javaw.exe"));
-        assert_eq!(java.by_major.len(), 2, "a bad key and a blank path are not choices");
+        assert_eq!(
+            java.by_major.len(),
+            2,
+            "a bad key and a blank path are not choices"
+        );
         // The version's own order decides, not the map's. This is the case the
         // tab exists for: 1.12.2 accepts 8 and would otherwise be run on 21.
         assert_eq!(
@@ -476,9 +498,12 @@ mod tests {
         let (_dir, paths) = temp_paths();
         assert_eq!(
             java_binary(&paths, "java-runtime-delta"),
-            paths.root.join("java").join("java-runtime-delta").join("bin").join(
-                if cfg!(windows) { "java.exe" } else { "java" }
-            )
+            paths
+                .root
+                .join("java")
+                .join("java-runtime-delta")
+                .join("bin")
+                .join(if cfg!(windows) { "java.exe" } else { "java" })
         );
     }
 
@@ -558,21 +583,24 @@ mod tests {
             &files,
             &fetcher.wire(),
             DOWNLOAD_THREADS,
-            &mut install::Reporter::new(
-                &mut |line| lines.push(line),
-                &mut |level| levels.push(level),
-            ),
+            &mut install::Reporter::new(&mut |line| lines.push(line), &mut |level| {
+                levels.push(level)
+            }),
         )
         .unwrap();
         assert_eq!(count, 2);
         assert!(java_binary(&paths, "java-runtime-delta").is_file());
-        assert!(runtime_dir(&paths, "java-runtime-delta").join("lib/modules").is_file());
+        assert!(runtime_dir(&paths, "java-runtime-delta")
+            .join("lib/modules")
+            .is_file());
         assert!(lines.iter().any(|line| line.contains("java-runtime-delta")));
         // The same progress cadence the asset phase uses: a runtime install is
         // hundreds of files, so it has to show it is moving while it moves. The
         // label names the runtime, because a bar that said "files" while a JRE
         // unpacks would not say what the megabytes are for.
-        let first = levels.first().expect("the runtime install reports its first file");
+        let first = levels
+            .first()
+            .expect("the runtime install reports its first file");
         assert_eq!(first.label, "Java 'java-runtime-delta'");
         assert_eq!((first.done, first.total), (1, 2));
         let last = levels.last().unwrap();
@@ -627,7 +655,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("could not be installed"), "{err}");
-        assert!(!runtime_dir(&paths, "java-runtime-delta").join(exe_rel()).is_file());
+        assert!(!runtime_dir(&paths, "java-runtime-delta")
+            .join(exe_rel())
+            .is_file());
     }
 
     #[test]
@@ -688,13 +718,21 @@ mod tests {
                 \"version\":{{\"major\":21}}}}]}}",
             crate::install::sha1_hex(manifest_text.as_bytes())
         );
-        fetcher.insert_str("https://meta.example/v1/net.minecraft.java/java21.json", &version_file);
+        fetcher.insert_str(
+            "https://meta.example/v1/net.minecraft.java/java21.json",
+            &version_file,
+        );
         fetcher.insert_str("https://objects/java.exe", "jre-java-exe");
         fetcher
     }
 
     fn request<'a>(majors: &'a [i64], name: &'a str, os: &'a str) -> RuntimeRequest<'a> {
-        RuntimeRequest { base_url: "https://meta.example/v1", majors, name, os }
+        RuntimeRequest {
+            base_url: "https://meta.example/v1",
+            majors,
+            name,
+            os,
+        }
     }
 
     #[test]
@@ -713,9 +751,15 @@ mod tests {
         let expected = java_binary(&paths, "java-runtime-delta");
         assert_eq!(binary, expected.to_string_lossy());
         assert!(expected.is_file());
-        assert!(lines.iter().any(|line| line.contains("fetching java-runtime-delta")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("fetching java-runtime-delta")));
         // The version file was cached where the offline store reads it.
-        assert!(paths.meta_dir().join(JAVA_RUNTIMES_UID).join("java21.json").is_file());
+        assert!(paths
+            .meta_dir()
+            .join(JAVA_RUNTIMES_UID)
+            .join("java21.json")
+            .is_file());
 
         // Second call: no fetch at all, because the binary is there.
         let mut lines: Vec<String> = Vec::new();
@@ -843,7 +887,10 @@ mod tests {
             &mut install::Reporter::lines_only(&mut |_| {}),
         )
         .unwrap();
-        assert_eq!(binary, java_binary(&paths, "java-runtime-delta").to_string_lossy());
+        assert_eq!(
+            binary,
+            java_binary(&paths, "java-runtime-delta").to_string_lossy()
+        );
     }
 
     #[test]
@@ -876,7 +923,12 @@ mod tests {
             &mut install::Reporter::lines_only(&mut |line| lines.push(line)),
         )
         .unwrap_err();
-        assert!(lines.iter().any(|line| line.contains("using the cached copy")), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("using the cached copy")),
+            "{lines:?}"
+        );
         // The manifest itself is not cached, so the download is what fails — and
         // the reason names it rather than pretending the runtime was installed.
         assert!(err.contains("https://piston/manifest.json"), "{err}");

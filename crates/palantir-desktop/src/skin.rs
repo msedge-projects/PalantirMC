@@ -75,12 +75,42 @@ struct Part {
 /// the sides and the back follow it. The left arm and the left leg only exist in
 /// the 64x64 extension, at `(36, 52)` and `(20, 52)`.
 const PARTS: [Part; 6] = [
-    Part { from: (8, 8), to: (4, 0), size: (8, 8), legacy_stand_in: None },
-    Part { from: (44, 20), to: (0, 8), size: (4, 12), legacy_stand_in: None },
-    Part { from: (20, 20), to: (4, 8), size: (8, 12), legacy_stand_in: None },
-    Part { from: (36, 52), to: (12, 8), size: (4, 12), legacy_stand_in: Some(1) },
-    Part { from: (4, 20), to: (4, 20), size: (4, 12), legacy_stand_in: None },
-    Part { from: (20, 52), to: (8, 20), size: (4, 12), legacy_stand_in: Some(4) },
+    Part {
+        from: (8, 8),
+        to: (4, 0),
+        size: (8, 8),
+        legacy_stand_in: None,
+    },
+    Part {
+        from: (44, 20),
+        to: (0, 8),
+        size: (4, 12),
+        legacy_stand_in: None,
+    },
+    Part {
+        from: (20, 20),
+        to: (4, 8),
+        size: (8, 12),
+        legacy_stand_in: None,
+    },
+    Part {
+        from: (36, 52),
+        to: (12, 8),
+        size: (4, 12),
+        legacy_stand_in: Some(1),
+    },
+    Part {
+        from: (4, 20),
+        to: (4, 20),
+        size: (4, 12),
+        legacy_stand_in: None,
+    },
+    Part {
+        from: (20, 52),
+        to: (8, 20),
+        size: (4, 12),
+        legacy_stand_in: Some(4),
+    },
 ];
 
 /// A skin's front view: the pixels, and the size they are laid out in.
@@ -158,7 +188,11 @@ pub fn cut(texture: &[u8]) -> Option<Cut> {
         blit(&decoded, &mut pixels, source, part.to, part.size, mirrored);
     }
     Some(Cut {
-        front: FrontView { width: FRONT_WIDTH, height: FRONT_HEIGHT, pixels },
+        front: FrontView {
+            width: FRONT_WIDTH,
+            height: FRONT_HEIGHT,
+            pixels,
+        },
         ears,
     })
 }
@@ -183,7 +217,12 @@ fn blit(
     let (part_width, part_height) = size;
     for row in 0..part_height {
         for column in 0..part_width {
-            let x = source_x + if mirrored { part_width - 1 - column } else { column };
+            let x = source_x
+                + if mirrored {
+                    part_width - 1 - column
+                } else {
+                    column
+                };
             let y = source_y + row;
             if x >= texture.width() || y >= texture.height() {
                 continue;
@@ -314,8 +353,14 @@ struct LimbFill {
 /// columns -- would put the right arm's *right* face where its front belongs, which is
 /// a player whose left arm shows the wrong side of itself.
 const LIMB_BOXES: [LimbFill; 2] = [
-    LimbFill { from: (0, 16), to: (16, 48) },
-    LimbFill { from: (40, 16), to: (32, 48) },
+    LimbFill {
+        from: (0, 16),
+        to: (16, 48),
+    },
+    LimbFill {
+        from: (40, 16),
+        to: (32, 48),
+    },
 ];
 
 /// The rectangle the arm style is read from: `(x, y, width, height)`.
@@ -433,7 +478,10 @@ fn model_of(image: &image::RgbaImage) -> Model {
 fn encode(image: image::RgbaImage) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     image::DynamicImage::ImageRgba8(image)
-        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
         .ok()?;
     Some(bytes)
 }
@@ -528,12 +576,36 @@ mod tests {
     /// The six source rectangles, in the order [`PARTS`] lists them, each painted
     /// its own colour so a pixel says which part it came from.
     const PAINTS: [Paint; 6] = [
-        Paint { from: (8, 8), size: (8, 8), colour: [255, 0, 0, 255] },
-        Paint { from: (44, 20), size: (4, 12), colour: [0, 255, 0, 255] },
-        Paint { from: (20, 20), size: (8, 12), colour: [0, 0, 255, 255] },
-        Paint { from: (36, 52), size: (4, 12), colour: [255, 255, 0, 255] },
-        Paint { from: (4, 20), size: (4, 12), colour: [255, 0, 255, 255] },
-        Paint { from: (20, 52), size: (4, 12), colour: [0, 255, 255, 255] },
+        Paint {
+            from: (8, 8),
+            size: (8, 8),
+            colour: [255, 0, 0, 255],
+        },
+        Paint {
+            from: (44, 20),
+            size: (4, 12),
+            colour: [0, 255, 0, 255],
+        },
+        Paint {
+            from: (20, 20),
+            size: (8, 12),
+            colour: [0, 0, 255, 255],
+        },
+        Paint {
+            from: (36, 52),
+            size: (4, 12),
+            colour: [255, 255, 0, 255],
+        },
+        Paint {
+            from: (4, 20),
+            size: (4, 12),
+            colour: [255, 0, 255, 255],
+        },
+        Paint {
+            from: (20, 52),
+            size: (4, 12),
+            colour: [0, 255, 255, 255],
+        },
     ];
 
     /// A real PNG of a real texture, painted part by part, so what the tests
@@ -542,7 +614,8 @@ mod tests {
     /// `height` picks the version: 64 paints all six parts, and 32 paints only the
     /// four the legacy format has -- which is the point of the second test.
     fn texture(height: u32) -> Vec<u8> {
-        let mut image = image::RgbaImage::from_pixel(TEXTURE_WIDTH, height, image::Rgba([0, 0, 0, 0]));
+        let mut image =
+            image::RgbaImage::from_pixel(TEXTURE_WIDTH, height, image::Rgba([0, 0, 0, 0]));
         for paint in PAINTS {
             let (from, size) = (paint.from, paint.size);
             if from.1 + size.1 > height {
@@ -556,7 +629,10 @@ mod tests {
         }
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         bytes
     }
@@ -625,11 +701,22 @@ mod tests {
         }
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .expect("a PNG in memory");
         let flipped = front(&bytes).expect("a 64x32 skin");
-        assert_eq!(at(&flipped, 12, 8), [0, 0, 255, 255], "the texture's last column");
-        assert_eq!(at(&flipped, 15, 8), [255, 0, 0, 255], "and its first, on the far side");
+        assert_eq!(
+            at(&flipped, 12, 8),
+            [0, 0, 255, 255],
+            "the texture's last column"
+        );
+        assert_eq!(
+            at(&flipped, 15, 8),
+            [255, 0, 0, 255],
+            "and its first, on the far side"
+        );
     }
 
     #[test]
@@ -642,7 +729,10 @@ mod tests {
             let image = image::RgbaImage::from_pixel(width, height, image::Rgba([1, 2, 3, 255]));
             let mut bytes = Vec::new();
             image::DynamicImage::ImageRgba8(image)
-                .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
                 .expect("a PNG in memory");
             assert!(front(&bytes).is_none(), "{width}x{height} is not a skin");
         }
@@ -660,7 +750,9 @@ mod tests {
     /// A decoded PNG, for the tests that ask what a transform did to the pixels
     /// rather than what it drew.
     fn decoded(bytes: &[u8]) -> image::RgbaImage {
-        image::load_from_memory(bytes).expect("a PNG in memory").to_rgba8()
+        image::load_from_memory(bytes)
+            .expect("a PNG in memory")
+            .to_rgba8()
     }
 
     /// A 64x32 texture whose right arm's front face is painted one colour per column,
@@ -689,33 +781,80 @@ mod tests {
         // below is that case.
         assert_eq!(prepared.model, Model::Slim);
         let modern = decoded(&prepared.png);
-        assert_eq!((modern.width(), modern.height()), (TEXTURE_WIDTH, TEXTURE_HEIGHT));
+        assert_eq!(
+            (modern.width(), modern.height()),
+            (TEXTURE_WIDTH, TEXTURE_HEIGHT)
+        );
         // What the legacy layout already had is where it was, at the same addresses:
         // the head, the body, and the right limbs' fronts.
         assert_eq!(modern.get_pixel(8, 8).0, [255, 0, 0, 255], "the head");
         assert_eq!(modern.get_pixel(20, 20).0, [0, 0, 255, 255], "the body");
-        assert_eq!(modern.get_pixel(44, 20).0, [0, 255, 0, 255], "the right arm's front");
-        assert_eq!(modern.get_pixel(4, 20).0, [255, 0, 255, 255], "the right leg's front");
+        assert_eq!(
+            modern.get_pixel(44, 20).0,
+            [0, 255, 0, 255],
+            "the right arm's front"
+        );
+        assert_eq!(
+            modern.get_pixel(4, 20).0,
+            [255, 0, 255, 255],
+            "the right leg's front"
+        );
         // The left limbs' boxes are filled from the right ones: the arm's front face
         // at (36, 52) and the leg's at (20, 52), which are the modern layout's own
         // addresses for them.
-        assert_eq!(modern.get_pixel(36, 52).0, [0, 255, 0, 255], "the left arm's front");
-        assert_eq!(modern.get_pixel(39, 63).0, [0, 255, 0, 255], "to its far corner");
-        assert_eq!(modern.get_pixel(20, 52).0, [255, 0, 255, 255], "the left leg's front");
+        assert_eq!(
+            modern.get_pixel(36, 52).0,
+            [0, 255, 0, 255],
+            "the left arm's front"
+        );
+        assert_eq!(
+            modern.get_pixel(39, 63).0,
+            [0, 255, 0, 255],
+            "to its far corner"
+        );
+        assert_eq!(
+            modern.get_pixel(20, 52).0,
+            [255, 0, 255, 255],
+            "the left leg's front"
+        );
         assert_eq!(modern.get_pixel(23, 63).0, [255, 0, 255, 255]);
         // The faces of the box that the legacy texture leaves empty stay empty, as
         // do the columns the fill does not reach -- the fill is the right limb's own
         // sixteen columns and not a set of pixels at all.
-        assert_eq!(modern.get_pixel(44, 52).0, [0, 0, 0, 0], "the left arm's back face");
-        assert_eq!(modern.get_pixel(36, 48).0, [0, 0, 0, 0], "and the strip above it");
-        assert_eq!(modern.get_pixel(52, 52).0, [0, 0, 0, 0], "and the overlay box beside it");
+        assert_eq!(
+            modern.get_pixel(44, 52).0,
+            [0, 0, 0, 0],
+            "the left arm's back face"
+        );
+        assert_eq!(
+            modern.get_pixel(36, 48).0,
+            [0, 0, 0, 0],
+            "and the strip above it"
+        );
+        assert_eq!(
+            modern.get_pixel(52, 52).0,
+            [0, 0, 0, 0],
+            "and the overlay box beside it"
+        );
         // The second layer is empty: a legacy texture has no jacket, no sleeves and no
         // trouser overlay, and painting them would be inventing pixels the reader never
         // drew.
         assert_eq!(modern.get_pixel(16, 32).0, [0, 0, 0, 0], "no jacket");
-        assert_eq!(modern.get_pixel(40, 32).0, [0, 0, 0, 0], "no sleeve overlay");
-        assert_eq!(modern.get_pixel(0, 32).0, [0, 0, 0, 0], "no trouser overlay");
-        assert_eq!(modern.get_pixel(0, 48).0, [0, 0, 0, 0], "no left trouser overlay");
+        assert_eq!(
+            modern.get_pixel(40, 32).0,
+            [0, 0, 0, 0],
+            "no sleeve overlay"
+        );
+        assert_eq!(
+            modern.get_pixel(0, 32).0,
+            [0, 0, 0, 0],
+            "no trouser overlay"
+        );
+        assert_eq!(
+            modern.get_pixel(0, 48).0,
+            [0, 0, 0, 0],
+            "no left trouser overlay"
+        );
     }
 
     #[test]
@@ -724,9 +863,17 @@ mod tests {
         // painted 10, 20, 30, 40 from left to right, and the left arm's is the same
         // four in the other order. A copy would have put 10 where 40 is.
         let modern = decoded(&prepare(&four_colour_arm()).expect("a 64x32 skin").png);
-        assert_eq!(modern.get_pixel(44, 20).0[0], 10, "the right arm's own front, leftmost column");
+        assert_eq!(
+            modern.get_pixel(44, 20).0[0],
+            10,
+            "the right arm's own front, leftmost column"
+        );
         assert_eq!(modern.get_pixel(47, 31).0[0], 40, "and its rightmost");
-        assert_eq!(modern.get_pixel(36, 52).0[0], 40, "the left arm's front, mirrored");
+        assert_eq!(
+            modern.get_pixel(36, 52).0[0],
+            40,
+            "the left arm's front, mirrored"
+        );
         assert_eq!(modern.get_pixel(39, 63).0[0], 10, "to its other end");
     }
 
@@ -758,7 +905,11 @@ mod tests {
     fn a_modern_texture_comes_back_pixel_for_pixel() {
         let modern = texture(TEXTURE_HEIGHT);
         let prepared = prepare(&modern).expect("a 64x64 skin");
-        assert_eq!(decoded(&prepared.png), decoded(&modern), "nothing is padded, nothing is lost");
+        assert_eq!(
+            decoded(&prepared.png),
+            decoded(&modern),
+            "nothing is padded, nothing is lost"
+        );
         // The model is the two columns' answer and not the arm's: this texture paints
         // the arm's *front* face, which is not what the reference reads, so it is slim.
         assert_eq!(prepared.model, Model::Slim);
@@ -792,18 +943,23 @@ mod tests {
         assert_eq!(prepare(&arm(true)).expect("a skin").model, Model::Classic);
         // One pixel of the twelve is enough, and it is the pixel the reference's own
         // loop stops on.
-        let mut image = image::RgbaImage::from_pixel(
-            TEXTURE_WIDTH,
-            TEXTURE_HEIGHT,
-            image::Rgba([0, 0, 0, 0]),
-        );
+        let mut image =
+            image::RgbaImage::from_pixel(TEXTURE_WIDTH, TEXTURE_HEIGHT, image::Rgba([0, 0, 0, 0]));
         image.put_pixel(55, 31, image::Rgba([1, 2, 3, 255]));
-        assert_eq!(prepare(&encode(image).expect("a PNG")).expect("a skin").model, Model::Classic);
+        assert_eq!(
+            prepare(&encode(image).expect("a PNG"))
+                .expect("a skin")
+                .model,
+            Model::Classic
+        );
         // The main test texture is the same case from the other side: the arm's *front*
         // face is painted and these two columns are not, so it is slim -- which is what
         // the reference's rule says too, and the reason it reads a face no artist
         // thinks of as the one that decides.
-        assert_eq!(prepare(&texture(TEXTURE_HEIGHT)).expect("a skin").model, Model::Slim);
+        assert_eq!(
+            prepare(&texture(TEXTURE_HEIGHT)).expect("a skin").model,
+            Model::Slim
+        );
         // And the *format* does not decide it: a legacy file whose arm box is painted
         // the way a real one's is -- all sixteen columns, not just the front -- reads
         // classic through the same two columns, padded or not.
@@ -815,7 +971,9 @@ mod tests {
             }
         }
         assert_eq!(
-            prepare(&encode(legacy).expect("a PNG in memory")).expect("a skin").model,
+            prepare(&encode(legacy).expect("a PNG in memory"))
+                .expect("a skin")
+                .model,
             Model::Classic,
             "a painted legacy arm box is a four-wide arm"
         );
@@ -866,8 +1024,14 @@ mod tests {
         let appearance = Appearance::of("Steve", owned(), Ok(texture(TEXTURE_HEIGHT)));
         assert_eq!(appearance.username, "Steve");
         assert_eq!(appearance.skins.len(), 2);
-        assert_eq!(appearance.equipped().map(|skin| skin.variant.as_str()), Some("CLASSIC"));
-        assert_eq!(appearance.equipped_cape().map(|cape| cape.alias.as_str()), Some("Migrator"));
+        assert_eq!(
+            appearance.equipped().map(|skin| skin.variant.as_str()),
+            Some("CLASSIC")
+        );
+        assert_eq!(
+            appearance.equipped_cape().map(|cape| cape.alias.as_str()),
+            Some("Migrator")
+        );
         assert!(appearance.front.is_some(), "the skin in force is drawn");
         assert!(appearance.note.is_none());
     }
@@ -879,13 +1043,24 @@ mod tests {
         let refused = Appearance::of("Steve", owned(), Err("the network is down".into()));
         assert!(refused.front.is_none());
         assert_eq!(refused.note.as_deref(), Some("the network is down"));
-        assert_eq!(refused.skins.len(), 2, "what the account owns does not change");
-        assert_eq!(refused.equipped().map(|skin| skin.id.as_str()), Some("skin-1"));
+        assert_eq!(
+            refused.skins.len(),
+            2,
+            "what the account owns does not change"
+        );
+        assert_eq!(
+            refused.equipped().map(|skin| skin.id.as_str()),
+            Some("skin-1")
+        );
 
         let not_a_skin = Appearance::of("Steve", owned(), Ok(b"not a PNG".to_vec()));
         assert!(not_a_skin.front.is_none());
         assert!(
-            not_a_skin.note.as_deref().unwrap_or_default().contains("not a texture"),
+            not_a_skin
+                .note
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not a texture"),
             "got {:?}",
             not_a_skin.note
         );
@@ -895,11 +1070,18 @@ mod tests {
     #[test]
     fn an_account_with_no_skin_in_force_is_drawn_without_a_picture() {
         let mut document = owned();
-        document.skins.iter_mut().for_each(|skin| skin.state = "INACTIVE".into());
+        document
+            .skins
+            .iter_mut()
+            .for_each(|skin| skin.state = "INACTIVE".into());
         let appearance = Appearance::of("Steve", document, Err("no skin is in force".into()));
         assert!(appearance.equipped().is_none());
         assert!(appearance.front.is_none());
-        assert_eq!(appearance.skins.len(), 2, "both are still the account's own");
+        assert_eq!(
+            appearance.skins.len(),
+            2,
+            "both are still the account's own"
+        );
     }
     /// A texture whose marker pixel is painted, if one is asked for.
     ///
@@ -931,7 +1113,10 @@ mod tests {
 
         // A plain texture asks for nothing, and one byte away from a magic is not a
         // magic -- the comparison is the whole three bytes.
-        assert_eq!(cut(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin").ears, None);
+        assert_eq!(
+            cut(&texture(TEXTURE_HEIGHT)).expect("a 64x64 skin").ears,
+            None
+        );
         let nearly = marked(TEXTURE_HEIGHT, Some([0x3f, 0x23, 0xd9]));
         assert_eq!(cut(&nearly).expect("a 64x64 skin").ears, None);
     }

@@ -139,7 +139,10 @@ mod tests {
         assert_eq!(pixels.len(), (LOGO_SIDE * LOGO_SIDE * 4) as usize);
         // Shrinking must not lose the transparency the mark depends on: the
         // square crop's corners stay clear.
-        assert!(pixels.chunks_exact(4).any(|px| px[3] == 0), "backdrop must stay transparent");
+        assert!(
+            pixels.chunks_exact(4).any(|px| px[3] == 0),
+            "backdrop must stay transparent"
+        );
 
         // The bar is relative rather than a fixed threshold, and the artwork is
         // why: the mark this test was written against was a soft radial glow, of
@@ -154,8 +157,17 @@ mod tests {
             .expect("embedded logo must decode")
             .to_rgba8();
         let source_alpha = source.as_raw();
-        let source_peak = source_alpha.chunks_exact(4).map(|px| px[3]).max().unwrap_or(0);
-        let source_ink: u64 = source_alpha.iter().skip(3).step_by(4).map(|&a| u64::from(a)).sum();
+        let source_peak = source_alpha
+            .chunks_exact(4)
+            .map(|px| px[3])
+            .max()
+            .unwrap_or(0);
+        let source_ink: u64 = source_alpha
+            .iter()
+            .skip(3)
+            .step_by(4)
+            .map(|&a| u64::from(a))
+            .sum();
 
         let peak = pixels.chunks_exact(4).map(|px| px[3]).max().unwrap_or(0);
         assert!(
@@ -169,7 +181,12 @@ mod tests {
         // downsample should carry the same total alpha into a quarter of the
         // pixels. The 5% band absorbs the filter's fractional edge windows and
         // its per-pixel integer truncation.
-        let ink: u64 = pixels.iter().skip(3).step_by(4).map(|&a| u64::from(a)).sum();
+        let ink: u64 = pixels
+            .iter()
+            .skip(3)
+            .step_by(4)
+            .map(|&a| u64::from(a))
+            .sum();
         let expected = source_ink / 4;
         let drift = ink.abs_diff(expected) * 100;
         assert!(
@@ -192,7 +209,10 @@ mod tests {
         assert!(rgba.chunks_exact(4).any(|px| px[3] == 255));
         // A clear pixel must not keep a colour, or a compositor that ignores
         // alpha at small sizes would paint the resampler's ringing.
-        assert!(rgba.chunks_exact(4).filter(|px| px[3] == 0).all(|px| px[..3] == [0, 0, 0]));
+        assert!(rgba
+            .chunks_exact(4)
+            .filter(|px| px[3] == 0)
+            .all(|px| px[..3] == [0, 0, 0]));
         // The emblem is centred, not jammed into a corner.
         let (mut min_x, mut max_x, mut min_y, mut max_y) = (256usize, 0usize, 256usize, 0usize);
         for (index, px) in rgba.chunks_exact(4).enumerate() {
@@ -206,8 +226,14 @@ mod tests {
             max_y = max_y.max(y);
         }
         let (dx, dy) = (max_x + min_x, max_y + min_y);
-        assert!((dx as i32 - 255).abs() <= 4, "logo is off-centre horizontally: {min_x}..{max_x}");
-        assert!((dy as i32 - 255).abs() <= 4, "logo is off-centre vertically: {min_y}..{max_y}");
+        assert!(
+            (dx as i32 - 255).abs() <= 4,
+            "logo is off-centre horizontally: {min_x}..{max_x}"
+        );
+        assert!(
+            (dy as i32 - 255).abs() <= 4,
+            "logo is off-centre vertically: {min_y}..{max_y}"
+        );
     }
 
     #[test]
@@ -219,8 +245,14 @@ mod tests {
         let (rgba, size) = icon.into_raw();
         assert_eq!((size.width, size.height), (512, 512));
         assert_eq!(rgba.len(), 512 * 512 * 4);
-        assert!(rgba.chunks_exact(4).any(|px| px[3] == 0), "backdrop must be transparent");
-        assert!(rgba.chunks_exact(4).any(|px| px[3] == 255), "emblem must be opaque");
+        assert!(
+            rgba.chunks_exact(4).any(|px| px[3] == 0),
+            "backdrop must be transparent"
+        );
+        assert!(
+            rgba.chunks_exact(4).any(|px| px[3] == 255),
+            "emblem must be opaque"
+        );
     }
 
     #[test]

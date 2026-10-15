@@ -630,8 +630,7 @@ mod tests {
                 Some(event) => second.push(event),
                 None => break,
             }
-            if matches!(second.last(), Some(Event::Idle))
-                && terminal(&second).len() == later.len()
+            if matches!(second.last(), Some(Event::Idle)) && terminal(&second).len() == later.len()
             {
                 break;
             }

@@ -189,7 +189,9 @@ fn hash_file(path: &Path, mut update: impl FnMut(&[u8])) -> Result<(), Error> {
     let mut file = std::fs::File::open(path).map_err(|error| Error::io(path, error))?;
     let mut buffer = vec![0u8; HASH_CHUNK];
     loop {
-        let read = file.read(&mut buffer).map_err(|error| Error::io(path, error))?;
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| Error::io(path, error))?;
         if read == 0 {
             return Ok(());
         }
@@ -345,7 +347,11 @@ impl ContentStore {
                 continue;
             };
             for entry in entries.flatten() {
-                if entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+                if entry
+                    .file_type()
+                    .map(|kind| kind.is_file())
+                    .unwrap_or(false)
+                {
                     files += 1;
                     bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
                 }
@@ -447,7 +453,11 @@ impl ContentStore {
         if digest.matches(bytes) {
             return Ok(());
         }
-        Err(Error::hash_mismatch(self.path(digest), digest.hex(), digest.of(bytes).hex()))
+        Err(Error::hash_mismatch(
+            self.path(digest),
+            digest.hex(),
+            digest.of(bytes).hex(),
+        ))
     }
 }
 
@@ -495,7 +505,9 @@ mod tests {
     const ABC_SHA512: &str = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
 
     fn store_in(name: &str) -> ContentStore {
-        let root = std::env::temp_dir().join("palantirmc-engine-content").join(name);
+        let root = std::env::temp_dir()
+            .join("palantirmc-engine-content")
+            .join(name);
         let _ = std::fs::remove_dir_all(&root);
         ContentStore::new(root)
     }
@@ -511,8 +523,14 @@ mod tests {
             Digest::parse(&format!("  {}  ", ABC_SHA1.to_uppercase())).expect("the same digest"),
             sha1
         );
-        assert_eq!(Digest::parse(EMPTY_SHA256).expect("a sha256").kind(), "sha256");
-        assert_eq!(Digest::parse(ABC_SHA512).expect("a sha512").kind(), "sha512");
+        assert_eq!(
+            Digest::parse(EMPTY_SHA256).expect("a sha256").kind(),
+            "sha256"
+        );
+        assert_eq!(
+            Digest::parse(ABC_SHA512).expect("a sha512").kind(),
+            "sha512"
+        );
     }
 
     #[test]
@@ -521,7 +539,10 @@ mod tests {
         // caller who hands one over has a bug, and a store that guessed would
         // hide it behind a file that verifies as something else.
         let error = Digest::parse("0123456789abcdef0123456789abcdef").expect_err("md5");
-        assert!(format!("{error}").contains("sha1, sha256 or sha512"), "{error}");
+        assert!(
+            format!("{error}").contains("sha1, sha256 or sha512"),
+            "{error}"
+        );
         assert!(Digest::parse("not hex at all, but long enough to be looked at once").is_err());
         assert!(Digest::parse("").is_err());
     }
@@ -551,13 +572,23 @@ mod tests {
         std::fs::create_dir_all(store.dir()).expect("a directory");
         std::fs::write(&path, b"abc").expect("the file");
 
-        Digest::sha1(b"abc").verify_file(&path).expect("sha1 matches");
-        Digest::sha256(b"abc").verify_file(&path).expect("sha256 matches");
-        Digest::sha512(b"abc").verify_file(&path).expect("sha512 matches");
+        Digest::sha1(b"abc")
+            .verify_file(&path)
+            .expect("sha1 matches");
+        Digest::sha256(b"abc")
+            .verify_file(&path)
+            .expect("sha256 matches");
+        Digest::sha512(b"abc")
+            .verify_file(&path)
+            .expect("sha512 matches");
 
-        let error = Digest::sha1(b"abd").verify_file(&path).expect_err("a different digest");
+        let error = Digest::sha1(b"abd")
+            .verify_file(&path)
+            .expect_err("a different digest");
         match error {
-            Error::HashMismatch { expected, actual, .. } => {
+            Error::HashMismatch {
+                expected, actual, ..
+            } => {
                 assert_eq!(expected, Digest::sha1(b"abd").hex());
                 assert_eq!(actual, ABC_SHA1);
             }
@@ -577,7 +608,9 @@ mod tests {
         let path = store.put(&digest, b"a library").expect("stored");
         assert_eq!(path, store.path(&digest));
         assert_eq!(
-            path.parent().and_then(|dir| dir.file_name()).and_then(|name| name.to_str()),
+            path.parent()
+                .and_then(|dir| dir.file_name())
+                .and_then(|name| name.to_str()),
             Some(&digest.hex()[..2]),
             "two characters of fan-out"
         );
@@ -605,7 +638,10 @@ mod tests {
         std::fs::write(&path, b"the real bytes!").expect("damaged");
         assert!(store.has(&digest), "the name is still there");
         assert!(!store.verified(&digest), "but the contents are not");
-        assert!(matches!(store.read(&digest), Err(Error::HashMismatch { .. })));
+        assert!(matches!(
+            store.read(&digest),
+            Err(Error::HashMismatch { .. })
+        ));
     }
 
     #[test]
@@ -629,7 +665,9 @@ mod tests {
         // the caller may still be able to resume it.
         let corrupt = store.dir().join("corrupt");
         std::fs::write(&corrupt, b"not a jar").expect("the file");
-        let error = store.adopt(&Digest::sha256(b"a jar"), &corrupt).expect_err("a mismatch");
+        let error = store
+            .adopt(&Digest::sha256(b"a jar"), &corrupt)
+            .expect_err("a mismatch");
         assert!(matches!(error, Error::HashMismatch { .. }), "{error:?}");
         assert!(corrupt.exists());
     }
@@ -639,10 +677,17 @@ mod tests {
         let store = store_in("fetch");
         let body = b"a whole library, more or less".to_vec();
         let digest = Digest::sha256(&body);
-        let fetch = MapFetch::new().with_route("https://cdn.invalid/lib.jar", Route::body(body.clone()));
+        let fetch =
+            MapFetch::new().with_route("https://cdn.invalid/lib.jar", Route::body(body.clone()));
 
         let first = store
-            .fetch_blocking(&fetch, "https://cdn.invalid/lib.jar", &digest, &Cancel::new(), &Backoff::with_attempts(1))
+            .fetch_blocking(
+                &fetch,
+                "https://cdn.invalid/lib.jar",
+                &digest,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("fetched");
         assert_eq!(first, Stored::Fetched(body.len() as u64));
         assert_eq!(fetch.count(), 1);
@@ -652,11 +697,20 @@ mod tests {
         // The second look is a path lookup: the fetcher is never asked, which is
         // what makes a reinstall of the same version mostly a disk read.
         let second = store
-            .fetch_blocking(&fetch, "https://cdn.invalid/lib.jar", &digest, &Cancel::new(), &Backoff::with_attempts(1))
+            .fetch_blocking(
+                &fetch,
+                "https://cdn.invalid/lib.jar",
+                &digest,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("not fetched");
         assert_eq!(second, Stored::AlreadyThere);
         assert_eq!(fetch.count(), 1);
-        assert!(!store.staging_path(&digest).exists(), "and nothing was left staging");
+        assert!(
+            !store.staging_path(&digest).exists(),
+            "and nothing was left staging"
+        );
     }
 
     #[test]
@@ -670,12 +724,21 @@ mod tests {
         let fetch = MapFetch::new().with_route("u", Route::text("the wrong bytes"));
 
         let error = store
-            .fetch_blocking(&fetch, "u", &digest, &Cancel::new(), &Backoff::with_attempts(1))
+            .fetch_blocking(
+                &fetch,
+                "u",
+                &digest,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect_err("a mismatch");
         assert!(matches!(error, Error::HashMismatch { .. }), "{error:?}");
         assert!(!store.has(&digest));
         assert_eq!(store.stats(), (0, 0));
-        assert!(!store.staging_path(&digest).exists(), "the staging file went with it");
+        assert!(
+            !store.staging_path(&digest).exists(),
+            "the staging file went with it"
+        );
     }
 
     #[test]
@@ -689,7 +752,9 @@ mod tests {
         let cancel = Cancel::new();
         let fetch = MapFetch::new().with_route(
             "u",
-            Route::body(body.clone()).chunked(512).stopping_after(2, cancel.clone()),
+            Route::body(body.clone())
+                .chunked(512)
+                .stopping_after(2, cancel.clone()),
         );
 
         let error = store
@@ -707,9 +772,19 @@ mod tests {
         // The next run continues from there and files the whole thing.
         let whole = MapFetch::new().with_route("u", Route::body(body.clone()));
         let stored = store
-            .fetch_blocking(&whole, "u", &digest, &Cancel::new(), &Backoff::with_attempts(1))
+            .fetch_blocking(
+                &whole,
+                "u",
+                &digest,
+                &Cancel::new(),
+                &Backoff::with_attempts(1),
+            )
             .expect("resumed");
-        assert_eq!(stored, Stored::Fetched(4096 - 1024), "only the rest came over the wire");
+        assert_eq!(
+            stored,
+            Stored::Fetched(4096 - 1024),
+            "only the rest came over the wire"
+        );
         assert!(store.verified(&digest));
         assert!(!staging.exists());
     }
@@ -722,7 +797,11 @@ mod tests {
         std::fs::create_dir_all(staging.parent().expect("a staging directory")).expect("mkdir");
         std::fs::write(&staging, b"half").expect("the file");
 
-        assert_eq!(store.sweep_staging(Duration::from_secs(3600)), 0, "it is fresh");
+        assert_eq!(
+            store.sweep_staging(Duration::from_secs(3600)),
+            0,
+            "it is fresh"
+        );
         assert!(staging.exists(), "a resume is worth keeping");
         assert_eq!(store.sweep_staging(Duration::ZERO), 1, "asked and answered");
         assert!(!staging.exists());

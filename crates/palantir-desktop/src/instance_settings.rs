@@ -618,7 +618,13 @@ pub fn view(theme: Gen, state: &State) -> Element<'_, Message> {
                 state.tab == Tab::Installation,
             ),
         ],
-        |index| Message::Tab(if index == 0 { Tab::Java } else { Tab::Installation }),
+        |index| {
+            Message::Tab(if index == 0 {
+                Tab::Java
+            } else {
+                Tab::Installation
+            })
+        },
     );
     let body = match state.tab {
         Tab::Java => java_body(theme, state),
@@ -657,9 +663,15 @@ fn java_body(theme: Gen, state: &State) -> Element<'_, Message> {
             ),
         ));
     if let Some(error) = &state.error {
-        body = body.push(ui::admonition(theme, ui::Severity::Warning, "instance-settings", error));
+        body = body.push(ui::admonition(
+            theme,
+            ui::Severity::Warning,
+            "instance-settings",
+            error,
+        ));
     }
-    body.push(save_row(theme, "instance-settings:save", Message::Save)).into()
+    body.push(save_row(theme, "instance-settings:save", Message::Save))
+        .into()
 }
 
 /// The installation half: the platform, the game version and the loader's build.
@@ -717,9 +729,12 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
             column![]
                 .spacing(8.0)
                 .push(section_heading(theme, Key::LabelPlatform.message()))
-                .push(ui::chips(theme, &platform_keys, &platform_labels, |index| {
-                    Some(Message::Platform(LoaderKind::all()[index]))
-                })),
+                .push(ui::chips(
+                    theme,
+                    &platform_keys,
+                    &platform_labels,
+                    |index| Some(Message::Platform(LoaderKind::all()[index])),
+                )),
         ))
         .push(ui::card(
             theme,
@@ -727,7 +742,11 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
                 .spacing(8.0)
                 .push(section_heading(
                     theme,
-                    &format!("{} · {}", Key::LabelGameVersion.message(), state.game_version),
+                    &format!(
+                        "{} · {}",
+                        Key::LabelGameVersion.message(),
+                        state.game_version
+                    ),
                 ))
                 .push(ui::search(
                     theme,
@@ -777,10 +796,19 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
     }
     body = body.push(paragraph(theme, SAVE_INSTALLS_NOTE));
     if let Some(error) = &state.error {
-        body = body.push(ui::admonition(theme, ui::Severity::Warning, "instance-settings", error));
+        body = body.push(ui::admonition(
+            theme,
+            ui::Severity::Warning,
+            "instance-settings",
+            error,
+        ));
     }
-    body.push(save_row(theme, "instance-settings:installation:save", Message::SaveInstallation))
-        .into()
+    body.push(save_row(
+        theme,
+        "instance-settings:installation:save",
+        Message::SaveInstallation,
+    ))
+    .into()
 }
 
 /// The pack an instance was installed from, named.
@@ -790,10 +818,9 @@ fn installation_body(theme: Gen, state: &State) -> Element<'_, Message> {
 /// fetch and a decode this slice does not do, and a card with the pack named in
 /// words is a card -- what it would add is the picture, not the answer.
 fn modpack_card<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
-    let mut card = column![
-    ]
-    .spacing(8.0)
-    .push(section_heading(theme, Key::LabelInstalledModpack.message()));
+    let mut card = column![]
+        .spacing(8.0)
+        .push(section_heading(theme, Key::LabelInstalledModpack.message()));
     card = match &state.modpack {
         // Asked, not answered. The reference replaces its whole tab with a spinner
         // while its own linked-pack query is in flight; this is the kit's word for
@@ -813,15 +840,12 @@ fn modpack_card<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
 /// One named pack: the title the service gave, and the caption under it.
 fn pack_line<'a>(theme: Gen, pack: &LinkedModpack) -> Element<'a, Message> {
     let caption = pack_caption(pack);
-    let mut line = column![
-    ]
-    .spacing(2.0)
-    .push(
-        text(pack.title.clone())
-            .size(14.0)
-            .font(semibold())
-            .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST))),
-    );
+    let mut line =
+        column![]
+            .spacing(2.0)
+            .push(text(pack.title.clone()).size(14.0).font(semibold()).style(
+                iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)),
+            ));
     if !caption.is_empty() {
         line = line.push(paragraph(theme, &caption));
     }
@@ -886,7 +910,10 @@ fn unlink_section(theme: Gen) -> Element<'static, Message> {
 fn unlink_title() -> String {
     Key::InstallationSettingsLinkedInstanceTitle
         .message()
-        .replace("{projectType}", Key::InstallationSettingsLinkedModpack.message())
+        .replace(
+            "{projectType}",
+            Key::InstallationSettingsLinkedModpack.message(),
+        )
 }
 
 /// The unlink section's sentence, with the reference's two placeholders filled.
@@ -898,7 +925,10 @@ fn unlink_sentence() -> String {
     Key::InstallationSettingsUnlinkDescription
         .message()
         .replace("{type}", Key::InstallationSettingsTypeInstance.message())
-        .replace("{projectType}", Key::InstallationSettingsLinkedModpack.message())
+        .replace(
+            "{projectType}",
+            Key::InstallationSettingsLinkedModpack.message(),
+        )
 }
 
 /// The way to re-install the instance's own files.
@@ -947,9 +977,15 @@ fn repair_section<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     };
     let mut section = column![]
         .spacing(8.0)
-        .push(section_heading(theme, Key::InstallationSettingsRepairInstanceTitle.message()))
+        .push(section_heading(
+            theme,
+            Key::InstallationSettingsRepairInstanceTitle.message(),
+        ))
         .push(row![button])
-        .push(paragraph(theme, Key::InstallationSettingsRepairInstanceDescription.message()));
+        .push(paragraph(
+            theme,
+            Key::InstallationSettingsRepairInstanceDescription.message(),
+        ));
     match &state.repair {
         Load::Ready(line) => section = section.push(paragraph(theme, line)),
         Load::Failed(reason) => section = section.push(paragraph_ink(theme, reason, Ink::Red)),
@@ -1035,8 +1071,8 @@ fn pack_version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         column(items).width(Length::Fill),
         Message::Wheel,
     )
-        .height(Length::Fixed(LIST_HEIGHT))
-        .into()
+    .height(Length::Fixed(LIST_HEIGHT))
+    .into()
 }
 
 /// The way to lay the linked pack over this instance again.
@@ -1122,10 +1158,14 @@ const SAVE_INSTALLS_NOTE: &str =
 /// drawn as pressable rows, or the sentence for a list that has nothing.
 fn version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     let rows = match &state.versions {
-        Load::Idle | Load::Loading => Some((Key::LabelLoading.message().to_string(), INK_SECONDARY)),
+        Load::Idle | Load::Loading => {
+            Some((Key::LabelLoading.message().to_string(), INK_SECONDARY))
+        }
         Load::Failed(reason) => Some((reason.clone(), Ink::Red)),
         Load::Empty => Some((
-            Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message().to_string(),
+            Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable
+                .message()
+                .to_string(),
             INK_SECONDARY,
         )),
         Load::Ready(_) => None,
@@ -1158,8 +1198,8 @@ fn version_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         column(items).width(Length::Fill),
         Message::Wheel,
     )
-        .height(Length::Fixed(LIST_HEIGHT))
-        .into()
+    .height(Length::Fixed(LIST_HEIGHT))
+    .into()
 }
 
 /// The game-version list's footer: the reference's own row that adds the
@@ -1191,12 +1231,20 @@ fn snapshot_toggle<'a>(theme: Gen, state: &State) -> Element<'a, Message> {
             .spacing(6.0)
             .push(icon::icon(glyph, 16.0, ink))
             .push(
-                text(label.message()).size(14.0).font(semibold()).style(iced::theme::Text::Color(ink)),
+                text(label.message())
+                    .size(14.0)
+                    .font(semibold())
+                    .style(iced::theme::Text::Color(ink)),
             ),
     )
     .width(Length::Fill)
     .center_x()
-    .padding(Padding { top: TOGGLE_PAD, bottom: TOGGLE_PAD, left: 0.0, right: 0.0 });
+    .padding(Padding {
+        top: TOGGLE_PAD,
+        bottom: TOGGLE_PAD,
+        left: 0.0,
+        right: 0.0,
+    });
     mouse_area(row)
         .interaction(Interaction::Pointer)
         .on_enter(Hovered::hover(key, true))
@@ -1208,10 +1256,14 @@ fn snapshot_toggle<'a>(theme: Gen, state: &State) -> Element<'a, Message> {
 /// The loader-build list, the same shape over the platform's own builds.
 fn build_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
     let rows = match &state.builds {
-        Load::Idle | Load::Loading => Some((Key::LabelLoading.message().to_string(), INK_SECONDARY)),
+        Load::Idle | Load::Loading => {
+            Some((Key::LabelLoading.message().to_string(), INK_SECONDARY))
+        }
         Load::Failed(reason) => Some((reason.clone(), Ink::Red)),
         Load::Empty => Some((
-            Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable.message().to_string(),
+            Key::CreationFlowModalCustomSetupOptionsNoVersionsAvailable
+                .message()
+                .to_string(),
             INK_SECONDARY,
         )),
         Load::Ready(_) => None,
@@ -1256,8 +1308,8 @@ fn build_list<'a>(theme: Gen, state: &'a State) -> Element<'a, Message> {
         column(items).width(Length::Fill),
         Message::Wheel,
     )
-        .height(Length::Fixed(LIST_HEIGHT))
-        .into()
+    .height(Length::Fixed(LIST_HEIGHT))
+    .into()
 }
 
 /// The loader row's heading: the reference's `{loader} version`, filled.
@@ -1309,10 +1361,18 @@ fn choice_row_or<'a>(
             ))),
     )
     .width(Length::Fill)
-    .padding(Padding { top: 8.0, bottom: 8.0, left: 12.0, right: 12.0 })
+    .padding(Padding {
+        top: 8.0,
+        bottom: 8.0,
+        left: 12.0,
+        right: 12.0,
+    })
     .style(move |_theme: &iced::Theme| container::Appearance {
         background: plate.map(Background::Color),
-        border: Border { radius: 8.0.into(), ..Border::default() },
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
         ..container::Appearance::default()
     });
     let mut area = mouse_area(row)
@@ -1338,7 +1398,10 @@ fn section_heading<'a>(theme: Gen, title: &str) -> Element<'a, Message> {
     text(title.to_string())
         .size(14.0)
         .font(semibold())
-        .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_CONTRAST)))
+        .style(iced::theme::Text::Color(theme_gen::ink(
+            theme,
+            INK_CONTRAST,
+        )))
         .into()
 }
 
@@ -1366,7 +1429,14 @@ fn save_row<'a>(theme: Gen, key: &'static str, message: Message) -> Element<'a, 
     row![]
         .align_items(Alignment::Center)
         .push(Space::with_width(Length::Fill))
-        .push(ui::button_sized(theme, key, Key::ButtonSave, ui::Kind::Colored, ui::Size::Md, message))
+        .push(ui::button_sized(
+            theme,
+            key,
+            Key::ButtonSave,
+            ui::Kind::Colored,
+            ui::Size::Md,
+            message,
+        ))
         .into()
 }
 
@@ -1383,12 +1453,9 @@ fn memory_section(theme: Gen, state: &State) -> Element<'_, Message> {
         column![]
             .spacing(4.0)
             .width(Length::Fill)
-            .push(
-                text(label.to_string())
-                    .size(12.0)
-                    .font(medium())
-                    .style(iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY))),
-            )
+            .push(text(label.to_string()).size(12.0).font(medium()).style(
+                iced::theme::Text::Color(theme_gen::ink(theme, INK_SECONDARY)),
+            ))
             .push(field(theme, "1024", value, on_input))
     };
     section(
@@ -1398,8 +1465,16 @@ fn memory_section(theme: Gen, state: &State) -> Element<'_, Message> {
         Key::InstanceSettingsTabsJavaCustomMemoryAllocation,
         row![]
             .spacing(8.0)
-            .push(number_field("Minimum (MiB)", &state.memory_min, Message::MemoryMin))
-            .push(number_field("Maximum (MiB)", &state.memory_max, Message::MemoryMax))
+            .push(number_field(
+                "Minimum (MiB)",
+                &state.memory_min,
+                Message::MemoryMin,
+            ))
+            .push(number_field(
+                "Maximum (MiB)",
+                &state.memory_max,
+                Message::MemoryMax,
+            ))
             .into(),
     )
 }
@@ -1437,10 +1512,17 @@ fn field<'a>(
 ) -> Element<'a, Message> {
     text_input(placeholder, value)
         .on_input(on_input)
-        .padding(Padding { top: 10.0, bottom: 10.0, left: 12.0, right: 12.0 })
+        .padding(Padding {
+            top: 10.0,
+            bottom: 10.0,
+            left: 12.0,
+            right: 12.0,
+        })
         .size(14.0)
         .font(medium())
-        .style(iced::theme::TextInput::Custom(Box::new(ui::Field::bordered(theme))))
+        .style(iced::theme::TextInput::Custom(Box::new(
+            ui::Field::bordered(theme),
+        )))
         .into()
 }
 
@@ -1510,7 +1592,11 @@ mod tests {
         // what keeps a hand-made instance off the network.
         let mut plain = state();
         plain.update(Message::Tab(Tab::Installation));
-        assert_eq!(plain.needs_modpack(), None, "this instance came from nothing");
+        assert_eq!(
+            plain.needs_modpack(),
+            None,
+            "this instance came from nothing"
+        );
 
         let mut linked = linked_state();
         assert_eq!(
@@ -1575,7 +1661,10 @@ mod tests {
         // The reference puts the author and the version number on one line with a
         // middot between them, and both halves can be missing: a team read that
         // failed, or a version its author has deleted.
-        assert_eq!(pack_caption(&named("jellysquid3", "1.6.1")), "jellysquid3 · 1.6.1");
+        assert_eq!(
+            pack_caption(&named("jellysquid3", "1.6.1")),
+            "jellysquid3 · 1.6.1"
+        );
         assert_eq!(pack_caption(&named("jellysquid3", "")), "jellysquid3");
         assert_eq!(
             pack_caption(&named("", "1.6.1")),
@@ -1610,7 +1699,10 @@ mod tests {
         assert_eq!(Key::ButtonRepair.message(), "Repair");
         assert_eq!(Key::ButtonRepairing.message(), "Repairing...");
         let description = Key::InstallationSettingsRepairInstanceDescription.message();
-        assert!(description.contains("checks for corruption"), "{description}");
+        assert!(
+            description.contains("checks for corruption"),
+            "{description}"
+        );
         assert!(
             description.contains("Minecraft dependencies"),
             "the sentence names what is re-installed: {description}"
@@ -1654,8 +1746,15 @@ mod tests {
         // the frame thread hashing an install.
         let mut state = linked_state();
         state.update(Message::Repair);
-        assert_eq!(state.repair, Load::Idle, "nothing was asked of the shell here");
-        assert_eq!(state.error, None, "and no sentence appeared under the button");
+        assert_eq!(
+            state.repair,
+            Load::Idle,
+            "nothing was asked of the shell here"
+        );
+        assert_eq!(
+            state.error, None,
+            "and no sentence appeared under the button"
+        );
         assert_eq!(
             state.link,
             Load::Ready(InstanceLink {
@@ -1715,7 +1814,10 @@ mod tests {
         state.update(Message::MemoryMin("2048x".to_string()));
         let refused = state.edit().expect_err("not a number");
         assert!(refused.contains("minimum heap"), "{refused}");
-        assert!(refused.contains("2048x"), "the sentence names what was typed: {refused}");
+        assert!(
+            refused.contains("2048x"),
+            "the sentence names what was typed: {refused}"
+        );
 
         // The other direction: a field that is off does not stand between the
         // reader and the settings that are on.
@@ -1754,16 +1856,26 @@ mod tests {
         // One answer arrives: the pair is remembered, so the same question is not
         // asked again on the next frame.
         state.builds_for = state.needs_builds();
-        state.builds = Load::Ready(vec![LoaderBuild { version: "0.16.9".to_string(), stable: true }]);
+        state.builds = Load::Ready(vec![LoaderBuild {
+            version: "0.16.9".to_string(),
+            stable: true,
+        }]);
         assert_eq!(state.needs_builds(), None);
 
         state.update(Message::GameVersion("1.21.1".to_string()));
-        assert_eq!(state.builds, Load::Idle, "the old list goes with the old pair");
+        assert_eq!(
+            state.builds,
+            Load::Idle,
+            "the old list goes with the old pair"
+        );
         assert_eq!(
             state.loader_build, "",
             "and the build chosen for the old game version goes with it"
         );
-        assert_eq!(state.needs_builds(), Some((LoaderKind::Fabric, "1.21.1".to_string())));
+        assert_eq!(
+            state.needs_builds(),
+            Some((LoaderKind::Fabric, "1.21.1".to_string()))
+        );
 
         // Vanilla has no builds to ask anyone for, and the build it cannot have
         // is taken out of the value a save would write.
@@ -1777,12 +1889,25 @@ mod tests {
     fn the_lists_draw_what_the_search_and_the_snapshot_toggle_leave() {
         let mut state = state();
         state.versions = Load::Ready(vec![
-            GameVersion { id: "1.21.4".to_string(), release: true },
-            GameVersion { id: "1.21.1".to_string(), release: true },
-            GameVersion { id: "24w45a".to_string(), release: false },
+            GameVersion {
+                id: "1.21.4".to_string(),
+                release: true,
+            },
+            GameVersion {
+                id: "1.21.1".to_string(),
+                release: true,
+            },
+            GameVersion {
+                id: "24w45a".to_string(),
+                release: false,
+            },
         ]);
         let ids = |state: &State| {
-            state.shown_versions().into_iter().map(|version| version.id).collect::<Vec<_>>()
+            state
+                .shown_versions()
+                .into_iter()
+                .map(|version| version.id)
+                .collect::<Vec<_>>()
         };
         assert_eq!(ids(&state), ["1.21.4", "1.21.1"], "releases by default");
         state.update(Message::ShowSnapshots(true));
@@ -1791,8 +1916,14 @@ mod tests {
         assert_eq!(ids(&state), ["1.21.1"], "the search narrows the same list");
 
         state.builds = Load::Ready(vec![
-            LoaderBuild { version: "0.16.9".to_string(), stable: true },
-            LoaderBuild { version: "0.17.0-beta.1".to_string(), stable: false },
+            LoaderBuild {
+                version: "0.16.9".to_string(),
+                stable: true,
+            },
+            LoaderBuild {
+                version: "0.17.0-beta.1".to_string(),
+                stable: false,
+            },
         ]);
         assert_eq!(state.shown_builds().len(), 2);
         state.update(Message::BuildQuery("beta".to_string()));

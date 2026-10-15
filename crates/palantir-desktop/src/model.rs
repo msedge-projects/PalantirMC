@@ -48,7 +48,6 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-
 /// One row of the instance list view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceEntry {
@@ -104,14 +103,14 @@ impl InstanceListModel {
     /// Sort entries by display name (case-insensitive), breaking ties by id
     /// so the order is deterministic.
     pub fn sort_by_name(&mut self) {
-        self.entries.sort_by_cached_key(|entry| (entry.name.to_lowercase(), entry.id.clone()));
+        self.entries
+            .sort_by_cached_key(|entry| (entry.name.to_lowercase(), entry.id.clone()));
     }
 
     /// All entries in display order.
     pub fn entries(&self) -> &[InstanceEntry] {
         &self.entries
     }
-
 }
 
 // Four methods went with the move -- `len`, `is_empty`, `filter` and `group_of`
@@ -139,7 +138,10 @@ pub struct SettingsModel {
 impl SettingsModel {
     /// Model with both global settings and per-instance overrides.
     pub fn with_instance(global: Settings, instance: Settings) -> Self {
-        SettingsModel { global, instance: Some(instance) }
+        SettingsModel {
+            global,
+            instance: Some(instance),
+        }
     }
 
     /// Effective string value: the instance value while `override_key`
@@ -186,7 +188,6 @@ impl SettingsModel {
             self.get_i64("MaxMemAlloc", GATE, defaults::MAX_MEM_ALLOC),
         )
     }
-
 }
 
 // The write side went with the move: `new`, `global`, `global_mut`, `instance`,
@@ -250,7 +251,11 @@ mod tests {
 
         let model = InstanceListModel::load(&paths).unwrap();
         let entries = model.entries();
-        assert_eq!(entries.len(), 2, "the folder that is not an instance is not an entry");
+        assert_eq!(
+            entries.len(),
+            2,
+            "the folder that is not an instance is not an entry"
+        );
         assert_eq!(entries[0].name, "grouped");
         assert_eq!(entries[0].group.as_deref(), Some("Packs"));
         assert_eq!(entries[1].group, None);
@@ -282,7 +287,10 @@ mod tests {
         let model = SettingsModel::with_instance(global, instance);
         // Gate off: the launcher's own value wins even though the instance has
         // one of its own.
-        assert_eq!(model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 4096);
+        assert_eq!(
+            model.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0),
+            4096
+        );
         assert_eq!(model.effective_memory(), (defaults::MIN_MEM_ALLOC, 4096));
         // Gate on: the instance's value, which is what the instance settings page
         // writes when it turns *Override memory* on.
@@ -293,7 +301,10 @@ mod tests {
             Settings::empty(dir.path().join("prismlauncher.cfg")),
             instance,
         );
-        assert_eq!(gated.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0), 8192);
+        assert_eq!(
+            gated.get_i64("MaxMemAlloc", Some("OverrideMemory"), 0),
+            8192
+        );
         assert_eq!(gated.effective_memory(), (defaults::MIN_MEM_ALLOC, 8192));
         // An ungated key reads the launcher's file whatever the instance holds.
         assert_eq!(model.get_str("JavaPath", None, ""), "/usr/bin/java");

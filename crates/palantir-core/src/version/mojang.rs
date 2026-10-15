@@ -49,7 +49,11 @@ pub fn from_mojang(value: &Value) -> Result<Value, String> {
         .ok_or_else(|| "a version file is an object".to_string())?;
     let mut out = Map::new();
     let id = string_of(obj, "id");
-    copy(obj, &mut out, &["type", "releaseTime", "mainClass", "assets", "assetIndex"]);
+    copy(
+        obj,
+        &mut out,
+        &["type", "releaseTime", "mainClass", "assets", "assetIndex"],
+    );
     if !id.is_empty() {
         out.insert("name".into(), Value::String(id.clone()));
     }
@@ -57,15 +61,24 @@ pub fn from_mojang(value: &Value) -> Result<Value, String> {
     // The game's arguments, in whichever shape this version published them.
     let minecraft_arguments = arguments_of(obj);
     if !minecraft_arguments.is_empty() {
-        out.insert("minecraftArguments".into(), Value::String(minecraft_arguments.clone()));
+        out.insert(
+            "minecraftArguments".into(),
+            Value::String(minecraft_arguments.clone()),
+        );
     }
 
     if let Some(java) = obj.get("javaVersion").and_then(Value::as_object) {
         if let Some(major) = java.get("majorVersion").and_then(Value::as_i64) {
-            out.insert("compatibleJavaMajors".into(), Value::Array(vec![Value::from(major)]));
+            out.insert(
+                "compatibleJavaMajors".into(),
+                Value::Array(vec![Value::from(major)]),
+            );
         }
         if let Some(component) = java.get("component").and_then(Value::as_str) {
-            out.insert("compatibleJavaName".into(), Value::String(component.to_string()));
+            out.insert(
+                "compatibleJavaName".into(),
+                Value::String(component.to_string()),
+            );
         }
     }
 
@@ -198,7 +211,9 @@ fn traits(obj: &Map<String, Value>, minecraft_arguments: &str) -> Vec<String> {
     }
     for feature in game_features(obj) {
         match feature.as_str() {
-            "is_quick_play_multiplayer" => traits.push("feature:is_quick_play_multiplayer".to_string()),
+            "is_quick_play_multiplayer" => {
+                traits.push("feature:is_quick_play_multiplayer".to_string())
+            }
             "is_quick_play_singleplayer" => {
                 traits.push("feature:is_quick_play_singleplayer".to_string())
             }
@@ -352,19 +367,27 @@ mod tests {
         let file = parsed(MODERN);
         assert_eq!(file.main_class, "net.minecraft.client.main.Main");
         assert_eq!(
-            file.minecraft_arguments,
-            "--username ${auth_player_name} --version ${version_name}",
+            file.minecraft_arguments, "--username ${auth_player_name} --version ${version_name}",
             "the plain strings, in order; the conditional entries are not arguments, \
              and the `--clientId` pair is not a pair this launcher can fill"
         );
         assert!(!file.minecraft_arguments.contains("--demo"));
         let jar = file.main_jar.as_ref().expect("a client jar");
         assert_eq!(
-            format!("{}:{}:{}", jar.name.group(), jar.name.artifact(), jar.name.version()),
+            format!(
+                "{}:{}:{}",
+                jar.name.group(),
+                jar.name.artifact(),
+                jar.name.version()
+            ),
             "com.mojang:minecraft:1.21.4"
         );
         assert_eq!(jar.name.classifier(), "client");
-        let artifact = jar.mojang_downloads.as_ref().and_then(|d| d.artifact.as_ref()).expect("its artifact");
+        let artifact = jar
+            .mojang_downloads
+            .as_ref()
+            .and_then(|d| d.artifact.as_ref())
+            .expect("its artifact");
         assert_eq!(artifact.url, "https://piston-data.mojang.com/client.jar");
         assert_eq!(artifact.sha1, "bb");
         assert_eq!(artifact.size, 28335587);
@@ -384,17 +407,28 @@ mod tests {
     #[test]
     fn the_traits_are_derived_from_the_file_rather_than_guessed() {
         let modern = parsed(MODERN);
-        assert!(modern.traits.contains("FirstThreadOnMacOS"), "{:?}", modern.traits);
+        assert!(
+            modern.traits.contains("FirstThreadOnMacOS"),
+            "{:?}",
+            modern.traits
+        );
         assert!(
             modern.traits.contains("feature:is_quick_play_multiplayer"),
             "the conditional argument's feature is kept as a trait: {:?}",
             modern.traits
         );
         assert!(!modern.traits.contains("legacyServices"));
-        assert!(!modern.traits.contains("feature:is_demo_user"), "the demo flag is not offered");
+        assert!(
+            !modern.traits.contains("feature:is_demo_user"),
+            "the demo flag is not offered"
+        );
 
         let legacy = parsed(LEGACY);
-        assert!(legacy.traits.contains("legacyServices"), "{:?}", legacy.traits);
+        assert!(
+            legacy.traits.contains("legacyServices"),
+            "{:?}",
+            legacy.traits
+        );
         assert!(
             !legacy.traits.contains("FirstThreadOnMacOS"),
             "1.6.4 loads LWJGL 2, which is what the mirror says too: {:?}",
@@ -405,14 +439,22 @@ mod tests {
     #[test]
     fn a_legacy_file_keeps_its_own_argument_string_untouched() {
         let file = parsed(LEGACY);
-        assert!(file.minecraft_arguments.contains("--session ${auth_session}"));
+        assert!(file
+            .minecraft_arguments
+            .contains("--session ${auth_session}"));
         assert_eq!(file.assets, "legacy");
-        assert!(file.compatible_java_majors.is_empty(), "1.6.4 states no java version");
+        assert!(
+            file.compatible_java_majors.is_empty(),
+            "1.6.4 states no java version"
+        );
         assert_eq!(file.libraries.len(), 1);
         // The classic natives map is untouched, so the classifier still names the
         // native for this host.
         let natives = &file.libraries[0].native_classifiers;
-        assert_eq!(natives.get("windows").map(String::as_str), Some("natives-windows"));
+        assert_eq!(
+            natives.get("windows").map(String::as_str),
+            Some("natives-windows")
+        );
     }
 
     #[test]
@@ -433,8 +475,12 @@ mod tests {
         }
         // The arguments on either side of the pair are still there, in order: it
         // is two arguments that go, not the tail of the string.
-        assert!(file.minecraft_arguments.starts_with("--username ${auth_player_name}"));
-        assert!(file.minecraft_arguments.contains("--version ${version_name}"));
+        assert!(file
+            .minecraft_arguments
+            .starts_with("--username ${auth_player_name}"));
+        assert!(file
+            .minecraft_arguments
+            .contains("--version ${version_name}"));
     }
 
     #[test]
@@ -448,7 +494,15 @@ mod tests {
             .iter()
             .filter(|library| library.is_native())
             .collect();
-        assert_eq!(natives.len(), 1, "{:?}", file.libraries.iter().map(|l| l.name.serialize()).collect::<Vec<_>>());
+        assert_eq!(
+            natives.len(),
+            1,
+            "{:?}",
+            file.libraries
+                .iter()
+                .map(|l| l.name.serialize())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(natives[0].name.classifier(), "natives-windows");
         assert!(file.libraries.iter().any(|library| !library.is_native()));
     }

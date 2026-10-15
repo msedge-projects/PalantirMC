@@ -38,16 +38,31 @@ pub struct Require {
 impl Require {
     /// Build a requirement that only names a uid.
     pub fn uid(uid: impl Into<String>) -> Require {
-        Require { uid: uid.into(), ..Default::default() }
+        Require {
+            uid: uid.into(),
+            ..Default::default()
+        }
     }
 
     /// Parse from a JSON object; missing members are empty.
     pub fn from_json(value: &serde_json::Value) -> Option<Require> {
         let obj = value.as_object()?;
         let uid = obj.get("uid")?.as_str()?.to_string();
-        let equals_version = obj.get("equals").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let suggests = obj.get("suggests").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        Some(Require { uid, equals_version, suggests })
+        let equals_version = obj
+            .get("equals")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let suggests = obj
+            .get("suggests")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        Some(Require {
+            uid,
+            equals_version,
+            suggests,
+        })
     }
 
     /// Serialize per `Meta::serializeRequires` (empty members omitted).
@@ -55,10 +70,16 @@ impl Require {
         let mut obj = serde_json::Map::new();
         obj.insert("uid".into(), serde_json::Value::String(self.uid.clone()));
         if !self.equals_version.is_empty() {
-            obj.insert("equals".into(), serde_json::Value::String(self.equals_version.clone()));
+            obj.insert(
+                "equals".into(),
+                serde_json::Value::String(self.equals_version.clone()),
+            );
         }
         if !self.suggests.is_empty() {
-            obj.insert("suggests".into(), serde_json::Value::String(self.suggests.clone()));
+            obj.insert(
+                "suggests".into(),
+                serde_json::Value::String(self.suggests.clone()),
+            );
         }
         serde_json::Value::Object(obj)
     }
@@ -106,10 +127,26 @@ impl ModLoader {
     /// Uids that conflict with this loader (`knownConflictingComponents`).
     pub fn conflicting_uids(self) -> &'static [&'static str] {
         match self {
-            ModLoader::NeoForge => &["net.minecraftforge", "net.fabricmc.fabric-loader", "org.quiltmc.quilt-loader"],
-            ModLoader::Forge => &["net.neoforged", "net.fabricmc.fabric-loader", "org.quiltmc.quilt-loader"],
-            ModLoader::Fabric => &["net.minecraftforge", "net.neoforged", "org.quiltmc.quilt-loader"],
-            ModLoader::Quilt => &["net.minecraftforge", "net.neoforged", "net.fabricmc.fabric-loader"],
+            ModLoader::NeoForge => &[
+                "net.minecraftforge",
+                "net.fabricmc.fabric-loader",
+                "org.quiltmc.quilt-loader",
+            ],
+            ModLoader::Forge => &[
+                "net.neoforged",
+                "net.fabricmc.fabric-loader",
+                "org.quiltmc.quilt-loader",
+            ],
+            ModLoader::Fabric => &[
+                "net.minecraftforge",
+                "net.neoforged",
+                "org.quiltmc.quilt-loader",
+            ],
+            ModLoader::Quilt => &[
+                "net.minecraftforge",
+                "net.neoforged",
+                "net.fabricmc.fabric-loader",
+            ],
             ModLoader::LiteLoader => &[],
         }
     }
@@ -165,7 +202,10 @@ impl Component {
         let mut obj = serde_json::Map::new();
         obj.insert("uid".into(), serde_json::Value::String(self.uid.clone()));
         if !self.version.is_empty() {
-            obj.insert("version".into(), serde_json::Value::String(self.version.clone()));
+            obj.insert(
+                "version".into(),
+                serde_json::Value::String(self.version.clone()),
+            );
         }
         if self.dependency_only {
             obj.insert("dependencyOnly".into(), serde_json::Value::Bool(true));
@@ -177,10 +217,16 @@ impl Component {
             obj.insert("disabled".into(), serde_json::Value::Bool(true));
         }
         if !self.cached_version.is_empty() {
-            obj.insert("cachedVersion".into(), serde_json::Value::String(self.cached_version.clone()));
+            obj.insert(
+                "cachedVersion".into(),
+                serde_json::Value::String(self.cached_version.clone()),
+            );
         }
         if !self.cached_name.is_empty() {
-            obj.insert("cachedName".into(), serde_json::Value::String(self.cached_name.clone()));
+            obj.insert(
+                "cachedName".into(),
+                serde_json::Value::String(self.cached_name.clone()),
+            );
         }
         if !self.cached_requires.is_empty() {
             // Prism stores requirements in a `RequireSet` ordered by uid, so
@@ -216,16 +262,26 @@ impl Component {
         let uid = obj
             .get("uid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Error::MissingField { path: path.to_path_buf(), field: "uid" })?
+            .ok_or_else(|| Error::MissingField {
+                path: path.to_path_buf(),
+                field: "uid",
+            })?
             .to_string();
         let get_bool = |key: &str| obj.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
         let get_str = |key: &str| {
-            obj.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+            obj.get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
         };
         let get_reqs = |key: &str| {
             obj.get(key)
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(Require::from_json).collect::<Vec<_>>())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Require::from_json)
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
         };
         Ok(Component {
@@ -261,14 +317,23 @@ impl PackProfile {
         let version = obj
             .get("formatVersion")
             .and_then(|v| v.as_i64())
-            .ok_or_else(|| Error::MissingField { path: path.to_path_buf(), field: "formatVersion" })?;
+            .ok_or_else(|| Error::MissingField {
+                path: path.to_path_buf(),
+                field: "formatVersion",
+            })?;
         if version != 1 {
-            return Err(Error::format(path, format!("Invalid component file version, expected 1 (found {version})")));
+            return Err(Error::format(
+                path,
+                format!("Invalid component file version, expected 1 (found {version})"),
+            ));
         }
         let items = obj
             .get("components")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| Error::MissingField { path: path.to_path_buf(), field: "components" })?;
+            .ok_or_else(|| Error::MissingField {
+                path: path.to_path_buf(),
+                field: "components",
+            })?;
         let mut components: Vec<Component> = Vec::with_capacity(items.len());
         for item in items {
             let comp = Component::from_json(item, path)?;
@@ -501,11 +566,8 @@ mod tests {
 
     #[test]
     fn wrong_format_version_and_missing_uid_are_errors() {
-        let err = PackProfile::from_text(
-            "{\"formatVersion\":2,\"components\":[]}",
-            Path::new("t"),
-        )
-        .unwrap_err();
+        let err = PackProfile::from_text("{\"formatVersion\":2,\"components\":[]}", Path::new("t"))
+            .unwrap_err();
         assert!(matches!(err, Error::Format { .. }));
         let err = PackProfile::from_text(
             "{\"formatVersion\":1,\"components\":[{\"version\":\"1\"}]}",
@@ -515,15 +577,29 @@ mod tests {
         assert!(matches!(err, Error::MissingField { field: "uid", .. }));
         let err = PackProfile::from_text("not json", Path::new("t")).unwrap_err();
         assert!(matches!(err, Error::Json { .. }));
-        assert!(matches!(PackProfile::from_text("[]", Path::new("t")), Err(Error::Json { .. })));
+        assert!(matches!(
+            PackProfile::from_text("[]", Path::new("t")),
+            Err(Error::Json { .. })
+        ));
     }
 
     #[test]
     fn requires_serialize_with_equals_and_suggests_keys() {
-        let mut c = Component { uid: "x".into(), ..Default::default() };
+        let mut c = Component {
+            uid: "x".into(),
+            ..Default::default()
+        };
         c.cached_requires = vec![
-            Require { uid: "org.lwjgl3".into(), suggests: "3.3.2".into(), equals_version: String::new() },
-            Require { uid: "net.minecraft".into(), equals_version: "1.21.1".into(), suggests: String::new() },
+            Require {
+                uid: "org.lwjgl3".into(),
+                suggests: "3.3.2".into(),
+                equals_version: String::new(),
+            },
+            Require {
+                uid: "net.minecraft".into(),
+                equals_version: "1.21.1".into(),
+                suggests: String::new(),
+            },
         ];
         let json = c.to_json();
         let reqs = json["cachedRequires"].as_array().unwrap();
@@ -538,7 +614,11 @@ mod tests {
 
     #[test]
     fn component_semantics_match_prism() {
-        let mut c = Component { uid: "x".into(), important: true, ..Default::default() };
+        let mut c = Component {
+            uid: "x".into(),
+            important: true,
+            ..Default::default()
+        };
         assert!(!c.is_removable());
         assert!(c.can_be_disabled()); // important but not dependencyOnly
         c.disabled = true;
@@ -557,21 +637,49 @@ mod tests {
         // important components are not removable
         assert!(!p.remove("net.minecraft"));
         // a non-important component is removable
-        p.append(Component { uid: "custom.thing".into(), ..Default::default() });
+        p.append(Component {
+            uid: "custom.thing".into(),
+            ..Default::default()
+        });
         assert!(p.remove("custom.thing"));
     }
 
     #[test]
     fn insert_ignores_duplicates_and_empty_uids() {
         let mut p = PackProfile::default();
-        p.append(Component { uid: "a".into(), ..Default::default() });
-        p.append(Component { uid: "a".into(), version: "2".into(), ..Default::default() });
+        p.append(Component {
+            uid: "a".into(),
+            ..Default::default()
+        });
+        p.append(Component {
+            uid: "a".into(),
+            version: "2".into(),
+            ..Default::default()
+        });
         assert_eq!(p.components().len(), 1);
-        p.insert(0, Component { uid: String::new(), ..Default::default() });
+        p.insert(
+            0,
+            Component {
+                uid: String::new(),
+                ..Default::default()
+            },
+        );
         assert_eq!(p.components().len(), 1);
-        p.insert(99, Component { uid: "b".into(), ..Default::default() }); // clamps to end
+        p.insert(
+            99,
+            Component {
+                uid: "b".into(),
+                ..Default::default()
+            },
+        ); // clamps to end
         assert!(p.get("b").is_some());
-        p.insert(0, Component { uid: "c".into(), ..Default::default() });
+        p.insert(
+            0,
+            Component {
+                uid: "c".into(),
+                ..Default::default()
+            },
+        );
         assert_eq!(p.components()[0].uid, "c");
     }
 
@@ -588,16 +696,30 @@ mod tests {
 
     #[test]
     fn mod_loaders_and_conflicts_match_known_table() {
-        assert_eq!(ModLoader::from_uid("net.fabricmc.fabric-loader"), Some(ModLoader::Fabric));
+        assert_eq!(
+            ModLoader::from_uid("net.fabricmc.fabric-loader"),
+            Some(ModLoader::Fabric)
+        );
         assert_eq!(ModLoader::from_uid("unknown"), None);
         assert_eq!(
             ModLoader::NeoForge.conflicting_uids(),
-            &["net.minecraftforge", "net.fabricmc.fabric-loader", "org.quiltmc.quilt-loader"]
+            &[
+                "net.minecraftforge",
+                "net.fabricmc.fabric-loader",
+                "org.quiltmc.quilt-loader"
+            ]
         );
         assert!(ModLoader::LiteLoader.conflicting_uids().is_empty());
         let mut p = PackProfile::default();
-        p.append(Component { uid: "net.fabricmc.fabric-loader".into(), ..Default::default() });
-        p.append(Component { uid: "net.minecraftforge".into(), disabled: true, ..Default::default() });
+        p.append(Component {
+            uid: "net.fabricmc.fabric-loader".into(),
+            ..Default::default()
+        });
+        p.append(Component {
+            uid: "net.minecraftforge".into(),
+            disabled: true,
+            ..Default::default()
+        });
         assert_eq!(p.mod_loaders(), vec![ModLoader::Fabric]);
     }
 }

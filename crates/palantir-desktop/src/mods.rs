@@ -79,7 +79,11 @@ pub fn list_mods(mods_dir: &Path) -> Vec<ModEntry> {
         }
         let name = entry.file_name().to_string_lossy().into_owned();
         if let Some((display_name, enabled)) = split_mod_name(&name) {
-            out.push(ModEntry { file_name: name, display_name, enabled });
+            out.push(ModEntry {
+                file_name: name,
+                display_name,
+                enabled,
+            });
         }
     }
     // Fold each name once, not twice per comparison in an O(n log n) sort.
@@ -91,7 +95,9 @@ pub fn list_mods(mods_dir: &Path) -> Vec<ModEntry> {
 /// in the requested state.
 pub fn set_mod_enabled(mods_dir: &Path, file_name: &str, enabled: bool) -> Result<(), String> {
     if file_name.contains('/') || file_name.contains('\\') {
-        return Err(format!("refusing to touch path-like mod name '{file_name}'"));
+        return Err(format!(
+            "refusing to touch path-like mod name '{file_name}'"
+        ));
     }
     let target = match toggled_file_name(file_name, enabled) {
         Some(target) => target,
@@ -112,11 +118,12 @@ pub fn set_mod_enabled(mods_dir: &Path, file_name: &str, enabled: bool) -> Resul
         // Reserve the name before a bounded-memory copy on those filesystems.
         let mut input = std::fs::File::open(&source)
             .map_err(|error| format!("reading mod '{file_name}': {error}"))?;
-        let mut output = std::fs::OpenOptions::new().write(true).create_new(true)
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
             .open(&destination)
             .map_err(|error| format!("renaming mod '{file_name}' to '{target}': {error}"))?;
-        let copied = std::io::copy(&mut input, &mut output)
-            .and_then(|_| output.sync_all());
+        let copied = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
         drop(output);
         if let Err(error) = copied {
             let _ = std::fs::remove_file(&destination);
@@ -147,7 +154,11 @@ pub fn list_content_names(dir: &Path) -> Vec<String> {
         };
         out.push(entry.file_name().to_string_lossy().into_owned());
     }
-    out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+    out.sort_by(|a, b| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    });
     out
 }
 
@@ -157,7 +168,10 @@ mod tests {
 
     #[test]
     fn split_names_recognizes_jar_and_disabled() {
-        assert_eq!(split_mod_name("sodium.jar"), Some(("sodium.jar".to_string(), true)));
+        assert_eq!(
+            split_mod_name("sodium.jar"),
+            Some(("sodium.jar".to_string(), true))
+        );
         assert_eq!(
             split_mod_name("sodium.jar.disabled"),
             Some(("sodium.jar".to_string(), false))
@@ -166,21 +180,36 @@ mod tests {
         assert_eq!(split_mod_name("weird.disabled"), None);
         assert_eq!(split_mod_name(""), None);
         // Degenerate but well-formed: the base is still a `.jar` name.
-        assert_eq!(split_mod_name(".jar.disabled"), Some((".jar".to_string(), false)));
+        assert_eq!(
+            split_mod_name(".jar.disabled"),
+            Some((".jar".to_string(), false))
+        );
         assert_eq!(split_mod_name("nested.jar.zip"), None);
     }
 
     #[test]
     fn toggle_mapping_round_trips() {
-        assert_eq!(toggled_file_name("a.jar", false).as_deref(), Some("a.jar.disabled"));
-        assert_eq!(toggled_file_name("a.jar.disabled", true).as_deref(), Some("a.jar"));
+        assert_eq!(
+            toggled_file_name("a.jar", false).as_deref(),
+            Some("a.jar.disabled")
+        );
+        assert_eq!(
+            toggled_file_name("a.jar.disabled", true).as_deref(),
+            Some("a.jar")
+        );
         // Already in the requested state: identity (caller skips rename).
         assert_eq!(toggled_file_name("a.jar", true).as_deref(), Some("a.jar"));
-        assert_eq!(toggled_file_name("a.jar.disabled", false).as_deref(), Some("a.jar.disabled"));
+        assert_eq!(
+            toggled_file_name("a.jar.disabled", false).as_deref(),
+            Some("a.jar.disabled")
+        );
         assert_eq!(toggled_file_name("notes.txt", true), None);
         // Double-disable does not stack the suffix.
         let once = toggled_file_name("a.jar", false).unwrap_or_default();
-        assert_eq!(toggled_file_name(&once, false).as_deref(), Some("a.jar.disabled"));
+        assert_eq!(
+            toggled_file_name(&once, false).as_deref(),
+            Some("a.jar.disabled")
+        );
     }
 
     #[test]
@@ -224,8 +253,14 @@ mod tests {
             std::fs::write(dir.path().join("a.jar.disabled"), b"disabled version").unwrap();
             let source = if enabled { "a.jar.disabled" } else { "a.jar" };
             assert!(set_mod_enabled(dir.path(), source, enabled).is_err());
-            assert_eq!(std::fs::read(dir.path().join("a.jar")).unwrap(), b"enabled version");
-            assert_eq!(std::fs::read(dir.path().join("a.jar.disabled")).unwrap(), b"disabled version");
+            assert_eq!(
+                std::fs::read(dir.path().join("a.jar")).unwrap(),
+                b"enabled version"
+            );
+            assert_eq!(
+                std::fs::read(dir.path().join("a.jar.disabled")).unwrap(),
+                b"disabled version"
+            );
         }
     }
 
@@ -235,6 +270,9 @@ mod tests {
         for name in ["zeta.zip", "Alpha", "beta.zip"] {
             assert!(std::fs::write(dir.path().join(name), b"x").is_ok());
         }
-        assert_eq!(list_content_names(dir.path()), vec!["Alpha", "beta.zip", "zeta.zip"]);
+        assert_eq!(
+            list_content_names(dir.path()),
+            vec!["Alpha", "beta.zip", "zeta.zip"]
+        );
     }
 }

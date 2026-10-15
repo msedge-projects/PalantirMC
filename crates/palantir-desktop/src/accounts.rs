@@ -154,7 +154,12 @@ impl AccountEntry {
     /// through the device-code flow again, which is the correct outcome.
     #[cfg(test)]
     pub fn needs_refresh(&self, now_ms: i64) -> bool {
-        needs_refresh(self.kind, self.refresh_token.as_deref(), self.expires_at_ms, now_ms)
+        needs_refresh(
+            self.kind,
+            self.refresh_token.as_deref(),
+            self.expires_at_ms,
+            now_ms,
+        )
     }
 
     /// The short line under the name in the accounts list.
@@ -241,7 +246,10 @@ fn empty_document() -> Value {
 /// accounts list.
 fn entry_from_object(object: &Value) -> Option<AccountEntry> {
     let text = |value: &Value| {
-        value.as_str().map(str::to_string).filter(|text| !text.trim().is_empty())
+        value
+            .as_str()
+            .map(str::to_string)
+            .filter(|text| !text.trim().is_empty())
     };
     let kind = match object["type"].as_str() {
         Some(kind) if kind.eq_ignore_ascii_case("msa") => AccountKind::Msa,
@@ -319,13 +327,17 @@ fn entries_from_legacy_document(document: &Value) -> (Option<String>, Vec<Accoun
 /// The profile id decides; the name is the fallback, for an account the user
 /// signed into a build that wrote no id.
 fn same_account(object: &Value, entry: &AccountEntry) -> bool {
-    let id = object["profile"]["id"].as_str().or_else(|| object["uuid"].as_str());
+    let id = object["profile"]["id"]
+        .as_str()
+        .or_else(|| object["uuid"].as_str());
     if let Some(id) = id {
         if id.eq_ignore_ascii_case(&entry.uuid) {
             return true;
         }
     }
-    object["profile"]["name"].as_str().or_else(|| object["username"].as_str())
+    object["profile"]["name"]
+        .as_str()
+        .or_else(|| object["username"].as_str())
         == Some(entry.username.as_str())
 }
 
@@ -340,14 +352,20 @@ fn write_entry(object: &mut Value, entry: &AccountEntry, active: bool) {
     };
     map.insert(
         "type".to_string(),
-        json!(if entry.is_microsoft() { "MSA" } else { "Offline" }),
+        json!(if entry.is_microsoft() {
+            "MSA"
+        } else {
+            "Offline"
+        }),
     );
     map.insert("active".to_string(), json!(active));
 
     // `profile` is patched rather than replaced, so a cape, a skin and its
     // `data` blob survive.
     {
-        let profile = map.entry("profile".to_string()).or_insert_with(|| json!({}));
+        let profile = map
+            .entry("profile".to_string())
+            .or_insert_with(|| json!({}));
         if !profile.is_object() {
             *profile = json!({});
         }
@@ -469,7 +487,12 @@ impl AccountsStore {
         if parsed.get("accounts").is_some() || parsed.get("formatVersion").is_some() {
             let (selected, list) = entries_from_document(&parsed);
             (
-                AccountsStore { path: path.to_path_buf(), selected, list, document: parsed },
+                AccountsStore {
+                    path: path.to_path_buf(),
+                    selected,
+                    list,
+                    document: parsed,
+                },
                 None,
             )
         } else if parsed.get("list").is_some() {
@@ -488,7 +511,9 @@ impl AccountsStore {
         } else {
             (
                 empty(empty_document()),
-                Some("accounts file does not look like an accounts file, starting empty".to_string()),
+                Some(
+                    "accounts file does not look like an accounts file, starting empty".to_string(),
+                ),
             )
         }
     }
@@ -553,7 +578,11 @@ impl AccountsStore {
             if !object.is_object() {
                 object = json!({});
             }
-            write_entry(&mut object, entry, self.selected.as_deref() == Some(entry.uuid.as_str()));
+            write_entry(
+                &mut object,
+                entry,
+                self.selected.as_deref() == Some(entry.uuid.as_str()),
+            );
             accounts.push(object);
         }
         document["accounts"] = Value::Array(accounts);
@@ -615,8 +644,9 @@ impl AccountsStore {
         if !replaced {
             // A leftover offline account with the same name would be confusing
             // next to the real one; the Microsoft entry wins.
-            self.list.retain(|account| !(account.username == entry.username
-                && account.kind == AccountKind::Offline));
+            self.list.retain(|account| {
+                !(account.username == entry.username && account.kind == AccountKind::Offline)
+            });
             self.list.push(entry);
         }
         self.selected = Some(uuid);
@@ -697,9 +727,18 @@ mod tests {
 
         store.add("Steve").unwrap();
         store.add("Alex").unwrap();
-        let alex = store.list().iter().find(|a| a.username == "Alex").unwrap().uuid.clone();
+        let alex = store
+            .list()
+            .iter()
+            .find(|a| a.username == "Alex")
+            .unwrap()
+            .uuid
+            .clone();
         // First add auto-selects.
-        assert_eq!(store.selected_account().map(|a| a.username.as_str()), Some("Steve"));
+        assert_eq!(
+            store.selected_account().map(|a| a.username.as_str()),
+            Some("Steve")
+        );
         store.select(&alex).unwrap();
         store.save().unwrap();
 
@@ -708,16 +747,28 @@ mod tests {
         assert_eq!(back.list().len(), 2);
         assert_eq!(back.list()[0].username, "Steve");
         assert_eq!(back.selected_uuid(), Some(alex.as_str()));
-        assert_eq!(back.selected_account().map(|a| a.username.as_str()), Some("Alex"));
+        assert_eq!(
+            back.selected_account().map(|a| a.username.as_str()),
+            Some("Alex")
+        );
 
         // The raw document is the *shared* shape, and says which account is
         // active the way the other launcher reads it.
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(raw["formatVersion"], serde_json::json!(ACCOUNTS_FORMAT_VERSION));
+        assert_eq!(
+            raw["formatVersion"],
+            serde_json::json!(ACCOUNTS_FORMAT_VERSION)
+        );
         assert_eq!(raw["accounts"].as_array().unwrap().len(), 2);
-        assert_eq!(raw["accounts"][0]["profile"]["name"], serde_json::json!("Steve"));
-        assert_eq!(raw["accounts"][1]["profile"]["name"], serde_json::json!("Alex"));
+        assert_eq!(
+            raw["accounts"][0]["profile"]["name"],
+            serde_json::json!("Steve")
+        );
+        assert_eq!(
+            raw["accounts"][1]["profile"]["name"],
+            serde_json::json!("Alex")
+        );
         assert_eq!(raw["accounts"][0]["active"], serde_json::json!(false));
         assert_eq!(raw["accounts"][1]["active"], serde_json::json!(true));
         assert_eq!(raw["accounts"][1]["type"], serde_json::json!("Offline"));
@@ -775,16 +826,25 @@ mod tests {
         let (store, warn) = AccountsStore::load_with_report(&path);
         assert!(warn.is_none(), "{warn:?}");
         assert_eq!(store.list().len(), 2);
-        let account = store.selected_account().expect("the active account is selected");
+        let account = store
+            .selected_account()
+            .expect("the active account is selected");
         assert_eq!(account.username, "WSedge");
         assert_eq!(account.uuid, "119bed4a98cd44b399434000dacd244c");
         assert!(account.is_microsoft());
         assert_eq!(account.access_token.as_deref(), Some("game-token"));
         assert_eq!(account.refresh_token.as_deref(), Some("M.C555_refresh"));
-        assert_eq!(account.expires_at_ms, Some(1_789_405_992_000), "seconds became milliseconds");
+        assert_eq!(
+            account.expires_at_ms,
+            Some(1_789_405_992_000),
+            "seconds became milliseconds"
+        );
         assert_eq!(account.entitled, Some(true));
         // `active` is the selection, not `active` plus a separate key.
-        assert_eq!(store.selected_uuid(), Some("119bed4a98cd44b399434000dacd244c"));
+        assert_eq!(
+            store.selected_uuid(),
+            Some("119bed4a98cd44b399434000dacd244c")
+        );
         assert!(!store.list()[1].is_microsoft());
         // The expiry came out of the file in seconds and is the renewal rule's
         // input: outside the twelve-hour window nothing is renewed, inside it is.
@@ -793,7 +853,10 @@ mod tests {
             !account.needs_refresh(expiry - REFRESH_WINDOW_MS - 1),
             "a session with more than twelve hours left is used as it is"
         );
-        assert!(account.needs_refresh(expiry), "and one that has run out is renewed");
+        assert!(
+            account.needs_refresh(expiry),
+            "and one that has run out is renewed"
+        );
     }
 
     #[test]
@@ -807,7 +870,12 @@ mod tests {
 
         let (mut store, _) = AccountsStore::load_with_report(&path);
         store
-            .update_tokens("119bed4a98cd44b399434000dacd244c", "new-game-token", None, 1_800_000_000_000)
+            .update_tokens(
+                "119bed4a98cd44b399434000dacd244c",
+                "new-game-token",
+                None,
+                1_800_000_000_000,
+            )
             .unwrap();
         store.save().unwrap();
 
@@ -818,18 +886,39 @@ mod tests {
         assert_eq!(first["ygg"]["exp"], serde_json::json!(1_800_000_000));
         // Untouched, field for field.
         assert_eq!(first["xrp-mc"]["token"], serde_json::json!("xbox-token"));
-        assert_eq!(first["msa-client-id"], serde_json::json!("c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"));
-        assert_eq!(first["profile"]["cape"], serde_json::json!("b9d4f2e0-6109-43f7-97aa-84250ce3c1dd"));
-        assert_eq!(first["profile"]["skin"]["url"], serde_json::json!("http://textures/skin"));
-        assert_eq!(first["msa"]["extra"]["ext_expires_in"], serde_json::json!(3599));
-        assert_eq!(first["entitlement"]["ownsMinecraft"], serde_json::json!(true));
+        assert_eq!(
+            first["msa-client-id"],
+            serde_json::json!("c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb")
+        );
+        assert_eq!(
+            first["profile"]["cape"],
+            serde_json::json!("b9d4f2e0-6109-43f7-97aa-84250ce3c1dd")
+        );
+        assert_eq!(
+            first["profile"]["skin"]["url"],
+            serde_json::json!("http://textures/skin")
+        );
+        assert_eq!(
+            first["msa"]["extra"]["ext_expires_in"],
+            serde_json::json!(3599)
+        );
+        assert_eq!(
+            first["entitlement"]["ownsMinecraft"],
+            serde_json::json!(true)
+        );
         // The second account is still there, still not active.
-        assert_eq!(raw["accounts"][1]["profile"]["name"], serde_json::json!("Second"));
+        assert_eq!(
+            raw["accounts"][1]["profile"]["name"],
+            serde_json::json!("Second")
+        );
         assert_eq!(raw["accounts"][1]["active"], serde_json::json!(false));
         // And it reads back the same way.
         let (back, _) = AccountsStore::load_with_report(&path);
         assert_eq!(back.list().len(), 2);
-        assert_eq!(back.selected_account().unwrap().access_token.as_deref(), Some("new-game-token"));
+        assert_eq!(
+            back.selected_account().unwrap().access_token.as_deref(),
+            Some("new-game-token")
+        );
     }
 
     #[test]
@@ -856,12 +945,18 @@ mod tests {
         let mut names: Vec<&str> = back.list().iter().map(|a| a.username.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, vec!["NewPlayer", "Second", "WSedge"]);
-        assert_eq!(back.selected_uuid(), Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        assert_eq!(
+            back.selected_uuid(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
         // The one that was active before is still an account, now inactive.
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(raw["accounts"][0]["active"], serde_json::json!(false));
-        assert_eq!(raw["accounts"][0]["msa"]["refresh_token"], serde_json::json!("M.C555_refresh"));
+        assert_eq!(
+            raw["accounts"][0]["msa"]["refresh_token"],
+            serde_json::json!("M.C555_refresh")
+        );
     }
 
     #[test]
@@ -967,7 +1062,11 @@ mod tests {
         assert!(warn.is_none());
         let account = store.selected_account().unwrap();
         assert_eq!(account.username, "Steve");
-        assert_eq!(account.kind, AccountKind::Offline, "an unknown kind defaults to offline");
+        assert_eq!(
+            account.kind,
+            AccountKind::Offline,
+            "an unknown kind defaults to offline"
+        );
         assert!(account.access_token.is_none());
         assert!(!account.needs_refresh(0));
     }
@@ -983,12 +1082,27 @@ mod tests {
         let entry = &raw["accounts"][0];
         assert_eq!(entry["type"], serde_json::json!("Offline"));
         assert_eq!(entry["active"], serde_json::json!(true));
-        assert!(entry.get("ygg").is_none(), "no token block for a name-only account");
+        assert!(
+            entry.get("ygg").is_none(),
+            "no token block for a name-only account"
+        );
         assert!(entry.get("msa").is_none());
-        assert!(entry.get("entitlement").is_none(), "and nothing to claim about owning the game");
+        assert!(
+            entry.get("entitlement").is_none(),
+            "and nothing to claim about owning the game"
+        );
         // None of this launcher's own old keys leak into the shared shape.
-        for legacy in ["kind", "access_token", "refresh_token", "expires_at_ms", "entitled"] {
-            assert!(entry.get(legacy).is_none(), "{legacy} should not be written");
+        for legacy in [
+            "kind",
+            "access_token",
+            "refresh_token",
+            "expires_at_ms",
+            "entitled",
+        ] {
+            assert!(
+                entry.get(legacy).is_none(),
+                "{legacy} should not be written"
+            );
         }
     }
 
@@ -1005,7 +1119,10 @@ mod tests {
         assert_eq!(store.list().len(), 1, "one profile is one account");
         assert_eq!(store.list()[0].access_token.as_deref(), Some("fresh-token"));
         assert_eq!(store.list()[0].expires_at_ms, Some(2_000_000));
-        assert_eq!(store.selected_uuid(), Some("1a2b3c4d5e6f708192a3b4c5d6e7f809"));
+        assert_eq!(
+            store.selected_uuid(),
+            Some("1a2b3c4d5e6f708192a3b4c5d6e7f809")
+        );
     }
 
     #[test]
@@ -1035,7 +1152,10 @@ mod tests {
         let now = 1_000_000i64;
         let mut account = msa_entry();
         account.expires_at_ms = Some(now + REFRESH_WINDOW_MS + 1);
-        assert!(!account.needs_refresh(now), "still more than twelve hours left");
+        assert!(
+            !account.needs_refresh(now),
+            "still more than twelve hours left"
+        );
         account.expires_at_ms = Some(now + REFRESH_WINDOW_MS - 1);
         assert!(account.needs_refresh(now), "inside the window");
         account.expires_at_ms = Some(now - 1);
@@ -1067,9 +1187,16 @@ mod tests {
             .unwrap();
         let account = store.account("1a2b3c4d5e6f708192a3b4c5d6e7f809").unwrap();
         assert_eq!(account.access_token.as_deref(), Some("new-token"));
-        assert_eq!(account.refresh_token.as_deref(), Some("refresh-token"), "kept when not sent");
+        assert_eq!(
+            account.refresh_token.as_deref(),
+            Some("refresh-token"),
+            "kept when not sent"
+        );
         assert_eq!(account.expires_at_ms, Some(5_000));
-        assert!(account.entitled == Some(true), "ownership is not lost on a refresh");
+        assert!(
+            account.entitled == Some(true),
+            "ownership is not lost on a refresh"
+        );
         assert!(store.update_tokens("missing", "x", None, 1).is_err());
     }
 
