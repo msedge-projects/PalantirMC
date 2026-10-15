@@ -56,6 +56,14 @@ jobs:
 
       # `--locked` is deliberate: a manifest and lock file that have drifted
       # must fail here, on the machine that has never built the tree.
+      #
+      # This runner is also the only place `#[cfg(windows)]` code is compiled at
+      # all: `palantir-bedrock`'s AppX enquiry and shell activation, and the
+      # desktop's Windows paths, do not exist as far as a Linux build is
+      # concerned -- it skips them silently and reports green. That makes this
+      # step coverage by compilation on the one platform that has the code, not
+      # a live AppX exercise: nothing here installs, registers or launches a
+      # Store package, and only an entitled Windows machine can do that by hand.
       - name: Run tests
         run: cargo test --workspace --all-targets --locked
 
@@ -109,3 +117,77 @@ jobs:
       # transfers sequential and the output readable.
       - name: Download a real version, and resume a real transfer
         run: cargo test -p palantir-net --test live --locked -- --ignored --test-threads=1
+
+  # Packaging is the expensive half -- a release profile for the whole
+  # dependency graph is minutes of billed Windows runner time against seconds
+  # for the gates -- and its result is identical for a given tree, so a pull
+  # request gets the fast questions only and `master` gets the artifact. It
+  # needs the gates and not the live job: whether a service answers is not what
+  # a binary's shape depends on, so the two run side by side rather than one
+  # waiting on the other. The gates still come first, because a binary built
+  # from a tree that failed its tests is not worth uploading.
+  package:
+    name: Package the desktop
+    needs: gates
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rewrite/target
+          key: ${{ runner.os }}-rewrite-package-${{ hashFiles('rewrite/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rewrite-package-
+
+      # The desktop is the only deliverable this tree builds; every other crate
+      # is a library it links. `--locked` for the same reason as everywhere
+      # else: the artifact must be the tree the gates passed.
+      - name: Build the release desktop
+        run: cargo build --release --locked -p palantir-desktop
+
+      # A release build that silently produces nothing, or produces something
+      # truncated, is the exact failure a packaging job exists to catch: the
+      # build command's exit status alone does not prove a runnable artifact
+      # came out of it. The size floor is a shape check, not a portability
+      # proof -- this cannot tell which DLLs the exe imports, and no check here
+      # is a substitute for running it on a machine that has never had a Rust
+      # toolchain.
+      - name: Check the binary is there
+        shell: pwsh
+        run: |
+          $exe = "target/release/PalantirMC.exe"
+          if (-not (Test-Path $exe)) {
+            throw "the release build produced no $exe"
+          }
+          $size = (Get-Item $exe).Length
+          if ($size -lt 1MB) {
+            throw "$exe is only $size bytes; a desktop binary that small is a build that did not link what it needs"
+          }
+          "PalantirMC.exe: $([math]::Round($size / 1MB, 2)) MiB" | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      # `if-no-files-found: error` rather than the default warning: an artifact
+      # job that cannot find its artifact has failed at the one thing it does,
+      # and a warning would let that read as a green run. The name carries the
+      # ref and the run id so two runs cannot be mistaken for each other when
+      # they are downloaded into the same folder.
+      #
+      # This uploads and stops. No tag is created, no GitHub Release is
+      # created, and nothing is published to any registry: the product licence
+      # is still the owner's `UNLICENSED` placeholder, and choosing the licence
+      # and tagging the first Release is phase 8 -- the owner's decision, taken
+      # on a built tree with a green audit. Adding a publisher here would be
+      # making that decision by accident.
+      - name: Upload the desktop binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: PalantirMC-${{ github.ref_name }}-${{ github.run_id }}
+          path: rewrite/target/release/PalantirMC.exe
+          if-no-files-found: error
