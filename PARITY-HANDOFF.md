@@ -21,7 +21,8 @@ authorised for the work.
 | working tree | clean — only `.local/` untracked, which is correct |
 | commits | **26**, all pushed to both remotes |
 
-Remotes: `origin` = `MSedgeMC/PalantirMC`, `public` = `msedge-projects/PalantirMC`. Branch `master`.
+Remotes: `origin` and `public` both = `msedge-projects/PalantirMC` — `origin`
+was repointed there on 2026-10-15 when `MSedgeMC/PalantirMC` stopped resolving. Branch `master`.
 
 Verify before trusting anything below:
 

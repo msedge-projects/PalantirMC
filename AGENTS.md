@@ -10,7 +10,7 @@ task with a commit, pushed to both remotes, without asking first and without
 leaving the work uncommitted for a later session to rediscover:
 
 ```
-git push origin <branch>   # MSedgeMC/PalantirMC, private, the working record
+git push origin <branch>   # msedge-projects/PalantirMC (repointed 2026-10-15)
 git push public <branch>   # msedge-projects/PalantirMC, public, where CI runs
 ```
 
@@ -31,6 +31,14 @@ charged. So the tree is mirrored to `public`, where the same workflows run for
 free and the artifacts come from. The mirror is one-way in practice: it is
 never edited, never merged, and the working record stays on `origin`.
 
+**2026-10-15: `origin` was repointed at the mirror.** `MSedgeMC/PalantirMC`
+stopped resolving entirely -- a plain 404, no rename redirect, and the
+active token sees no organisation that could hold it -- so the working
+record could not be pushed anywhere but the mirror. `origin` now fetches
+and pushes `msedge-projects/PalantirMC` like `public` does. The paragraphs
+above stand as the reason two remotes existed; keep pushing to both names
+so a re-split loses nothing.
+
 **A push schedules nothing without an open pull request.** `ci.yml` narrows
 `push` to `master` and carries every other branch through `pull_request`: the
 mirror's PR (`msedge-projects/PalantirMC#1`) is what made every push on the
@@ -46,10 +54,10 @@ What that means in practice:
 - Push at the end of the task, then **confirm the run went green**:
   `gh run list --repo msedge-projects/PalantirMC --limit 3` and
   `gh run watch <id> --repo msedge-projects/PalantirMC`.
-- The two accounts are held by per-remote credential helpers in `.git/config`
-  (`gh auth token -u <account>`), so pushing needs no account switching and the
-  active `gh` account does not matter for a push. It does matter for `gh api`
-  calls against a private repository: `gh auth switch -u MSedgeMC` first.
+- The credential helpers in `.git/config` route `MSedgeMC/*` paths to the
+  `MSedgeMC` account and everything else to `msedge-projects`; since the
+  repoint both remotes take the latter, so pushing needs no account switching
+  and the active `gh` account does not matter for a push.
 - `AGENTS.md`'s rules apply to both remotes. In particular a `v*` tag publishes
   a Release wherever it is pushed, and on the mirror that Release is public.
 - When a run is red, fix forward with another commit. Do not amend or
