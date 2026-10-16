@@ -24,6 +24,51 @@ The phase list and its estimates come from the rewrite specification
 (`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` §6);
 phases 1–3 are the largest block of new work. All hours are estimates.
 
+## Offline-mode acceptance — Java and Bedrock, 2026-10-16
+
+Asked whether *every* game path had been checked, the answer was no, and the
+gap named was offline-mode launching for both editions. What exists and what
+was missing:
+
+- **Java offline launch was already implemented** — `LaunchMode::Offline`
+  hands the launch the selected offline account's name and derived uuid with
+  access token `0` and user type `legacy`, and needs no session
+  (`backend.rs::prepare_and_launch`); it is the *Microsoft* arm that refuses
+  and never falls back (`a_microsoft_launch_decides_from_the_stored_session_and_never_falls_back`).
+  Re-verified live twice on 2026-10-16: the loader suite's vanilla launch (the
+  real game installed into a temp root, spawned, watched 20 s) and
+  `tools/play_live.py` (the actual window, *Play with offline identity*, 762
+  files downloaded, the managed `jre-legacy` java watched on the real 1.5.2
+  classpath for 20 s). Both reproducible.
+- **Bedrock launching carries no launcher session by design**: `windows.rs::launch`
+  is a shell activation of the installed package (`activate_command`), so
+  there is no offline *mode* to add — the game owns its Xbox sign-in. What was
+  genuinely missing is that the real Windows branch had **no test at all**:
+  only the non-Windows stubs were covered, so `#[cfg(windows)]` compiled on CI
+  and was never run. Added
+  `windows_tests::the_real_enquiry_answers_without_a_store_session`, which runs
+  the real, read-only `Get-AppxPackage` enquiry with no Store or Xbox session
+  and asserts every package it returns is one this launcher can address. It
+  runs in the existing `windows-latest` gates job; a runner with no Bedrock
+  answers with an empty list, which is the honest result, so the test asserts
+  the enquiry *answered*, never that the game is present. Shell activation is
+  deliberately not called in a test — `start` is asynchronous and can raise an
+  "open with" prompt.
+
+**Harness requirement discovered:** `tools/play_live.py` sizes its window to
+1280×1500, so it needs a *tall* private display — this session's `Xvfb :95` and
+`:97` at 1920×2600 satisfy it. On the 1706×848 desktop display the window is
+clamped to 820 high and the accent-filled primary buttons stop reading in every
+OCR pass (3x/4x at psm 6 and 11), so the harness fails at its first control
+while the app itself is fine. Recorded so a future run on a short display is
+not mistaken for a product fault.
+
+**Still not automated:** Bedrock's actual *launch* (shell activation of a real
+package) needs an entitled Windows machine by hand; only its enquiry is
+automated now. The modpack-import paths remain fixture-driven — a real pack is
+installed through `pack_live.py`, but a genuine CurseForge/Prism archetype has
+not been imported and launched end to end.
+
 ## Live acceptance — the real game from the desktop Play button, 2026-10-15
 
 Phase 5's last gap closed the same way as the pack flow: the actual window,

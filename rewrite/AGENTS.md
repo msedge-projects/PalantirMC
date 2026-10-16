@@ -213,3 +213,13 @@ pack download and the real-game desktop launch were both verified through
 the actual window against live services (`tools/pack_live.py`,
 `tools/play_live.py`). Still open: real Microsoft native-client acceptance,
 Windows interactive acceptance; Phase 8's first Release is not cut.
+
+Offline-mode launching was re-checked 2026-10-16 for both editions: Java is
+live again (loader vanilla launch and `tools/play_live.py`), and Bedrock's real
+Windows *enquiry* now runs in the gates job
+(`windows_tests::the_real_enquiry_answers_without_a_store_session`, read-only,
+no Store session) — its actual *launch* still needs an entitled machine. The
+desktop acceptance requires a **tall** private X display (the window is sized
+1280×1500; this session's `Xvfb :95`/`:97` at 1920×2600 work): on a short
+display the window clamps and the accent-filled primary buttons stop reading in
+any OCR pass, so the harness stops at its first control while the app is fine.

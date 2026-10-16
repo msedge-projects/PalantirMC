@@ -120,3 +120,36 @@ mod tests {
         assert!(error.contains("Windows only"));
     }
 }
+
+// The Windows half of this module is the *only* place a real AppX enquiry
+// exists, so the one test that runs it has to be a Windows test too -- and the
+// gates job already runs `cargo test --workspace` on `windows-latest`, which is
+// the one runner where this code is compiled at all. The enquiry is read-only:
+// it never installs, registers, removes or launches a package, and it needs no
+// Store or Xbox session, so it is a legitimate offline check. A runner with no
+// Bedrock answers with an empty list, which is the honest result rather than a
+// failure -- the test asserts that the enquiry *answered*, never that the game
+// is present. Exercising shell *activation* is deliberately left out: `start`
+// is asynchronous and can raise an "open with" prompt, so launching belongs on
+// an entitled machine by hand, not in a test.
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::detect_installs;
+    use crate::paths::classify_package;
+
+    #[test]
+    fn the_real_enquiry_answers_without_a_store_session() {
+        let installs = detect_installs()
+            .expect("the read-only AppX enquiry must answer on Windows, session or not");
+        for install in &installs {
+            // Every entry the enquiry hands back must be one this launcher can
+            // address; an unlaunchable package would be worse than none.
+            assert_eq!(
+                classify_package(&install.package_name),
+                Some(install.channel),
+                "the enquiry returned a package this launcher cannot launch: {}",
+                install.package_name
+            );
+        }
+    }
+}
