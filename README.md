@@ -22,6 +22,7 @@ listed there.
 | --- | --- |
 | `AGENTS.md` | How to work here: commit/push rules, the commands CI runs, conventions the code already holds. Start here. |
 | `NEXT_STEPS.md` | Where the project stands and what is being done to it: the stage table, and where the old sections went. |
+| `HANDOFF.md` | The most recent session's handoff: what landed green, what is in the tree but not yet reachable from the window, and the seams the next changes go through. |
 | `NOTES.md` | The engineering record — what was measured and what it cost. Sections keep their old `NEXT_STEPS.md` numbers because source comments cite them. |
 | `GATES.md` | The recorded gate results: what each gate asserts, the command that runs it, and the capture it was judged from. |
 | `REFERENCE.md` | The design reference: what was measured off the Modrinth App, token by token, and how the shell draws it. |
