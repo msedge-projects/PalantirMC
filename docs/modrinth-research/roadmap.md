@@ -197,6 +197,10 @@ a missing context action, so completeness matters more than polish.
 
 ## Slice 10 — Breadcrumb and titlebar route context
 
+**Shipped 2026-10-17** — `crates/palantir-desktop/src/route.rs`, rendered above
+every page, with Back/Forward over a trail of visited routes (Alt+Left/Right).
+The window smoke reads it in the actual window; see `rewrite/NOTES.md`.
+
 **Do.** A breadcrumb in the titlebar (`OBSERVED S-0002,S-0003`). Cheap, and it is
 the main answer to the reference's icon-only rail: if the rail is icons, the
 user must always be able to see where they are in words.

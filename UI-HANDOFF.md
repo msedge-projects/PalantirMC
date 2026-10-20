@@ -1,5 +1,196 @@
 # UI hand-off — start the selected model here
 
+## Latest continuation — Settings is the reference's rail, row for row (2026-10-18)
+
+The Preferences dialog is now Settings, and it is the reference's settings
+surface: **ten tabs in three groups** (Display: Appearance, Features, Behavior,
+Language, Feature flags · Account: Profile, Privacy · Instances: Synced
+settings, Java installations, Resource management), in its order, with Language
+badged Beta and Feature flags hidden until developer mode is on. Rows keep its
+anatomy (name, sentence, control in a fixed lane).
+
+Only rows this build honours are on the page. The first cut also listed every
+reference row with no capability behind it, tagged `Not in this build` with a
+reason; that read as an inventory of what is missing and is gone, along with
+the Social tab it filled. What is left is pressable: accent, density, activity
+panel, the five instance-tab switches, remember-last-page, language search,
+offline identities, the Microsoft client id, the Java roster, launcher window
+size and memory, data directory, diagnostics.
+
+Also deliberate, and recorded in `rewrite/NOTES.md`: one save model for every
+tab instead of the reference's two (its own research calls that split the
+biggest UX bug class on the screen), and `Reset` meaning discard-the-draft —
+there is no footer action that wipes the file. Toggle rows are
+a single control: the whole row presses, the switch is drawn so one click is
+one change, and the keyboard gets one stop per row. At the 840-pixel minimum
+the rail wraps into three rows of chips so all eleven tabs stay reachable.
+
+## Previous continuation — our own palette, and browse laid out like a catalogue (2026-10-18)
+
+The layout borrows the catalogue shape; the colour no longer borrows the
+catalogue's. Read `rewrite/NOTES.md` → *The palette is ours, and the browse
+pages borrow only a shape* for the full record. In short:
+
+- **Palette.** Warm obsidian floor (`BG #17130F`, `SURFACE #221C16`,
+  `INSET #110E0A`, `CONTROL #2D251D`) with one accent, `EMBER #F0932B` — the
+  light inside a palantír. The default accent variant is `Ember`; `Copper` and
+  `Emerald` remain serde aliases so old `preferences.json` files keep their
+  accent. `assets/*.svg` were recoloured to match.
+- **Contrast, measured.** Every text pairing passes AA (4.5:1) with margin. The
+  failure the review found was non-text: the field border was 1.4:1, so
+  `design::LINE` (dividers, scroll handles) and `design::RULE` (3.97:1, every
+  interactive edge) are now separate tokens, and an option row's hover lifts
+  both its plate and its ink.
+- **Discover** is a filter rail (two ninths of the body, capped at 260) beside
+  a result lane: search, count, results two to a row as listing cards,
+  pagination. Narrow widths turn the rail into a row of chips. The split is by
+  `FillPortion`, not a fixed rail width: a fixed one made 1440 → 840 a negative
+  width on the first frame after the resize and crashed the renderer.
+- **The instance page** opens on a header card (mark, name, game/loader/state
+  tags, Play) with a tab strip — word over rule, accent rule on the chosen tab —
+  under it. `App::instance_status` is the single source for the state tag.
+- **Also removed by the review:** Home's four equal stat tiles (now one line of
+  the same real counts), the Bedrock eyebrow, the shouted `EDITION` caption,
+  the capsule radius on chips, and the cool dialog scrim.
+
+Harness: `tools/ui_smoke.py` matched phrases by substring, so the content-type
+picker's `Mod` clicked `Mods folder` behind the dialog and dismissed it — it now
+matches whole words only. Its thresholded dialog pass used 55%, which loses the
+dark caption on a bright plate; at 35% and through overlapping 200-pixel
+windows across the foot of the window, the primary action reads.
+
+## Previous continuation — the live drivers both pass (2026-10-17)
+
+The two acceptance scripts the work order left unrun now pass on the current
+build, on a private Xvfb (`:105`):
+
+- `tools/pack_live.py` — a live catalogue modpack reviewed, downloaded and
+  installed into a brand-new collection (26.1.2 NeoForge; 28 files on disk, 26
+  under `game/`).
+- `tools/play_live.py` — a vanilla 1.5.2 collection created through the window
+  and played with the offline identity; the game process was watched alive for
+  20 s (762 files on disk).
+
+Driving them fixed the harness where its copy had drifted (the Discover search
+placeholder, `Open`, `Select`), added a thresholded 6× top-band pass because
+tesseract discarded the pale *New instance* pill inside the dark page, and
+found one real gap: the pack-setup dialog's name field had no caption and no
+open-focus, unlike Create and Import. It now has both. Discover results remain
+live cards with catalogue icons (CDN-only, 512 KB cap, fetched once).
+
+Gates from `/PalantirMC/rewrite`: **374 tests across 32 targets** (0 failed, 7
+live-ignored), `cargo fmt --all -- --check` clean, workspace Clippy
+`--all-targets --locked -- -D warnings` clean, licence audit 6/6 (22 manifest
+rows). `tools/ui_smoke.py` passes on the same build.
+
+## Previous continuation — the route in words, and a way back (2026-10-17)
+
+**Roadmap slice 10 shipped.** The line above every page was an eyebrow that
+named the page and nothing else; a collection's tab and an open catalogue
+project were invisible in the one piece of chrome every surface shares. It is
+now a route breadcrumb with pressable ancestors, and the places a player
+visits are a trail that Back and Forward walk:
+
+- `route::Route` is page + open collection (id and the name it had when
+  recorded) + tab + project; `route::Trail` is a bounded (32) list with a
+  cursor, and a new place after going back drops the forward branch, the way a
+  browser does. Identity is ids, not names — a rename is not a step.
+- Recording lives in one place: the `update` wrapper compares the route before
+  and after the outermost message. A nested `update` is the rest of the same
+  step (`SelectTab` selects, then chooses the tab), so it is not a step of its
+  own. `apply` is an inherent method for exactly this reason.
+- Crumbs read `INSTANCES / My instance / Content`
+  (`INSTALLED COPIES` on the Bedrock shelf, `DISCOVER / <project>` in the
+  catalogue; Home alone reads `HOME`). Ancestors are a muted caption under `mouse_area`, not pills;
+  `‹ Back` / `Forward ›` are real buttons so the keyboard can reach them and
+  are disabled rather than hidden when there is nowhere to go. Alt+Left /
+  Alt+Right are the same messages and stay dormant while a dialog owns the
+  keyboard.
+- Restoring a project re-requests its detail and releases, so Back never lands
+  on a blank page; a collection deleted while the window was away falls back
+  to the shelf instead of a missing place.
+
+Driving it found a defect the tests could not: at 840×600 with the import
+review open the renderer panicked on a quad with a non-normal width. The crumb
+line sat before a `Fill` spacer, so an overflowing line left the activity
+toggle beside it a negative width. The line now owns the flexible slot
+(`container(...).width(Fill).clip(true)`), the narrow layout keeps only the two
+crumbs that name the place, and a caption is capped at 24 characters. A focused
+probe reproduces the old crash in seconds by opening the review and shrinking
+the window; it also caught the harness hanging seven minutes on a capture of
+the dead window, so every external tool now has a 120-second bound and every
+observation first checks that the launcher is still running.
+
+The licence audit then caught two things the code gates do not: a test comment
+named a file in the reference application's tree (rule 4 — clean-room forbids
+citing their source; the comment now records observed behaviour), and rule 5
+counted this session's smoke screenshots under `rewrite/.local/` as shipped
+assets (616 problems). `.local` is scratch, never reachable from a build, so the
+audit now skips it beside `.scratch` with that reason at the constant; the
+manifest again covers the 28 real assets and `--selftest` still behaves.
+
+Measured: 7 `route` tests and the desktop test that walks Back and Forward to
+the same places are green; the workspace is **370 tests across 26 targets** (0
+failed, 7 live-ignored), `cargo fmt --check` and Clippy `-D warnings` clean,
+licence audit 6/6 with its self-test. The window smoke reads the crumb band on
+the real collection page, drives Alt+Left to Home and Alt+Right back to
+Overview, and passes twice consecutively from a clean fixture. Roadmap slices
+5, 6 and 11 remain unshipped (their own rule made them optional).
+
+## Previous continuation — the sign-in row, and a rail that stays put (2026-10-16)
+
+**Microsoft sign-in became shippable by a player, not only by a deployment.**
+The registered native client's application id was environment-only
+(`PALANTIR_MSA_CLIENT_ID`), which is fine for a live test and useless for
+someone who installed the launcher: the feature read as permanently
+unavailable. It is now a settings row — Preferences → Java & player,
+*Registered client id* — with the environment kept as the fallback:
+
+- `Preferences::msa_client_id`, resolved by `Preferences::client_id(environment)`
+  (the saved value wins; the environment arrives as an argument so the rule
+  stays pure). `Request::Authenticate(client_id)` carries the answer to the
+  worker, so sign-in uses the live preferences rather than re-reading a file.
+- The value is validated at the settings door: five groups of hex, 8-4-4-4-12.
+  A pasted client *secret*, the portal URL it came from or a truncated id is
+  refused by name — "The Microsoft client id is not an application (client)
+  id … A client secret does not belong here." — instead of reaching Microsoft
+  as `invalid_client`, which names nothing a player can act on.
+- Copy that claimed the environment was the only way was corrected in the
+  pane, the sign-in dialog, the account dialog and the README.
+
+**A defect this change caused, found by driving the real window.** Java & player
+is the longest settings pane and the row made it longer; the Preferences dialog
+scrolled rail and pane as one body, so reaching the new row carried all eight
+tabs off the top (measured in the failing capture: the strip left of the pane,
+x 130–430, held no tab word at all). The rail is navigation, so the dialog now
+keeps it fixed and scrolls the pane instead — `surfaces::panel_shell_fixed`
+plus a pane lane of its own (`settings-pane`), while the Settings *page* keeps
+the page-level scroll it always had. Measured after the fix in the same state:
+the rail's tabs read 45 pixels apart at x≈249 (Appearance 270, Language 315,
+Java & player 359, Window 404, Resources 449, Privacy 491, Behaviour 538) with
+the pane scrolled to the sign-in row, and Behaviour → Features → Worlds tab →
+Save each succeed on the first attempt. The chosen tab still snaps both
+surfaces to their tops (`dialog-body` and `settings-pane`).
+
+**Harness.** `tools/ui_smoke.py` gained the sign-in row (paste a GUID, save,
+read `preferences.json`; paste a secret, see the refusal, prove the file is
+untouched; clear it and prove the value is empty) and now reads the Java roster
+from the file each action writes rather than from a row that can sit at the
+pane's clip edge. Two driver defects were fixed with their measurement: one
+observation costs **9.5s**, and `click` swept on an attempt count, so the first
+sweep arrived 29s into a 45s deadline and a control one screen down was
+reported missing — recovery now sweeps on a clock (≥6s between sweeps, 90s
+deadline) and `assert_text` sweeps the same way (40s). Latest runs: **PASS**
+twice consecutively (see below). Gates from `/PalantirMC/rewrite`: 362
+workspace tests pass across all targets (0 failed, 7 live-ignored),
+`cargo fmt --all -- --check` clean, workspace Clippy `--all-targets --locked --
+-D warnings` clean.
+
+Roadmap slices 5, 6 and 11 remain unshipped (their own rule made them
+optional); live Microsoft native-client acceptance still needs an app
+registration only the owner can create, and Windows interactive acceptance is
+still outstanding.
+
 ## Minimum-size defect pass (2026-10-15) — the last work of the work order
 
 After the third pass, actual-window captures at the supported minimum sizes
@@ -64,8 +255,8 @@ magnification (3× garbled short button words) and unions two tesseract passes
 (default + sparse, which mis-segment different words); one button is clicked
 by the readable half of its label ("and review" for "Resolve and review
 files"); the home card lookup retries across captures and reports what it saw
-on a miss. Roadmap slices 5, 6, 10, 11 are the remaining unshipped work
-(their own rule made them optional).
+on a miss. Roadmap slices 5, 6 and 11 remained after that pass; slice 10
+shipped on 2026-10-17 (see the top of this file).
 
 ## Previous continuation — research-driven settings slices (2026-10-14, second pass)
 
