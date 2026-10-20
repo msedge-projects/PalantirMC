@@ -34,6 +34,9 @@
 //! * No `.unwrap()`/`.expect()` outside tests.
 
 pub mod auth;
+/// CurseForge's Core API: the catalogue beside Modrinth's, browsed uncached
+/// because Overwolf's terms forbid keeping what it answers.
+pub mod curseforge;
 pub mod download;
 /// The engine every request goes through: one client, one concurrency ceiling,
 /// cancellable transfers, resumable downloads and one retry policy.
@@ -52,6 +55,13 @@ pub use auth::{
     BlockingHttpTransport, DeviceCodeResponse, HttpResponse, HttpTransport, MapTransport,
     MicrosoftAuth, MicrosoftOAuth, MinecraftCape, MinecraftSession, MinecraftSkin, MinecraftSkins,
     MsaToken, MultipartBody, OfflineSession, PollOutcome, SkinChange, DEFAULT_MICROSOFT_CLIENT_ID,
+};
+pub use curseforge::{
+    fetch_files, fetch_mod, fetch_search, files_url, mod_url, parse_download_url, parse_files,
+    parse_mod, parse_search, resolve_download, CfAuthor, CfCategory, CfClass, CfDependency, CfFile,
+    CfHash, CfLoader, CfLogo, CfManifest, CfManifestFile, CfManifestLoader, CfManifestMinecraft,
+    CfMod, CfPage, CfPagination, CfQuery, CfSort, API_KEY_HEADER, CURSEFORGE_BASE_URL,
+    MAX_PAGE_SIZE, MINECRAFT_GAME_ID,
 };
 pub use download::{
     download_bytes, download_file, download_many, download_many_with_progress, sha256_hex,

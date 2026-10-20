@@ -21,6 +21,10 @@ mod anim;
 /// The reference's `Avatar`: a project's own icon, decoded and rounded to the
 /// share of its size the reference's own stylesheet rounds it by.
 mod avatar;
+/// Bedrock: what this launcher may do with the edition it did not install --
+/// find the player's own copy, list its worlds and packs, and offer the Store
+/// link instead of a download. See the module for why there is no pipeline.
+mod bedrock;
 mod brand;
 mod browse;
 mod catalog;
