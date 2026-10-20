@@ -13,3 +13,7 @@ __pycache__/
 # The evidence bundle tools/pack_transfer.py writes: recordings and the frames
 # derived from them, which are captures rather than source.
 /transfer/
+
+# The clean-room tree, parked here rather than deleted when the project went
+# back to the Modrinth port. Not part of any build.
+/.archive/

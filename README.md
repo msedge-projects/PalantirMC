@@ -25,7 +25,7 @@ listed there.
 | `NOTES.md` | The engineering record — what was measured and what it cost. Sections keep their old `NEXT_STEPS.md` numbers because source comments cite them. |
 | `GATES.md` | The recorded gate results: what each gate asserts, the command that runs it, and the capture it was judged from. |
 | `REFERENCE.md` | The design reference: what was measured off the Modrinth App, token by token, and how the shell draws it. |
-| `docs/superpowers/specs/` | Dated working specs. The active one is `2026-10-08-clean-room-own-licence-rewrite.md`, which supersedes the port described by `2026-09-24-modrinth-native-rewrite.md`. |
+| `docs/superpowers/specs/` | Dated working specs. The active one is `2026-09-24-modrinth-native-rewrite.md`, the port this tree implements; the clean-room spec dated 2026-10-08 was abandoned on 2026-10-20 and its tree is parked at `.archive/clean-room/`. |
 
 ## Layout
 
@@ -156,15 +156,14 @@ copy, so the text travels next to them rather than inside. Third-party component
 keep their own licences, which are unaffected: full notices, with provenance, in
 `THIRD_PARTY_NOTICES.md`.
 
-The repository still carries material it is in the process of replacing. It
-vendors the Modrinth App source (GPL-3.0, pinned in
-`vendor/modrinth-app/UPSTREAM.md`) as a read-only measurement reference — never
-compiled, never shipped — and three generated files and one asset directory were
-compiled from it. **The GPL-3.0 terms continue to apply to that material, and to
-the combined work, until each item is removed**; `NOTES.md` keeps the list and
-`docs/superpowers/specs/2026-10-08-clean-room-own-licence-rewrite.md` is the
-clean-room route that ends it — a fresh repository, written from behaviour and
-public formats, with no file taken from this one.
+The repository derives from the Modrinth App, which is GPL-3.0. It vendors that
+source at `vendor/modrinth-app/` (pinned in `UPSTREAM.md`), and three generated
+files and one asset directory were compiled out of it — ported, not merely
+measured. **GPL-3.0 therefore governs this whole work, source and binary alike,
+and the clean-room route that would have ended that was dropped on 2026-10-20.**
+`NOTES.md` keeps the list of what came from upstream. The proprietary claim above
+is a placeholder the owner has to replace: a tree built this way cannot honestly
+be distributed on terms other than the GPL's.
 
 Modrinth's name, wordmark and logo are its marks and not ours, and no licence
 grants rights in an identity: this launcher draws its own mark and its own

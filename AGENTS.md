@@ -253,10 +253,9 @@ fails when they do.
 
 ## 8. Working pace: never a dead second
 
-The clean-room rewrite under `rewrite/` keeps its own working context in
-`rewrite/AGENTS.md` (standing instructions, exact gates, phase state);
-read it before working in that tree. It is the same discipline, scoped
-to the rewrite.
+There is one workspace: this one. The clean-room tree that used to sit at
+`rewrite/` was parked at `.archive/clean-room/` on 2026-10-20 when the project
+went back to the Modrinth port, and it is not part of any build, gate or release.
 
 Owner's standing instructions (2026-10-09), for every session:
 
@@ -264,7 +263,14 @@ Owner's standing instructions (2026-10-09), for every session:
   background, do the next thing: write the next module, analyze the next
   format, fetch the next fixture, review the last diff. Polling loops that
   do nothing else are waiting; polling that is interleaved with real work
-  is progress.
+  is progress. Concretely (owner, 2026-10-17): never hold a turn while a
+  build, test run or window smoke compiles — start it with the background
+  runner, then make the next edit, write the records, or read the next file,
+  and collect the result when the work that needed it is done. A test cycle
+  and a UI drive can run at the same time when they touch different files.
+  Independent reads, searches and verification steps go out in one batch
+  rather than one call each, and a mechanical change repeated across many
+  files is fanned out to parallel workers instead of serialised.
 - **Test a feature as it is written.** The moment code exists, kick its
   tests off in the background and keep building; collect and act on the
   result before claiming anything is done. A finished feature is one whose
