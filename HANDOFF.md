@@ -56,6 +56,12 @@ The `makensis` run above was against a **dummy `MZ` payload** standing in for
 binary. It proves the script compiles and links; it does not prove the
 installer runs.
 
+The push that carried this file was answered on the runner by CI run
+`39453976089`: **all five jobs green** — Lint, Test workspace, Live services,
+and both Windows exes. That is the first time `bedrock.rs` and `curseforge.rs`
+compiled into a Windows binary; it is still not evidence that the installer has
+been run.
+
 ## 3. What is not done — the next three things, in this order
 
 ### 3a. CurseForge is not in Discover (highest value, smallest surface)
