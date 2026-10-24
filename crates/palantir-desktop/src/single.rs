@@ -112,10 +112,12 @@ pub fn tell_the_user(pid: u32) {
         .collect();
     // Both pointers are to buffers this function owns, alive across the call, and
     // the dialog is modal until it is answered; there is no pre-condition left
-    // over, which is all the `unsafe` covers.
+    // over, which is all the `unsafe` covers. The owner is `0` -- no window --
+    // because `HWND` is an `isize` in windows-sys 0.52, the same handle type
+    // `native::own_hwnd` returns.
     unsafe {
         MessageBoxW(
-            std::ptr::null_mut(),
+            0,
             text.as_ptr(),
             title.as_ptr(),
             MB_OK | MB_ICONINFORMATION,
@@ -206,10 +208,12 @@ fn alive(pid: u32) -> bool {
 
     // Both calls take a handle this function owns and closes; neither has a
     // pre-condition this code does not satisfy, which is the whole of the
-    // `unsafe` here.
+    // `unsafe` here. A failed `OpenProcess` answers `0` -- `HANDLE` is an
+    // `isize` in windows-sys 0.52, which is also why the comparison is not
+    // `is_null`.
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle.is_null() {
+        if handle == 0 {
             return false;
         }
         let mut code: u32 = 0;
