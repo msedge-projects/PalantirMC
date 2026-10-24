@@ -10160,41 +10160,90 @@ struct RailButton {
 }
 
 impl<Message> canvas::Program<Message> for RailButton {
-    type State = ();
+    type State = CachedRail;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
-        if let Some(color) = self.background {
-            frame.fill(&Path::circle(center, PLATE_RADIUS), color);
+        // Cached for the same reason `crate::icon` is, and by the same rule: a
+        // canvas that rebuilds its frame and re-tessellates its glyph on every
+        // draw is a per-frame cost that grows with what is on screen, which is how
+        // a scroll becomes a slideshow on a slow machine and merely wasteful on a
+        // fast one. Nine of these are on the rail at all times; only the one that is
+        // actually animating misses its cache, because only its inputs change.
+        let key = CachedRail::of(self, bounds.size());
+        if state.key.get() != Some(key) {
+            state.cache.clear();
+            state.key.set(Some(key));
         }
-        if let Some((opacity, scale)) = self.plate {
-            let color = Color {
-                a: self.plate_ink.a * opacity,
-                ..self.plate_ink
-            };
-            frame.fill(&Path::circle(center, PLATE_RADIUS * scale), color);
-        }
-        // The icon sits in the middle of the plate, at `RAIL_ICON` pixels
-        // whatever the plate's own size is.
-        let (scale, offset) = icon::fit(self.glyph, RAIL_ICON);
-        let inset = (PLATE - RAIL_ICON) / 2.0;
-        frame.translate(Vector::new(inset + offset.x, inset + offset.y));
-        frame.scale(scale);
-        for (path, paint) in icons_gen::parts(self.glyph, scale, self.ink) {
-            match paint {
-                icons_gen::Paint::Stroke(stroke) => frame.stroke(&path, stroke),
-                icons_gen::Paint::Fill(color) => frame.fill(&path, color),
+        let geometry = state.cache.draw(renderer, bounds.size(), |frame| {
+            let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+            if let Some(color) = self.background {
+                frame.fill(&Path::circle(center, PLATE_RADIUS), color);
             }
-        }
-        vec![frame.into_geometry()]
+            if let Some((opacity, scale)) = self.plate {
+                let color = Color {
+                    a: self.plate_ink.a * opacity,
+                    ..self.plate_ink
+                };
+                frame.fill(&Path::circle(center, PLATE_RADIUS * scale), color);
+            }
+            // The icon sits in the middle of the plate, at `RAIL_ICON` pixels
+            // whatever the plate's own size is.
+            let (scale, offset) = icon::fit(self.glyph, RAIL_ICON);
+            let inset = (PLATE - RAIL_ICON) / 2.0;
+            frame.translate(Vector::new(inset + offset.x, inset + offset.y));
+            frame.scale(scale);
+            for (path, paint) in icons_gen::parts(self.glyph, scale, self.ink) {
+                match paint {
+                    icons_gen::Paint::Stroke(stroke) => frame.stroke(&path, stroke),
+                    icons_gen::Paint::Fill(color) => frame.fill(&path, color),
+                }
+            }
+        });
+        vec![geometry]
+    }
+}
+
+/// What a rail button's canvas keeps between frames.
+///
+/// The key is every input the drawing reads: the glyph, the two colours, the plate's
+/// opacity and growth (as bits), and the box it is drawn in. Anything less and a
+/// hover would keep drawing the plate it had a frame ago.
+#[derive(Debug, Default)]
+struct CachedRail {
+    cache: canvas::Cache,
+    key: std::cell::Cell<Option<RailKey>>,
+}
+
+/// The inputs a rail button's mesh is drawn from.
+type RailKey = (
+    Glyph,
+    Option<[u8; 4]>,
+    Option<(u32, u32)>,
+    [u8; 4],
+    [u8; 4],
+    (u32, u32),
+);
+
+impl CachedRail {
+    /// The key this button draws under.
+    fn of(button: &RailButton, size: iced::Size) -> RailKey {
+        (
+            button.glyph,
+            button.background.map(Color::into_rgba8),
+            button
+                .plate
+                .map(|(opacity, scale)| (opacity.to_bits(), scale.to_bits())),
+            button.plate_ink.into_rgba8(),
+            button.ink.into_rgba8(),
+            (size.width.to_bits(), size.height.to_bits()),
+        )
     }
 }
 

@@ -15,7 +15,7 @@
 //!   declares `preserveAspectRatio`, so all of them take the SVG default, which
 //!   is a uniform scale that fits and centres. [`fit`] is that rule.
 
-use iced::widget::canvas::{self, Canvas, Frame, Geometry};
+use iced::widget::canvas::{self, Canvas, Geometry};
 use iced::{mouse::Cursor, Color, Element, Length, Rectangle, Renderer, Theme, Vector};
 
 use crate::icons_gen::{self, Glyph, Paint};

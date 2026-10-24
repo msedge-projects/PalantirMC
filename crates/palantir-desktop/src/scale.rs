@@ -462,3 +462,59 @@ fn the_interaction_clock_costs_this_much_a_frame() {
         "the clock is read once per control per frame; worst was {worst:.3} ms"
     );
 }
+
+/// Every canvas in this shell caches its geometry, and none builds a frame by hand.
+///
+/// **The device-independent half of the scrolling work.** A `Canvas` whose `draw`
+/// rebuilds its frame and re-tessellates its paths is a cost that scales with what
+/// is on screen and is paid on every frame -- which is invisible on a fast machine
+/// and is a slideshow on a slow one. Icons were that, thirty at a time, until
+/// `crate::icon` grew a `canvas::Cache`; the rail's nine buttons were that too.
+///
+/// This gate reads the crate's own sources rather than its behaviour, because the
+/// behaviour is a frame rate and a frame rate is not something a test on a runner
+/// can hold. What it can hold is the shape of the code that makes the frame rate:
+///
+/// * `Frame::new(` appears **nowhere** outside these tests. A canvas is handed a
+///   frame by `Cache::draw`, and a fresh one is what "rebuilt from scratch every
+///   frame" is made of.
+/// * every `impl canvas::Program` keeps some `State`: `type State = ()` is exactly
+///   the stateless canvas that has nowhere to hold a cache, and both canvases in
+///   this crate name a type whose definition holds a `canvas::Cache`.
+///
+/// A third canvas added without a cache, or a glyph drawn by building its own
+/// frame, fails here on the runner instead of in somebody's scroll.
+#[test]
+fn every_canvas_caches_the_geometry_it_draws() {
+    let sources = [
+        ("icon.rs", include_str!("icon.rs")),
+        ("shell.rs", include_str!("shell.rs")),
+    ];
+    for (name, source) in sources {
+        // The drawing half, not the tests. Anchored on the test *module* rather than
+        // on the first `#[cfg(test)]`: this crate puts `#[cfg(test)]` on individual
+        // items too, and splitting there would read a few hundred lines and call it
+        // the file.
+        let body = match source.find("\nmod tests {") {
+            Some(at) => &source[..at],
+            None => source,
+        };
+        assert!(
+            !body.contains("Frame::new("),
+            "{name} builds a canvas frame by hand: a cached canvas is handed one"
+        );
+        for (at, _) in body.match_indices("canvas::Program<") {
+            let head = &body[at..(at + 600).min(body.len())];
+            let state = head.split("fn draw").next().unwrap_or(head);
+            assert!(
+                state.contains("type State =") && !state.contains("type State = ()"),
+                "{name}: a canvas program with no state has nowhere to cache its \
+                 geometry, and re-tessellates every frame (at byte {at})"
+            );
+        }
+        assert!(
+            body.contains("canvas::Cache"),
+            "{name} draws a canvas but holds no Cache for it"
+        );
+    }
+}

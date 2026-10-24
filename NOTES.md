@@ -4483,3 +4483,44 @@ whatever iced and the GPU cost per frame, which is now in the same league as any
 iced app. If a scroll still stutters after this, the next measurement is the app's
 own frame intervals -- not the curve, which has now been wrong three times and is
 finally the least interesting part of the story.
+## The rule is now "no canvas rebuilds per frame", and CI says so
+
+A fix that only works on the machine it was felt on is not a fix, so the icon work
+is finished as a *rule* rather than as a patch:
+
+1. **The last uncached canvas is cached.** `shell.rs`'s `RailButton` drew its plate,
+   its selection pill and its glyph into a fresh `Frame` on every draw -- nine of
+   them on the rail at all times, and one of them re-drawing on every frame of a hover
+   tween. It now holds a `canvas::Cache` keyed by everything its drawing reads: the
+   glyph, both colours, the plate's opacity and growth as bits, and the box it is
+   drawn in. Only a button whose inputs actually change misses its cache; the other
+   eight draw their stored mesh.
+
+2. **A gate holds the shape of the code, because a frame rate is not something a
+   runner can assert.** `scale::every_canvas_caches_the_geometry_it_draws` reads this
+   crate's own sources and fails if either of these stops being true:
+   - `Frame::new(` appears nowhere in the drawing half of `icon.rs` or `shell.rs` --
+     a canvas is handed its frame by `Cache::draw`, and building one by hand is
+     exactly what "rebuilt from scratch every frame" looks like;
+   - every `impl canvas::Program` keeps state (`type State = ()` is the stateless
+     canvas with nowhere to hold a cache), and each file that draws a canvas names a
+     `canvas::Cache`.
+
+   Both halves were written by failing first: the first version matched on the impl
+   body and caught nothing (the cache lives in the `State` type), and the second
+   truncated `shell.rs` at its first `#[cfg(test)]` attribute and reported a canvas
+   that does cache. The rule it enforces is the one that matters: **the number of
+   tessellations per frame must not scale with what is on screen.** That is true on
+   every device, and it is what made a scroll cost a slideshow on a slow one and
+   merely waste on a fast one.
+
+**What was measured.** `sift-launcher`, `cargo test --workspace --all-targets
+--locked`: **1,410 passed / 0 failed**, 19 ignored; clippy
+`-D clippy::correctness` exits 0. The desktop crate's 895 is the 893 after the icon
+cache plus the rail's cache-related gate and the icon key test.
+
+**What this cannot say.** It cannot promise sixty frames a second on a device that
+cannot draw sixty frames a second -- what it guarantees is that scrolling no longer
+*asks* for work that grows with the page. If a scroll still stutters after this, the
+remaining cost is iced's own per-frame draw, and the next step is to measure frame
+intervals on the machine in question rather than to touch the easing again.
