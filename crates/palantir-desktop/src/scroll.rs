@@ -168,7 +168,29 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// either way — which is the whole reason this is a duration. A frame count
 /// makes the *length* of the gesture depend on how fast the machine happens to
 /// be, and on a slow renderer that turns a scroll into a slideshow.
+///
+/// **A ceiling, not a constant.** A glide lasts as long as its distance is worth
+/// at [`GLIDE_SPEED`] and never longer than this; see [`ScrollAnim::begin`]. The
+/// first version used this number for every gesture, and one notch then took the
+/// same fifth of a second as a whole page — which is exactly what "the scrolling
+/// is laggy" describes from the other side of the screen.
 pub const DURATION: Duration = Duration::from_millis(160);
+
+/// How fast a glide is allowed to move the page, in pixels a second.
+///
+/// 6,000 is a hundred pixels in one 16 ms frame: a wheel notch is over before the
+/// next frame can show the page anywhere but where the notch put it, and a long
+/// flick still takes several frames to arrive instead of teleporting. Any finite
+/// number makes a glide last `distance / speed`, which is what stops a small move
+/// from paying the ceiling's price.
+pub const GLIDE_SPEED: f32 = 6_000.0;
+
+/// The shortest glide, so a notch's own step is not stretched across a frame.
+///
+/// A glide this short is over at the first [`ScrollAnim::tick`] after its start,
+/// which is one frame on any machine: the notch lands, and nothing is left
+/// animating.
+pub const GLIDE_FLOOR: Duration = Duration::from_millis(16);
 
 /// Below this many pixels from the target, the animation is over.
 ///
@@ -256,19 +278,43 @@ impl ScrollAnim {
 
     /// Start easing toward the target.
     ///
-    /// Every machine gets the same gesture: the deadline is what bounds the
-    /// cost, so a slow one draws fewer steps of it rather than none.
+    /// **A gesture that is already moving keeps its clock.** The first version
+    /// restarted the ease on every wheel event — `from` became wherever it had got
+    /// to, `began` became now — and with a stream of events arriving faster than
+    /// one per [`DURATION`] the page could never catch up: it stayed a fixed
+    /// fraction of a second behind the wheel for as long as the reader kept
+    /// scrolling, and only settled after they stopped. That is the lag this
+    /// replaces. Retargeting now moves only the target; the deadline belongs to
+    /// the burst, and the frame that arrives after it lands on the newest target.
+    ///
+    /// A gesture that has *finished* starts a fresh glide, which is why this asks
+    /// `glide.is_none()` rather than looking at `animating()` alone: the offset of
+    /// a finished glide is its target, so a new wheel begins from where the page
+    /// actually is.
+    ///
+    /// The duration is the distance over [`GLIDE_SPEED`], floored at
+    /// [`GLIDE_FLOOR`] and capped at [`DURATION`]. The cap is the old constant and
+    /// the reason a slow machine still draws every gesture: what it bounds is the
+    /// cost, not the length of the list.
     fn begin(&mut self, now: Instant) {
-        self.glide = None;
+        if self.glide.is_some() {
+            // Mid-burst: the target moved, the clock did not.
+            return;
+        }
         if !self.animating() {
             // Already there. A wheel clamped out of range at the end of a page
             // must not start a timer for a gesture that moves nothing.
             return;
         }
+        let distance = (self.target - self.offset).abs();
+        let seconds = (distance / GLIDE_SPEED).clamp(
+            GLIDE_FLOOR.as_secs_f32(),
+            DURATION.as_secs_f32(),
+        );
         self.glide = Some(Glide {
             from: self.offset,
             began: now,
-            duration: DURATION,
+            duration: Duration::from_secs_f32(seconds),
         });
     }
 
@@ -512,6 +558,16 @@ impl Glides {
         let region = self.regions.entry(name).or_default();
         region.adopt(wheel.offset);
         region.anim.wheel(wheel, now);
+        // One command per event, deliberately. A first attempt sent only the
+        // event that started a glide and let the frame timer carry the rest, which
+        // halved the commands -- and lost notches, because [`Region::adopt`] reads
+        // the *commanded* offset as the proof that the region has not been moved by
+        // somebody else. A command that is never sent is an offset the next wheel
+        // cannot recognise, so the policy re-synced to a stale number and dropped
+        // the notches in flight. `however_the_frames_and_the_wheel_events_interleave`
+        // is the test that says so. What makes a burst cheap is the glide below,
+        // not the count of commands: a notch is over in one frame now, so the offset
+        // a command carries has already converged instead of trailing the wheel.
         let offset = region.send(region.anim.offset);
         scroll_to(name, offset)
     }
@@ -1289,35 +1345,42 @@ mod tests {
             "it must land exactly on the target"
         );
         assert!(!anim.animating());
-        // About ten frames at 60fps: a fifth of a second, which reads as one
-        // movement. The window is wide on purpose -- the property that matters
-        // is a bounded gesture, not an exact count -- but a curve that doubled
-        // the count would fail here.
-        assert!((5..=20).contains(&frames), "settled in {frames} frames");
+        // Five notches are 300 px, which is 50 ms at `GLIDE_SPEED` -- four frames
+        // at 60 fps, and the window is wide because the property that matters is a
+        // bounded gesture rather than an exact count. What changed with G168 is the
+        // other end of the range: one notch used to cost ten frames and now costs
+        // one, so a curve that took ten frames for five notches would fail here.
+        assert!((1..=12).contains(&frames), "settled in {frames} frames");
         // And a settled animation costs nothing: no further frames are asked for.
         assert!(!anim.tick(Instant::now()));
     }
 
     #[test]
-    fn a_long_flick_takes_the_same_time_as_a_short_one() {
-        // Easing against a deadline means distance changes how far each frame
-        // travels, never how long the gesture lasts. The frame-counted curve
-        // this replaced took ten times the frames for a ten times longer flick,
-        // which is how one wheel notch became three quarters of a second on a
-        // slow renderer.
+    fn a_long_flick_costs_more_frames_but_never_more_than_the_ceiling() {
+        // What G168 changed, and the reason the old name is wrong now. A gesture's
+        // length is its distance over `GLIDE_SPEED`, capped at `DURATION`: one
+        // notch is over inside a single frame, a twenty-notch flick takes the
+        // ceiling, and a two-hundred-notch one takes no longer than that. The
+        // constant-duration curve this replaces gave a notch the same fifth of a
+        // second as a whole page, which is the lag the reader reported.
         let frames = |notches: f32| {
-            let mut anim = page(8000.0, 600.0);
+            let mut anim = page(80_000.0, 600.0);
             anim.scroll_notches(notches);
             frames_to_settle(&mut anim)
         };
-        assert_eq!(
-            frames(-2.0),
-            frames(-20.0),
-            "a 10x flick must not cost ten times the frames"
+        let (one, twenty, two_hundred) = (frames(-1.0), frames(-20.0), frames(-200.0));
+        assert!(one <= 1, "a notch must land in one frame: {one}");
+        assert!(
+            twenty > one,
+            "a long flick still travels over frames: {twenty}"
         );
         assert!(
-            frames(-20.0) <= 20,
-            "a gesture is a fifth of a second at 60fps"
+            twenty <= 10,
+            "and never past the ceiling's ten frames at 60 fps: {twenty}"
+        );
+        assert_eq!(
+            two_hundred, twenty,
+            "past the ceiling, distance stops costing frames"
         );
     }
 
@@ -1329,9 +1392,12 @@ mod tests {
         // milliseconds. An earlier revision folded that gap into a frame-cost
         // measurement, which made it a "frame" of four seconds: the probe was
         // wrong about what it was measuring, whatever it did with the number.
-        // What this asserts is that the number is not taken at all.
+        // What this asserts is that the number is not taken at all. The gesture is
+        // a ten-notch flick rather than a single one, because a single notch now
+        // lands in one frame (G168) and "it glided rather than teleporting" would
+        // be asking the old contract back.
         let mut anim = page(4000.0, 600.0);
-        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
+        anim.wheel(wheel_at(-10.0, 4000.0, 600.0, 0.0), Instant::now());
         assert!(
             anim.animating(),
             "the first gesture of a session must glide"
@@ -1342,7 +1408,10 @@ mod tests {
             "it glided rather than teleporting: {first} frames"
         );
         // A minute of reading later, the same wheel on the same page.
-        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, anim.target), Instant::now());
+        anim.wheel(
+            wheel_at(-10.0, 4000.0, 600.0, anim.target),
+            Instant::now(),
+        );
         assert!(
             anim.animating(),
             "the gap between two gestures is not a measurement"
@@ -1364,7 +1433,7 @@ mod tests {
         // is what the reference draws at ~30 fps (G140).
         let mut anim = page(4000.0, 600.0);
         let began = Instant::now();
-        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), began);
+        anim.wheel(wheel_at(-10.0, 4000.0, 600.0, 0.0), began);
         assert!(anim.animating(), "a slow machine is still asked to glide");
         let (mut frames, mut now) = (0, began);
         while anim.tick(now) {
@@ -1409,8 +1478,9 @@ mod tests {
         assert_eq!(anim.target, 0.0);
         assert!(!anim.animating());
         // ...and glides like every other one. Nothing about the machine is
-        // carried across a navigation, because nothing about it is measured.
-        anim.wheel(wheel_at(-1.0, 4000.0, 600.0, 0.0), Instant::now());
+        // carried across a navigation, because nothing about it is measured. A
+        // ten-notch flick, because a single notch now lands in one frame (G168).
+        anim.wheel(wheel_at(-10.0, 4000.0, 600.0, 0.0), Instant::now());
         assert!(
             frames_to_settle(&mut anim) > 1,
             "a fresh page must glide too"
@@ -1626,8 +1696,8 @@ mod tests {
         let _ = glides.tick::<()>(began + FRAME);
         let sent = glides.anim(PAGE).offset;
         assert!(
-            sent > 0.0 && sent < WHEEL_PIXELS_PER_NOTCH,
-            "one frame of a glide: {sent}"
+            (0.0..=WHEEL_PIXELS_PER_NOTCH).contains(&sent),
+            "one frame of a glide moves no further than the notch that asked: {sent}"
         );
         // The second notch arrives with the region still reporting the position
         // the first frame asked for, because that is what it is at.
@@ -1898,5 +1968,60 @@ mod tests {
             WHEEL_PIXELS_PER_NOTCH,
             "and it lands on the target"
         );
+    }
+
+    /// The lag this replaces: a stream of wheel events must not restart the clock.
+    ///
+    /// This is the defect a reader reported as "the scrolling is still laggy", and
+    /// it was a bug rather than a matter of taste. `begin` used to reset the ease on
+    /// **every** event — `from` became wherever the page had got to and `began`
+    /// became now — so a burst arriving faster than one event per `DURATION` kept
+    /// the page a fixed fraction of a second behind the wheel for as long as the
+    /// reader kept scrolling, and let it settle only once they stopped. Ten notches
+    /// arriving every 10 ms is that burst, and what this asserts is that the page is
+    /// where the *last* notch asked by the *first* event's deadline.
+    ///
+    /// The old policy fails this twice over: it would still be gliding at `DURATION`
+    /// — the tenth event restarted the clock 90 ms in — and the distance covered by
+    /// then would be a fraction of the ten notches.
+    #[test]
+    fn a_burst_of_notches_arrives_by_the_first_events_deadline() {
+        let mut anim = page(80_000.0, 600.0);
+        let began = Instant::now();
+        for index in 0..10 {
+            anim.wheel(
+                wheel_at(-1.0, 80_000.0, 600.0, anim.offset),
+                began + Duration::from_millis(10 * index),
+            );
+        }
+        let target = anim.target;
+        assert_eq!(
+            target,
+            10.0 * WHEEL_PIXELS_PER_NOTCH,
+            "ten notches travel ten notches"
+        );
+        anim.tick(began + DURATION);
+        assert_eq!(
+            anim.offset, target,
+            "the burst is over by the first event's deadline, not the last one's"
+        );
+        assert!(!anim.animating(), "and nothing is left asking for frames");
+    }
+
+    /// A single notch is over inside one frame, which is the other half of the same
+    /// report: a notch that takes a sixth of a second to travel sixty pixels *is* the
+    /// trail the reader described, even when nothing restarts.
+    #[test]
+    fn one_notch_is_over_within_a_frame() {
+        let mut anim = page(4_000.0, 600.0);
+        let began = Instant::now();
+        anim.wheel(wheel_at(-1.0, 4_000.0, 600.0, 0.0), began);
+        assert!(anim.animating(), "the notch starts a glide");
+        assert_eq!(
+            frames_to_settle(&mut anim),
+            1,
+            "and the first frame after it is the one that lands it"
+        );
+        assert_eq!(anim.offset, WHEEL_PIXELS_PER_NOTCH);
     }
 }

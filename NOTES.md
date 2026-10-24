@@ -4338,3 +4338,58 @@ installer, nothing closes the launcher first, and nothing rolls back -- and the
 installer still renames `PalantirMC.exe` to `Sift Launcher.exe` at install time,
 which an updater has to know before it can replace anything. Every one of those
 needs a Windows host with an installed copy.
+## The wheel restarted its own clock, and that was the lag
+
+The reader said "the scrolling is still laggy" after the fastframe comparison,
+which had concluded that nothing should change. That conclusion was wrong, and the
+reason is visible in the policy: **`ScrollAnim::begin` reset the ease on every wheel
+event** -- `from` became wherever the page had got to, `began` became now -- so a
+burst arriving faster than one event per `DURATION` could never finish a glide. The
+page stayed a fixed fraction of a second behind the wheel for as long as the reader
+kept scrolling and settled only after they stopped. That is not a matter of taste;
+it is a tween that never reaches its target while it is being fed.
+
+Two changes, both in `crate::scroll`:
+
+1. **A glide in flight keeps its clock.** `begin` returns early when one is running,
+   so a wheel landing mid-burst moves only the target. The deadline belongs to the
+   burst; the frame after it lands on the newest target.
+2. **A glide lasts as long as its distance is worth.** `DURATION` is now a ceiling,
+   not a constant: the duration is `distance / GLIDE_SPEED` (6,000 px/s), floored at
+   `GLIDE_FLOOR` (16 ms) and capped at 160 ms. One notch is 60 px -- 10 ms, so it
+   lands on the first frame; twenty notches are 1,200 px, 200 ms, capped to 160 ms;
+   two hundred notches cost the same 160 ms as twenty.
+
+**What was tried and reverted, because the test caught it.** The first attempt also
+coalesced wheel events so that only the event starting a glide sent a `scroll_to`
+and the frame timer carried the rest -- one relayout per frame instead of one per
+event. It **lost notches**: `Region::adopt` reads the last *commanded* offset as the
+proof that the region has not been moved by somebody else, so an event whose command
+was never sent made the next wheel re-sync the policy to a stale number.
+`however_the_frames_and_the_wheel_events_interleave_the_notches_all_land` failed
+with 240 px where 360 had accumulated, which is what that test exists for. The
+coalescing is gone; the comment at the call site says why, so nobody re-adds it
+without fixing the adopt model first. Commands are still one per event, and what
+makes a burst cheap now is that each command carries an offset that has already
+converged instead of one that trails.
+
+**What was measured.** Two new gates: `a_burst_of_notches_arrives_by_the_first_events_deadline`
+(ten notches 10 ms apart reach the tenth target by the first event's deadline -- the
+old policy fails both halves of it) and `one_notch_is_over_within_a_frame`. Five
+existing tests were restated to the contract this replaces rather than deleted, each
+keeping its own property: `a_long_flick_costs_more_frames_but_never_more_than_the_ceiling`
+(was `..._takes_the_same_time_as_a_short_one`), `a_gap_between_two_gestures_is_not_a_frame`,
+`a_slow_machine_glides_too_and_lands_on_the_deadline`,
+`a_page_opened_later_starts_at_its_top_and_still_glides` and
+`the_offset_reaches_the_target_and_then_stops`. Three of them now use a ten-notch
+flick, because a single notch no longer has several frames to observe. On
+`sift-launcher`: **918 passed / 0 failed** and 4 native passed.
+
+**What this cannot say.** It is not a measurement of the reader's machine. What it
+fixes is the trailing half of the lag; the *draw* cost of a frame is untouched, and
+the count of relayouts is unchanged (one per wheel event). If the page still feels
+slow, the next levers in order are the draw cost of the page under the wheel
+(`crate::scale`'s harness measures that per page) and the relayout-per-command, which
+needs `adopt` to be taught about commands that were never sent. The 160 ms ceiling
+is also still a constant nobody has tuned against a live window -- now it only binds
+on a flick longer than 960 px.
